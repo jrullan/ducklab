@@ -299,14 +299,21 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
-	// preflight: test binary must at least resolve
-	if m.tests != "" {
-		bin := strings.Fields(m.tests)[0]
-		if ok, _ := prim.Shell("command -v "+bin, m.repo); !ok {
-			m.println(duck.Bad.Render("  preflight failed — test command not found: " + bin))
-			m.refresh()
-			return m, nil
-		}
+	// ducklab verifies against tests — refuse to run without ground truth
+	// rather than collapse "no tests" into a meaningless red.
+	if strings.TrimSpace(m.tests) == "" {
+		m.println(duck.Bad.Render("  no test command — ducklab verifies against tests, not opinion."))
+		m.println(duck.Dim.Render("  set one with  /tests <cmd>   e.g.  /tests pytest -q"))
+		m.refresh()
+		return m, nil
+	}
+	// preflight: the test binary must at least resolve
+	bin := strings.Fields(m.tests)[0]
+	if ok, _ := prim.Shell("command -v "+bin, m.repo); !ok {
+		m.println(duck.Bad.Render("  preflight failed — test command not found: " + bin))
+		m.println(duck.Dim.Render("  check /tests (typo? wrong venv?)"))
+		m.refresh()
+		return m, nil
 	}
 	srcs, err := config.Load()
 	if err != nil {

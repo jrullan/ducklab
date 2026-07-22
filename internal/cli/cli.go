@@ -139,6 +139,11 @@ func cmdRun(args []string) int {
 		fmt.Fprintln(os.Stderr, duck.Bad.Render("cannot read requirement: ")+err.Error())
 		return 1
 	}
+	if strings.TrimSpace(f.tests) == "" {
+		fmt.Fprintln(os.Stderr, duck.Bad.Render("no test command — ducklab verifies against tests."))
+		fmt.Fprintln(os.Stderr, duck.Dim.Render("pass --tests \"<cmd>\"  e.g.  --tests \"pytest -q\""))
+		return 1
+	}
 	if f.repo == "" {
 		f.repo, _ = os.Getwd()
 	}

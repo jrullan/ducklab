@@ -73,6 +73,17 @@ func TestChatCommands(t *testing.T) {
 	if !strings.Contains(tail(m), "no goal") {
 		t.Errorf("empty-goal run not guarded: %q", tail(m))
 	}
+
+	// /run with a goal but no test command → refuse with guidance, don't
+	// collapse "no tests" into a meaningless red (the escalation José hit).
+	m.goal = "do the thing"
+	m.tests = ""
+	before = len(m.lines)
+	m.handle("/run")
+	emitted := strings.Join(m.lines[before:], "\n")
+	if !strings.Contains(emitted, "no test command") {
+		t.Errorf("empty-tests run not guarded: %q", emitted)
+	}
 }
 
 func TestChatQuit(t *testing.T) {
