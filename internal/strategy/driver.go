@@ -94,7 +94,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 
 		env.stage(fmt.Sprintf("OBSERVE r%d/%d", round, driverMaxRounds), observer.Name())
 		review, err := observer.Complete(env.Ctx,
-			prim.ObserverPrompt(env.Requirement, env.Repo, out, round, driverMaxRounds), opts)
+			prim.ObserverPrompt(env.Requirement, env.Repo, base, out, round, driverMaxRounds), opts)
 		if err != nil {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Branch: branch,

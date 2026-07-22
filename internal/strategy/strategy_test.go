@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/prim"
@@ -13,13 +14,17 @@ import (
 
 // fakeSource returns queued replies, satisfying source.Client without a network.
 type fakeSource struct {
-	name    string
-	replies []string
-	i       int
+	name       string
+	replies    []string
+	i          int
+	lastPrompt string
 }
 
 func (f *fakeSource) Name() string { return f.name }
-func (f *fakeSource) Complete(_ context.Context, _ []source.Message, _ source.Options) (source.Result, error) {
+func (f *fakeSource) Complete(_ context.Context, msgs []source.Message, _ source.Options) (source.Result, error) {
+	if len(msgs) > 0 {
+		f.lastPrompt = msgs[len(msgs)-1].Content
+	}
 	r := ""
 	if f.i < len(f.replies) {
 		r = f.replies[f.i]
@@ -100,7 +105,14 @@ func TestDriverApproved(t *testing.T) {
 	if out.State != "HUMAN_GATE" || out.Resolution != "approved_round_1" {
 		t.Fatalf("driver outcome = %+v", out)
 	}
+	// Regression: the observer must be shown a NON-empty diff (against base, not
+	// the scratch branch). Its prompt must contain the driver's actual change.
+	if !contains(observer.lastPrompt, "fixed") {
+		t.Errorf("observer prompt lacked the change diff (self-diff bug?):\n%s", observer.lastPrompt)
+	}
 }
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestTournamentShortCircuit(t *testing.T) {
 	repo := gitRepo(t)

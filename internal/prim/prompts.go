@@ -62,8 +62,12 @@ func DriverPrompt(requirement, repo, feedback string, round, maxRounds int) []so
 }
 
 // ObserverPrompt asks the reviewer for structured feedback on the current diff.
-func ObserverPrompt(requirement, repo, testOutput string, round, maxRounds int) []source.Message {
-	diff := TruncateMiddle(DiffAgainst(repo, CurrentBranch(repo)), 8000)
+// The diff MUST be taken against base, not the current branch: the driver works
+// on the scratch branch, so diffing against the current branch would compare it
+// to itself and show nothing — the observer would then reject a correct change
+// as "empty diff".
+func ObserverPrompt(requirement, repo, base, testOutput string, round, maxRounds int) []source.Message {
+	diff := TruncateMiddle(DiffAgainst(repo, base), 8000)
 	return []source.Message{
 		{Role: "system", Content: "You are a strict code reviewer. You evaluate the driver's " +
 			"changes against the task and the test results. Your reply MUST have this structure:\n\n" +
