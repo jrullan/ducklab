@@ -1,0 +1,81 @@
+// Package strategy holds ducklab's collaboration recipes. Each strategy is a
+// deterministic state machine that wires model roles (solver, driver, observer,
+// judge) over the shared primitives. Models only ever produce text; git, tests,
+// and control flow belong to the orchestrator.
+package strategy
+
+import (
+	"context"
+	"sort"
+
+	"github.com/jrullan/ducklab/internal/run"
+	"github.com/jrullan/ducklab/internal/source"
+)
+
+// StageFunc is an optional progress sink: (stage label, active source name).
+type StageFunc func(stage, sourceName string)
+
+// Env is everything a strategy needs to execute one task.
+type Env struct {
+	Ctx         context.Context
+	TaskID      string
+	Requirement string
+	Repo        string
+	TestCmd     string
+	Contestants []source.Client
+	Judge       source.Client
+	Run         *run.Run
+	OnStage     StageFunc
+}
+
+func (e Env) stage(stage, src string) {
+	if e.OnStage != nil {
+		e.OnStage(stage, src)
+	}
+}
+
+// Outcome is the terminal result of a run.
+type Outcome struct {
+	State      string // HUMAN_GATE | ESCALATED
+	Resolution string
+	Winner     string
+	Branch     string
+	TestsPass  bool
+	Message    string
+}
+
+// Strategy is one collaboration recipe.
+type Strategy interface {
+	Name() string
+	// MinContestants reports how many contestant sources the recipe needs
+	// (solo=1, driver=1 plus a judge/observer, tournament=2 plus a judge).
+	MinContestants() int
+	Run(env Env) (Outcome, error)
+}
+
+var registry = map[string]Strategy{}
+
+// Register adds a strategy to the global registry.
+func Register(s Strategy) { registry[s.Name()] = s }
+
+// Get returns a registered strategy.
+func Get(name string) (Strategy, bool) {
+	s, ok := registry[name]
+	return s, ok
+}
+
+// Names lists registered strategies, sorted.
+func Names() []string {
+	var out []string
+	for k := range registry {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func init() {
+	Register(Solo{})
+	Register(Driver{})
+	Register(Tournament{})
+}

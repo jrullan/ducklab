@@ -1,0 +1,19 @@
+# Build output
+/dist/
+/ducklab
+/ducklab.exe
+*.test
+*.out
+
+# Per-run artifacts (never committed)
+/runs/
+**/runs/
+
+# Local config with anything sensitive
+/.ducklab/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/

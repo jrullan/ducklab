@@ -1,0 +1,168 @@
+package strategy
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/jrullan/ducklab/internal/prim"
+	"github.com/jrullan/ducklab/internal/source"
+)
+
+// Driver is Rubber Duck Mode 1: one model drives with surgical SEARCH/REPLACE
+// edits, a second observes — runs tests, reads the diff, and either approves or
+// returns specific corrections. SEARCH/REPLACE makes destroying unrelated code
+// impossible by construction. Up to maxRounds of drive→observe.
+type Driver struct{}
+
+const driverMaxRounds = 3
+
+func (Driver) Name() string        { return "driver" }
+func (Driver) MinContestants() int { return 1 }
+
+func (Driver) Run(env Env) (Outcome, error) {
+	if dirty, lines := guardClean(env.Repo); dirty {
+		return Outcome{}, fmt.Errorf("repo has uncommitted changes:\n  %s\nCommit/stash first",
+			joinMax(lines, 10))
+	}
+	base := prim.CurrentBranch(env.Repo)
+	defer restore(env.Repo, base)
+
+	driver := env.Contestants[0]
+	observer := env.Judge
+	r := env.Run
+	branch := finalBranch(env.TaskID)
+	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
+
+	for round := 1; round <= driverMaxRounds; round++ {
+		// --- DRIVE ---
+		env.stage(fmt.Sprintf("DRIVE r%d/%d", round, driverMaxRounds), driver.Name())
+		feedback := ""
+		if round > 1 {
+			feedback, _ = r.Read(fmt.Sprintf("feedback_%d.md", round-1))
+		}
+		res, err := driver.Complete(env.Ctx,
+			prim.DriverPrompt(env.Requirement, env.Repo, feedback, round, driverMaxRounds), opts)
+		if err != nil {
+			_ = r.Advance("ESCALATED")
+			return Outcome{State: "ESCALATED", Message: "driver failed: " + err.Error()}, nil
+		}
+		_ = r.Write(fmt.Sprintf("changes_%d.md", round), res.Content)
+
+		if round == 1 {
+			checkoutFresh(env.Repo, branch, base)
+		} else {
+			prim.Git("checkout -q "+branch, env.Repo)
+			prim.Git("reset -q HEAD", env.Repo) // unstage; keep committed tree
+		}
+		applied := prim.ApplySearchReplace(env.Repo, res.Content)
+		if applied.Applied > 0 {
+			commitAll(env.Repo, fmt.Sprintf("ducklab: %s driver round %d", env.TaskID, round))
+		}
+
+		// All edits rejected: feed the real file text back so the driver can
+		// copy exact SEARCH strings, then retry.
+		if applied.Applied == 0 {
+			fb := rejectionFeedback(env.Repo, applied.Rejected)
+			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), fb)
+			if round >= driverMaxRounds {
+				_ = r.Advance("ESCALATED")
+				return Outcome{State: "ESCALATED", Branch: branch,
+					Message: "all SEARCH blocks rejected after max rounds"}, nil
+			}
+			continue
+		}
+
+		// --- OBSERVE ---
+		env.stage(fmt.Sprintf("TEST r%d/%d", round, driverMaxRounds), "")
+		ok, out := runTests(env.Repo, env.TestCmd)
+		_ = r.Write(fmt.Sprintf("test_output_%d.txt", round), out)
+		_ = r.Write(fmt.Sprintf("diff_%d.patch", round), snapshotDiff(env.Repo, base))
+		_ = r.Set(fmt.Sprintf("tests_%d", round), map[string]any{"ok": ok})
+
+		if !ok {
+			// Tests red: hand the failure straight back to the driver.
+			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), cap2000(out))
+			if round >= driverMaxRounds {
+				_ = r.Advance("ESCALATED")
+				return Outcome{State: "ESCALATED", Branch: branch,
+					Message: "tests never went green"}, nil
+			}
+			continue
+		}
+
+		env.stage(fmt.Sprintf("OBSERVE r%d/%d", round, driverMaxRounds), observer.Name())
+		review, err := observer.Complete(env.Ctx,
+			prim.ObserverPrompt(env.Requirement, env.Repo, out, round, driverMaxRounds), opts)
+		if err != nil {
+			_ = r.Advance("ESCALATED")
+			return Outcome{State: "ESCALATED", Branch: branch,
+				Message: "observer failed: " + err.Error()}, nil
+		}
+		_ = r.Write(fmt.Sprintf("review_%d.md", round), review.Content)
+
+		if strings.Contains(strings.ToUpper(review.Content), "APPROVED") && len(review.Content) > 50 {
+			_ = r.Write("test_output_final.txt", out)
+			_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
+			_ = r.Set("tests_final", map[string]any{"ok": true})
+			_ = r.Set("winner", driver.Name())
+			_ = r.Set("resolution", fmt.Sprintf("approved_round_%d", round))
+			_ = r.Advance("HUMAN_GATE")
+			return Outcome{State: "HUMAN_GATE", Resolution: fmt.Sprintf("approved_round_%d", round),
+				Winner: driver.Name(), Branch: branch, TestsPass: true,
+				Message: fmt.Sprintf("observer approved in round %d", round)}, nil
+		}
+
+		// Observer wants corrections.
+		_ = r.Write(fmt.Sprintf("feedback_%d.md", round), review.Content)
+		if round >= driverMaxRounds {
+			_ = r.Advance("ESCALATED")
+			return Outcome{State: "ESCALATED", Branch: branch,
+				Message: "no APPROVED within max rounds"}, nil
+		}
+	}
+	_ = r.Advance("ESCALATED")
+	return Outcome{State: "ESCALATED", Branch: branch, Message: "max rounds exhausted"}, nil
+}
+
+// rejectionFeedback appends the real current content of each rejected file so
+// the driver can copy exact SEARCH text on the next round.
+func rejectionFeedback(repo string, rejected []string) string {
+	var b strings.Builder
+	b.WriteString("All your SEARCH/REPLACE blocks were rejected:\n")
+	for _, rj := range rejected {
+		b.WriteString("- " + rj + "\n")
+	}
+	b.WriteString("\nThe SEARCH text does not exist in the file. Real file contents:\n\n")
+	seen := map[string]bool{}
+	for _, rj := range rejected {
+		path := rj
+		if i := strings.Index(rj, ":"); i >= 0 {
+			path = rj[:i]
+		}
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(path)))
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if len(content) > 4000 {
+			content = content[:4000] + "\n... (truncated)"
+		}
+		b.WriteString(fmt.Sprintf("=== %s (current content) ===\n%s\n\n", path, content))
+	}
+	b.WriteString("Use the EXACT text above in your SEARCH blocks. Copy and paste it.")
+	return b.String()
+}
+
+func cap2000(s string) string {
+	if len(s) > 2000 {
+		return s[:2000]
+	}
+	return s
+}
