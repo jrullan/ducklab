@@ -64,6 +64,24 @@ A hard-won rule baked into `tournament`: on modest local models, free
 regeneration corrupts. The judge's value is **evaluation**, not rewriting — a
 green solution is applied verbatim, never regenerated.
 
+## Verification is a spectrum
+
+ducklab's thesis is *executable verification is the ground truth, not the other
+model's opinion*. But ground truth comes in tiers, and ducklab always tells you
+which rung a run stood on — it never fakes a verdict:
+
+| Gate | Example | Outcome when it passes |
+|------|---------|------------------------|
+| **tests** | `go test ./...`, `pytest -q`, `npm test` | `HUMAN_GATE` (green) |
+| **build** | `tsc --noEmit`, `python -m compileall` | `HUMAN_GATE` (compiles) |
+| **none** | docs, config, a new repo with no harness | `UNVERIFIED` — reviewer + your eyes are the gate |
+
+The gate is **auto-detected** (tests → build → none) and shown in `/config` and
+`/show`. Override with `--verify "<cmd>"` (`ducklab run`) or `/verify <cmd|auto|none>`
+(REPL). An `UNVERIFIED` run still produces a diff and still reaches your
+`/accept` — it's just labeled honestly, never dressed up as tested-green (or
+faked-red).
+
 ## Sources
 
 Defaults: `beelink` (`localhost:8081`, model auto-detected) and `aitopatom`

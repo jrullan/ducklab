@@ -75,27 +75,32 @@ func (Driver) Run(env Env) (Outcome, error) {
 			continue
 		}
 
-		// --- OBSERVE ---
-		env.stage(fmt.Sprintf("TEST r%d/%d", round, driverMaxRounds), "")
-		ok, out := runTests(env.Repo, env.TestCmd)
+		// --- VERIFY (skipped when unverified — the reviewer is then the gate) ---
+		env.stage(fmt.Sprintf("VERIFY r%d/%d", round, driverMaxRounds), "")
+		ran, ok, out := runGate(env.Repo, env.Gate)
 		_ = r.Write(fmt.Sprintf("test_output_%d.txt", round), out)
 		_ = r.Write(fmt.Sprintf("diff_%d.patch", round), snapshotDiff(env.Repo, base))
-		_ = r.Set(fmt.Sprintf("tests_%d", round), map[string]any{"ok": ok})
+		_ = r.Set(fmt.Sprintf("tests_%d", round), map[string]any{"ran": ran, "ok": ok})
 
-		if !ok {
-			// Tests red: hand the failure straight back to the driver.
+		if ran && !ok {
+			// Gate red: hand the failure straight back to the driver.
 			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), cap2000(out))
 			if round >= driverMaxRounds {
 				_ = r.Advance("ESCALATED")
 				return Outcome{State: "ESCALATED", Branch: branch,
-					Message: "tests never went green"}, nil
+					Message: env.Gate.Kind + " never went green"}, nil
 			}
 			continue
 		}
 
+		// --- OBSERVE ---
+		obsInput := out
+		if !ran {
+			obsInput = "(no automated gate — judge the change against the task and the code)"
+		}
 		env.stage(fmt.Sprintf("OBSERVE r%d/%d", round, driverMaxRounds), observer.Name())
 		review, err := observer.Complete(env.Ctx,
-			prim.ObserverPrompt(env.Requirement, env.Repo, base, out, round, driverMaxRounds), opts)
+			prim.ObserverPrompt(env.Requirement, env.Repo, base, obsInput, round, driverMaxRounds), opts)
 		if err != nil {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Branch: branch,
@@ -106,8 +111,17 @@ func (Driver) Run(env Env) (Outcome, error) {
 		if strings.Contains(strings.ToUpper(review.Content), "APPROVED") && len(review.Content) > 50 {
 			_ = r.Write("test_output_final.txt", out)
 			_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
-			_ = r.Set("tests_final", map[string]any{"ok": true})
+			_ = r.Set("gate", env.Gate.Kind)
 			_ = r.Set("resolution", fmt.Sprintf("approved_round_%d", round))
+			if !ran {
+				_ = r.Set("tests_final", map[string]any{"verified": false})
+				_ = r.Advance("UNVERIFIED")
+				return Outcome{State: "UNVERIFIED", Resolution: fmt.Sprintf("approved_round_%d", round),
+					Branch: branch,
+					Message: fmt.Sprintf("%s drove, %s approved (no automated gate — review the diff)",
+						driver.Name(), observer.Name())}, nil
+			}
+			_ = r.Set("tests_final", map[string]any{"ok": true})
 			_ = r.Advance("HUMAN_GATE")
 			return Outcome{State: "HUMAN_GATE", Resolution: fmt.Sprintf("approved_round_%d", round),
 				Branch: branch, TestsPass: true,

@@ -27,33 +27,17 @@ func cmdChat(args []string) int {
 		repo, _ = os.Getwd()
 	}
 	repo, _ = filepath.Abs(repo)
-	tests := f.tests
-	if tests == "" {
-		tests = detectTestCmd(repo)
+	gate := prim.DetectGate(repo)
+	if strings.TrimSpace(f.tests) != "" {
+		gate = prim.GateFromCmd(f.tests)
 	}
-	m := newChatModel(repo, tests)
+	m := newChatModel(repo, gate)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, duck.Bad.Render("chat needs a terminal: ")+err.Error())
 		return 1
 	}
 	return 0
-}
-
-// detectTestCmd guesses the test command, preferring a repo-local runner.
-func detectTestCmd(repo string) string {
-	if exists(filepath.Join(repo, "go.mod")) {
-		return "go test ./..."
-	}
-	for _, v := range []string{".venv", "venv"} {
-		if exists(filepath.Join(repo, v, "bin", "pytest")) {
-			return v + "/bin/pytest -q"
-		}
-	}
-	if exists(filepath.Join(repo, "package.json")) {
-		return "npm test"
-	}
-	return ""
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
@@ -74,7 +58,8 @@ type chatModel struct {
 	running bool
 	ready   bool
 
-	repo, tests       string
+	repo              string
+	gate              prim.Gate
 	mode, a, b, judge string
 	goal              string
 	current           string
@@ -82,14 +67,14 @@ type chatModel struct {
 	quip              int
 }
 
-func newChatModel(repo, tests string) *chatModel {
+func newChatModel(repo string, gate prim.Gate) *chatModel {
 	ti := textinput.New()
 	ti.Placeholder = "describe a task, or /help"
 	ti.Prompt = duck.Prompt()
 	ti.Focus()
 	ti.CharLimit = 0
 	m := &chatModel{
-		ti: ti, repo: repo, tests: tests,
+		ti: ti, repo: repo, gate: gate,
 		mode: "driver", a: "beelink", b: "aitopatom", judge: "aitopatom",
 		sub: make(chan tea.Msg, 64),
 	}
@@ -105,8 +90,8 @@ func (m *chatModel) Init() tea.Cmd { return textinput.Blink }
 func (m *chatModel) println(s string) { m.lines = append(m.lines, s) }
 
 func (m *chatModel) configLine() string {
-	return fmt.Sprintf("mode=%s a=%s b=%s judge=%s tests=%s",
-		m.mode, m.a, m.b, m.judge, orNone(m.tests))
+	return fmt.Sprintf("mode=%s a=%s b=%s judge=%s gate=%s",
+		m.mode, m.a, m.b, m.judge, m.gate.Label())
 }
 
 func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -225,13 +210,19 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 	case "/repo":
 		if len(rest) == 1 {
 			m.repo, _ = filepath.Abs(rest[0])
+			m.gate = prim.DetectGate(m.repo)
 			m.println(duck.OK.Render("  repo → " + m.repo))
+			m.println(duck.Dim.Render("  gate → " + m.gate.Label()))
 		}
-	case "/tests":
-		if len(rest) >= 1 {
-			m.tests = strings.Join(rest, " ")
-			m.println(duck.OK.Render("  tests → " + m.tests))
+	case "/verify", "/tests":
+		if len(rest) == 1 && rest[0] == "auto" {
+			m.gate = prim.DetectGate(m.repo)
+		} else if len(rest) == 1 && rest[0] == "none" {
+			m.gate = prim.Gate{Kind: "none"}
+		} else if len(rest) >= 1 {
+			m.gate = prim.GateFromCmd(strings.Join(rest, " "))
 		}
+		m.println(duck.OK.Render("  gate → " + m.gate.Label()))
 	case "/goal":
 		if len(rest) >= 1 {
 			m.goal = strings.Join(rest, " ")
@@ -262,7 +253,7 @@ func (m *chatModel) help() {
 		"  " + duck.Key.Render("/mode") + " tournament|driver|solo   collaboration recipe",
 		"  " + duck.Key.Render("/models") + " [A <s> B <s>]           list or assign contestants",
 		"  " + duck.Key.Render("/judge") + " <src>                    assign judge/observer",
-		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/tests") + " <cmd>    target repo & test command",
+		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/verify") + " <cmd|auto|none>   repo & verification gate",
 		"  " + duck.Key.Render("/goal") + " <text>  (or just type)     set the task",
 		"  " + duck.Key.Render("/run") + "                             launch the run",
 		"  " + duck.Key.Render("/show") + "  " + duck.Key.Render("/diff") + "   inspect result (summary · full patch)",
@@ -302,21 +293,18 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
-	// ducklab verifies against tests — refuse to run without ground truth
-	// rather than collapse "no tests" into a meaningless red.
-	if strings.TrimSpace(m.tests) == "" {
-		m.println(duck.Bad.Render("  no test command — ducklab verifies against tests, not opinion."))
-		m.println(duck.Dim.Render("  set one with  /tests <cmd>   e.g.  /tests pytest -q"))
-		m.refresh()
-		return m, nil
-	}
-	// preflight: the test binary must at least resolve
-	bin := strings.Fields(m.tests)[0]
-	if ok, _ := prim.Shell("command -v "+bin, m.repo); !ok {
-		m.println(duck.Bad.Render("  preflight failed — test command not found: " + bin))
-		m.println(duck.Dim.Render("  check /tests (typo? wrong venv?)"))
-		m.refresh()
-		return m, nil
+	// A gate is optional (no gate → UNVERIFIED). But if one is set, its binary
+	// must resolve — a typo shouldn't burn a model call on a phantom red.
+	if m.gate.Active() {
+		bin := strings.Fields(m.gate.Cmd)[0]
+		if ok, _ := prim.Shell("command -v "+bin, m.repo); !ok {
+			m.println(duck.Bad.Render("  preflight failed — gate command not found: " + bin))
+			m.println(duck.Dim.Render("  check /verify (typo? wrong venv?) or /verify none to run unverified"))
+			m.refresh()
+			return m, nil
+		}
+	} else {
+		m.println(duck.Hunk.Render("  ◌ no gate — this run will be UNVERIFIED (reviewer + your eyes)"))
 	}
 	srcs, err := config.Load()
 	if err != nil {
@@ -342,11 +330,10 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 	}
 	_ = r.Set("mode", m.mode)
 	_ = r.Set("requirement", m.goal)
-	_ = r.Set("test_cmd", m.tests)
 
 	env := strategy.Env{
 		Ctx: context.Background(), TaskID: taskID, Requirement: m.goal,
-		Repo: m.repo, TestCmd: m.tests,
+		Repo: m.repo, Gate: m.gate,
 		Contestants: []source.Client{a, b}, Judge: j, Run: r,
 		OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
 	}
@@ -381,9 +368,12 @@ func (m *chatModel) dedupID(base string) string {
 }
 
 func (m *chatModel) renderOutcome(o strategy.Outcome) {
-	if o.State == "HUMAN_GATE" {
+	switch o.State {
+	case "HUMAN_GATE":
 		m.println(duck.OK.Render("  ✓ HUMAN_GATE — ") + o.Message)
-	} else {
+	case "UNVERIFIED":
+		m.println(duck.Hunk.Render("  ◌ UNVERIFIED — ") + o.Message)
+	default:
 		m.println(duck.Warns.Render("  ⚠ "+o.State+" — ") + o.Message)
 	}
 	if o.Resolution != "" {
@@ -420,8 +410,8 @@ func (m *chatModel) diff() {
 }
 
 func (m *chatModel) accept() {
-	if m.last == nil || m.last.State != "HUMAN_GATE" {
-		m.println(duck.Bad.Render("  nothing at HUMAN_GATE to accept."))
+	if m.last == nil || (m.last.State != "HUMAN_GATE" && m.last.State != "UNVERIFIED") {
+		m.println(duck.Bad.Render("  nothing to accept (need a run at HUMAN_GATE or UNVERIFIED)."))
 		return
 	}
 	base := prim.CurrentBranch(m.repo)

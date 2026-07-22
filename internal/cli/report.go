@@ -74,9 +74,15 @@ func runReport(repo, taskID string) string {
 	kv := func(k, v string) { line("  " + duck.Key.Render(pad(k, 12)) + v) }
 
 	mode := dataString(r, "mode")
+	gateKind := dataString(r, "gate")
 	state := r.State.State
-	stateStyled := duck.OK.Render(state)
-	if state != "HUMAN_GATE" {
+	var stateStyled string
+	switch state {
+	case "HUMAN_GATE":
+		stateStyled = duck.OK.Render(state)
+	case "UNVERIFIED":
+		stateStyled = duck.Hunk.Render(state)
+	default:
 		stateStyled = duck.Warns.Render(state)
 	}
 
@@ -86,12 +92,14 @@ func runReport(repo, taskID string) string {
 		kv("resolution", res)
 	}
 
-	// tests
+	// verification gate outcome
 	if tf, ok := r.State.Data["tests_final"].(map[string]any); ok {
-		if okv, _ := tf["ok"].(bool); okv {
-			kv("tests", duck.OK.Render("green"))
+		if v, hasV := tf["verified"].(bool); hasV && !v {
+			kv("gate", duck.Hunk.Render("unverified — reviewer + human only"))
+		} else if okv, _ := tf["ok"].(bool); okv {
+			kv("gate", duck.OK.Render(orNone(gateKind)+" green"))
 		} else {
-			kv("tests", duck.Bad.Render("red"))
+			kv("gate", duck.Bad.Render(orNone(gateKind)+" red"))
 		}
 	}
 

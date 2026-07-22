@@ -8,6 +8,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/jrullan/ducklab/internal/prim"
 	"github.com/jrullan/ducklab/internal/run"
 	"github.com/jrullan/ducklab/internal/source"
 )
@@ -21,7 +22,7 @@ type Env struct {
 	TaskID      string
 	Requirement string
 	Repo        string
-	TestCmd     string
+	Gate        prim.Gate // verification tier (tests / build / custom / none)
 	Contestants []source.Client
 	Judge       source.Client
 	Run         *run.Run
@@ -36,7 +37,11 @@ func (e Env) stage(stage, src string) {
 
 // Outcome is the terminal result of a run.
 type Outcome struct {
-	State      string // HUMAN_GATE | ESCALATED
+	// State is the terminal state:
+	//   HUMAN_GATE — a gate passed (tests/build/custom green); ready to accept
+	//   UNVERIFIED — changes produced but no automated gate ran; you are the gate
+	//   ESCALATED  — a gate failed or the run could not converge
+	State      string
 	Resolution string
 	// Winner names the model whose solution won a competition. It is set ONLY
 	// by tournament, where models genuinely compete. Collaborative modes (solo,

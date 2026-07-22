@@ -11,10 +11,14 @@ import (
 // Tournament is Rubber Duck Mode 2: two contestants solve the same task
 // independently; an independent judge evaluates both. Resolution follows a
 // hard-won hierarchy (the legacy pilot proved free synthesis corrupts on weak
-// models): a declared, green winner is applied verbatim (short-circuit); a
-// winner carrying a blocking finding is overridden to a clean green rival;
-// otherwise synthesis is attempted, falling back to any green contestant before
+// models): a declared winner is applied verbatim (short-circuit); a winner
+// carrying a blocking finding is overridden to a clean rival; otherwise
+// synthesis is attempted, falling back to any usable contestant before
 // escalating. The judge's value is evaluation, not regeneration.
+//
+// When there is a verification gate, "usable" means green. When there is none,
+// the run is UNVERIFIED: the judge's decision stands, but the result is labeled
+// so it is never mistaken for tested-green.
 type Tournament struct{}
 
 func (Tournament) Name() string        { return "tournament" }
@@ -32,15 +36,19 @@ func (Tournament) Run(env Env) (Outcome, error) {
 	judge := env.Judge
 	r := env.Run
 	_ = r.Set("base_branch", base)
+	_ = r.Set("gate", env.Gate.Kind)
+	verified := env.Gate.Active()
 	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
 
-	// --- SOLVE + TEST each (a red contestant does not abort the tournament) ---
 	type cand struct {
-		src   source.Client
-		green bool
-		note  string
+		src     source.Client
+		applied bool
+		green   bool
+		note    string
 	}
 	cands := []cand{{src: a}, {src: b}}
+
+	// --- SOLVE + (VERIFY) each; a red/failed contestant does not abort ---
 	for i := range cands {
 		src := cands[i].src
 		env.stage("SOLVE", src.Name())
@@ -60,27 +68,36 @@ func (Tournament) Run(env Env) (Outcome, error) {
 		}
 		_ = r.Write("solution_"+src.Name()+".md", content)
 
-		env.stage("TEST", src.Name())
-		branch := "ducklab/" + env.TaskID + "/" + src.Name()
-		checkoutFresh(env.Repo, branch, base)
+		env.stage("APPLY", src.Name())
+		cbranch := "ducklab/" + env.TaskID + "/" + src.Name()
+		checkoutFresh(env.Repo, cbranch, base)
 		if _, err := prim.ApplyFileBlocks(env.Repo, content); err != nil {
 			cands[i].note = "unparseable: " + err.Error()
 			_ = r.Set("tests_"+src.Name(), map[string]any{"ok": false, "note": cands[i].note})
 			continue
 		}
+		cands[i].applied = true
 		commitAll(env.Repo, fmt.Sprintf("ducklab: %s solution (%s)", env.TaskID, src.Name()))
-		ok, out := runTests(env.Repo, env.TestCmd)
-		_ = r.Write("test_output_"+src.Name()+".txt", out)
+		if verified {
+			env.stage("VERIFY", src.Name())
+			_, ok, out := runGate(env.Repo, env.Gate)
+			_ = r.Write("test_output_"+src.Name()+".txt", out)
+			cands[i].green = ok
+			_ = r.Set("tests_"+src.Name(), map[string]any{"ok": ok})
+		} else {
+			_ = r.Set("tests_"+src.Name(), map[string]any{"verified": false})
+		}
 		_ = r.Write("diff_"+src.Name()+".patch", snapshotDiff(env.Repo, base))
-		cands[i].green = ok
-		_ = r.Set("tests_"+src.Name(), map[string]any{"ok": ok})
 	}
 
 	// --- JUDGE ---
 	env.stage("JUDGE", judge.Name())
 	diffA, _ := r.Read("diff_" + a.Name() + ".patch")
 	diffB, _ := r.Read("diff_" + b.Name() + ".patch")
-	verdicts := fmt.Sprintf("A(%s)=%v B(%s)=%v", a.Name(), cands[0].green, b.Name(), cands[1].green)
+	verdicts := "unverified (no automated gate)"
+	if verified {
+		verdicts = fmt.Sprintf("A(%s)=%v B(%s)=%v", a.Name(), cands[0].green, b.Name(), cands[1].green)
+	}
 	jr, err := judge.Complete(env.Ctx, prim.JudgePrompt(env.Requirement, diffA, diffB, verdicts), opts)
 	if err != nil {
 		_ = r.Advance("ESCALATED")
@@ -93,97 +110,117 @@ func (Tournament) Run(env Env) (Outcome, error) {
 	report := prim.ParseJudge(jr.Content)
 	byLetter := map[string]source.Client{"A": a, "B": b}
 	greenOf := map[string]bool{"A": cands[0].green, "B": cands[1].green}
+	appliedOf := map[string]bool{"A": cands[0].applied, "B": cands[1].applied}
 	decision := report.Decision
 	_ = r.Set("decision", decision)
 
-	// NONE -> escalate immediately, no synthesis.
+	branch := finalBranch(env.TaskID)
+
+	// applyStored applies a contestant's stored solution on the final branch and
+	// returns the terminal state ("HUMAN_GATE" | "UNVERIFIED" | "" on failure).
+	applyStored := func(letter, resolution string) (string, string) {
+		src := byLetter[letter]
+		checkoutFresh(env.Repo, branch, base)
+		sol, _ := r.Read("solution_" + src.Name() + ".md")
+		if _, err := prim.ApplyFileBlocks(env.Repo, sol); err != nil {
+			return "", ""
+		}
+		commitAll(env.Repo, fmt.Sprintf("ducklab: %s final (%s)", env.TaskID, resolution))
+		_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
+		if !verified {
+			_ = r.Set("tests_final", map[string]any{"verified": false})
+			_ = r.Set("winner", src.Name())
+			_ = r.Set("resolution", resolution)
+			return "UNVERIFIED", src.Name()
+		}
+		_, ok, out := runGate(env.Repo, env.Gate)
+		_ = r.Write("test_output_final.txt", out)
+		_ = r.Set("tests_final", map[string]any{"ok": ok})
+		if ok {
+			_ = r.Set("winner", src.Name())
+			_ = r.Set("resolution", resolution)
+			return "HUMAN_GATE", src.Name()
+		}
+		return "", ""
+	}
+
+	finish := func(state, resolution, winner, msg string) (Outcome, error) {
+		_ = r.Advance(state)
+		return Outcome{State: state, Resolution: resolution, Winner: winner,
+			Branch: branch, TestsPass: state == "HUMAN_GATE", Message: msg}, nil
+	}
+
+	// Judge found nothing acceptable -> escalate, no synthesis.
 	if decision == "NONE" {
 		_ = r.Advance("ESCALATED")
 		return Outcome{State: "ESCALATED", Resolution: "judge_none",
 			Message: "judge declared no acceptable solution"}, nil
 	}
 
-	// Declared winner with a blocking finding -> override to a clean green rival.
+	// Declared winner with a blocking finding -> override to a clean rival
+	// (green when verified; merely applied when unverified).
 	if (decision == "A" || decision == "B") && report.Blocking[decision] {
 		other := "A"
 		if decision == "A" {
 			other = "B"
 		}
-		if !report.Blocking[other] && greenOf[other] {
+		rivalOK := appliedOf[other] && (!verified || greenOf[other])
+		if !report.Blocking[other] && rivalOK {
 			_ = r.Set("overridden", decision)
 			decision = other
 			_ = r.Set("decision", decision)
 		}
 	}
 
-	branch := finalBranch(env.TaskID)
-	applyStored := func(letter, resolution string) (bool, string) {
-		src := byLetter[letter]
-		checkoutFresh(env.Repo, branch, base)
-		sol, _ := r.Read("solution_" + src.Name() + ".md")
-		if _, err := prim.ApplyFileBlocks(env.Repo, sol); err != nil {
-			return false, ""
+	// Short-circuit: apply the declared winner verbatim (never regenerated).
+	if decision == "A" || decision == "B" {
+		eligible := appliedOf[decision] && (!verified || greenOf[decision])
+		if eligible {
+			if state, name := applyStored(decision, "short_circuit"); state != "" {
+				msg := "declared winner green — applied without regeneration"
+				if state == "UNVERIFIED" {
+					msg = "declared winner applied — no automated gate, review the diff"
+				}
+				return finish(state, "short_circuit", name, msg)
+			}
 		}
-		commitAll(env.Repo, fmt.Sprintf("ducklab: %s final (%s)", env.TaskID, resolution))
-		ok, out := runTests(env.Repo, env.TestCmd)
-		_ = r.Write("test_output_final.txt", out)
-		_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
-		_ = r.Set("tests_final", map[string]any{"ok": ok})
-		if ok {
-			_ = r.Set("winner", src.Name())
-			_ = r.Set("resolution", resolution)
-		}
-		return ok, src.Name()
 	}
 
-	// Short-circuit: declared winner that is green -> apply verbatim.
-	if (decision == "A" || decision == "B") && greenOf[decision] {
-		ok, name := applyStored(decision, "short_circuit")
-		if ok {
-			_ = r.Advance("HUMAN_GATE")
-			return Outcome{State: "HUMAN_GATE", Resolution: "short_circuit", Winner: name,
-				Branch: branch, TestsPass: true,
-				Message: "declared winner green — applied without regeneration"}, nil
-		}
-		// fall through to synthesis if it somehow does not reproduce
-	}
-
-	// HYBRID or non-green winner -> synthesis.
+	// HYBRID, or a winner that could not be applied cleanly -> synthesis.
 	env.stage("SYNTHESIZE", judge.Name())
-	syn, err := judge.Complete(env.Ctx,
-		prim.SynthesizePrompt(env.Requirement, jr.Content, env.Repo), opts)
-	if err == nil {
+	if syn, serr := judge.Complete(env.Ctx,
+		prim.SynthesizePrompt(env.Requirement, jr.Content, env.Repo), opts); serr == nil {
 		_ = r.Write("final_solution.md", syn.Content)
 		checkoutFresh(env.Repo, branch, base)
 		if _, perr := prim.ApplyFileBlocks(env.Repo, syn.Content); perr == nil {
 			commitAll(env.Repo, "ducklab: "+env.TaskID+" final (synthesis)")
-			ok, out := runTests(env.Repo, env.TestCmd)
-			_ = r.Write("test_output_final.txt", out)
 			_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
+			if !verified {
+				_ = r.Set("tests_final", map[string]any{"verified": false})
+				_ = r.Set("resolution", "synthesis")
+				return finish("UNVERIFIED", "synthesis", "", "judge synthesis applied — no automated gate, review the diff")
+			}
+			_, ok, out := runGate(env.Repo, env.Gate)
+			_ = r.Write("test_output_final.txt", out)
 			_ = r.Set("tests_final", map[string]any{"ok": ok})
 			if ok {
 				_ = r.Set("resolution", "synthesis")
-				_ = r.Advance("HUMAN_GATE")
-				return Outcome{State: "HUMAN_GATE", Resolution: "synthesis", Branch: branch,
-					TestsPass: true, Message: "judge synthesis green"}, nil
+				return finish("HUMAN_GATE", "synthesis", "", "judge synthesis green")
 			}
 		}
 	}
 
-	// Fallback: any green contestant before escalating.
-	for letter, g := range greenOf {
-		if g {
-			ok, name := applyStored(letter, "fallback")
-			if ok {
-				_ = r.Advance("HUMAN_GATE")
-				return Outcome{State: "HUMAN_GATE", Resolution: "fallback", Winner: name,
-					Branch: branch, TestsPass: true,
-					Message: "synthesis failed; fell back to green contestant " + name}, nil
-			}
+	// Fallback: any usable contestant before escalating.
+	for _, letter := range []string{"A", "B"} {
+		if !appliedOf[letter] || (verified && !greenOf[letter]) {
+			continue
+		}
+		if state, name := applyStored(letter, "fallback"); state != "" {
+			return finish(state, "fallback", name, "synthesis failed; fell back to contestant "+name)
 		}
 	}
 
 	_ = r.Advance("ESCALATED")
 	return Outcome{State: "ESCALATED", Branch: branch,
-		Message: "synthesis failed and no contestant is green"}, nil
+		Message: "synthesis failed and no contestant is usable"}, nil
 }

@@ -58,8 +58,9 @@ func usage() {
 	fmt.Println(duck.Banner("a multi-model harness for local LLMs"))
 	fmt.Println()
 	fmt.Println(duck.Title.Render("Usage"))
-	fmt.Println("  ducklab chat [--repo PATH] [--tests CMD]      interactive REPL")
-	fmt.Println("  ducklab run <id> <req-file> --repo PATH --tests CMD [--mode M] [--a S --b S --judge S]")
+	fmt.Println("  ducklab chat [--repo PATH] [--verify CMD]     interactive REPL")
+	fmt.Println("  ducklab run <id> <req-file> --repo PATH [--verify CMD | --no-verify] [--mode M] [--a S --b S --judge S]")
+	fmt.Println(duck.Dim.Render("      verification auto-detects (tests > build > unverified) when --verify is omitted"))
 	fmt.Println("  ducklab resume <id> --repo PATH               resume a run from state.json")
 	fmt.Println("  ducklab show <id> --repo PATH                 summarize a run (models, cost, diff, verdict)")
 	fmt.Println("  ducklab diff <id> --repo PATH                 the full result patch")
@@ -97,6 +98,7 @@ func cmdSources() int {
 // runFlags is the shared flag set for run/resume.
 type runFlags struct {
 	repo, tests, mode, a, b, judge string
+	noVerify                       bool
 }
 
 func parseRunFlags(args []string) (pos []string, f runFlags) {
@@ -107,9 +109,11 @@ func parseRunFlags(args []string) (pos []string, f runFlags) {
 		case "--repo":
 			i++
 			f.repo = get(args, i)
-		case "--tests":
+		case "--tests", "--verify":
 			i++
 			f.tests = get(args, i)
+		case "--no-verify":
+			f.noVerify = true
 		case "--mode":
 			i++
 			f.mode = get(args, i)
@@ -140,11 +144,6 @@ func cmdRun(args []string) int {
 	reqData, err := os.ReadFile(pos[1])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, duck.Bad.Render("cannot read requirement: ")+err.Error())
-		return 1
-	}
-	if strings.TrimSpace(f.tests) == "" {
-		fmt.Fprintln(os.Stderr, duck.Bad.Render("no test command — ducklab verifies against tests."))
-		fmt.Fprintln(os.Stderr, duck.Dim.Render("pass --tests \"<cmd>\"  e.g.  --tests \"pytest -q\""))
 		return 1
 	}
 	if f.repo == "" {
@@ -210,12 +209,8 @@ func cmdResume(args []string) int {
 	}
 	mode, _ := r.Get("mode")
 	req, _ := r.Get("requirement")
-	tests, _ := r.Get("test_cmd")
 	if s, ok := mode.(string); ok {
 		f.mode = s
-	}
-	if s, ok := tests.(string); ok && f.tests == "" {
-		f.tests = s
 	}
 	strat, ok := strategy.Get(f.mode)
 	if !ok {
@@ -261,13 +256,14 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 		fmt.Fprintln(os.Stderr, duck.Bad.Render(err.Error()))
 		return strategy.Env{}, 1
 	}
+	gate := resolveGate(repo, f)
 	_ = r.Set("mode", f.mode)
 	_ = r.Set("requirement", requirement)
-	_ = r.Set("test_cmd", f.tests)
+	fmt.Println(duck.Dim.Render("  gate: " + gate.Label()))
 	return strategy.Env{
 		Ctx: context.Background(), TaskID: taskID, Requirement: requirement,
-		Repo: repo, TestCmd: f.tests, Contestants: []source.Client{a, b},
-		Judge: r0judge(judge), Run: r,
+		Repo: repo, Gate: gate, Contestants: []source.Client{a, b},
+		Judge: judge, Run: r,
 		OnStage: func(stage, src string) {
 			if src != "" {
 				fmt.Println(duck.Dim.Render("  · " + stage + " — " + src))
@@ -278,7 +274,17 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 	}, 0
 }
 
-func r0judge(j source.Client) source.Client { return j }
+// resolveGate picks the verification gate: an explicit --verify/--tests command
+// (unless --no-verify), else auto-detection (tests > build > none).
+func resolveGate(repo string, f runFlags) prim.Gate {
+	if f.noVerify {
+		return prim.Gate{Kind: "none"}
+	}
+	if strings.TrimSpace(f.tests) != "" {
+		return prim.GateFromCmd(f.tests)
+	}
+	return prim.DetectGate(repo)
+}
 
 func execute(strat strategy.Strategy, env strategy.Env) int {
 	fmt.Println(duck.Quack.Render("  quack — " + strat.Name() + " on [" + env.TaskID + "]"))
@@ -288,15 +294,21 @@ func execute(strat strategy.Strategy, env strategy.Env) int {
 		return 1
 	}
 	printOutcome(out)
-	if out.State == "HUMAN_GATE" {
-		return 0
+	// HUMAN_GATE and UNVERIFIED are both awaiting-a-human, not failures.
+	if out.State == "ESCALATED" {
+		return 2
 	}
-	return 2
+	return 0
 }
 
 func printOutcome(o strategy.Outcome) {
-	head := duck.OK.Render("  ✓ " + o.State)
-	if o.State != "HUMAN_GATE" {
+	var head string
+	switch o.State {
+	case "HUMAN_GATE":
+		head = duck.OK.Render("  ✓ " + o.State)
+	case "UNVERIFIED":
+		head = duck.Hunk.Render("  ◌ " + o.State)
+	default:
 		head = duck.Warns.Render("  ⚠ " + o.State)
 	}
 	fmt.Println(head + duck.Dim.Render("  "+o.Message))

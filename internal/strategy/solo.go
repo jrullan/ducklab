@@ -38,7 +38,7 @@ func (Solo) Run(env Env) (Outcome, error) {
 	}
 	_ = r.Write("solution.md", res.Content)
 
-	env.stage("TEST", solver.Name())
+	env.stage("APPLY", solver.Name())
 	branch := finalBranch(env.TaskID)
 	checkoutFresh(env.Repo, branch, base)
 	if _, err := prim.ApplyFileBlocks(env.Repo, res.Content); err != nil {
@@ -47,21 +47,29 @@ func (Solo) Run(env Env) (Outcome, error) {
 			Message: "unparseable solution: " + err.Error()}, nil
 	}
 	commitAll(env.Repo, "ducklab: "+env.TaskID+" solo")
-	ok, out := runTests(env.Repo, env.TestCmd)
+	env.stage("VERIFY", "")
+	ran, ok, out := runGate(env.Repo, env.Gate)
 	_ = r.Write("test_output.txt", out)
 	_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
-	_ = r.Set("tests_final", map[string]any{"ok": ok})
+	_ = r.Set("gate", env.Gate.Kind)
+	_ = r.Set("resolution", "solo")
 
+	if !ran {
+		_ = r.Set("tests_final", map[string]any{"verified": false})
+		_ = r.Advance("UNVERIFIED")
+		return Outcome{State: "UNVERIFIED", Resolution: "solo", Branch: branch,
+			Message: solver.Name() + " produced changes — no automated gate, review the diff"}, nil
+	}
+	_ = r.Set("tests_final", map[string]any{"ok": ok})
 	if ok {
-		_ = r.Set("resolution", "solo")
 		_ = r.Advance("HUMAN_GATE")
 		return Outcome{State: "HUMAN_GATE", Resolution: "solo",
 			Branch: branch, TestsPass: true,
-			Message: solver.Name() + " (single-model baseline) — tests green"}, nil
+			Message: solver.Name() + " (single-model baseline) — " + env.Gate.Kind + " green"}, nil
 	}
 	_ = r.Advance("ESCALATED")
 	return Outcome{State: "ESCALATED", Branch: branch,
-		Message: "single-model solution failed tests"}, nil
+		Message: "single-model solution failed " + env.Gate.Kind}, nil
 }
 
 func joinMax(lines []string, n int) string {

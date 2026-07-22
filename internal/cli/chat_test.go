@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/jrullan/ducklab/internal/prim"
 )
 
 // tail returns the last appended scrollback line.
@@ -16,7 +18,7 @@ func tail(m *chatModel) string {
 }
 
 func TestChatBannerAndConfig(t *testing.T) {
-	m := newChatModel("/tmp/x", "go test ./...")
+	m := newChatModel("/tmp/x", prim.GateFromCmd("go test ./..."))
 	joined := strings.Join(m.lines, "\n")
 	if !strings.Contains(joined, "ducklab") {
 		t.Error("banner missing wordmark")
@@ -27,7 +29,7 @@ func TestChatBannerAndConfig(t *testing.T) {
 }
 
 func TestChatCommands(t *testing.T) {
-	m := newChatModel("/tmp/x", "")
+	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
 
 	// free text becomes the goal
 	m.handle("fix the parser bug")
@@ -53,11 +55,16 @@ func TestChatCommands(t *testing.T) {
 		t.Errorf("contestants = %q/%q", m.a, m.b)
 	}
 
-	// /judge, /repo, /tests
+	// /judge and /verify
 	m.handle("/judge aitopatom")
-	m.handle("/tests pytest -q")
-	if m.judge != "aitopatom" || m.tests != "pytest -q" {
-		t.Errorf("judge=%q tests=%q", m.judge, m.tests)
+	m.handle("/verify pytest -q")
+	if m.judge != "aitopatom" || m.gate.Cmd != "pytest -q" || m.gate.Kind != "custom" {
+		t.Errorf("judge=%q gate=%+v", m.judge, m.gate)
+	}
+	// /verify none → explicit unverified
+	m.handle("/verify none")
+	if m.gate.Active() {
+		t.Errorf("/verify none should disable the gate, got %+v", m.gate)
 	}
 
 	// unknown command is flagged
@@ -76,27 +83,28 @@ func TestChatCommands(t *testing.T) {
 		}
 	}
 
-	// /run with no goal after clearing → guarded, not a crash
+	// /run with no goal → guarded, not a crash (and no launch)
 	m.goal = ""
 	m.handle("/run")
 	if !strings.Contains(tail(m), "no goal") {
 		t.Errorf("empty-goal run not guarded: %q", tail(m))
 	}
+}
 
-	// /run with a goal but no test command → refuse with guidance, don't
-	// collapse "no tests" into a meaningless red (the escalation José hit).
-	m.goal = "do the thing"
-	m.tests = ""
-	before = len(m.lines)
-	m.handle("/run")
-	emitted := strings.Join(m.lines[before:], "\n")
-	if !strings.Contains(emitted, "no test command") {
-		t.Errorf("empty-tests run not guarded: %q", emitted)
+func TestChatGateLabel(t *testing.T) {
+	// no gate → config reflects unverified; with a command → shows it
+	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
+	if !strings.Contains(m.configLine(), "unverified") {
+		t.Errorf("no-gate config should say unverified: %s", m.configLine())
+	}
+	m.handle("/verify go build ./...")
+	if !strings.Contains(m.configLine(), "go build") {
+		t.Errorf("gate not reflected in config: %s", m.configLine())
 	}
 }
 
 func TestChatQuit(t *testing.T) {
-	m := newChatModel("/tmp/x", "")
+	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
 	_, cmd := m.handle("/exit")
 	if cmd == nil {
 		t.Fatal("/exit returned no command")
@@ -107,7 +115,7 @@ func TestChatQuit(t *testing.T) {
 }
 
 func TestChatRenders(t *testing.T) {
-	m := newChatModel("/tmp/x", "")
+	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
 	// simulate the terminal reporting its size — makes the viewport ready
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := updated.View()

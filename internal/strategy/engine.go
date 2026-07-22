@@ -49,12 +49,20 @@ func snapshotDiff(repo, base string) string {
 	return out
 }
 
-// runTests executes the test command and reports pass/fail plus output.
-func runTests(repo, testCmd string) (bool, string) {
-	if testCmd == "" {
-		return false, "(no test command configured)"
+// runGate executes the verification gate. It returns:
+//
+//	ran  — whether an automated gate actually executed
+//	pass — whether it passed (meaningless when ran is false)
+//	out  — captured output
+//
+// A gate of kind "none" does not run: the caller produces an UNVERIFIED result
+// rather than inventing a pass or fail.
+func runGate(repo string, gate prim.Gate) (ran, pass bool, out string) {
+	if !gate.Active() {
+		return false, false, "(no automated gate — unverified)"
 	}
-	return prim.Shell(testCmd, repo)
+	ok, output := prim.Shell(gate.Cmd, repo)
+	return true, ok, output
 }
 
 // restore returns the repo to base (used in a deferred cleanup).

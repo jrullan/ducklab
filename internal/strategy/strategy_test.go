@@ -57,7 +57,7 @@ func newEnv(t *testing.T, repo, testCmd string, a, b, judge source.Client) Env {
 	}
 	return Env{
 		Ctx: context.Background(), TaskID: "t", Requirement: "do the thing",
-		Repo: repo, TestCmd: testCmd,
+		Repo: repo, Gate: prim.GateFromCmd(testCmd),
 		Contestants: []source.Client{a, b}, Judge: judge, Run: r,
 	}
 }
@@ -89,6 +89,42 @@ func TestSoloRed(t *testing.T) {
 	out, _ := Solo{}.Run(env)
 	if out.State != "ESCALATED" {
 		t.Fatalf("solo red should escalate, got %+v", out)
+	}
+}
+
+func TestSoloUnverified(t *testing.T) {
+	repo := gitRepo(t)
+	solver := &fakeSource{name: "solo", replies: []string{"=== FILE: sol.txt ===\nsolved\n"}}
+	// empty gate command -> no automated verification
+	env := newEnv(t, repo, "", solver, solver, solver)
+	out, err := Solo{}.Run(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != "UNVERIFIED" {
+		t.Fatalf("no-gate solo should be UNVERIFIED, got %+v", out)
+	}
+	if out.TestsPass {
+		t.Error("UNVERIFIED must not claim tests passed")
+	}
+}
+
+func TestDriverUnverified(t *testing.T) {
+	repo := gitRepo(t)
+	driver := &fakeSource{name: "drv", replies: []string{
+		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+	}}
+	observer := &fakeSource{name: "obs", replies: []string{
+		"Analysis: the change is coherent with the task and touches only what was asked.\n" +
+			"Tests: none available; judged by inspection.\nVerdict: APPROVED",
+	}}
+	env := newEnv(t, repo, "", driver, driver, observer)
+	out, err := Driver{}.Run(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != "UNVERIFIED" {
+		t.Fatalf("no-gate driver approval should be UNVERIFIED, got %+v", out)
 	}
 }
 
