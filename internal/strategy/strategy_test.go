@@ -73,8 +73,12 @@ func TestSoloGreen(t *testing.T) {
 	if out.State != "HUMAN_GATE" || !out.TestsPass {
 		t.Fatalf("solo green outcome = %+v", out)
 	}
-	if out.Winner != "solo" {
-		t.Errorf("winner = %q", out.Winner)
+	if out.Resolution != "solo" {
+		t.Errorf("resolution = %q", out.Resolution)
+	}
+	// Collaborative/baseline modes never crown a "winner".
+	if out.Winner != "" {
+		t.Errorf("solo should not set a Winner, got %q", out.Winner)
 	}
 }
 

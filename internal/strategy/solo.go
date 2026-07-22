@@ -26,6 +26,7 @@ func (Solo) Run(env Env) (Outcome, error) {
 
 	solver := env.Contestants[0]
 	r := env.Run
+	_ = r.Set("base_branch", base)
 	_ = r.Advance("SOLVE")
 
 	env.stage("SOLVE", solver.Name())
@@ -52,12 +53,11 @@ func (Solo) Run(env Env) (Outcome, error) {
 	_ = r.Set("tests_final", map[string]any{"ok": ok})
 
 	if ok {
-		_ = r.Set("winner", solver.Name())
 		_ = r.Set("resolution", "solo")
 		_ = r.Advance("HUMAN_GATE")
-		return Outcome{State: "HUMAN_GATE", Resolution: "solo", Winner: solver.Name(),
+		return Outcome{State: "HUMAN_GATE", Resolution: "solo",
 			Branch: branch, TestsPass: true,
-			Message: "single-model baseline green"}, nil
+			Message: solver.Name() + " (single-model baseline) — tests green"}, nil
 	}
 	_ = r.Advance("ESCALATED")
 	return Outcome{State: "ESCALATED", Branch: branch,

@@ -31,6 +31,7 @@ func (Tournament) Run(env Env) (Outcome, error) {
 	a, b := env.Contestants[0], env.Contestants[1]
 	judge := env.Judge
 	r := env.Run
+	_ = r.Set("base_branch", base)
 	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
 
 	// --- SOLVE + TEST each (a red contestant does not abort the tournament) ---

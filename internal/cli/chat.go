@@ -394,15 +394,8 @@ func (m *chatModel) show() {
 		m.println(duck.Dim.Render("  no run yet."))
 		return
 	}
-	r, err := run.Open(filepath.Join(m.repo, "runs", m.current))
-	if err != nil {
-		m.println(duck.Bad.Render("  " + err.Error()))
-		return
-	}
-	m.println("  " + duck.Key.Render("task ") + m.current + "  " + duck.Key.Render("state ") + r.State.State)
-	if v, ok := r.Read("judge.md"); ok {
-		m.println(duck.Dim.Render("  judge.md:"))
-		m.println(duck.Dim.Render("  " + prim.TruncateMiddle(oneLine(v), 400)))
+	for _, l := range strings.Split(runReport(m.repo, m.current), "\n") {
+		m.println(l)
 	}
 }
 

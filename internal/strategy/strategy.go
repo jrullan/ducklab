@@ -38,10 +38,13 @@ func (e Env) stage(stage, src string) {
 type Outcome struct {
 	State      string // HUMAN_GATE | ESCALATED
 	Resolution string
-	Winner     string
-	Branch     string
-	TestsPass  bool
-	Message    string
+	// Winner names the model whose solution won a competition. It is set ONLY
+	// by tournament, where models genuinely compete. Collaborative modes (solo,
+	// driver, plan) leave it empty — nobody wins or loses there but the user.
+	Winner    string
+	Branch    string
+	TestsPass bool
+	Message   string
 }
 
 // Strategy is one collaboration recipe.

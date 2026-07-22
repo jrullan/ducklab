@@ -33,6 +33,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 	observer := env.Judge
 	r := env.Run
 	branch := finalBranch(env.TaskID)
+	_ = r.Set("base_branch", base)
 	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
 
 	for round := 1; round <= driverMaxRounds; round++ {
@@ -106,12 +107,12 @@ func (Driver) Run(env Env) (Outcome, error) {
 			_ = r.Write("test_output_final.txt", out)
 			_ = r.Write("diff_final.patch", snapshotDiff(env.Repo, base))
 			_ = r.Set("tests_final", map[string]any{"ok": true})
-			_ = r.Set("winner", driver.Name())
 			_ = r.Set("resolution", fmt.Sprintf("approved_round_%d", round))
 			_ = r.Advance("HUMAN_GATE")
 			return Outcome{State: "HUMAN_GATE", Resolution: fmt.Sprintf("approved_round_%d", round),
-				Winner: driver.Name(), Branch: branch, TestsPass: true,
-				Message: fmt.Sprintf("observer approved in round %d", round)}, nil
+				Branch: branch, TestsPass: true,
+				Message: fmt.Sprintf("%s drove, %s approved in round %d",
+					driver.Name(), observer.Name(), round)}, nil
 		}
 
 		// Observer wants corrections.
