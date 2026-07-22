@@ -293,6 +293,15 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
+	// Greenfield: initialize a git repo so ducklab can isolate its work.
+	if initialized, err := prim.EnsureRepo(m.repo); err != nil {
+		m.println(duck.Bad.Render("  cannot initialize repo: " + err.Error()))
+		m.refresh()
+		return m, nil
+	} else if initialized {
+		m.println(duck.Hunk.Render("  ◌ no git repo here — ran git init + initial commit so ducklab can branch"))
+		m.gate = prim.DetectGate(m.repo) // re-detect now that the tree exists
+	}
 	// A gate is optional (no gate → UNVERIFIED). But if one is set, its binary
 	// must resolve — a typo shouldn't burn a model call on a phantom red.
 	if m.gate.Active() {

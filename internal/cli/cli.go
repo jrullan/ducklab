@@ -156,6 +156,12 @@ func cmdRun(args []string) int {
 			duck.Dim.Render(" (have: "+strings.Join(strategy.Names(), ", ")+")"))
 		return 1
 	}
+	if initialized, err := prim.EnsureRepo(repo); err != nil {
+		fmt.Fprintln(os.Stderr, duck.Bad.Render("cannot initialize repo: ")+err.Error())
+		return 1
+	} else if initialized {
+		fmt.Println(duck.Hunk.Render("  ◌ no git repo — ran git init + initial commit so ducklab can branch"))
+	}
 	env, code := buildEnv(taskID, string(reqData), repo, f)
 	if code != 0 {
 		return code

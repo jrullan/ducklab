@@ -38,10 +38,16 @@ func CurrentBranch(dir string) string {
 	return out
 }
 
-// IsDirty reports whether the working tree has uncommitted changes, returning
-// the porcelain status lines for display.
+// IsDirty reports whether the working tree has uncommitted changes the user
+// cares about, returning the porcelain status lines for display. ducklab's own
+// runs/ artifacts are excluded — they are never the user's work — so a second
+// run never trips the guard on the first run's output.
 func IsDirty(dir string) (bool, []string) {
-	_, out := Git("status --porcelain", dir)
+	ok, out := Git("status --porcelain -- . ':(exclude)runs'", dir)
+	if !ok {
+		// not a repo, or git error — not "dirty user work"; callers ensure a repo
+		return false, nil
+	}
 	out = strings.TrimSpace(out)
 	if out == "" {
 		return false, nil
