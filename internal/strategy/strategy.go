@@ -86,4 +86,5 @@ func init() {
 	Register(Solo{})
 	Register(Driver{})
 	Register(Tournament{})
+	Register(Plan{})
 }

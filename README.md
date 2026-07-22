@@ -57,7 +57,7 @@ primitives. Add `--mode`:
 | `solo` | one model solves; tests decide. **The baseline every other mode is measured against.** | ✅ |
 | `driver` | one model drives surgical SEARCH/REPLACE edits, a second observes and approves or corrects (up to 3 rounds) | ✅ |
 | `tournament` | two models solve independently; an independent judge picks a green winner (short-circuit), overrides a cheating winner, or synthesizes as a last resort | ✅ |
-| `plan` | peer dialogue: A drafts a plan, B gives observations, A decides, then execute + verify | ⏳ roadmap |
+| `plan` | peer dialogue: A drafts a plan, B gives observations, A decides, then execute + verify | ✅ |
 | `split` | decompose a task beyond one model's reach, solve pieces, integrate **deterministically** | ⏳ roadmap |
 
 A hard-won rule baked into `tournament`: on modest local models, free

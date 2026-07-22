@@ -190,6 +190,53 @@ func TestTournamentJudgeOverride(t *testing.T) {
 	}
 }
 
+func TestPlanExecutedGreen(t *testing.T) {
+	repo := gitRepo(t)
+	// Round 1 planner hands off a plan; reviewer observes; round 2 planner
+	// stands by the plan (ends planning); then executes with SEARCH/REPLACE.
+	planner := &fakeSource{name: "A", replies: []string{
+		"A→B: here is my plan.\n1. Change base to fixed in main.txt\nThoughts?",
+		"B, I appreciate the notes but I'm keeping my plan because it already meets the requirement.",
+		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+	}}
+	reviewer := &fakeSource{name: "B", replies: []string{
+		"A, the plan looks solid. One observation: confirm the exact string. I think it's ready to execute.",
+		"1. Plan vs execution: all steps done.\n2. Requirement: satisfied.\n3. Verdict: APPROVED",
+	}}
+	env := newEnv(t, repo, "true", planner, planner, reviewer)
+	out, err := Plan{}.Run(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != "HUMAN_GATE" || out.Resolution != "plan_executed" {
+		t.Fatalf("plan outcome = %+v", out)
+	}
+	if out.Winner != "" {
+		t.Errorf("plan is collaborative — no winner, got %q", out.Winner)
+	}
+}
+
+func TestPlanUnverified(t *testing.T) {
+	repo := gitRepo(t)
+	planner := &fakeSource{name: "A", replies: []string{
+		"A→B plan.\n1. Change base to fixed",
+		"I'm keeping my plan because it is correct.",
+		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+	}}
+	reviewer := &fakeSource{name: "B", replies: []string{
+		"A, the plan is promising. I think it's ready to execute.",
+		"Plan vs execution: complete. Requirement: met. Verdict: APPROVED",
+	}}
+	env := newEnv(t, repo, "", planner, planner, reviewer) // no gate
+	out, err := Plan{}.Run(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != "UNVERIFIED" {
+		t.Fatalf("no-gate plan should be UNVERIFIED, got %+v", out)
+	}
+}
+
 func TestDirtyGuard(t *testing.T) {
 	repo := gitRepo(t)
 	os.WriteFile(filepath.Join(repo, "main.txt"), []byte("dirty\n"), 0o644)

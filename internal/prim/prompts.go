@@ -117,3 +117,71 @@ func cap3000(s string) string {
 	}
 	return s
 }
+
+// ─── plan mode (peer dialogue) ────────────────────────────────────
+
+// PlanHandoffPrompt is Model A: round 1 drafts a plan and hands it to B; later
+// rounds respond to B's observations by either revising or standing pat.
+func PlanHandoffPrompt(requirement, repo, feedback string, round, maxRounds int) []source.Message {
+	if round == 1 {
+		return []source.Message{
+			{Role: "system", Content: "You are Model A, a software architect. Present an execution plan " +
+				"to your colleague Model B for review.\n\nStructure your message:\n" +
+				"1. A short framing: 'B, here is my plan for the user's requirement — tell me if it meets the " +
+				"goals and where you'd change it.'\n" +
+				"2. The plan: a numbered list of concrete steps (file, change, why).\n" +
+				"3. Close by asking if B has observations.\n\n" +
+				"The plan must be complete and executable without ambiguity."},
+			{Role: "user", Content: fmt.Sprintf("User requirement:\n%s\n\nRepo files:\n%s\n\nContents of relevant files:\n%s",
+				requirement, RepoListing(repo), RelevantFiles(requirement, repo, 12000))},
+		}
+	}
+	return []source.Message{
+		{Role: "system", Content: "You are Model A. Your colleague B reviewed your plan and gave observations. " +
+			"You have TWO options:\n\n" +
+			"OPTION 1 — Revise: 'B, thanks — here is my revised plan incorporating your points.' Then the full " +
+			"revised plan as a numbered list.\n\n" +
+			"OPTION 2 — Stand by it: 'B, I appreciate the observations but I'm keeping my plan because <concrete " +
+			"reason>.' Do NOT include a new plan if you choose this — just the reason.\n\n" +
+			"Do not combine the options. If you revise, give the complete plan. If you stand by it, give only the reason."},
+		{Role: "user", Content: fmt.Sprintf("User requirement:\n%s\n\nB's observations (round %d/%d):\n%s\n\n"+
+			"Decide: revise, or stand by your plan?", requirement, round, maxRounds, feedback)},
+	}
+}
+
+// PlanReviewPrompt is Model B: observations only — B never approves or rejects,
+// so A keeps final say over its own plan.
+func PlanReviewPrompt(requirement, handoff, repo string) []source.Message {
+	return []source.Message{
+		{Role: "system", Content: "You are Model B, a software reviewer. Model A has shown you an execution plan. " +
+			"Give constructive observations and suggestions — do NOT approve or reject. A decides whether to " +
+			"incorporate them.\n\nStructure:\n1. A one-line read: 'A, the plan looks solid / promising / needs work.'\n" +
+			"2. Observations: specific points — what's good, what's missing, what could go wrong. Be concrete.\n" +
+			"3. Close with either 'a revised version incorporating these would help' or 'I think it's ready to execute.'\n\n" +
+			"Do NOT use APPROVED/REJECTED. Only observations and suggestions."},
+		{Role: "user", Content: fmt.Sprintf("User requirement:\n%s\n\nA's message (contains the plan):\n%s\n\nRepo files:\n%s",
+			requirement, handoff, RepoListing(repo))},
+	}
+}
+
+// PlanExecutePrompt is Model A implementing the ratified plan with SEARCH/REPLACE.
+func PlanExecutePrompt(requirement, plan, repo string) []source.Message {
+	return []source.Message{
+		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan using surgical " +
+			"SEARCH/REPLACE blocks, step by step. Each SEARCH must be EXACT text from the real file. " + SearchReplaceFormat},
+		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan (follow it exactly):\n%s\n\nContents of relevant files:\n%s",
+			requirement, plan, RelevantFiles(requirement, repo, 12000))},
+	}
+}
+
+// PlanVerifyPrompt is Model B checking the execution against the plan and the
+// requirement. Advisory when a gate ran; the decisive check when none did.
+func PlanVerifyPrompt(requirement, plan, repo, diff, gateOutput string) []source.Message {
+	return []source.Message{
+		{Role: "system", Content: "You are a verifier. Compare the execution against the original plan and the " +
+			"requirement. Reply with:\n1. Plan vs execution: were all steps completed?\n2. Requirement: satisfied?\n" +
+			"3. Gate: did the automated check pass (if any)?\n4. Verdict: APPROVED, or ISSUES: followed by a list."},
+		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan:\n%s\n\nDiff:\n%s\n\nGate output:\n%s",
+			requirement, plan, TruncateMiddle(diff, 6000), cap3000(gateOutput))},
+	}
+}

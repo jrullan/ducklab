@@ -20,7 +20,7 @@ Guiding principles:
 
 - Core engine: sources, resumable runs, primitives (file blocks, SEARCH/REPLACE,
   portable shell/git), role prompts.
-- Strategies: `solo`, `driver`, `tournament`.
+- Strategies: `solo`, `driver`, `tournament`, `plan`.
 - Interactive Charm REPL with the rubber-duck character; scriptable CLI parity.
 - Validated end-to-end against real local models.
 
@@ -34,7 +34,6 @@ The point of `solo` is to be the yardstick. This phase makes the comparison real
 - **Standard task set** — a versioned suite of local, self-contained coding
   tasks (with tests) to characterize a *model*, a *combination*, or a *role
   assignment* on equal footing. `ducklab bench`.
-- **`plan` strategy** — peer planning dialogue → execute → verify.
 
 ## v0.3 — cost-aware escalation
 

@@ -250,7 +250,7 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 func (m *chatModel) help() {
 	for _, l := range []string{
 		duck.Title.Render("  commands"),
-		"  " + duck.Key.Render("/mode") + " tournament|driver|solo   collaboration recipe",
+		"  " + duck.Key.Render("/mode") + " solo|driver|tournament|plan   collaboration recipe",
 		"  " + duck.Key.Render("/models") + " [A <s> B <s>]           list or assign contestants",
 		"  " + duck.Key.Render("/judge") + " <src>                    assign judge/observer",
 		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/verify") + " <cmd|auto|none>   repo & verification gate",
