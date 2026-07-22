@@ -67,6 +67,15 @@ func TestChatCommands(t *testing.T) {
 		t.Errorf("unknown command not reported: %q", tail(m))
 	}
 
+	// /diff and /show are known commands (referenced in hints) — must not be
+	// reported as unknown even before a run exists.
+	for _, c := range []string{"/diff", "/show"} {
+		m.handle(c)
+		if strings.Contains(tail(m), "unknown command") {
+			t.Errorf("%s reported as unknown", c)
+		}
+	}
+
 	// /run with no goal after clearing → guarded, not a crash
 	m.goal = ""
 	m.handle("/run")

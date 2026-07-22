@@ -27,6 +27,11 @@ var (
 	Dim   = lipgloss.NewStyle().Foreground(Mist)
 	Quack = lipgloss.NewStyle().Italic(true).Foreground(Beak)
 
+	// Diff line styles (not bold — a whole patch of bold is unreadable).
+	Add  = lipgloss.NewStyle().Foreground(Reed)
+	Del  = lipgloss.NewStyle().Foreground(Splash)
+	Hunk = lipgloss.NewStyle().Foreground(Pond)
+
 	prompt = lipgloss.NewStyle().Bold(true).Foreground(Beak)
 )
 

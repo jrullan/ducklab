@@ -241,6 +241,8 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 		return m.startRun()
 	case "/show":
 		m.show()
+	case "/diff":
+		m.diff()
 	case "/accept":
 		m.accept()
 	case "/reject":
@@ -263,7 +265,8 @@ func (m *chatModel) help() {
 		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/tests") + " <cmd>    target repo & test command",
 		"  " + duck.Key.Render("/goal") + " <text>  (or just type)     set the task",
 		"  " + duck.Key.Render("/run") + "                             launch the run",
-		"  " + duck.Key.Render("/show") + "   " + duck.Key.Render("/accept") + "   " + duck.Key.Render("/reject") + "     inspect & decide",
+		"  " + duck.Key.Render("/show") + "  " + duck.Key.Render("/diff") + "   inspect result (summary · full patch)",
+		"  " + duck.Key.Render("/accept") + "   " + duck.Key.Render("/reject") + "                     merge or discard",
 		"  " + duck.Key.Render("/config") + "   " + duck.Key.Render("/exit"),
 	} {
 		m.println(l)
@@ -402,6 +405,16 @@ func (m *chatModel) show() {
 		return
 	}
 	for _, l := range strings.Split(runReport(m.repo, m.current), "\n") {
+		m.println(l)
+	}
+}
+
+func (m *chatModel) diff() {
+	if m.current == "" {
+		m.println(duck.Dim.Render("  no run yet."))
+		return
+	}
+	for _, l := range strings.Split(runDiff(m.repo, m.current), "\n") {
 		m.println(l)
 	}
 }

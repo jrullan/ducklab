@@ -37,6 +37,8 @@ func Main(args []string) int {
 		return cmdResume(args[1:])
 	case "show":
 		return cmdShow(args[1:])
+	case "diff":
+		return cmdDiff(args[1:])
 	case "chat":
 		return cmdChat(args[1:])
 	case "version", "--version", "-v":
@@ -60,6 +62,7 @@ func usage() {
 	fmt.Println("  ducklab run <id> <req-file> --repo PATH --tests CMD [--mode M] [--a S --b S --judge S]")
 	fmt.Println("  ducklab resume <id> --repo PATH               resume a run from state.json")
 	fmt.Println("  ducklab show <id> --repo PATH                 summarize a run (models, cost, diff, verdict)")
+	fmt.Println("  ducklab diff <id> --repo PATH                 the full result patch")
 	fmt.Println("  ducklab sources                               list sources and reachability")
 	fmt.Println("  ducklab version")
 	fmt.Println()
@@ -172,6 +175,20 @@ func cmdShow(args []string) int {
 	}
 	repo, _ := filepath.Abs(f.repo)
 	fmt.Println(runReport(repo, prim.Slugify(pos[0])))
+	return 0
+}
+
+func cmdDiff(args []string) int {
+	pos, f := parseRunFlags(args)
+	if len(pos) < 1 {
+		fmt.Fprintln(os.Stderr, duck.Bad.Render("usage: ducklab diff <task_id> --repo PATH"))
+		return 1
+	}
+	if f.repo == "" {
+		f.repo, _ = os.Getwd()
+	}
+	repo, _ := filepath.Abs(f.repo)
+	fmt.Println(runDiff(repo, prim.Slugify(pos[0])))
 	return 0
 }
 

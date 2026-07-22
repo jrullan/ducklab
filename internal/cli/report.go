@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -118,6 +119,16 @@ func runReport(repo, taskID string) string {
 			for _, l := range strings.Split(strings.TrimSpace(stat), "\n") {
 				line("    " + duck.Dim.Render(strings.TrimSpace(l)))
 			}
+			// Inline preview of the actual edited lines so "what changed" is
+			// evident without opening the file. Full patch lives in /diff.
+			if preview, more := diffPreview(runDiff(repo, taskID), 14); len(preview) > 0 {
+				for _, l := range preview {
+					line("    " + l)
+				}
+				if more {
+					line("    " + duck.Dim.Render("… /diff for the full patch"))
+				}
+			}
 		}
 	}
 
@@ -162,6 +173,79 @@ func lastReview(r *run.Run) (string, string) {
 	}
 	return "", ""
 }
+
+// runDiff returns the full result patch for a run, colorized. It prefers the
+// saved diff_final.patch artifact and falls back to a live git diff of the
+// result branch against base.
+func runDiff(repo, taskID string) string {
+	r, err := run.Open(filepath.Join(repo, "runs", taskID))
+	if err != nil {
+		return duck.Dim.Render("  no run named " + taskID)
+	}
+	patch, _ := r.Read("diff_final.patch")
+	if strings.TrimSpace(patch) == "" {
+		base := dataString(r, "base_branch")
+		if base == "" {
+			base = detectBase(repo)
+		}
+		branch := "ducklab/" + taskID + "/final"
+		if ok, _ := prim.Git("rev-parse --verify -q "+branch, repo); ok {
+			_, patch = prim.Git(fmt.Sprintf("diff %s %s -- . ':(exclude)runs'", base, branch), repo)
+		}
+	}
+	if strings.TrimSpace(patch) == "" {
+		return duck.Dim.Render("  (no changes recorded for " + taskID + ")")
+	}
+	return colorizeDiff(patch)
+}
+
+// colorizeDiff styles a unified diff: additions green, deletions red, hunk
+// headers blue, file/metadata lines dim.
+func colorizeDiff(patch string) string {
+	var b strings.Builder
+	for _, l := range strings.Split(patch, "\n") {
+		switch {
+		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"),
+			strings.HasPrefix(l, "diff "), strings.HasPrefix(l, "index "):
+			b.WriteString(duck.Dim.Render(l))
+		case strings.HasPrefix(l, "@@"):
+			b.WriteString(duck.Hunk.Render(l))
+		case strings.HasPrefix(l, "+"):
+			b.WriteString(duck.Add.Render(l))
+		case strings.HasPrefix(l, "-"):
+			b.WriteString(duck.Del.Render(l))
+		default:
+			b.WriteString(duck.Dim.Render(l))
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// diffPreview extracts up to max changed lines (+/- content, not file headers)
+// from an already-colorized patch, reporting whether more were elided.
+func diffPreview(colorized string, max int) ([]string, bool) {
+	var out []string
+	for _, l := range strings.Split(colorized, "\n") {
+		// strip ANSI to test the leading marker
+		plain := stripANSI(l)
+		if plain == "" {
+			continue
+		}
+		if (plain[0] == '+' || plain[0] == '-') &&
+			!strings.HasPrefix(plain, "+++") && !strings.HasPrefix(plain, "---") {
+			if len(out) >= max {
+				return out, true
+			}
+			out = append(out, l)
+		}
+	}
+	return out, false
+}
+
+var ansiRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 func dataString(r *run.Run, key string) string {
 	if v, ok := r.State.Data[key].(string); ok {
