@@ -20,8 +20,6 @@ import (
 // wrong approach before any code is written.
 type Plan struct{}
 
-const planMaxRounds = 3
-
 func (Plan) Name() string        { return "plan" }
 func (Plan) MinContestants() int { return 2 }
 
@@ -39,14 +37,15 @@ func (Plan) Run(env Env) (Outcome, error) {
 	_ = r.Set("base_branch", base)
 	_ = r.Set("gate", env.Gate.Kind)
 	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall, OnRetry: env.OnRetry}
+	maxRounds := env.rounds()
 
 	// ── planning dialogue ──────────────────────────────────────────
 	_ = r.Advance("HANDOFF")
 	lastPlan, lastReview, planRes := "", "", ""
-	for round := 1; round <= planMaxRounds; round++ {
-		env.stage(fmt.Sprintf("HANDOFF r%d/%d", round, planMaxRounds), planner.Name())
+	for round := 1; round <= maxRounds; round++ {
+		env.stage(fmt.Sprintf("HANDOFF r%d/%d", round, maxRounds), planner.Name())
 		ho, err := planner.Complete(env.Ctx,
-			prim.PlanHandoffPrompt(env.Requirement, env.Repo, lastReview, round, planMaxRounds), opts)
+			prim.PlanHandoffPrompt(env.Requirement, env.Repo, lastReview, round, maxRounds), opts)
 		if err != nil {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Message: "planner failed: " + err.Error()}, nil
@@ -58,12 +57,12 @@ func (Plan) Run(env Env) (Outcome, error) {
 			break
 		}
 		lastPlan = prim.ExtractPlan(ho.Content)
-		if round == planMaxRounds {
+		if round == maxRounds {
 			planRes = fmt.Sprintf("max_rounds_r%d", round)
 			break
 		}
 
-		env.stage(fmt.Sprintf("REVIEW r%d/%d", round, planMaxRounds), reviewer.Name())
+		env.stage(fmt.Sprintf("REVIEW r%d/%d", round, maxRounds), reviewer.Name())
 		rv, err := reviewer.Complete(env.Ctx,
 			prim.PlanReviewPrompt(env.Requirement, ho.Content, env.Repo), opts)
 		if err != nil {

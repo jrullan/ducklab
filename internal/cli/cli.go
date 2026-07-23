@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -59,7 +60,7 @@ func usage() {
 	fmt.Println()
 	fmt.Println(duck.Title.Render("Usage"))
 	fmt.Println("  ducklab chat [--repo PATH] [--verify CMD]     interactive REPL")
-	fmt.Println("  ducklab run <id> <req-file> --repo PATH [--verify CMD | --no-verify] [--mode M] [--a S --b S --judge S]")
+	fmt.Println("  ducklab run <id> <req-file> --repo PATH [--verify CMD | --no-verify] [--mode M] [--rounds N] [--a S --b S --judge S]")
 	fmt.Println(duck.Dim.Render("      verification auto-detects (tests > build > unverified) when --verify is omitted"))
 	fmt.Println("  ducklab resume <id> --repo PATH               resume a run from state.json")
 	fmt.Println("  ducklab show <id> --repo PATH                 summarize a run (models, cost, diff, verdict)")
@@ -99,6 +100,7 @@ func cmdSources() int {
 type runFlags struct {
 	repo, tests, mode, a, b, judge string
 	noVerify                       bool
+	rounds                         int
 }
 
 func parseRunFlags(args []string) (pos []string, f runFlags) {
@@ -126,6 +128,9 @@ func parseRunFlags(args []string) (pos []string, f runFlags) {
 		case "--judge":
 			i++
 			f.judge = get(args, i)
+		case "--rounds":
+			i++
+			f.rounds, _ = strconv.Atoi(get(args, i))
 		default:
 			pos = append(pos, args[i])
 		}
@@ -277,7 +282,7 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 	}
 	return strategy.Env{
 		Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
-		Repo: repo, Gate: gate, Contestants: []source.Client{a, b},
+		Repo: repo, Gate: gate, MaxRounds: f.rounds, Contestants: []source.Client{a, b},
 		Judge: judge, Run: r,
 		OnStage: func(stage, src string) {
 			if src != "" {

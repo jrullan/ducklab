@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,7 @@ type chatModel struct {
 	repo              string
 	gate              prim.Gate
 	mode, a, b, judge string
+	rounds            int
 	goal              string
 	current           string
 	last              *strategy.Outcome
@@ -94,7 +96,8 @@ func newChatModel(repo string, gate prim.Gate) *chatModel {
 	m := &chatModel{
 		ti: ti, repo: repo, gate: gate,
 		mode: "driver", a: "beelink", b: "aitopatom", judge: "aitopatom",
-		sub: make(chan tea.Msg, 64),
+		rounds: strategy.DefaultRounds,
+		sub:    make(chan tea.Msg, 64),
 	}
 	m.println(duck.Banner("a multi-model harness for local LLMs"))
 	m.println(duck.Quack.Render("  " + duck.Quip(0)))
@@ -108,7 +111,11 @@ func (m *chatModel) Init() tea.Cmd { return textinput.Blink }
 func (m *chatModel) println(s string) { m.lines = append(m.lines, s) }
 
 func (m *chatModel) configLine() string {
-	return fmt.Sprintf("mode=%s · %s · gate=%s", m.mode, rolesDesc(m.mode, m.a, m.b, m.judge), m.gate.Label())
+	s := fmt.Sprintf("mode=%s · %s · gate=%s", m.mode, rolesDesc(m.mode, m.a, m.b, m.judge), m.gate.Label())
+	if m.mode == "driver" || m.mode == "plan" {
+		s += fmt.Sprintf(" · rounds=%d", m.rounds)
+	}
+	return s
 }
 
 // rolesDesc names the models actually used by a mode, so it's obvious which
@@ -318,6 +325,17 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 			m.judge = rest[0]
 			m.println(duck.OK.Render("  judge → " + m.judge))
 		}
+	case "/rounds":
+		if len(rest) == 1 {
+			if n, err := strconv.Atoi(rest[0]); err == nil && n >= 1 && n <= 20 {
+				m.rounds = n
+				m.println(duck.OK.Render(fmt.Sprintf("  rounds → %d  (driver/plan iteration cap)", n)))
+			} else {
+				m.println(duck.Bad.Render("  /rounds needs a number 1–20"))
+			}
+		} else {
+			m.println(duck.Dim.Render(fmt.Sprintf("  rounds = %d (driver/plan)", m.rounds)))
+		}
 	case "/repo":
 		if len(rest) == 1 {
 			m.repo, _ = filepath.Abs(rest[0])
@@ -366,6 +384,7 @@ func (m *chatModel) help() {
 		"  " + duck.Key.Render("/mode") + " solo|driver|tournament|plan   collaboration recipe",
 		"  " + duck.Key.Render("/models") + " [A <s> B <s>]           list or assign contestants",
 		"  " + duck.Key.Render("/judge") + " <src>                    assign judge/observer",
+		"  " + duck.Key.Render("/rounds") + " <n>                     driver/plan iteration cap (1–20)",
 		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/verify") + " <cmd|auto|none>   repo & verification gate",
 		"  " + duck.Key.Render("/goal") + " <text>  (or just type)     set the task",
 		"  " + duck.Key.Render("/project") + " [\"desc\"]                 project memory (inferred if unset)",
@@ -476,7 +495,7 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		}
 		env := strategy.Env{
 			Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
-			Repo: m.repo, Gate: m.gate,
+			Repo: m.repo, Gate: m.gate, MaxRounds: m.rounds,
 			Contestants: []source.Client{a, b}, Judge: j, Run: r,
 			OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
 			OnCall:  onCall,

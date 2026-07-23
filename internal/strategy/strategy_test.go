@@ -237,6 +237,36 @@ func TestPlanUnverified(t *testing.T) {
 	}
 }
 
+func TestDriverRespectsMaxRounds(t *testing.T) {
+	repo := gitRepo(t)
+	driver := &fakeSource{name: "drv", replies: []string{
+		"=== FILE: main.txt ===\n```search\nbase\n```\n```replace\nfixed\n```\n",
+	}}
+	// observer never approves → the loop is bounded only by MaxRounds
+	observer := &fakeSource{name: "obs", replies: []string{
+		"Analysis: still not quite right.\nTests: n/a.\nVerdict: CORRECTIONS: keep going",
+	}}
+	env := newEnv(t, repo, "", driver, observer, observer)
+	env.MaxRounds = 1 // one round only
+	out, _ := Driver{}.Run(env)
+	if out.State != "ESCALATED" {
+		t.Fatalf("expected escalation after 1 round, got %+v", out)
+	}
+	// exactly one DRIVE and one OBSERVE call happened
+	if driver.i != 1 || observer.i != 1 {
+		t.Errorf("MaxRounds=1 should be 1 drive + 1 observe, got drive=%d observe=%d", driver.i, observer.i)
+	}
+}
+
+func TestEnvRoundsDefault(t *testing.T) {
+	if (Env{}).rounds() != DefaultRounds {
+		t.Errorf("unset MaxRounds should default to %d", DefaultRounds)
+	}
+	if (Env{MaxRounds: 9}).rounds() != 9 {
+		t.Error("MaxRounds should override the default")
+	}
+}
+
 func TestDirtyGuard(t *testing.T) {
 	repo := gitRepo(t)
 	os.WriteFile(filepath.Join(repo, "main.txt"), []byte("dirty\n"), 0o644)

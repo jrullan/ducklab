@@ -26,11 +26,25 @@ type Env struct {
 	Contestants []source.Client
 	Judge       source.Client
 	Run         *run.Run
-	OnStage     StageFunc
+	// MaxRounds caps the iterative drive/observe (driver) or handoff/review
+	// (plan) loop. <=0 means the default (DefaultRounds). Ignored by solo/tournament.
+	MaxRounds int
+	OnStage   StageFunc
 	// OnCall, if set, receives each completion's Result for per-phase telemetry.
 	OnCall func(source.Result)
 	// OnRetry, if set, is notified when a transient failure is being retried.
 	OnRetry func(attempt int, reason string)
+}
+
+// DefaultRounds is the iteration cap when Env.MaxRounds is unset.
+const DefaultRounds = 3
+
+// rounds returns the effective iteration cap for an Env.
+func (e Env) rounds() int {
+	if e.MaxRounds > 0 {
+		return e.MaxRounds
+	}
+	return DefaultRounds
 }
 
 func (e Env) stage(stage, src string) {

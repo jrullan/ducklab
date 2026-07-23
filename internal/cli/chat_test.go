@@ -55,6 +55,16 @@ func TestChatCommands(t *testing.T) {
 		t.Errorf("contestants = %q/%q", m.a, m.b)
 	}
 
+	// /rounds sets the iteration cap; out-of-range is rejected
+	m.handle("/rounds 7")
+	if m.rounds != 7 {
+		t.Errorf("rounds = %d, want 7", m.rounds)
+	}
+	m.handle("/rounds 99")
+	if m.rounds != 7 {
+		t.Errorf("out-of-range /rounds should be ignored, got %d", m.rounds)
+	}
+
 	// /judge and /verify
 	m.handle("/judge aitopatom")
 	m.handle("/verify pytest -q")

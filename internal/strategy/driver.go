@@ -14,8 +14,6 @@ import (
 // is a blocking finding for the observer. Up to maxRounds of drive→observe.
 type Driver struct{}
 
-const driverMaxRounds = 3
-
 func (Driver) Name() string        { return "driver" }
 func (Driver) MinContestants() int { return 2 }
 
@@ -33,16 +31,17 @@ func (Driver) Run(env Env) (Outcome, error) {
 	branch := finalBranch(env.TaskID)
 	_ = r.Set("base_branch", base)
 	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall, OnRetry: env.OnRetry}
+	maxRounds := env.rounds()
 
-	for round := 1; round <= driverMaxRounds; round++ {
+	for round := 1; round <= maxRounds; round++ {
 		// --- DRIVE ---
-		env.stage(fmt.Sprintf("DRIVE r%d/%d", round, driverMaxRounds), driver.Name())
+		env.stage(fmt.Sprintf("DRIVE r%d/%d", round, maxRounds), driver.Name())
 		feedback := ""
 		if round > 1 {
 			feedback, _ = r.Read(fmt.Sprintf("feedback_%d.md", round-1))
 		}
 		res, err := driver.Complete(env.Ctx,
-			prim.DriverPrompt(env.Requirement, env.Repo, feedback, round, driverMaxRounds), opts)
+			prim.DriverPrompt(env.Requirement, env.Repo, feedback, round, maxRounds), opts)
 		if err != nil {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Message: "driver failed: " + err.Error()}, nil
@@ -62,7 +61,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 				"). Use the exact === FILE: === + ```search / ```replace format; copy search text " +
 				"verbatim from the file shown."
 			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), fb)
-			if round >= driverMaxRounds {
+			if round >= maxRounds {
 				_ = r.Advance("ESCALATED")
 				return Outcome{State: "ESCALATED", Branch: branch,
 					Message: "no edits could be applied after max rounds"}, nil
@@ -72,7 +71,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 		commitAll(env.Repo, fmt.Sprintf("ducklab: %s driver round %d", env.TaskID, round))
 
 		// --- VERIFY (skipped when unverified — the reviewer is then the gate) ---
-		env.stage(fmt.Sprintf("VERIFY r%d/%d", round, driverMaxRounds), "")
+		env.stage(fmt.Sprintf("VERIFY r%d/%d", round, maxRounds), "")
 		ran, ok, out := runGate(env.Repo, env.Gate)
 		_ = r.Write(fmt.Sprintf("test_output_%d.txt", round), out)
 		_ = r.Write(fmt.Sprintf("diff_%d.patch", round), snapshotDiff(env.Repo, base))
@@ -81,7 +80,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 		if ran && !ok {
 			// Gate red: hand the failure straight back to the driver.
 			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), cap2000(out))
-			if round >= driverMaxRounds {
+			if round >= maxRounds {
 				_ = r.Advance("ESCALATED")
 				return Outcome{State: "ESCALATED", Branch: branch,
 					Message: env.Gate.Kind + " never went green"}, nil
@@ -94,9 +93,9 @@ func (Driver) Run(env Env) (Outcome, error) {
 		if !ran {
 			obsInput = "(no automated gate — judge the change against the task and the code)"
 		}
-		env.stage(fmt.Sprintf("OBSERVE r%d/%d", round, driverMaxRounds), observer.Name())
+		env.stage(fmt.Sprintf("OBSERVE r%d/%d", round, maxRounds), observer.Name())
 		review, err := observer.Complete(env.Ctx,
-			prim.ObserverPrompt(env.Requirement, env.Repo, base, obsInput, round, driverMaxRounds), opts)
+			prim.ObserverPrompt(env.Requirement, env.Repo, base, obsInput, round, maxRounds), opts)
 		if err != nil {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Branch: branch,
@@ -127,7 +126,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 
 		// Observer wants corrections.
 		_ = r.Write(fmt.Sprintf("feedback_%d.md", round), review.Content)
-		if round >= driverMaxRounds {
+		if round >= maxRounds {
 			_ = r.Advance("ESCALATED")
 			return Outcome{State: "ESCALATED", Branch: branch,
 				Message: "no APPROVED within max rounds"}, nil
