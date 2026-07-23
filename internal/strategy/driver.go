@@ -19,7 +19,7 @@ type Driver struct{}
 const driverMaxRounds = 3
 
 func (Driver) Name() string        { return "driver" }
-func (Driver) MinContestants() int { return 1 }
+func (Driver) MinContestants() int { return 2 }
 
 func (Driver) Run(env Env) (Outcome, error) {
 	if dirty, lines := guardClean(env.Repo); dirty {
@@ -30,7 +30,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 	defer restore(env.Repo, base)
 
 	driver := env.Contestants[0]
-	observer := env.Judge
+	observer := env.Contestants[1] // Model B (the decorrelated peer, not the judge)
 	r := env.Run
 	branch := finalBranch(env.TaskID)
 	_ = r.Set("base_branch", base)

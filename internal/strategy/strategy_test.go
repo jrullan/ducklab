@@ -118,7 +118,7 @@ func TestDriverUnverified(t *testing.T) {
 		"Analysis: the change is coherent with the task and touches only what was asked.\n" +
 			"Tests: none available; judged by inspection.\nVerdict: APPROVED",
 	}}
-	env := newEnv(t, repo, "", driver, driver, observer)
+	env := newEnv(t, repo, "", driver, observer, observer) // B = observer
 	out, err := Driver{}.Run(env)
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestDriverApproved(t *testing.T) {
 		"Analysis: the change replaces base with fixed and matches the task fully.\n" +
 			"Tests: they pass and cover the change.\nVerdict: APPROVED",
 	}}
-	env := newEnv(t, repo, "true", driver, driver, observer)
+	env := newEnv(t, repo, "true", driver, observer, observer) // B = observer
 	out, err := Driver{}.Run(env)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestPlanExecutedGreen(t *testing.T) {
 		"A, the plan looks solid. One observation: confirm the exact string. I think it's ready to execute.",
 		"1. Plan vs execution: all steps done.\n2. Requirement: satisfied.\n3. Verdict: APPROVED",
 	}}
-	env := newEnv(t, repo, "true", planner, planner, reviewer)
+	env := newEnv(t, repo, "true", planner, reviewer, reviewer) // B = reviewer
 	out, err := Plan{}.Run(env)
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestPlanUnverified(t *testing.T) {
 		"A, the plan is promising. I think it's ready to execute.",
 		"Plan vs execution: complete. Requirement: met. Verdict: APPROVED",
 	}}
-	env := newEnv(t, repo, "", planner, planner, reviewer) // no gate
+	env := newEnv(t, repo, "", planner, reviewer, reviewer) // B = reviewer, no gate
 	out, err := Plan{}.Run(env)
 	if err != nil {
 		t.Fatal(err)

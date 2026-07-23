@@ -23,7 +23,7 @@ type Plan struct{}
 const planMaxRounds = 3
 
 func (Plan) Name() string        { return "plan" }
-func (Plan) MinContestants() int { return 1 }
+func (Plan) MinContestants() int { return 2 }
 
 func (Plan) Run(env Env) (Outcome, error) {
 	if dirty, lines := guardClean(env.Repo); dirty {
@@ -33,8 +33,8 @@ func (Plan) Run(env Env) (Outcome, error) {
 	base := prim.CurrentBranch(env.Repo)
 	defer restore(env.Repo, base)
 
-	planner := env.Contestants[0] // Model A
-	reviewer := env.Judge         // Model B
+	planner := env.Contestants[0]  // Model A
+	reviewer := env.Contestants[1] // Model B (the decorrelated peer, not the judge)
 	r := env.Run
 	_ = r.Set("base_branch", base)
 	_ = r.Set("gate", env.Gate.Kind)

@@ -106,8 +106,24 @@ func (m *chatModel) Init() tea.Cmd { return textinput.Blink }
 func (m *chatModel) println(s string) { m.lines = append(m.lines, s) }
 
 func (m *chatModel) configLine() string {
-	return fmt.Sprintf("mode=%s a=%s b=%s judge=%s gate=%s",
-		m.mode, m.a, m.b, m.judge, m.gate.Label())
+	return fmt.Sprintf("mode=%s · %s · gate=%s", m.mode, rolesDesc(m.mode, m.a, m.b, m.judge), m.gate.Label())
+}
+
+// rolesDesc names the models actually used by a mode, so it's obvious which
+// sources are active (e.g. plan uses A+B, not the judge).
+func rolesDesc(mode, a, b, judge string) string {
+	switch mode {
+	case "solo":
+		return "solver=" + a
+	case "driver":
+		return "driver=" + a + " observer=" + b
+	case "plan":
+		return "planner=" + a + " reviewer=" + b
+	case "tournament":
+		return "A=" + a + " B=" + b + " judge=" + judge
+	default:
+		return "a=" + a + " b=" + b + " judge=" + judge
+	}
 }
 
 func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
