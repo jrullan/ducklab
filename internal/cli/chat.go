@@ -16,6 +16,7 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duck"
 	"github.com/jrullan/ducklab/internal/prim"
+	"github.com/jrullan/ducklab/internal/project"
 	"github.com/jrullan/ducklab/internal/run"
 	"github.com/jrullan/ducklab/internal/source"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -54,6 +55,7 @@ type retryMsg struct {
 	attempt int
 	reason  string
 }
+type noticeMsg struct{ text string }
 type tickMsg struct{}
 type doneMsg struct {
 	outcome strategy.Outcome
@@ -178,6 +180,11 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, m.waitFor()
 
+	case noticeMsg:
+		m.println(duck.Hunk.Render("  ◌ " + msg.text))
+		m.refresh()
+		return m, m.waitFor()
+
 	case tickMsg:
 		if !m.running {
 			return m, nil
@@ -255,6 +262,23 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 	case "/config":
 		m.println(duck.Dim.Render("  " + m.configLine()))
 		m.println(duck.Dim.Render("  repo=" + m.repo + " goal=" + orNone(m.goal)))
+		if p, ok := project.Load(m.repo); ok && p.Description != "" {
+			m.println(duck.Dim.Render("  project=" + p.Description +
+				fmt.Sprintf(" (%d past goals)", len(p.Goals))))
+		}
+	case "/project":
+		if len(rest) > 0 {
+			desc := strings.Join(rest, " ")
+			_ = project.SetDescription(m.repo, desc)
+			m.println(duck.OK.Render("  project → " + desc))
+		} else if p, ok := project.Load(m.repo); ok && (p.Description != "" || len(p.Goals) > 0) {
+			m.println(duck.Key.Render("  project ") + orNone(p.Description))
+			if len(p.Goals) > 0 {
+				m.println(duck.Dim.Render("  goals: " + strings.Join(p.Goals, " · ")))
+			}
+		} else {
+			m.println(duck.Dim.Render("  no project note yet — /project \"...\" or it's inferred on first run"))
+		}
 	case "/mode":
 		if len(rest) == 1 {
 			if _, ok := strategy.Get(rest[0]); ok {
@@ -326,6 +350,7 @@ func (m *chatModel) help() {
 		"  " + duck.Key.Render("/judge") + " <src>                    assign judge/observer",
 		"  " + duck.Key.Render("/repo") + " <path>   " + duck.Key.Render("/verify") + " <cmd|auto|none>   repo & verification gate",
 		"  " + duck.Key.Render("/goal") + " <text>  (or just type)     set the task",
+		"  " + duck.Key.Render("/project") + " [\"desc\"]                 project memory (inferred if unset)",
 		"  " + duck.Key.Render("/run") + "                             launch the run",
 		"  " + duck.Key.Render("/show") + "  " + duck.Key.Render("/diff") + "   inspect result (summary · full patch)",
 		"  " + duck.Key.Render("/accept") + "  " + duck.Key.Render("/reject") + "  " + duck.Key.Render("/commit") + " [msg]      merge · discard · keep manual edits",
@@ -411,24 +436,31 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 	_ = r.Set("mode", m.mode)
 	_ = r.Set("requirement", m.goal)
 
-	env := strategy.Env{
-		Ctx: context.Background(), TaskID: taskID, Requirement: m.goal,
-		Repo: m.repo, Gate: m.gate,
-		Contestants: []source.Client{a, b}, Judge: j, Run: r,
-		OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
-		OnCall: func(res source.Result) {
-			m.sub <- callMsg{res.Source, res.Tokens(), res.Elapsed.Seconds()}
-		},
-		OnRetry: func(attempt int, reason string) {
-			m.sub <- retryMsg{attempt, reason}
-		},
-	}
+	onCall := func(res source.Result) { m.sub <- callMsg{res.Source, res.Tokens(), res.Elapsed.Seconds()} }
+	onRetry := func(attempt int, reason string) { m.sub <- retryMsg{attempt, reason} }
+	goal := m.goal
 	m.running = true
 	m.phaseStart = time.Now()
 	m.quip++
 	m.println(duck.Quack.Render(fmt.Sprintf("  quack — %s on [%s] · %s", m.mode, taskID, duck.Quip(m.quip))))
 	m.refresh()
 	go func() {
+		// Project context: inject the session preamble, inferring the
+		// description from history+files the first time if unset.
+		ctxOpts := source.Options{Temperature: 0.2, DisableThinking: true, OnDone: onCall}
+		m.sub <- stageMsg{"CONTEXT", a.Name()}
+		effReq, inferred := projectRequirement(a, m.repo, goal, ctxOpts)
+		if inferred != "" {
+			m.sub <- noticeMsg{"project: " + inferred + "  (/project to edit)"}
+		}
+		env := strategy.Env{
+			Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
+			Repo: m.repo, Gate: m.gate,
+			Contestants: []source.Client{a, b}, Judge: j, Run: r,
+			OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
+			OnCall:  onCall,
+			OnRetry: onRetry,
+		}
 		out, err := strat.Run(env)
 		m.sub <- doneMsg{out, err}
 	}()
@@ -534,6 +566,12 @@ func (m *chatModel) accept() {
 		return
 	}
 	m.cleanupBranches()
+	// Record the accepted goal in the project's session memory.
+	if r, err := run.Open(filepath.Join(m.repo, "runs", m.current)); err == nil {
+		if g, ok := r.Get("requirement"); ok {
+			_ = project.AddGoal(m.repo, asString(g))
+		}
+	}
 	m.println(duck.OK.Render("  ✓ merged " + branch + " → " + base))
 	m.last = nil
 }

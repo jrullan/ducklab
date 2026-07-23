@@ -82,6 +82,20 @@ The gate is **auto-detected** (tests → build → none) and shown in `/config` 
 `/accept` — it's just labeled honestly, never dressed up as tested-green (or
 faked-red).
 
+## Session memory
+
+ducklab remembers what you're building across tasks — and across sessions. A
+gitignored `.ducklab/project.md` holds a one-line project description plus the
+log of accepted task goals, and injects them as context into every task so a
+follow-up knows what it's continuing.
+
+- Set the description with `/project "…"`; if unset, ducklab infers it once from
+  the repo's **git history + files** (so a freshly cloned project gets context
+  from its commit story) and you can edit it.
+- The goal log grows automatically each time you `/accept` a run.
+- Because it's on disk, closing the session and returning later needs no
+  rediscovery — the note is read back in.
+
 ## Sources
 
 Defaults: `beelink` (`localhost:8081`, model auto-detected) and `aitopatom`

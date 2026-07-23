@@ -266,8 +266,14 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 	_ = r.Set("mode", f.mode)
 	_ = r.Set("requirement", requirement)
 	fmt.Println(duck.Dim.Render("  gate: " + gate.Label()))
+	// Inject project session memory (infer the description on first use).
+	ctxOpts := source.Options{Temperature: 0.2, DisableThinking: true}
+	effReq, inferred := projectRequirement(a, repo, requirement, ctxOpts)
+	if inferred != "" {
+		fmt.Println(duck.Hunk.Render("  ◌ project: "+inferred) + duck.Dim.Render("  (edit .ducklab/project.md)"))
+	}
 	return strategy.Env{
-		Ctx: context.Background(), TaskID: taskID, Requirement: requirement,
+		Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
 		Repo: repo, Gate: gate, Contestants: []source.Client{a, b},
 		Judge: judge, Run: r,
 		OnStage: func(stage, src string) {
