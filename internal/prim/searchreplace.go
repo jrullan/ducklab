@@ -75,6 +75,26 @@ func hasLine(body []string, want string) bool {
 	return false
 }
 
+// srDivider matches the SEARCH→REPLACE separator: canonical "===" or the
+// git-conflict-style "=======".
+func srDivider(l string) bool {
+	t := strings.TrimSpace(l)
+	return t == "===" || t == "======="
+}
+
+// srTerminator matches the end of a REPLACE section, tolerating the variants
+// models emit (and the case where ">>> REPLACE" is used as the separator too).
+func srTerminator(l string) bool {
+	t := strings.TrimSpace(l)
+	return t == ">>> REPLACE" || t == ">>>" || t == ">>>>>>> REPLACE"
+}
+
+// srBlockStart matches the beginning of the next block, so an unterminated
+// section stops cleanly instead of swallowing the following block.
+func srBlockStart(l string) bool {
+	return strings.TrimSpace(l) == "<<< SEARCH" || fileHeader.MatchString(l)
+}
+
 // applyFullFile writes a whole new file. It refuses to clobber an existing file.
 func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
 	content := strings.Join(trimBlankEdges(body), "\n")
@@ -110,22 +130,27 @@ func applySRBlocks(repo, path string, body []string, res *SearchReplaceResult) {
 			continue
 		}
 		i++
+		// Collect SEARCH until a divider. Canonically that's a bare "===", but
+		// models often drop it and use ">>> REPLACE" (git-conflict / Aider style)
+		// as the separator — accept both, and a git-style "=======" too.
 		var search []string
-		for i < len(body) && strings.TrimSpace(body[i]) != "===" {
+		for i < len(body) && !srDivider(body[i]) && !srTerminator(body[i]) && !srBlockStart(body[i]) {
 			search = append(search, body[i])
 			i++
 		}
-		i++ // skip ===
+		// Consume the divider (but not a new block start — that belongs to the
+		// next iteration).
+		if i < len(body) && (srDivider(body[i]) || srTerminator(body[i])) {
+			i++
+		}
 		var replace []string
-		for i < len(body) {
-			t := strings.TrimSpace(body[i])
-			if t == ">>> REPLACE" || t == ">>>" {
-				break
-			}
+		for i < len(body) && !srTerminator(body[i]) && !srBlockStart(body[i]) {
 			replace = append(replace, body[i])
 			i++
 		}
-		i++ // skip >>>
+		if i < len(body) && srTerminator(body[i]) {
+			i++ // consume the >>> REPLACE terminator
+		}
 
 		searchText := strings.Join(search, "\n")
 		replaceText := strings.Join(replace, "\n")

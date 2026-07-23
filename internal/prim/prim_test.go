@@ -140,6 +140,29 @@ func TestApplySearchReplaceWholeFileBlock(t *testing.T) {
 	}
 }
 
+func TestApplySearchReplaceTolerantSeparator(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "f.go"), []byte("package x\n\nfunc a() int { return 1 }\n"), 0o644)
+
+	// The model omits the "===" divider and uses ">>> REPLACE" as the separator
+	// (the earth run's actual malformed output). It must still apply.
+	out := "=== FILE: f.go ===\n<<< SEARCH\nreturn 1\n>>> REPLACE\nreturn 2\n>>> REPLACE\n"
+	res := ApplySearchReplace(dir, out)
+	if res.Applied != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("tolerant-separator apply: applied=%d rejected=%v", res.Applied, res.Rejected)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "f.go"))
+	if !contains(string(data), "return 2") {
+		t.Errorf("edit not applied via >>> REPLACE separator: %q", data)
+	}
+
+	// git-conflict-style "=======" divider also works
+	out2 := "=== FILE: f.go ===\n<<< SEARCH\nreturn 2\n=======\nreturn 3\n>>>>>>> REPLACE\n"
+	if res := ApplySearchReplace(dir, out2); res.Applied != 1 {
+		t.Errorf("git-conflict divider not accepted: %+v", res)
+	}
+}
+
 func TestDecisionAndJudge(t *testing.T) {
 	if d := Decision("blah\n### DECISION: A\nmore"); d != "A" {
 		t.Errorf("Decision=%q", d)
