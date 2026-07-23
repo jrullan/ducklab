@@ -114,6 +114,20 @@ func TestChatQuit(t *testing.T) {
 	}
 }
 
+func TestChatTypingGoesToInputNotViewport(t *testing.T) {
+	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
+	var mdl tea.Model = m
+	mdl, _ = mdl.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Type characters the viewport binds to scrolling (j, k, d, u, b, space).
+	for _, r := range []rune{'j', 'k', 'd', 'u', 'b', ' '} {
+		mdl, _ = mdl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	got := mdl.(*chatModel).ti.Value()
+	if got != "jkdub " {
+		t.Errorf("typed scroll-keys should land in the input, got %q", got)
+	}
+}
+
 func TestChatRenders(t *testing.T) {
 	m := newChatModel("/tmp/x", prim.Gate{Kind: "none"})
 	// simulate the terminal reporting its size — makes the viewport ready

@@ -153,6 +153,18 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			line := strings.TrimSpace(m.ti.Value())
 			m.ti.Reset()
 			return m.handle(line)
+		case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
+			// Explicit history scrolling — these don't conflict with typing.
+			var c tea.Cmd
+			m.vp, c = m.vp.Update(msg)
+			return m, c
+		default:
+			// All typing goes ONLY to the input. Never forward keys to the
+			// viewport — its default keymap would otherwise scroll the history
+			// on j/k/d/u/b/f/space/g/G as you type the goal.
+			var c tea.Cmd
+			m.ti, c = m.ti.Update(msg)
+			return m, c
 		}
 
 	case stageMsg:
