@@ -8,10 +8,10 @@ import (
 	"github.com/jrullan/ducklab/internal/source"
 )
 
-// Driver is Rubber Duck Mode 1: one model drives with surgical SEARCH/REPLACE
-// edits, a second observes — runs tests, reads the diff, and either approves or
-// returns specific corrections. SEARCH/REPLACE makes destroying unrelated code
-// impossible by construction. Up to maxRounds of drive→observe.
+// Driver is Rubber Duck Mode 1: one model drives with surgical fenced
+// search/replace edits, a second observes — runs tests, reads the diff, and
+// either approves or returns specific corrections. A net loss of unrelated code
+// is a blocking finding for the observer. Up to maxRounds of drive→observe.
 type Driver struct{}
 
 const driverMaxRounds = 3
@@ -55,16 +55,17 @@ func (Driver) Run(env Env) (Outcome, error) {
 			prim.Git("checkout -q "+branch, env.Repo)
 			prim.Git("reset -q HEAD", env.Repo) // unstage; keep committed tree
 		}
-		// Apply the whole updated file(s). This only fails when the reply has no
-		// usable === FILE: === blocks — then re-ask.
-		if _, err := prim.ApplyFileBlocks(env.Repo, res.Content); err != nil {
-			fb := "Your reply had no usable '=== FILE: path ===' file blocks (" + err.Error() +
-				"). Return the COMPLETE updated file(s) in that exact format, nothing else."
+		// Apply the fenced search/replace edits (or whole-file blocks). Nothing
+		// applied means the reply's edits didn't parse/match — re-ask.
+		if applied := prim.ApplyEdits(env.Repo, res.Content); applied.Applied == 0 {
+			fb := "No edits could be applied (" + strings.Join(applied.Rejected, "; ") +
+				"). Use the exact === FILE: === + ```search / ```replace format; copy search text " +
+				"verbatim from the file shown."
 			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), fb)
 			if round >= driverMaxRounds {
 				_ = r.Advance("ESCALATED")
 				return Outcome{State: "ESCALATED", Branch: branch,
-					Message: "no usable file blocks after max rounds"}, nil
+					Message: "no edits could be applied after max rounds"}, nil
 			}
 			continue
 		}

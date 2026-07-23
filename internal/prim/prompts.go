@@ -51,11 +51,7 @@ func SolvePrompt(requirement, repo string) []source.Message {
 // and a net loss of code is a blocking finding, so destruction is caught.
 func DriverPrompt(requirement, repo, feedback string, round, maxRounds int) []source.Message {
 	system := "You are a senior software engineer implementing the requested task. Make the " +
-		"MINIMAL change needed and leave everything else intact.\n" +
-		"When you modify a file you MUST return the ENTIRE file with your change integrated — " +
-		"reproduce all existing content verbatim; never omit, summarize, or abbreviate parts " +
-		"with placeholders like '// ... unchanged ...'. Preserve every function and line not " +
-		"related to the task. " + FileFormat
+		"MINIMAL change needed and leave everything else intact. " + FencedEditFormat
 	user := fmt.Sprintf("Task:\n%s\n\nRepo files:\n%s\n\nContents of relevant files:\n%s",
 		requirement, RepoListing(repo), RelevantFiles(requirement, repo, ContextBudget))
 	if feedback != "" {
@@ -179,10 +175,8 @@ func PlanReviewPrompt(requirement, handoff, repo string) []source.Message {
 // complete updated file(s).
 func PlanExecutePrompt(requirement, plan, repo string) []source.Message {
 	return []source.Message{
-		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan, step by step. " +
-			"When you modify a file you MUST return the ENTIRE file with your changes integrated — " +
-			"reproduce all existing content verbatim; never omit, summarize, or abbreviate parts with " +
-			"placeholders. Preserve every function and line not related to the task. " + FileFormat},
+		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan, step by step, " +
+			"making the minimal changes needed. " + FencedEditFormat},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan (follow it exactly):\n%s\n\nContents of relevant files:\n%s",
 			requirement, plan, RelevantFiles(requirement, repo, ContextBudget))},
 	}

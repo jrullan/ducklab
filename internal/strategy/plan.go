@@ -12,8 +12,8 @@ import (
 // verification. Model A drafts a plan and hands it to B conversationally; B
 // gives observations — never approve/reject — so A keeps final say. A revises
 // (loop) or stands by its plan with reasoning (planning ends). Then A executes
-// the ratified plan with SEARCH/REPLACE and the gate verifies it. B's post-hoc
-// verification is advisory when a gate ran, and the decisive check when none did.
+// the ratified plan with fenced search/replace edits and the gate verifies it.
+// B's post-hoc verification is advisory when a gate ran, decisive when none did.
 //
 // This is an on-thesis mode: planning-before-execution is one of the ways two
 // modest models beat one — the plan is where a decorrelated reviewer catches a
@@ -93,12 +93,12 @@ func (Plan) Run(env Env) (Outcome, error) {
 
 	branch := finalBranch(env.TaskID)
 	checkoutFresh(env.Repo, branch, base)
-	// Apply the whole updated file(s); fails only when the reply has no usable
-	// === FILE: === blocks (or content that would corrupt a file).
-	if _, err := prim.ApplyFileBlocks(env.Repo, ex.Content); err != nil {
+	// Apply the fenced search/replace edits (or whole-file blocks).
+	if applied := prim.ApplyEdits(env.Repo, ex.Content); applied.Applied == 0 {
+		_ = r.Write("execution_rejected.md", strings.Join(applied.Rejected, "\n"))
 		_ = r.Advance("ESCALATED")
 		return Outcome{State: "ESCALATED", Branch: branch,
-			Message: "execution produced no usable file blocks: " + err.Error()}, nil
+			Message: "execution produced no applicable edits: " + strings.Join(applied.Rejected, "; ")}, nil
 	}
 	commitAll(env.Repo, "ducklab: "+env.TaskID+" execute plan")
 	diff := snapshotDiff(env.Repo, base)
