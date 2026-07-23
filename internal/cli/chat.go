@@ -192,6 +192,9 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phaseName = ""
 		if msg.err != nil {
 			m.println(duck.Bad.Render("  ✗ " + msg.err.Error()))
+			if strings.Contains(msg.err.Error(), "uncommitted changes") {
+				m.println(duck.Dim.Render("  ▸ /commit to keep those changes, then /run again"))
+			}
 		} else {
 			m.last = &msg.outcome
 			m.renderOutcome(msg.outcome)
@@ -300,6 +303,8 @@ func (m *chatModel) handle(line string) (tea.Model, tea.Cmd) {
 		m.show()
 	case "/diff":
 		m.diff()
+	case "/commit":
+		m.commit(rest)
 	case "/accept":
 		m.accept()
 	case "/reject":
@@ -323,7 +328,7 @@ func (m *chatModel) help() {
 		"  " + duck.Key.Render("/goal") + " <text>  (or just type)     set the task",
 		"  " + duck.Key.Render("/run") + "                             launch the run",
 		"  " + duck.Key.Render("/show") + "  " + duck.Key.Render("/diff") + "   inspect result (summary · full patch)",
-		"  " + duck.Key.Render("/accept") + "   " + duck.Key.Render("/reject") + "                     merge or discard",
+		"  " + duck.Key.Render("/accept") + "  " + duck.Key.Render("/reject") + "  " + duck.Key.Render("/commit") + " [msg]      merge · discard · keep manual edits",
 		"  " + duck.Key.Render("/config") + "   " + duck.Key.Render("/exit"),
 	} {
 		m.println(l)
@@ -489,6 +494,32 @@ func (m *chatModel) diff() {
 	for _, l := range strings.Split(runDiff(m.repo, m.current), "\n") {
 		m.println(l)
 	}
+}
+
+// commit snapshots the user's own working-tree changes onto the current branch
+// (excluding ducklab's runs/). The escape hatch for keeping manual edits so the
+// next task starts from a clean, committed base.
+func (m *chatModel) commit(rest []string) {
+	dirty, _ := prim.IsDirty(m.repo)
+	if !dirty {
+		m.println(duck.Dim.Render("  nothing to commit — working tree is clean"))
+		return
+	}
+	msg := "manual changes"
+	if len(rest) > 0 {
+		msg = strings.Join(rest, " ")
+	}
+	prim.Git("add -A", m.repo)
+	prim.Git("reset -q -- runs", m.repo) // never commit ducklab artifacts
+	ok, out := prim.Git(fmt.Sprintf("commit -q -m %q", msg), m.repo)
+	if !ok { // no user identity configured — fall back to ducklab's
+		ok, out = prim.Git(fmt.Sprintf("%s commit -q -m %q", gitIDConst, msg), m.repo)
+	}
+	if !ok {
+		m.println(duck.Bad.Render("  commit failed: " + firstLine(out)))
+		return
+	}
+	m.println(duck.OK.Render("  ✓ committed working-tree changes to " + prim.CurrentBranch(m.repo)))
 }
 
 func (m *chatModel) accept() {

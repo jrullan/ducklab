@@ -84,8 +84,16 @@ func RelevantFiles(requirement, repo string, maxChars int) string {
 		}
 	}
 	srcExt := func(f string) bool {
-		return strings.HasSuffix(f, ".go") || strings.HasSuffix(f, ".py") ||
-			strings.HasSuffix(f, ".js") || strings.HasSuffix(f, ".ts")
+		for _, e := range []string{
+			".go", ".py", ".js", ".ts", ".jsx", ".tsx",
+			".html", ".htm", ".css", ".vue", ".svelte", ".rb", ".rs",
+			".java", ".c", ".h", ".cpp", ".sh", ".md",
+		} {
+			if strings.HasSuffix(f, e) {
+				return true
+			}
+		}
+		return false
 	}
 	matchedSrc := false
 	for _, f := range files {

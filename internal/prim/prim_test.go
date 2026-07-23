@@ -111,6 +111,35 @@ func TestApplySearchReplaceCreatesNewFile(t *testing.T) {
 	}
 }
 
+func TestApplySearchReplaceWholeFileBlock(t *testing.T) {
+	dir := t.TempDir()
+	// whole-file block (NO SEARCH) — the natural way models emit new files.
+	// This is the earth3.html case that used to land only in execution.md.
+	out := "=== FILE: earth3.html ===\n<!DOCTYPE html>\n<html><body>earth</body></html>\n"
+	res := ApplySearchReplace(dir, out)
+	if res.Applied != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("whole-file create: applied=%d rejected=%v", res.Applied, res.Rejected)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "earth3.html"))
+	if err != nil || !contains(string(data), "<!DOCTYPE html>") {
+		t.Errorf("earth3.html not created from whole-file block: %q err=%v", data, err)
+	}
+
+	// a whole-file block over an existing file is refused (no silent clobber)
+	res = ApplySearchReplace(dir, out)
+	if res.Applied != 0 || len(res.Rejected) != 1 {
+		t.Errorf("whole-file over existing file should be rejected: %+v", res)
+	}
+
+	// mixed: create one new file AND edit it is not sensible in one block, but
+	// creating two new files in one output must both land.
+	multi := "=== FILE: a.txt ===\nAAA\n=== FILE: b.txt ===\nBBB\n"
+	res = ApplySearchReplace(dir, multi)
+	if res.Applied != 2 {
+		t.Errorf("two whole-file creates: applied=%d rejected=%v", res.Applied, res.Rejected)
+	}
+}
+
 func TestDecisionAndJudge(t *testing.T) {
 	if d := Decision("blah\n### DECISION: A\nmore"); d != "A" {
 		t.Errorf("Decision=%q", d)

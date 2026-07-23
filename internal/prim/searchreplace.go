@@ -1,114 +1,181 @@
 package prim
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// SearchReplaceResult reports the outcome of applying a batch of surgical edits.
+// SearchReplaceResult reports the outcome of applying a batch of edits.
 type SearchReplaceResult struct {
 	Applied  int
 	Rejected []string
 }
 
-// ApplySearchReplace parses and applies surgical edits in the form:
+// ApplySearchReplace applies changes grouped under "=== FILE: path ===" headers.
+// A file segment can take either form:
 //
-//	=== FILE: path/to/file ===
-//	<<< SEARCH
-//	<exact current text>
-//	===
-//	<replacement text>
-//	>>> REPLACE
+//	Edit an existing file (surgical, cannot destroy unrelated code):
+//	  === FILE: path ===
+//	  <<< SEARCH
+//	  <exact current text>
+//	  ===
+//	  <replacement text>
+//	  >>> REPLACE
 //
-// A block whose SEARCH text is not found verbatim is rejected (never guessed),
-// so by construction this cannot destroy code outside a matched block. The
-// closing delimiter is tolerant: ">>>" or ">>> REPLACE".
+//	Create a new file (models emit whole files naturally for new files):
+//	  === FILE: path ===
+//	  <full file content>
+//
+// A full-file block targeting an existing file is rejected — editing an existing
+// file must go through SEARCH/REPLACE, so a whole-file dump can never silently
+// overwrite real code. SEARCH text that isn't found verbatim is rejected too.
 func ApplySearchReplace(repo, output string) SearchReplaceResult {
-	lines := strings.Split(output, "\n")
 	res := SearchReplaceResult{}
-	current := ""
+	lines := strings.Split(output, "\n")
+
+	var hdr []int
+	for i, l := range lines {
+		if fileHeader.MatchString(l) {
+			hdr = append(hdr, i)
+		}
+	}
+	if len(hdr) == 0 {
+		res.Rejected = append(res.Rejected, "no === FILE: === blocks found in output")
+		return res
+	}
+
+	for k, h := range hdr {
+		m := fileHeader.FindStringSubmatch(lines[h])
+		path := strings.TrimSpace(m[1])
+		start := h + 1
+		end := len(lines)
+		if k+1 < len(hdr) {
+			end = hdr[k+1]
+		}
+		body := lines[start:end]
+		if hasLine(body, "<<< SEARCH") {
+			applySRBlocks(repo, path, body, &res)
+		} else {
+			applyFullFile(repo, path, body, &res)
+		}
+	}
+	if res.Applied == 0 && len(res.Rejected) == 0 {
+		res.Rejected = append(res.Rejected, "no applicable changes found")
+	}
+	return res
+}
+
+func hasLine(body []string, want string) bool {
+	for _, l := range body {
+		if strings.TrimSpace(l) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// applyFullFile writes a whole new file. It refuses to clobber an existing file.
+func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
+	content := strings.Join(trimBlankEdges(body), "\n")
+	if strings.TrimSpace(content) == "" {
+		return // header with no content — nothing to do
+	}
+	p := filepath.Join(repo, filepath.FromSlash(path))
+	if _, err := os.Stat(p); err == nil {
+		res.Rejected = append(res.Rejected,
+			path+": whole-file block but file exists — use a SEARCH/REPLACE block to edit it")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		res.Rejected = append(res.Rejected, path+": mkdir failed: "+err.Error())
+		return
+	}
+	if err := os.WriteFile(p, []byte(content+"\n"), 0o644); err != nil {
+		res.Rejected = append(res.Rejected, path+": create failed: "+err.Error())
+		return
+	}
+	res.Applied++
+}
+
+// applySRBlocks applies one or more SEARCH/REPLACE blocks within a file segment.
+// An empty SEARCH also creates the file (Aider convention), so both new-file
+// styles work.
+func applySRBlocks(repo, path string, body []string, res *SearchReplaceResult) {
+	p := filepath.Join(repo, filepath.FromSlash(path))
 	i := 0
-	for i < len(lines) {
-		line := lines[i]
-		if m := fileHeader.FindStringSubmatch(line); m != nil {
-			current = strings.TrimSpace(m[1])
+	for i < len(body) {
+		if strings.TrimSpace(body[i]) != "<<< SEARCH" {
 			i++
 			continue
 		}
-		if strings.TrimSpace(line) == "<<< SEARCH" && current != "" {
+		i++
+		var search []string
+		for i < len(body) && strings.TrimSpace(body[i]) != "===" {
+			search = append(search, body[i])
 			i++
-			var search []string
-			for i < len(lines) && strings.TrimSpace(lines[i]) != "===" {
-				search = append(search, lines[i])
-				i++
+		}
+		i++ // skip ===
+		var replace []string
+		for i < len(body) {
+			t := strings.TrimSpace(body[i])
+			if t == ">>> REPLACE" || t == ">>>" {
+				break
 			}
-			i++ // skip ===
-			var replace []string
-			for i < len(lines) {
-				t := strings.TrimSpace(lines[i])
-				if t == ">>> REPLACE" || t == ">>>" {
-					break
-				}
-				replace = append(replace, lines[i])
-				i++
-			}
-			i++ // skip >>>
+			replace = append(replace, body[i])
+			i++
+		}
+		i++ // skip >>>
 
-			searchText := strings.Join(search, "\n")
-			replaceText := strings.Join(replace, "\n")
-			p := filepath.Join(repo, filepath.FromSlash(current))
+		searchText := strings.Join(search, "\n")
+		replaceText := strings.Join(replace, "\n")
 
-			data, err := os.ReadFile(p)
-			fileMissing := err != nil
+		data, err := os.ReadFile(p)
+		fileMissing := err != nil
 
-			// Empty SEARCH == "create this file" (greenfield / new files, which
-			// plain SEARCH/REPLACE otherwise can't do).
-			if strings.TrimSpace(searchText) == "" {
-				if !fileMissing {
-					res.Rejected = append(res.Rejected,
-						fmt.Sprintf("%s: empty SEARCH but file exists — use a real SEARCH block to edit", current))
-					continue
-				}
-				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-					res.Rejected = append(res.Rejected, fmt.Sprintf("%s: mkdir failed: %v", current, err))
-					continue
-				}
-				if err := os.WriteFile(p, []byte(replaceText+"\n"), 0o644); err != nil {
-					res.Rejected = append(res.Rejected, fmt.Sprintf("%s: create failed: %v", current, err))
-					continue
-				}
-				res.Applied++
-				continue
-			}
-
-			if fileMissing {
-				res.Rejected = append(res.Rejected, fmt.Sprintf("%s: file not found", current))
-				continue
-			}
-			content := string(data)
-			if !strings.Contains(content, searchText) {
-				head := searchText
-				if len(head) > 60 {
-					head = head[:60]
-				}
+		if strings.TrimSpace(searchText) == "" { // create
+			if !fileMissing {
 				res.Rejected = append(res.Rejected,
-					fmt.Sprintf("%s: SEARCH text not found (first 60 chars: %q)", current, head))
+					path+": empty SEARCH but file exists — use a real SEARCH block to edit")
 				continue
 			}
-			content = strings.Replace(content, searchText, replaceText, 1)
-			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-				res.Rejected = append(res.Rejected, fmt.Sprintf("%s: write failed: %v", current, err))
+			_ = os.MkdirAll(filepath.Dir(p), 0o755)
+			if err := os.WriteFile(p, []byte(replaceText+"\n"), 0o644); err != nil {
+				res.Rejected = append(res.Rejected, path+": create failed: "+err.Error())
 				continue
 			}
 			res.Applied++
 			continue
 		}
-		i++
+		if fileMissing {
+			res.Rejected = append(res.Rejected, path+": file not found")
+			continue
+		}
+		content := string(data)
+		if !strings.Contains(content, searchText) {
+			head := searchText
+			if len(head) > 60 {
+				head = head[:60]
+			}
+			res.Rejected = append(res.Rejected, path+": SEARCH text not found (first 60 chars: "+head+")")
+			continue
+		}
+		if err := os.WriteFile(p, []byte(strings.Replace(content, searchText, replaceText, 1)), 0o644); err != nil {
+			res.Rejected = append(res.Rejected, path+": write failed: "+err.Error())
+			continue
+		}
+		res.Applied++
 	}
-	if res.Applied == 0 && len(res.Rejected) == 0 {
-		res.Rejected = append(res.Rejected, "no SEARCH/REPLACE blocks found in output")
+}
+
+// trimBlankEdges drops leading and trailing all-blank lines from a segment.
+func trimBlankEdges(body []string) []string {
+	s, e := 0, len(body)
+	for s < e && strings.TrimSpace(body[s]) == "" {
+		s++
 	}
-	return res
+	for e > s && strings.TrimSpace(body[e-1]) == "" {
+		e--
+	}
+	return body[s:e]
 }

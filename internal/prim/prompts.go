@@ -20,16 +20,17 @@ const (
 		"<new code that replaces it>\n" +
 		">>> REPLACE\n\n" +
 		"Rules:\n" +
-		"- SEARCH text must exist EXACTLY in the file (whitespace and indentation\n" +
-		"  included). If not found, the change is REJECTED.\n" +
-		"- To CREATE A NEW FILE, leave the SEARCH section EMPTY (nothing between\n" +
-		"  <<< SEARCH and ===) and put the full new file content in REPLACE:\n" +
-		"    === FILE: path/to/new_file ===\n    <<< SEARCH\n    ===\n    <full new file content>\n    >>> REPLACE\n" +
-		"- Multiple === FILE: ... >>> REPLACE blocks may target the same file;\n" +
-		"  each needs its own === FILE: === header.\n" +
-		"- Do NOT rewrite whole existing files — only the portion that changes.\n" +
+		"- To EDIT AN EXISTING FILE: SEARCH text must exist EXACTLY in the file\n" +
+		"  (whitespace and indentation included). If not found, it is REJECTED.\n" +
+		"  Only the portion that changes — never rewrite a whole existing file.\n" +
+		"- To CREATE A NEW FILE: write the header and then the FULL file content\n" +
+		"  directly, with NO SEARCH block:\n" +
+		"    === FILE: path/to/new_file.html ===\n    <complete file content here>\n" +
+		"  (A whole-file block is only allowed for files that don't exist yet.)\n" +
+		"- Multiple blocks may target the same file; each needs its own\n" +
+		"  === FILE: === header.\n" +
 		"- No explanatory text outside the blocks.\n" +
-		"- The closing delimiter is >>> REPLACE."
+		"- The closing delimiter for a SEARCH/REPLACE edit is >>> REPLACE."
 )
 
 // SolvePrompt asks a model to implement the requirement as full files.
@@ -132,9 +133,12 @@ func PlanHandoffPrompt(requirement, repo, feedback string, round, maxRounds int)
 				"to your colleague Model B for review.\n\nStructure your message:\n" +
 				"1. A short framing: 'B, here is my plan for the user's requirement — tell me if it meets the " +
 				"goals and where you'd change it.'\n" +
-				"2. The plan: a numbered list of concrete steps (file, change, why).\n" +
+				"2. The plan: a numbered list of concrete IMPLEMENTATION steps. For each step name the " +
+				"file to touch, the specific change, and why. 5-10 steps is typical; keep each to 1-2 sentences.\n" +
 				"3. Close by asking if B has observations.\n\n" +
-				"The plan must be complete and executable without ambiguity."},
+				"A plan is a sequence of implementation actions — NOT a restatement of the requirements, NOT " +
+				"acceptance criteria, and NOT the finished code. Do not write actual file contents here; that " +
+				"happens in the execution step. Be concrete about files and changes so it is executable."},
 			{Role: "user", Content: fmt.Sprintf("User requirement:\n%s\n\nRepo files:\n%s\n\nContents of relevant files:\n%s",
 				requirement, RepoListing(repo), RelevantFiles(requirement, repo, 12000))},
 		}
