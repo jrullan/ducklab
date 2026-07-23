@@ -140,6 +140,15 @@ func runReport(repo, taskID string) string {
 		}
 	}
 
+	// rejected edits (a dropped block is why a "planned" fix can go missing)
+	if rej, ok := r.Read("execution_rejected.md"); ok && strings.TrimSpace(rej) != "" {
+		lines := strings.Split(strings.TrimSpace(rej), "\n")
+		line("  " + duck.Bad.Render(fmt.Sprintf("%d edit(s) rejected — NOT applied:", len(lines))))
+		for _, l := range lines {
+			line("    " + duck.Warns.Render(prim.TruncateMiddle(strings.TrimSpace(l), 120)))
+		}
+	}
+
 	// verdict — mode-specific
 	switch mode {
 	case "tournament":

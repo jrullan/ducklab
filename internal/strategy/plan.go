@@ -94,10 +94,20 @@ func (Plan) Run(env Env) (Outcome, error) {
 	branch := finalBranch(env.TaskID)
 	checkoutFresh(env.Repo, branch, base)
 	applied := prim.ApplySearchReplace(env.Repo, ex.Content)
+	// Surface rejected edits even when others applied — a silently-dropped block
+	// is how a plan's #1 step can go unexecuted while the run marches on.
+	if len(applied.Rejected) > 0 {
+		_ = r.Write("execution_rejected.md", strings.Join(applied.Rejected, "\n"))
+		_ = r.Set("rejected_count", len(applied.Rejected))
+	}
 	if applied.Applied == 0 {
 		_ = r.Advance("ESCALATED")
 		return Outcome{State: "ESCALATED", Branch: branch,
 			Message: "execution produced no applicable changes: " + strings.Join(applied.Rejected, "; ")}, nil
+	}
+	if len(applied.Rejected) > 0 {
+		env.stage(fmt.Sprintf("EXECUTE — %d of %d edits applied, %d rejected",
+			applied.Applied, applied.Applied+len(applied.Rejected), len(applied.Rejected)), "")
 	}
 	commitAll(env.Repo, "ducklab: "+env.TaskID+" execute plan")
 	diff := snapshotDiff(env.Repo, base)
