@@ -281,6 +281,9 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 			fmt.Println(duck.Dim.Render(fmt.Sprintf("    ↳ %s · %d tok · %.1fs",
 				res.Source, res.Tokens(), res.Elapsed.Seconds())))
 		},
+		OnRetry: func(attempt int, reason string) {
+			fmt.Println(duck.Warns.Render(fmt.Sprintf("    ↻ %s — retrying (%d/%d)", reason, attempt+1, 3)))
+		},
 	}, 0
 }
 

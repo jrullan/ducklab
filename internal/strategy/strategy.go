@@ -29,6 +29,8 @@ type Env struct {
 	OnStage     StageFunc
 	// OnCall, if set, receives each completion's Result for per-phase telemetry.
 	OnCall func(source.Result)
+	// OnRetry, if set, is notified when a transient failure is being retried.
+	OnRetry func(attempt int, reason string)
 }
 
 func (e Env) stage(stage, src string) {

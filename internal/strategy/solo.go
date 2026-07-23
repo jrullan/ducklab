@@ -31,7 +31,7 @@ func (Solo) Run(env Env) (Outcome, error) {
 
 	env.stage("SOLVE", solver.Name())
 	res, err := solver.Complete(env.Ctx, prim.SolvePrompt(env.Requirement, env.Repo),
-		source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall})
+		source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall, OnRetry: env.OnRetry})
 	if err != nil {
 		_ = r.Advance("ESCALATED")
 		return Outcome{State: "ESCALATED", Message: "solve failed: " + err.Error()}, nil

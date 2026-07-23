@@ -31,7 +31,16 @@ type Options struct {
 	// OnDone, if set, is called with the Result right after each completion —
 	// the seam through which the UI reports per-phase tokens and latency.
 	OnDone func(Result)
+	// OnRetry, if set, is called before each retry of a transient failure
+	// (5xx / connection error) so the UI can show that a blip is being ridden out.
+	OnRetry func(attempt int, reason string)
 }
+
+// maxAttempts is how many times a completion is tried before giving up. Local
+// model servers (vLLM/llama.cpp) occasionally throw a transient 5xx or drop a
+// connection; a couple of backed-off retries ride that out instead of losing a
+// multi-minute run.
+const maxAttempts = 3
 
 // Result is a completion plus the observability every ducklab call records.
 type Result struct {
@@ -98,6 +107,30 @@ func (s *HTTPSource) ResolveModel(ctx context.Context) (string, error) {
 	return s.ModelID, nil
 }
 
+// doOnce performs one chat-completion HTTP attempt, returning the body, status
+// code, and any transport error. A fresh timeout and request body are used each
+// call so retries are independent.
+func (s *HTTPSource) doOnce(ctx context.Context, raw []byte, timeout time.Duration) ([]byte, int, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
+		s.BaseURL+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.APIKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return data, resp.StatusCode, nil
+}
+
 func (s *HTTPSource) Complete(ctx context.Context, msgs []Message, opts Options) (Result, error) {
 	model, err := s.ResolveModel(ctx)
 	if err != nil {
@@ -121,28 +154,32 @@ func (s *HTTPSource) Complete(ctx context.Context, msgs []Message, opts Options)
 	if timeout == 0 {
 		timeout = 10 * time.Minute
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		s.BaseURL+"/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return Result{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if s.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.APIKey)
-	}
 
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
+	var data []byte
+	var status int
+	for attempt := 1; ; attempt++ {
+		data, status, err = s.doOnce(ctx, raw, timeout)
+		transient := err != nil || status >= 500
+		if !transient || attempt >= maxAttempts {
+			break
+		}
+		reason := s.SrcName + " "
+		if err != nil {
+			reason += "connection error: " + prim60(err.Error())
+		} else {
+			reason += fmt.Sprintf("HTTP %d", status)
+		}
+		if opts.OnRetry != nil {
+			opts.OnRetry(attempt, reason)
+		}
+		time.Sleep(time.Duration(attempt) * 2 * time.Second) // 2s, 4s backoff
+	}
 	if err != nil {
 		return Result{}, err
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("%s returned %d: %s", s.SrcName, resp.StatusCode,
-			prim60(string(data)))
+	if status != http.StatusOK {
+		return Result{}, fmt.Errorf("%s returned %d: %s", s.SrcName, status, prim60(string(data)))
 	}
 
 	var parsed struct {

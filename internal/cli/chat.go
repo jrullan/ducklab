@@ -50,6 +50,10 @@ type callMsg struct {
 	tokens int
 	secs   float64
 }
+type retryMsg struct {
+	attempt int
+	reason  string
+}
 type tickMsg struct{}
 type doneMsg struct {
 	outcome strategy.Outcome
@@ -149,6 +153,12 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case callMsg:
 		m.println(duck.Dim.Render(fmt.Sprintf("      ↳ %s · %d tok · %.1fs",
 			msg.src, msg.tokens, msg.secs)))
+		m.refresh()
+		return m, m.waitFor()
+
+	case retryMsg:
+		m.println(duck.Warns.Render(fmt.Sprintf("      ↻ %s — retrying (%d/%d)",
+			msg.reason, msg.attempt+1, 3)))
 		m.refresh()
 		return m, m.waitFor()
 
@@ -387,6 +397,9 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
 		OnCall: func(res source.Result) {
 			m.sub <- callMsg{res.Source, res.Tokens(), res.Elapsed.Seconds()}
+		},
+		OnRetry: func(attempt int, reason string) {
+			m.sub <- retryMsg{attempt, reason}
 		},
 	}
 	m.running = true
