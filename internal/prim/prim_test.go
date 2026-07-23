@@ -91,6 +91,26 @@ func TestApplySearchReplace(t *testing.T) {
 	}
 }
 
+func TestApplySearchReplaceCreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	// empty SEARCH → create the file (greenfield / new files)
+	out := "=== FILE: web/index.html ===\n<<< SEARCH\n===\n<h1>hi</h1>\n>>> REPLACE\n"
+	res := ApplySearchReplace(dir, out)
+	if res.Applied != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("new-file create: applied=%d rejected=%v", res.Applied, res.Rejected)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "web", "index.html"))
+	if err != nil || !contains(string(data), "<h1>hi</h1>") {
+		t.Errorf("new file not created correctly: %q err=%v", data, err)
+	}
+
+	// empty SEARCH on an existing file is rejected (guards against wipes)
+	res = ApplySearchReplace(dir, out)
+	if res.Applied != 0 || len(res.Rejected) != 1 {
+		t.Errorf("empty SEARCH on existing file should be rejected: %+v", res)
+	}
+}
+
 func TestDecisionAndJudge(t *testing.T) {
 	if d := Decision("blah\n### DECISION: A\nmore"); d != "A" {
 		t.Errorf("Decision=%q", d)

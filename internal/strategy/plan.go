@@ -38,7 +38,7 @@ func (Plan) Run(env Env) (Outcome, error) {
 	r := env.Run
 	_ = r.Set("base_branch", base)
 	_ = r.Set("gate", env.Gate.Kind)
-	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
+	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall}
 
 	// ── planning dialogue ──────────────────────────────────────────
 	_ = r.Advance("HANDOFF")

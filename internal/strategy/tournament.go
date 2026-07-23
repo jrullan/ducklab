@@ -38,7 +38,7 @@ func (Tournament) Run(env Env) (Outcome, error) {
 	_ = r.Set("base_branch", base)
 	_ = r.Set("gate", env.Gate.Kind)
 	verified := env.Gate.Active()
-	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
+	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall}
 
 	type cand struct {
 		src     source.Client

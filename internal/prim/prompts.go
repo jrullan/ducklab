@@ -22,9 +22,12 @@ const (
 		"Rules:\n" +
 		"- SEARCH text must exist EXACTLY in the file (whitespace and indentation\n" +
 		"  included). If not found, the change is REJECTED.\n" +
+		"- To CREATE A NEW FILE, leave the SEARCH section EMPTY (nothing between\n" +
+		"  <<< SEARCH and ===) and put the full new file content in REPLACE:\n" +
+		"    === FILE: path/to/new_file ===\n    <<< SEARCH\n    ===\n    <full new file content>\n    >>> REPLACE\n" +
 		"- Multiple === FILE: ... >>> REPLACE blocks may target the same file;\n" +
 		"  each needs its own === FILE: === header.\n" +
-		"- Do NOT rewrite whole files — only the portion that changes.\n" +
+		"- Do NOT rewrite whole existing files — only the portion that changes.\n" +
 		"- No explanatory text outside the blocks.\n" +
 		"- The closing delimiter is >>> REPLACE."
 )

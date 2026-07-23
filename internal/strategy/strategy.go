@@ -27,6 +27,8 @@ type Env struct {
 	Judge       source.Client
 	Run         *run.Run
 	OnStage     StageFunc
+	// OnCall, if set, receives each completion's Result for per-phase telemetry.
+	OnCall func(source.Result)
 }
 
 func (e Env) stage(stage, src string) {

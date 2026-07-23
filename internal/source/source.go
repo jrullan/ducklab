@@ -28,10 +28,14 @@ type Options struct {
 	MaxTokens       int
 	DisableThinking bool // some local models burn MaxTokens on hidden reasoning
 	LogPath         string
+	// OnDone, if set, is called with the Result right after each completion —
+	// the seam through which the UI reports per-phase tokens and latency.
+	OnDone func(Result)
 }
 
 // Result is a completion plus the observability every ducklab call records.
 type Result struct {
+	Source           string
 	Content          string
 	PromptTokens     int
 	CompletionTokens int
@@ -39,6 +43,9 @@ type Result struct {
 	ReasoningChars   int
 	Elapsed          time.Duration
 }
+
+// Tokens is the total (prompt + completion) tokens for the call.
+func (r Result) Tokens() int { return r.PromptTokens + r.CompletionTokens }
 
 // Client is the single seam strategies depend on. Real endpoints and test
 // fakes both implement it.
@@ -159,6 +166,7 @@ func (s *HTTPSource) Complete(ctx context.Context, msgs []Message, opts Options)
 	}
 	ch := parsed.Choices[0]
 	r := Result{
+		Source:           s.SrcName,
 		Content:          ch.Message.Content,
 		PromptTokens:     parsed.Usage.PromptTokens,
 		CompletionTokens: parsed.Usage.CompletionTokens,
@@ -167,6 +175,9 @@ func (s *HTTPSource) Complete(ctx context.Context, msgs []Message, opts Options)
 		Elapsed:          time.Since(start),
 	}
 	s.log(opts.LogPath, model, r)
+	if opts.OnDone != nil {
+		opts.OnDone(r)
+	}
 	return r, nil
 }
 

@@ -61,7 +61,29 @@ func ApplySearchReplace(repo, output string) SearchReplaceResult {
 			p := filepath.Join(repo, filepath.FromSlash(current))
 
 			data, err := os.ReadFile(p)
-			if err != nil {
+			fileMissing := err != nil
+
+			// Empty SEARCH == "create this file" (greenfield / new files, which
+			// plain SEARCH/REPLACE otherwise can't do).
+			if strings.TrimSpace(searchText) == "" {
+				if !fileMissing {
+					res.Rejected = append(res.Rejected,
+						fmt.Sprintf("%s: empty SEARCH but file exists — use a real SEARCH block to edit", current))
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+					res.Rejected = append(res.Rejected, fmt.Sprintf("%s: mkdir failed: %v", current, err))
+					continue
+				}
+				if err := os.WriteFile(p, []byte(replaceText+"\n"), 0o644); err != nil {
+					res.Rejected = append(res.Rejected, fmt.Sprintf("%s: create failed: %v", current, err))
+					continue
+				}
+				res.Applied++
+				continue
+			}
+
+			if fileMissing {
 				res.Rejected = append(res.Rejected, fmt.Sprintf("%s: file not found", current))
 				continue
 			}

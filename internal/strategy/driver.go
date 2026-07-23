@@ -34,7 +34,7 @@ func (Driver) Run(env Env) (Outcome, error) {
 	r := env.Run
 	branch := finalBranch(env.TaskID)
 	_ = r.Set("base_branch", base)
-	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath()}
+	opts := source.Options{Temperature: 0.2, DisableThinking: true, LogPath: r.LogPath(), OnDone: env.OnCall}
 
 	for round := 1; round <= driverMaxRounds; round++ {
 		// --- DRIVE ---

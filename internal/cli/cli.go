@@ -277,6 +277,10 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 				fmt.Println(duck.Dim.Render("  · " + stage))
 			}
 		},
+		OnCall: func(res source.Result) {
+			fmt.Println(duck.Dim.Render(fmt.Sprintf("    ↳ %s · %d tok · %.1fs",
+				res.Source, res.Tokens(), res.Elapsed.Seconds())))
+		},
 	}, 0
 }
 

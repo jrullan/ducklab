@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -44,6 +45,12 @@ func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
 // ─── messages ─────────────────────────────────────────────────────
 type stageMsg struct{ stage, src string }
+type callMsg struct {
+	src    string
+	tokens int
+	secs   float64
+}
+type tickMsg struct{}
 type doneMsg struct {
 	outcome strategy.Outcome
 	err     error
@@ -65,6 +72,11 @@ type chatModel struct {
 	current           string
 	last              *strategy.Outcome
 	quip              int
+
+	// live phase telemetry
+	phaseStart time.Time
+	phaseName  string
+	elapsed    float64
 }
 
 func newChatModel(repo string, gate prim.Gate) *chatModel {
@@ -122,7 +134,11 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case stageMsg:
+		m.phaseStart = time.Now()
+		m.phaseName = msg.stage
+		m.elapsed = 0
 		if msg.src != "" {
+			m.phaseName += " — " + msg.src
 			m.println(duck.Dim.Render("    · " + msg.stage + " — " + msg.src))
 		} else {
 			m.println(duck.Dim.Render("    · " + msg.stage))
@@ -130,8 +146,24 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, m.waitFor()
 
+	case callMsg:
+		m.println(duck.Dim.Render(fmt.Sprintf("      ↳ %s · %d tok · %.1fs",
+			msg.src, msg.tokens, msg.secs)))
+		m.refresh()
+		return m, m.waitFor()
+
+	case tickMsg:
+		if !m.running {
+			return m, nil
+		}
+		if !m.phaseStart.IsZero() {
+			m.elapsed = time.Since(m.phaseStart).Seconds()
+		}
+		return m, m.tick()
+
 	case doneMsg:
 		m.running = false
+		m.phaseName = ""
 		if msg.err != nil {
 			m.println(duck.Bad.Render("  ✗ " + msg.err.Error()))
 		} else {
@@ -158,12 +190,20 @@ func (m *chatModel) refresh() {
 	}
 }
 
+// tick drives the live per-phase elapsed clock while a run is in flight.
+func (m *chatModel) tick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
 func (m *chatModel) View() string {
 	if !m.ready {
 		return "starting ducklab…"
 	}
-	bar := duck.Dim.Render(strings.Repeat("─", max(m.vp.Width, 1)))
-	return lipgloss.JoinVertical(lipgloss.Left, m.vp.View(), bar, m.ti.View())
+	status := duck.Dim.Render(strings.Repeat("─", max(m.vp.Width, 1)))
+	if m.running && m.phaseName != "" {
+		status = duck.Hunk.Render(fmt.Sprintf("⏱ %2.0fs", m.elapsed)) + "  " + duck.Dim.Render(m.phaseName)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, m.vp.View(), status, m.ti.View())
 }
 
 // ─── command handling ─────────────────────────────────────────────
@@ -345,8 +385,12 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		Repo: m.repo, Gate: m.gate,
 		Contestants: []source.Client{a, b}, Judge: j, Run: r,
 		OnStage: func(stage, src string) { m.sub <- stageMsg{stage, src} },
+		OnCall: func(res source.Result) {
+			m.sub <- callMsg{res.Source, res.Tokens(), res.Elapsed.Seconds()}
+		},
 	}
 	m.running = true
+	m.phaseStart = time.Now()
 	m.quip++
 	m.println(duck.Quack.Render(fmt.Sprintf("  quack — %s on [%s] · %s", m.mode, taskID, duck.Quip(m.quip))))
 	m.refresh()
@@ -354,7 +398,7 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		out, err := strat.Run(env)
 		m.sub <- doneMsg{out, err}
 	}()
-	return m, m.waitFor()
+	return m, tea.Batch(m.waitFor(), m.tick())
 }
 
 func (m *chatModel) waitFor() tea.Cmd {
