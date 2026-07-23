@@ -43,7 +43,7 @@ func CurrentBranch(dir string) string {
 // runs/ artifacts are excluded — they are never the user's work — so a second
 // run never trips the guard on the first run's output.
 func IsDirty(dir string) (bool, []string) {
-	ok, out := Git("status --porcelain -- . ':(exclude)runs'", dir)
+	ok, out := Git("status --porcelain -- . ':(exclude)runs' ':(exclude).ducklab'", dir)
 	if !ok {
 		// not a repo, or git error — not "dirty user work"; callers ensure a repo
 		return false, nil

@@ -7,7 +7,9 @@ import (
 
 	"github.com/jrullan/ducklab/internal/prim"
 	"github.com/jrullan/ducklab/internal/project"
+	"github.com/jrullan/ducklab/internal/run"
 	"github.com/jrullan/ducklab/internal/source"
+	"github.com/jrullan/ducklab/internal/strategy"
 )
 
 // inferDescription asks a model for a one-line description of the project, from
@@ -30,10 +32,12 @@ func inferDescription(src source.Client, repo string, opts source.Options) strin
 	return firstLine(strings.TrimSpace(res.Content))
 }
 
-// projectRequirement augments a task goal with the project's context preamble,
+// projectRequirement augments a task goal with the project's context preamble
+// AND any prior failed attempts at this goal (so a re-run avoids the dead end),
 // inferring and persisting a description the first time if none is set. Returns
-// the effective requirement plus the description if it was just inferred.
-func projectRequirement(src source.Client, repo, goal string, opts source.Options) (effReq, inferred string) {
+// the effective requirement, a just-inferred description (if any), and how many
+// prior failed attempts are being fed in.
+func projectRequirement(src source.Client, repo, goal string, opts source.Options) (effReq, inferred string, priorFails int) {
 	p, _ := project.Load(repo)
 	if strings.TrimSpace(p.Description) == "" {
 		if desc := inferDescription(src, repo, opts); desc != "" {
@@ -42,9 +46,43 @@ func projectRequirement(src source.Client, repo, goal string, opts source.Option
 			inferred = desc
 		}
 	}
-	pre := p.Context()
-	if pre == "" {
-		return goal, inferred
+	var parts []string
+	if pre := p.Context(); pre != "" {
+		parts = append(parts, pre)
 	}
-	return pre + "\n\nTask:\n" + goal, inferred
+	if att := project.AttemptsContext(repo, goal); att != "" {
+		parts = append(parts, att)
+	}
+	priorFails = project.Count(repo, goal)
+	parts = append(parts, "Task:\n"+goal)
+	return strings.Join(parts, "\n\n"), inferred, priorFails
+}
+
+// recordFailure remembers an escalated run's approach so the next attempt at the
+// same goal is told to avoid it. Goal and mode come from the run's own state.
+func recordFailure(repo string, r *run.Run, o strategy.Outcome) {
+	goal, _ := r.Get("requirement")
+	mode, _ := r.Get("mode")
+	g := asString(goal)
+	if g == "" {
+		return
+	}
+	detail := ""
+	if v, ok := r.Read("execution_review.md"); ok { // plan: B's verdict
+		detail = v
+	} else if v, name := lastReview(r); name != "" { // driver: observer review
+		detail = v
+	} else if v, ok := r.Read("test_output_final.txt"); ok {
+		detail = v
+	} else if v, ok := r.Read("test_output.txt"); ok { // solo
+		detail = v
+	}
+	diff, _ := r.Read("diff_final.patch")
+	_ = project.AddAttempt(repo, project.Attempt{
+		Goal:   g,
+		Mode:   asString(mode),
+		Reason: o.Message,
+		Detail: prim.TruncateMiddle(strings.TrimSpace(detail), 800),
+		Diff:   prim.TruncateMiddle(strings.TrimSpace(diff), 1500),
+	})
 }

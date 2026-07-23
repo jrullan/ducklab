@@ -29,7 +29,8 @@ func EnsureRepo(dir string) (initialized bool, err error) {
 	if ok, out := Git("init -q", dir); !ok {
 		return false, fmt.Errorf("git init failed: %s", strings.TrimSpace(out))
 	}
-	ensureGitignoreRuns(dir)
+	ensureIgnored(dir, "runs/")
+	ensureIgnored(dir, ".ducklab/")
 	Git("add -A", dir)
 	// --allow-empty so a truly empty folder still gets a base commit.
 	if ok, out := Git(gitIdentity+` commit -q --allow-empty -m "ducklab: initialize repository"`, dir); !ok {
@@ -38,13 +39,13 @@ func EnsureRepo(dir string) (initialized bool, err error) {
 	return true, nil
 }
 
-// ensureGitignoreRuns makes sure runs/ is git-ignored so ducklab's per-run
-// artifacts never enter the user's history.
-func ensureGitignoreRuns(dir string) {
+// ensureIgnored makes sure a pattern is present in the repo's .gitignore so
+// ducklab's own directories never enter the user's history.
+func ensureIgnored(dir, pattern string) {
 	p := filepath.Join(dir, ".gitignore")
 	data, _ := os.ReadFile(p)
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == "runs/" {
+		if strings.TrimSpace(line) == pattern {
 			return
 		}
 	}
@@ -52,6 +53,6 @@ func ensureGitignoreRuns(dir string) {
 	if len(body) > 0 && !strings.HasSuffix(body, "\n") {
 		body += "\n"
 	}
-	body += "runs/\n"
+	body += pattern + "\n"
 	_ = os.WriteFile(p, []byte(body), 0o644)
 }

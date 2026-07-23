@@ -266,11 +266,14 @@ func buildEnv(taskID, requirement, repo string, f runFlags) (strategy.Env, int) 
 	_ = r.Set("mode", f.mode)
 	_ = r.Set("requirement", requirement)
 	fmt.Println(duck.Dim.Render("  gate: " + gate.Label()))
-	// Inject project session memory (infer the description on first use).
+	// Inject project session memory + prior failed attempts (avoid dead ends).
 	ctxOpts := source.Options{Temperature: 0.2, DisableThinking: true}
-	effReq, inferred := projectRequirement(a, repo, requirement, ctxOpts)
+	effReq, inferred, priorFails := projectRequirement(a, repo, requirement, ctxOpts)
 	if inferred != "" {
 		fmt.Println(duck.Hunk.Render("  ◌ project: "+inferred) + duck.Dim.Render("  (edit .ducklab/project.md)"))
+	}
+	if priorFails > 0 {
+		fmt.Println(duck.Hunk.Render(fmt.Sprintf("  ◌ avoiding %d prior failed approach(es) for this goal", priorFails)))
 	}
 	return strategy.Env{
 		Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
@@ -315,6 +318,7 @@ func execute(strat strategy.Strategy, env strategy.Env) int {
 	printOutcome(out)
 	// HUMAN_GATE and UNVERIFIED are both awaiting-a-human, not failures.
 	if out.State == "ESCALATED" {
+		recordFailure(env.Repo, env.Run, out) // so a re-run avoids this approach
 		return 2
 	}
 	return 0

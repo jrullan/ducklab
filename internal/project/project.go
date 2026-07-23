@@ -63,11 +63,7 @@ func Save(repo string, p Project) error {
 	for _, g := range p.Goals {
 		b.WriteString("- " + g + "\n")
 	}
-	if err := os.WriteFile(Path(repo), []byte(b.String()), 0o644); err != nil {
-		return err
-	}
-	ensureIgnored(repo, ".ducklab/")
-	return nil
+	return os.WriteFile(Path(repo), []byte(b.String()), 0o644)
 }
 
 // AddGoal appends an accepted task goal (deduped against the last entry).
@@ -112,20 +108,4 @@ func (p Project) Context() string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func ensureIgnored(repo, pattern string) {
-	p := filepath.Join(repo, ".gitignore")
-	data, _ := os.ReadFile(p)
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == pattern {
-			return
-		}
-	}
-	body := string(data)
-	if len(body) > 0 && !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	body += pattern + "\n"
-	_ = os.WriteFile(p, []byte(body), 0o644)
 }

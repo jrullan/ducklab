@@ -204,6 +204,12 @@ func (m *chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.last = &msg.outcome
+			// Remember a failed approach so a re-run of this goal avoids it.
+			if msg.outcome.State == "ESCALATED" && m.current != "" {
+				if r, err := run.Open(filepath.Join(m.repo, "runs", m.current)); err == nil {
+					recordFailure(m.repo, r, msg.outcome)
+				}
+			}
 			m.renderOutcome(msg.outcome)
 		}
 		m.refresh()
@@ -449,9 +455,12 @@ func (m *chatModel) startRun() (tea.Model, tea.Cmd) {
 		// description from history+files the first time if unset.
 		ctxOpts := source.Options{Temperature: 0.2, DisableThinking: true, OnDone: onCall}
 		m.sub <- stageMsg{"CONTEXT", a.Name()}
-		effReq, inferred := projectRequirement(a, m.repo, goal, ctxOpts)
+		effReq, inferred, priorFails := projectRequirement(a, m.repo, goal, ctxOpts)
 		if inferred != "" {
 			m.sub <- noticeMsg{"project: " + inferred + "  (/project to edit)"}
+		}
+		if priorFails > 0 {
+			m.sub <- noticeMsg{fmt.Sprintf("avoiding %d prior failed approach(es) for this goal", priorFails)}
 		}
 		env := strategy.Env{
 			Ctx: context.Background(), TaskID: taskID, Requirement: effReq,
@@ -542,7 +551,7 @@ func (m *chatModel) commit(rest []string) {
 		msg = strings.Join(rest, " ")
 	}
 	prim.Git("add -A", m.repo)
-	prim.Git("reset -q -- runs", m.repo) // never commit ducklab artifacts
+	prim.Git("reset -q -- runs .ducklab", m.repo) // never commit ducklab artifacts
 	ok, out := prim.Git(fmt.Sprintf("commit -q -m %q", msg), m.repo)
 	if !ok { // no user identity configured — fall back to ducklab's
 		ok, out = prim.Git(fmt.Sprintf("%s commit -q -m %q", gitIDConst, msg), m.repo)
@@ -566,10 +575,11 @@ func (m *chatModel) accept() {
 		return
 	}
 	m.cleanupBranches()
-	// Record the accepted goal in the project's session memory.
+	// Record the accepted goal, and drop its failed-attempt history (solved).
 	if r, err := run.Open(filepath.Join(m.repo, "runs", m.current)); err == nil {
 		if g, ok := r.Get("requirement"); ok {
 			_ = project.AddGoal(m.repo, asString(g))
+			_ = project.ClearAttempts(m.repo, asString(g))
 		}
 	}
 	m.println(duck.OK.Render("  ✓ merged " + branch + " → " + base))

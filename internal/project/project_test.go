@@ -1,8 +1,6 @@
 package project
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,11 +17,6 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	if out.Description != in.Description || len(out.Goals) != 2 || out.Goals[1] != "add starfield" {
 		t.Fatalf("roundtrip mismatch: %+v", out)
-	}
-	// .ducklab/ is gitignored
-	gi, _ := os.ReadFile(filepath.Join(repo, ".gitignore"))
-	if !strings.Contains(string(gi), ".ducklab/") {
-		t.Errorf(".ducklab/ not ignored: %q", gi)
 	}
 }
 

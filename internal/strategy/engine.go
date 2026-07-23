@@ -32,7 +32,7 @@ func checkoutFresh(repo, branch, base string) {
 // holds whether or not the target repo gitignores runs/.
 func stageWork(repo string) {
 	prim.Git("add -A", repo)
-	prim.Git("reset -q -- runs", repo)
+	prim.Git("reset -q -- runs .ducklab", repo)
 }
 
 // commitAll stages the work (never runs/) and commits with the ducklab identity.
@@ -45,7 +45,7 @@ func commitAll(repo, msg string) {
 // leaves runs/ unstaged so a later commit cannot capture it.
 func snapshotDiff(repo, base string) string {
 	stageWork(repo)
-	_, out := prim.Git("diff --cached "+base+" -- . ':(exclude)runs'", repo)
+	_, out := prim.Git("diff --cached "+base+" -- . ':(exclude)runs' ':(exclude).ducklab'", repo)
 	return out
 }
 
