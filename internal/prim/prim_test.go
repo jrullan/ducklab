@@ -161,6 +161,17 @@ func TestApplySearchReplaceTolerantSeparator(t *testing.T) {
 	if res := ApplySearchReplace(dir, out2); res.Applied != 1 {
 		t.Errorf("git-conflict divider not accepted: %+v", res)
 	}
+
+	// model closes the block with a second "===" instead of ">>> REPLACE" — the
+	// trailing "===" must NOT leak into the file (the earth3.html failure).
+	out3 := "=== FILE: f.go ===\n<<< SEARCH\nreturn 3\n===\nreturn 4\n===\n"
+	if res := ApplySearchReplace(dir, out3); res.Applied != 1 {
+		t.Fatalf("=== terminator not handled: %+v", res)
+	}
+	data2, _ := os.ReadFile(filepath.Join(dir, "f.go"))
+	if contains(string(data2), "\n===\n") || contains(string(data2), "return 4\n===") {
+		t.Errorf("trailing === leaked into the file: %q", data2)
+	}
 }
 
 func TestApplySearchReplaceRefusesMarkerInjection(t *testing.T) {

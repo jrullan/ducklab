@@ -107,7 +107,7 @@ func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
 			path+": whole-file block but file exists — use a SEARCH/REPLACE block to edit it")
 		return
 	}
-	if hasStructuralMarker(content) {
+	if hasStructuralMarker(content, path) {
 		res.Rejected = append(res.Rejected,
 			path+": content contains ducklab/merge markers — refused (would corrupt the file)")
 		return
@@ -128,11 +128,27 @@ func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
 // line into a file corrupts it (and breaks future edits) — the earth3.html
 // "<<< SEARCH injected into JavaScript" bug. Real source never has these as
 // standalone lines, so refusing to write them is safe.
-func hasStructuralMarker(text string) bool {
+func hasStructuralMarker(text, path string) bool {
+	doc := isDocFile(path) // "===" is a legitimate Setext heading underline there
 	for _, l := range strings.Split(text, "\n") {
 		t := strings.TrimSpace(l)
 		if t == "<<< SEARCH" || t == ">>> REPLACE" || fileHeader.MatchString(l) ||
 			strings.HasPrefix(t, "<<<<<<<") || strings.HasPrefix(t, ">>>>>>>") {
+			return true
+		}
+		if !doc && (t == "===" || t == "=======") {
+			return true
+		}
+	}
+	return false
+}
+
+// isDocFile reports whether a path is a prose/markup format where a bare "==="
+// line is legitimate content (a Setext underline), not corruption.
+func isDocFile(path string) bool {
+	p := strings.ToLower(path)
+	for _, e := range []string{".md", ".markdown", ".rst", ".txt", ".adoc"} {
+		if strings.HasSuffix(p, e) {
 			return true
 		}
 	}
@@ -165,19 +181,22 @@ func applySRBlocks(repo, path string, body []string, res *SearchReplaceResult) {
 			i++
 		}
 		var replace []string
-		for i < len(body) && !srTerminator(body[i]) && !srBlockStart(body[i]) {
+		// Stop at ">>> REPLACE", at a "===" (models sometimes close a block with
+		// another "===" instead of ">>> REPLACE" — that trailing "===" must not
+		// leak into the file), or at the next block.
+		for i < len(body) && !srTerminator(body[i]) && !srDivider(body[i]) && !srBlockStart(body[i]) {
 			replace = append(replace, body[i])
 			i++
 		}
-		if i < len(body) && srTerminator(body[i]) {
-			i++ // consume the >>> REPLACE terminator
+		if i < len(body) && (srTerminator(body[i]) || srDivider(body[i])) {
+			i++ // consume the terminator (>>> REPLACE or a closing ===)
 		}
 
 		searchText := strings.Join(search, "\n")
 		replaceText := strings.Join(replace, "\n")
 
 		// Never write ducklab/merge markers into a file (self-corruption guard).
-		if hasStructuralMarker(replaceText) {
+		if hasStructuralMarker(replaceText, path) {
 			res.Rejected = append(res.Rejected,
 				path+": REPLACE contains ducklab/merge markers — refused (would corrupt the file)")
 			continue
