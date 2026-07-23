@@ -112,7 +112,7 @@ func TestSoloUnverified(t *testing.T) {
 func TestDriverUnverified(t *testing.T) {
 	repo := gitRepo(t)
 	driver := &fakeSource{name: "drv", replies: []string{
-		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+		"=== FILE: main.txt ===\nfixed\n",
 	}}
 	observer := &fakeSource{name: "obs", replies: []string{
 		"Analysis: the change is coherent with the task and touches only what was asked.\n" +
@@ -131,7 +131,7 @@ func TestDriverUnverified(t *testing.T) {
 func TestDriverApproved(t *testing.T) {
 	repo := gitRepo(t)
 	driver := &fakeSource{name: "drv", replies: []string{
-		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+		"=== FILE: main.txt ===\nfixed\n",
 	}}
 	observer := &fakeSource{name: "obs", replies: []string{
 		"Analysis: the change replaces base with fixed and matches the task fully.\n" +
@@ -197,7 +197,7 @@ func TestPlanExecutedGreen(t *testing.T) {
 	planner := &fakeSource{name: "A", replies: []string{
 		"A→B: here is my plan.\n1. Change base to fixed in main.txt\nThoughts?",
 		"B, I appreciate the notes but I'm keeping my plan because it already meets the requirement.",
-		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+		"=== FILE: main.txt ===\nfixed\n",
 	}}
 	reviewer := &fakeSource{name: "B", replies: []string{
 		"A, the plan looks solid. One observation: confirm the exact string. I think it's ready to execute.",
@@ -221,7 +221,7 @@ func TestPlanUnverified(t *testing.T) {
 	planner := &fakeSource{name: "A", replies: []string{
 		"A→B plan.\n1. Change base to fixed",
 		"I'm keeping my plan because it is correct.",
-		"=== FILE: main.txt ===\n<<< SEARCH\nbase\n===\nfixed\n>>> REPLACE\n",
+		"=== FILE: main.txt ===\nfixed\n",
 	}}
 	reviewer := &fakeSource{name: "B", replies: []string{
 		"A, the plan is promising. I think it's ready to execute.",

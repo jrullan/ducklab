@@ -2,8 +2,6 @@ package strategy
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/prim"
@@ -57,23 +55,20 @@ func (Driver) Run(env Env) (Outcome, error) {
 			prim.Git("checkout -q "+branch, env.Repo)
 			prim.Git("reset -q HEAD", env.Repo) // unstage; keep committed tree
 		}
-		applied := prim.ApplySearchReplace(env.Repo, res.Content)
-		if applied.Applied > 0 {
-			commitAll(env.Repo, fmt.Sprintf("ducklab: %s driver round %d", env.TaskID, round))
-		}
-
-		// All edits rejected: feed the real file text back so the driver can
-		// copy exact SEARCH strings, then retry.
-		if applied.Applied == 0 {
-			fb := rejectionFeedback(env.Repo, applied.Rejected)
+		// Apply the whole updated file(s). This only fails when the reply has no
+		// usable === FILE: === blocks — then re-ask.
+		if _, err := prim.ApplyFileBlocks(env.Repo, res.Content); err != nil {
+			fb := "Your reply had no usable '=== FILE: path ===' file blocks (" + err.Error() +
+				"). Return the COMPLETE updated file(s) in that exact format, nothing else."
 			_ = r.Write(fmt.Sprintf("feedback_%d.md", round), fb)
 			if round >= driverMaxRounds {
 				_ = r.Advance("ESCALATED")
 				return Outcome{State: "ESCALATED", Branch: branch,
-					Message: "all SEARCH blocks rejected after max rounds"}, nil
+					Message: "no usable file blocks after max rounds"}, nil
 			}
 			continue
 		}
+		commitAll(env.Repo, fmt.Sprintf("ducklab: %s driver round %d", env.TaskID, round))
 
 		// --- VERIFY (skipped when unverified — the reviewer is then the gate) ---
 		env.stage(fmt.Sprintf("VERIFY r%d/%d", round, driverMaxRounds), "")
@@ -139,43 +134,6 @@ func (Driver) Run(env Env) (Outcome, error) {
 	}
 	_ = r.Advance("ESCALATED")
 	return Outcome{State: "ESCALATED", Branch: branch, Message: "max rounds exhausted"}, nil
-}
-
-// rejectionFeedback appends the real current content of each rejected file so
-// the driver can copy exact SEARCH text on the next round.
-func rejectionFeedback(repo string, rejected []string) string {
-	var b strings.Builder
-	b.WriteString("All your SEARCH/REPLACE blocks were rejected:\n")
-	for _, rj := range rejected {
-		b.WriteString("- " + rj + "\n")
-	}
-	b.WriteString("\nThe SEARCH text does not exist in the file. Real file contents:\n\n")
-	seen := map[string]bool{}
-	for _, rj := range rejected {
-		path := rj
-		if i := strings.Index(rj, ":"); i >= 0 {
-			path = rj[:i]
-		}
-		path = strings.TrimSpace(path)
-		if path == "" || seen[path] {
-			continue
-		}
-		seen[path] = true
-		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(path)))
-		if err != nil {
-			continue
-		}
-		content := string(data)
-		// Show the WHOLE file so the driver can copy exact SEARCH text — the
-		// prior 4KB cap was why edits to large files (e.g. 19KB earth3.html)
-		// never matched on retry.
-		if len(content) > prim.PerFileCap {
-			content = content[:prim.PerFileCap] + "\n... (truncated)"
-		}
-		b.WriteString(fmt.Sprintf("=== %s (current content) ===\n%s\n\n", path, content))
-	}
-	b.WriteString("Use the EXACT text above in your SEARCH blocks. Copy and paste it.")
-	return b.String()
 }
 
 func cap2000(s string) string {

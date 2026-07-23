@@ -40,11 +40,15 @@ func ApplyFileBlocks(repo, output string) (int, error) {
 		if current == "" {
 			return nil
 		}
+		body := strings.Join(buf, "\n") + "\n"
+		// Never write ducklab/merge markers into a file (self-corruption guard).
+		if hasStructuralMarker(body, current) {
+			return fmt.Errorf("%s: content contains ducklab/merge markers — refused", current)
+		}
 		p := filepath.Join(repo, filepath.FromSlash(current))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
-		body := strings.Join(buf, "\n") + "\n"
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			return err
 		}

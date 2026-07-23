@@ -45,22 +45,22 @@ func SolvePrompt(requirement, repo string) []source.Message {
 	}
 }
 
-// DriverPrompt asks the driver for surgical SEARCH/REPLACE edits, optionally
-// incorporating the observer's feedback from a prior round.
+// DriverPrompt asks the driver to implement the task by returning the complete
+// updated file(s). Whole-file rewriting is far more robust than inline
+// SEARCH/REPLACE markers on modest local models; the observer reviews the diff
+// and a net loss of code is a blocking finding, so destruction is caught.
 func DriverPrompt(requirement, repo, feedback string, round, maxRounds int) []source.Message {
-	system := "You are a senior software engineer. You implement the requested task with " +
-		"minimal, surgical changes. You read the existing code and propose ONLY the portions " +
-		"that change using SEARCH/REPLACE. SEARCH text must be EXACT (indentation included) — " +
-		"if not found the change is auto-rejected. " + SearchReplaceFormat +
-		"\nCRITICAL: only modify files whose content is shown below under 'Contents of relevant " +
-		"files'. Do NOT invent code in files you have not read. Copy the EXACT file text into " +
-		"your SEARCH blocks."
-	user := fmt.Sprintf("Task:\n%s\n\nRepo files:\n%s\n\nContents of relevant files (only modify these):\n%s",
+	system := "You are a senior software engineer implementing the requested task. Make the " +
+		"MINIMAL change needed and leave everything else intact.\n" +
+		"When you modify a file you MUST return the ENTIRE file with your change integrated — " +
+		"reproduce all existing content verbatim; never omit, summarize, or abbreviate parts " +
+		"with placeholders like '// ... unchanged ...'. Preserve every function and line not " +
+		"related to the task. " + FileFormat
+	user := fmt.Sprintf("Task:\n%s\n\nRepo files:\n%s\n\nContents of relevant files:\n%s",
 		requirement, RepoListing(repo), RelevantFiles(requirement, repo, ContextBudget))
 	if feedback != "" {
-		user += fmt.Sprintf("\n\nObserver feedback (round %d/%d):\n%s\n\n"+
-			"Fix ONLY what the observer flagged. If already correct, return an empty SEARCH/REPLACE block.",
-			round, maxRounds, feedback)
+		user += fmt.Sprintf("\n\nReviewer feedback (round %d/%d):\n%s\n\n"+
+			"Address the feedback. Return the COMPLETE updated file(s).", round, maxRounds, feedback)
 	}
 	return []source.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}
 }
@@ -79,6 +79,10 @@ func ObserverPrompt(requirement, repo, base, testOutput string, round, maxRounds
 			"2. Tests: (do they pass, do they cover the change)\n" +
 			"3. Verdict: APPROVED — if the changes meet the task and tests pass, or CORRECTIONS: " +
 			"followed by a numbered list of specific problems (file, line, what is missing/wrong).\n\n" +
+			"CRITICAL: the driver rewrites whole files. If the diff shows existing code being " +
+			"REMOVED or omitted that the task did not ask to remove (a net loss of functions, lines, " +
+			"or content), that is a serious regression — respond CORRECTIONS, never APPROVED. Losing " +
+			"unrelated code is worse than not making the change.\n" +
 			"NEVER reply just 'APPROVED' without the analysis. Without the analysis the verdict is invalid."},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nTest result (round %d/%d):\n%s\n\nCurrent diff:\n%s",
 			requirement, round, maxRounds, cap3000(testOutput), diff)},
@@ -171,11 +175,14 @@ func PlanReviewPrompt(requirement, handoff, repo string) []source.Message {
 	}
 }
 
-// PlanExecutePrompt is Model A implementing the ratified plan with SEARCH/REPLACE.
+// PlanExecutePrompt is Model A implementing the ratified plan by returning the
+// complete updated file(s).
 func PlanExecutePrompt(requirement, plan, repo string) []source.Message {
 	return []source.Message{
-		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan using surgical " +
-			"SEARCH/REPLACE blocks, step by step. Each SEARCH must be EXACT text from the real file. " + SearchReplaceFormat},
+		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan, step by step. " +
+			"When you modify a file you MUST return the ENTIRE file with your changes integrated — " +
+			"reproduce all existing content verbatim; never omit, summarize, or abbreviate parts with " +
+			"placeholders. Preserve every function and line not related to the task. " + FileFormat},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan (follow it exactly):\n%s\n\nContents of relevant files:\n%s",
 			requirement, plan, RelevantFiles(requirement, repo, ContextBudget))},
 	}
@@ -187,7 +194,9 @@ func PlanVerifyPrompt(requirement, plan, repo, diff, gateOutput string) []source
 	return []source.Message{
 		{Role: "system", Content: "You are a verifier. Compare the execution against the original plan and the " +
 			"requirement. Reply with:\n1. Plan vs execution: were all steps completed?\n2. Requirement: satisfied?\n" +
-			"3. Gate: did the automated check pass (if any)?\n4. Verdict: APPROVED, or ISSUES: followed by a list."},
+			"3. Gate: did the automated check pass (if any)?\n4. Regression check: did the diff REMOVE or omit " +
+			"existing code the plan did not ask to remove? A net loss of unrelated functions/lines is a serious " +
+			"problem.\n5. Verdict: APPROVED, or ISSUES: followed by a list. Do not APPROVE if code was lost."},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan:\n%s\n\nDiff:\n%s\n\nGate output:\n%s",
 			requirement, plan, TruncateMiddle(diff, 6000), cap3000(gateOutput))},
 	}
