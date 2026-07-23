@@ -33,9 +33,20 @@ func RepoListing(repo string) string {
 // every tracked source file. Source is prioritized over tests within a byte
 // budget so the solver always sees the code it must edit (the single biggest
 // lesson from the legacy pilot: listing-only prompts starve the model).
+// ContextBudget is the default total character budget for file context, and
+// PerFileCap is the most of a single file that's ever included. A file the model
+// must edit has to be shown WHOLE — SEARCH/REPLACE needs exact text — so files
+// are included complete (up to PerFileCap) and the total budget only limits how
+// MANY files come along. (A truncated 19KB file was why edits to earth3.html
+// kept getting rejected: the shader code lived past the old 12KB cutoff.)
+const (
+	ContextBudget = 48000
+	PerFileCap    = 64000
+)
+
 func RelevantFiles(requirement, repo string, maxChars int) string {
 	if maxChars <= 0 {
-		maxChars = 12000
+		maxChars = ContextBudget
 	}
 	_, listing := Shell("git ls-files", repo)
 	var files []string
@@ -142,22 +153,23 @@ func RelevantFiles(requirement, repo string, maxChars int) string {
 	var chunks []string
 	budget := maxChars
 	for _, f := range order {
+		if budget <= 0 {
+			break
+		}
 		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(f)))
 		if err != nil {
 			continue
 		}
-		block := "=== " + f + " ===\n" + string(data)
-		if len(block) > budget {
-			if budget <= 0 {
-				break
-			}
-			block = block[:budget] + "\n... (truncated)"
+		// Include each file WHOLE (up to the per-file cap). A partially shown
+		// file is useless for SEARCH/REPLACE — the model can't match text it
+		// can't see. The total budget only bounds how many files come along.
+		content := string(data)
+		if len(content) > PerFileCap {
+			content = content[:PerFileCap] + "\n... (truncated — file exceeds per-file cap)"
 		}
+		block := "=== " + f + " ===\n" + content
 		chunks = append(chunks, block)
 		budget -= len(block)
-		if budget <= 0 {
-			break
-		}
 	}
 	return strings.Join(chunks, "\n\n")
 }

@@ -166,8 +166,11 @@ func rejectionFeedback(repo string, rejected []string) string {
 			continue
 		}
 		content := string(data)
-		if len(content) > 4000 {
-			content = content[:4000] + "\n... (truncated)"
+		// Show the WHOLE file so the driver can copy exact SEARCH text — the
+		// prior 4KB cap was why edits to large files (e.g. 19KB earth3.html)
+		// never matched on retry.
+		if len(content) > prim.PerFileCap {
+			content = content[:prim.PerFileCap] + "\n... (truncated)"
 		}
 		b.WriteString(fmt.Sprintf("=== %s (current content) ===\n%s\n\n", path, content))
 	}

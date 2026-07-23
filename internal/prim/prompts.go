@@ -41,7 +41,7 @@ func SolvePrompt(requirement, repo string) []source.Message {
 			"return it COMPLETE with your change integrated — never omit prior content. " + FileFormat},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nRepo files:\n%s\n\n"+
 			"Contents of relevant files:\n%s", requirement, RepoListing(repo),
-			RelevantFiles(requirement, repo, 12000))},
+			RelevantFiles(requirement, repo, ContextBudget))},
 	}
 }
 
@@ -56,7 +56,7 @@ func DriverPrompt(requirement, repo, feedback string, round, maxRounds int) []so
 		"files'. Do NOT invent code in files you have not read. Copy the EXACT file text into " +
 		"your SEARCH blocks."
 	user := fmt.Sprintf("Task:\n%s\n\nRepo files:\n%s\n\nContents of relevant files (only modify these):\n%s",
-		requirement, RepoListing(repo), RelevantFiles(requirement, repo, 12000))
+		requirement, RepoListing(repo), RelevantFiles(requirement, repo, ContextBudget))
 	if feedback != "" {
 		user += fmt.Sprintf("\n\nObserver feedback (round %d/%d):\n%s\n\n"+
 			"Fix ONLY what the observer flagged. If already correct, return an empty SEARCH/REPLACE block.",
@@ -111,7 +111,7 @@ func SynthesizePrompt(requirement, judgeNotes, repo string) []source.Message {
 			"COMPLETE with all prior content intact — omitting existing content is a serious error. " + FileFormat},
 		{Role: "user", Content: fmt.Sprintf("Original task:\n%s\n\nYour evaluation:\n%s\n\n"+
 			"Current contents of relevant files:\n%s", requirement, judgeNotes,
-			RelevantFiles(requirement, repo, 12000))},
+			RelevantFiles(requirement, repo, ContextBudget))},
 	}
 }
 
@@ -140,7 +140,7 @@ func PlanHandoffPrompt(requirement, repo, feedback string, round, maxRounds int)
 				"acceptance criteria, and NOT the finished code. Do not write actual file contents here; that " +
 				"happens in the execution step. Be concrete about files and changes so it is executable."},
 			{Role: "user", Content: fmt.Sprintf("User requirement:\n%s\n\nRepo files:\n%s\n\nContents of relevant files:\n%s",
-				requirement, RepoListing(repo), RelevantFiles(requirement, repo, 12000))},
+				requirement, RepoListing(repo), RelevantFiles(requirement, repo, ContextBudget))},
 		}
 	}
 	return []source.Message{
@@ -177,7 +177,7 @@ func PlanExecutePrompt(requirement, plan, repo string) []source.Message {
 		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan using surgical " +
 			"SEARCH/REPLACE blocks, step by step. Each SEARCH must be EXACT text from the real file. " + SearchReplaceFormat},
 		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan (follow it exactly):\n%s\n\nContents of relevant files:\n%s",
-			requirement, plan, RelevantFiles(requirement, repo, 12000))},
+			requirement, plan, RelevantFiles(requirement, repo, ContextBudget))},
 	}
 }
 
