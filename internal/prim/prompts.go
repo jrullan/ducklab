@@ -171,15 +171,22 @@ func PlanReviewPrompt(requirement, handoff, repo string) []source.Message {
 	}
 }
 
-// PlanExecutePrompt is Model A implementing the ratified plan by returning the
-// complete updated file(s).
-func PlanExecutePrompt(requirement, plan, repo string) []source.Message {
-	return []source.Message{
-		{Role: "system", Content: "You are a senior engineer. Implement the ratified plan, step by step, " +
-			"making the minimal changes needed. " + FencedEditFormat},
-		{Role: "user", Content: fmt.Sprintf("Task:\n%s\n\nPlan (follow it exactly):\n%s\n\nContents of relevant files:\n%s",
-			requirement, plan, RelevantFiles(requirement, repo, ContextBudget))},
+// PlanExecutePrompt is Model A implementing the ratified plan. It insists that
+// EVERY step be completed, and on retry rounds feeds back the reviewer's list of
+// what's still missing.
+func PlanExecutePrompt(requirement, plan, repo, feedback string, round, maxRounds int) []source.Message {
+	system := "You are a senior engineer executing a ratified plan. The plan has several numbered steps, " +
+		"and you MUST implement EVERY step COMPLETELY — do not skip, defer, or only partially do any step. " +
+		"A plan with N steps needs edits covering all N. Before you finish, re-read the plan and confirm each " +
+		"numbered step has a corresponding edit in your output. " + FencedEditFormat
+	user := fmt.Sprintf("Requirement:\n%s\n\nThe ratified plan — implement ALL of it, every step:\n%s\n\n"+
+		"Current contents of the relevant files:\n%s", requirement, plan, RelevantFiles(requirement, repo, ContextBudget))
+	if feedback != "" {
+		user += fmt.Sprintf("\n\nYour previous execution was INCOMPLETE or incorrect (round %d/%d). The "+
+			"reviewer found:\n%s\n\nProduce the edits that finish the MISSING work and fix these issues. Every "+
+			"plan step must end up fully implemented.", round, maxRounds, feedback)
 	}
+	return []source.Message{{Role: "system", Content: system}, {Role: "user", Content: user}}
 }
 
 // PlanVerifyPrompt is Model B checking the execution against the plan and the

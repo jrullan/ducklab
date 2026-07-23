@@ -237,6 +237,35 @@ func TestPlanUnverified(t *testing.T) {
 	}
 }
 
+func TestPlanExecuteRetriesUntilComplete(t *testing.T) {
+	repo := gitRepo(t)
+	// Planning ends fast (stand by), then execution is INCOMPLETE on round 1 and
+	// completed on round 2 after the reviewer's feedback.
+	planner := &fakeSource{name: "A", replies: []string{
+		"A→B plan.\n1. do X\n2. do Y",
+		"I'm keeping my plan because it is correct.",
+		"=== FILE: main.txt ===\npartial\n",  // round 1 execution (incomplete)
+		"=== FILE: main.txt ===\ncomplete\n", // round 2 execution (fixed)
+	}}
+	reviewer := &fakeSource{name: "B", replies: []string{
+		"A, the plan is ready to execute.",                                         // planning review
+		"1. Plan vs execution: step 2 (do Y) was NOT done. ISSUES: finish step 2.", // round 1 check → reject
+		"1. Plan vs execution: all steps done.\nVerdict: APPROVED",                 // round 2 check → approve
+	}}
+	env := newEnv(t, repo, "", planner, reviewer, reviewer) // no gate
+	out, err := Plan{}.Run(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != "UNVERIFIED" {
+		t.Fatalf("expected UNVERIFIED after retry completes the plan, got %+v", out)
+	}
+	// two execution attempts happened (reviewer approved only the second)
+	if planner.i != 4 {
+		t.Errorf("expected 4 planner calls (2 handoff + 2 execute), got %d", planner.i)
+	}
+}
+
 func TestDriverRespectsMaxRounds(t *testing.T) {
 	repo := gitRepo(t)
 	driver := &fakeSource{name: "drv", replies: []string{
