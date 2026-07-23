@@ -107,6 +107,11 @@ func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
 			path+": whole-file block but file exists — use a SEARCH/REPLACE block to edit it")
 		return
 	}
+	if hasStructuralMarker(content) {
+		res.Rejected = append(res.Rejected,
+			path+": content contains ducklab/merge markers — refused (would corrupt the file)")
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		res.Rejected = append(res.Rejected, path+": mkdir failed: "+err.Error())
 		return
@@ -116,6 +121,22 @@ func applyFullFile(repo, path string, body []string, res *SearchReplaceResult) {
 		return
 	}
 	res.Applied++
+}
+
+// hasStructuralMarker reports whether text contains, on its own line, one of
+// ducklab's SEARCH/REPLACE markers or a git conflict marker. Writing such a
+// line into a file corrupts it (and breaks future edits) — the earth3.html
+// "<<< SEARCH injected into JavaScript" bug. Real source never has these as
+// standalone lines, so refusing to write them is safe.
+func hasStructuralMarker(text string) bool {
+	for _, l := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(l)
+		if t == "<<< SEARCH" || t == ">>> REPLACE" || fileHeader.MatchString(l) ||
+			strings.HasPrefix(t, "<<<<<<<") || strings.HasPrefix(t, ">>>>>>>") {
+			return true
+		}
+	}
+	return false
 }
 
 // applySRBlocks applies one or more SEARCH/REPLACE blocks within a file segment.
@@ -154,6 +175,13 @@ func applySRBlocks(repo, path string, body []string, res *SearchReplaceResult) {
 
 		searchText := strings.Join(search, "\n")
 		replaceText := strings.Join(replace, "\n")
+
+		// Never write ducklab/merge markers into a file (self-corruption guard).
+		if hasStructuralMarker(replaceText) {
+			res.Rejected = append(res.Rejected,
+				path+": REPLACE contains ducklab/merge markers — refused (would corrupt the file)")
+			continue
+		}
 
 		data, err := os.ReadFile(p)
 		fileMissing := err != nil

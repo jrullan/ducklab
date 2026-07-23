@@ -163,6 +163,29 @@ func TestApplySearchReplaceTolerantSeparator(t *testing.T) {
 	}
 }
 
+func TestApplySearchReplaceRefusesMarkerInjection(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "app.js"), []byte("const a = 1;\n"), 0o644)
+
+	// A REPLACE whose content carries a git-conflict marker must be refused —
+	// writing it would corrupt the file (the earth3.html failure mode).
+	out := "=== FILE: app.js ===\n<<< SEARCH\nconst a = 1;\n===\n<<<<<<< HEAD\nconst a = 1;\n>>> REPLACE\n"
+	res := ApplySearchReplace(dir, out)
+	data, _ := os.ReadFile(filepath.Join(dir, "app.js"))
+	if contains(string(data), "<<<<<<<") {
+		t.Fatalf("marker was written into the file (corruption): %q", data)
+	}
+	if res.Applied != 0 || len(res.Rejected) == 0 {
+		t.Errorf("expected the marker-bearing REPLACE to be refused: %+v", res)
+	}
+
+	// whole-file create with a marker in it is likewise refused
+	out2 := "=== FILE: new.js ===\nconst x = 1;\n>>> REPLACE\nconst y = 2;\n"
+	if res := ApplySearchReplace(dir, out2); res.Applied != 0 {
+		t.Errorf("whole-file create with marker should be refused: %+v", res)
+	}
+}
+
 func TestDecisionAndJudge(t *testing.T) {
 	if d := Decision("blah\n### DECISION: A\nmore"); d != "A" {
 		t.Errorf("Decision=%q", d)
