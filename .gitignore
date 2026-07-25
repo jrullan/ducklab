@@ -1,0 +1,10 @@
+/ducklab
+/ducklab-engine
+*.exe
+*.test
+*.out
+coverage.*
+dist/
+build/
+bin/
+.DS_Store

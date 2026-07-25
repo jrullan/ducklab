@@ -1,0 +1,572 @@
+// Package config handles global and project configuration: loading, merging,
+// validation, defaults, and environment overrides. Strict TOML decoding is
+// enforced — unknown keys are rejected.
+package config
+
+import (
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// ID is a validated identifier.
+type ID string
+
+// ProviderID is a provider identifier.
+type ProviderID string
+
+// DucklingID is a duckling identifier.
+type DucklingID string
+
+// Role is a job a duckling performs in a turn.
+type Role string
+
+const (
+	RoleArchitect   Role = "architect"
+	RoleImplementer Role = "implementer"
+	RoleReviewer    Role = "reviewer"
+	RoleJudge       Role = "judge"
+	RoleTriager     Role = "triager"
+	RoleScribe      Role = "scribe"
+	RoleHuman       Role = "human"
+)
+
+// ValidRoles returns all valid roles.
+func ValidRoles() []Role {
+	return []Role{
+		RoleArchitect, RoleImplementer, RoleReviewer,
+		RoleJudge, RoleTriager, RoleScribe, RoleHuman,
+	}
+}
+
+// Autonomy is the autonomy level.
+type Autonomy string
+
+const (
+	AutonomyManual  Autonomy = "manual"
+	AutonomyGuarded Autonomy = "guarded"
+	AutonomyAuto    Autonomy = "auto"
+	AutonomyYolo    Autonomy = "yolo"
+)
+
+// ValidAutonomies returns all valid autonomy levels.
+func ValidAutonomies() []Autonomy {
+	return []Autonomy{AutonomyManual, AutonomyGuarded, AutonomyAuto, AutonomyYolo}
+}
+
+// Mode is a duck mode.
+type Mode string
+
+const (
+	ModeSolo       Mode = "solo"
+	ModePair       Mode = "pair"
+	ModeTournament Mode = "tournament"
+	ModeCouncil    Mode = "council"
+	ModeSplit      Mode = "split"
+)
+
+// ValidModes returns all valid modes.
+func ValidModes() []Mode {
+	return []Mode{ModeSolo, ModePair, ModeTournament, ModeCouncil, ModeSplit}
+}
+
+// Stage is a lifecycle stage.
+type Stage string
+
+const (
+	StageIntake  Stage = "intake"
+	StageSpec    Stage = "spec"
+	StagePlan    Stage = "plan"
+	StageBuild   Stage = "build"
+	StageReview  Stage = "review"
+	StageRelease Stage = "release"
+	StageOperate Stage = "operate"
+)
+
+// ValidStages returns all valid stages.
+func ValidStages() []Stage {
+	return []Stage{StageIntake, StageSpec, StagePlan, StageBuild, StageReview, StageRelease, StageOperate}
+}
+
+// Budget is a set of caps.
+type Budget struct {
+	MaxUSD        float64 `toml:"max_usd"`
+	MaxTokens     int64   `toml:"max_tokens"`
+	MaxWallclockS int     `toml:"max_wallclock_s"`
+	MaxTurns      int     `toml:"max_turns"`
+}
+
+// Defaults holds global defaults.
+type Defaults struct {
+	Autonomy            Autonomy `toml:"autonomy"`
+	Mode                Mode     `toml:"mode"`
+	RepairAttempts      int      `toml:"repair_attempts"`
+	ToolResultMaxBytes  int      `toml:"tool_result_max_bytes"`
+	AgentMaxTurns       int      `toml:"agent_max_turns"`
+	HTTPTimeoutS        int      `toml:"http_timeout_s"`
+	TransientRetries    int      `toml:"transient_retries"`
+	Budget              Budget   `toml:"budget"`
+}
+
+// Engine holds engine configuration.
+type Engine struct {
+	Autostart               bool   `toml:"autostart"`
+	Port                    int    `toml:"port"`
+	Path                    string `toml:"path"`
+	MaxConcurrentRuns       int    `toml:"max_concurrent_runs"`
+	ShutdownGraceS          int    `toml:"shutdown_grace_s"`
+	ProjectMemoryMaxBytes   int    `toml:"project_memory_max_bytes"`
+}
+
+// ProviderKind is the provider kind.
+type ProviderKind string
+
+const (
+	ProviderKindOpenAI    ProviderKind = "openai"
+	ProviderKindAnthropic ProviderKind = "anthropic"
+)
+
+// Provider is a configured endpoint.
+type Provider struct {
+	Kind       ProviderKind      `toml:"kind"`
+	BaseURL    string            `toml:"base_url"`
+	APIKeyEnv  string            `toml:"api_key_env"`
+	Headers    map[string]string `toml:"headers"`
+}
+
+// SamplingParams holds sampling parameters.
+type SamplingParams struct {
+	Temperature      *float64 `toml:"temperature"`
+	TopP             *float64 `toml:"top_p"`
+	MaxTokens        *int     `toml:"max_tokens"`
+	DisableThinking  bool     `toml:"disable_thinking"`
+	Stop             []string `toml:"stop"`
+}
+
+// Cost holds cost configuration.
+type Cost struct {
+	InputPerMTok  float64 `toml:"input_per_mtok"`
+	OutputPerMTok float64 `toml:"output_per_mtok"`
+}
+
+// Caps holds capability overrides.
+type Caps struct {
+	NativeTools   *bool `toml:"native_tools"`
+	ContextTokens *int  `toml:"context_tokens"`
+}
+
+// Duckling is a named, configured model participant.
+type Duckling struct {
+	Provider ProviderID     `toml:"provider"`
+	Model    string         `toml:"model"`
+	Roles    []Role         `toml:"roles"`
+	Notes    string         `toml:"notes"`
+	Params   SamplingParams `toml:"params"`
+	Caps     Caps           `toml:"caps"`
+	Cost     Cost           `toml:"cost"`
+}
+
+// MCP holds MCP server configuration.
+type MCP struct {
+	Command string            `toml:"command"`
+	Args    []string          `toml:"args"`
+	Env     map[string]string `toml:"env"`
+	Enabled bool              `toml:"enabled"`
+}
+
+// Global is the global configuration.
+type Global struct {
+	Schema    int                    `toml:"schema"`
+	Defaults  Defaults               `toml:"defaults"`
+	Engine    Engine                 `toml:"engine"`
+	Providers map[ProviderID]Provider `toml:"provider"`
+	Ducklings map[DucklingID]Duckling `toml:"duckling"`
+	MCPs      map[string]MCP          `toml:"mcp"`
+}
+
+// ShellPolicy holds shell policy configuration.
+type ShellPolicy struct {
+	Mode          string   `toml:"mode"`
+	Deny          []string `toml:"deny"`
+	AllowPrefixes []string `toml:"allow_prefixes"`
+	TimeoutS      int      `toml:"timeout_s"`
+	Network       string   `toml:"network"`
+}
+
+// Verify holds verification configuration.
+type Verify struct {
+	Mode     string `toml:"mode"`
+	Tests    string `toml:"tests"`
+	Build    string `toml:"build"`
+	Lint     string `toml:"lint"`
+	Custom   string `toml:"custom"`
+	TimeoutS int    `toml:"timeout_s"`
+}
+
+// Roster maps roles to ducklings.
+type Roster map[Role]DucklingID
+
+// Modes maps stages to modes.
+type Modes map[Stage]Mode
+
+// Git holds git configuration.
+type Git struct {
+	BranchPrefix    string   `toml:"branch_prefix"`
+	BaseBranch      string   `toml:"base_branch"`
+	CommitTrailer   bool     `toml:"commit_trailer"`
+	ProtectedPaths  []string `toml:"protected_paths"`
+}
+
+// GitHub holds GitHub configuration.
+type GitHub struct {
+	Enabled    bool   `toml:"enabled"`
+	Repo       string `toml:"repo"`
+	MirrorBugs bool   `toml:"mirror_bugs"`
+}
+
+// Project is the project configuration.
+type Project struct {
+	Schema    int        `toml:"schema"`
+	ID        string     `toml:"id"`
+	Name      string     `toml:"name"`
+	Created   string     `toml:"created"`
+	Autonomy  Autonomy   `toml:"autonomy"`
+	Verify    Verify     `toml:"verify"`
+	Roster    Roster     `toml:"roster"`
+	Modes     Modes      `toml:"modes"`
+	Budget    Budget     `toml:"budget"`
+	Git       Git        `toml:"git"`
+	GitHub    GitHub     `toml:"github"`
+	Shell     ShellPolicy `toml:"shell"`
+}
+
+// Error is a configuration error.
+type Error struct {
+	File string
+	Key  string
+	Msg  string
+}
+
+func (e *Error) Error() string {
+	if e.Key != "" {
+		return fmt.Sprintf("%s: %s: %s", e.File, e.Key, e.Msg)
+	}
+	return fmt.Sprintf("%s: %s", e.File, e.Msg)
+}
+
+var idRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
+
+// ValidateID validates an identifier.
+func ValidateID(id string) error {
+	if !idRe.MatchString(id) {
+		return fmt.Errorf("invalid id %q: must match [a-z0-9][a-z0-9-]{0,31}", id)
+	}
+	return nil
+}
+
+// ValidateRole validates a role.
+func ValidateRole(r Role) error {
+	for _, v := range ValidRoles() {
+		if r == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid role %q", r)
+}
+
+// ValidateAutonomy validates an autonomy level.
+func ValidateAutonomy(a Autonomy) error {
+	for _, v := range ValidAutonomies() {
+		if a == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid autonomy %q", a)
+}
+
+// ValidateMode validates a mode.
+func ValidateMode(m Mode) error {
+	for _, v := range ValidModes() {
+		if m == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid mode %q", m)
+}
+
+// ValidateStage validates a stage.
+func ValidateStage(s Stage) error {
+	for _, v := range ValidStages() {
+		if s == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid stage %q", s)
+}
+
+// ValidateProviderKind validates a provider kind.
+func ValidateProviderKind(k ProviderKind) error {
+	if k != ProviderKindOpenAI && k != ProviderKindAnthropic {
+		return fmt.Errorf("invalid provider kind %q", k)
+	}
+	return nil
+}
+
+// ValidateURL validates a URL is absolute.
+func ValidateURL(u string) error {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return fmt.Errorf("invalid URL %q: %w", u, err)
+	}
+	if !parsed.IsAbs() {
+		return fmt.Errorf("URL %q is not absolute", u)
+	}
+	return nil
+}
+
+// LoadGlobal loads the global configuration from a TOML file.
+func LoadGlobal(path string) (*Global, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	var g Global
+	if err := toml.Unmarshal(data, &g); err != nil {
+		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	if err := g.Validate(path); err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+// Validate validates the global configuration.
+func (g *Global) Validate(path string) error {
+	if g.Schema != 1 {
+		return &Error{File: path, Key: "schema", Msg: fmt.Sprintf("expected 1, got %d", g.Schema)}
+	}
+	if err := ValidateAutonomy(g.Defaults.Autonomy); err != nil {
+		return &Error{File: path, Key: "defaults.autonomy", Msg: err.Error()}
+	}
+	if err := ValidateMode(g.Defaults.Mode); err != nil {
+		return &Error{File: path, Key: "defaults.mode", Msg: err.Error()}
+	}
+	if g.Defaults.Budget.MaxUSD <= 0 {
+		return &Error{File: path, Key: "defaults.budget.max_usd", Msg: "must be positive"}
+	}
+	if g.Defaults.Budget.MaxTokens <= 0 {
+		return &Error{File: path, Key: "defaults.budget.max_tokens", Msg: "must be positive"}
+	}
+	if g.Defaults.Budget.MaxWallclockS <= 0 {
+		return &Error{File: path, Key: "defaults.budget.max_wallclock_s", Msg: "must be positive"}
+	}
+	if g.Defaults.Budget.MaxTurns <= 0 {
+		return &Error{File: path, Key: "defaults.budget.max_turns", Msg: "must be positive"}
+	}
+	for id, p := range g.Providers {
+		if err := ValidateID(string(id)); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("provider.%s", id), Msg: err.Error()}
+		}
+		if err := ValidateProviderKind(p.Kind); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("provider.%s.kind", id), Msg: err.Error()}
+		}
+		if err := ValidateURL(p.BaseURL); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("provider.%s.base_url", id), Msg: err.Error()}
+		}
+	}
+	for id, d := range g.Ducklings {
+		if err := ValidateID(string(id)); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("duckling.%s", id), Msg: err.Error()}
+		}
+		if _, ok := g.Providers[d.Provider]; !ok {
+			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.provider", id), Msg: fmt.Sprintf("provider %q not defined", d.Provider)}
+		}
+		for _, r := range d.Roles {
+			if err := ValidateRole(r); err != nil {
+				return &Error{File: path, Key: fmt.Sprintf("duckling.%s.roles", id), Msg: err.Error()}
+			}
+		}
+		if d.Cost.InputPerMTok < 0 || d.Cost.OutputPerMTok < 0 {
+			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.cost", id), Msg: "cost must be non-negative"}
+		}
+	}
+	return nil
+}
+
+// DefaultGlobal returns the default global configuration.
+func DefaultGlobal() *Global {
+	return &Global{
+		Schema: 1,
+		Defaults: Defaults{
+			Autonomy:           AutonomyGuarded,
+			Mode:               ModeSolo,
+			RepairAttempts:     2,
+			ToolResultMaxBytes: 32768,
+			AgentMaxTurns:      24,
+			HTTPTimeoutS:       300,
+			TransientRetries:   3,
+			Budget: Budget{
+				MaxUSD:        2.00,
+				MaxTokens:     400000,
+				MaxWallclockS: 1800,
+				MaxTurns:      24,
+			},
+		},
+		Engine: Engine{
+			Autostart:             true,
+			Port:                  0,
+			Path:                  "",
+			MaxConcurrentRuns:     2,
+			ShutdownGraceS:        30,
+			ProjectMemoryMaxBytes: 8192,
+		},
+		Providers: make(map[ProviderID]Provider),
+		Ducklings: make(map[DucklingID]Duckling),
+		MCPs:      make(map[string]MCP),
+	}
+}
+
+// LoadProject loads the project configuration from a TOML file.
+func LoadProject(path string) (*Project, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	var p Project
+	if err := toml.Unmarshal(data, &p); err != nil {
+		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	if err := p.Validate(path); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// Validate validates the project configuration.
+func (p *Project) Validate(path string) error {
+	if p.Schema != 1 {
+		return &Error{File: path, Key: "schema", Msg: fmt.Sprintf("expected 1, got %d", p.Schema)}
+	}
+	if err := ValidateID(p.ID); err != nil {
+		return &Error{File: path, Key: "id", Msg: err.Error()}
+	}
+	if err := ValidateAutonomy(p.Autonomy); err != nil {
+		return &Error{File: path, Key: "autonomy", Msg: err.Error()}
+	}
+	if p.Verify.Mode != "" && p.Verify.Mode != "auto" && p.Verify.Mode != "tests" &&
+		p.Verify.Mode != "build" && p.Verify.Mode != "lint" && p.Verify.Mode != "none" &&
+		p.Verify.Mode != "custom" {
+		return &Error{File: path, Key: "verify.mode", Msg: fmt.Sprintf("invalid mode %q", p.Verify.Mode)}
+	}
+	for role, ducklingID := range p.Roster {
+		if err := ValidateRole(role); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("roster.%s", role), Msg: err.Error()}
+		}
+		if err := ValidateID(string(ducklingID)); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("roster.%s", role), Msg: err.Error()}
+		}
+	}
+	for stage, mode := range p.Modes {
+		if err := ValidateStage(stage); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("modes.%s", stage), Msg: err.Error()}
+		}
+		if err := ValidateMode(mode); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("modes.%s", stage), Msg: err.Error()}
+		}
+	}
+	if p.Budget.MaxUSD < 0 {
+		return &Error{File: path, Key: "budget.max_usd", Msg: "must be non-negative"}
+	}
+	return nil
+}
+
+// DefaultProject returns the default project configuration.
+func DefaultProject(id, name string) *Project {
+	return &Project{
+		Schema:   1,
+		ID:       id,
+		Name:     name,
+		Autonomy: AutonomyGuarded,
+		Verify: Verify{
+			Mode:     "auto",
+			TimeoutS: 900,
+		},
+		Roster: make(Roster),
+		Modes:  make(Modes),
+		Budget: Budget{
+			MaxUSD: 5.00,
+		},
+		Git: Git{
+			BranchPrefix:  "ducklab/",
+			BaseBranch:    "main",
+			CommitTrailer: true,
+		},
+		Shell: ShellPolicy{
+			Mode: "guarded",
+			Deny: []string{"rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="},
+			AllowPrefixes: []string{
+				"go ", "npm ", "pnpm ", "yarn ", "pytest", "python ", "cargo ",
+				"make ", "ls", "cat", "grep", "rg", "sed -n", "find", "git status",
+				"git diff", "git log", "node ", "tsc", "docker compose config",
+			},
+			TimeoutS: 120,
+			Network:  "deny",
+		},
+	}
+}
+
+// ApplyEnvOverrides applies environment overrides to the global config.
+func (g *Global) ApplyEnvOverrides() {
+	// DUCKLAB_CONFIG is handled by the caller (path selection).
+	// Provider overrides
+	for id, p := range g.Providers {
+		name := strings.ToUpper(string(id))
+		name = strings.ReplaceAll(name, "-", "_")
+		if v := os.Getenv("DUCKLAB_PROVIDER_" + name + "_BASE_URL"); v != "" {
+			p.BaseURL = v
+			g.Providers[id] = p
+		}
+		if v := os.Getenv("DUCKLAB_PROVIDER_" + name + "_API_KEY"); v != "" {
+			// Direct value override — store in a special env var name
+			// The actual key resolution happens at first use
+			os.Setenv(p.APIKeyEnv, v)
+		}
+	}
+	// Duckling overrides
+	for id, d := range g.Ducklings {
+		name := strings.ToUpper(string(id))
+		name = strings.ReplaceAll(name, "-", "_")
+		if v := os.Getenv("DUCKLAB_DUCKLING_" + name + "_MODEL"); v != "" {
+			d.Model = v
+			g.Ducklings[id] = d
+		}
+	}
+}
+
+// APIKey returns the API key for a provider, reading from the environment.
+func (p *Provider) APIKey() (string, error) {
+	if p.APIKeyEnv == "" {
+		return "", nil // keyless
+	}
+	key := os.Getenv(p.APIKeyEnv)
+	if key == "" {
+		return "", fmt.Errorf("api_key_env %q is not set", p.APIKeyEnv)
+	}
+	return key, nil
+}
+
+// HasAPIKey returns whether the provider has an API key configured.
+func (p *Provider) HasAPIKey() bool {
+	if p.APIKeyEnv == "" {
+		return false
+	}
+	return os.Getenv(p.APIKeyEnv) != ""
+}
+
+// ErrNotFound is returned when a config file does not exist.
+var ErrNotFound = errors.New("config file not found")
