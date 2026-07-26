@@ -643,3 +643,47 @@ func SaveGlobal(path string, cfg *Global) error {
 	}
 	return xplat.AtomicWrite(path, buf.Bytes(), 0o600)
 }
+
+// EnsureGlobal loads the global config, creating a usable default if none
+// exists.
+//
+// A first run must work. Refusing to start because config.toml is absent
+// makes the app unusable until the user hand-writes TOML they have not been
+// shown yet — the engine knows what a valid file looks like, so it writes one.
+// An existing file is never rewritten: the user's edits are theirs.
+func EnsureGlobal(path string) (*Global, bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		cfg, err := LoadGlobal(path)
+		return cfg, false, err
+	} else if !os.IsNotExist(err) {
+		return nil, false, &Error{File: path, Msg: err.Error()}
+	}
+
+	cfg := StarterGlobal()
+	if err := SaveGlobal(path, cfg); err != nil {
+		return nil, false, fmt.Errorf("write starter config %s: %w", path, err)
+	}
+	return cfg, true, nil
+}
+
+// StarterGlobal is the config a fresh install gets: the two local endpoints
+// from 02 §2, so a user with llama.cpp or vLLM already running can start
+// immediately, and one with neither gets a file to edit rather than a blank.
+func StarterGlobal() *Global {
+	nativeFalse := false
+	ctx := 32768
+	g := DefaultGlobal()
+	g.Providers = map[ProviderID]Provider{
+		"beelink":    {Kind: ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
+		"aitopatom":  {Kind: ProviderKindOpenAI, BaseURL: "http://10.0.0.5:8000/v1"},
+		"openrouter": {Kind: ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"},
+	}
+	g.Ducklings = map[DucklingID]Duckling{
+		"pato-local": {
+			Provider: "beelink", Model: "local-model",
+			Notes: "edit model to match what your endpoint serves",
+			Caps:  Caps{NativeTools: &nativeFalse, ContextTokens: &ctx},
+		},
+	}
+	return g
+}

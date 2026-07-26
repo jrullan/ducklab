@@ -290,28 +290,28 @@
       },
       "DucklingDuckling": {
         "properties": {
-          "Caps": {
+          "caps": {
             "$ref": "#/components/schemas/DucklingCapabilities"
           },
-          "Cost": {
+          "cost": {
             "$ref": "#/components/schemas/ConfigCost"
           },
-          "ID": {
+          "id": {
             "type": "string"
           },
-          "Model": {
+          "model": {
             "type": "string"
           },
-          "Notes": {
+          "notes": {
             "type": "string"
           },
-          "Params": {
+          "params": {
             "$ref": "#/components/schemas/ConfigSamplingParams"
           },
-          "Provider": {
+          "provider": {
             "type": "string"
           },
-          "Roles": {
+          "roles": {
             "items": {
               "type": "string"
             },
@@ -319,14 +319,12 @@
           }
         },
         "required": [
-          "Caps",
-          "Cost",
-          "ID",
-          "Model",
-          "Notes",
-          "Params",
-          "Provider",
-          "Roles"
+          "caps",
+          "cost",
+          "id",
+          "model",
+          "params",
+          "provider"
         ],
         "type": "object"
       },

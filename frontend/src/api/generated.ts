@@ -87,14 +87,14 @@ export interface DucklingCapabilities {
 }
 
 export interface DucklingDuckling {
-  Caps?: DucklingCapabilities;
-  Cost?: ConfigCost;
-  ID?: string;
-  Model?: string;
-  Notes?: string;
-  Params?: ConfigSamplingParams;
-  Provider?: string;
-  Roles?: string[];
+  caps?: DucklingCapabilities;
+  cost?: ConfigCost;
+  id?: string;
+  model?: string;
+  notes?: string;
+  params?: ConfigSamplingParams;
+  provider?: string;
+  roles?: string[];
 }
 
 export interface EngineapiacceptRequest {

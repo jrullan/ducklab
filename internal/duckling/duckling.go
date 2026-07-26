@@ -13,14 +13,14 @@ import (
 
 // Duckling is a named, configured model participant.
 type Duckling struct {
-	ID       config.DucklingID
-	Provider config.ProviderID
-	Model    string
-	Roles    []config.Role
-	Notes    string
-	Params   config.SamplingParams
-	Caps     Capabilities
-	Cost     config.Cost
+	ID       config.DucklingID     `json:"id"`
+	Provider config.ProviderID     `json:"provider"`
+	Model    string                `json:"model"`
+	Roles    []config.Role         `json:"roles,omitempty"`
+	Notes    string                `json:"notes,omitempty"`
+	Params   config.SamplingParams `json:"params"`
+	Caps     Capabilities          `json:"caps"`
+	Cost     config.Cost           `json:"cost"`
 }
 
 // Capabilities describes what a duckling can do.
@@ -304,7 +304,7 @@ func (r *Registry) Test(ctx context.Context, id config.DucklingID, prompt string
 
 // FromConfig creates a Duckling from config.
 func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
-	return &Duckling{
+	d := &Duckling{
 		ID:       id,
 		Provider: cfg.Provider,
 		Model:    cfg.Model,
@@ -312,7 +312,18 @@ func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 		Notes:    cfg.Notes,
 		Params:   cfg.Params,
 		Cost:     cfg.Cost,
+		Caps:     Capabilities{ContextTokens: 32768},
 	}
+	// Declared capabilities were dropped here, so a duckling that says
+	// native_tools = true still listed as "text protocol" everywhere the
+	// registry is read — including the desktop's Ducklings view.
+	if cfg.Caps.NativeTools != nil {
+		d.Caps.NativeTools = *cfg.Caps.NativeTools
+	}
+	if cfg.Caps.ContextTokens != nil {
+		d.Caps.ContextTokens = *cfg.Caps.ContextTokens
+	}
+	return d
 }
 
 func intPtr(i int) *int {

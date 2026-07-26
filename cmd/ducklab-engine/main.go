@@ -37,10 +37,14 @@ func main() {
 	if envPath := os.Getenv("DUCKLAB_CONFIG"); envPath != "" {
 		configPath = envPath
 	}
-	cfg, err := config.LoadGlobal(configPath)
+	cfg, created, err := config.EnsureGlobal(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load config: %v\n", err)
 		os.Exit(3)
+	}
+
+	if created {
+		fmt.Printf("wrote a starter config to %s — edit it to point at your models\n", configPath)
 	}
 
 	// Create bus

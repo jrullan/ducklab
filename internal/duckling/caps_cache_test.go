@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/xplat"
 )
 
@@ -146,5 +147,30 @@ func TestCapsCacheLivesInTheDataDir(t *testing.T) {
 	}
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("cache not written to the data dir: %v", err)
+	}
+}
+
+// Declared capabilities must survive FromConfig. They were dropped, so a
+// duckling configured with native_tools = true listed as "text protocol"
+// everywhere the registry is read — including the desktop's Ducklings view.
+func TestFromConfigKeepsDeclaredCapabilities(t *testing.T) {
+	yes := true
+	ctx := 131072
+	d := FromConfig("pato", config.Duckling{
+		Provider: "p", Model: "m",
+		Caps: config.Caps{NativeTools: &yes, ContextTokens: &ctx},
+	})
+	if !d.Caps.NativeTools {
+		t.Error("declared native_tools was dropped")
+	}
+	if d.Caps.ContextTokens != ctx {
+		t.Errorf("context_tokens = %d, want %d", d.Caps.ContextTokens, ctx)
+	}
+}
+
+func TestFromConfigDefaultsContextWhenUndeclared(t *testing.T) {
+	d := FromConfig("pato", config.Duckling{Provider: "p", Model: "m"})
+	if d.Caps.ContextTokens == 0 {
+		t.Error("context window defaulted to zero; a run would send nothing")
 	}
 }
