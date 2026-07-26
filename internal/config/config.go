@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -103,24 +104,24 @@ type Budget struct {
 
 // Defaults holds global defaults.
 type Defaults struct {
-	Autonomy            Autonomy `toml:"autonomy"`
-	Mode                Mode     `toml:"mode"`
-	RepairAttempts      int      `toml:"repair_attempts"`
-	ToolResultMaxBytes  int      `toml:"tool_result_max_bytes"`
-	AgentMaxTurns       int      `toml:"agent_max_turns"`
-	HTTPTimeoutS        int      `toml:"http_timeout_s"`
-	TransientRetries    int      `toml:"transient_retries"`
-	Budget              Budget   `toml:"budget"`
+	Autonomy           Autonomy `toml:"autonomy"`
+	Mode               Mode     `toml:"mode"`
+	RepairAttempts     int      `toml:"repair_attempts"`
+	ToolResultMaxBytes int      `toml:"tool_result_max_bytes"`
+	AgentMaxTurns      int      `toml:"agent_max_turns"`
+	HTTPTimeoutS       int      `toml:"http_timeout_s"`
+	TransientRetries   int      `toml:"transient_retries"`
+	Budget             Budget   `toml:"budget"`
 }
 
 // Engine holds engine configuration.
 type Engine struct {
-	Autostart               bool   `toml:"autostart"`
-	Port                    int    `toml:"port"`
-	Path                    string `toml:"path"`
-	MaxConcurrentRuns       int    `toml:"max_concurrent_runs"`
-	ShutdownGraceS          int    `toml:"shutdown_grace_s"`
-	ProjectMemoryMaxBytes   int    `toml:"project_memory_max_bytes"`
+	Autostart             bool   `toml:"autostart"`
+	Port                  int    `toml:"port"`
+	Path                  string `toml:"path"`
+	MaxConcurrentRuns     int    `toml:"max_concurrent_runs"`
+	ShutdownGraceS        int    `toml:"shutdown_grace_s"`
+	ProjectMemoryMaxBytes int    `toml:"project_memory_max_bytes"`
 }
 
 // ProviderKind is the provider kind.
@@ -133,19 +134,19 @@ const (
 
 // Provider is a configured endpoint.
 type Provider struct {
-	Kind       ProviderKind      `toml:"kind"`
-	BaseURL    string            `toml:"base_url"`
-	APIKeyEnv  string            `toml:"api_key_env"`
-	Headers    map[string]string `toml:"headers"`
+	Kind      ProviderKind      `toml:"kind"`
+	BaseURL   string            `toml:"base_url"`
+	APIKeyEnv string            `toml:"api_key_env"`
+	Headers   map[string]string `toml:"headers"`
 }
 
 // SamplingParams holds sampling parameters.
 type SamplingParams struct {
-	Temperature      *float64 `toml:"temperature"`
-	TopP             *float64 `toml:"top_p"`
-	MaxTokens        *int     `toml:"max_tokens"`
-	DisableThinking  bool     `toml:"disable_thinking"`
-	Stop             []string `toml:"stop"`
+	Temperature     *float64 `toml:"temperature"`
+	TopP            *float64 `toml:"top_p"`
+	MaxTokens       *int     `toml:"max_tokens"`
+	DisableThinking bool     `toml:"disable_thinking"`
+	Stop            []string `toml:"stop"`
 }
 
 // Cost holds cost configuration.
@@ -181,9 +182,9 @@ type MCP struct {
 
 // Global is the global configuration.
 type Global struct {
-	Schema    int                    `toml:"schema"`
-	Defaults  Defaults               `toml:"defaults"`
-	Engine    Engine                 `toml:"engine"`
+	Schema    int                     `toml:"schema"`
+	Defaults  Defaults                `toml:"defaults"`
+	Engine    Engine                  `toml:"engine"`
 	Providers map[ProviderID]Provider `toml:"provider"`
 	Ducklings map[DucklingID]Duckling `toml:"duckling"`
 	MCPs      map[string]MCP          `toml:"mcp"`
@@ -216,10 +217,10 @@ type Modes map[Stage]Mode
 
 // Git holds git configuration.
 type Git struct {
-	BranchPrefix    string   `toml:"branch_prefix"`
-	BaseBranch      string   `toml:"base_branch"`
-	CommitTrailer   bool     `toml:"commit_trailer"`
-	ProtectedPaths  []string `toml:"protected_paths"`
+	BranchPrefix   string   `toml:"branch_prefix"`
+	BaseBranch     string   `toml:"base_branch"`
+	CommitTrailer  bool     `toml:"commit_trailer"`
+	ProtectedPaths []string `toml:"protected_paths"`
 }
 
 // GitHub holds GitHub configuration.
@@ -231,18 +232,18 @@ type GitHub struct {
 
 // Project is the project configuration.
 type Project struct {
-	Schema    int        `toml:"schema"`
-	ID        string     `toml:"id"`
-	Name      string     `toml:"name"`
-	Created   string     `toml:"created"`
-	Autonomy  Autonomy   `toml:"autonomy"`
-	Verify    Verify     `toml:"verify"`
-	Roster    Roster     `toml:"roster"`
-	Modes     Modes      `toml:"modes"`
-	Budget    Budget     `toml:"budget"`
-	Git       Git        `toml:"git"`
-	GitHub    GitHub     `toml:"github"`
-	Shell     ShellPolicy `toml:"shell"`
+	Schema   int         `toml:"schema"`
+	ID       string      `toml:"id"`
+	Name     string      `toml:"name"`
+	Created  string      `toml:"created"`
+	Autonomy Autonomy    `toml:"autonomy"`
+	Verify   Verify      `toml:"verify"`
+	Roster   Roster      `toml:"roster"`
+	Modes    Modes       `toml:"modes"`
+	Budget   Budget      `toml:"budget"`
+	Git      Git         `toml:"git"`
+	GitHub   GitHub      `toml:"github"`
+	Shell    ShellPolicy `toml:"shell"`
 }
 
 // Error is a configuration error.
@@ -335,14 +336,21 @@ func LoadGlobal(path string) (*Global, error) {
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
-	var g Global
-	if err := toml.Unmarshal(data, &g); err != nil {
+	// Start from the defaults and let the file override only what it sets.
+	// Unmarshalling into a zero value made every unset key fail validation,
+	// so a minimal config.toml was impossible to write.
+	g := DefaultGlobal()
+	md, err := toml.Decode(string(data), g)
+	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	if err := rejectUndecoded(path, md); err != nil {
+		return nil, err
 	}
 	if err := g.Validate(path); err != nil {
 		return nil, err
 	}
-	return &g, nil
+	return g, nil
 }
 
 // Validate validates the global configuration.
@@ -437,14 +445,18 @@ func LoadProject(path string) (*Project, error) {
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
-	var p Project
-	if err := toml.Unmarshal(data, &p); err != nil {
+	p := DefaultProject("", "")
+	md, err := toml.Decode(string(data), p)
+	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	if err := rejectUndecoded(path, md); err != nil {
+		return nil, err
 	}
 	if err := p.Validate(path); err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return p, nil
 }
 
 // Validate validates the project configuration.
@@ -570,3 +582,22 @@ func (p *Provider) HasAPIKey() bool {
 
 // ErrNotFound is returned when a config file does not exist.
 var ErrNotFound = errors.New("config file not found")
+
+// rejectUndecoded enforces strict decoding: any key in the file that no
+// struct field claimed is a typo, and a silently ignored typo in a config
+// file is a bug the user cannot see (02 §2.1).
+//
+// Keys under free-form maps (provider/duckling/mcp headers, env) are not
+// reported by Undecoded, so this only fires on genuine unknowns.
+func rejectUndecoded(path string, md toml.MetaData) error {
+	undecoded := md.Undecoded()
+	if len(undecoded) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(undecoded))
+	for _, k := range undecoded {
+		keys = append(keys, k.String())
+	}
+	sort.Strings(keys)
+	return &Error{File: path, Msg: fmt.Sprintf("unknown key %q", keys[0])}
+}

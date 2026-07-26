@@ -6,11 +6,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -39,6 +41,9 @@ type Service struct {
 	providers map[config.ProviderID]provider.Provider
 	projects  map[string]*projectState
 	projMu    sync.RWMutex
+	// shuttingDown makes an in-flight run's cancellation read as a deliberate
+	// pause rather than a failure, so a graceful stop never marks work FAILED.
+	shuttingDown atomic.Bool
 }
 
 type projectState struct {
@@ -50,9 +55,14 @@ type projectState struct {
 
 type runState struct {
 	run    *runlog.Run
-	writer *runlog.Writer
-	cancel context.CancelFunc
-	done   chan struct{}
+	writer *runlog.Writer // nil for rehydrated runs until a mutation needs it
+	runDir string
+	// projectPath is kept so a rehydrated run can open its writer without
+	// a registry lookup that may have changed since the run started.
+	projectPath string
+	cancel      context.CancelFunc
+	done        chan struct{}
+	wmu         sync.Mutex
 }
 
 // Options are service options.
@@ -465,11 +475,17 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// Register run state
 	ctx, cancel := context.WithCancel(context.Background())
 	rs := &runState{
-		run:    run,
-		writer: writer,
-		cancel: cancel,
-		done:   make(chan struct{}),
+		run:         run,
+		writer:      writer,
+		runDir:      writer.RunDir(),
+		projectPath: entry.Path,
+		cancel:      cancel,
+		done:        make(chan struct{}),
 	}
+	// Every persisted event reaches the bus through this hook, carrying its
+	// seq. Without it the live SSE stream is nearly empty and subscribers
+	// cannot deduplicate against a replayed backlog.
+	s.attachWriter(rs, writer)
 	s.runsMu.Lock()
 	s.runs[runID] = rs
 	s.runsMu.Unlock()
@@ -767,6 +783,20 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 }
 
 func (s *Service) failRun(rs *runState, err error) {
+	// A cancellation during graceful shutdown is a pause, not a failure.
+	// Without this check, stopping the engine marks every in-flight run
+	// FAILED and the work is lost.
+	if s.shuttingDown.Load() && errors.Is(err, context.Canceled) {
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "engine_shutdown"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.writer.AppendEvent("checkpoint", map[string]interface{}{
+			"reason": "engine_shutdown",
+			"status": "paused",
+		})
+		rs.writer.WriteState()
+		return
+	}
 	rs.run.Status = "failed"
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
@@ -810,6 +840,10 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 }
 
 // RunResume resumes a paused run.
+//
+// A run paused by engine_restart or engine_shutdown is resumed by re-entering
+// the strategy from its checkpoint. A run paused at a human gate is left where
+// it is: the gate is answered with RunAccept/RunReject, not by resuming.
 func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
@@ -820,30 +854,83 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if rs.run.Status != "paused" {
 		return nil, fmt.Errorf("run %q is not paused (status: %s)", id, rs.run.Status)
 	}
-	// For v0.1, resume just continues from the human gate
+
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return nil, err
+	}
+
+	// A human gate is not a resume point — it is answered, not continued.
+	if rs.run.PendingKind == "gate" {
+		return rs.run, nil
+	}
+
+	entry, err := s.entryFor(rs)
+	if err != nil {
+		return nil, err
+	}
+
+	req := RunRequest{
+		TaskID:       rs.run.TaskID,
+		Mode:         rs.run.Mode,
+		Autonomy:     rs.run.Autonomy,
+		Stream:       rs.run.Stream,
+		UnsafeWrites: rs.run.UnsafeWrites,
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	rs.cancel = cancel
+	rs.done = make(chan struct{})
 	rs.run.Status = "running"
-	rs.writer.WriteState()
+	rs.run.PendingKind = ""
+	rs.run.PendingSince = ""
+	w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+	w.WriteState()
+
+	go s.executeRun(runCtx, rs, entry, req)
 	return rs.run, nil
 }
 
 // RunAbort aborts a run.
 func (s *Service) RunAbort(ctx context.Context, id string) error {
-	s.runsMu.Lock()
+	s.runsMu.RLock()
 	rs, ok := s.runs[id]
-	if ok {
-		rs.cancel()
-		rs.run.Status = "failed"
-		rs.run.Verdict = "ABORTED"
-		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
-		rs.writer.WriteState()
-		delete(s.runs, id)
-	}
-	s.runsMu.Unlock()
+	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	return nil
+	if rs.cancel != nil {
+		rs.cancel()
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return err
+	}
+	rs.run.Status = "failed"
+	rs.run.Verdict = "ABORTED"
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
+	// The run stays in the map: it is still inspectable through RunGet and
+	// still on disk. Deleting it made an aborted run vanish from run list.
+	return w.WriteState()
+}
+
+// RunDir returns the run directory for a run ID, or empty if not found.
+func (s *Service) RunDir(runID string) string {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	if rs, ok := s.runs[runID]; ok {
+		// runDir is recorded on the state itself, so a rehydrated run with no
+		// open writer still resolves. Returning "" here silently emptied the
+		// SSE backlog replay after every engine restart.
+		if rs.runDir != "" {
+			return rs.runDir
+		}
+		if rs.writer != nil {
+			return rs.writer.RunDir()
+		}
+	}
+	return ""
 }
 
 // RunGet returns a run detail.
@@ -854,7 +941,7 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	events, _ := runlog.ReadEvents(rs.writer.RunDir())
+	events, _ := runlog.ReadEvents(s.RunDir(id))
 	return &RunDetail{
 		Run:    rs.run,
 		Events: events,
@@ -886,8 +973,11 @@ func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*Accept
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	entry, err := s.registry.Get(rs.run.ProjectID)
+	entry, err := s.entryFor(rs)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
 	if err := s.acceptRun(ctx, rs, entry, msg); err != nil {
@@ -898,21 +988,22 @@ func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*Accept
 
 // RunReject rejects a run.
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {
-	s.runsMu.Lock()
+	s.runsMu.RLock()
 	rs, ok := s.runs[id]
-	if ok {
-		rs.run.Status = "done"
-		rs.run.Verdict = "FAILED"
-		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
-		rs.writer.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
-		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
-		rs.writer.WriteState()
-	}
-	s.runsMu.Unlock()
+	s.runsMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	return nil
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return err
+	}
+	rs.run.Status = "done"
+	rs.run.Verdict = "FAILED"
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
+	return w.WriteState()
 }
 
 // RunAnswer answers a pending question.

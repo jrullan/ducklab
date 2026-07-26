@@ -93,10 +93,27 @@ type Writer struct {
 	llmMu     sync.Mutex
 	llmSeq    int
 	llmF      *os.File
+
+	// OnEvent, if set, is called with every event after it has been durably
+	// appended to events.jsonl. This is the single point where persisted
+	// events reach the bus, so a subscriber can never see an event that is
+	// not also on disk. Must not block.
+	OnEvent func(*Event)
 }
 
-// NewWriter creates a new run writer.
+// NewWriter creates a writer for a new run.
 func NewWriter(projectRoot string, run *Run) (*Writer, error) {
+	return openWriter(projectRoot, run, false)
+}
+
+// OpenWriter creates a writer for an existing run, continuing its sequence
+// numbers from what is already on disk. Used when a run is rehydrated after
+// an engine restart: seq must never restart, or SSE resume breaks.
+func OpenWriter(projectRoot string, run *Run) (*Writer, error) {
+	return openWriter(projectRoot, run, true)
+}
+
+func openWriter(projectRoot string, run *Run, resume bool) (*Writer, error) {
 	runDir := filepath.Join(projectRoot, ".ducklab", "runs", run.ID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create run dir: %w", err)
@@ -104,6 +121,10 @@ func NewWriter(projectRoot string, run *Run) (*Writer, error) {
 	w := &Writer{
 		runDir: runDir,
 		run:    run,
+	}
+	if resume {
+		w.eventsSeq = lastSeq(filepath.Join(runDir, "events.jsonl"))
+		w.llmSeq = lastSeq(filepath.Join(runDir, "llm.jsonl"))
 	}
 	// Open events.jsonl
 	eventsPath := filepath.Join(runDir, "events.jsonl")
@@ -167,6 +188,11 @@ func (w *Writer) AppendEvent(eventType string, data map[string]interface{}) erro
 	}
 	if _, err := w.eventsF.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write event: %w", err)
+	}
+	if w.OnEvent != nil {
+		// Published only after the durable append, and while still holding
+		// eventsMu, so bus delivery order matches on-disk seq order.
+		w.OnEvent(&e)
 	}
 	return nil
 }
@@ -270,6 +296,36 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
+}
+
+// lastSeq returns the highest seq recorded in a JSONL file, or 0.
+// A torn final line is ignored, matching ReadEvents.
+func lastSeq(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	max := 0
+	for _, line := range splitLines(string(data)) {
+		if line == "" {
+			continue
+		}
+		var probe struct {
+			Seq int `json:"seq"`
+		}
+		if err := json.Unmarshal([]byte(line), &probe); err != nil {
+			break
+		}
+		if probe.Seq > max {
+			max = probe.Seq
+		}
+	}
+	return max
+}
+
+// RunDirFor returns the directory for a run without needing an open writer.
+func RunDirFor(projectRoot, runID string) string {
+	return filepath.Join(projectRoot, ".ducklab", "runs", runID)
 }
 
 // ListRuns lists all run IDs for a project.

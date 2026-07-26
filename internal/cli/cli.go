@@ -3,9 +3,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
@@ -248,6 +252,7 @@ func runCmd(verb string, args []string, repo string) int {
 		mode := "solo"
 		dryRun := false
 		yes := false
+		noWait := false
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--mode":
@@ -259,9 +264,13 @@ func runCmd(verb string, args []string, repo string) int {
 				dryRun = true
 			case "--yes":
 				yes = true
+			case "--no-wait":
+				noWait = true
+			case "--wait":
+				noWait = false
 			}
 		}
-		return runStart(taskID, mode, dryRun, yes, repo)
+		return runStart(taskID, mode, dryRun, yes, noWait, repo)
 	}
 	switch verb {
 	case "list":
@@ -366,13 +375,44 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Println("aborted")
 		return 0
+	case "watch":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run watch <run-id>")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		// Attaching to a run started elsewhere is the same code path as
+		// waiting on one you started: the engine, not the CLI, owns the run.
+		return followRun(engineclt.New(info), args[0])
+	case "resume":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run resume <run-id>")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		client := engineclt.New(info)
+		run, err := client.RunResume(args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("run %s resumed (status: %s)\n", run["id"], run["status"])
+		return followRun(client, args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown run command: %s\n", verb)
 		return 2
 	}
 }
 
-func runStart(taskID, mode string, dryRun, yes bool, repo string) int {
+func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string) int {
 	if repo == "" {
 		repo = "."
 	}
@@ -420,6 +460,105 @@ func runStart(taskID, mode string, dryRun, yes bool, repo string) int {
 	fmt.Printf("run %s started (status: %s)\n", run["id"], run["status"])
 	if dryRun {
 		fmt.Println("(dry run — no model calls made)")
+		return 0
+	}
+	runID, _ := run["id"].(string)
+	if noWait {
+		return 0
+	}
+	return followRun(client, runID)
+}
+
+// followRun renders a run's events until it reaches a terminal or paused
+// state, and maps that outcome to an exit code.
+//
+// Ctrl-C DETACHES: the run lives in the engine, not in this process, so
+// interrupting the CLI must never abort the work. Aborting is an explicit
+// `ducklab run abort`.
+func followRun(client *engineclt.Client, runID string) int {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	return followRunWith(context.Background(), sigCh, client, runID)
+}
+
+// followRunWith is followRun with the interrupt source injected, so the
+// detach path can be tested without sending real signals to the test binary.
+func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engineclt.Client, runID string) int {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	var mu sync.Mutex
+	detached := false
+	go func() {
+		select {
+		case <-sigCh:
+			mu.Lock()
+			detached = true
+			mu.Unlock()
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	isDetached := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return detached
+	}
+
+	verdict := ""
+	status := ""
+	err := client.StreamRunEvents(ctx, runID, 0, func(e engineclt.SSEEvent) bool {
+		switch e.Type {
+		case "turn_start":
+			fmt.Printf("  → turn %v (%v)\n", e.Data["turn"], e.Data["role"])
+		case "tool_call":
+			fmt.Printf("    · %v\n", e.Data["tool"])
+		case "policy_violation":
+			fmt.Printf("    ! policy: %v\n", e.Data["detail"])
+		case "gate":
+			fmt.Printf("  gate %v: exit %v\n", e.Data["gate"], e.Data["exit"])
+		case "verdict":
+			verdict, _ = e.Data["verdict"].(string)
+			fmt.Printf("  verdict: %s\n", verdict)
+		case "human_needed":
+			status = "paused"
+			fmt.Printf("  ⏸ waiting for you (%v) — ducklab run accept %s\n", e.Data["kind"], runID)
+			return false
+		case "checkpoint":
+			if e.Data["status"] == "paused" {
+				status = "paused"
+				fmt.Printf("  ⏸ paused (%v) — ducklab run resume %s\n", e.Data["reason"], runID)
+				return false
+			}
+		case "run_end":
+			status = "done"
+			if v, ok := e.Data["verdict"].(string); ok {
+				verdict = v
+			}
+			return false
+		}
+		return true
+	})
+
+	if isDetached() {
+		fmt.Printf("detached; run continues — ducklab run watch %s\n", runID)
+		return 0
+	}
+	if err != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	switch {
+	case status == "paused":
+		return 7
+	case verdict == "FAILED":
+		return 5
+	case verdict == "BUDGET_EXCEEDED":
+		return 6
+	case verdict == "ABORTED":
+		return 7
 	}
 	return 0
 }

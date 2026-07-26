@@ -9,10 +9,10 @@ import (
 
 // Budget is a set of caps for a run.
 type Budget struct {
-	MaxUSD        float64
-	MaxTokens     int64
-	MaxWallclockS int
-	MaxTurns      int
+	MaxUSD        float64 `json:"max_usd"`
+	MaxTokens     int64   `json:"max_tokens"`
+	MaxWallclockS int     `json:"max_wallclock_s"`
+	MaxTurns      int     `json:"max_turns"`
 }
 
 // Spend tracks what has been spent in a run.

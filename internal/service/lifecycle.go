@@ -1,0 +1,216 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/registry"
+	"github.com/jrullan/ducklab/internal/runlog"
+)
+
+// pauseWaitPerRun bounds how long a graceful stop waits for one in-flight run
+// to reach its next safe point before its state is written as paused anyway.
+// I9 makes the hard case cheap: an unwaited run still resumes from its last
+// checkpoint.
+const pauseWaitPerRun = 5 * time.Second
+
+// publishEvent forwards a persisted run event to the bus, carrying its seq so
+// subscribers can deduplicate against a replayed backlog.
+func (s *Service) publishEvent(projectID string, e *runlog.Event) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(bus.Event{
+		Type:      e.Type,
+		RunID:     e.RunID,
+		ProjectID: projectID,
+		Seq:       e.Seq,
+		TS:        time.Now(),
+		Data:      e.Data,
+	})
+}
+
+// attachWriter wires a writer's event hook to the bus for this run.
+func (s *Service) attachWriter(rs *runState, w *runlog.Writer) {
+	projectID := rs.run.ProjectID
+	w.OnEvent = func(e *runlog.Event) { s.publishEvent(projectID, e) }
+}
+
+// ensureWriter returns the run's writer, opening one for a rehydrated run.
+// Historical runs are recovered without file handles; a writer is created only
+// when something actually needs to mutate the run.
+func (s *Service) ensureWriter(rs *runState) (*runlog.Writer, error) {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	if rs.writer != nil {
+		return rs.writer, nil
+	}
+	if rs.projectPath == "" {
+		return nil, fmt.Errorf("run %q has no project path", rs.run.ID)
+	}
+	w, err := runlog.OpenWriter(rs.projectPath, rs.run)
+	if err != nil {
+		return nil, fmt.Errorf("open writer for run %q: %w", rs.run.ID, err)
+	}
+	s.attachWriter(rs, w)
+	rs.writer = w
+	return w, nil
+}
+
+// RecoverRuns rehydrates every run from disk and repairs runs that were left
+// mid-flight by a dead engine.
+//
+// Without this the engine is amnesiac: state.json is written but never read
+// back, so after a restart RunGet/RunResume/RunDir all report "not found" and
+// a crashed run can never be resumed — a direct violation of I9.
+//
+// A run still marked "running" or "queued" cannot be running, because this
+// runs before the HTTP server accepts connections and only one engine may
+// hold the state directory. Such a run is moved to "paused" with reason
+// engine_restart, which is the state RunResume accepts.
+func (s *Service) RecoverRuns(ctx context.Context) error {
+	entries := s.registry.List()
+	recovered, repaired := 0, 0
+
+	for _, entry := range entries {
+		ids, err := runlog.ListRuns(entry.Path)
+		if err != nil {
+			// A project on an unmounted drive must not stop the engine.
+			continue
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			runDir := runlog.RunDirFor(entry.Path, id)
+			run, err := runlog.ReadState(runDir)
+			if err != nil {
+				// No state.json, or a torn write: nothing to recover.
+				continue
+			}
+			if run.ProjectID == "" {
+				run.ProjectID = entry.ID
+			}
+			rs := &runState{
+				run:         run,
+				runDir:      runDir,
+				projectPath: entry.Path,
+				done:        closedChan(),
+				cancel:      func() {},
+			}
+			s.runsMu.Lock()
+			if _, exists := s.runs[id]; exists {
+				s.runsMu.Unlock()
+				continue
+			}
+			s.runs[id] = rs
+			s.runsMu.Unlock()
+			recovered++
+
+			if run.Status == "running" || run.Status == "queued" {
+				if err := s.markEngineRestart(rs); err == nil {
+					repaired++
+				}
+			}
+		}
+	}
+
+	if recovered > 0 && s.bus != nil {
+		s.bus.Publish(bus.Event{
+			Type: "engine_recovered",
+			TS:   time.Now(),
+			Data: map[string]interface{}{
+				"runs_recovered": recovered,
+				"runs_repaired":  repaired,
+			},
+		})
+	}
+	return nil
+}
+
+// markEngineRestart moves an orphaned run to paused so it can be resumed.
+func (s *Service) markEngineRestart(rs *runState) error {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return err
+	}
+	rs.run.Status = "paused"
+	rs.run.PendingKind = "engine_restart"
+	if rs.run.PendingSince == "" {
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+	}
+	w.AppendEvent("checkpoint", map[string]interface{}{
+		"reason": "engine_restart",
+		"status": "paused",
+	})
+	return w.WriteState()
+}
+
+// PauseAllRuns checkpoints every in-flight run as paused. Called on SIGTERM
+// before the HTTP server stops, so a graceful stop loses no work and marks
+// nothing FAILED.
+func (s *Service) PauseAllRuns(ctx context.Context) error {
+	s.shuttingDown.Store(true)
+
+	s.runsMu.RLock()
+	var active []*runState
+	for _, rs := range s.runs {
+		if rs.run.Status == "running" || rs.run.Status == "queued" {
+			active = append(active, rs)
+		}
+	}
+	s.runsMu.RUnlock()
+
+	// Cancel first so every run starts unwinding concurrently, then wait.
+	for _, rs := range active {
+		if rs.cancel != nil {
+			rs.cancel()
+		}
+	}
+
+	for _, rs := range active {
+		if rs.done != nil {
+			select {
+			case <-rs.done:
+			case <-time.After(pauseWaitPerRun):
+			case <-ctx.Done():
+			}
+		}
+		// The run goroutine may already have written a terminal state; only
+		// an still-unfinished run is forced to paused.
+		if rs.run.Status == "running" || rs.run.Status == "queued" {
+			w, err := s.ensureWriter(rs)
+			if err != nil {
+				continue
+			}
+			rs.run.Status = "paused"
+			rs.run.PendingKind = "engine_shutdown"
+			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+			w.AppendEvent("checkpoint", map[string]interface{}{
+				"reason": "engine_shutdown",
+				"status": "paused",
+			})
+			w.WriteState()
+		}
+	}
+	return nil
+}
+
+// entryFor resolves a run's project entry, preferring the path recorded on the
+// run state so a rehydrated run survives registry drift.
+func (s *Service) entryFor(rs *runState) (*registry.ProjectEntry, error) {
+	if entry, err := s.registry.Get(rs.run.ProjectID); err == nil {
+		return entry, nil
+	}
+	if rs.projectPath != "" {
+		return &registry.ProjectEntry{ID: rs.run.ProjectID, Path: rs.projectPath}, nil
+	}
+	return nil, fmt.Errorf("project %q not found for run %q", rs.run.ProjectID, rs.run.ID)
+}
+
+func closedChan() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/service"
 )
 
@@ -21,6 +23,19 @@ type Server struct {
 	token   string
 	version string
 	mux     *http.ServeMux
+
+	// OnShutdown, if set, is invoked by POST /v1/shutdown. The daemon owns
+	// the actual stop sequence; the API only requests it.
+	OnShutdown func()
+
+	// Seams for testing the SSE path without a full Service.
+	runDirFn    func(runID string) string
+	projectIDFn func(runID string) string
+	// hookDuringReplay, if set, runs while the backlog is being replayed.
+	// It exists so a test can emit an event exactly inside the
+	// replay/subscribe window, which is the only way to prove that window
+	// loses nothing.
+	hookDuringReplay func()
 }
 
 // New creates a new engine API server.
@@ -31,6 +46,13 @@ func New(svc *service.Service, b *bus.Bus, token, version string) *Server {
 		token:   token,
 		version: version,
 		mux:     http.NewServeMux(),
+	}
+	s.runDirFn = func(runID string) string { return svc.RunDir(runID) }
+	s.projectIDFn = func(runID string) string {
+		if d, err := svc.RunGet(context.Background(), runID); err == nil && d.Run != nil {
+			return d.Run.ProjectID
+		}
+		return ""
 	}
 	s.routes()
 	return s
@@ -58,7 +80,39 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/runs/{id}/accept", s.auth(s.handleRunAccept))
 	s.mux.HandleFunc("POST /v1/runs/{id}/reject", s.auth(s.handleRunReject))
 	s.mux.HandleFunc("POST /v1/runs/{id}/abort", s.auth(s.handleRunAbort))
+	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
 	s.mux.HandleFunc("GET /v1/events", s.auth(s.handleEvents))
+}
+
+// allowedOrigins are the only origins permitted to call the engine.
+// 07 §1 forbids a wildcard: the engine is loopback-only and token-guarded,
+// and a wildcard would let any page in a browser probe it.
+var allowedOrigins = map[string]bool{
+	"wails://wails":           true,
+	"wails.localhost":         true,
+	"http://wails.localhost":  true,
+	"https://wails.localhost": true,
+}
+
+func setCORS(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return // non-browser client; no CORS headers needed
+	}
+	if allowedOrigins[origin] {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
+	}
+}
+
+func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.RunResume(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusAccepted, run)
 }
 
 // auth middleware checks the bearer token.
@@ -126,7 +180,9 @@ func (s *Server) handleEngine(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusAccepted, map[string]string{"status": "shutting down"})
-	// TODO: implement graceful shutdown
+	if s.OnShutdown != nil {
+		s.OnShutdown()
+	}
 }
 
 func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
@@ -269,6 +325,53 @@ func (s *Server) handleRunAbort(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// replayBacklog sends the persisted events for a run before live events and
+// returns the highest seq it delivered, so the live loop can skip duplicates.
+//
+// Replayed events are emitted in the same JSON shape as live bus events; a
+// client must not have to parse two shapes for one logical event.
+func (s *Server) replayBacklog(w http.ResponseWriter, flusher http.Flusher, runID string, fromSeq int) int {
+	runDir := s.runDirFn(runID)
+	if runDir == "" {
+		return fromSeq
+	}
+	events, err := runlog.ReadEvents(runDir)
+	if err != nil {
+		return fromSeq
+	}
+	projectID := s.projectIDFn(runID)
+	if s.hookDuringReplay != nil {
+		s.hookDuringReplay()
+	}
+	last := fromSeq
+	for _, e := range events {
+		if e.Seq <= fromSeq {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, e.TS)
+		if err != nil {
+			ts = time.Now()
+		}
+		data, err := json.Marshal(bus.Event{
+			Type:      e.Type,
+			RunID:     e.RunID,
+			ProjectID: projectID,
+			Seq:       e.Seq,
+			TS:        ts,
+			Data:      e.Data,
+		})
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "event: %s\n", e.Type)
+		fmt.Fprintf(w, "id: %s:%d\n", e.RunID, e.Seq)
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		last = e.Seq
+	}
+	flusher.Flush()
+	return last
+}
+
 // handleEvents handles SSE.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project")
@@ -278,10 +381,24 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(seq, "%d", &fromSeq)
 	}
 
+	// Last-Event-ID ("<runID>:<seq>") takes precedence over from_seq so a
+	// reconnecting client resumes exactly where it was cut off.
+	if lastID := r.Header.Get("Last-Event-ID"); lastID != "" {
+		if i := strings.LastIndex(lastID, ":"); i >= 0 {
+			if n, err := strconv.Atoi(lastID[i+1:]); err == nil {
+				fromSeq = n
+				if runID == "" {
+					runID = lastID[:i]
+				}
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
+	setCORS(w, r)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -289,7 +406,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Subscribe to bus
+	// Order matters and is the whole correctness argument here.
+	//
+	// Subscribing BEFORE replaying the backlog means an event emitted during
+	// the replay lands in the subscriber buffer instead of being lost. The
+	// reverse order leaves a window in which events vanish (07 §6: "backlog
+	// then live, no gap and no duplicate"). Duplicates from that overlap are
+	// then removed by seq, below.
 	filter := func(e bus.Event) bool {
 		if projectID != "" && e.ProjectID != projectID {
 			return false
@@ -301,6 +424,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	sub, unsub := s.bus.Subscribe(fmt.Sprintf("sse-%d", time.Now().UnixNano()), filter)
 	defer unsub()
+
+	replayedTo := fromSeq
+	if runID != "" {
+		replayedTo = s.replayBacklog(w, flusher, runID, fromSeq)
+	}
 
 	// Heartbeat ticker
 	heartbeat := time.NewTicker(15 * time.Second)
@@ -314,6 +442,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case e := <-sub.Ch:
+			// Drop anything the backlog replay already delivered. Persisted
+			// events carry a seq; token_delta and heartbeat do not and always
+			// pass through.
+			if e.Seq > 0 && e.RunID == runID && e.Seq <= replayedTo {
+				continue
+			}
 			data, err := json.Marshal(e)
 			if err != nil {
 				continue

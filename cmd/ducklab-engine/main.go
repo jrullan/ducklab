@@ -89,6 +89,13 @@ func main() {
 	}
 	defer daemon.DeleteEngineJSON()
 
+	// Rehydrate runs from disk and repair anything a dead engine left
+	// mid-flight. This runs BEFORE the listener accepts connections, so no
+	// client can observe a half-recovered state.
+	if err := svc.RecoverRuns(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: recover runs: %v\n", err)
+	}
+
 	// Create server
 	server := engineapi.New(svc, b, token, version)
 	httpServer := &http.Server{
@@ -96,16 +103,32 @@ func main() {
 		Handler: server,
 	}
 
+	grace := time.Duration(cfg.Engine.ShutdownGraceS) * time.Second
+	if grace <= 0 {
+		grace = 30 * time.Second
+	}
+
+	shutdown := func(reason string) {
+		fmt.Printf("shutting down (%s)...\n", reason)
+		ctx, cancel := context.WithTimeout(context.Background(), grace)
+		defer cancel()
+		// Checkpoint in-flight work first: once the listener closes, a run
+		// that is still going has no way to report itself, and on the next
+		// start it would look like an orphan.
+		if err := svc.PauseAllRuns(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: pause runs: %v\n", err)
+		}
+		httpServer.Shutdown(ctx)
+	}
+	server.OnShutdown = func() { go shutdown("api request") }
+
 	// Handle signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
 		<-sigCh
-		fmt.Println("shutting down...")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		httpServer.Shutdown(ctx)
+		shutdown("signal")
 	}()
 
 	fmt.Printf("ducklab-engine %s listening on 127.0.0.1:%d\n", version, port)

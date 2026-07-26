@@ -3,11 +3,14 @@
 package engineclt
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/daemon"
@@ -177,4 +180,65 @@ func (c *Client) DucklingTest(id, prompt string) (map[string]interface{}, error)
 // EventsURL returns the SSE events URL.
 func (c *Client) EventsURL() string {
 	return c.BaseURL + "/v1/events"
+}
+
+// SSEEvent is one decoded server-sent event.
+type SSEEvent struct {
+	Type      string                 `json:"type"`
+	RunID     string                 `json:"run_id"`
+	ProjectID string                 `json:"project_id"`
+	Seq       int                    `json:"seq"`
+	Data      map[string]interface{} `json:"data"`
+}
+
+// RunResume asks the engine to resume a paused run.
+func (c *Client) RunResume(id string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/runs/"+id+"/resume", nil, &result)
+	return result, err
+}
+
+// StreamRunEvents follows a run's event stream, calling fn for each event.
+// It returns when fn returns false, the stream ends, or ctx is cancelled.
+//
+// The connection has no client-side timeout: a run may sit at a human gate
+// for hours, and the engine's heartbeat keeps the socket alive.
+func (c *Client) StreamRunEvents(ctx context.Context, runID string, fromSeq int, fn func(SSEEvent) bool) error {
+	url := fmt.Sprintf("%s?run=%s&from_seq=%d", c.EventsURL(), runID, fromSeq)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Accept", "text/event-stream")
+	if c.Version != "" {
+		req.Header.Set("X-Ducklab-Client", c.Version)
+	}
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("events: %s: %s", resp.Status, string(body))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var e SSEEvent
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &e); err != nil {
+			continue
+		}
+		if !fn(e) {
+			return nil
+		}
+	}
+	return scanner.Err()
 }

@@ -294,3 +294,65 @@ func TestApplyEnvOverrides(t *testing.T) {
 		t.Errorf("BaseURL = %q, want override", g.Providers["test"].BaseURL)
 	}
 }
+
+// A minimal config file must inherit defaults rather than fail validation.
+// Unmarshalling into a zero value left every unset key at Go's zero value,
+// so even a valid two-line config was rejected.
+func TestLoadGlobalAppliesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	minimal := `schema = 1
+
+[provider.fake]
+kind = "openai"
+base_url = "fake://"
+`
+	if err := os.WriteFile(path, []byte(minimal), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatalf("minimal config rejected: %v", err)
+	}
+	def := DefaultGlobal()
+	if g.Defaults.Autonomy != def.Defaults.Autonomy {
+		t.Errorf("autonomy = %q, want default %q", g.Defaults.Autonomy, def.Defaults.Autonomy)
+	}
+	if g.Defaults.Mode != def.Defaults.Mode {
+		t.Errorf("mode = %q, want default %q", g.Defaults.Mode, def.Defaults.Mode)
+	}
+	if g.Engine.MaxConcurrentRuns != def.Engine.MaxConcurrentRuns {
+		t.Errorf("max_concurrent_runs = %d, want default %d",
+			g.Engine.MaxConcurrentRuns, def.Engine.MaxConcurrentRuns)
+	}
+	if _, ok := g.Providers["fake"]; !ok {
+		t.Error("provider from the file was lost")
+	}
+}
+
+// An explicit value in the file must still win over the default.
+func TestLoadGlobalFileOverridesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `schema = 1
+
+[defaults]
+autonomy = "manual"
+
+[engine]
+max_concurrent_runs = 7
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Defaults.Autonomy != "manual" {
+		t.Errorf("autonomy = %q, want manual", g.Defaults.Autonomy)
+	}
+	if g.Engine.MaxConcurrentRuns != 7 {
+		t.Errorf("max_concurrent_runs = %d, want 7", g.Engine.MaxConcurrentRuns)
+	}
+}
