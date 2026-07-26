@@ -139,7 +139,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			})
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt)
+			if outcome != nil {
+				result.Outcome = outcome
+			}
 			if err != nil {
+				// A pause propagates untouched: the caller checkpoints the run
+				// and the loop resumes from the top once answered.
 				result.Error = err
 				return result, err
 			}

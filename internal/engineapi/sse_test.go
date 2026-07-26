@@ -255,3 +255,119 @@ func TestCORSRejectsUnknownOrigin(t *testing.T) {
 		t.Errorf("allowed origin = %q, want wails://wails", got)
 	}
 }
+
+// AC-26: token_delta reaches subscribers but is never persisted — it is
+// display state, and writing it would bloat events.jsonl with data no resume
+// needs (01 §5.3).
+func TestTokenDeltaIsStreamedButNotPersisted(t *testing.T) {
+	h := newSSEHarness(t, "r-sse-delta")
+	h.writer.AppendEvent("run_start", nil)
+
+	url := h.URL + "/v1/events?run=" + h.runID + "&from_seq=0"
+	var got []bus.Event
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		got = collect(t, url, 4, 3*time.Second)
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		h.bus.Publish(bus.Event{
+			Type: "token_delta", RunID: h.runID, ProjectID: "p",
+			Data: map[string]interface{}{"text": "chunk"},
+		})
+	}
+	wg.Wait()
+
+	deltas := 0
+	for _, e := range got {
+		if e.Type == "token_delta" {
+			deltas++
+			if e.Seq != 0 {
+				t.Errorf("token_delta carried seq %d; it must not be sequenced", e.Seq)
+			}
+		}
+	}
+	if deltas != 3 {
+		t.Errorf("received %d token_delta events, want 3", deltas)
+	}
+
+	// None of them may be on disk.
+	onDisk, err := runlog.ReadEvents(h.writer.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range onDisk {
+		if e.Type == "token_delta" {
+			t.Error("token_delta was persisted to events.jsonl")
+		}
+	}
+}
+
+// I11: a subscriber that stops reading is dropped with an overflow marker and
+// the run continues unaffected. One slow client must never stall a run.
+func TestSlowSubscriberIsDroppedAndPublishingContinues(t *testing.T) {
+	h := newSSEHarness(t, "r-sse-slow")
+
+	// Subscribe directly with a small buffer and never read from it.
+	sub, unsub := h.bus.Subscribe("slow-client", nil)
+	defer unsub()
+
+	// A healthy subscriber attached alongside must keep receiving.
+	healthy, unsubHealthy := h.bus.Subscribe("healthy", nil)
+	defer unsubHealthy()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			h.bus.Publish(bus.Event{Type: "token_delta", RunID: h.runID,
+				Data: map[string]interface{}{"n": i}})
+		}
+	}()
+
+	// Drain the healthy subscriber so it never overflows.
+	received := 0
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for range healthy.Ch {
+			received++
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("publishing blocked on a subscriber that stopped reading — a slow client stalled the run")
+	}
+
+	// The slow one must have been told to resync.
+	sawOverflow := false
+	for {
+		select {
+		case e, ok := <-sub.Ch:
+			if !ok {
+				goto checked
+			}
+			if e.Type == "overflow" {
+				sawOverflow = true
+			}
+			continue
+		default:
+		}
+		break
+	}
+checked:
+	if !sawOverflow {
+		t.Error("the slow subscriber was never sent an overflow marker; it would believe it was up to date")
+	}
+
+	unsubHealthy()
+	<-drainDone
+	if received == 0 {
+		t.Error("the healthy subscriber received nothing while another was overflowing")
+	}
+}

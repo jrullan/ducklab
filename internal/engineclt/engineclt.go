@@ -209,6 +209,14 @@ func (c *Client) RunResume(id string) (map[string]interface{}, error) {
 	return result, err
 }
 
+// RunAnswer answers a run's pending question.
+func (c *Client) RunAnswer(id, questionID, answer string) error {
+	return c.post("/v1/runs/"+id+"/answer", map[string]string{
+		"question_id": questionID,
+		"answer":      answer,
+	}, nil)
+}
+
 // StreamRunEvents follows a run's event stream, calling fn for each event.
 // It returns when fn returns false, the stream ends, or ctx is cancelled.
 //

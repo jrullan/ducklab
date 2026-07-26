@@ -82,6 +82,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/runs/{id}/reject", s.auth(s.handleRunReject))
 	s.mux.HandleFunc("POST /v1/runs/{id}/abort", s.auth(s.handleRunAbort))
 	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
+	s.mux.HandleFunc("POST /v1/runs/{id}/answer", s.auth(s.handleRunAnswer))
 	s.mux.HandleFunc("GET /v1/projects/{id}/report", s.auth(s.handleReport))
 	s.mux.HandleFunc("GET /v1/events", s.auth(s.handleEvents))
 }
@@ -133,6 +134,22 @@ func parseSince(v string) (time.Duration, error) {
 		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	return time.ParseDuration(v)
+}
+
+func (s *Server) handleRunAnswer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		QuestionID string `json:"question_id"`
+		Answer     string `json:"answer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.RunAnswer(r.Context(), r.PathValue("id"), body.QuestionID, body.Answer); err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {

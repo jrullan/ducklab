@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,8 +39,29 @@ type Tool interface {
 	Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error)
 }
 
+// ErrHumanNeeded signals that a run must pause for human input. It is not a
+// failure: the run is waiting, and waiting indefinitely is correct behaviour.
+var ErrHumanNeeded = errors.New("human input needed")
+
+// PendingQuestion is a question waiting for a human.
+type PendingQuestion struct {
+	ID       string   `json:"id"`
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+}
+
 // ExecContext is the execution context for a tool call.
 type ExecContext struct {
+	// Answers holds already-given answers, keyed by QuestionID. A resumed run
+	// replays its turn with these available so the same question does not
+	// pause it a second time.
+	Answers map[string]string
+	// Pending is set by ask_human when the run must stop for a human.
+	Pending *PendingQuestion
+	// NoHuman disables pausing: the tool returns an error result instead, for
+	// --output json and non-interactive contexts.
+	NoHuman bool
+
 	ProjectRoot  string
 	RunID        string
 	Turn         int
@@ -96,6 +118,8 @@ func (r *Registry) registerBuiltins() {
 	// Execution
 	r.Register(&Shell{})
 	r.Register(&VerifyRun{})
+	// Human
+	r.Register(&AskHuman{})
 	// Version control (read-only)
 	r.Register(&GitStatus{})
 	r.Register(&GitDiff{})

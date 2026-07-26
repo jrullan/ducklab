@@ -52,7 +52,7 @@ func TestIsTransient(t *testing.T) {
 func TestRetry(t *testing.T) {
 	ctx := context.Background()
 	policy := RetryPolicy{MaxAttempts: 3, InitialWait: 1 * time.Millisecond, MaxWait: 10 * time.Millisecond}
-	
+
 	// Success on first try
 	calls := 0
 	err := Retry(ctx, policy, func() error {
@@ -65,7 +65,7 @@ func TestRetry(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("calls = %d, want 1", calls)
 	}
-	
+
 	// Success after transient failure
 	calls = 0
 	err = Retry(ctx, policy, func() error {
@@ -81,7 +81,7 @@ func TestRetry(t *testing.T) {
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
 	}
-	
+
 	// Non-transient error fails immediately
 	calls = 0
 	err = Retry(ctx, policy, func() error {
@@ -94,7 +94,7 @@ func TestRetry(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("calls = %d, want 1 (no retry on non-transient)", calls)
 	}
-	
+
 	// Exhausted attempts
 	calls = 0
 	err = Retry(ctx, policy, func() error {
@@ -142,7 +142,7 @@ func TestFinishReasonHelpers(t *testing.T) {
 func TestFakeProvider(t *testing.T) {
 	fake := NewFake("test")
 	fake.AddTextResponse("hello")
-	
+
 	ctx := context.Background()
 	resp, err := fake.Chat(ctx, ChatRequest{
 		Model: "test-model",
@@ -167,7 +167,7 @@ func TestFakeProvider(t *testing.T) {
 func TestFakeProviderStream(t *testing.T) {
 	fake := NewFake("test")
 	fake.AddTextResponse("hi")
-	
+
 	ctx := context.Background()
 	ch := make(chan Delta, 10)
 	resp, err := fake.ChatStream(ctx, ChatRequest{Model: "test"}, ch)

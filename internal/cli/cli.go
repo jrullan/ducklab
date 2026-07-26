@@ -452,6 +452,43 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Println("aborted")
 		return 0
+	case "answer":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run answer <run-id> --answer <text> [--question <id>]")
+			return 2
+		}
+		runID := args[0]
+		var answer, question string
+		for i := 1; i < len(args); i++ {
+			switch args[i] {
+			case "--answer":
+				if i+1 < len(args) {
+					answer = args[i+1]
+					i++
+				}
+			case "--question":
+				if i+1 < len(args) {
+					question = args[i+1]
+					i++
+				}
+			}
+		}
+		if answer == "" {
+			fmt.Fprintln(os.Stderr, "error: --answer is required")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		client := engineclt.New(info)
+		if err := client.RunAnswer(runID, question, answer); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("answered; run %s resumed\n", runID)
+		return followRun(client, runID)
 	case "watch":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab run watch <run-id>")

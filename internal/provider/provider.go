@@ -13,17 +13,17 @@ import (
 
 // ChatRequest is a request to a model.
 type ChatRequest struct {
-	Model         string                 `json:"model"`
-	Messages      []Message              `json:"messages"`
-	Tools         []Tool                 `json:"tools,omitempty"`
-	ToolChoice    interface{}            `json:"tool_choice,omitempty"`
-	Temperature   *float64               `json:"temperature,omitempty"`
-	TopP          *float64               `json:"top_p,omitempty"`
-	MaxTokens     *int                   `json:"max_tokens,omitempty"`
-	Stop          []string               `json:"stop,omitempty"`
-	Stream        bool                   `json:"stream,omitempty"`
-	JSONMode      bool                   `json:"json_mode,omitempty"`
-	Extra         map[string]interface{} `json:"extra,omitempty"`
+	Model       string                 `json:"model"`
+	Messages    []Message              `json:"messages"`
+	Tools       []Tool                 `json:"tools,omitempty"`
+	ToolChoice  interface{}            `json:"tool_choice,omitempty"`
+	Temperature *float64               `json:"temperature,omitempty"`
+	TopP        *float64               `json:"top_p,omitempty"`
+	MaxTokens   *int                   `json:"max_tokens,omitempty"`
+	Stop        []string               `json:"stop,omitempty"`
+	Stream      bool                   `json:"stream,omitempty"`
+	JSONMode    bool                   `json:"json_mode,omitempty"`
+	Extra       map[string]interface{} `json:"extra,omitempty"`
 }
 
 // Message is a chat message.
@@ -47,7 +47,7 @@ type ToolCall struct {
 
 // Tool is a tool definition.
 type Tool struct {
-	Type     string      `json:"type"`
+	Type     string       `json:"type"`
 	Function ToolFunction `json:"function"`
 }
 

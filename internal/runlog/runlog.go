@@ -16,31 +16,31 @@ import (
 
 // Run represents a run's persistent state.
 type Run struct {
-	ID           string                 `json:"id"`
-	ProjectID    string                 `json:"project_id"`
-	Stage        string                 `json:"stage"`
-	Mode         string                 `json:"mode"`
-	TaskID       string                 `json:"task_id"`
-	Roster       map[string]string      `json:"roster"`
-	Gate         string                 `json:"gate"`
-	Status       string                 `json:"status"` // running|paused|done|failed|queued
-	Verdict      string                 `json:"verdict"`
-	Accepted     bool                   `json:"accepted"`
-	CommitSHA    string                 `json:"commit_sha"`
-	StartedAt    string                 `json:"started_at"`
-	EndedAt      string                 `json:"ended_at"`
-	WallclockMs  int64                  `json:"wallclock_ms"`
-	PendingSince string                 `json:"pending_since,omitempty"`
-	PendingKind  string                 `json:"pending_kind,omitempty"` // gate|question
-	PendingData  map[string]interface{} `json:"pending_data,omitempty"`
-	UnsafeWrites bool                   `json:"unsafe_writes"`
-	Stream       bool                   `json:"stream"`
-	DryRun       bool                   `json:"dry_run"`
-	Autonomy     string                 `json:"autonomy"`
-	Budget       BudgetState            `json:"budget"`
-	Resolution   string                 `json:"resolution,omitempty"` // tournament resolution
-	TestsModified bool                  `json:"tests_modified"`
-	Warning      string                 `json:"warning,omitempty"`
+	ID            string                 `json:"id"`
+	ProjectID     string                 `json:"project_id"`
+	Stage         string                 `json:"stage"`
+	Mode          string                 `json:"mode"`
+	TaskID        string                 `json:"task_id"`
+	Roster        map[string]string      `json:"roster"`
+	Gate          string                 `json:"gate"`
+	Status        string                 `json:"status"` // running|paused|done|failed|queued
+	Verdict       string                 `json:"verdict"`
+	Accepted      bool                   `json:"accepted"`
+	CommitSHA     string                 `json:"commit_sha"`
+	StartedAt     string                 `json:"started_at"`
+	EndedAt       string                 `json:"ended_at"`
+	WallclockMs   int64                  `json:"wallclock_ms"`
+	PendingSince  string                 `json:"pending_since,omitempty"`
+	PendingKind   string                 `json:"pending_kind,omitempty"` // gate|question
+	PendingData   map[string]interface{} `json:"pending_data,omitempty"`
+	UnsafeWrites  bool                   `json:"unsafe_writes"`
+	Stream        bool                   `json:"stream"`
+	DryRun        bool                   `json:"dry_run"`
+	Autonomy      string                 `json:"autonomy"`
+	Budget        BudgetState            `json:"budget"`
+	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
+	TestsModified bool                   `json:"tests_modified"`
+	Warning       string                 `json:"warning,omitempty"`
 }
 
 // BudgetState tracks budget spend in a run.
@@ -53,34 +53,34 @@ type BudgetState struct {
 
 // Event is a single event in events.jsonl.
 type Event struct {
-	TS      string                 `json:"ts"`
-	Seq     int                    `json:"seq"`
-	Type    string                 `json:"type"`
-	RunID   string                 `json:"run_id"`
-	Round   int                    `json:"round,omitempty"`
-	Turn    int                    `json:"turn,omitempty"`
-	Role    string                 `json:"role,omitempty"`
-	Duckling string                `json:"duckling,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty"`
+	TS       string                 `json:"ts"`
+	Seq      int                    `json:"seq"`
+	Type     string                 `json:"type"`
+	RunID    string                 `json:"run_id"`
+	Round    int                    `json:"round,omitempty"`
+	Turn     int                    `json:"turn,omitempty"`
+	Role     string                 `json:"role,omitempty"`
+	Duckling string                 `json:"duckling,omitempty"`
+	Data     map[string]interface{} `json:"data,omitempty"`
 }
 
 // LLMCall is a single LLM call record in llm.jsonl.
 type LLMCall struct {
-	TS            string                 `json:"ts"`
-	Seq           int                    `json:"seq"`
-	Duckling      string                 `json:"duckling"`
-	Provider      string                 `json:"provider"`
-	Model         string                 `json:"model"`
-	Role          string                 `json:"role"`
-	Request       map[string]interface{} `json:"request"`
-	Response      map[string]interface{} `json:"response"`
-	Usage         map[string]interface{} `json:"usage"`
-	CostUSD       float64                `json:"cost_usd"`
-	LatencyMs     int64                  `json:"latency_ms"`
-	Attempt       int                    `json:"attempt"`
-	Estimated     bool                   `json:"estimated"`
-	CostSource    string                 `json:"cost_source"`
-	FinishReason  string                 `json:"finish_reason"`
+	TS           string                 `json:"ts"`
+	Seq          int                    `json:"seq"`
+	Duckling     string                 `json:"duckling"`
+	Provider     string                 `json:"provider"`
+	Model        string                 `json:"model"`
+	Role         string                 `json:"role"`
+	Request      map[string]interface{} `json:"request"`
+	Response     map[string]interface{} `json:"response"`
+	Usage        map[string]interface{} `json:"usage"`
+	CostUSD      float64                `json:"cost_usd"`
+	LatencyMs    int64                  `json:"latency_ms"`
+	Attempt      int                    `json:"attempt"`
+	Estimated    bool                   `json:"estimated"`
+	CostSource   string                 `json:"cost_source"`
+	FinishReason string                 `json:"finish_reason"`
 }
 
 // Writer manages writing run files.

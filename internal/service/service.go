@@ -63,6 +63,9 @@ type runState struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	wmu         sync.Mutex
+	// givenAnswers holds human answers keyed by question id, so a resumed run
+	// replays its turn without asking the same question again.
+	givenAnswers map[string]string
 }
 
 // Options are service options.
@@ -115,6 +118,32 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 		fake.AddTextResponse("I am a fake duckling.")
 		// Script for implementation tasks: fix add.go via fs_patch
 		fake.ScriptFunc = func(req provider.ChatRequest, callCount int) *provider.ChatResponse {
+			// A task named T-ASK exercises the human-gate path: the fake asks
+			// a question, which pauses the run until someone answers.
+			for _, m := range req.Messages {
+				if m.Role == "user" && strings.Contains(m.Content, "T-ASK") {
+					if callCount == 1 {
+						return &provider.ChatResponse{
+							Choices: []provider.Choice{{
+								Message: provider.Message{
+									Role:    "assistant",
+									Content: "I need to know which behaviour you want.\n```ducklab\n{\"tool\":\"ask_human\",\"args\":{\"question\":\"Should Add saturate or wrap on overflow?\"}}\n```",
+								},
+								FinishReason: provider.FinishStop,
+							}},
+							Usage: provider.Usage{PromptTokens: 60, CompletionTokens: 30},
+						}
+					}
+					return &provider.ChatResponse{
+						Choices: []provider.Choice{{
+							Message:      provider.Message{Role: "assistant", Content: "Understood; proceeding with the stated behaviour."},
+							FinishReason: provider.FinishStop,
+						}},
+						Usage: provider.Usage{PromptTokens: 60, CompletionTokens: 12},
+					}
+				}
+			}
+
 			// Reviewer and judge turns are recognised by their system prompt,
 			// so the fake can satisfy their contracts. Without this every
 			// multi-model mode fails at the first review with a contract
@@ -571,6 +600,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
 		ShellPolicy:  projCfg.Shell,
+		Answers:      rs.answers(),
 	}
 
 	// Build the turn that would be sent
@@ -662,6 +692,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
 		ShellPolicy:  projCfg.Shell,
+		Answers:      rs.answers(),
 	}
 
 	roster, rosterWarning := s.resolveRoster(projCfg)
@@ -677,6 +708,20 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		writer: &runLogAdapter{w: rs.writer},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
+	if rs.run.Stream && s.bus != nil {
+		// token_delta is never persisted (01 §5.3): it is display state, and
+		// writing it would bloat events.jsonl with data no resume needs.
+		runID, projectID := rs.run.ID, rs.run.ProjectID
+		cache.onDelta = func(role config.Role, d config.DucklingID, text string) {
+			s.bus.Publish(bus.Event{
+				Type: "token_delta", RunID: runID, ProjectID: projectID,
+				TS: time.Now(),
+				Data: map[string]interface{}{
+					"role": string(role), "duckling": string(d), "text": text,
+				},
+			})
+		}
+	}
 
 	dispatchErr := s.dispatchMode(ctx, &modeContext{
 		entry: entry, projCfg: projCfg, rs: rs, ectx: ectx,
@@ -687,6 +732,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// becomes a slogan.
 	recordSpend(rs, tracker)
 	if dispatchErr != nil {
+		// A pause is not a failure: the run is waiting for a person, and
+		// waiting indefinitely is correct behaviour (01 §7.1).
+		var pending *pendingErr
+		if errors.As(dispatchErr, &pending) {
+			s.pauseForQuestion(rs, pending.q)
+			return
+		}
 		s.failRun(rs, dispatchErr)
 		return
 	}
@@ -841,7 +893,8 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		return nil, err
 	}
 
-	// A human gate is not a resume point — it is answered, not continued.
+	// A human gate is not a resume point — it is answered with accept/reject,
+	// not continued.
 	if rs.run.PendingKind == "gate" {
 		return rs.run, nil
 	}
@@ -987,10 +1040,43 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	return w.WriteState()
 }
 
-// RunAnswer answers a pending question.
+// RunAnswer records a human's answer and resumes the run.
+//
+// The run replays its turn with the answer available, so the ask_human call
+// that paused it now resolves instead of pausing again.
 func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) error {
-	// For v0.1, this is a no-op placeholder
-	return nil
+	s.runsMu.RLock()
+	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
+	if !ok {
+		return fmt.Errorf("run %q not found", id)
+	}
+	if rs.run.PendingKind != "question" {
+		return fmt.Errorf("run %q is not waiting for an answer (pending: %q)", id, rs.run.PendingKind)
+	}
+	if questionID == "" {
+		// Answering "the pending question" without naming it is the common
+		// case from a CLI; take it from the checkpoint.
+		if v, ok := rs.run.PendingData["question_id"].(string); ok {
+			questionID = v
+		}
+	}
+	if questionID == "" {
+		return fmt.Errorf("run %q has no recorded question id", id)
+	}
+	rs.recordAnswer(questionID, answer)
+
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return err
+	}
+	w.AppendEvent("human", map[string]interface{}{
+		"action":      "answer",
+		"question_id": questionID,
+	})
+
+	_, err = s.RunResume(ctx, id)
+	return err
 }
 
 func writeProjectTOML(path string, cfg *config.Project) error {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -30,6 +31,7 @@ type loopCache struct {
 	svc     *Service
 	tracker *budget.Tracker
 	writer  agent.RunLogWriter
+	onDelta func(config.Role, config.DucklingID, string)
 	mu      sync.Mutex
 	loops   map[config.DucklingID]*agent.Loop
 }
@@ -44,6 +46,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	if err != nil {
 		return nil, err
 	}
+	l.OnDelta = c.onDelta
 	c.loops[id] = l
 	return l, nil
 }
@@ -71,7 +74,7 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 		caps = probed
 	}
 
-	return &agent.Loop{
+	loop := &agent.Loop{
 		Provider: p,
 		Duckling: &agent.DucklingConfig{
 			ID: id, Provider: d.Provider, Model: d.Model,
@@ -82,7 +85,8 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 		MaxTurns:       s.cfg.Defaults.AgentMaxTurns,
 		RepairAttempts: s.cfg.Defaults.RepairAttempts,
 		RunWriter:      writer,
-	}, nil
+	}
+	return loop, nil
 }
 
 // resolveRoster fills every role a mode needs.
@@ -196,12 +200,12 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 
 	switch mc.rs.run.Mode {
 	case "", "solo":
-		_, err := strategy.ExecuteSolo(ctx, &base)
-		return err
+		res, err := strategy.ExecuteSolo(ctx, &base)
+		return pendingOrErr(res, err)
 
 	case "pair":
-		_, err := strategy.ExecutePair(ctx, &base)
-		return err
+		res, err := strategy.ExecutePair(ctx, &base)
+		return pendingOrErr(res, err)
 
 	case "tournament":
 		return s.runTournament(ctx, mc, base)
@@ -312,6 +316,27 @@ func (s *Service) Report(ctx context.Context, projectID string, opts report.Opti
 	}
 	return report.Build(runs, opts), nil
 }
+
+// pendingOrErr surfaces a human-input pause with the question attached, so the
+// caller can checkpoint it rather than treating it as a failure.
+func pendingOrErr(res *strategy.ExecuteResult, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, tools.ErrHumanNeeded) && res != nil && res.Outcome != nil && res.Outcome.Pending != nil {
+		return &pendingErr{q: res.Outcome.Pending, err: err}
+	}
+	return err
+}
+
+// pendingErr carries the question a run stopped on.
+type pendingErr struct {
+	q   *tools.PendingQuestion
+	err error
+}
+
+func (e *pendingErr) Error() string { return e.err.Error() }
+func (e *pendingErr) Unwrap() error { return e.err }
 
 // recordSpend copies the budget tracker's totals onto the run record.
 func recordSpend(rs *runState, tracker *budget.Tracker) {

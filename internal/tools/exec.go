@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -240,17 +243,41 @@ type askHumanArgs struct {
 	Options  []string `json:"options"`
 }
 
-// Execute runs the tool.
+// Execute either returns a stored answer or signals that the run must pause.
+//
+// It never blocks. A blocking wait would hold a goroutine for as long as the
+// human takes — which may be days — and would make a paused run indistinguishable
+// from a hung one. Instead it returns ErrHumanNeeded, the agent loop unwinds,
+// and the engine checkpoints the run as paused (01 §7.1).
 func (t *AskHuman) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var a askHumanArgs
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	// Under --yes or auto/yolo autonomy, return the no-human response
-	if ectx.Autonomy == config.AutonomyAuto || ectx.Autonomy == config.AutonomyYolo {
+	if strings.TrimSpace(a.Question) == "" {
+		return ErrorResult("question is required"), nil
+	}
+
+	id := QuestionID(a.Question)
+
+	// A resumed run replays the turn with the answer already available, so the
+	// same question resolves instead of pausing again.
+	if ans, ok := ectx.Answers[id]; ok {
+		return SuccessResult("%s", ans), nil
+	}
+
+	// Nobody is there to answer: say so plainly rather than stalling forever.
+	if ectx.NoHuman || ectx.Autonomy == config.AutonomyAuto || ectx.Autonomy == config.AutonomyYolo {
 		return ErrorResult("no human available; proceed with your best judgement and state the assumption"), nil
 	}
-	// This tool's execution is intercepted by the agent loop, which pauses the run.
-	// Returning here means the loop didn't intercept it, which is an error.
-	return ErrorResult("ask_human should be intercepted by the agent loop"), nil
+
+	ectx.Pending = &PendingQuestion{ID: id, Question: a.Question, Options: a.Options}
+	return nil, ErrHumanNeeded
+}
+
+// QuestionID is a stable identifier for a question, so a resumed run can match
+// an answer to the question that produced it without persisting message state.
+func QuestionID(question string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(question)))
+	return hex.EncodeToString(sum[:8])
 }

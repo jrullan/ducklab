@@ -12,6 +12,7 @@ import (
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/tools"
 )
 
 // pauseWaitPerRun bounds how long a graceful stop waits for one in-flight run
@@ -227,4 +228,54 @@ func closedChan() chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
 	return ch
+}
+
+// answers returns the answers already given for this run, keyed by question id.
+func (rs *runState) answers() map[string]string {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	out := map[string]string{}
+	for k, v := range rs.givenAnswers {
+		out[k] = v
+	}
+	return out
+}
+
+// recordAnswer stores a human's answer so a resumed run can use it.
+func (rs *runState) recordAnswer(id, answer string) {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	if rs.givenAnswers == nil {
+		rs.givenAnswers = map[string]string{}
+	}
+	rs.givenAnswers[id] = answer
+}
+
+// pauseForQuestion checkpoints a run that stopped for human input.
+//
+// No goroutine is held: the run's goroutine returns here, and the run sits on
+// disk until a client answers. That is what makes an unanswered question
+// indefinitely cheap rather than a leak.
+func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	rs.run.Status = "paused"
+	rs.run.PendingKind = "question"
+	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+	rs.run.PendingData = map[string]interface{}{
+		"question_id": q.ID,
+		"question":    q.Question,
+	}
+	if len(q.Options) > 0 {
+		rs.run.PendingData["options"] = q.Options
+	}
+	w.AppendEvent("human_needed", map[string]interface{}{
+		"kind":        "question",
+		"question_id": q.ID,
+		"question":    q.Question,
+		"options":     q.Options,
+	})
+	w.WriteState()
 }

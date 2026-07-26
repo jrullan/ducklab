@@ -40,6 +40,8 @@ type Outcome struct {
 	// Parsed is the contract's typed value: *Verdict, *Choice, []Section,
 	// map[string]interface{}, or nil for freeform/edits.
 	Parsed interface{}
+	// Pending is set when the turn stopped because a human must answer.
+	Pending *tools.PendingQuestion
 	// Repairs counts how many repair prompts this turn needed.
 	Repairs int
 }
@@ -69,6 +71,8 @@ type Loop struct {
 	Budget         *budget.Tracker
 	MaxTurns       int
 	RepairAttempts int
+	// OnDelta, if set, receives streamed text as it arrives. Display only.
+	OnDelta func(role config.Role, duckling config.DucklingID, text string)
 	// RunWriter, if set, receives LLM call records.
 	RunWriter RunLogWriter
 }
@@ -179,7 +183,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 		// Make the call
 		start := time.Now()
-		resp, err := loop.Provider.Chat(ctx, req)
+		resp, err := chatMaybeStreaming(ctx, loop, turn, req)
 		_ = time.Since(start) // latency recorded in llm.jsonl by the orchestrator
 
 		if err != nil {
@@ -275,7 +279,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			toolCalls := choice.Message.ToolCalls
 			conversation = append(conversation, choice.Message)
 			for _, tc := range toolCalls {
-				result := executeToolCall(ctx, loop, ectx, tc, turn)
+				result, terr := executeToolCall(ctx, loop, ectx, tc, turn)
+				if errors.Is(terr, tools.ErrHumanNeeded) {
+					outcome.Pending = ectx.Pending
+					return outcome, terr
+				}
 				conversation = append(conversation, provider.Message{
 					Role:       "tool",
 					ToolCallID: tc.ID,
@@ -297,7 +305,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			// Check for tool call in text
 			toolCall, remainingText := parseTextToolCall(text)
 			if toolCall != nil {
-				result := executeTextToolCall(ctx, loop, ectx, toolCall, turn)
+				result, terr := executeTextToolCall(ctx, loop, ectx, toolCall, turn)
+				if errors.Is(terr, tools.ErrHumanNeeded) {
+					outcome.Pending = ectx.Pending
+					return outcome, terr
+				}
 				conversation = append(conversation, provider.Message{
 					Role:    "assistant",
 					Content: text,
@@ -333,7 +345,8 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// findings and tournament needs the judge's choice.
 	parsed, err := ParseContract(turn.Contract, outcome.Text)
 	if err != nil {
-		repairedText, repairedVal, rerr := repairContract(ctx, loop, turn, outcome.Text, err)
+		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err)
+		outcome.Repairs = attempts
 		if rerr != nil {
 			// Name the contract and the original parse failure: "contract
 			// parse failed" alone gives no way to tell a malformed verdict
@@ -347,6 +360,46 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	outcome.Parsed = parsed
 
 	return outcome, nil
+}
+
+// chatMaybeStreaming streams when the caller asked for it and the provider can,
+// and falls back to a plain call otherwise.
+//
+// Streaming is a DISPLAY concern only (01 §5.2): contract parsing, tool
+// dispatch and logging always operate on the assembled final response, never
+// on deltas. A dropped subscriber therefore cannot affect a run.
+func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest) (provider.ChatResponse, error) {
+	if loop.OnDelta == nil {
+		return loop.Provider.Chat(ctx, req)
+	}
+
+	ch := make(chan provider.Delta, 64)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for d := range ch {
+			if d.Text != "" {
+				loop.OnDelta(turn.Role, loop.Duckling.ID, d.Text)
+			}
+		}
+	}()
+
+	resp, err := loop.Provider.ChatStream(ctx, req, ch)
+	close(ch)
+	<-done
+
+	if errors.Is(err, provider.ErrUnsupported) {
+		// The endpoint cannot stream. Emit the assembled text as a single
+		// delta so a watching client still sees output appear, rather than
+		// silently showing nothing for the whole turn.
+		resp, err = loop.Provider.Chat(ctx, req)
+		if err == nil && len(resp.Choices) > 0 {
+			if text := resp.Choices[0].Message.Content; text != "" {
+				loop.OnDelta(turn.Role, loop.Duckling.ID, text)
+			}
+		}
+	}
+	return resp, err
 }
 
 // BuildMessages builds the message list for a turn.
@@ -575,7 +628,7 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 }
 
 // executeToolCall executes a native tool call.
-func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, tc provider.ToolCall, turn *Turn) *tools.Result {
+func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, tc provider.ToolCall, turn *Turn) (*tools.Result, error) {
 	// Check tool is in toolbelt
 	allowed := false
 	for _, name := range turn.Toolbelt {
@@ -585,17 +638,22 @@ func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, t
 		}
 	}
 	if !allowed {
-		return tools.ErrorResult("tool %q not in toolbelt", tc.Function.Name)
+		return tools.ErrorResult("tool %q not in toolbelt", tc.Function.Name), nil
 	}
 	result, err := loop.Registry.Execute(ctx, ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 	if err != nil {
-		return tools.ErrorResult("execute: %v", err)
+		// A pause is not a tool error: turning it into an error result would
+		// feed "human input needed" back to the model as if it were an answer.
+		if errors.Is(err, tools.ErrHumanNeeded) {
+			return nil, err
+		}
+		return tools.ErrorResult("execute: %v", err), nil
 	}
-	return result
+	return result, nil
 }
 
 // executeTextToolCall executes a text-protocol tool call.
-func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, tc *TextToolCall, turn *Turn) *tools.Result {
+func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, tc *TextToolCall, turn *Turn) (*tools.Result, error) {
 	allowed := false
 	for _, name := range turn.Toolbelt {
 		if name == tc.Name {
@@ -604,50 +662,89 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 		}
 	}
 	if !allowed {
-		return tools.ErrorResult("tool %q not in toolbelt", tc.Name)
+		return tools.ErrorResult("tool %q not in toolbelt", tc.Name), nil
 	}
 	result, err := loop.Registry.Execute(ctx, ectx, tc.Name, tc.Args)
 	if err != nil {
-		return tools.ErrorResult("execute: %v", err)
+		if errors.Is(err, tools.ErrHumanNeeded) {
+			return nil, err
+		}
+		return tools.ErrorResult("execute: %v", err), nil
 	}
-	return result
+	return result, nil
 }
 
 // repairContract attempts to repair a contract violation.
-func repairContract(ctx context.Context, loop *Loop, turn *Turn, text string, parseErr error) (string, interface{}, error) {
+func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, text string, parseErr error) (string, interface{}, int, error) {
 	repairs := loop.RepairAttempts
 	if repairs <= 0 {
 		repairs = 2
 	}
 
+	// The repair conversation KEEPS the original exchange and appends the bad
+	// answer plus the correction. Sending only the correction, as this used to,
+	// asks a model to fix a response it can no longer see — which is why weak
+	// models tended to produce a second, differently-malformed answer.
+	base := append([]provider.Message{}, msgs...)
+
+	attempts := 0
 	for i := 0; i < repairs; i++ {
-		repairPrompt := fmt.Sprintf(`Your previous response did not satisfy the output contract.
+		attempts++
 
-Contract: %s
-Error: %v
-
-Please reply again with the correct format.`, turn.Contract, parseErr)
+		conv := append([]provider.Message{}, base...)
+		conv = append(conv,
+			provider.Message{Role: "assistant", Content: text},
+			provider.Message{Role: "user", Content: repairInstruction(turn.Contract, parseErr)},
+		)
 
 		req := provider.ChatRequest{
-			Model: loop.Duckling.Model,
-			Messages: []provider.Message{
-				{Role: "system", Content: "You are a duckling in ducklab. Follow the output contract exactly."},
-				{Role: "user", Content: repairPrompt},
-			},
+			Model:    loop.Duckling.Model,
+			Messages: conv,
 		}
+		applySampling(&req, loop.Duckling)
+
 		resp, err := loop.Provider.Chat(ctx, req)
 		if err != nil {
-			continue
+			// A transport failure is not the model failing the contract.
+			// Burning a repair attempt on it would spend the budget the
+			// model needs to actually correct itself.
+			return "", nil, attempts, fmt.Errorf("repair attempt %d: %w", attempts, err)
 		}
 		if len(resp.Choices) == 0 {
+			parseErr = fmt.Errorf("empty response")
+			text = ""
 			continue
 		}
 		newText := resp.Choices[0].Message.Content
 		if val, perr := ParseContract(turn.Contract, newText); perr == nil {
-			return newText, val, nil
+			return newText, val, attempts, nil
 		} else {
 			parseErr = perr
+			text = newText
 		}
 	}
-	return "", nil, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, repairs, parseErr)
+	return "", nil, attempts, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, attempts, parseErr)
+}
+
+func repairInstruction(contract string, parseErr error) string {
+	return fmt.Sprintf(`Your reply did not satisfy the required output format.
+
+Contract: %s
+What was wrong: %v
+
+Reply again with ONLY the required format. No prose before or after it.`, contract, parseErr)
+}
+
+// applySampling copies the duckling's sampling parameters onto a request, so a
+// repair uses the same settings as the turn it is repairing.
+func applySampling(req *provider.ChatRequest, d *DucklingConfig) {
+	if d == nil {
+		return
+	}
+	if d.Params.Temperature != nil {
+		req.Temperature = d.Params.Temperature
+	}
+	if d.Params.MaxTokens != nil {
+		req.MaxTokens = d.Params.MaxTokens
+	}
 }
