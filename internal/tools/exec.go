@@ -13,7 +13,8 @@ import (
 type Shell struct{}
 
 // Name returns the tool name.
-func (t *Shell) Name() string { return "shell" }
+func (t *Shell) Name() string   { return "shell" }
+func (t *Shell) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *Shell) Description() string {
@@ -64,7 +65,8 @@ func (t *Shell) Execute(ctx context.Context, ectx *ExecContext, args json.RawMes
 type VerifyRun struct{}
 
 // Name returns the tool name.
-func (t *VerifyRun) Name() string { return "verify_run" }
+func (t *VerifyRun) Name() string   { return "verify_run" }
+func (t *VerifyRun) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *VerifyRun) Description() string {
@@ -97,7 +99,8 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 type GitStatus struct{}
 
 // Name returns the tool name.
-func (t *GitStatus) Name() string { return "git_status" }
+func (t *GitStatus) Name() string   { return "git_status" }
+func (t *GitStatus) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *GitStatus) Description() string {
@@ -126,7 +129,8 @@ func (t *GitStatus) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 type GitDiff struct{}
 
 // Name returns the tool name.
-func (t *GitDiff) Name() string { return "git_diff" }
+func (t *GitDiff) Name() string   { return "git_diff" }
+func (t *GitDiff) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *GitDiff) Description() string {
@@ -170,7 +174,8 @@ func (t *GitDiff) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 type GitLog struct{}
 
 // Name returns the tool name.
-func (t *GitLog) Name() string { return "git_log" }
+func (t *GitLog) Name() string   { return "git_log" }
+func (t *GitLog) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *GitLog) Description() string {
@@ -215,7 +220,8 @@ func (t *GitLog) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 type AskHuman struct{}
 
 // Name returns the tool name.
-func (t *AskHuman) Name() string { return "ask_human" }
+func (t *AskHuman) Name() string   { return "ask_human" }
+func (t *AskHuman) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *AskHuman) Description() string {

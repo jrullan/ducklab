@@ -46,39 +46,54 @@ type Turn struct {
 	Anonymize bool
 }
 
-// ResolveToolbelt resolves the toolbelt string to a list of tool names.
+// ResolveToolbelt resolves the turn's toolbelt against its ROLE's ceiling.
+//
+// The role decides what its holder may ever touch (04 §2.5); the turn may only
+// narrow that. Previously this returned registry.List() for "full", so the
+// script — not the role — chose the toolbelt, and a Turn{Role: reviewer,
+// Toolbelt: "full"} would have handed a reviewer fs_write and shell.
 func (t *Turn) ResolveToolbelt(registry *tools.Registry) ([]string, error) {
-	switch t.Toolbelt {
-	case "full":
-		return registry.List(), nil
-	case "read-only":
-		return []string{"fs_read", "fs_search", "git_diff", "verify_run", "artifact_read"}, nil
-	default:
-		// Comma-separated list
-		var result []string
-		for _, name := range splitComma(t.Toolbelt) {
-			if _, err := registry.Get(name); err != nil {
-				return nil, fmt.Errorf("unknown tool %q in toolbelt", name)
-			}
-			result = append(result, name)
-		}
-		return result, nil
-	}
+	return registry.NarrowToolbelt(t.Role, t.Toolbelt)
 }
 
-func splitComma(s string) []string {
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == ',' {
-			result = append(result, s[start:i])
-			start = i + 1
+// Validate checks a script before it runs. A script that widens a role's
+// toolbelt, names an unknown role, or leaves a loop unbounded is rejected here
+// rather than midway through a run, when half the work is already done and a
+// bad toolbelt has already been handed to a model (04 §2.5, I3).
+func (s *Script) Validate(registry *tools.Registry) error {
+	if s.Name == "" {
+		return fmt.Errorf("script has no name")
+	}
+	if len(s.Turns) == 0 {
+		return fmt.Errorf("script %q has no turns", s.Name)
+	}
+	if s.MaxRounds <= 0 {
+		return fmt.Errorf("script %q: MaxRounds must be > 0 (I3: nothing unbounded)", s.Name)
+	}
+	for i, turn := range s.Turns {
+		if !validRole(turn.Role) {
+			return fmt.Errorf("script %q turn %d: unknown role %q", s.Name, i, turn.Role)
+		}
+		if turn.MaxTurns <= 0 {
+			return fmt.Errorf("script %q turn %d (%s): MaxTurns must be > 0 (I3)", s.Name, i, turn.Role)
+		}
+		if turn.Role == config.RoleHuman {
+			continue // a human turn runs no agent loop and needs no toolbelt
+		}
+		if _, err := turn.ResolveToolbelt(registry); err != nil {
+			return fmt.Errorf("script %q turn %d: %w", s.Name, i, err)
 		}
 	}
-	if start < len(s) {
-		result = append(result, s[start:])
+	return nil
+}
+
+func validRole(r config.Role) bool {
+	for _, valid := range config.ValidRoles() {
+		if r == valid {
+			return true
+		}
 	}
-	return result
+	return false
 }
 
 // ExecuteSolo executes the solo mode.
@@ -99,15 +114,19 @@ type ExecuteParams struct {
 
 // ExecuteResult is the result of executing a script.
 type ExecuteResult struct {
-	Text     string
-	Rounds   int
-	Outcome  *agent.Outcome
-	Error    error
+	Text    string
+	Rounds  int
+	Outcome *agent.Outcome
+	Error   error
 }
 
 // ExecuteScript executes a conversation script.
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{}
+	if err := script.Validate(params.AgentLoop.Registry); err != nil {
+		result.Error = err
+		return result, err
+	}
 	maxRounds := params.Rounds
 	if maxRounds <= 0 {
 		maxRounds = script.MaxRounds

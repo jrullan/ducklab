@@ -29,21 +29,26 @@ type Tool interface {
 	// Schema returns the JSON Schema for the tool's arguments.
 	Schema() interface{}
 
+	// Mutating reports whether the tool can change the working tree.
+	// This is what makes a "read-only" toolbelt a computed property rather
+	// than a hand-maintained list that drifts as tools are added (01 §4.4).
+	Mutating() bool
+
 	// Execute runs the tool with the given arguments.
 	Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error)
 }
 
 // ExecContext is the execution context for a tool call.
 type ExecContext struct {
-	ProjectRoot string
-	RunID       string
-	Turn        int
-	Role        config.Role
-	Duckling    config.DucklingID
-	Autonomy    config.Autonomy
+	ProjectRoot  string
+	RunID        string
+	Turn         int
+	Role         config.Role
+	Duckling     config.DucklingID
+	Autonomy     config.Autonomy
 	UnsafeWrites bool
-	ShellPolicy config.ShellPolicy
-	Registry    *Registry
+	ShellPolicy  config.ShellPolicy
+	Registry     *Registry
 }
 
 // Result is the result of a tool execution.
@@ -327,9 +332,9 @@ func Digest(args json.RawMessage) string {
 
 // ToolSchema is a helper for creating JSON schemas.
 type ToolSchema struct {
-	Type       string                 `json:"type"`
-	Properties map[string]Property    `json:"properties"`
-	Required   []string               `json:"required,omitempty"`
+	Type       string              `json:"type"`
+	Properties map[string]Property `json:"properties"`
+	Required   []string            `json:"required,omitempty"`
 }
 
 // Property is a JSON schema property.

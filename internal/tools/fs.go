@@ -13,7 +13,8 @@ import (
 type FSList struct{}
 
 // Name returns the tool name.
-func (t *FSList) Name() string { return "fs_list" }
+func (t *FSList) Name() string   { return "fs_list" }
+func (t *FSList) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSList) Description() string {
@@ -118,7 +119,8 @@ func isBinary(path string) bool {
 type FSRead struct{}
 
 // Name returns the tool name.
-func (t *FSRead) Name() string { return "fs_read" }
+func (t *FSRead) Name() string   { return "fs_read" }
+func (t *FSRead) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSRead) Description() string {
@@ -164,7 +166,8 @@ func (t *FSRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 type FSSearch struct{}
 
 // Name returns the tool name.
-func (t *FSSearch) Name() string { return "fs_search" }
+func (t *FSSearch) Name() string   { return "fs_search" }
+func (t *FSSearch) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSSearch) Description() string {
@@ -238,7 +241,8 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 type FSWrite struct{}
 
 // Name returns the tool name.
-func (t *FSWrite) Name() string { return "fs_write" }
+func (t *FSWrite) Name() string   { return "fs_write" }
+func (t *FSWrite) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSWrite) Description() string {
@@ -284,7 +288,8 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 type FSPatch struct{}
 
 // Name returns the tool name.
-func (t *FSPatch) Name() string { return "fs_patch" }
+func (t *FSPatch) Name() string   { return "fs_patch" }
+func (t *FSPatch) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSPatch) Description() string {
@@ -346,7 +351,8 @@ func (t *FSPatch) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 type FSDelete struct{}
 
 // Name returns the tool name.
-func (t *FSDelete) Name() string { return "fs_delete" }
+func (t *FSDelete) Name() string   { return "fs_delete" }
+func (t *FSDelete) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSDelete) Description() string {
