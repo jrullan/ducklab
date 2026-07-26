@@ -83,38 +83,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// routes wires the table into the mux. Both the mux and the OpenAPI document
+// are built from routeTable(), so a route can never exist in one and not the
+// other.
 func (s *Server) routes() {
-	// Health (no auth)
-	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
-	// Auth-protected
-	s.mux.HandleFunc("GET /v1/engine", s.auth(s.handleEngine))
-	s.mux.HandleFunc("POST /v1/shutdown", s.auth(s.handleShutdown))
-	s.mux.HandleFunc("GET /v1/projects", s.auth(s.handleProjectList))
-	s.mux.HandleFunc("POST /v1/projects", s.auth(s.handleProjectCreate))
-	s.mux.HandleFunc("GET /v1/projects/{id}", s.auth(s.handleProjectGet))
-	s.mux.HandleFunc("GET /v1/ducklings", s.auth(s.handleDucklingList))
-	s.mux.HandleFunc("POST /v1/ducklings/{id}/test", s.auth(s.handleDucklingTest))
-	s.mux.HandleFunc("POST /v1/projects/{id}/runs", s.auth(s.handleRunStart))
-	s.mux.HandleFunc("GET /v1/runs", s.auth(s.handleRunList))
-	s.mux.HandleFunc("GET /v1/runs/{id}", s.auth(s.handleRunGet))
-	s.mux.HandleFunc("POST /v1/runs/{id}/accept", s.auth(s.handleRunAccept))
-	s.mux.HandleFunc("POST /v1/runs/{id}/reject", s.auth(s.handleRunReject))
-	s.mux.HandleFunc("POST /v1/runs/{id}/abort", s.auth(s.handleRunAbort))
-	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
-	s.mux.HandleFunc("POST /v1/runs/{id}/answer", s.auth(s.handleRunAnswer))
-	s.mux.HandleFunc("GET /v1/runs/{id}/diff", s.auth(s.handleRunDiff))
-	s.mux.HandleFunc("GET /v1/runs/{id}/candidates", s.auth(s.handleRunCandidates))
-	s.mux.HandleFunc("GET /v1/runs/{id}/verify", s.auth(s.handleRunVerify))
-	s.mux.HandleFunc("GET /v1/runs/{id}/transcript", s.auth(s.handleRunTranscript))
-	s.mux.HandleFunc("GET /v1/runs/{id}/llm", s.auth(s.handleRunLLM))
-	s.mux.HandleFunc("GET /v1/projects/{id}/status", s.auth(s.handleProjectStatus))
-	s.mux.HandleFunc("GET /v1/projects/{id}/report", s.auth(s.handleReport))
-	s.mux.HandleFunc("GET /v1/projects/{id}/roster", s.auth(s.handleRosterGet))
-	s.mux.HandleFunc("PUT /v1/projects/{id}/roster", s.auth(s.handleRosterSet))
-	s.mux.HandleFunc("GET /v1/projects/{id}/roster/suggest", s.auth(s.handleRosterSuggest))
-	s.mux.HandleFunc("POST /v1/projects/{id}/roster/suggest", s.auth(s.handleRosterApply))
-	s.mux.HandleFunc("POST /v1/ducklings/{id}/probe", s.auth(s.handleDucklingProbe))
-	s.mux.HandleFunc("GET /v1/events", s.auth(s.handleEvents))
+	for _, r := range routeTable() {
+		h := r.handler(s)
+		if r.Auth {
+			h = s.auth(h)
+		}
+		s.mux.HandleFunc(r.Method+" "+r.Path, h)
+	}
+	s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
 }
 
 // allowedOrigins are the only origins permitted to call the engine.
@@ -692,4 +672,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) handleTraceCheck(w http.ResponseWriter, r *http.Request) {
+	// v0.4 owns the traceability spine; the endpoint exists now so the
+	// generated clients do not change shape when it lands.
+	s.json(w, http.StatusOK, map[string]interface{}{"errors": []map[string]string{}})
+}
+
+// handleOpenAPI serves the document the clients are generated from.
+func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, BuildOpenAPI(s.version))
 }

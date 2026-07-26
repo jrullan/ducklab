@@ -99,32 +99,32 @@ func ValidStages() []Stage {
 
 // Budget is a set of caps.
 type Budget struct {
-	MaxUSD        float64 `toml:"max_usd"`
-	MaxTokens     int64   `toml:"max_tokens"`
-	MaxWallclockS int     `toml:"max_wallclock_s"`
-	MaxTurns      int     `toml:"max_turns"`
+	MaxUSD        float64 `toml:"max_usd" json:"max_usd"`
+	MaxTokens     int64   `toml:"max_tokens" json:"max_tokens"`
+	MaxWallclockS int     `toml:"max_wallclock_s" json:"max_wallclock_s"`
+	MaxTurns      int     `toml:"max_turns" json:"max_turns"`
 }
 
 // Defaults holds global defaults.
 type Defaults struct {
-	Autonomy           Autonomy `toml:"autonomy"`
-	Mode               Mode     `toml:"mode"`
-	RepairAttempts     int      `toml:"repair_attempts"`
-	ToolResultMaxBytes int      `toml:"tool_result_max_bytes"`
-	AgentMaxTurns      int      `toml:"agent_max_turns"`
-	HTTPTimeoutS       int      `toml:"http_timeout_s"`
-	TransientRetries   int      `toml:"transient_retries"`
-	Budget             Budget   `toml:"budget"`
+	Autonomy           Autonomy `toml:"autonomy" json:"autonomy"`
+	Mode               Mode     `toml:"mode" json:"mode"`
+	RepairAttempts     int      `toml:"repair_attempts" json:"repair_attempts"`
+	ToolResultMaxBytes int      `toml:"tool_result_max_bytes" json:"tool_result_max_bytes"`
+	AgentMaxTurns      int      `toml:"agent_max_turns" json:"agent_max_turns"`
+	HTTPTimeoutS       int      `toml:"http_timeout_s" json:"http_timeout_s"`
+	TransientRetries   int      `toml:"transient_retries" json:"transient_retries"`
+	Budget             Budget   `toml:"budget" json:"budget"`
 }
 
 // Engine holds engine configuration.
 type Engine struct {
-	Autostart             bool   `toml:"autostart"`
-	Port                  int    `toml:"port"`
-	Path                  string `toml:"path"`
-	MaxConcurrentRuns     int    `toml:"max_concurrent_runs"`
-	ShutdownGraceS        int    `toml:"shutdown_grace_s"`
-	ProjectMemoryMaxBytes int    `toml:"project_memory_max_bytes"`
+	Autostart             bool   `toml:"autostart" json:"autostart"`
+	Port                  int    `toml:"port" json:"port"`
+	Path                  string `toml:"path" json:"path"`
+	MaxConcurrentRuns     int    `toml:"max_concurrent_runs" json:"max_concurrent_runs"`
+	ShutdownGraceS        int    `toml:"shutdown_grace_s" json:"shutdown_grace_s"`
+	ProjectMemoryMaxBytes int    `toml:"project_memory_max_bytes" json:"project_memory_max_bytes"`
 }
 
 // ProviderKind is the provider kind.
@@ -137,79 +137,79 @@ const (
 
 // Provider is a configured endpoint.
 type Provider struct {
-	Kind      ProviderKind      `toml:"kind"`
-	BaseURL   string            `toml:"base_url"`
-	APIKeyEnv string            `toml:"api_key_env"`
-	Headers   map[string]string `toml:"headers"`
+	Kind      ProviderKind      `toml:"kind" json:"kind"`
+	BaseURL   string            `toml:"base_url" json:"base_url"`
+	APIKeyEnv string            `toml:"api_key_env" json:"api_key_env"`
+	Headers   map[string]string `toml:"headers" json:"headers"`
 }
 
 // SamplingParams holds sampling parameters.
 type SamplingParams struct {
-	Temperature     *float64 `toml:"temperature"`
-	TopP            *float64 `toml:"top_p"`
-	MaxTokens       *int     `toml:"max_tokens"`
-	DisableThinking bool     `toml:"disable_thinking"`
-	Stop            []string `toml:"stop"`
+	Temperature     *float64 `toml:"temperature" json:"temperature"`
+	TopP            *float64 `toml:"top_p" json:"top_p"`
+	MaxTokens       *int     `toml:"max_tokens" json:"max_tokens"`
+	DisableThinking bool     `toml:"disable_thinking" json:"disable_thinking"`
+	Stop            []string `toml:"stop" json:"stop"`
 }
 
 // Cost holds cost configuration.
 type Cost struct {
-	InputPerMTok  float64 `toml:"input_per_mtok"`
-	OutputPerMTok float64 `toml:"output_per_mtok"`
+	InputPerMTok  float64 `toml:"input_per_mtok" json:"input_per_mtok"`
+	OutputPerMTok float64 `toml:"output_per_mtok" json:"output_per_mtok"`
 }
 
 // Caps holds capability overrides.
 type Caps struct {
-	NativeTools   *bool `toml:"native_tools"`
-	ContextTokens *int  `toml:"context_tokens"`
+	NativeTools   *bool `toml:"native_tools" json:"native_tools"`
+	ContextTokens *int  `toml:"context_tokens" json:"context_tokens"`
 }
 
 // Duckling is a named, configured model participant.
 type Duckling struct {
-	Provider ProviderID     `toml:"provider"`
-	Model    string         `toml:"model"`
-	Roles    []Role         `toml:"roles"`
-	Notes    string         `toml:"notes"`
-	Params   SamplingParams `toml:"params"`
-	Caps     Caps           `toml:"caps"`
-	Cost     Cost           `toml:"cost"`
+	Provider ProviderID     `toml:"provider" json:"provider"`
+	Model    string         `toml:"model" json:"model"`
+	Roles    []Role         `toml:"roles" json:"roles"`
+	Notes    string         `toml:"notes" json:"notes"`
+	Params   SamplingParams `toml:"params" json:"params"`
+	Caps     Caps           `toml:"caps" json:"caps"`
+	Cost     Cost           `toml:"cost" json:"cost"`
 }
 
 // MCP holds MCP server configuration.
 type MCP struct {
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args"`
-	Env     map[string]string `toml:"env"`
-	Enabled bool              `toml:"enabled"`
+	Command string            `toml:"command" json:"command"`
+	Args    []string          `toml:"args" json:"args"`
+	Env     map[string]string `toml:"env" json:"env"`
+	Enabled bool              `toml:"enabled" json:"enabled"`
 }
 
 // Global is the global configuration.
 type Global struct {
-	Schema    int                     `toml:"schema"`
-	Defaults  Defaults                `toml:"defaults"`
-	Engine    Engine                  `toml:"engine"`
-	Providers map[ProviderID]Provider `toml:"provider"`
-	Ducklings map[DucklingID]Duckling `toml:"duckling"`
-	MCPs      map[string]MCP          `toml:"mcp"`
+	Schema    int                     `toml:"schema" json:"schema"`
+	Defaults  Defaults                `toml:"defaults" json:"defaults"`
+	Engine    Engine                  `toml:"engine" json:"engine"`
+	Providers map[ProviderID]Provider `toml:"provider" json:"provider"`
+	Ducklings map[DucklingID]Duckling `toml:"duckling" json:"duckling"`
+	MCPs      map[string]MCP          `toml:"mcp" json:"mcp"`
 }
 
 // ShellPolicy holds shell policy configuration.
 type ShellPolicy struct {
-	Mode          string   `toml:"mode"`
-	Deny          []string `toml:"deny"`
-	AllowPrefixes []string `toml:"allow_prefixes"`
-	TimeoutS      int      `toml:"timeout_s"`
-	Network       string   `toml:"network"`
+	Mode          string   `toml:"mode" json:"mode"`
+	Deny          []string `toml:"deny" json:"deny"`
+	AllowPrefixes []string `toml:"allow_prefixes" json:"allow_prefixes"`
+	TimeoutS      int      `toml:"timeout_s" json:"timeout_s"`
+	Network       string   `toml:"network" json:"network"`
 }
 
 // Verify holds verification configuration.
 type Verify struct {
-	Mode     string `toml:"mode"`
-	Tests    string `toml:"tests"`
-	Build    string `toml:"build"`
-	Lint     string `toml:"lint"`
-	Custom   string `toml:"custom"`
-	TimeoutS int    `toml:"timeout_s"`
+	Mode     string `toml:"mode" json:"mode"`
+	Tests    string `toml:"tests" json:"tests"`
+	Build    string `toml:"build" json:"build"`
+	Lint     string `toml:"lint" json:"lint"`
+	Custom   string `toml:"custom" json:"custom"`
+	TimeoutS int    `toml:"timeout_s" json:"timeout_s"`
 }
 
 // Roster maps roles to ducklings.
@@ -220,33 +220,33 @@ type Modes map[Stage]Mode
 
 // Git holds git configuration.
 type Git struct {
-	BranchPrefix   string   `toml:"branch_prefix"`
-	BaseBranch     string   `toml:"base_branch"`
-	CommitTrailer  bool     `toml:"commit_trailer"`
-	ProtectedPaths []string `toml:"protected_paths"`
+	BranchPrefix   string   `toml:"branch_prefix" json:"branch_prefix"`
+	BaseBranch     string   `toml:"base_branch" json:"base_branch"`
+	CommitTrailer  bool     `toml:"commit_trailer" json:"commit_trailer"`
+	ProtectedPaths []string `toml:"protected_paths" json:"protected_paths"`
 }
 
 // GitHub holds GitHub configuration.
 type GitHub struct {
-	Enabled    bool   `toml:"enabled"`
-	Repo       string `toml:"repo"`
-	MirrorBugs bool   `toml:"mirror_bugs"`
+	Enabled    bool   `toml:"enabled" json:"enabled"`
+	Repo       string `toml:"repo" json:"repo"`
+	MirrorBugs bool   `toml:"mirror_bugs" json:"mirror_bugs"`
 }
 
 // Project is the project configuration.
 type Project struct {
-	Schema   int         `toml:"schema"`
-	ID       string      `toml:"id"`
-	Name     string      `toml:"name"`
-	Created  string      `toml:"created"`
-	Autonomy Autonomy    `toml:"autonomy"`
-	Verify   Verify      `toml:"verify"`
-	Roster   Roster      `toml:"roster"`
-	Modes    Modes       `toml:"modes"`
-	Budget   Budget      `toml:"budget"`
-	Git      Git         `toml:"git"`
-	GitHub   GitHub      `toml:"github"`
-	Shell    ShellPolicy `toml:"shell"`
+	Schema   int         `toml:"schema" json:"schema"`
+	ID       string      `toml:"id" json:"id"`
+	Name     string      `toml:"name" json:"name"`
+	Created  string      `toml:"created" json:"created"`
+	Autonomy Autonomy    `toml:"autonomy" json:"autonomy"`
+	Verify   Verify      `toml:"verify" json:"verify"`
+	Roster   Roster      `toml:"roster" json:"roster"`
+	Modes    Modes       `toml:"modes" json:"modes"`
+	Budget   Budget      `toml:"budget" json:"budget"`
+	Git      Git         `toml:"git" json:"git"`
+	GitHub   GitHub      `toml:"github" json:"github"`
+	Shell    ShellPolicy `toml:"shell" json:"shell"`
 }
 
 // Error is a configuration error.

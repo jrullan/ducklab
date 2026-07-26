@@ -1,0 +1,2149 @@
+{
+  "components": {
+    "schemas": {
+      "BudgetBudget": {
+        "properties": {
+          "max_tokens": {
+            "type": "integer"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "max_usd": {
+            "type": "number"
+          },
+          "max_wallclock_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_tokens",
+          "max_turns",
+          "max_usd",
+          "max_wallclock_s"
+        ],
+        "type": "object"
+      },
+      "ConfigBudget": {
+        "properties": {
+          "max_tokens": {
+            "type": "integer"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "max_usd": {
+            "type": "number"
+          },
+          "max_wallclock_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_tokens",
+          "max_turns",
+          "max_usd",
+          "max_wallclock_s"
+        ],
+        "type": "object"
+      },
+      "ConfigCost": {
+        "properties": {
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "input_per_mtok",
+          "output_per_mtok"
+        ],
+        "type": "object"
+      },
+      "ConfigGit": {
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "branch_prefix": {
+            "type": "string"
+          },
+          "commit_trailer": {
+            "type": "boolean"
+          },
+          "protected_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_branch",
+          "branch_prefix",
+          "commit_trailer",
+          "protected_paths"
+        ],
+        "type": "object"
+      },
+      "ConfigGitHub": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mirror_bugs": {
+            "type": "boolean"
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "mirror_bugs",
+          "repo"
+        ],
+        "type": "object"
+      },
+      "ConfigProject": {
+        "properties": {
+          "autonomy": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/ConfigBudget"
+          },
+          "created": {
+            "type": "string"
+          },
+          "git": {
+            "$ref": "#/components/schemas/ConfigGit"
+          },
+          "github": {
+            "$ref": "#/components/schemas/ConfigGitHub"
+          },
+          "id": {
+            "type": "string"
+          },
+          "modes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "roster": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "schema": {
+            "type": "integer"
+          },
+          "shell": {
+            "$ref": "#/components/schemas/ConfigShellPolicy"
+          },
+          "verify": {
+            "$ref": "#/components/schemas/ConfigVerify"
+          }
+        },
+        "required": [
+          "autonomy",
+          "budget",
+          "created",
+          "git",
+          "github",
+          "id",
+          "modes",
+          "name",
+          "roster",
+          "schema",
+          "shell",
+          "verify"
+        ],
+        "type": "object"
+      },
+      "ConfigSamplingParams": {
+        "properties": {
+          "disable_thinking": {
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "type": "integer"
+          },
+          "stop": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "top_p": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "disable_thinking",
+          "max_tokens",
+          "stop",
+          "temperature",
+          "top_p"
+        ],
+        "type": "object"
+      },
+      "ConfigShellPolicy": {
+        "properties": {
+          "allow_prefixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "deny": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "timeout_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "allow_prefixes",
+          "deny",
+          "mode",
+          "network",
+          "timeout_s"
+        ],
+        "type": "object"
+      },
+      "ConfigVerify": {
+        "properties": {
+          "build": {
+            "type": "string"
+          },
+          "custom": {
+            "type": "string"
+          },
+          "lint": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "tests": {
+            "type": "string"
+          },
+          "timeout_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "build",
+          "custom",
+          "lint",
+          "mode",
+          "tests",
+          "timeout_s"
+        ],
+        "type": "object"
+      },
+      "DucklingCapabilities": {
+        "properties": {
+          "context_tokens": {
+            "type": "integer"
+          },
+          "json_mode": {
+            "type": "boolean"
+          },
+          "native_tools": {
+            "type": "boolean"
+          },
+          "probed_at": {
+            "type": "string"
+          },
+          "vision": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context_tokens",
+          "json_mode",
+          "native_tools",
+          "vision"
+        ],
+        "type": "object"
+      },
+      "DucklingDuckling": {
+        "properties": {
+          "Caps": {
+            "$ref": "#/components/schemas/DucklingCapabilities"
+          },
+          "Cost": {
+            "$ref": "#/components/schemas/ConfigCost"
+          },
+          "ID": {
+            "type": "string"
+          },
+          "Model": {
+            "type": "string"
+          },
+          "Notes": {
+            "type": "string"
+          },
+          "Params": {
+            "$ref": "#/components/schemas/ConfigSamplingParams"
+          },
+          "Provider": {
+            "type": "string"
+          },
+          "Roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "Caps",
+          "Cost",
+          "ID",
+          "Model",
+          "Notes",
+          "Params",
+          "Provider",
+          "Roles"
+        ],
+        "type": "object"
+      },
+      "EngineapiacceptRequest": {
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "EngineapianswerRequest": {
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "question_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer",
+          "question_id"
+        ],
+        "type": "object"
+      },
+      "EngineapidiffResponse": {
+        "properties": {
+          "diff": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff"
+        ],
+        "type": "object"
+      },
+      "EngineapiducklingTestRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prompt",
+          "stream"
+        ],
+        "type": "object"
+      },
+      "EngineapiducklingTestResponse": {
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tokens_in": {
+            "type": "integer"
+          },
+          "tokens_out": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost_usd",
+          "text",
+          "tokens_in",
+          "tokens_out"
+        ],
+        "type": "object"
+      },
+      "EngineapihealthResponse": {
+        "properties": {
+          "active_runs": {
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "uptime_s": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_runs",
+          "ok",
+          "uptime_s",
+          "version"
+        ],
+        "type": "object"
+      },
+      "EngineapirejectRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "EngineapirosterSetRequest": {
+        "properties": {
+          "duckling": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "duckling",
+          "role"
+        ],
+        "type": "object"
+      },
+      "EngineapitraceCheckResponse": {
+        "properties": {
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "errors"
+        ],
+        "type": "object"
+      },
+      "EngineapitranscriptResponse": {
+        "properties": {
+          "markdown": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "EngineapiverifyResponse": {
+        "properties": {
+          "output": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "output"
+        ],
+        "type": "object"
+      },
+      "ReportDelta": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "n": {
+            "type": "integer"
+          },
+          "pass_rate": {
+            "type": "number"
+          },
+          "points_vs_baseline": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "n",
+          "pass_rate",
+          "points_vs_baseline"
+        ],
+        "type": "object"
+      },
+      "ReportReport": {
+        "properties": {
+          "baseline": {
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "deltas": {
+            "items": {
+              "$ref": "#/components/schemas/ReportDelta"
+            },
+            "type": "array"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReportResolution"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ReportRow"
+            },
+            "type": "array"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseline",
+          "by",
+          "rows",
+          "since"
+        ],
+        "type": "object"
+      },
+      "ReportResolution": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ReportRow": {
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "tokens_in": {
+            "type": "integer"
+          },
+          "tokens_out": {
+            "type": "integer"
+          },
+          "unverified": {
+            "type": "integer"
+          },
+          "wallclock_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost_usd",
+          "estimated",
+          "failed",
+          "key",
+          "passed",
+          "runs",
+          "tokens_in",
+          "tokens_out",
+          "unverified",
+          "wallclock_ms"
+        ],
+        "type": "object"
+      },
+      "RunlogBudgetState": {
+        "properties": {
+          "tokens": {
+            "type": "integer"
+          },
+          "turns": {
+            "type": "integer"
+          },
+          "usd": {
+            "type": "number"
+          },
+          "wallclock_s": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "tokens",
+          "turns",
+          "usd",
+          "wallclock_s"
+        ],
+        "type": "object"
+      },
+      "RunlogEvent": {
+        "properties": {
+          "data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "duckling": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "ts": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "seq",
+          "ts",
+          "type"
+        ],
+        "type": "object"
+      },
+      "RunlogRun": {
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "autonomy": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/RunlogBudgetState"
+          },
+          "commit_sha": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "ended_at": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "pending_data": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "pending_kind": {
+            "type": "string"
+          },
+          "pending_since": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "roster": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "tests_modified": {
+            "type": "boolean"
+          },
+          "unsafe_writes": {
+            "type": "boolean"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "wallclock_ms": {
+            "type": "integer"
+          },
+          "warning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accepted",
+          "autonomy",
+          "budget",
+          "commit_sha",
+          "dry_run",
+          "ended_at",
+          "gate",
+          "id",
+          "mode",
+          "project_id",
+          "roster",
+          "stage",
+          "started_at",
+          "status",
+          "stream",
+          "task_id",
+          "tests_modified",
+          "unsafe_writes",
+          "verdict",
+          "wallclock_ms"
+        ],
+        "type": "object"
+      },
+      "ServiceAcceptResult": {
+        "properties": {
+          "commit_sha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha"
+        ],
+        "type": "object"
+      },
+      "ServiceCandidateView": {
+        "properties": {
+          "diff": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "diff",
+          "label"
+        ],
+        "type": "object"
+      },
+      "ServiceInitRequest": {
+        "properties": {
+          "describe": {
+            "type": "string"
+          },
+          "git_init": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "describe",
+          "git_init",
+          "name",
+          "path"
+        ],
+        "type": "object"
+      },
+      "ServiceProject": {
+        "properties": {
+          "autonomy": {
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ConfigProject"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "autonomy",
+          "config",
+          "gate",
+          "id",
+          "name",
+          "path"
+        ],
+        "type": "object"
+      },
+      "ServiceRosterEntry": {
+        "properties": {
+          "duckling": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "duckling",
+          "role",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ServiceRosterView": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceRosterEntry"
+            },
+            "type": "array"
+          },
+          "warning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "ServiceRunDetail": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogEvent"
+            },
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunlogRun"
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "type": "object"
+      },
+      "ServiceRunRequest": {
+        "properties": {
+          "autonomy": {
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetBudget"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "parallel": {
+            "type": "boolean"
+          },
+          "rounds": {
+            "type": "integer"
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "unsafe_writes": {
+            "type": "boolean"
+          },
+          "verify": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "autonomy",
+          "budget",
+          "dry_run",
+          "ducklings",
+          "mode",
+          "parallel",
+          "rounds",
+          "stream",
+          "task_id",
+          "unsafe_writes",
+          "verify"
+        ],
+        "type": "object"
+      },
+      "ServiceStatus": {
+        "properties": {
+          "active_runs": {
+            "type": "integer"
+          },
+          "budget_spent_today": {
+            "type": "number"
+          },
+          "stage_progress": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "task_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "active_runs",
+          "budget_spent_today",
+          "stage_progress",
+          "task_counts"
+        ],
+        "type": "object"
+      },
+      "ServiceSuggestion": {
+        "properties": {
+          "cost_per_mtok": {
+            "type": "number"
+          },
+          "duckling": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "pass_rate": {
+            "type": "number"
+          },
+          "role": {
+            "type": "string"
+          },
+          "runs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost_per_mtok",
+          "duckling",
+          "evidence",
+          "pass_rate",
+          "role",
+          "runs"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Local engine API. Loopback only, bearer-token authenticated (07).",
+    "title": "ducklab engine",
+    "version": "0.3.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/ducklings": {
+      "get": {
+        "operationId": "DucklingList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/DucklingDuckling"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List ducklings"
+      }
+    },
+    "/v1/ducklings/{id}/probe": {
+      "post": {
+        "operationId": "DucklingProbe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DucklingCapabilities"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Force a capability re-probe"
+      }
+    },
+    "/v1/ducklings/{id}/test": {
+      "post": {
+        "operationId": "DucklingTest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiducklingTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiducklingTestResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One round-trip against a duckling"
+      }
+    },
+    "/v1/engine": {
+      "get": {
+        "operationId": "Engine",
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Engine info"
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "get_events",
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "SSE event stream. Accepts ?token= because EventSource cannot set headers."
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "operationId": "Health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapihealthResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "summary": "Engine liveness. No auth: a client must reach it before reading the token file."
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "operationId": "ProjectList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceProject"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List registered projects"
+      },
+      "post": {
+        "operationId": "ProjectInit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceInitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProject"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Open or initialise a project"
+      }
+    },
+    "/v1/projects/{id}": {
+      "get": {
+        "operationId": "ProjectGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProject"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a project"
+      }
+    },
+    "/v1/projects/{id}/report": {
+      "get": {
+        "operationId": "Report",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportReport"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Solo-baseline comparison"
+      }
+    },
+    "/v1/projects/{id}/roster": {
+      "get": {
+        "operationId": "RosterGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resolved roster"
+      },
+      "put": {
+        "operationId": "RosterSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirosterSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Assign a duckling to a role"
+      }
+    },
+    "/v1/projects/{id}/roster/suggest": {
+      "get": {
+        "operationId": "RosterSuggest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceSuggestion"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ranked roster suggestion"
+      },
+      "post": {
+        "operationId": "RosterApply",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Apply the suggestion"
+      }
+    },
+    "/v1/projects/{id}/runs": {
+      "post": {
+        "operationId": "RunStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a run"
+      }
+    },
+    "/v1/projects/{id}/status": {
+      "get": {
+        "operationId": "ProjectStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Project status"
+      }
+    },
+    "/v1/projects/{id}/trace/check": {
+      "get": {
+        "operationId": "get_projects_id_trace_check",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapitraceCheckResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Traceability check"
+      }
+    },
+    "/v1/runs": {
+      "get": {
+        "operationId": "RunList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/RunlogRun"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List runs"
+      }
+    },
+    "/v1/runs/{id}": {
+      "get": {
+        "operationId": "RunGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRunDetail"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run detail with events"
+      }
+    },
+    "/v1/runs/{id}/abort": {
+      "post": {
+        "operationId": "RunAbort",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Abort"
+      }
+    },
+    "/v1/runs/{id}/accept": {
+      "post": {
+        "operationId": "RunAccept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiacceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAcceptResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Accept and commit"
+      }
+    },
+    "/v1/runs/{id}/answer": {
+      "post": {
+        "operationId": "RunAnswer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapianswerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Answer a pending question"
+      }
+    },
+    "/v1/runs/{id}/candidates": {
+      "get": {
+        "operationId": "RunCandidates",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceCandidateView"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Anonymised candidates. Carries no authorship, by design (I7)."
+      }
+    },
+    "/v1/runs/{id}/diff": {
+      "get": {
+        "operationId": "RunDiff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapidiffResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Working diff"
+      }
+    },
+    "/v1/runs/{id}/llm": {
+      "get": {
+        "operationId": "RunLLM",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recorded model calls, redacted"
+      }
+    },
+    "/v1/runs/{id}/reject": {
+      "post": {
+        "operationId": "RunReject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reject"
+      }
+    },
+    "/v1/runs/{id}/resume": {
+      "post": {
+        "operationId": "RunResume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resume a paused run"
+      }
+    },
+    "/v1/runs/{id}/transcript": {
+      "get": {
+        "operationId": "RunTranscript",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapitranscriptResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rendered transcript"
+      }
+    },
+    "/v1/runs/{id}/verify": {
+      "get": {
+        "operationId": "RunVerify",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapiverifyResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Gate output"
+      }
+    },
+    "/v1/shutdown": {
+      "post": {
+        "operationId": "post_shutdown",
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Request a graceful stop"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "0"
+        }
+      }
+    }
+  ]
+}
