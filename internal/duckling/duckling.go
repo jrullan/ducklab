@@ -25,10 +25,11 @@ type Duckling struct {
 
 // Capabilities describes what a duckling can do.
 type Capabilities struct {
-	NativeTools   bool `json:"native_tools"`
-	JSONMode      bool `json:"json_mode"`
-	ContextTokens int  `json:"context_tokens"`
-	Vision        bool `json:"vision"`
+	NativeTools   bool   `json:"native_tools"`
+	JSONMode      bool   `json:"json_mode"`
+	ContextTokens int    `json:"context_tokens"`
+	Vision        bool   `json:"vision"`
+	ProbedAt      string `json:"probed_at,omitempty"` // RFC3339; empty means never probed
 }
 
 // HealthStatus is the health of a duckling.
@@ -53,6 +54,7 @@ type Health struct {
 type Registry struct {
 	ducklings map[config.DucklingID]*Duckling
 	providers map[config.ProviderID]provider.Provider
+	caps      *CapsCache
 }
 
 // NewRegistry creates a new duckling registry.
@@ -113,9 +115,37 @@ func (r *Registry) Provider(id config.DucklingID) (provider.Provider, error) {
 
 // Probe probes a duckling's capabilities.
 func (r *Registry) Probe(ctx context.Context, id config.DucklingID) (*Capabilities, error) {
+	return r.probe(ctx, id, false)
+}
+
+// ProbeForce ignores the cache and re-probes. This is what
+// `ducklab duckling probe` does: the user asked, so the cached answer is not
+// what they want.
+func (r *Registry) ProbeForce(ctx context.Context, id config.DucklingID) (*Capabilities, error) {
+	return r.probe(ctx, id, true)
+}
+
+// CachedCaps returns a cached record without probing, for listings.
+func (r *Registry) CachedCaps(id config.DucklingID) (*Capabilities, bool) {
+	d, err := r.Get(id)
+	if err != nil || r.caps == nil {
+		return nil, false
+	}
+	return r.caps.Get(d.Provider, d.Model)
+}
+
+func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) (*Capabilities, error) {
 	d, err := r.Get(id)
 	if err != nil {
 		return nil, err
+	}
+	if r.caps == nil {
+		r.caps = LoadCapsCache()
+	}
+	if !force {
+		if cached, ok := r.caps.Get(d.Provider, d.Model); ok {
+			return cached, nil
+		}
 	}
 	p, err := r.Provider(id)
 	if err != nil {
@@ -182,6 +212,12 @@ func (r *Registry) Probe(ctx context.Context, id config.DucklingID) (*Capabiliti
 		// This is provider-specific; for now use a default
 		_ = models
 	}
+
+	// Cache the result so the next run does not pay for these calls again.
+	// A cache write failure must not fail the probe: the answer is correct,
+	// it just will not be remembered.
+	_ = r.caps.Put(d.Provider, d.Model, caps)
+	caps.ProbedAt = time.Now().UTC().Format(time.RFC3339)
 
 	return caps, nil
 }
@@ -281,4 +317,19 @@ func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 
 func intPtr(i int) *int {
 	return &i
+}
+
+// ProviderCaps converts a probe record into the subset the provider layer
+// needs. ProbedAt is deliberately dropped: it is metadata about the probe, not
+// a capability, and the provider has no use for it.
+func ProviderCaps(c *Capabilities) provider.Capabilities {
+	if c == nil {
+		return provider.Capabilities{ContextTokens: 32768}
+	}
+	return provider.Capabilities{
+		NativeTools:   c.NativeTools,
+		JSONMode:      c.JSONMode,
+		ContextTokens: c.ContextTokens,
+		Vision:        c.Vision,
+	}
 }

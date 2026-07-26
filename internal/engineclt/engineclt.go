@@ -87,6 +87,22 @@ func (c *Client) post(path string, body interface{}, result interface{}) error {
 	return nil
 }
 
+func (c *Client) put(path string, body interface{}, result interface{}) error {
+	resp, err := c.do("PUT", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("PUT %s: %s: %s", path, resp.Status, string(b))
+	}
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
 // Health checks the engine health.
 func (c *Client) Health() (map[string]interface{}, error) {
 	var result map[string]interface{}
@@ -185,6 +201,44 @@ func (c *Client) Report(projectID, by, since string) (map[string]interface{}, er
 	}
 	var result map[string]interface{}
 	err := c.get(path, &result)
+	return result, err
+}
+
+// RosterGet returns the resolved roster for a project.
+func (c *Client) RosterGet(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/roster", projectID), &result)
+	return result, err
+}
+
+// RosterSet assigns a duckling to a role.
+func (c *Client) RosterSet(projectID, role, ducklingID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.put(fmt.Sprintf("/v1/projects/%s/roster", projectID),
+		map[string]string{"role": role, "duckling": ducklingID}, &result)
+	return result, err
+}
+
+// RosterSuggest returns a ranked assignment, without applying it.
+func (c *Client) RosterSuggest(projectID string) ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/roster/suggest", projectID), &result)
+	return result.Items, err
+}
+
+// RosterApply writes the suggested assignment to project.toml.
+func (c *Client) RosterApply(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/projects/%s/roster/suggest", projectID), nil, &result)
+	return result, err
+}
+
+// DucklingProbe re-probes a duckling's capabilities.
+func (c *Client) DucklingProbe(id string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/ducklings/%s/probe", id), nil, &result)
 	return result, err
 }
 

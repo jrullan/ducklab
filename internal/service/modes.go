@@ -13,7 +13,6 @@ import (
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
-	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -78,7 +77,7 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 		Provider: p,
 		Duckling: &agent.DucklingConfig{
 			ID: id, Provider: d.Provider, Model: d.Model,
-			Params: d.Params, Caps: provider.Capabilities(*caps), Cost: d.Cost,
+			Params: d.Params, Caps: duckling.ProviderCaps(caps), Cost: d.Cost,
 		},
 		Registry:       tools.NewRegistry(),
 		Budget:         tracker,

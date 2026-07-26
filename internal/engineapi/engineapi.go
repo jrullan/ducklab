@@ -84,6 +84,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
 	s.mux.HandleFunc("POST /v1/runs/{id}/answer", s.auth(s.handleRunAnswer))
 	s.mux.HandleFunc("GET /v1/projects/{id}/report", s.auth(s.handleReport))
+	s.mux.HandleFunc("GET /v1/projects/{id}/roster", s.auth(s.handleRosterGet))
+	s.mux.HandleFunc("PUT /v1/projects/{id}/roster", s.auth(s.handleRosterSet))
+	s.mux.HandleFunc("GET /v1/projects/{id}/roster/suggest", s.auth(s.handleRosterSuggest))
+	s.mux.HandleFunc("POST /v1/projects/{id}/roster/suggest", s.auth(s.handleRosterApply))
+	s.mux.HandleFunc("POST /v1/ducklings/{id}/probe", s.auth(s.handleDucklingProbe))
 	s.mux.HandleFunc("GET /v1/events", s.auth(s.handleEvents))
 }
 
@@ -107,6 +112,65 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
 	}
+}
+
+func (s *Server) handleRosterGet(w http.ResponseWriter, r *http.Request) {
+	view, err := s.svc.RosterGet(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleRosterSet(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Role     string `json:"role"`
+		Duckling string `json:"duckling"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	view, err := s.svc.RosterSet(r.Context(), r.PathValue("id"), body.Role, body.Duckling)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleRosterSuggest(w http.ResponseWriter, r *http.Request) {
+	sugg, err := s.svc.RosterSuggest(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": sugg, "total": len(sugg)})
+}
+
+func (s *Server) handleRosterApply(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sugg, err := s.svc.RosterSuggest(r.Context(), id)
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	view, err := s.svc.RosterApply(r.Context(), id, sugg)
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+func (s *Server) handleDucklingProbe(w http.ResponseWriter, r *http.Request) {
+	caps, err := s.svc.DucklingProbeForce(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusFailedDependency, "provider", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, caps)
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {

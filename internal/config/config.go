@@ -4,10 +4,13 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"github.com/jrullan/ducklab/internal/xplat"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -600,4 +603,43 @@ func rejectUndecoded(path string, md toml.MetaData) error {
 	}
 	sort.Strings(keys)
 	return &Error{File: path, Msg: fmt.Sprintf("unknown key %q", keys[0])}
+}
+
+// SaveProject writes a project config.
+//
+// Lives next to LoadProject deliberately: a hand-rolled writer in another
+// package silently dropped roster, modes, budget, github and shell, so
+// `roster set` appeared to work and lost the assignment on the next load.
+// Encoding from the same struct the loader reads makes that class of drift
+// impossible.
+func SaveProject(path string, cfg *Project) error {
+	if cfg == nil {
+		return fmt.Errorf("nil project config")
+	}
+	var buf bytes.Buffer
+	buf.WriteString("# Written by ducklab. Hand edits are preserved on the next write\n")
+	buf.WriteString("# only for keys ducklab knows about.\n\n")
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return fmt.Errorf("encode project config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return xplat.AtomicWrite(path, buf.Bytes(), 0o644)
+}
+
+// SaveGlobal writes the global config, preserving the same guarantee.
+// Secrets are never written: only api_key_env names, which are not secret (I10).
+func SaveGlobal(path string, cfg *Global) error {
+	if cfg == nil {
+		return fmt.Errorf("nil global config")
+	}
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return fmt.Errorf("encode global config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return xplat.AtomicWrite(path, buf.Bytes(), 0o600)
 }

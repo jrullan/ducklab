@@ -1079,32 +1079,10 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 	return err
 }
 
+// writeProjectTOML persists a project config. Delegates to config.SaveProject
+// so serialization cannot drift from the loader.
 func writeProjectTOML(path string, cfg *config.Project) error {
-	// Simplified TOML writer
-	content := fmt.Sprintf(`schema = 1
-id = %q
-name = %q
-created = %q
-autonomy = %q
-
-[verify]
-mode = %q
-tests = %q
-build = %q
-lint = %q
-custom = %q
-timeout_s = %d
-
-[git]
-branch_prefix = %q
-base_branch = %q
-commit_trailer = %v
-`,
-		cfg.ID, cfg.Name, cfg.Created, cfg.Autonomy,
-		cfg.Verify.Mode, cfg.Verify.Tests, cfg.Verify.Build, cfg.Verify.Lint, cfg.Verify.Custom, cfg.Verify.TimeoutS,
-		cfg.Git.BranchPrefix, cfg.Git.BaseBranch, cfg.Git.CommitTrailer,
-	)
-	return os.WriteFile(path, []byte(content), 0o644)
+	return config.SaveProject(path, cfg)
 }
 
 func slugify(s string) string {

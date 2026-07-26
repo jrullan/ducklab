@@ -356,3 +356,133 @@ max_concurrent_runs = 7
 		t.Errorf("max_concurrent_runs = %d, want 7", g.Engine.MaxConcurrentRuns)
 	}
 }
+
+// The hand-rolled writer this replaced dropped roster, modes, budget, github
+// and shell, so `roster set` appeared to work and lost the assignment on the
+// next load. A full round trip is the only thing that catches that.
+func TestSaveProjectRoundTripsEveryField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "project.toml")
+
+	original := DefaultProject("miempresa", "MiEmpresa")
+	original.Autonomy = AutonomyManual
+	original.Roster = Roster{
+		RoleImplementer: "pato-local",
+		RoleReviewer:    "pato-nube",
+		RoleJudge:       "pato-nube",
+	}
+	original.Modes = Modes{StageBuild: ModePair, StageIntake: ModeCouncil}
+	original.Budget = Budget{MaxUSD: 5, MaxTokens: 400000, MaxWallclockS: 1800, MaxTurns: 24}
+	original.Verify = Verify{Mode: "tests", Tests: "go test ./...", TimeoutS: 900}
+	original.Git = Git{BranchPrefix: "ducklab/", BaseBranch: "main", CommitTrailer: true}
+	original.GitHub = GitHub{Enabled: true, Repo: "jrullan/ducklab"}
+	original.Shell = ShellPolicy{Mode: "guarded", TimeoutS: 120, Network: "deny",
+		AllowPrefixes: []string{"go ", "npm "}, Deny: []string{"rm -rf /"}}
+
+	if err := SaveProject(path, original); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadProject(path)
+	if err != nil {
+		t.Fatalf("saved config does not load back: %v", err)
+	}
+
+	if loaded.Autonomy != original.Autonomy {
+		t.Errorf("autonomy = %q, want %q", loaded.Autonomy, original.Autonomy)
+	}
+	for role, want := range original.Roster {
+		if got := loaded.Roster[role]; got != want {
+			t.Errorf("roster[%s] = %q, want %q", role, got, want)
+		}
+	}
+	for stage, want := range original.Modes {
+		if got := loaded.Modes[stage]; got != want {
+			t.Errorf("modes[%s] = %q, want %q", stage, got, want)
+		}
+	}
+	if loaded.Budget != original.Budget {
+		t.Errorf("budget = %+v, want %+v", loaded.Budget, original.Budget)
+	}
+	if loaded.Verify.Tests != original.Verify.Tests || loaded.Verify.TimeoutS != original.Verify.TimeoutS {
+		t.Errorf("verify = %+v", loaded.Verify)
+	}
+	if loaded.Git.BranchPrefix != original.Git.BranchPrefix ||
+		loaded.Git.BaseBranch != original.Git.BaseBranch ||
+		loaded.Git.CommitTrailer != original.Git.CommitTrailer {
+		t.Errorf("git = %+v, want %+v", loaded.Git, original.Git)
+	}
+	if loaded.GitHub != original.GitHub {
+		t.Errorf("github = %+v, want %+v", loaded.GitHub, original.GitHub)
+	}
+	if loaded.Shell.Mode != original.Shell.Mode || len(loaded.Shell.AllowPrefixes) != 2 {
+		t.Errorf("shell = %+v", loaded.Shell)
+	}
+}
+
+// Saving must survive strict decoding: an encoder emitting a key the loader
+// rejects would make every write unloadable.
+func TestSavedProjectPassesStrictDecoding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.toml")
+	if err := SaveProject(path, DefaultProject("p", "P")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProject(path); err != nil {
+		t.Fatalf("a config ducklab wrote was rejected by its own loader: %v", err)
+	}
+}
+
+func TestSaveGlobalRoundTripsProvidersAndDucklings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	g := DefaultGlobal()
+	g.Providers = map[ProviderID]Provider{
+		"openrouter": {Kind: ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"},
+	}
+	nativeTools := true
+	g.Ducklings = map[DucklingID]Duckling{
+		"pato-nube": {Provider: "openrouter", Model: "qwen/qwen3.6",
+			Roles: []Role{RoleImplementer, RoleReviewer},
+			Caps:  Caps{NativeTools: &nativeTools},
+			Cost:  Cost{InputPerMTok: 0.2, OutputPerMTok: 0.6}},
+	}
+	if err := SaveGlobal(path, g); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatalf("saved global config does not load back: %v", err)
+	}
+	p, ok := loaded.Providers["openrouter"]
+	if !ok || p.APIKeyEnv != "OPENROUTER_API_KEY" {
+		t.Errorf("provider lost: %+v", loaded.Providers)
+	}
+	d, ok := loaded.Ducklings["pato-nube"]
+	if !ok || d.Model != "qwen/qwen3.6" || len(d.Roles) != 2 {
+		t.Errorf("duckling lost: %+v", loaded.Ducklings)
+	}
+	if d.Caps.NativeTools == nil || !*d.Caps.NativeTools {
+		t.Errorf("declared caps lost: %+v", d.Caps)
+	}
+	if d.Cost.OutputPerMTok != 0.6 {
+		t.Errorf("cost lost: %+v", d.Cost)
+	}
+}
+
+// I10: the global config file must never contain a secret value.
+func TestSaveGlobalWritesNoSecretValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("SECRET_TEST_KEY", "sk-do-not-write-me")
+	g := DefaultGlobal()
+	g.Providers = map[ProviderID]Provider{
+		"p": {Kind: ProviderKindOpenAI, BaseURL: "https://x/v1", APIKeyEnv: "SECRET_TEST_KEY"},
+	}
+	if err := SaveGlobal(path, g); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "sk-do-not-write-me") {
+		t.Error("an API key value was written to config.toml")
+	}
+	if !strings.Contains(string(data), "SECRET_TEST_KEY") {
+		t.Error("the env var name should be written; only the value is secret")
+	}
+}

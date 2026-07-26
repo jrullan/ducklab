@@ -120,6 +120,8 @@ func Run(args []string) int {
 		return runCmd(verb, cmdArgs, repo)
 	case "report":
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
+	case "roster":
+		return rosterCmd(verb, cmdArgs, repo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", noun)
 		return 2
@@ -211,6 +213,33 @@ func ducklingCmd(verb string, args []string) int {
 			fmt.Printf("%-20s %-15s %-30s %v\n", d["id"], d["provider"], d["model"], d["roles"])
 		}
 		return 0
+	case "probe":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab duckling probe <id>")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		caps, err := engineclt.New(info).DucklingProbe(args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 8
+		}
+		dialect := "text protocol (dialect B)"
+		if b, _ := caps["native_tools"].(bool); b {
+			dialect = "native tool calling (dialect A)"
+		}
+		fmt.Printf("%s\n", args[0])
+		fmt.Printf("  tools:   %s\n", dialect)
+		fmt.Printf("  json:    %v\n", caps["json_mode"])
+		fmt.Printf("  context: %.0f tokens\n", num(caps["context_tokens"]))
+		if at := str(caps["probed_at"]); at != "" {
+			fmt.Printf("  probed:  %s\n", at)
+		}
+		return 0
 	case "test":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab duckling test <id> [--prompt <s>]")
@@ -242,6 +271,94 @@ func ducklingCmd(verb string, args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown duckling command: %s\n", verb)
 		return 2
 	}
+}
+
+// rosterCmd shows or changes which duckling plays which role.
+func rosterCmd(verb string, args []string, repo string) int {
+	info, err := daemon.ReadEngineJSON()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "engine not running")
+		return 9
+	}
+	client := engineclt.New(info)
+	projectID, code := resolveProjectID(client, repo)
+	if code != 0 {
+		return code
+	}
+
+	switch verb {
+	case "", "show":
+		view, err := client.RosterGet(projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Print(renderRoster(view))
+		return 0
+
+	case "set":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab roster set <role> <duckling-id>")
+			return 2
+		}
+		view, err := client.RosterSet(projectID, args[0], args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("%s -> %s\n\n", args[0], args[1])
+		fmt.Print(renderRoster(view))
+		return 0
+
+	case "suggest":
+		apply := false
+		for _, a := range args {
+			if a == "--apply" {
+				apply = true
+			}
+		}
+		if apply {
+			view, err := client.RosterApply(projectID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 1
+			}
+			fmt.Print(renderRoster(view))
+			return 0
+		}
+		sugg, err := client.RosterSuggest(projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("%-13s %-16s %8s %7s  %s\n", "ROLE", "DUCKLING", "PASS", "RUNS", "EVIDENCE")
+		for _, sg := range sugg {
+			fmt.Printf("%-13s %-16s %7.0f%% %7.0f  %s\n",
+				str(sg["role"]), str(sg["duckling"]),
+				num(sg["pass_rate"]), num(sg["runs"]), str(sg["evidence"]))
+		}
+		fmt.Println("\nranked from recorded runs only — no model was consulted.")
+		fmt.Println("apply with: ducklab roster suggest --apply")
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown roster command: %s\n", verb)
+		return 2
+	}
+}
+
+func renderRoster(view map[string]interface{}) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-13s %-16s %s\n", "ROLE", "DUCKLING", "SOURCE")
+	entries, _ := view["entries"].([]interface{})
+	for _, raw := range entries {
+		e, _ := raw.(map[string]interface{})
+		fmt.Fprintf(&b, "%-13s %-16s %s\n", str(e["role"]), str(e["duckling"]), str(e["source"]))
+	}
+	if w := str(view["warning"]); w != "" {
+		fmt.Fprintf(&b, "\nwarning: %s\n", w)
+	}
+	return b.String()
 }
 
 // reportCmd prints the solo-baseline comparison for the current project.
