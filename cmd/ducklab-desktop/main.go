@@ -1,0 +1,71 @@
+// Command ducklab-desktop is the Wails shell.
+//
+// It is a CLIENT (01 §1.2): it resolves and supervises the engine, hands the
+// frontend its connection details, and does nothing the CLI cannot. All the
+// work happens in ducklab-engine, which outlives this window — closing the app
+// must never kill a six-minute tournament run.
+//
+// This is the only package that needs cgo. Everything else in ducklab builds
+// with CGO_ENABLED=0 for four targets.
+package main
+
+import (
+	"embed"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"github.com/jrullan/ducklab/internal/daemon"
+	"github.com/jrullan/ducklab/internal/desktop"
+)
+
+//go:embed all:frontend/dist
+var assets embed.FS
+
+var version = "0.3.0"
+
+func main() {
+	// Resolve the engine before showing a window: an app that opens and then
+	// reports it cannot find its engine is worse than one that says so first.
+	enginePath, err := desktop.ResolveEngine(os.Getenv("DUCKLAB_ENGINE"), exec.LookPath)
+	if err != nil {
+		log.Printf("warning: %v", err)
+	}
+
+	info, err := desktop.EnsureEngine(enginePath, 10*time.Second)
+	if err != nil {
+		log.Printf("warning: engine not available: %v", err)
+		info = &daemon.EngineInfo{}
+	}
+
+	app := application.New(application.Options{
+		Name:        "ducklab",
+		Description: "a multi-model software development harness",
+		Assets: application.AssetOptions{
+			Handler: application.BundledAssetFileServer(assets),
+		},
+	})
+
+	// The frontend reads its connection details from window.ducklab. They are
+	// injected rather than fetched so the UI never has to know where the
+	// engine's state directory lives.
+	application.NewWindow(application.WebviewWindowOptions{
+		Title:     "ducklab",
+		Width:     1440,
+		Height:    900,
+		MinWidth:  1024,
+		MinHeight: 700,
+		JS: fmt.Sprintf(
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q };`,
+			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, version,
+		),
+	})
+
+	if err := app.Run(); err != nil {
+		log.Fatalf("error: %v", err)
+	}
+}

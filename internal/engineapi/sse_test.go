@@ -371,3 +371,42 @@ checked:
 		t.Error("the healthy subscriber received nothing while another was overflowing")
 	}
 }
+
+// EventSource cannot set headers, so the SSE endpoint must also accept the
+// token as a query parameter — without this the desktop app's event stream
+// can never authenticate.
+func TestSSEAcceptsTokenAsQueryParameter(t *testing.T) {
+	r := httptest.NewRequest("GET", "/v1/events?token=abc", nil)
+	got, ok := bearerToken(r)
+	if !ok || got != "abc" {
+		t.Errorf("query token = %q, ok=%v; want abc, true", got, ok)
+	}
+}
+
+// The exception is narrow: a token in a query string is more likely to be
+// logged, and every other endpoint is reached with fetch, which can set headers.
+func TestOtherEndpointsRejectAQueryToken(t *testing.T) {
+	for _, path := range []string{"/v1/runs", "/v1/projects", "/v1/ducklings"} {
+		r := httptest.NewRequest("GET", path+"?token=abc", nil)
+		if _, ok := bearerToken(r); ok {
+			t.Errorf("%s accepted a query-string token", path)
+		}
+	}
+}
+
+func TestHeaderTokenStillWins(t *testing.T) {
+	r := httptest.NewRequest("GET", "/v1/runs", nil)
+	r.Header.Set("Authorization", "Bearer header-token")
+	got, ok := bearerToken(r)
+	if !ok || got != "header-token" {
+		t.Errorf("header token = %q, ok=%v", got, ok)
+	}
+}
+
+func TestMalformedAuthorizationIsRejected(t *testing.T) {
+	r := httptest.NewRequest("GET", "/v1/runs", nil)
+	r.Header.Set("Authorization", "Basic abc")
+	if _, ok := bearerToken(r); ok {
+		t.Error("a non-Bearer Authorization header was accepted")
+	}
+}

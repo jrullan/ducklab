@@ -28,10 +28,11 @@ func main() {
 	port := flag.Int("port", 0, "port to listen on (0 = ephemeral)")
 	token := flag.String("token", "fake-token", "bearer token clients must present")
 	scenario := flag.String("scenario", "pair", "scripted scenario: pair | tournament | gate | question | idle")
+	allowOrigin := flag.String("allow-origin", "*", "CORS origin the test harness is served from")
 	delay := flag.Int("delay-ms", 40, "delay between scripted events")
 	flag.Parse()
 
-	srv := newFakeEngine(*token, *scenario, time.Duration(*delay)*time.Millisecond)
+	srv := newFakeEngine(*token, *scenario, time.Duration(*delay)*time.Millisecond, *allowOrigin)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	ln, err := listen(addr)
@@ -42,7 +43,7 @@ func main() {
 	// Print the real port so a test harness can find an ephemeral one.
 	fmt.Printf("fake-engine listening on %s token=%s scenario=%s\n", ln.Addr(), *token, *scenario)
 
-	if err := http.Serve(ln, srv.mux); err != nil {
+	if err := http.Serve(ln, srv); err != nil {
 		fmt.Fprintf(os.Stderr, "error: serve: %v\n", err)
 		os.Exit(1)
 	}
@@ -56,6 +57,12 @@ type fakeEngine struct {
 	token    string
 	scenario string
 	delay    time.Duration
+	// allowOrigin exists only because the harness serves the frontend from a
+	// vite preview on a different port. The REAL engine keeps its strict
+	// wails-only allowlist (07 §1); loosening that here would make the double
+	// weaker than the thing it stands in for, so the flag lives on the fake
+	// alone.
+	allowOrigin string
 
 	// firstClient closes when a client first attaches to the event stream.
 	// Playback waits on it so a test never races the scenario: deltas are
@@ -73,10 +80,11 @@ type fakeEngine struct {
 	aborted  bool
 }
 
-func newFakeEngine(token, scenario string, delay time.Duration) *fakeEngine {
+func newFakeEngine(token, scenario string, delay time.Duration, allowOrigin string) *fakeEngine {
 	f := &fakeEngine{
 		mux: http.NewServeMux(), bus: bus.New(256),
 		token: token, scenario: scenario, delay: delay,
+		allowOrigin: allowOrigin,
 		firstClient: make(chan struct{}),
 		run: map[string]interface{}{
 			"id": fakeRunID, "project_id": "demo", "stage": "build",
@@ -102,6 +110,19 @@ func scenarioMode(s string) string {
 	}
 }
 
+// ServeHTTP answers CORS preflight before routing, for the same reason the
+// real engine does: Go's method-specific mux patterns do not match OPTIONS.
+func (f *fakeEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		f.cors(w, r)
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	f.cors(w, r)
+	f.mux.ServeHTTP(w, r)
+}
+
 func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/health", f.health)
 	f.mux.HandleFunc("GET /v1/engine", f.auth(f.engine))
@@ -121,9 +142,33 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/events", f.auth(f.events_))
 }
 
+// cors mirrors the real engine's behaviour, with the harness origin allowed.
+func (f *fakeEngine) cors(w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+	if f.allowOrigin == "*" || f.allowOrigin == origin {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID, X-Ducklab-Client")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	}
+}
+
 func (f *fakeEngine) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		f.cors(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		// EventSource cannot set headers, so /v1/events also accepts ?token=,
+		// exactly as the real engine does.
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" && r.URL.Path == "/v1/events" {
+			got = r.URL.Query().Get("token")
+		}
 		if got != f.token {
 			f.write(w, http.StatusUnauthorized, map[string]interface{}{
 				"error": map[string]string{"code": "unauthorized", "message": "invalid token"},
@@ -257,6 +302,7 @@ func (f *fakeEngine) setStatus(status, verdict string) {
 // --- handlers ---------------------------------------------------------------
 
 func (f *fakeEngine) health(w http.ResponseWriter, r *http.Request) {
+	f.cors(w, r)
 	f.write(w, http.StatusOK, map[string]interface{}{
 		"ok": true, "version": "0.3.0-fake", "uptime_s": 1, "active_runs": 1,
 	})

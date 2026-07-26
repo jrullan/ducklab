@@ -60,7 +60,26 @@ func New(svc *service.Service, b *bus.Bus, token, version string) *Server {
 }
 
 // ServeHTTP implements http.Handler.
+//
+// CORS preflight is answered here, before routing. Go's ServeMux matches
+// method-specific patterns ("GET /v1/runs"), so an OPTIONS request matches no
+// route and would get a 405 with no CORS headers — which means every
+// browser-side fetch carrying an Authorization header fails before it is ever
+// sent. The desktop app cannot talk to the engine at all without this.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		setCORS(w, r)
+		if w.Header().Get("Access-Control-Allow-Origin") == "" {
+			// Unknown origin: refuse rather than answer a preflight we would
+			// not honour anyway.
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Access-Control-Max-Age", "600")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	setCORS(w, r)
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -116,7 +135,11 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 	if allowedOrigins[origin] {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
+		// X-Ducklab-Client must be listed: the engine REQUIRES it for version
+		// skew detection, so omitting it here made every browser request fail
+		// preflight against the engine's own contract.
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID, X-Ducklab-Client")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	}
 }
 
@@ -296,19 +319,38 @@ func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
 }
 
 // auth middleware checks the bearer token.
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			s.error(w, http.StatusUnauthorized, "unauthorized", "missing Authorization header")
-			return
-		}
+// bearerToken extracts the caller's token.
+//
+// EventSource cannot set request headers, so the SSE endpoint alone also
+// accepts ?token=. Without this the desktop app's event stream can never
+// authenticate — the browser simply has no way to send the header. The
+// exception is deliberately narrow: every other endpoint is reached with
+// fetch, which can set headers, and a token in a query string is more likely
+// to end up in a log.
+func bearerToken(r *http.Request) (string, bool) {
+	if auth := r.Header.Get("Authorization"); auth != "" {
 		parts := strings.SplitN(auth, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid Authorization header")
+			return "", false
+		}
+		return parts[1], true
+	}
+	if r.URL.Path == "/v1/events" {
+		if t := r.URL.Query().Get("token"); t != "" {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerToken(r)
+		if !ok {
+			s.error(w, http.StatusUnauthorized, "unauthorized", "missing or malformed credentials")
 			return
 		}
-		if parts[1] != s.token {
+		if token != s.token {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}

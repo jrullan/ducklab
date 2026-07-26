@@ -12,3 +12,6 @@ bin/
 # Fixtures must stay pristine: a run executed against them in place mutates
 # the working tree and silently invalidates the acceptance criteria.
 fixtures/*/.ducklab/
+fake-engine-bin
+frontend/test-results/
+frontend/playwright-report/
