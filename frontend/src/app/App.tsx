@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { EngineClient, type Duckling } from "../api/client";
-import { EventSubscriber } from "../api/events";
+import { EventSubscriber, type DucklabEvent } from "../api/events";
+import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { Overview } from "../views/Overview";
@@ -56,20 +57,45 @@ export function App() {
     };
     refresh();
 
+    // Streamed text is coalesced per animation frame; persisted events go
+    // straight through, since delaying them would make the UI lag the
+    // engine's own record.
+    const batcher = new DeltaBatcher((batch) =>
+      useRuns.getState().applyDeltaBatch(mergeDeltas(batch)),
+    );
+
     const sub = new EventSubscriber({
       baseUrl: cfg.baseUrl,
       token: cfg.token,
-      onEvent: (e) => useRuns.getState().applyEvent(e),
+      onEvent: (e) => {
+        if (batcher.push(e)) return;
+        useRuns.getState().applyEvent(e);
+      },
       onState: (s) => useRuns.getState().setConnection(s),
-      // Overflow means we fell behind: refetch the snapshot rather than guess.
+      // Overflow means we fell behind and the engine dropped us. Refetching
+      // the run LIST is not enough: the conversation lives in the run detail,
+      // so without this the transcript stays permanently truncated at the
+      // point we fell behind.
       onOverflow: () => {
-        useRuns.getState().markOverflow();
+        const store = useRuns.getState();
+        store.markOverflow();
         refresh();
-        useRuns.getState().clearResync();
+        const current = parseRoute(location.hash);
+        if (current.name === "run") {
+          c.run(current.id)
+            .then((d) => store.resyncRun(d.run, d.events as DucklabEvent[]))
+            .catch(() => {})
+            .finally(() => useRuns.getState().clearResync());
+        } else {
+          store.clearResync();
+        }
       },
     });
     sub.start();
-    return () => sub.stop();
+    return () => {
+      sub.stop();
+      batcher.drain();
+    };
   }, []);
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).

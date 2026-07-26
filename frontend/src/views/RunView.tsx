@@ -3,6 +3,7 @@ import type { EngineClient, Candidate, Run } from "../api/client";
 import { useRuns } from "../store/runs";
 import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, parseDiff } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
+import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
 import { CandidateCard } from "../components/CandidateCard";
@@ -130,14 +131,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
       <div className="grid gap-4 p-4 md:grid-cols-[1fr_260px]">
         <section data-testid="conversation">
-          {turns.map((t) => (
-            <ConversationTurn
-              key={t.key}
-              block={t}
-              roster={roster}
-              streamed={t.duckling ? deltas[t.duckling] : undefined}
-            />
-          ))}
+          <VirtualList items={turns}>
+            {(t) => (
+              <ConversationTurn
+                block={t}
+                roster={roster}
+                streamed={t.duckling ? deltas[t.duckling] : undefined}
+              />
+            )}
+          </VirtualList>
         </section>
 
         <aside className="flex flex-col gap-3">

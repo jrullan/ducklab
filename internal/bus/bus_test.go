@@ -115,3 +115,56 @@ func TestConcurrentPublishAndSubscribe(t *testing.T) {
 	}
 	wg.Wait() // -race makes this meaningful
 }
+
+// After an overflow the reader must see the channel END, not block forever.
+//
+// Without the close, the SSE handler sat on a channel nobody would publish to
+// again: the HTTP connection stayed open but permanently silent, and the
+// client never learned to reconnect. A run's conversation simply stopped
+// growing at the point the client fell behind.
+func TestOverflowClosesTheChannelSoReadersTerminate(t *testing.T) {
+	b := New(2)
+	sub, unsub := b.Subscribe("slow", nil)
+	defer unsub()
+
+	for i := 0; i < 100; i++ {
+		b.Publish(Event{Type: "e", RunID: "r", Seq: i})
+	}
+
+	// Drain everything the subscriber holds; the channel must then be closed.
+	closed := false
+	deadline := time.After(2 * time.Second)
+	for !closed {
+		select {
+		case _, open := <-sub.Ch:
+			if !open {
+				closed = true
+			}
+		case <-deadline:
+			t.Fatal("channel never closed after overflow; a reader would block forever")
+		}
+	}
+}
+
+func TestOverflowMarkerArrivesBeforeTheClose(t *testing.T) {
+	b := New(2)
+	sub, unsub := b.Subscribe("slow", nil)
+	defer unsub()
+
+	for i := 0; i < 100; i++ {
+		b.Publish(Event{Type: "e", RunID: "r", Seq: i})
+	}
+	sawOverflow := false
+	for {
+		e, open := <-sub.Ch
+		if !open {
+			break
+		}
+		if e.Type == "overflow" {
+			sawOverflow = true
+		}
+	}
+	if !sawOverflow {
+		t.Error("the subscriber was closed without ever being told to resync")
+	}
+}

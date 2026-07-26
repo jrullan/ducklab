@@ -142,6 +142,11 @@ func (b *Bus) Publish(e Event) {
 			delete(b.subscribers, sub.ID)
 		}
 		b.mu.Unlock()
+		// Close after the marker so the reader drains it and then sees the
+		// channel end. Without this the reader blocks forever on a channel
+		// nobody will ever publish to again: the HTTP connection stays open
+		// but permanently silent, and the client never learns to reconnect.
+		sub.close()
 	}
 }
 

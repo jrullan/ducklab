@@ -28,8 +28,12 @@ export interface RunsState {
   needsResync: boolean;
 
   applyEvent: (e: DucklabEvent) => void;
+  /** Applies a frame's worth of streamed text in one update (AC-33). */
+  applyDeltaBatch: (byRun: Map<string, Map<string, string>>) => void;
   setRuns: (runs: Run[]) => void;
   setRun: (run: Run) => void;
+  /** Replaces a run's events wholesale after an overflow resync. */
+  resyncRun: (run: Run, events: DucklabEvent[]) => void;
   setConnection: (s: ConnectionState) => void;
   markOverflow: () => void;
   clearResync: () => void;
@@ -90,6 +94,21 @@ export const useRuns = create<RunsState>((set) => ({
       return { ...state, events: { ...state.events, [runId]: trimmed }, runs };
     }),
 
+  // One store update per frame regardless of how many tokens arrived in it.
+  applyDeltaBatch: (byRun) =>
+    set((state) => {
+      if (byRun.size === 0) return state;
+      const deltas = { ...state.deltas };
+      for (const [runId, perDuckling] of byRun) {
+        const forRun = { ...(deltas[runId] ?? {}) };
+        for (const [duckling, text] of perDuckling) {
+          forRun[duckling] = (forRun[duckling] ?? "") + text;
+        }
+        deltas[runId] = forRun;
+      }
+      return { ...state, deltas };
+    }),
+
   setRuns: (list) =>
     set((state) => ({
       ...state,
@@ -97,6 +116,16 @@ export const useRuns = create<RunsState>((set) => ({
     })),
 
   setRun: (run) => set((state) => ({ ...state, runs: { ...state.runs, [run.id]: run } })),
+
+  // A resync REPLACES rather than merges: after an overflow we do not know
+  // which events we missed, and appending would leave a gap in the middle
+  // that looks like a complete transcript.
+  resyncRun: (run, events) =>
+    set((state) => ({
+      ...state,
+      runs: { ...state.runs, [run.id]: run },
+      events: { ...state.events, [run.id]: events.filter((e) => e && e.type !== "token_delta") },
+    })),
 
   setConnection: (connection) => set((state) => ({ ...state, connection })),
 
@@ -126,8 +155,10 @@ export const useRuns = create<RunsState>((set) => ({
       runs: {}, events: {}, deltas: {}, connection: "connecting",
       acceptState: {}, needsResync: false,
       applyEvent: useRuns.getState().applyEvent,
+      applyDeltaBatch: useRuns.getState().applyDeltaBatch,
       setRuns: useRuns.getState().setRuns,
       setRun: useRuns.getState().setRun,
+      resyncRun: useRuns.getState().resyncRun,
       setConnection: useRuns.getState().setConnection,
       markOverflow: useRuns.getState().markOverflow,
       clearResync: useRuns.getState().clearResync,

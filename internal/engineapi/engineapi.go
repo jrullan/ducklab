@@ -663,7 +663,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case e := <-sub.Ch:
+		case e, open := <-sub.Ch:
+			if !open {
+				// The bus dropped us for overflow. Ending the response is what
+				// makes the client reconnect with Last-Event-ID; ranging over a
+				// closed channel would spin instead.
+				return
+			}
 			// Drop anything the backlog replay already delivered. Persisted
 			// events carry a seq; token_delta and heartbeat do not and always
 			// pass through.

@@ -27,7 +27,7 @@ import (
 func main() {
 	port := flag.Int("port", 0, "port to listen on (0 = ephemeral)")
 	token := flag.String("token", "fake-token", "bearer token clients must present")
-	scenario := flag.String("scenario", "pair", "scripted scenario: pair | tournament | gate | question | idle")
+	scenario := flag.String("scenario", "pair", "scripted scenario: pair | tournament | question | flood | idle")
 	allowOrigin := flag.String("allow-origin", "*", "CORS origin the test harness is served from")
 	delay := flag.Int("delay-ms", 40, "delay between scripted events")
 	flag.Parse()
@@ -218,6 +218,22 @@ func (f *fakeEngine) play() {
 
 	switch f.scenario {
 	case "idle":
+		return
+
+	case "flood":
+		// A long run, for the virtualisation and frame-rate check (AC-33).
+		for i := 0; i < 5000; i++ {
+			if i%2 == 0 {
+				f.emit("turn_start", map[string]interface{}{
+					"round": i/2 + 1, "turn": 0, "role": "implementer", "duckling": "pato-uno",
+				})
+			} else {
+				f.emit("turn_end", map[string]interface{}{"round": i / 2, "turn": 0})
+			}
+		}
+		f.emit("gate", map[string]interface{}{"gate": "tests", "cmd": "go test ./...", "exit": 0})
+		f.emit("verdict", map[string]interface{}{"verdict": "PASSED"})
+		f.humanGate("PASSED")
 		return
 
 	case "question":
