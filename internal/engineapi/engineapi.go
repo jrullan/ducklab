@@ -83,6 +83,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/runs/{id}/abort", s.auth(s.handleRunAbort))
 	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
 	s.mux.HandleFunc("POST /v1/runs/{id}/answer", s.auth(s.handleRunAnswer))
+	s.mux.HandleFunc("GET /v1/runs/{id}/diff", s.auth(s.handleRunDiff))
+	s.mux.HandleFunc("GET /v1/runs/{id}/candidates", s.auth(s.handleRunCandidates))
+	s.mux.HandleFunc("GET /v1/runs/{id}/verify", s.auth(s.handleRunVerify))
+	s.mux.HandleFunc("GET /v1/runs/{id}/transcript", s.auth(s.handleRunTranscript))
+	s.mux.HandleFunc("GET /v1/runs/{id}/llm", s.auth(s.handleRunLLM))
+	s.mux.HandleFunc("GET /v1/projects/{id}/status", s.auth(s.handleProjectStatus))
 	s.mux.HandleFunc("GET /v1/projects/{id}/report", s.auth(s.handleReport))
 	s.mux.HandleFunc("GET /v1/projects/{id}/roster", s.auth(s.handleRosterGet))
 	s.mux.HandleFunc("PUT /v1/projects/{id}/roster", s.auth(s.handleRosterSet))
@@ -112,6 +118,70 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
 	}
+}
+
+func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
+	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"diff": diff})
+}
+
+func (s *Server) handleRunCandidates(w http.ResponseWriter, r *http.Request) {
+	cands, err := s.svc.RunCandidates(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": cands, "total": len(cands)})
+}
+
+func (s *Server) handleRunVerify(w http.ResponseWriter, r *http.Request) {
+	tail := 500
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			tail = n
+		}
+	}
+	out, err := s.svc.RunVerify(r.Context(), r.PathValue("id"), tail)
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"output": out})
+}
+
+func (s *Server) handleRunTranscript(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.RunTranscript(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"markdown": out})
+}
+
+func (s *Server) handleRunLLM(w http.ResponseWriter, r *http.Request) {
+	fromSeq := 0
+	if v := r.URL.Query().Get("from_seq"); v != "" {
+		fmt.Sscanf(v, "%d", &fromSeq)
+	}
+	calls, err := s.svc.RunLLMCalls(r.Context(), r.PathValue("id"), fromSeq)
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": calls, "total": len(calls)})
+}
+
+func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.ProjectStatus(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
 }
 
 func (s *Server) handleRosterGet(w http.ResponseWriter, r *http.Request) {

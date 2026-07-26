@@ -361,3 +361,30 @@ func GenerateRunID() string {
 	}
 	return fmt.Sprintf("r-%s-%s", ts, string(suffix))
 }
+
+// ReadJSONL reads a JSONL file as generic objects, skipping records at or
+// below fromSeq. A torn final line is ignored, matching ReadEvents.
+func ReadJSONL(path string, fromSeq int) ([]map[string]interface{}, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []map[string]interface{}
+	for _, line := range splitLines(string(data)) {
+		if line == "" {
+			continue
+		}
+		var rec map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			break
+		}
+		if seq, ok := rec["seq"].(float64); ok && int(seq) <= fromSeq {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
