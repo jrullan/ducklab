@@ -1,23 +1,44 @@
 import { useEffect, useState } from "react";
-import { EngineClient } from "../api/client";
+import { EngineClient, type Duckling } from "../api/client";
 import { EventSubscriber } from "../api/events";
 import { useRuns, pendingForHuman } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
-import { EmptyState } from "../components/EmptyState";
-import { runStatusRole, verdictLabel, verdictStatus, type Verdict } from "../lib/colors";
-import { waitingFor } from "../lib/format";
+import { Overview } from "../views/Overview";
+import { RunView } from "../views/RunView";
+import { Ducklings } from "../views/Ducklings";
+import { Settings } from "../views/Settings";
+import { parseRoute, routeHref, type Route } from "./routes";
+import { loadTheme, type Theme } from "./theme";
 
-/** Engine connection details, injected by the Wails host at runtime. */
 declare global {
   interface Window {
     ducklab?: { baseUrl: string; token: string };
   }
 }
 
+const NAV: { route: Route; label: string }[] = [
+  { route: { name: "overview" }, label: "Overview" },
+  { route: { name: "runs" }, label: "Runs" },
+  { route: { name: "ducklings" }, label: "Ducklings" },
+  { route: { name: "settings" }, label: "Settings" },
+];
+
 export function App() {
-  const runs = useRuns((s) => s.runs);
-  const connection = useRuns((s) => s.connection);
+  const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
+  const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  const [ducklings, setDucklings] = useState<Duckling[]>([]);
+  const [engineVersion, setEngineVersion] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [client, setClient] = useState<EngineClient | null>(null);
+
+  const connection = useRuns((s) => s.connection);
+  const runs = useRuns((s) => s.runs);
+
+  useEffect(() => {
+    const onHash = () => setRoute(parseRoute(location.hash));
+    addEventListener("hashchange", onHash);
+    return () => removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffect(() => {
     const cfg = window.ducklab;
@@ -25,10 +46,14 @@ export function App() {
       setError("no engine connection details were provided by the host");
       return;
     }
-    const client = new EngineClient({ baseUrl: cfg.baseUrl, token: cfg.token, version: "0.3.0" });
-    const store = useRuns.getState();
+    const c = new EngineClient({ baseUrl: cfg.baseUrl, token: cfg.token, version: "0.3.0" });
+    setClient(c);
 
-    const refresh = () => client.runs().then(store.setRuns).catch((e) => setError(String(e)));
+    const refresh = () => {
+      c.runs().then(useRuns.getState().setRuns).catch((e) => setError(String(e)));
+      c.ducklings().then(setDucklings).catch(() => {});
+      c.health().then((h) => setEngineVersion(h.version)).catch(() => {});
+    };
     refresh();
 
     const sub = new EventSubscriber({
@@ -36,7 +61,7 @@ export function App() {
       token: cfg.token,
       onEvent: (e) => useRuns.getState().applyEvent(e),
       onState: (s) => useRuns.getState().setConnection(s),
-      // An overflow means we fell behind: refetch rather than guess.
+      // Overflow means we fell behind: refetch the snapshot rather than guess.
       onOverflow: () => {
         useRuns.getState().markOverflow();
         refresh();
@@ -47,54 +72,50 @@ export function App() {
     return () => sub.stop();
   }, []);
 
-  const list = Object.values(runs);
-  const waiting = pendingForHuman(runs);
-  // A dropped connection dims the last known state; it never blanks it.
-  const dimmed = connection === "reconnecting" || connection === "closed";
+  // A dropped connection dims the last known state; it never blanks it (AC-30).
+  const degraded = connection === "reconnecting" || connection === "closed";
+  const waitingCount = pendingForHuman(runs).length;
 
   return (
-    <div className="min-h-full bg-page text-ink">
-      <header className="flex items-center justify-between border-b border-hairline px-4 py-3">
+    <div className="flex min-h-full flex-col bg-page text-ink">
+      <header className="flex items-center gap-4 border-b border-hairline px-4 py-2">
         <span className="text-md">🦆 ducklab</span>
+        <nav className="flex gap-3">
+          {NAV.map((n) => (
+            <a
+              key={n.label}
+              href={routeHref(n.route)}
+              data-testid={`nav-${n.route.name}`}
+              className={route.name === n.route.name ? "text-ink" : "text-ink-muted"}
+            >
+              {n.label}
+              {n.route.name === "runs" && waitingCount > 0 && (
+                <span className="ml-1 text-serious" data-testid="nav-badge">{waitingCount}</span>
+              )}
+            </a>
+          ))}
+        </nav>
+      </header>
+
+      <main className={degraded ? "flex-1 opacity-60 transition-opacity" : "flex-1"} data-degraded={String(degraded)}>
+        {error && <p className="m-4 text-critical" data-testid="app-error">{error}</p>}
+
+        {route.name === "overview" && <Overview spentToday={0} budget={2} />}
+        {route.name === "runs" && <Overview spentToday={0} budget={2} />}
+        {route.name === "run" && client && <RunView runId={route.id} client={client} />}
+        {route.name === "ducklings" && <Ducklings ducklings={ducklings} />}
+        {route.name === "settings" && (
+          <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />
+        )}
+      </main>
+
+      <footer className="flex items-center gap-3 border-t border-hairline px-4 py-1 text-sm">
         <StatusChip
           role={connection === "open" ? "good" : connection === "reconnecting" ? "warning" : "critical"}
           label={connection === "open" ? "engine" : connection}
         />
-      </header>
-
-      <main className={dimmed ? "opacity-60 transition-opacity" : ""}>
-        {error && <div className="m-4 rounded border border-hairline p-3 text-critical">{error}</div>}
-
-        {waiting.length > 0 && (
-          <section className="border-b border-hairline p-4" data-testid="human-gate-inbox">
-            <h2 className="text-sm text-ink-muted">waiting for you</h2>
-            <ul>
-              {waiting.map((r) => (
-                <li key={r.id} className="flex gap-3 py-1">
-                  <StatusChip role="serious" label={r.pending_kind ?? "waiting"} />
-                  <span className="text-ink-secondary">{r.task_id}</span>
-                  <span className="text-ink-muted">{waitingFor(r.pending_since ?? "")}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {list.length === 0 ? (
-          <EmptyState message="No runs yet. Pick a task and press Run." />
-        ) : (
-          <ul className="p-4">
-            {list.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 py-1" data-testid="run-row">
-                <StatusChip role={runStatusRole(r.status)} label={r.status} />
-                <span className="text-ink-secondary">{r.mode}</span>
-                <span className="text-ink-secondary">{r.task_id}</span>
-                <StatusChip role={verdictStatus(r.verdict as Verdict)} label={verdictLabel(r.verdict as Verdict)} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </main>
+        {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}
+      </footer>
     </div>
   );
 }
