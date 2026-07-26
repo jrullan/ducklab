@@ -24,7 +24,6 @@ import (
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/store"
-	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
 	"github.com/jrullan/ducklab/internal/verify"
@@ -44,13 +43,14 @@ type Service struct {
 	// shuttingDown makes an in-flight run's cancellation read as a deliberate
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool
+	queue        *runQueue
 }
 
 type projectState struct {
-	cfg   *config.Project
-	db    *store.DB
-	git   *vcs.Git
-	lock  sync.Mutex
+	cfg  *config.Project
+	db   *store.DB
+	git  *vcs.Git
+	lock sync.Mutex
 }
 
 type runState struct {
@@ -85,6 +85,7 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		runs:      make(map[string]*runState),
 		providers: make(map[config.ProviderID]provider.Provider),
 		projects:  make(map[string]*projectState),
+		queue:     newRunQueue(cfg.Engine.MaxConcurrentRuns),
 	}
 
 	// Register providers
@@ -114,6 +115,34 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 		fake.AddTextResponse("I am a fake duckling.")
 		// Script for implementation tasks: fix add.go via fs_patch
 		fake.ScriptFunc = func(req provider.ChatRequest, callCount int) *provider.ChatResponse {
+			// Reviewer and judge turns are recognised by their system prompt,
+			// so the fake can satisfy their contracts. Without this every
+			// multi-model mode fails at the first review with a contract
+			// error, and the e2e tests can never exercise pair or tournament.
+			for _, m := range req.Messages {
+				if m.Role != "system" {
+					continue
+				}
+				if strings.Contains(m.Content, "You are the reviewer") {
+					return &provider.ChatResponse{
+						Choices: []provider.Choice{{
+							Message:      provider.Message{Role: "assistant", Content: `{"verdict":"approve","findings":[]}`},
+							FinishReason: provider.FinishStop,
+						}},
+						Usage: provider.Usage{PromptTokens: 80, CompletionTokens: 12},
+					}
+				}
+				if strings.Contains(m.Content, "You are the judge") {
+					return &provider.ChatResponse{
+						Choices: []provider.Choice{{
+							Message:      provider.Message{Role: "assistant", Content: `{"choice":"A","reason":"only candidate whose verification passed"}`},
+							FinishReason: provider.FinishStop,
+						}},
+						Usage: provider.Usage{PromptTokens: 90, CompletionTokens: 14},
+					}
+				}
+			}
+
 			// Check if this is an implementation prompt about fixing a bug
 			isImplPrompt := false
 			for _, m := range req.Messages {
@@ -407,22 +436,22 @@ func (s *Service) DucklingTest(ctx context.Context, id, prompt string, stream bo
 
 // RunRequest is a run request.
 type RunRequest struct {
-	TaskID       string            `json:"task_id"`
-	Mode         string            `json:"mode"`
-	Ducklings    []string          `json:"ducklings"`
-	Rounds       int               `json:"rounds"`
-	Verify       string            `json:"verify"`
-	Budget       *budget.Budget    `json:"budget"`
-	Autonomy     string            `json:"autonomy"`
-	Stream       bool              `json:"stream"`
-	DryRun       bool              `json:"dry_run"`
-	Parallel     bool              `json:"parallel"`
-	UnsafeWrites bool              `json:"unsafe_writes"`
+	TaskID       string         `json:"task_id"`
+	Mode         string         `json:"mode"`
+	Ducklings    []string       `json:"ducklings"`
+	Rounds       int            `json:"rounds"`
+	Verify       string         `json:"verify"`
+	Budget       *budget.Budget `json:"budget"`
+	Autonomy     string         `json:"autonomy"`
+	Stream       bool           `json:"stream"`
+	DryRun       bool           `json:"dry_run"`
+	Parallel     bool           `json:"parallel"`
+	UnsafeWrites bool           `json:"unsafe_writes"`
 }
 
 // RunDetail is a run detail.
 type RunDetail struct {
-	Run    *runlog.Run `json:"run"`
+	Run    *runlog.Run     `json:"run"`
 	Events []*runlog.Event `json:"events,omitempty"`
 }
 
@@ -492,7 +521,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 
 	// Emit run_start event
 	writer.AppendEvent("run_start", map[string]interface{}{
-		"mode":   run.Mode,
+		"mode":    run.Mode,
 		"task_id": run.TaskID,
 	})
 
@@ -502,8 +531,9 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		return run, nil
 	}
 
-	// Execute asynchronously
-	go s.executeRun(ctx, rs, entry, req)
+	// Submit to the queue: it starts the run now, or marks it queued and
+	// starts it when a slot frees (AC-25).
+	s.queue.submit(s, &queued{rs: rs, entry: entry, req: req, ctx: ctx})
 
 	return run, nil
 }
@@ -577,18 +607,18 @@ type runLogAdapter struct {
 
 func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 	return a.w.AppendLLM(&runlog.LLMCall{
-		Duckling:    call.Duckling,
-		Provider:    call.Provider,
-		Model:       call.Model,
-		Role:        call.Role,
-		Request:     call.Request,
-		Response:    call.Response,
-		Usage:       call.Usage,
-		CostUSD:     call.CostUSD,
-		LatencyMs:   call.LatencyMs,
-		Attempt:     call.Attempt,
-		Estimated:   call.Estimated,
-		CostSource:  call.CostSource,
+		Duckling:     call.Duckling,
+		Provider:     call.Provider,
+		Model:        call.Model,
+		Role:         call.Role,
+		Request:      call.Request,
+		Response:     call.Response,
+		Usage:        call.Usage,
+		CostUSD:      call.CostUSD,
+		LatencyMs:    call.LatencyMs,
+		Attempt:      call.Attempt,
+		Estimated:    call.Estimated,
+		CostSource:   call.CostSource,
 		FinishReason: call.FinishReason,
 	})
 }
@@ -614,27 +644,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 
-	// Resolve duckling
-	ducklingID := projCfg.Roster[config.RoleImplementer]
-	if ducklingID == "" {
-		// Find first available duckling
-		for id := range s.cfg.Ducklings {
-			ducklingID = id
-			break
-		}
-	}
-	d, err := s.ducklings.Get(ducklingID)
-	if err != nil {
-		s.failRun(rs, fmt.Errorf("get duckling: %w", err))
-		return
-	}
-	p, err := s.ducklings.Provider(ducklingID)
-	if err != nil {
-		s.failRun(rs, fmt.Errorf("get provider: %w", err))
-		return
-	}
-
-	// Setup budget
+	// Budget
 	b := req.Budget
 	if b == nil {
 		b = &budget.Budget{
@@ -646,7 +656,6 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	tracker := budget.NewTracker(b)
 
-	// Setup exec context
 	ectx := &tools.ExecContext{
 		ProjectRoot:  entry.Path,
 		RunID:        rs.run.ID,
@@ -655,60 +664,32 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		ShellPolicy:  projCfg.Shell,
 	}
 
-	// Setup agent loop
-	// Use caps from config if present; only probe if absent
-	var caps *duckling.Capabilities
-	cfgDuckling, cfgOk := s.cfg.Ducklings[ducklingID]
-	if cfgOk && cfgDuckling.Caps.NativeTools != nil {
-		caps = &duckling.Capabilities{
-			NativeTools:   *cfgDuckling.Caps.NativeTools,
-			ContextTokens: 32768,
-		}
-		if cfgDuckling.Caps.ContextTokens != nil {
-			caps.ContextTokens = *cfgDuckling.Caps.ContextTokens
-		}
-	} else {
-		probed, err := s.ducklings.Probe(ctx, ducklingID)
-		if err != nil {
-			probed = &duckling.Capabilities{NativeTools: false, ContextTokens: 32768}
-		}
-		caps = probed
+	roster, rosterWarning := s.resolveRoster(projCfg)
+	rs.run.Roster = rosterStrings(roster)
+	if rosterWarning != "" {
+		// Recorded, not fatal: running both sides on one duckling is a
+		// legitimate experiment, but reports must be able to segment it.
+		rs.run.Warning = rosterWarning
+		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rosterWarning})
 	}
-	agentLoop := &agent.Loop{
-		Provider: p,
-		Duckling: &agent.DucklingConfig{
-			ID:       ducklingID,
-			Provider: d.Provider,
-			Model:    d.Model,
-			Params:   d.Params,
-			Caps:     provider.Capabilities(*caps),
-			Cost:     d.Cost,
-		},
-		Registry:       tools.NewRegistry(),
-		Budget:         tracker,
-		MaxTurns:       s.cfg.Defaults.AgentMaxTurns,
-		RepairAttempts: s.cfg.Defaults.RepairAttempts,
-		RunWriter:      &runLogAdapter{w: rs.writer},
+	cache := &loopCache{
+		svc: s, tracker: tracker,
+		writer: &runLogAdapter{w: rs.writer},
+		loops:  map[config.DucklingID]*agent.Loop{},
 	}
 
-	// Execute strategy
-	params := &strategy.ExecuteParams{
-		ProjectRoot: entry.Path,
-		TaskID:      req.TaskID,
-		Prompt:      fmt.Sprintf("Implement task %s", req.TaskID),
-		AgentLoop:   agentLoop,
-		ExecContext: ectx,
-		Rounds:      req.Rounds,
-	}
-	fmt.Fprintf(os.Stderr, "[engine] executing strategy for run %s with duckling %s\n", rs.run.ID, ducklingID)
-
-	_, err = strategy.ExecuteSolo(ctx, params)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[engine] strategy error for run %s: %v\n", rs.run.ID, err)
-		s.failRun(rs, err)
+	dispatchErr := s.dispatchMode(ctx, &modeContext{
+		entry: entry, projCfg: projCfg, rs: rs, ectx: ectx,
+		cache: cache, roster: roster, req: req,
+	})
+	// Persist what the run actually spent. Without this every report shows
+	// zero tokens and zero cost, and "measurable, or it didn't happen" (P9)
+	// becomes a slogan.
+	recordSpend(rs, tracker)
+	if dispatchErr != nil {
+		s.failRun(rs, dispatchErr)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[engine] strategy done for run %s\n", rs.run.ID)
 
 	// Run the gate
 	gateResult, err := verify.Run(entry.Path, projCfg.Verify)

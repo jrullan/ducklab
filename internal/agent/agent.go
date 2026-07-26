@@ -335,8 +335,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	if err != nil {
 		repairedText, repairedVal, rerr := repairContract(ctx, loop, turn, outcome.Text, err)
 		if rerr != nil {
-			outcome.ContractError = rerr
-			return outcome, ErrContract
+			// Name the contract and the original parse failure: "contract
+			// parse failed" alone gives no way to tell a malformed verdict
+			// from a malformed choice.
+			outcome.ContractError = fmt.Errorf("%s contract (role %s): %w", turn.Contract, turn.Role, err)
+			return outcome, fmt.Errorf("%w: %v", ErrContract, outcome.ContractError)
 		}
 		outcome.Text = repairedText
 		parsed = repairedVal

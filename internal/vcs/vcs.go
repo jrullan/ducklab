@@ -3,8 +3,10 @@
 package vcs
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -187,4 +189,56 @@ func EnsureGitignore(root string, entries []string) error {
 	}
 	content += strings.Join(toAdd, "\n") + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// ApplyPatch applies a unified diff to the working tree.
+//
+// This is how a tournament winner is applied: the candidate's patch is written
+// to the main tree byte-for-byte. No model is involved, and nothing is
+// regenerated — on modest models, free regeneration corrupts working code
+// (I8).
+func (g *Git) ApplyPatch(patch string) error {
+	if strings.TrimSpace(patch) == "" {
+		return fmt.Errorf("empty patch")
+	}
+	cmd := exec.Command("git", "apply", "--whitespace=nowarn", "-")
+	cmd.Dir = g.Root
+	cmd.Stdin = strings.NewReader(ensureTrailingNewline(patch))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git apply: %v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// DiffAgainst returns the diff of the working tree against a commit, including
+// files git does not yet track. A contestant that creates a new file must have
+// it captured, or its patch silently loses the work.
+func (g *Git) DiffAgainst(ref string) (string, error) {
+	if _, err := g.run("add", "-AN"); err != nil {
+		return "", err
+	}
+	return g.run("diff", ref)
+}
+
+// PruneWorktrees removes worktree records whose directories are gone.
+// Called at engine start: a killed engine leaves stale entries that make a
+// later `worktree add` on the same path fail.
+func (g *Git) PruneWorktrees() error {
+	_, err := g.run("worktree", "prune")
+	return err
+}
+
+func ensureTrailingNewline(s string) string {
+	if strings.HasSuffix(s, "\n") {
+		return s
+	}
+	return s + "\n"
+}
+
+// DeleteBranch removes a branch, ignoring the case where it is already gone.
+func (g *Git) DeleteBranch(name string) error {
+	_, err := g.run("branch", "-D", name)
+	return err
 }

@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/jrullan/ducklab/internal/strategy"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -112,6 +115,17 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 				if err := s.markEngineRestart(rs); err == nil {
 					repaired++
 				}
+			}
+		}
+	}
+
+	// Reap scratch worktrees left by a dead engine. A stale record makes the
+	// next tournament's `worktree add` fail on a path that looks free (AC-19).
+	for _, entry := range entries {
+		scratch := filepath.Join(entry.Path, ".ducklab", "worktrees")
+		if _, err := os.Stat(scratch); err == nil {
+			if err := strategy.ReapWorktrees(entry.Path, scratch); err != nil {
+				continue
 			}
 		}
 	}

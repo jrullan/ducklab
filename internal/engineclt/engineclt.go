@@ -177,6 +177,17 @@ func (c *Client) DucklingTest(id, prompt string) (map[string]interface{}, error)
 	return result, err
 }
 
+// Report fetches the aggregated report for a project.
+func (c *Client) Report(projectID, by, since string) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/v1/projects/%s/report?by=%s", projectID, by)
+	if since != "" {
+		path += "&since=" + since
+	}
+	var result map[string]interface{}
+	err := c.get(path, &result)
+	return result, err
+}
+
 // EventsURL returns the SSE events URL.
 func (c *Client) EventsURL() string {
 	return c.BaseURL + "/v1/events"

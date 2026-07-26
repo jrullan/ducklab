@@ -201,3 +201,76 @@ func TestFileTreeRespectsMaxEntries(t *testing.T) {
 		t.Errorf("FileTree(5) produced %d lines; cap not applied:\n%s", lines, tree)
 	}
 }
+
+// I8: a winning candidate is applied byte-for-byte, never regenerated.
+func TestApplyPatchIsByteIdentical(t *testing.T) {
+	g, dir := newRepo(t)
+	os.WriteFile(filepath.Join(dir, "add.go"), []byte("package x\n\nfunc Add(a, b int) int {\n\treturn a - b\n}\n"), 0o644)
+	g.AddAll()
+	g.Commit("seed")
+
+	// Produce a patch the way a contestant's worktree would.
+	os.WriteFile(filepath.Join(dir, "add.go"), []byte("package x\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"), 0o644)
+	patch, err := g.DiffAgainst("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := os.ReadFile(filepath.Join(dir, "add.go"))
+
+	// Reset and re-apply the captured patch.
+	if _, err := g.run("checkout", "--", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ApplyPatch(patch); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "add.go"))
+	if string(got) != string(want) {
+		t.Errorf("applied content differs from the candidate:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// A contestant that creates a new file must have it captured in its patch.
+func TestDiffAgainstIncludesUntrackedFiles(t *testing.T) {
+	g, dir := newRepo(t)
+	os.WriteFile(filepath.Join(dir, "brand_new.go"), []byte("package x\n"), 0o644)
+
+	patch, err := g.DiffAgainst("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(patch, "brand_new.go") {
+		t.Errorf("new file missing from the patch; a contestant's work would be silently lost:\n%s", patch)
+	}
+}
+
+func TestApplyPatchRejectsEmpty(t *testing.T) {
+	g, _ := newRepo(t)
+	if err := g.ApplyPatch("   "); err == nil {
+		t.Error("empty patch accepted")
+	}
+}
+
+func TestPruneWorktreesClearsStaleRecords(t *testing.T) {
+	g, dir := newRepo(t)
+	wt := filepath.Join(filepath.Dir(dir), "stale-"+filepath.Base(dir))
+	if err := g.WorktreeAdd(wt, "stale-branch"); err != nil {
+		t.Skipf("worktree add: %v", err)
+	}
+	// Simulate a killed engine: the directory vanishes, the record remains.
+	os.RemoveAll(wt)
+	if err := g.PruneWorktrees(); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := g.WorktreeList()
+	for _, w := range list {
+		if strings.Contains(w, filepath.Base(wt)) {
+			t.Errorf("stale worktree record survived prune: %v", list)
+		}
+	}
+	// The path must be reusable afterwards, which is the point of pruning.
+	if err := g.WorktreeAdd(wt, "stale-branch-2"); err != nil {
+		t.Errorf("worktree path not reusable after prune: %v", err)
+	}
+	g.WorktreeRemove(wt)
+}

@@ -302,3 +302,8 @@ func TestShutdownThenRestartLeavesRunResumable(t *testing.T) {
 		t.Errorf("task_id lost across restart: %q", detail.Run.TaskID)
 	}
 }
+
+// fakeRunState builds a minimal runState for queue tests.
+func fakeRunState(id, projectID string) *runState {
+	return &runState{run: &runlog.Run{ID: id, ProjectID: projectID, Status: "running"}}
+}

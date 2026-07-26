@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -117,6 +118,8 @@ func Run(args []string) int {
 		return ducklingCmd(verb, cmdArgs)
 	case "run":
 		return runCmd(verb, cmdArgs, repo)
+	case "report":
+		return reportCmd(append([]string{verb}, cmdArgs...), repo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", noun)
 		return 2
@@ -241,11 +244,73 @@ func ducklingCmd(verb string, args []string) int {
 	}
 }
 
+// reportCmd prints the solo-baseline comparison for the current project.
+func reportCmd(args []string, repo string) int {
+	by, since := "mode", ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--by":
+			if i+1 < len(args) {
+				by = args[i+1]
+				i++
+			}
+		case "--since":
+			if i+1 < len(args) {
+				since = args[i+1]
+				i++
+			}
+		}
+	}
+	info, err := daemon.ReadEngineJSON()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "engine not running")
+		return 9
+	}
+	client := engineclt.New(info)
+	projectID, code := resolveProjectID(client, repo)
+	if code != 0 {
+		return code
+	}
+	rep, err := client.Report(projectID, by, since)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	fmt.Print(renderReport(rep))
+	return 0
+}
+
+// resolveProjectID maps --repo to the engine's project id.
+func resolveProjectID(client *engineclt.Client, repo string) (string, int) {
+	if repo == "" {
+		repo = "."
+	}
+	abs, err := filepath.Abs(repo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return "", 2
+	}
+	projects, err := client.ProjectList()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return "", 1
+	}
+	for _, p := range projects {
+		if p["path"] == abs {
+			if id, ok := p["id"].(string); ok {
+				return id, 0
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "error: no ducklab project at %s\n", abs)
+	return "", 2
+}
+
 func runCmd(verb string, args []string, repo string) int {
 	if verb == "" {
 		// ducklab run <task-id>
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo] [--dry-run] [--yes]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament] [--ducklings a,b] [--rounds n] [--dry-run] [--yes] [--no-wait]")
 			return 2
 		}
 		taskID := args[0]
@@ -253,11 +318,23 @@ func runCmd(verb string, args []string, repo string) int {
 		dryRun := false
 		yes := false
 		noWait := false
+		var ducklings []string
+		rounds := 0
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--mode":
 				if i+1 < len(args) {
 					mode = args[i+1]
+					i++
+				}
+			case "--ducklings":
+				if i+1 < len(args) {
+					ducklings = strings.Split(args[i+1], ",")
+					i++
+				}
+			case "--rounds":
+				if i+1 < len(args) {
+					fmt.Sscanf(args[i+1], "%d", &rounds)
 					i++
 				}
 			case "--dry-run":
@@ -270,7 +347,7 @@ func runCmd(verb string, args []string, repo string) int {
 				noWait = false
 			}
 		}
-		return runStart(taskID, mode, dryRun, yes, noWait, repo)
+		return runStart(taskID, mode, dryRun, yes, noWait, repo, ducklings, rounds)
 	}
 	switch verb {
 	case "list":
@@ -412,7 +489,7 @@ func runCmd(verb string, args []string, repo string) int {
 	}
 }
 
-func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string) int {
+func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string, ducklings []string, rounds int) int {
 	if repo == "" {
 		repo = "."
 	}
@@ -448,6 +525,12 @@ func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string) int {
 		"task_id": taskID,
 		"mode":    mode,
 		"dry_run": dryRun,
+	}
+	if len(ducklings) > 0 {
+		req["ducklings"] = ducklings
+	}
+	if rounds > 0 {
+		req["rounds"] = rounds
 	}
 	if yes {
 		req["autonomy"] = "yolo"
@@ -561,4 +644,88 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 		return 7
 	}
 	return 0
+}
+
+// renderReport formats the engine's report JSON.
+//
+// The CLI renders rather than importing internal/report: it may import only
+// engineclt, daemon and xplat (01 §4.1), and that restriction is what keeps it
+// a client instead of growing a second implementation.
+func renderReport(rep map[string]interface{}) string {
+	var b strings.Builder
+	by, _ := rep["by"].(string)
+	if by == "" {
+		by = "mode"
+	}
+	fmt.Fprintf(&b, "%-12s %5s %7s %11s %7s %11s %8s\n",
+		by, "runs", "passed", "unverified", "failed", "avg_tokens", "avg_usd")
+
+	rows, _ := rep["rows"].([]interface{})
+	for _, raw := range rows {
+		r, _ := raw.(map[string]interface{})
+		runs := num(r["runs"])
+		avgTokens, avgCost := 0.0, 0.0
+		if runs > 0 {
+			avgTokens = (num(r["tokens_in"]) + num(r["tokens_out"])) / runs
+			avgCost = num(r["cost_usd"]) / runs
+		}
+		marker := ""
+		if est, _ := r["estimated"].(bool); est {
+			marker = "~"
+		}
+		fmt.Fprintf(&b, "%-12s %5.0f %7.0f %11.0f %7.0f %10.0f%s %8.4f\n",
+			str(r["key"]), runs, num(r["passed"]), num(r["unverified"]), num(r["failed"]),
+			avgTokens, marker, avgCost)
+	}
+
+	if by != "mode" {
+		return b.String()
+	}
+
+	b.WriteString("\n")
+	var baseRow map[string]interface{}
+	for _, raw := range rows {
+		if r, _ := raw.(map[string]interface{}); str(r["key"]) == "solo" {
+			baseRow = r
+		}
+	}
+	if baseRow == nil {
+		b.WriteString("no solo runs yet — without the baseline there is nothing to compare against.\n")
+		b.WriteString("run the same task with --mode solo to establish it.\n")
+		return b.String()
+	}
+	baseRuns := num(baseRow["runs"])
+	basePass := 0.0
+	if baseRuns > 0 {
+		basePass = num(baseRow["passed"]) / baseRuns * 100
+	}
+	fmt.Fprintf(&b, "solo baseline: %.1f%% passed (n=%.0f)\n", basePass, baseRuns)
+
+	deltas, _ := rep["deltas"].([]interface{})
+	for _, raw := range deltas {
+		d, _ := raw.(map[string]interface{})
+		fmt.Fprintf(&b, "%-14s %.1f%% passed  (%+.1f pts, n=%.0f)\n",
+			str(d["key"])+":", num(d["pass_rate"]), num(d["points_vs_baseline"]), num(d["n"]))
+	}
+
+	if res, _ := rep["resolutions"].([]interface{}); len(res) > 0 {
+		b.WriteString("\nresolutions: ")
+		var parts []string
+		for _, raw := range res {
+			r, _ := raw.(map[string]interface{})
+			parts = append(parts, fmt.Sprintf("%s=%.0f", str(r["kind"]), num(r["count"])))
+		}
+		b.WriteString(strings.Join(parts, " ") + "\n")
+	}
+	return b.String()
+}
+
+func num(v interface{}) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+func str(v interface{}) string {
+	s, _ := v.(string)
+	return s
 }

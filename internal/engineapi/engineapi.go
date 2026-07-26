@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/service"
 )
@@ -81,6 +82,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/runs/{id}/reject", s.auth(s.handleRunReject))
 	s.mux.HandleFunc("POST /v1/runs/{id}/abort", s.auth(s.handleRunAbort))
 	s.mux.HandleFunc("POST /v1/runs/{id}/resume", s.auth(s.handleRunResume))
+	s.mux.HandleFunc("GET /v1/projects/{id}/report", s.auth(s.handleReport))
 	s.mux.HandleFunc("GET /v1/events", s.auth(s.handleEvents))
 }
 
@@ -104,6 +106,33 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID")
 	}
+}
+
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	opts := report.Options{By: r.URL.Query().Get("by")}
+	if since := r.URL.Query().Get("since"); since != "" {
+		if d, err := parseSince(since); err == nil {
+			opts.Since = time.Now().Add(-d)
+		}
+	}
+	rep, err := s.svc.Report(r.Context(), r.PathValue("id"), opts)
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, rep)
+}
+
+// parseSince accepts "30d", "12h", "90m".
+func parseSince(v string) (time.Duration, error) {
+	if strings.HasSuffix(v, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(v, "d"))
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(v)
 }
 
 func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
@@ -243,10 +272,10 @@ func (s *Server) handleDucklingTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, map[string]interface{}{
-		"text":        text,
-		"tokens_in":   tokensIn,
-		"tokens_out":  tokensOut,
-		"cost_usd":    cost,
+		"text":       text,
+		"tokens_in":  tokensIn,
+		"tokens_out": tokensOut,
+		"cost_usd":   cost,
 	})
 }
 
