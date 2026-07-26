@@ -51,6 +51,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/projects", s.auth(s.handleProjectCreate))
 	s.mux.HandleFunc("GET /v1/projects/{id}", s.auth(s.handleProjectGet))
 	s.mux.HandleFunc("GET /v1/ducklings", s.auth(s.handleDucklingList))
+	s.mux.HandleFunc("POST /v1/ducklings/{id}/test", s.auth(s.handleDucklingTest))
 	s.mux.HandleFunc("POST /v1/projects/{id}/runs", s.auth(s.handleRunStart))
 	s.mux.HandleFunc("GET /v1/runs", s.auth(s.handleRunList))
 	s.mux.HandleFunc("GET /v1/runs/{id}", s.auth(s.handleRunGet))
@@ -168,6 +169,29 @@ func (s *Server) handleDucklingList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": ducklings, "total": len(ducklings)})
+}
+
+func (s *Server) handleDucklingTest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body struct {
+		Prompt string `json:"prompt"`
+		Stream bool   `json:"stream"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	text, tokensIn, tokensOut, cost, err := s.svc.DucklingTest(r.Context(), id, body.Prompt, body.Stream)
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{
+		"text":        text,
+		"tokens_in":   tokensIn,
+		"tokens_out":  tokensOut,
+		"cost_usd":    cost,
+	})
 }
 
 func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {

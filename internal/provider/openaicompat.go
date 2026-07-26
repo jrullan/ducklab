@@ -461,6 +461,9 @@ type Fake struct {
 	requests  []ChatRequest
 	callCount int
 	models    []string
+	// ScriptFunc is called when responses are exhausted. If it returns a
+	// response, it is used; otherwise an error is returned.
+	ScriptFunc func(req ChatRequest, callCount int) *ChatResponse
 }
 
 // NewFake creates a new fake provider.
@@ -516,6 +519,12 @@ func (p *Fake) CallCount() int {
 func (p *Fake) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	p.requests = append(p.requests, req)
 	p.callCount++
+	// ScriptFunc takes priority over pre-scripted responses
+	if p.ScriptFunc != nil {
+		if resp := p.ScriptFunc(req, p.callCount); resp != nil {
+			return *resp, nil
+		}
+	}
 	if len(p.responses) == 0 {
 		return ChatResponse{}, errors.New("no more scripted responses")
 	}

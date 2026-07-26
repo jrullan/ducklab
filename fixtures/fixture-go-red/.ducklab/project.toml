@@ -1,0 +1,18 @@
+schema = 1
+id = "fixture-go-red"
+name = "Fixture Go Red"
+created = "2026-07-26T01:59:38Z"
+autonomy = "guarded"
+
+[verify]
+mode = "tests"
+tests = "go test ./..."
+build = ""
+lint = ""
+custom = ""
+timeout_s = 900
+
+[git]
+branch_prefix = "ducklab/"
+base_branch = "main"
+commit_trailer = true

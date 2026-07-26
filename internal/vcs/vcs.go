@@ -100,15 +100,19 @@ func (g *Git) Commit(message string) (string, error) {
 
 // CommitWithTrailer creates a commit with trailers.
 func (g *Git) CommitWithTrailer(message string, trailers map[string]string) (string, error) {
-	args := []string{"commit", "-m", message}
+	args := []string{"commit", "-m", shellEscape(message)}
 	for k, v := range trailers {
-		args = append(args, "-m", fmt.Sprintf("%s: %s", k, v))
+		args = append(args, "-m", shellEscape(fmt.Sprintf("%s: %s", k, v)))
 	}
 	_, err := g.run(args...)
 	if err != nil {
 		return "", err
 	}
 	return g.HeadSHA()
+}
+
+func shellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // Diff returns the working tree diff.

@@ -64,6 +64,30 @@ type Loop struct {
 	Budget      *budget.Tracker
 	MaxTurns    int
 	RepairAttempts int
+	// RunWriter, if set, receives LLM call records.
+	RunWriter   RunLogWriter
+}
+
+// RunLogWriter is the interface for writing LLM call records.
+type RunLogWriter interface {
+	AppendLLM(call *LLMCallRecord) error
+}
+
+// LLMCallRecord is a record of an LLM call for logging.
+type LLMCallRecord struct {
+	Duckling     string
+	Provider     string
+	Model        string
+	Role         string
+	Request      map[string]interface{}
+	Response     map[string]interface{}
+	Usage        map[string]interface{}
+	CostUSD      float64
+	LatencyMs    int64
+	Attempt      int
+	Estimated    bool
+	CostSource   string
+	FinishReason string
 }
 
 // DucklingConfig holds the duckling's configuration for the loop.
@@ -80,11 +104,11 @@ type DucklingConfig struct {
 func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContext) (*Outcome, error) {
 	outcome := &Outcome{}
 
-	// Build messages
-	messages := buildMessages(turn, ectx)
-
 	// Determine dialect
 	useNative := loop.Duckling.Caps.NativeTools
+
+	// Build messages
+	messages := BuildMessages(turn, ectx, useNative)
 
 	// Build tool definitions for native dialect
 	var nativeTools []provider.Tool
@@ -185,6 +209,39 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		choice := resp.Choices[0]
 		finishReason := choice.FinishReason
 
+		// Log the LLM call
+		if loop.RunWriter != nil {
+			latencyMs := time.Since(start).Milliseconds()
+			reqMap := map[string]interface{}{
+				"model":    req.Model,
+				"messages": req.Messages,
+			}
+			if len(req.Tools) > 0 {
+				reqMap["tools"] = req.Tools
+			}
+			respMap := map[string]interface{}{
+				"content":      choice.Message.Content,
+				"finish_reason": finishReason,
+			}
+			if len(choice.Message.ToolCalls) > 0 {
+				respMap["tool_calls"] = choice.Message.ToolCalls
+			}
+			loop.RunWriter.AppendLLM(&LLMCallRecord{
+				Duckling:     string(loop.Duckling.ID),
+				Provider:     string(loop.Duckling.Provider),
+				Model:        loop.Duckling.Model,
+				Role:         string(turn.Role),
+				Request:      reqMap,
+				Response:     respMap,
+				Usage:        map[string]interface{}{"prompt_tokens": resp.Usage.PromptTokens, "completion_tokens": resp.Usage.CompletionTokens},
+				CostUSD:      cost,
+				LatencyMs:    latencyMs,
+				Attempt:      1,
+				CostSource:   calc.CostSource(resp.Usage),
+				FinishReason: finishReason,
+			})
+		}
+
 		// Handle truncation
 		if provider.IsLength(finishReason) {
 			// Retry once with terse instruction
@@ -281,8 +338,8 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	return outcome, nil
 }
 
-// buildMessages builds the message list for a turn.
-func buildMessages(turn *Turn, ectx *tools.ExecContext) []provider.Message {
+// BuildMessages builds the message list for a turn.
+func BuildMessages(turn *Turn, ectx *tools.ExecContext, useNative bool) []provider.Message {
 	var messages []provider.Message
 
 	// 1. System: preamble + role prompt + gate description
@@ -303,6 +360,36 @@ Ground rules, which you cannot change:
 	gateDesc := "The verification gate will run tests after you finish."
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
+	// Dialect B: append fenced text protocol instructions
+	if !useNative {
+		system += `
+
+## How to use tools
+
+When you want to use a tool, end your message with exactly one fenced block
+tagged ` + "```ducklab" + ` containing a single JSON object:
+
+` + "```ducklab" + `
+{"tool": "fs_read", "args": {"path": "src/main.go"}}
+` + "```" + `
+
+Rules:
+- One tool call per message. Nothing after the closing fence.
+- To pass a large or multi-line string (like file content), write the value as
+  "@payload:N" and add a fenced block tagged ` + "```payload:N" + ` after the ducklab block:
+
+` + "```ducklab" + `
+{"tool": "fs_write", "args": {"path": "src/main.go", "content": "@payload:1"}}
+` + "```" + `
+` + "```payload:1" + `
+package main
+
+func main() {}
+` + "```" + `
+
+- When you are finished and have no tool to call, reply with your answer and no
+  ` + "```ducklab" + ` block at all.`
+	}
 	messages = append(messages, provider.Message{Role: "system", Content: system})
 
 	// 2. System: project memory (capped at 8 KB)
@@ -379,8 +466,8 @@ type TextToolCall struct {
 	Args json.RawMessage
 }
 
-var ducklabBlockRe = regexp.MustCompile("```ducklab\\s*\\n(.*?)\\n```")
-var payloadBlockRe = regexp.MustCompile("```payload:(\\d+)\\s*\\n(.*?)\\n```")
+var ducklabBlockRe = regexp.MustCompile("(?s)```ducklab\\s*\\n(.*?)\\n```")
+var payloadBlockRe = regexp.MustCompile("(?s)```payload:(\\d+)\\s*\\n(.*?)\\n```")
 
 // parseTextToolCall parses a Dialect B tool call from text.
 func parseTextToolCall(text string) (*TextToolCall, string) {
@@ -411,7 +498,7 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 		if s, ok := v.(string); ok {
 			if strings.HasPrefix(s, "@payload:") {
 				payloadID := strings.TrimPrefix(s, "@payload:")
-				payloadRe := regexp.MustCompile("```payload:" + payloadID + "\\s*\\n(.*?)\\n```")
+				payloadRe := regexp.MustCompile("(?s)```payload:" + payloadID + "\\s*\\n(.*?)\\n```")
 				payloadMatch := payloadRe.FindStringSubmatch(text)
 				if len(payloadMatch) < 2 {
 					return nil, text

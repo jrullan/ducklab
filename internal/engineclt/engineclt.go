@@ -164,6 +164,16 @@ func (c *Client) DucklingList() ([]map[string]interface{}, error) {
 	return result.Items, err
 }
 
+// DucklingTest tests a duckling.
+func (c *Client) DucklingTest(id, prompt string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/ducklings/%s/test", id), map[string]interface{}{
+		"prompt": prompt,
+		"stream": false,
+	}, &result)
+	return result, err
+}
+
 // EventsURL returns the SSE events URL.
 func (c *Client) EventsURL() string {
 	return c.BaseURL + "/v1/events"

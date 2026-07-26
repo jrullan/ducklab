@@ -1,0 +1,5 @@
+.ducklab/runs/
+.ducklab/ducklab.db
+.ducklab/ducklab.db-wal
+.ducklab/ducklab.db-shm
+.ducklab/lock
