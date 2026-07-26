@@ -37,6 +37,11 @@ type Outcome struct {
 	TokensOut     int
 	CostUSD       float64
 	ContractError error
+	// Parsed is the contract's typed value: *Verdict, *Choice, []Section,
+	// map[string]interface{}, or nil for freeform/edits.
+	Parsed interface{}
+	// Repairs counts how many repair prompts this turn needed.
+	Repairs int
 }
 
 // ToolCallRecord records a tool call.
@@ -58,14 +63,14 @@ var ErrBudgetExceeded = errors.New("budget exceeded")
 
 // Loop runs the agentic loop for a single turn.
 type Loop struct {
-	Provider    provider.Provider
-	Duckling    *DucklingConfig
-	Registry    *tools.Registry
-	Budget      *budget.Tracker
-	MaxTurns    int
+	Provider       provider.Provider
+	Duckling       *DucklingConfig
+	Registry       *tools.Registry
+	Budget         *budget.Tracker
+	MaxTurns       int
 	RepairAttempts int
 	// RunWriter, if set, receives LLM call records.
-	RunWriter   RunLogWriter
+	RunWriter RunLogWriter
 }
 
 // RunLogWriter is the interface for writing LLM call records.
@@ -220,7 +225,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				reqMap["tools"] = req.Tools
 			}
 			respMap := map[string]interface{}{
-				"content":      choice.Message.Content,
+				"content":       choice.Message.Content,
 				"finish_reason": finishReason,
 			}
 			if len(choice.Message.ToolCalls) > 0 {
@@ -324,16 +329,19 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// Record turn
 	loop.Budget.RecordTurn()
 
-	// Parse contract
-	if err := parseContract(turn.Contract, outcome.Text); err != nil {
-		// Repair loop
-		repaired, err := repairContract(ctx, loop, turn, outcome.Text, err)
-		if err != nil {
-			outcome.ContractError = err
+	// Parse contract. The parsed value is kept: pair needs the reviewer's
+	// findings and tournament needs the judge's choice.
+	parsed, err := ParseContract(turn.Contract, outcome.Text)
+	if err != nil {
+		repairedText, repairedVal, rerr := repairContract(ctx, loop, turn, outcome.Text, err)
+		if rerr != nil {
+			outcome.ContractError = rerr
 			return outcome, ErrContract
 		}
-		outcome.Text = repaired
+		outcome.Text = repairedText
+		parsed = repairedVal
 	}
+	outcome.Parsed = parsed
 
 	return outcome, nil
 }
@@ -413,11 +421,26 @@ func main() {}
 	return messages
 }
 
-// getRolePrompt returns the prompt for a role.
+// getRolePrompt returns the system prompt for a role (04 §6).
+//
+// The prompt is one third of what a role IS; the other two are its toolbelt
+// ceiling (tools.RoleToolbelt) and its output contract. All three must agree:
+// a reviewer told to judge correctness, given read-only tools, and parsed with
+// the verdict contract.
 func getRolePrompt(role config.Role) string {
 	switch role {
 	case config.RoleImplementer:
-		return `You are the implementer. You change the code so the task is done and the
+		return implementerPrompt
+	case config.RoleReviewer:
+		return reviewerPrompt
+	case config.RoleJudge:
+		return judgePrompt
+	default:
+		return "You are a duckling in ducklab."
+	}
+}
+
+const implementerPrompt = `You are the implementer. You change the code so the task is done and the
 verification command passes.
 
 Method:
@@ -432,10 +455,38 @@ Method:
 Do not: reformat untouched code, rename things not named in the task, add
 dependencies without saying so in your summary, or claim tests pass without
 having run verify_run.`
-	default:
-		return "You are a duckling in ducklab."
-	}
-}
+
+const reviewerPrompt = `You are the reviewer. You did not write this code and you are not here to be
+agreeable. The tests have already been run; their result is given to you and is
+not yours to dispute.
+
+Judge only: correctness against the task, obvious defects, security, and whether
+the change does something it was not asked to do. Style is not a finding unless
+the project's conventions are written down and violated.
+
+Reply with one JSON object:
+{"verdict":"approve"|"request-changes",
+ "findings":[{"severity":"critical"|"major"|"minor","file":"path","line":N,
+              "issue":"one sentence","fix":"one sentence"}]}
+
+If the gate result you were given is red, "approve" is not available to you.
+An empty findings list with "approve" is a legitimate answer.`
+
+const judgePrompt = `You are the judge. You are given several candidate solutions labelled A, B, …
+and, for each, the result of running the project's verification command. You do
+not know who wrote them and you must not ask.
+
+Rules that bind you:
+- A candidate whose gate is green beats any candidate whose gate is red,
+  regardless of how the code reads.
+- If exactly one candidate is green, choose it. Do not look for reasons to
+  prefer a red one.
+- If several are green, choose the one that changes least while satisfying the
+  task.
+- If all are red, answer "none" and say in one sentence what they all got wrong.
+- You may not rewrite, improve, or merge candidates. Choose or refuse.
+
+Reply with one JSON object: {"choice":"A"|"B"|…|"none","reason":"one sentence"}`
 
 // readProjectMemory reads .ducklab/docs/project.md.
 func readProjectMemory(root string) string {
@@ -559,86 +610,8 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 	return result
 }
 
-// parseContract parses the outcome text against the contract.
-func parseContract(contract, text string) error {
-	switch contract {
-	case "freeform", "edits":
-		return nil
-	case "verdict":
-		return parseVerdictContract(text)
-	case "choice":
-		return parseChoiceContract(text)
-	default:
-		if strings.HasPrefix(contract, "json:") {
-			return parseJSONContract(text)
-		}
-		if strings.HasPrefix(contract, "markdown_sections:") {
-			return parseMarkdownSectionsContract(contract, text)
-		}
-		return nil
-	}
-}
-
-func parseVerdictContract(text string) error {
-	// Strip fences
-	text = stripFences(text)
-	var v struct {
-		Verdict string `json:"verdict"`
-	}
-	if err := json.Unmarshal([]byte(text), &v); err != nil {
-		return fmt.Errorf("verdict contract: %w", err)
-	}
-	if v.Verdict != "approve" && v.Verdict != "request-changes" {
-		return fmt.Errorf("verdict must be approve or request-changes")
-	}
-	return nil
-}
-
-func parseChoiceContract(text string) error {
-	text = stripFences(text)
-	var c struct {
-		Choice string `json:"choice"`
-	}
-	if err := json.Unmarshal([]byte(text), &c); err != nil {
-		return fmt.Errorf("choice contract: %w", err)
-	}
-	return nil
-}
-
-func parseJSONContract(text string) error {
-	text = stripFences(text)
-	var v interface{}
-	if err := json.Unmarshal([]byte(text), &v); err != nil {
-		return fmt.Errorf("json contract: %w", err)
-	}
-	return nil
-}
-
-func parseMarkdownSectionsContract(contract, text string) error {
-	prefix := strings.TrimPrefix(contract, "markdown_sections:")
-	// Check at least one section starts with the prefix
-	if !strings.Contains(text, "## "+prefix+"-") {
-		return fmt.Errorf("no markdown sections starting with ## %s-", prefix)
-	}
-	return nil
-}
-
-func stripFences(text string) string {
-	// Remove ```json and ``` fences
-	text = strings.TrimSpace(text)
-	if strings.HasPrefix(text, "```json") {
-		text = strings.TrimPrefix(text, "```json")
-	} else if strings.HasPrefix(text, "```") {
-		text = strings.TrimPrefix(text, "```")
-	}
-	if strings.HasSuffix(text, "```") {
-		text = strings.TrimSuffix(text, "```")
-	}
-	return strings.TrimSpace(text)
-}
-
 // repairContract attempts to repair a contract violation.
-func repairContract(ctx context.Context, loop *Loop, turn *Turn, text string, parseErr error) (string, error) {
+func repairContract(ctx context.Context, loop *Loop, turn *Turn, text string, parseErr error) (string, interface{}, error) {
 	repairs := loop.RepairAttempts
 	if repairs <= 0 {
 		repairs = 2
@@ -667,9 +640,11 @@ Please reply again with the correct format.`, turn.Contract, parseErr)
 			continue
 		}
 		newText := resp.Choices[0].Message.Content
-		if err := parseContract(turn.Contract, newText); err == nil {
-			return newText, nil
+		if val, perr := ParseContract(turn.Contract, newText); perr == nil {
+			return newText, val, nil
+		} else {
+			parseErr = perr
 		}
 	}
-	return "", fmt.Errorf("%w: after %d repair attempts", ErrContract, repairs)
+	return "", nil, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, repairs, parseErr)
 }

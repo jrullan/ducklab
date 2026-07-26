@@ -3,10 +3,8 @@
 package strategy
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
 )
@@ -94,84 +92,4 @@ func validRole(r config.Role) bool {
 		}
 	}
 	return false
-}
-
-// ExecuteSolo executes the solo mode.
-func ExecuteSolo(ctx context.Context, params *ExecuteParams) (*ExecuteResult, error) {
-	script := SoloScript()
-	return ExecuteScript(ctx, script, params)
-}
-
-// ExecuteParams are the parameters for executing a script.
-type ExecuteParams struct {
-	ProjectRoot string
-	TaskID      string
-	Prompt      string
-	AgentLoop   *agent.Loop
-	ExecContext *tools.ExecContext
-	Rounds      int
-}
-
-// ExecuteResult is the result of executing a script.
-type ExecuteResult struct {
-	Text    string
-	Rounds  int
-	Outcome *agent.Outcome
-	Error   error
-}
-
-// ExecuteScript executes a conversation script.
-func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
-	result := &ExecuteResult{}
-	if err := script.Validate(params.AgentLoop.Registry); err != nil {
-		result.Error = err
-		return result, err
-	}
-	maxRounds := params.Rounds
-	if maxRounds <= 0 {
-		maxRounds = script.MaxRounds
-	}
-	if maxRounds <= 0 {
-		maxRounds = 3
-	}
-
-	for round := 1; round <= maxRounds; round++ {
-		result.Rounds = round
-		for _, turn := range script.Turns {
-			// Resolve toolbelt
-			toolbelt, err := turn.ResolveToolbelt(params.AgentLoop.Registry)
-			if err != nil {
-				result.Error = err
-				return result, err
-			}
-
-			// Build agent turn
-			agentTurn := &agent.Turn{
-				Role:      turn.Role,
-				Duckling:  turn.Duckling,
-				Prompt:    params.Prompt,
-				Toolbelt:  toolbelt,
-				Contract:  turn.Contract,
-				MaxTurns:  turn.MaxTurns,
-				Anonymize: turn.Anonymize,
-			}
-
-			// Run the turn
-			outcome, err := agent.RunTurn(ctx, params.AgentLoop, agentTurn, params.ExecContext)
-			if err != nil {
-				result.Error = err
-				return result, err
-			}
-			result.Outcome = outcome
-			result.Text = outcome.Text
-		}
-
-		// Check Until condition
-		// For solo, this is: gate == "green"
-		// The actual gate check is done by the orchestrator after the script
-		// For now, we break after one round if no error
-		break
-	}
-
-	return result, nil
 }
