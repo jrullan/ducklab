@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/daemon"
@@ -19,11 +20,9 @@ import (
 	"github.com/jrullan/ducklab/internal/xplat"
 )
 
-var version = "0.1.0"
-
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("ducklab-engine %s (%s, go1.24+, %s/%s)\n", version, "dev", "linux", "amd64")
+		fmt.Printf("ducklab-engine %s (%s, go1.24+, %s/%s)\n", build.Version, "dev", "linux", "amd64")
 		os.Exit(0)
 	}
 
@@ -83,7 +82,7 @@ func main() {
 		PID:       os.Getpid(),
 		Port:      port,
 		Token:     token,
-		Version:   version,
+		Version:   build.Version,
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		StateDir:  stateDir,
 	}
@@ -101,7 +100,7 @@ func main() {
 	}
 
 	// Create server
-	server := engineapi.New(svc, b, token, version)
+	server := engineapi.New(svc, b, token, build.Version)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,
@@ -135,7 +134,7 @@ func main() {
 		shutdown("signal")
 	}()
 
-	fmt.Printf("ducklab-engine %s listening on 127.0.0.1:%d\n", version, port)
+	fmt.Printf("ducklab-engine %s listening on 127.0.0.1:%d\n", build.Version, port)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "error: serve: %v\n", err)
 		os.Exit(1)

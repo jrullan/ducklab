@@ -71,3 +71,26 @@ cross:
 
 clean:
 	rm -rf bin fake-engine-bin frontend/dist frontend/test-results
+
+PREFIX ?= $(HOME)/.local
+
+# install puts the CLI and engine on PATH together.
+#
+# They must move as a pair: the engine rejects a client whose major version
+# differs, so installing one and not the other turns every command into a
+# version_skew error. Any binary already at the target is backed up rather than
+# overwritten — the first person this bit had a superseded ducklab from an
+# earlier iteration shadowing the new one, and silently deleting it would have
+# destroyed the only copy.
+install: build
+	@mkdir -p $(PREFIX)/bin
+	@for b in ducklab ducklab-engine; do \
+	  t=$(PREFIX)/bin/$$b; \
+	  if [ -e $$t ] && ! cmp -s bin/$$b $$t; then \
+	    mv $$t $$t.bak && echo "  backed up $$t -> $$t.bak"; \
+	  fi; \
+	  install -m 755 bin/$$b $$t && echo "  installed $$t"; \
+	done
+	@echo "ducklab $$($(PREFIX)/bin/ducklab --version 2>/dev/null | head -1)"
+
+.PHONY: install

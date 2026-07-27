@@ -12,12 +12,13 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
-// Version is the CLI version.
-var Version = "0.1.0"
+// Version is the CLI version, set from build.Version at startup.
+var Version = build.Version
 
 // Run runs the CLI.
 func Run(args []string) int {
