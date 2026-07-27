@@ -153,7 +153,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 			result.Transcript.Add(conv.Entry{
 				Round: round, Index: i, Role: turn.Role,
-				Duckling: duckling, Text: outcome.Text,
+				Duckling: duckling, Text: transcriptText(outcome),
 			})
 
 			// Fold the turn's parsed contract value into the round state.
@@ -210,6 +210,12 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 	b.WriteString(params.Prompt)
 
 	switch turn.Role {
+	case config.RoleArchitect:
+		// A revision that cannot see the critique is just a second draft.
+		if rendered := tr.Render(false, ""); rendered != "" {
+			b.WriteString("\n\n")
+			b.WriteString(rendered)
+		}
 	case config.RoleImplementer:
 		if rendered := conv.RenderFindings(findings); rendered != "" {
 			b.WriteString("\n\n")
@@ -227,14 +233,29 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString(strings.TrimSpace(diff))
 			b.WriteString("\n```\n")
 		}
-		if turn.Anonymize {
-			if rendered := tr.Render(true, config.RoleImplementer); rendered != "" {
-				b.WriteString("\n")
-				b.WriteString(rendered)
-			}
+		if rendered := tr.Render(turn.Anonymize, turn.OmitRole); rendered != "" {
+			b.WriteString("\n")
+			b.WriteString(rendered)
 		}
 	}
 	return b.String(), nil
+}
+
+// transcriptText renders a turn for the next reader.
+//
+// A verdict's raw JSON is the wire format, not the content. An architect asked
+// to revise against `{"verdict":"request-changes"}` has been told nothing;
+// against the rendered findings it has been told what to change.
+func transcriptText(outcome *agent.Outcome) string {
+	if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil {
+		var b strings.Builder
+		fmt.Fprintf(&b, "Verdict: %s\n", v.Verdict)
+		if rendered := conv.RenderFindings(toConvFindings(v.Findings)); rendered != "" {
+			b.WriteString(rendered)
+		}
+		return strings.TrimSpace(b.String())
+	}
+	return outcome.Text
 }
 
 func resolveDuckling(params *ExecuteParams, turn Turn) config.DucklingID {

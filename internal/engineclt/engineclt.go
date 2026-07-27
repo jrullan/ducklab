@@ -315,3 +315,59 @@ func (c *Client) StreamRunEvents(ctx context.Context, runID string, fromSeq int,
 	}
 	return scanner.Err()
 }
+
+// --- the cycle ---------------------------------------------------------------
+
+// StageStart runs intake, spec or plan.
+func (c *Client) StageStart(projectID, stage string, req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/projects/%s/stages/%s", projectID, stage), req, &result)
+	return result, err
+}
+
+// ArtifactGet reads an artifact and any pending proposal.
+func (c *Client) ArtifactGet(projectID, kind string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/artifacts/%s", projectID, kind), &result)
+	return result, err
+}
+
+// ArtifactPromote accepts a pending proposal.
+func (c *Client) ArtifactPromote(projectID, kind, approvedBy string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/projects/%s/artifacts/%s/promote", projectID, kind),
+		map[string]string{"approved_by": approvedBy}, &result)
+	return result, err
+}
+
+// TaskList reads the plan's tasks.
+func (c *Client) TaskList(projectID string) ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/tasks", projectID), &result)
+	return result.Items, err
+}
+
+// TaskNext returns the first task whose dependencies are met.
+func (c *Client) TaskNext(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/tasks/next", projectID), &result)
+	return result, err
+}
+
+// TraceCheck walks the whole spine.
+func (c *Client) TraceCheck(projectID string) ([]map[string]interface{}, error) {
+	var result struct {
+		Errors []map[string]interface{} `json:"errors"`
+	}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/trace/check", projectID), &result)
+	return result.Errors, err
+}
+
+// TraceShow walks the spine from one id.
+func (c *Client) TraceShow(projectID, id string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get(fmt.Sprintf("/v1/projects/%s/trace/%s", projectID, id), &result)
+	return result, err
+}

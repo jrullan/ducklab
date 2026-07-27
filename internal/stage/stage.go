@@ -112,6 +112,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		sections = PlanTaskIDs(current.Sections, sections)
 	}
 	produced.Sections = sections
+	// Anything before the first section is the model narrating its own
+	// process ("Let me check the requirements I wrote…"), not the artifact.
+	// The architect's contract is sections; a preamble a human wrote in an
+	// existing document is preserved by Parse, but a stage's proposal starts
+	// at its first section.
+	produced.Preamble = ""
 	produced.Front.Kind = kind
 	produced.Front.Project = current.Front.Project
 

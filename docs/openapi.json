@@ -1,6 +1,37 @@
 {
   "components": {
     "schemas": {
+      "ArtifactNode": {
+        "properties": {
+          "down": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "up": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title"
+        ],
+        "type": "object"
+      },
       "BudgetBudget": {
         "properties": {
           "max_tokens": {
@@ -973,6 +1004,33 @@
         ],
         "type": "object"
       },
+      "ServiceStageRequest": {
+        "properties": {
+          "autonomy": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "autonomy",
+          "from",
+          "mode",
+          "stage",
+          "stream"
+        ],
+        "type": "object"
+      },
       "ServiceStatus": {
         "properties": {
           "active_runs": {
@@ -1030,6 +1088,47 @@
           "pass_rate",
           "role",
           "runs"
+        ],
+        "type": "object"
+      },
+      "ServiceTaskView": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "complexity": {
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "implements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "milestone": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "milestone",
+          "status",
+          "title"
         ],
         "type": "object"
       }
@@ -1341,6 +1440,80 @@
         "summary": "Get a project"
       }
     },
+    "/v1/projects/{id}/artifacts/{kind}": {
+      "get": {
+        "operationId": "ArtifactGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read an artifact and any pending proposal"
+      }
+    },
+    "/v1/projects/{id}/artifacts/{kind}/promote": {
+      "post": {
+        "operationId": "ArtifactPromote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Accept a pending proposal"
+      }
+    },
     "/v1/projects/{id}/report": {
       "get": {
         "operationId": "Report",
@@ -1588,6 +1761,60 @@
         "summary": "Start a run"
       }
     },
+    "/v1/projects/{id}/stages/{stage}": {
+      "post": {
+        "operationId": "StageStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stage",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceStageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run intake, spec or plan"
+      }
+    },
     "/v1/projects/{id}/status": {
       "get": {
         "operationId": "ProjectStatus",
@@ -1624,9 +1851,96 @@
         "summary": "Project status"
       }
     },
+    "/v1/projects/{id}/tasks": {
+      "get": {
+        "operationId": "TaskList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceTaskView"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Tasks from the plan"
+      }
+    },
+    "/v1/projects/{id}/tasks/next": {
+      "get": {
+        "operationId": "TaskNext",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTaskView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "First task whose dependencies are met"
+      }
+    },
     "/v1/projects/{id}/trace/check": {
       "get": {
-        "operationId": "get_projects_id_trace_check",
+        "operationId": "TraceCheck",
         "parameters": [
           {
             "in": "path",
@@ -1657,7 +1971,51 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Traceability check"
+        "summary": "Traceability check (deterministic, model-free)"
+      }
+    },
+    "/v1/projects/{id}/trace/{anyID}": {
+      "get": {
+        "operationId": "TraceShow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anyID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactNode"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Walk the spine from an id"
       }
     },
     "/v1/runs": {

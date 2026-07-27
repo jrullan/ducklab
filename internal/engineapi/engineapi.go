@@ -697,12 +697,83 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTraceCheck(w http.ResponseWriter, r *http.Request) {
-	// v0.4 owns the traceability spine; the endpoint exists now so the
-	// generated clients do not change shape when it lands.
-	s.json(w, http.StatusOK, map[string]interface{}{"errors": []map[string]string{}})
+	errs, err := s.svc.TraceCheck(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"errors": errs})
 }
 
 // handleOpenAPI serves the document the clients are generated from.
 func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, BuildOpenAPI(s.version))
+}
+
+func (s *Server) handleStageStart(w http.ResponseWriter, r *http.Request) {
+	var req service.StageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	req.Stage = r.PathValue("stage")
+	run, err := s.svc.StageStart(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusAccepted, run)
+}
+
+func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
+	got, err := s.svc.ArtifactGet(r.Context(), r.PathValue("id"), r.PathValue("kind"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, got)
+}
+
+func (s *Server) handleArtifactPromote(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ApprovedBy string `json:"approved_by"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	got, err := s.svc.ArtifactPromote(r.Context(), r.PathValue("id"), r.PathValue("kind"), body.ApprovedBy)
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, got)
+}
+
+func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
+	tasks, err := s.svc.TaskList(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": tasks, "total": len(tasks)})
+}
+
+func (s *Server) handleTaskNext(w http.ResponseWriter, r *http.Request) {
+	task, err := s.svc.TaskNext(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	if task == nil {
+		s.json(w, http.StatusOK, map[string]interface{}{})
+		return
+	}
+	s.json(w, http.StatusOK, task)
+}
+
+func (s *Server) handleTraceShow(w http.ResponseWriter, r *http.Request) {
+	node, err := s.svc.TraceShow(r.Context(), r.PathValue("id"), r.PathValue("anyID"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, node)
 }

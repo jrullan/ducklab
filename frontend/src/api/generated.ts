@@ -6,6 +6,14 @@
 // engine, the Go client and this file cannot describe the same endpoint
 // differently. An edit here would reintroduce exactly the drift it prevents.
 
+export interface ArtifactNode {
+  down?: string[];
+  id?: string;
+  kind?: string;
+  title?: string;
+  up?: string[];
+}
+
 export interface BudgetBudget {
   max_tokens?: number;
   max_turns?: number;
@@ -287,6 +295,14 @@ export interface ServiceRunRequest {
   verify?: string;
 }
 
+export interface ServiceStageRequest {
+  autonomy?: string;
+  from?: string;
+  mode?: string;
+  stage?: string;
+  stream?: boolean;
+}
+
 export interface ServiceStatus {
   active_runs?: number;
   budget_spent_today?: number;
@@ -303,6 +319,17 @@ export interface ServiceSuggestion {
   runs?: number;
 }
 
+export interface ServiceTaskView {
+  body?: string;
+  complexity?: string;
+  depends_on?: string[];
+  id?: string;
+  implements?: string[];
+  milestone?: string;
+  status?: string;
+  title?: string;
+}
+
 
 /** Every endpoint, derived from the engine's route table. */
 export const OPERATIONS = [
@@ -315,14 +342,20 @@ export const OPERATIONS = [
   { id: "ProjectList", method: "GET", path: "/v1/projects" },
   { id: "ProjectInit", method: "POST", path: "/v1/projects" },
   { id: "ProjectGet", method: "GET", path: "/v1/projects/{id}" },
+  { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
+  { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
   { id: "Report", method: "GET", path: "/v1/projects/{id}/report" },
   { id: "RosterGet", method: "GET", path: "/v1/projects/{id}/roster" },
   { id: "RosterSet", method: "PUT", path: "/v1/projects/{id}/roster" },
   { id: "RosterSuggest", method: "GET", path: "/v1/projects/{id}/roster/suggest" },
   { id: "RosterApply", method: "POST", path: "/v1/projects/{id}/roster/suggest" },
   { id: "RunStart", method: "POST", path: "/v1/projects/{id}/runs" },
+  { id: "StageStart", method: "POST", path: "/v1/projects/{id}/stages/{stage}" },
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
-  { id: "get_projects_id_trace_check", method: "GET", path: "/v1/projects/{id}/trace/check" },
+  { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },
+  { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
+  { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
+  { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
   { id: "RunList", method: "GET", path: "/v1/runs" },
   { id: "RunGet", method: "GET", path: "/v1/runs/{id}" },
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },

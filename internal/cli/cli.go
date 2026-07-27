@@ -78,6 +78,9 @@ func Run(args []string) int {
 				verb = remaining[1]
 				cmdArgs = remaining[2:]
 			}
+		case "task", "trace":
+			verb = remaining[1]
+			cmdArgs = remaining[2:]
 		case "provider", "duckling", "roster":
 			if remaining[1] == "list" || remaining[1] == "add" || remaining[1] == "probe" || remaining[1] == "test" || remaining[1] == "remove" || remaining[1] == "show" || remaining[1] == "set" || remaining[1] == "suggest" {
 				verb = remaining[1]
@@ -122,6 +125,12 @@ func Run(args []string) int {
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
 	case "roster":
 		return rosterCmd(verb, cmdArgs, repo)
+	case "intake", "spec", "plan":
+		return stageCmd(noun, remaining[1:], repo)
+	case "task":
+		return taskCmd(verb, cmdArgs, repo)
+	case "trace":
+		return traceCmd(verb, cmdArgs, repo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", noun)
 		return 2

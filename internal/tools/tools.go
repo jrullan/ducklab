@@ -120,6 +120,9 @@ func (r *Registry) registerBuiltins() {
 	r.Register(&VerifyRun{})
 	// Human
 	r.Register(&AskHuman{})
+	// Lifecycle documents (read-only: a model proposes, it does not write)
+	r.Register(&ArtifactRead{})
+	r.Register(&TaskRead{})
 	// Version control (read-only)
 	r.Register(&GitStatus{})
 	r.Register(&GitDiff{})

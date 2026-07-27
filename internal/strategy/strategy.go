@@ -36,12 +36,20 @@ type Script struct {
 
 // Turn is a script turn.
 type Turn struct {
-	Role      config.Role
-	Duckling  config.DucklingID
-	Toolbelt  string // "full", "read-only", or a comma-separated list
-	Contract  string
-	MaxTurns  int
+	Role     config.Role
+	Duckling config.DucklingID
+	Toolbelt string // "full", "read-only", or a comma-separated list
+	Contract string
+	MaxTurns int
+	// Anonymize hides WHO wrote each prior turn. It does not control whether
+	// the transcript appears at all — those are different questions, and
+	// conflating them meant council's reviewer was asked to review nothing.
 	Anonymize bool
+	// OmitRole drops a role's turns from what this turn sees. pair omits the
+	// implementer so the reviewer cannot adopt the author's rationalisation;
+	// council omits nothing, because the architect's draft IS the artifact
+	// under review.
+	OmitRole config.Role
 }
 
 // ResolveToolbelt resolves the turn's toolbelt against its ROLE's ceiling.

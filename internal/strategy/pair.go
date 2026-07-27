@@ -26,6 +26,10 @@ func PairScript() *Script {
 				Contract:  "verdict",
 				MaxTurns:  8,
 				Anonymize: true,
+				// The reviewer must not read the author's reasoning: a
+				// reviewer that does adopts it, and the second model stops
+				// being decorrelated.
+				OmitRole: config.RoleImplementer,
 			},
 		},
 		Until:     `gate == "green" and verdict == "approve"`,

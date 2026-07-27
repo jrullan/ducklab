@@ -224,3 +224,36 @@ func TestUnknownStageIsRejected(t *testing.T) {
 		t.Error("release is not a stage this package runs yet")
 	}
 }
+
+// Models narrate. "Let me check the requirements I wrote…" is the model
+// describing its own process, not part of the artifact.
+func TestModelNarrationIsNotKeptInTheArtifact(t *testing.T) {
+	root := projectWith(t, nil)
+	res, err := Run(context.Background(), Params{
+		ProjectRoot: root, Stage: Intake, RunID: "r-1", Seed: "brief",
+		Execute: replay(`The reviewer approved. Let me check the requirements I wrote:
+
+1. REQ-001 covers auth
+2. REQ-002 covers clients
+
+Here is the final version:
+
+## REQ-001 — Users can log in
+
+**Priority:** must
+`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Proposed.Preamble != "" {
+		t.Errorf("model narration kept in the artifact:\n%s", res.Proposed.Preamble)
+	}
+	rendered := artifact.Render(res.Proposed)
+	if strings.Contains(rendered, "Let me check") {
+		t.Errorf("narration survived rendering:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "REQ-001 — Users can log in") {
+		t.Error("the actual requirement was lost")
+	}
+}

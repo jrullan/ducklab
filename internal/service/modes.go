@@ -177,7 +177,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	base := strategy.ExecuteParams{
 		ProjectRoot: mc.entry.Path,
 		TaskID:      mc.req.TaskID,
-		Prompt:      taskPrompt(mc.req.TaskID),
+		Prompt:      s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID),
 		ExecContext: mc.ectx,
 		Rounds:      mc.req.Rounds,
 		Runner:      s.runnerFor(mc.cache, mc.roster, mc.ectx),

@@ -3,6 +3,7 @@ package engineapi
 import (
 	"net/http"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -193,13 +194,35 @@ func routeTable() []Route {
 			Request: answerRequest{}, Summary: "Answer a pending question", ClientMethod: "RunAnswer",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAnswer }},
 
+		// The cycle
+		{Method: "POST", Path: "/v1/projects/{id}/stages/{stage}", Auth: true,
+			Request: service.StageRequest{}, Response: runlog.Run{},
+			Summary: "Run intake, spec or plan", ClientMethod: "StageStart",
+			handler: func(s *Server) http.HandlerFunc { return s.handleStageStart }},
+		{Method: "GET", Path: "/v1/projects/{id}/artifacts/{kind}", Auth: true,
+			Summary: "Read an artifact and any pending proposal", ClientMethod: "ArtifactGet",
+			handler: func(s *Server) http.HandlerFunc { return s.handleArtifactGet }},
+		{Method: "POST", Path: "/v1/projects/{id}/artifacts/{kind}/promote", Auth: true,
+			Summary: "Accept a pending proposal", ClientMethod: "ArtifactPromote",
+			handler: func(s *Server) http.HandlerFunc { return s.handleArtifactPromote }},
+		{Method: "GET", Path: "/v1/projects/{id}/tasks", Auth: true,
+			Response: listOf{Items: []service.TaskView{}}, Summary: "Tasks from the plan",
+			ClientMethod: "TaskList", handler: func(s *Server) http.HandlerFunc { return s.handleTaskList }},
+		{Method: "GET", Path: "/v1/projects/{id}/tasks/next", Auth: true,
+			Response: service.TaskView{}, Summary: "First task whose dependencies are met",
+			ClientMethod: "TaskNext", handler: func(s *Server) http.HandlerFunc { return s.handleTaskNext }},
+		{Method: "GET", Path: "/v1/projects/{id}/trace/{anyID}", Auth: true,
+			Response: artifact.Node{}, Summary: "Walk the spine from an id",
+			ClientMethod: "TraceShow", handler: func(s *Server) http.HandlerFunc { return s.handleTraceShow }},
+
 		// Reporting
 		{Method: "GET", Path: "/v1/projects/{id}/report", Auth: true,
 			Response: report.Report{}, Summary: "Solo-baseline comparison", ClientMethod: "Report",
 			handler: func(s *Server) http.HandlerFunc { return s.handleReport }},
 		{Method: "GET", Path: "/v1/projects/{id}/trace/check", Auth: true,
-			Response: traceCheckResponse{}, Summary: "Traceability check",
-			handler: func(s *Server) http.HandlerFunc { return s.handleTraceCheck }},
+			Response: traceCheckResponse{}, Summary: "Traceability check (deterministic, model-free)",
+			ClientMethod: "TraceCheck",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleTraceCheck }},
 
 		// Stream
 		{Method: "GET", Path: "/v1/events", Auth: true,

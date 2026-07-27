@@ -27,14 +27,41 @@ func TestRoleToolbeltReturnsACopy(t *testing.T) {
 
 func TestAvailableFiltersUnimplementedTools(t *testing.T) {
 	r := NewRegistry()
-	// artifact_read is in the reviewer's ceiling but not implemented in v0.1.
-	if !RoleAllows(config.RoleReviewer, "artifact_read") {
-		t.Fatal("test assumption broken: artifact_read should be in the reviewer ceiling")
+	// skill_run is in the implementer's ceiling but arrives in v0.6. The
+	// ceiling lists the spec's full set so adding a tool later needs no edit
+	// there; Available filters it to what actually exists.
+	if !RoleAllows(config.RoleImplementer, "skill_run") {
+		t.Fatal("test assumption broken: skill_run should be in the implementer ceiling")
 	}
-	for _, name := range r.Available(config.RoleReviewer) {
-		if name == "artifact_read" {
+	for _, name := range r.Available(config.RoleImplementer) {
+		if name == "skill_run" {
 			t.Error("Available returned a tool that is not registered")
 		}
+	}
+}
+
+// artifact_read landed in v0.4 and must now reach the roles that need it.
+func TestArtifactReadIsAvailableToTheRolesThatNeedIt(t *testing.T) {
+	r := NewRegistry()
+	for _, role := range []config.Role{config.RoleArchitect, config.RoleReviewer, config.RoleImplementer} {
+		found := false
+		for _, name := range r.Available(role) {
+			if name == "artifact_read" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("role %q cannot read the cycle's documents", role)
+		}
+	}
+}
+
+// A model changes an artifact by proposing through a stage, never by writing
+// the file: there is deliberately no artifact_write.
+func TestThereIsNoArtifactWriteTool(t *testing.T) {
+	r := NewRegistry()
+	if _, err := r.Get("artifact_write"); err == nil {
+		t.Error("artifact_write exists; a model could bypass the human gate")
 	}
 }
 
