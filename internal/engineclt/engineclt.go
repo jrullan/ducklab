@@ -151,10 +151,28 @@ func (c *Client) RunList(projectID string) ([]map[string]interface{}, error) {
 }
 
 // RunGet gets a run.
+// The endpoint answers {"run": {...}, "events": [...]}, so it unwraps to the
+// run itself. Returning the envelope made every caller read a missing key and
+// print "%!s(<nil>)" for the whole record — id, status and verdict alike.
 func (c *Client) RunGet(id string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.get("/v1/runs/"+id, &result)
-	return result, err
+	if err := c.get("/v1/runs/"+id, &result); err != nil {
+		return nil, err
+	}
+	if run, ok := result["run"].(map[string]interface{}); ok {
+		return run, nil
+	}
+	return result, nil
+}
+
+// RunEvents returns a run's event log, which RunGet deliberately drops.
+func (c *Client) RunEvents(id string) ([]interface{}, error) {
+	var result map[string]interface{}
+	if err := c.get("/v1/runs/"+id, &result); err != nil {
+		return nil, err
+	}
+	events, _ := result["events"].([]interface{})
+	return events, nil
 }
 
 // RunAccept accepts a run.
