@@ -63,9 +63,16 @@ export function ConversationTurn({
         </ul>
       )}
 
-      {streamed && (
-        <pre className="mt-1 whitespace-pre-wrap font-mono text-sm text-ink-secondary">
-          {streamed}
+      {/* Live tokens while a turn is in flight, the recorded message once it
+          is not. Only `streamed` was rendered, and it comes from token_delta
+          events that arrive solely during a live run — so a lane showed a
+          participant, its tool calls, and no word of what was actually said. */}
+      {(streamed || block.text) && (
+        <pre
+          data-testid="turn-text"
+          className="mt-1 whitespace-pre-wrap font-mono text-sm text-ink-secondary"
+        >
+          {streamed || block.text}
         </pre>
       )}
     </article>

@@ -149,3 +149,25 @@ describe("DiffView", () => {
     expect(screen.getByTestId("diff-empty")).toBeTruthy();
   });
 });
+
+// The lane rendered only `streamed`, which comes from token_delta events that
+// arrive solely during a live run. Opening a finished run showed the
+// participant and its tool calls with no word of what was actually said.
+describe("ConversationTurn and the recorded message", () => {
+  const block = {
+    key: "1:0", round: 1, turn: 0, role: "implementer", duckling: "pato-uno",
+    toolCalls: [], text: "Changed add.go: a - b became a + b.", done: true,
+  };
+
+  it("shows the recorded message when nothing is streaming", () => {
+    render(<ConversationTurn block={block} roster={["pato-uno"]} />);
+    expect(screen.getByTestId("turn-text").textContent).toBe(
+      "Changed add.go: a - b became a + b.",
+    );
+  });
+
+  it("prefers live tokens while the turn is still arriving", () => {
+    render(<ConversationTurn block={block} roster={["pato-uno"]} streamed="Changed ad" />);
+    expect(screen.getByTestId("turn-text").textContent).toBe("Changed ad");
+  });
+});
