@@ -15,6 +15,8 @@ export interface DucklabEvent {
   run_id?: string;
   project_id?: string;
   seq?: number;
+  /** RFC3339, as the engine stamps it. */
+  ts?: string;
   data?: Record<string, unknown>;
 }
 
@@ -173,8 +175,16 @@ export class EventSubscriber {
   }
 }
 
-/** Event types the engine emits. `message` is also bound, for servers that
- * omit the event name. */
+/** Event types the engine emits.
+ *
+ * EventSource dispatches by name, so anything missing here is dropped in
+ * silence — the stream carries it and no listener ever runs. Three types added
+ * to the engine in one afternoon (message, round_gate, gate_resolved) were
+ * invisible to the desktop until this list caught up.
+ *
+ * `message` also arrives through the generic "message" listener, since that is
+ * SSE's default event name; the rest have no such safety net. When you add an
+ * event to the engine, add it here in the same change. */
 export const KNOWN_EVENT_TYPES = [
   "run_start",
   "run_end",
@@ -187,6 +197,10 @@ export const KNOWN_EVENT_TYPES = [
   "tool_call",
   "policy_violation",
   "gate",
+  "round_gate",
+  "gate_resolved",
+  "message",
+  "proposal",
   "verdict",
   "resolution",
   "human",

@@ -86,7 +86,28 @@ export const useRuns = create<RunsState>((set) => ({
       // Reflect status changes the engine reports, without inventing any.
       const run = state.runs[runId];
       let runs = state.runs;
-      if (run) {
+      if (!run && e.type === "run_start") {
+        // A run that begins while this client is connected. Without this the
+        // store only ever updated runs it already knew, so starting a run from
+        // the CLI with the desktop open left it invisible until a refetch —
+        // and the desktop exists to watch runs happen.
+        //
+        // The record is provisional and made only of what the event states;
+        // the engine corrects it on the next fetch.
+        runs = {
+          ...runs,
+          [runId]: {
+            id: runId,
+            project_id: String(e.project_id ?? ""),
+            stage: String(e.data?.stage ?? "build"),
+            mode: String(e.data?.mode ?? ""),
+            task_id: String(e.data?.task_id ?? ""),
+            status: "running",
+            verdict: "",
+            started_at: String(e.ts ?? ""),
+          },
+        };
+      } else if (run) {
         if (e.type === "human_needed") {
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
         } else if (e.type === "run_end") {

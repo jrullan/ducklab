@@ -141,3 +141,30 @@ describe("human gate inbox", () => {
     expect(pending.map((r) => r.id)).toEqual(["r-3", "r-2"]);
   });
 });
+
+// A run that begins while this client is connected. The store only ever
+// updated runs it already knew, so starting a run from the CLI with the
+// desktop open left it invisible until a refetch — and the desktop exists to
+// watch runs happen.
+describe("a run that starts while we are watching", () => {
+  it("appears from its run_start event", () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, acceptState: {}, needsResync: false, connection: "open" });
+    useRuns.getState().applyEvent({
+      type: "run_start", run_id: "r-new", project_id: "p", seq: 1,
+      ts: "2026-07-27T22:00:00Z",
+      data: { mode: "pair", task_id: "T-001" },
+    });
+
+    const run = useRuns.getState().runs["r-new"];
+    expect(run).toBeTruthy();
+    expect(run!.status).toBe("running");
+    expect(run!.mode).toBe("pair");
+    expect(run!.task_id).toBe("T-001");
+  });
+
+  it("does not invent a run from any other event", () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, acceptState: {}, needsResync: false, connection: "open" });
+    useRuns.getState().applyEvent({ type: "turn_start", run_id: "r-ghost", seq: 1, data: {} });
+    expect(useRuns.getState().runs["r-ghost"]).toBeUndefined();
+  });
+});
