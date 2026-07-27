@@ -444,6 +444,7 @@ func runCmd(verb string, args []string, repo string) int {
 		dryRun := false
 		yes := false
 		noWait := false
+		noStream := false
 		var ducklings []string
 		rounds := 0
 		for i := 1; i < len(args); i++ {
@@ -471,9 +472,14 @@ func runCmd(verb string, args []string, repo string) int {
 				noWait = true
 			case "--wait":
 				noWait = false
+			case "--no-stream":
+				// The documented opt-out (07 §7.2). It also makes streaming
+				// falsifiable: without a control run there is no way to tell a
+				// model's own formatting mistake from one the stream introduced.
+				noStream = true
 			}
 		}
-		return runStart(taskID, mode, dryRun, yes, noWait, repo, ducklings, rounds)
+		return runStart(taskID, mode, dryRun, yes, noWait, noStream, repo, ducklings, rounds)
 	}
 	switch verb {
 	case "list":
@@ -652,7 +658,7 @@ func runCmd(verb string, args []string, repo string) int {
 	}
 }
 
-func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string, ducklings []string, rounds int) int {
+func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds int) int {
 	if repo == "" {
 		repo = "."
 	}
@@ -688,6 +694,9 @@ func runStart(taskID, mode string, dryRun, yes, noWait bool, repo string, duckli
 		"task_id": taskID,
 		"mode":    mode,
 		"dry_run": dryRun,
+	}
+	if noStream {
+		req["no_stream"] = true
 	}
 	if len(ducklings) > 0 {
 		req["ducklings"] = ducklings
