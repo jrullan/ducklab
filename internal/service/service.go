@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -998,6 +999,22 @@ func (s *Service) RunList(ctx context.Context, f RunFilter) ([]*runlog.Run, erro
 		}
 		runs = append(runs, rs.run)
 	}
+	// Newest first, and deterministically.
+	//
+	// This ranged over a map, so the order was reshuffled on every call: three
+	// consecutive `run list` invocations returned three different orders, and
+	// the newest run could land anywhere. Anything reading "the first run" —
+	// a script, the desktop's recent list, a person scanning the top of the
+	// table — got an arbitrary answer that changed under it.
+	//
+	// StartedAt is RFC3339, so lexical order is chronological. The id breaks
+	// ties, since two runs can start within the same second.
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].StartedAt != runs[j].StartedAt {
+			return runs[i].StartedAt > runs[j].StartedAt
+		}
+		return runs[i].ID > runs[j].ID
+	})
 	return runs, nil
 }
 
