@@ -218,6 +218,21 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		choice := resp.Choices[0]
 		finishReason := choice.FinishReason
 
+		// Strip an inline reasoning block before anything reads the content.
+		// Doing it here means every downstream path — contract parsing, tool
+		// extraction, the transcript — sees the answer and not the thinking.
+		choice.Message.Content = stripThinking(choice.Message.Content)
+
+		// A response with tokens spent and nothing to show is a model that
+		// thought until its budget ran out. Saying so beats "empty response",
+		// which sends the reader hunting for a transport fault.
+		if choice.Message.Content == "" && len(choice.Message.ToolCalls) == 0 &&
+			resp.Usage.CompletionTokens > 0 {
+			return outcome, fmt.Errorf("%w: %s spent %d tokens on hidden reasoning and returned no answer; "+
+				"raise max_tokens for this duckling, or disable thinking at the endpoint",
+				ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens)
+		}
+
 		// Log the LLM call
 		if loop.RunWriter != nil {
 			latencyMs := time.Since(start).Milliseconds()
@@ -574,22 +589,59 @@ func readProjectMemory(root string) string {
 	return ""
 }
 
-// applyThinkingSuppression applies thinking-token suppression.
+// applyThinkingSuppression asks a provider not to spend the budget on hidden
+// reasoning.
+//
+// It deliberately does NOT add "</think>" as a stop sequence, which is what
+// this used to do and which caused the exact failure it was meant to prevent.
+// A server that separates reasoning from content (llama.cpp with a Qwen3
+// model) puts the think block in reasoning_content and the answer in content;
+// stopping generation at </think> ends the request precisely when the answer
+// was about to start, so content comes back EMPTY with hundreds of tokens
+// spent. Measured against a live endpoint: with the stop, content ""; without
+// it, the requested JSON.
+//
+// Suppression is therefore only ever a request. What makes this safe is
+// stripThinking below, which removes an inline think block after the fact
+// without truncating anything.
 func applyThinkingSuppression(req *provider.ChatRequest, caps provider.Capabilities) {
-	// Step 1: vLLM/Qwen family
 	if req.Extra == nil {
 		req.Extra = make(map[string]interface{})
 	}
+	// vLLM and the Qwen family.
 	req.Extra["chat_template_kwargs"] = map[string]interface{}{
 		"enable_thinking": false,
 	}
-	// Step 2: OpenRouter
+	// OpenRouter.
 	req.Extra["reasoning"] = map[string]interface{}{
 		"exclude": true,
 	}
-	// Step 3: stop sequences (always)
-	req.Stop = append(req.Stop, "</think>")
 }
+
+var thinkBlockRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// stripThinking removes an inline reasoning block from a response.
+//
+// Servers differ: some return the block inside content, some put it in a
+// separate field and leave content clean. Stripping post-hoc handles both, and
+// unlike a stop sequence it can never truncate the answer.
+func stripThinking(content string) string {
+	cleaned := thinkBlockRe.ReplaceAllString(content, "")
+	// An unterminated block means generation was cut mid-thought; everything
+	// from the marker on is reasoning, not answer.
+	if i := strings.Index(cleaned, "<think>"); i >= 0 {
+		cleaned = cleaned[:i]
+	}
+	return strings.TrimSpace(cleaned)
+}
+
+// ErrThoughtOnly reports that a model spent its whole budget on hidden
+// reasoning and returned no answer.
+//
+// Worth its own error: "empty response" sends the reader looking for a
+// transport fault, when the cause is a token budget consumed before the answer
+// began and the fix is to raise max_tokens or turn thinking off at the server.
+var ErrThoughtOnly = errors.New("model returned only hidden reasoning")
 
 // TextToolCall is a parsed text-protocol tool call.
 type TextToolCall struct {

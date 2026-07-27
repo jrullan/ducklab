@@ -215,3 +215,57 @@ func TestReviewerProseAlsoFailsAfterRepairs(t *testing.T) {
 		t.Errorf("ContractError = %v; should name the contract and role", out.ContractError)
 	}
 }
+
+// A "</think>" stop sequence used to be added as thinking suppression. On a
+// server that separates reasoning from content it ended generation exactly
+// when the answer was about to start, so content came back empty with
+// hundreds of tokens spent — the failure the suppression existed to prevent.
+// Measured against a live llama.cpp endpoint before this was removed.
+func TestThinkingSuppressionDoesNotTruncateTheAnswer(t *testing.T) {
+	req := provider.ChatRequest{}
+	applyThinkingSuppression(&req, provider.Capabilities{})
+	for _, s := range req.Stop {
+		if strings.Contains(s, "think") {
+			t.Errorf("a think marker is used as a stop sequence (%q); it truncates the answer", s)
+		}
+	}
+	if req.Extra["chat_template_kwargs"] == nil || req.Extra["reasoning"] == nil {
+		t.Error("suppression no longer asks the provider to skip reasoning")
+	}
+}
+
+func TestStripThinkingRemovesTheBlockNotTheAnswer(t *testing.T) {
+	cases := map[string]string{
+		"<think>reasoning here</think>\n{\"verdict\":\"approve\"}": `{"verdict":"approve"}`,
+		"no thinking at all":                         "no thinking at all",
+		"<think>only reasoning, cut off mid-thought": "",
+		"before <think>middle</think> after":         "before  after",
+	}
+	for in, want := range cases {
+		if got := stripThinking(in); got != want {
+			t.Errorf("stripThinking(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Tokens spent with nothing returned has a specific cause and a specific fix;
+// "empty response" names neither.
+func TestThoughtOnlyResponseIsDiagnosed(t *testing.T) {
+	p := &countingProvider{fallback: ""}
+	p.replies = []string{""}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 2}
+
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected a failure")
+	}
+	if !errors.Is(err, ErrThoughtOnly) {
+		t.Fatalf("err = %v; want it identified as a thought-only response", err)
+	}
+	for _, want := range []string{"hidden reasoning", "max_tokens"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not say what to do (%q): %v", want, err)
+		}
+	}
+}
