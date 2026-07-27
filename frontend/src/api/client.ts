@@ -73,12 +73,18 @@ export interface TraceError {
   detail: string;
 }
 
+/** Mirrors service.TaskView. Status is derived from run records, never stored
+ * on the task — a model rewriting the plan must not be able to mark its own
+ * work accepted. That is why the board has no drag-to-move. */
 export interface Task {
   id: string;
   title: string;
+  milestone: string;
   status: string;
   implements?: string[];
-  run_id?: string;
+  complexity?: string;
+  depends_on?: string[];
+  body?: string;
 }
 
 /** A tournament candidate. There is no author field, by design (I7). */

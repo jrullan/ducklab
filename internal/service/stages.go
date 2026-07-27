@@ -306,9 +306,18 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		return nil, err
 	}
 
+	// A task's status is its MOST RECENT run, and RunList answers newest
+	// first, so the first run seen for a task wins.
+	//
+	// This used to assign unconditionally on every branch, letting an older
+	// run overwrite a newer one: a task accepted this morning went back to
+	// "in progress" because a run from last week appeared later in the list.
+	// While RunList ranged over a map it was worse than wrong, it was
+	// unstable — the same board could show two different columns on two
+	// consecutive loads.
 	status := map[string]string{}
 	for _, r := range runs {
-		if r.TaskID == "" {
+		if r.TaskID == "" || status[r.TaskID] != "" {
 			continue
 		}
 		switch {
@@ -318,7 +327,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 			status[r.TaskID] = "in_progress"
 		case r.Status == "paused":
 			status[r.TaskID] = "review"
-		case status[r.TaskID] == "":
+		default:
 			status[r.TaskID] = "todo"
 		}
 	}

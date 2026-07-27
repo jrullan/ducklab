@@ -232,3 +232,37 @@ func TestStageStartRejectsAnUnknownStage(t *testing.T) {
 		t.Error("an unknown stage started")
 	}
 }
+
+// A task's status is its latest run. The loop used to assign on every branch,
+// so an older run overwrote a newer one and an accepted task fell back into
+// "in progress" because a stale run happened to be visited last.
+func TestTaskStatusFollowsTheNewestRun(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	older := &runlog.Run{
+		ID: "r-old", ProjectID: id, TaskID: "T-001", Status: "paused",
+		StartedAt: "2026-07-01T00:00:00Z",
+	}
+	newer := &runlog.Run{
+		ID: "r-new", ProjectID: id, TaskID: "T-001", Status: "done",
+		Verdict: "PASSED", Accepted: true,
+		StartedAt: "2026-07-20T00:00:00Z",
+	}
+	for _, r := range []*runlog.Run{older, newer} {
+		w, err := runlog.NewWriter(dir, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+	s.RecoverRuns(context.Background())
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tasks[0].Status != "accepted" {
+		t.Errorf("T-001 = %q, want accepted: the newest run was accepted, the older one only paused", tasks[0].Status)
+	}
+}

@@ -6,6 +6,7 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { Overview } from "../views/Overview";
 import { RunView } from "../views/RunView";
+import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
@@ -26,6 +27,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: { name: "overview" }, label: "Overview" },
   { route: { name: "runs" }, label: "Runs" },
   { route: { name: "cycle" }, label: "Cycle" },
+  { route: { name: "board" }, label: "Board" },
   { route: { name: "ducklings" }, label: "Ducklings" },
   { route: { name: "settings" }, label: "Settings" },
 ];
@@ -176,6 +178,14 @@ export function App() {
               No project registered yet.
             </p>
           ))}
+        {route.name === "board" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Board client={client} projectId={projectId} />
+            </div>
+          ) : (
+            <p className="m-4 text-ink-muted">No project registered yet.</p>
+          ))}
         {route.name === "ducklings" && <Ducklings ducklings={ducklings} />}
         {route.name === "settings" && (
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />
@@ -183,8 +193,18 @@ export function App() {
       </main>
 
       <footer className="flex items-center gap-3 border-t border-hairline px-4 py-1 text-sm">
+        {/* "connecting" is the normal first second of the app's life, not a
+            failure. Painting it critical told every user that something was
+            broken before anything had a chance to go wrong. Only "closed" —
+            we gave up — is critical. */}
         <StatusChip
-          role={connection === "open" ? "good" : connection === "reconnecting" ? "warning" : "critical"}
+          role={
+            connection === "open"
+              ? "good"
+              : connection === "closed"
+                ? "critical"
+                : "warning"
+          }
           label={connection === "open" ? "engine" : connection}
         />
         {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}

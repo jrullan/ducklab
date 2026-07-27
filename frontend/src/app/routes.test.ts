@@ -31,3 +31,14 @@ describe("routing", () => {
     }
   });
 });
+
+// Both new views must be addressable, since a pop-out opens a route directly
+// and the desktop can be launched onto one.
+describe("the cycle and board routes round-trip", () => {
+  it("parses and renders back", () => {
+    for (const name of ["cycle", "board"] as const) {
+      expect(parseRoute(`#/${name}`)).toEqual({ name });
+      expect(routeHref({ name })).toBe(`#/${name}`);
+    }
+  });
+});
