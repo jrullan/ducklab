@@ -269,3 +269,48 @@ func TestThoughtOnlyResponseIsDiagnosed(t *testing.T) {
 		}
 	}
 }
+
+// I3: nothing unbounded. A request with no max_tokens lets a looping model
+// generate until the context window fills — measured at over ten minutes of
+// wall clock on a fast endpoint, then multiplied by the retry policy.
+func TestEveryRequestCarriesAnOutputCap(t *testing.T) {
+	p := &countingProvider{fallback: "done"}
+	loop := testLoop(p, 2)
+	// A duckling that declares nothing, which is the common case.
+	loop.Duckling.Params.MaxTokens = nil
+
+	turn := &Turn{Role: config.RoleArchitect, Prompt: "draft", Contract: "freeform", MaxTurns: 1}
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) == 0 {
+		t.Fatal("no request made")
+	}
+	got := p.requests[0].MaxTokens
+	if got == nil {
+		t.Fatal("the request carried no max_tokens; a looping model would run unbounded")
+	}
+	if *got != DefaultMaxOutputTokens {
+		t.Errorf("max_tokens = %d, want the default %d", *got, DefaultMaxOutputTokens)
+	}
+}
+
+// A duckling's own limit still wins.
+func TestDeclaredOutputCapIsRespected(t *testing.T) {
+	want := 512
+	p := &countingProvider{fallback: "done"}
+	loop := testLoop(p, 2)
+	loop.Duckling.Params.MaxTokens = &want
+
+	turn := &Turn{Role: config.RoleArchitect, Prompt: "draft", Contract: "freeform", MaxTurns: 1}
+	RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if got := p.requests[0].MaxTokens; got == nil || *got != want {
+		t.Errorf("max_tokens = %v, want %d", got, want)
+	}
+}

@@ -169,9 +169,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		if loop.Duckling.Params.TopP != nil {
 			req.TopP = loop.Duckling.Params.TopP
 		}
-		if loop.Duckling.Params.MaxTokens != nil {
-			req.MaxTokens = loop.Duckling.Params.MaxTokens
-		}
+		req.MaxTokens = outputCap(loop.Duckling.Params.MaxTokens)
 		if len(loop.Duckling.Params.Stop) > 0 {
 			req.Stop = loop.Duckling.Params.Stop
 		}
@@ -635,6 +633,25 @@ func stripThinking(content string) string {
 	return strings.TrimSpace(cleaned)
 }
 
+// DefaultMaxOutputTokens caps a single completion when a duckling declares no
+// limit of its own.
+//
+// I3 says nothing is unbounded, and a request with no max_tokens is exactly
+// that: a model that starts looping generates until the context window fills,
+// which on a fast endpoint still took over ten minutes of wall clock and then
+// multiplied by the transient-retry policy. The cap is high enough for a long
+// artifact and low enough that a loop is caught in seconds, not hours.
+const DefaultMaxOutputTokens = 8192
+
+// outputCap returns the per-call token limit, never nil.
+func outputCap(declared *int) *int {
+	if declared != nil && *declared > 0 {
+		return declared
+	}
+	n := DefaultMaxOutputTokens
+	return &n
+}
+
 // ErrThoughtOnly reports that a model spent its whole budget on hidden
 // reasoning and returned no answer.
 //
@@ -820,7 +837,5 @@ func applySampling(req *provider.ChatRequest, d *DucklingConfig) {
 	if d.Params.Temperature != nil {
 		req.Temperature = d.Params.Temperature
 	}
-	if d.Params.MaxTokens != nil {
-		req.MaxTokens = d.Params.MaxTokens
-	}
+	req.MaxTokens = outputCap(d.Params.MaxTokens)
 }
