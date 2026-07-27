@@ -258,7 +258,14 @@ type sseScanner struct {
 }
 
 func newSSEScanner(r io.Reader) *sseScanner {
-	return &sseScanner{r: r, buf: make([]byte, 4096)}
+	// Length zero, capacity 4096 — NOT length 4096.
+	//
+	// With a full-length buffer, s.buf[len(s.buf):cap(s.buf)] is an empty
+	// slice, Read into it returns (0, nil) immediately, and scan() spins
+	// forever over 4096 zero bytes without ever consuming the body. Streaming
+	// therefore never worked: a run that asked for it hung on its first turn
+	// while the endpoint sat idle, burning a core.
+	return &sseScanner{r: r, buf: make([]byte, 0, 4096)}
 }
 
 func (s *sseScanner) scan() bool {
@@ -278,6 +285,13 @@ func (s *sseScanner) scan() bool {
 				}
 			}
 			continue
+		}
+		// Grow when the buffer is full, or the read window is empty again and
+		// a single event larger than the buffer would deadlock the same way.
+		if len(s.buf) == cap(s.buf) {
+			grown := make([]byte, len(s.buf), 2*cap(s.buf)+1)
+			copy(grown, s.buf)
+			s.buf = grown
 		}
 		n, err := s.r.Read(s.buf[len(s.buf):cap(s.buf)])
 		if n > 0 {
