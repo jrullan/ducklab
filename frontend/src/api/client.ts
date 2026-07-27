@@ -45,6 +45,42 @@ export interface Duckling {
   cost?: { input_per_mtok: number; output_per_mtok: number };
 }
 
+/** One numbered item in an artifact: a REQ, a SPEC, a milestone. */
+export interface Section {
+  id: string;
+  title: string;
+  body: string;
+  implements?: string[];
+  fields?: Record<string, string>;
+  children?: Section[];
+}
+
+export interface Artifact {
+  kind: string;
+  version: number;
+  approved: boolean;
+  markdown: string;
+  sections: Section[] | null;
+  /** Present only while a stage's output is awaiting the human gate. */
+  proposal?: { diff: string; run_id?: string; ducklings?: string[] };
+}
+
+/** A break in the traceability spine. Produced deterministically, never by a
+ * model, so the UI can state these as fact rather than opinion. */
+export interface TraceError {
+  kind: string;
+  id: string;
+  detail: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  status: string;
+  implements?: string[];
+  run_id?: string;
+}
+
 /** A tournament candidate. There is no author field, by design (I7). */
 export interface Candidate {
   label: string;
@@ -151,5 +187,32 @@ export class EngineClient {
       question_id: questionId,
       answer,
     });
+  }
+
+  artifact(projectId: string, kind: string) {
+    return this.request<Artifact>("GET", `/v1/projects/${projectId}/artifacts/${kind}`);
+  }
+  /** Promote a proposal to the artifact. This is the human gate (05 §1.1) —
+   * the only caller is a person clicking Accept, never a model. */
+  promote(projectId: string, kind: string, approvedBy = "human") {
+    return this.request<Artifact>("POST", `/v1/projects/${projectId}/artifacts/${kind}/promote`, {
+      approved_by: approvedBy,
+    });
+  }
+  traceCheck(projectId: string) {
+    return this.request<{ errors: TraceError[] | null }>(
+      "GET",
+      `/v1/projects/${projectId}/trace/check`,
+    ).then((r) => r.errors ?? []);
+  }
+  traceShow(projectId: string, id: string) {
+    return this.request<Record<string, unknown>>("GET", `/v1/projects/${projectId}/trace/${id}`);
+  }
+  tasks(projectId: string) {
+    // items is null, not [], when a project has no plan yet.
+    return this.request<{ items: Task[] | null; total: number }>(
+      "GET",
+      `/v1/projects/${projectId}/tasks`,
+    ).then((r) => r.items ?? []);
   }
 }

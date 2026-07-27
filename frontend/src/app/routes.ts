@@ -4,6 +4,7 @@
 export type Route =
   | { name: "overview" }
   | { name: "runs" }
+  | { name: "cycle" }
   | { name: "run"; id: string }
   | { name: "ducklings" }
   | { name: "settings" };
@@ -14,6 +15,8 @@ export function parseRoute(hash: string): Route {
   switch (head) {
     case "runs":
       return arg ? { name: "run", id: arg } : { name: "runs" };
+    case "cycle":
+      return { name: "cycle" };
     case "ducklings":
       return { name: "ducklings" };
     case "settings":
@@ -29,6 +32,8 @@ export function routeHref(route: Route): string {
       return `#/runs/${route.id}`;
     case "runs":
       return "#/runs";
+    case "cycle":
+      return "#/cycle";
     case "ducklings":
       return "#/ducklings";
     case "settings":

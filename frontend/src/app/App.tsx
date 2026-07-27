@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
-import { EngineClient, type Duckling } from "../api/client";
+import { EngineClient, type Duckling, type Project } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { Overview } from "../views/Overview";
 import { RunView } from "../views/RunView";
+import { Cycle } from "../views/Cycle";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
 import { parseRoute, routeHref, type Route } from "./routes";
 import { loadTheme, type Theme } from "./theme";
+
+/** Must match internal/build.Version: the engine rejects a client whose
+ * major version differs. */
+const VERSION = "0.4.0";
 
 declare global {
   interface Window {
@@ -20,6 +25,7 @@ declare global {
 const NAV: { route: Route; label: string }[] = [
   { route: { name: "overview" }, label: "Overview" },
   { route: { name: "runs" }, label: "Runs" },
+  { route: { name: "cycle" }, label: "Cycle" },
   { route: { name: "ducklings" }, label: "Ducklings" },
   { route: { name: "settings" }, label: "Settings" },
 ];
@@ -28,6 +34,12 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  // The chosen project survives a reload: a view that silently reset to the
+  // first project every refresh would show someone else's cycle.
+  const [projectId, setProjectId] = useState<string>(
+    () => localStorage.getItem("ducklab.project") ?? "",
+  );
   const [engineVersion, setEngineVersion] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<EngineClient | null>(null);
@@ -47,12 +59,20 @@ export function App() {
       setError("no engine connection details were provided by the host");
       return;
     }
-    const c = new EngineClient({ baseUrl: cfg.baseUrl, token: cfg.token, version: "0.3.0" });
+    const c = new EngineClient({ baseUrl: cfg.baseUrl, token: cfg.token, version: VERSION });
     setClient(c);
 
     const refresh = () => {
       c.runs().then(useRuns.getState().setRuns).catch((e) => setError(String(e)));
       c.ducklings().then(setDucklings).catch(() => {});
+      c.projects()
+        .then((ps) => {
+          setProjects(ps);
+          // Only fall back to the first project when the stored one is gone,
+          // not on every load.
+          setProjectId((cur) => (ps.some((p) => p.id === cur) ? cur : (ps[0]?.id ?? "")));
+        })
+        .catch(() => {});
       c.health().then((h) => setEngineVersion(h.version)).catch(() => {});
     };
     refresh();
@@ -121,6 +141,23 @@ export function App() {
             </a>
           ))}
         </nav>
+        {projects.length > 0 && (
+          <select
+            data-testid="project-select"
+            className="ml-auto bg-page text-ink border border-hairline rounded px-2 py-1 text-sm"
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              localStorage.setItem("ducklab.project", e.target.value);
+            }}
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name || p.id}
+              </option>
+            ))}
+          </select>
+        )}
       </header>
 
       <main className={degraded ? "flex-1 opacity-60 transition-opacity" : "flex-1"} data-degraded={String(degraded)}>
@@ -129,6 +166,16 @@ export function App() {
         {route.name === "overview" && <Overview spentToday={0} budget={2} />}
         {route.name === "runs" && <Overview spentToday={0} budget={2} />}
         {route.name === "run" && client && <RunView runId={route.id} client={client} />}
+        {route.name === "cycle" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Cycle client={client} projectId={projectId} />
+            </div>
+          ) : (
+            <p className="m-4 text-ink-muted" data-testid="cycle-no-project">
+              No project registered yet.
+            </p>
+          ))}
         {route.name === "ducklings" && <Ducklings ducklings={ducklings} />}
         {route.name === "settings" && (
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />

@@ -15,18 +15,18 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/desktop"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
-
-var version = "0.3.0"
 
 func main() {
 	// Resolve the engine before showing a window: an app that opens and then
@@ -56,6 +56,14 @@ func main() {
 	// app.Window.NewWithOptions, NOT the package-level application.NewWindow:
 	// the latter constructs a window but never registers it with the app, so
 	// the process starts, serves assets, and shows nothing.
+	// A window can open straight onto a route (08 §1.3): pop-outs need it, and
+	// so does anyone who wants to launch the app on the view they care about.
+	// Routing is hash-based precisely so this needs no router cooperation.
+	route := ""
+	if len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "#/") {
+		route = os.Args[1]
+	}
+
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "ducklab",
 		Width:     1440,
@@ -63,8 +71,10 @@ func main() {
 		MinWidth:  1024,
 		MinHeight: 700,
 		JS: fmt.Sprintf(
-			`window.ducklab = { baseUrl: %q, token: %q, version: %q };`,
-			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, version,
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q };`+
+				`if (%q) location.hash = %q;`,
+			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Version,
+			route, route,
 		),
 	})
 
