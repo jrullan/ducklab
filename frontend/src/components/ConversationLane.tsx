@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TurnBlock, ToolCall } from "../lib/runview";
 import { ducklingColor } from "../lib/colors";
 import { DuckAvatar } from "./DuckAvatar";
+import { StatusChip } from "./StatusChip";
 
 /**
  * One turn in the conversation.
@@ -44,7 +45,7 @@ export function ConversationTurn({
             🔒
           </span>
         ) : (
-          <DuckAvatar id={block.duckling} roster={roster} />
+          <DuckAvatar id={block.duckling} roster={roster} bobbing={!block.done} />
         )}
         <span style={{ color: tint }}>{who}</span>
         <span className="text-ink-muted">{block.role}</span>
@@ -63,11 +64,16 @@ export function ConversationTurn({
         </ul>
       )}
 
+      {/* A reviewer's turn is already structured. Rendering its raw text put
+          `{"verdict":"approve", "findings":[]}` on screen — the one turn whose
+          content the engine has already parsed, shown as a blob. */}
+      {!streamed && block.verdict && <VerdictBlock block={block} />}
+
       {/* Live tokens while a turn is in flight, the recorded message once it
           is not. Only `streamed` was rendered, and it comes from token_delta
           events that arrive solely during a live run — so a lane showed a
           participant, its tool calls, and no word of what was actually said. */}
-      {(streamed || block.text) && (
+      {(streamed || (block.text && !block.verdict)) && (
         <pre
           data-testid="turn-text"
           className="mt-1 whitespace-pre-wrap font-mono text-sm text-ink-secondary"
@@ -76,6 +82,40 @@ export function ConversationTurn({
         </pre>
       )}
     </article>
+  );
+}
+
+function VerdictBlock({ block }: { block: TurnBlock }) {
+  const approved = block.verdict === "approve";
+  const findings = block.findings ?? [];
+  return (
+    <div className="mt-1" data-testid="turn-verdict" data-verdict={block.verdict}>
+      <StatusChip
+        role={approved ? "good" : "serious"}
+        label={approved ? "approve" : String(block.verdict)}
+      />
+      {findings.length === 0 ? (
+        approved ? null : (
+          <span className="ml-2 text-sm text-ink-muted">no findings given</span>
+        )
+      ) : (
+        <ul className="mt-1 space-y-1">
+          {findings.map((f, i) => (
+            <li key={i} data-testid="finding" className="text-sm">
+              <span className="text-ink-muted">{f.severity}</span>{" "}
+              {f.file && (
+                <span className="font-mono text-xs text-ink-muted">
+                  {f.file}
+                  {f.line ? `:${f.line}` : ""}
+                </span>
+              )}{" "}
+              <span className="text-ink">{f.issue}</span>
+              {f.fix && <span className="text-ink-secondary"> — {f.fix}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

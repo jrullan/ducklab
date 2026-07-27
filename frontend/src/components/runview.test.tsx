@@ -171,3 +171,88 @@ describe("ConversationTurn and the recorded message", () => {
     expect(screen.getByTestId("turn-text").textContent).toBe("Changed ad");
   });
 });
+
+// A reviewer's turn is already structured. Rendering its raw text put
+// {"verdict":"approve", "findings":[]} on screen — the one turn whose content
+// the engine has already parsed, shown to a person as a blob.
+describe("ConversationTurn and a reviewer's verdict", () => {
+  const base = {
+    key: "1:1", round: 1, turn: 1, role: "reviewer", duckling: "pato-dos",
+    toolCalls: [], done: true,
+  };
+
+  it("shows an approval as a verdict, not as JSON", () => {
+    render(
+      <ConversationTurn
+        block={{ ...base, text: '{"verdict":"approve", "findings":[]}', verdict: "approve", findings: [] }}
+        roster={["pato-dos"]}
+      />,
+    );
+    expect(screen.getByTestId("turn-verdict").dataset.verdict).toBe("approve");
+    expect(screen.queryByTestId("turn-text")).toBeNull();
+    expect(screen.queryByText(/"findings"/)).toBeNull();
+  });
+
+  it("lists findings with where and what", () => {
+    render(
+      <ConversationTurn
+        block={{
+          ...base,
+          text: "{...}",
+          verdict: "request-changes",
+          findings: [
+            { severity: "major", file: "add.go", line: 4, issue: "off-by-one", fix: "start at 0" },
+          ],
+        }}
+        roster={["pato-dos"]}
+      />,
+    );
+    const f = screen.getByTestId("finding");
+    expect(f.textContent).toContain("major");
+    expect(f.textContent).toContain("add.go:4");
+    expect(f.textContent).toContain("off-by-one");
+    expect(f.textContent).toContain("start at 0");
+  });
+
+  // Rejecting with nothing to fix is a reviewer failing its job, and the lane
+  // must not make that look like an empty but valid review.
+  it("says so when changes are requested with no findings", () => {
+    render(
+      <ConversationTurn
+        block={{ ...base, text: "{...}", verdict: "request-changes", findings: [] }}
+        roster={["pato-dos"]}
+      />,
+    );
+    expect(screen.getByTestId("turn-verdict").textContent).toContain("no findings given");
+  });
+
+  // An ordinary turn is unaffected.
+  it("still renders prose for a turn with no verdict", () => {
+    render(
+      <ConversationTurn block={{ ...base, role: "implementer", text: "Fixed add.go." }} roster={[]} />,
+    );
+    expect(screen.getByTestId("turn-text").textContent).toBe("Fixed add.go.");
+    expect(screen.queryByTestId("turn-verdict")).toBeNull();
+  });
+});
+
+// A thinking turn looked exactly like a finished one that said nothing, which
+// is the difference between "wait" and "something is wrong".
+describe("the in-flight duck", () => {
+  const block = {
+    key: "1:0", round: 1, turn: 0, role: "implementer", duckling: "pato-uno",
+    toolCalls: [], text: "",
+  };
+
+  it("bobs while the turn is in flight", () => {
+    render(<ConversationTurn block={{ ...block, done: false }} roster={["pato-uno"]} />);
+    expect(screen.getByTestId("duck-avatar").dataset.bobbing).toBe("true");
+    expect(screen.getByTestId("in-flight")).toBeTruthy();
+  });
+
+  it("stops the moment the turn ends", () => {
+    render(<ConversationTurn block={{ ...block, done: true, text: "Done." }} roster={["pato-uno"]} />);
+    expect(screen.getByTestId("duck-avatar").dataset.bobbing).toBe("false");
+    expect(screen.queryByTestId("in-flight")).toBeNull();
+  });
+});

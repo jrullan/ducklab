@@ -11,3 +11,19 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
 }
+
+/* The duck bobs while its turn is in flight (08 §4.4).
+ *
+ * A turn that is thinking looked exactly like one that had finished and said
+ * nothing, which is the difference between "wait" and "something is wrong".
+ * Motion is the honest signal: it stops the moment the turn ends. */
+@keyframes duck-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+.duck-bob { animation: duck-bob 1.1s ease-in-out infinite; }
+
+/* Anyone who asked the system not to animate gets a static duck. */
+@media (prefers-reduced-motion: reduce) {
+  .duck-bob { animation: none; }
+}

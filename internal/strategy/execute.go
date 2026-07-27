@@ -339,14 +339,23 @@ func emitMessage(params *ExecuteParams, round, turn int, role config.Role, duckl
 		return
 	}
 	if text := strings.TrimSpace(outcome.Text); text != "" {
-		emit(params, "message", map[string]interface{}{
+		data := map[string]interface{}{
 			"round": round, "turn": turn,
 			"role": string(role), "duckling": string(duckling),
 			"content":    text,
 			"tokens_in":  outcome.TokensIn,
 			"tokens_out": outcome.TokensOut,
 			"repairs":    outcome.Repairs,
-		})
+		}
+		// A reviewer's turn is a verdict, not prose. Sending only the raw text
+		// left the lane showing `{"verdict":"approve", "findings":[]}` — the
+		// one turn whose content is already structured, displayed as a blob.
+		// The raw text stays: it is what the model actually returned.
+		if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil {
+			data["verdict"] = v.Verdict
+			data["findings"] = v.Findings
+		}
+		emit(params, "message", data)
 	}
 	for _, tc := range outcome.ToolCalls {
 		data := map[string]interface{}{

@@ -31,6 +31,19 @@ export interface TurnBlock {
   toolCalls: ToolCall[];
   text: string;
   done: boolean;
+  /** A reviewer's turn is a verdict, not prose. Present only when the engine
+   * parsed one, so the lane can render findings instead of a JSON blob. */
+  verdict?: string;
+  findings?: Finding[];
+}
+
+/** One thing a reviewer objected to. */
+export interface Finding {
+  severity: string;
+  file?: string;
+  line?: number;
+  issue: string;
+  fix?: string;
 }
 
 export interface GateState {
@@ -92,8 +105,12 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         // rendered a participant header above an empty bubble even when the
         // engine had the content.
         const content = String(d.content ?? "");
+        const verdict = d.verdict ? String(d.verdict) : undefined;
+        const findings = Array.isArray(d.findings) ? (d.findings as Finding[]) : undefined;
         if (current) {
           current.text = content;
+          current.verdict = verdict;
+          current.findings = findings;
         } else {
           // A message outside a turn still belongs in the lane rather than
           // being dropped on the floor.
@@ -106,6 +123,8 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
             toolCalls: [],
             text: content,
             done: true,
+            verdict,
+            findings,
           });
         }
         break;
