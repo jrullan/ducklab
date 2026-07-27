@@ -48,3 +48,49 @@ describe("parseProse", () => {
     );
   });
 });
+
+describe("parseProse, the constructs a spec actually contains", () => {
+  it("renders a sub-heading as a heading, not as literal hashes", () => {
+    const blocks = parseProse("### Clients\n\n- Admins can create clients.");
+    expect(blocks[0]).toEqual({
+      kind: "heading",
+      level: 3,
+      spans: [{ kind: "text", text: "Clients" }],
+    });
+  });
+
+  it("parses a table instead of spilling its pipes into a paragraph", () => {
+    const blocks = parseProse(
+      "| Role | Permissions |\n|------|-------------|\n| **Empleado** | Log hours |\n| **Gerente** | Approve |",
+    );
+    expect(blocks).toHaveLength(1);
+    const t = blocks[0]!;
+    expect(t.kind).toBe("table");
+    if (t.kind !== "table") return;
+    expect(t.head.map((c) => c.map((s) => s.text).join(""))).toEqual(["Role", "Permissions"]);
+    expect(t.rows).toHaveLength(2); // the |---| separator is not a row
+    expect(t.rows[0]![0]![0]).toEqual({ kind: "strong", text: "Empleado" });
+  });
+
+  it("treats --- as a rule rather than printing it", () => {
+    const blocks = parseProse("Some prose.\n\n---\n");
+    expect(blocks.map((b) => b.kind)).toEqual(["para", "rule"]);
+  });
+
+  // The view renders the traceability edge itself, so leaving it in the prose
+  // showed every spec section's Implements twice.
+  it("drops field lines the view renders separately", () => {
+    const blocks = parseProse("**Implements:** REQ-001, REQ-007\n\nA single-tenant app.");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.kind === "para" && blocks[0]!.spans[0]!.text).toBe("A single-tenant app.");
+  });
+
+  it("keeps field lines the view does not render, like Assumption", () => {
+    const blocks = parseProse("**Assumption:** single tenant.");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.kind === "para" && blocks[0]!.spans[0]).toEqual({
+      kind: "strong",
+      text: "Assumption:",
+    });
+  });
+});

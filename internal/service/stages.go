@@ -232,9 +232,20 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	if err != nil {
 		return nil, err
 	}
+	// Read the proposal before promoting: Promote removes the file, and its
+	// frontmatter is where the producing run's id lives.
+	runID := ""
+	if proposed, _ := artifact.LoadProposed(entry.Path, artifact.Kind(kind)); proposed != nil {
+		runID = proposed.Front.RunID
+	}
 	if _, err := artifact.Promote(entry.Path, artifact.Kind(kind), approvedBy); err != nil {
 		return nil, err
 	}
+	// Close the run that produced it. Promoting answered its gate, and a run
+	// left paused on a question already decided sits in the inbox forever:
+	// three of them had accumulated on the timesheet project, each still
+	// claiming to be waiting for an answer that had been given hours before.
+	s.resolveStageRun(runID, approvedBy)
 	// The trace check runs on promotion, not on demand: an artifact accepted
 	// into a broken spine should say so immediately, while the person who
 	// accepted it is still looking.
@@ -243,6 +254,36 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 		return nil, err
 	}
 	return map[string]interface{}{"promoted": kind, "trace_errors": errs}, nil
+}
+
+// resolveStageRun marks the run behind an accepted artifact as finished.
+//
+// It is deliberately not RunAccept: that path commits a diff, and a document
+// stage produced no diff to commit. What it owes is the gate — clear the
+// pending block, record who decided, and let the run leave the inbox.
+func (s *Service) resolveStageRun(runID, approvedBy string) {
+	if runID == "" {
+		return
+	}
+	s.runsMu.RLock()
+	rs, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok || rs.run.Status != "paused" {
+		return
+	}
+	rs.run.Status = "done"
+	rs.run.Accepted = true
+	rs.run.Resolution = "accepted by " + approvedBy
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
+	// ensureWriter attaches the bus hook, so appending here is what tells a
+	// connected desktop the run has left the inbox — no refresh needed.
+	if w, err := s.ensureWriter(rs); err == nil {
+		w.AppendEvent("gate_resolved", map[string]interface{}{
+			"resolution": "accepted", "by": approvedBy,
+		})
+		w.WriteState()
+	}
 }
 
 // TraceCheck walks the spine. Deterministic and model-free.

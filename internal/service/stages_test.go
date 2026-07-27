@@ -266,3 +266,60 @@ func TestTaskStatusFollowsTheNewestRun(t *testing.T) {
 		t.Errorf("T-001 = %q, want accepted: the newest run was accepted, the older one only paused", tasks[0].Status)
 	}
 }
+
+// Promoting an artifact answers the gate its run is paused on. Without this
+// the run stays paused forever, and the inbox fills with gates that were
+// decided hours ago — three had piled up on a real project before anyone
+// noticed, because no view listed runs until one did.
+//
+// The run and the proposal are built directly rather than produced by a stage:
+// what is under test is the promote path, not whether a fake model can write
+// requirements.
+func TestPromotingAnArtifactClosesItsRun(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-stage", ProjectID: id, Stage: "intake", Mode: "council",
+		Status: "paused", Verdict: "UNVERIFIED", PendingKind: "gate",
+		PendingSince: time.Now().UTC().Format(time.RFC3339),
+		StartedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	doc := &artifact.Document{
+		Front:    artifact.Frontmatter{Kind: artifact.KindRequirements, RunID: run.ID},
+		Sections: []artifact.Section{{ID: "REQ-001", Title: "A requirement", Body: "Text."}},
+	}
+	if err := artifact.WriteProposal(entry.Path, artifact.KindRequirements, doc, run.ID, []string{"pato-uno"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ArtifactPromote(context.Background(), id, "requirements", "human"); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := detail.Run
+	if got.Status != "done" {
+		t.Errorf("status = %q, want done: the gate it waits on has been answered", got.Status)
+	}
+	if got.PendingKind != "" {
+		t.Errorf("pending_kind = %q, want empty: it is not waiting for anyone", got.PendingKind)
+	}
+	if !got.Accepted {
+		t.Error("accepted = false after a human promoted its artifact")
+	}
+}

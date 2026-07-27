@@ -5,6 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { money, waitingFor } from "../lib/format";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
+import { runLabel } from "../lib/runview";
 
 /** The cockpit: what is running, what is waiting, what it has cost. */
 export function Overview({ spentToday, budget }: { spentToday: number; budget: number }) {
@@ -40,7 +41,7 @@ export function Overview({ spentToday, budget }: { spentToday: number; budget: n
               <li key={r.id} className="flex items-center gap-3 py-1">
                 <StatusChip role="serious" label={r.pending_kind ?? "waiting"} />
                 <a href={routeHref({ name: "run", id: r.id })} className="text-ink-secondary underline">
-                  {r.task_id}
+                  {runLabel(r)}
                 </a>
                 <span className="text-ink-muted">{waitingFor(r.pending_since ?? "")}</span>
               </li>
@@ -59,7 +60,7 @@ export function Overview({ spentToday, budget }: { spentToday: number; budget: n
               <li key={r.id} className="flex items-center gap-3 py-1" data-testid="run-row">
                 <StatusChip role={runStatusRole(r.status)} label={r.status} />
                 <a href={routeHref({ name: "run", id: r.id })} className="text-ink underline">
-                  {r.task_id}
+                  {runLabel(r)}
                 </a>
                 <span className="text-ink-secondary">{r.mode}</span>
               </li>

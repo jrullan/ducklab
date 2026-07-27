@@ -5,6 +5,7 @@ import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { Overview } from "../views/Overview";
+import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
@@ -169,7 +170,11 @@ export function App() {
         {error && <p className="m-4 text-critical" data-testid="app-error">{error}</p>}
 
         {route.name === "overview" && <Overview spentToday={0} budget={2} />}
-        {route.name === "runs" && <Overview spentToday={0} budget={2} />}
+        {route.name === "runs" && (
+          <div className="p-4">
+            <Runs runs={Object.values(runs)} />
+          </div>
+        )}
         {route.name === "run" && client && <RunView runId={route.id} client={client} />}
         {route.name === "cycle" &&
           (client && projectId ? (

@@ -272,3 +272,13 @@ export function orderDiffFiles(files: readonly DiffFile[]): DiffFile[] {
 export function touchesTests(files: readonly DiffFile[]): boolean {
   return files.some((f) => f.isTest);
 }
+
+/** What to call a run in a list.
+ *
+ * Rows used to be labelled with task_id alone, which is empty for the artifact
+ * stages — intake, spec and plan carry no task. Those rows rendered an anchor
+ * with no text: invisible, unclickable, and the only runs that ever pause at a
+ * human gate. */
+export function runLabel(run: { task_id?: string; stage?: string; id: string }): string {
+  return run.task_id || run.stage || run.id;
+}

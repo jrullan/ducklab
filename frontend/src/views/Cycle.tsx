@@ -196,21 +196,68 @@ export function Cycle({
 function Prose({ body }: { body: string }) {
   return (
     <div className="mt-2 space-y-2 text-sm text-ink-secondary">
-      {parseProse(body).map((b, i) =>
-        b.kind === "list" ? (
-          <ul key={i} className="list-disc space-y-1 pl-5">
-            {b.items.map((spans, j) => (
-              <li key={j}>
-                <Spans spans={spans} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p key={i}>
-            <Spans spans={b.spans} />
-          </p>
-        ),
-      )}
+      {parseProse(body).map((b, i) => {
+        switch (b.kind) {
+          case "rule":
+            return <hr key={i} className="border-hairline" />;
+          case "heading":
+            return (
+              <h4 key={i} className="mt-3 text-sm font-medium text-ink">
+                <Spans spans={b.spans} />
+              </h4>
+            );
+          case "table":
+            // Wide tables scroll inside their own box; the page never scrolls
+            // sideways.
+            return (
+              <div key={i} className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  {b.head.length > 0 && (
+                    <thead>
+                      <tr>
+                        {b.head.map((c, j) => (
+                          <th
+                            key={j}
+                            className="border-b border-hairline px-2 py-1 text-left font-medium text-ink"
+                          >
+                            <Spans spans={c} />
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody>
+                    {b.rows.map((r, j) => (
+                      <tr key={j}>
+                        {r.map((c, k) => (
+                          <td key={k} className="border-b border-hairline px-2 py-1 align-top">
+                            <Spans spans={c} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          case "list":
+            return (
+              <ul key={i} className="list-disc space-y-1 pl-5">
+                {b.items.map((spans, j) => (
+                  <li key={j}>
+                    <Spans spans={spans} />
+                  </li>
+                ))}
+              </ul>
+            );
+          default:
+            return (
+              <p key={i}>
+                <Spans spans={b.spans} />
+              </p>
+            );
+        }
+      })}
     </div>
   );
 }
