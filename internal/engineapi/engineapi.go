@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -100,10 +102,23 @@ func (s *Server) routes() {
 // allowedOrigins are the only origins permitted to call the engine.
 // 07 §1 forbids a wildcard: the engine is loopback-only and token-guarded,
 // and a wildcard would let any page in a browser probe it.
+func allowedOriginList() string {
+	out := make([]string, 0, len(allowedOrigins))
+	for o := range allowedOrigins {
+		out = append(out, o)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+// The Linux webview loads "wails://" and sends Origin: wails://localhost.
+// These values were MEASURED from a running app, not guessed: the earlier
+// list was invented and every request the desktop made was refused, which the
+// browser reports only as "Load failed" with no origin named.
 var allowedOrigins = map[string]bool{
-	"wails://wails":           true,
-	"wails.localhost":         true,
-	"http://wails.localhost":  true,
+	"wails://localhost":       true, // Linux (GTK/WebKitGTK) and macOS
+	"wails://wails":           true, // Windows (WebView2)
+	"http://wails.localhost":  true, // Windows, older WebView2 builds
 	"https://wails.localhost": true,
 }
 
@@ -111,6 +126,13 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return // non-browser client; no CORS headers needed
+	}
+	if !allowedOrigins[origin] {
+		// A refused origin is the single hardest failure to diagnose from the
+		// client side: the browser reports only "Load failed" and never says
+		// which origin was rejected. Say it here.
+		log.Printf("cors: refused origin %q (allowed: %s)", origin, allowedOriginList())
+		return
 	}
 	if allowedOrigins[origin] {
 		w.Header().Set("Access-Control-Allow-Origin", origin)

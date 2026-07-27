@@ -410,3 +410,23 @@ func TestMalformedAuthorizationIsRejected(t *testing.T) {
 		t.Error("a non-Bearer Authorization header was accepted")
 	}
 }
+
+// The origins here were measured from a running desktop app. An invented
+// allowlist refuses every request the app makes, and the browser reports only
+// "Load failed" without naming the origin — so this list is worth pinning.
+func TestWailsOriginsAreAllowed(t *testing.T) {
+	for _, origin := range []string{
+		"wails://localhost",      // Linux and macOS
+		"wails://wails",          // Windows WebView2
+		"http://wails.localhost", // older WebView2
+		"https://wails.localhost",
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/v1/runs", nil)
+		r.Header.Set("Origin", origin)
+		setCORS(w, r)
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Errorf("origin %q was refused; the desktop app could not reach the engine", origin)
+		}
+	}
+}
