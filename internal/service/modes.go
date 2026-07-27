@@ -30,7 +30,7 @@ type loopCache struct {
 	svc     *Service
 	tracker *budget.Tracker
 	writer  agent.RunLogWriter
-	onDelta func(config.Role, config.DucklingID, string)
+	onDelta func(*agent.Turn, string)
 	mu      sync.Mutex
 	loops   map[config.DucklingID]*agent.Loop
 }
@@ -141,7 +141,7 @@ func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config
 
 // runnerFor returns a TurnRunner that picks the loop matching each turn's role.
 func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.DucklingID, ectx *tools.ExecContext) strategy.TurnRunner {
-	return func(ctx context.Context, t *strategy.Turn, d config.DucklingID, prompt string, belt []string) (*agent.Outcome, error) {
+	return func(ctx context.Context, t *strategy.Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
 		if d == "" {
 			d = roster[t.Role]
 		}
@@ -157,6 +157,7 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 		return agent.RunTurn(ctx, loop, &agent.Turn{
 			Role: t.Role, Duckling: d, Prompt: prompt, Toolbelt: belt,
 			Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
+			Round: round, Index: index,
 		}, &turnCtx)
 	}
 }

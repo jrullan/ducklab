@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { DeltaBatcher, mergeDeltas } from "./batcher";
 import type { DucklabEvent } from "./events";
 
-const delta = (duckling: string, text: string, run = "r-1"): DucklabEvent =>
-  ({ type: "token_delta", run_id: run, data: { duckling, text } });
+const delta = (duckling: string, text: string, run = "r-1", round = 1, turn = 0): DucklabEvent =>
+  ({ type: "token_delta", run_id: run, data: { duckling, text, round, turn } });
 
 describe("DeltaBatcher", () => {
   // AC-33: one store update per frame, not one per token.
@@ -56,18 +56,31 @@ describe("DeltaBatcher", () => {
 });
 
 describe("mergeDeltas", () => {
-  it("concatenates per run and per duckling", () => {
+  it("concatenates per run and per turn", () => {
     const merged = mergeDeltas([
-      delta("pato-uno", "func "), delta("pato-dos", "{"), delta("pato-uno", "Add"),
+      delta("pato-uno", "func ", "r-1", 1, 0),
+      delta("pato-dos", "{", "r-1", 1, 1),
+      delta("pato-uno", "Add", "r-1", 1, 0),
     ]);
-    expect(merged.get("r-1")!.get("pato-uno")).toBe("func Add");
-    expect(merged.get("r-1")!.get("pato-dos")).toBe("{");
+    expect(merged.get("r-1")!.get("1:0")).toBe("func Add");
+    expect(merged.get("r-1")!.get("1:1")).toBe("{");
+  });
+
+  // A council takes two architect turns. Keyed by duckling, the second one
+  // appended to the first and both lanes showed the concatenation.
+  it("keeps two turns by the same duckling apart", () => {
+    const merged = mergeDeltas([
+      delta("pato-uno", "draft", "r-1", 1, 0),
+      delta("pato-uno", "revision", "r-1", 1, 3),
+    ]);
+    expect(merged.get("r-1")!.get("1:0")).toBe("draft");
+    expect(merged.get("r-1")!.get("1:3")).toBe("revision");
   });
 
   it("keeps runs separate", () => {
     const merged = mergeDeltas([delta("a", "x", "r-1"), delta("a", "y", "r-2")]);
-    expect(merged.get("r-1")!.get("a")).toBe("x");
-    expect(merged.get("r-2")!.get("a")).toBe("y");
+    expect(merged.get("r-1")!.get("1:0")).toBe("x");
+    expect(merged.get("r-2")!.get("1:0")).toBe("y");
   });
 
   it("drops a delta with no run id rather than inventing one", () => {

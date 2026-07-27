@@ -21,7 +21,7 @@ type recorder struct {
 
 func (r *recorder) runner(outcomes ...*agent.Outcome) TurnRunner {
 	i := 0
-	return func(ctx context.Context, t *Turn, d config.DucklingID, prompt string, belt []string) (*agent.Outcome, error) {
+	return func(ctx context.Context, t *Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
 		r.prompts = append(r.prompts, prompt)
 		r.roles = append(r.roles, t.Role)
 		r.ducklings = append(r.ducklings, d)

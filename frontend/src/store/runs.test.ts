@@ -32,21 +32,32 @@ describe("event application", () => {
   // UI's record diverge from events.jsonl.
   it("accumulates token_delta separately and never in the event log", () => {
     const s = useRuns.getState();
-    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "pato-uno", text: "func " } });
-    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "pato-uno", text: "Add" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "pato-uno", round: 1, turn: 0, text: "func " } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "pato-uno", round: 1, turn: 0, text: "Add" } });
 
     const st = useRuns.getState();
-    expect(st.deltas["r-1"]?.["pato-uno"]).toBe("func Add");
+    expect(st.deltas["r-1"]?.["1:0"]).toBe("func Add");
     expect(st.events["r-1"] ?? []).toHaveLength(0);
   });
 
-  it("keeps deltas per duckling so lanes do not interleave", () => {
+  it("keeps deltas per turn so lanes do not interleave", () => {
     const s = useRuns.getState();
-    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "a", text: "one" } });
-    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "b", text: "two" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "a", round: 1, turn: 0, text: "one" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "b", round: 1, turn: 1, text: "two" } });
     const d = useRuns.getState().deltas["r-1"]!;
-    expect(d["a"]).toBe("one");
-    expect(d["b"]).toBe("two");
+    expect(d["1:0"]).toBe("one");
+    expect(d["1:1"]).toBe("two");
+  });
+
+  // The same duckling speaking twice — a council's architect drafts and then
+  // revises. Keyed by duckling, the revision appended to the draft.
+  it("keeps two turns by the same duckling apart", () => {
+    const s = useRuns.getState();
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "a", round: 1, turn: 0, text: "draft" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { duckling: "a", round: 1, turn: 3, text: "revision" } });
+    const d = useRuns.getState().deltas["r-1"]!;
+    expect(d["1:0"]).toBe("draft");
+    expect(d["1:3"]).toBe("revision");
   });
 
   it("ignores heartbeats", () => {

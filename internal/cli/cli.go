@@ -764,6 +764,8 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 			fmt.Printf("    ! policy: %v\n", e.Data["detail"])
 		case "gate":
 			fmt.Printf("  gate %v: exit %v\n", e.Data["gate"], e.Data["exit"])
+		case "round_gate":
+			fmt.Printf("  round %v: %v\n", e.Data["round"], e.Data["result"])
 		case "verdict":
 			verdict, _ = e.Data["verdict"].(string)
 			fmt.Printf("  verdict: %s\n", verdict)

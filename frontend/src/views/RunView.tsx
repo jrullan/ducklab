@@ -163,7 +163,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               <ConversationTurn
                 block={t}
                 roster={roster}
-                streamed={t.duckling ? deltas[t.duckling] : undefined}
+                streamed={deltas[`${t.round}:${t.turn}`]}
               />
             )}
           </VirtualList>

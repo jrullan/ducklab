@@ -575,7 +575,9 @@ type RunRequest struct {
 	Verify       string         `json:"verify"`
 	Budget       *budget.Budget `json:"budget"`
 	Autonomy     string         `json:"autonomy"`
-	Stream       bool           `json:"stream"`
+	// NoStream turns off token streaming for this run. The default is to
+	// stream, because the desktop exists to watch a run happen.
+	NoStream     bool           `json:"no_stream"`
 	DryRun       bool           `json:"dry_run"`
 	Parallel     bool           `json:"parallel"`
 	UnsafeWrites bool           `json:"unsafe_writes"`
@@ -615,7 +617,19 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		TaskID:       req.TaskID,
 		Status:       "running",
 		StartedAt:    time.Now().UTC().Format(time.RFC3339),
-		Stream:       req.Stream,
+		// Streaming on unless a caller opts out.
+		//
+		// It used to be off unless a client asked, and no client ever asked —
+		// so onDelta was never installed, chatMaybeStreaming always took the
+		// non-streaming branch, and not one token_delta was published in the
+		// project's history. The whole streaming path, batcher and delta store
+		// included, was dead code guarded by a flag nobody set.
+		//
+		// Defaulting it on is safe: streaming is display-only (01 §5.2), the
+		// contract and tool dispatch always read the assembled response, and
+		// an endpoint that cannot stream falls back and emits the finished
+		// text as a single delta.
+		Stream:       !req.NoStream,
 		DryRun:       req.DryRun,
 		UnsafeWrites: req.UnsafeWrites,
 		Autonomy:     req.Autonomy,
@@ -815,12 +829,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// token_delta is never persisted (01 §5.3): it is display state, and
 		// writing it would bloat events.jsonl with data no resume needs.
 		runID, projectID := rs.run.ID, rs.run.ProjectID
-		cache.onDelta = func(role config.Role, d config.DucklingID, text string) {
+		cache.onDelta = func(t *agent.Turn, text string) {
 			s.bus.Publish(bus.Event{
 				Type: "token_delta", RunID: runID, ProjectID: projectID,
 				TS: time.Now(),
 				Data: map[string]interface{}{
-					"role": string(role), "duckling": string(d), "text": text,
+					"role": string(t.Role), "duckling": string(t.Duckling),
+					// Which turn, not just which duckling: a council's second
+					// architect turn must not append to the first one's text.
+					"round": t.Round, "turn": t.Index,
+					"text": text,
 				},
 			})
 		}
@@ -1012,7 +1030,8 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		TaskID:       rs.run.TaskID,
 		Mode:         rs.run.Mode,
 		Autonomy:     rs.run.Autonomy,
-		Stream:       rs.run.Stream,
+		// A resumed run keeps whatever it was started with.
+		NoStream:     !rs.run.Stream,
 		UnsafeWrites: rs.run.UnsafeWrites,
 	}
 

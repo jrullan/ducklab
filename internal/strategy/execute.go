@@ -16,7 +16,10 @@ import (
 // Injected rather than called directly so the round scheduler — the part that
 // must be deterministic — can be tested without a provider, a repo, or a
 // model. The default implementation calls agent.RunTurn.
-type TurnRunner func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string) (*agent.Outcome, error)
+// round and index identify WHICH turn this is, not just what kind. Streamed
+// tokens have to be attributable to one turn: keyed by duckling alone, a
+// council's second architect turn appended to the first one's text.
+type TurnRunner func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, round, index int) (*agent.Outcome, error)
 
 // GateRunner runs the project's verification and reports green/red/none.
 type GateRunner func(ctx context.Context) (gate string, log string, err error)
@@ -138,7 +141,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				"round": round, "turn": i, "role": string(turn.Role), "duckling": string(duckling),
 			})
 
-			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt)
+			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, round, i)
 			if outcome != nil {
 				result.Outcome = outcome
 			}
@@ -190,7 +193,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				return result, err
 			}
 			state.Gate = gate
-			emit(params, "gate", map[string]interface{}{"gate": gate, "round": round})
+			// round_gate, not gate: the two carry different things under the same
+			// name otherwise. The service's "gate" reports a verification —
+			// which command ran and what it exited with. This reports a round's
+			// outcome, green or red. A consumer taking the latest "gate" event
+			// got whichever happened to come last, and the desktop's gate card
+			// showed the right thing only because of event ordering.
+			emit(params, "round_gate", map[string]interface{}{"result": gate, "round": round})
 			_ = log
 		}
 		state.Changed = true
@@ -291,8 +300,10 @@ func registryFrom(params *ExecuteParams) *tools.Registry {
 }
 
 func defaultRunner(params *ExecuteParams) TurnRunner {
-	return func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string) (*agent.Outcome, error) {
+	return func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, round, index int) (*agent.Outcome, error) {
 		return agent.RunTurn(ctx, params.AgentLoop, &agent.Turn{
+			Round:     round,
+			Index:     index,
 			Role:      t.Role,
 			Duckling:  duckling,
 			Prompt:    prompt,

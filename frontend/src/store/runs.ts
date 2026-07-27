@@ -61,10 +61,13 @@ export const useRuns = create<RunsState>((set) => ({
       // token_delta is display state: it accumulates text but is never added
       // to the event log, which mirrors the engine never persisting it.
       if (e.type === "token_delta") {
-        const duckling = String(e.data?.duckling ?? "unknown");
+        // Keyed by turn, not by duckling. A council takes two architect
+        // turns, and keyed by duckling the second one appended to the first
+        // one's text and both lanes showed the concatenation.
+        const key = deltaKey(e.data);
         const text = String(e.data?.text ?? "");
         const forRun = { ...(state.deltas[runId] ?? {}) };
-        forRun[duckling] = (forRun[duckling] ?? "") + text;
+        forRun[key] = (forRun[key] ?? "") + text;
         return { ...state, deltas: { ...state.deltas, [runId]: forRun } };
       }
       if (e.type === "heartbeat") return state;
@@ -174,4 +177,9 @@ export function pendingForHuman(runs: Record<string, Run>): Run[] {
   return Object.values(runs)
     .filter((r) => r.status === "paused" && !!r.pending_kind)
     .sort((a, b) => (a.pending_since ?? "").localeCompare(b.pending_since ?? ""));
+}
+
+/** The key a streamed fragment accumulates under: one turn of one run. */
+export function deltaKey(data: Record<string, unknown> | undefined): string {
+  return `${Number(data?.round ?? 1)}:${Number(data?.turn ?? 0)}`;
 }

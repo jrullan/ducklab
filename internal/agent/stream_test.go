@@ -59,7 +59,7 @@ func TestStreamingEmitsDeltas(t *testing.T) {
 
 	var mu sync.Mutex
 	var got []string
-	loop.OnDelta = func(role config.Role, d config.DucklingID, text string) {
+	loop.OnDelta = func(_ *Turn, text string) {
 		mu.Lock()
 		got = append(got, text)
 		mu.Unlock()
@@ -105,7 +105,7 @@ func TestUnsupportedStreamingFallsBackToOneDelta(t *testing.T) {
 	loop := testLoop(p, 2)
 
 	var got []string
-	loop.OnDelta = func(role config.Role, d config.DucklingID, text string) {
+	loop.OnDelta = func(_ *Turn, text string) {
 		got = append(got, text)
 	}
 	turn := &Turn{Role: config.RoleImplementer, Prompt: "x", Contract: "freeform", MaxTurns: 1}
@@ -129,7 +129,7 @@ func TestSlowDeltaConsumerDoesNotAffectTheResult(t *testing.T) {
 
 	var count int
 	var mu sync.Mutex
-	loop.OnDelta = func(role config.Role, d config.DucklingID, text string) {
+	loop.OnDelta = func(_ *Turn, text string) {
 		mu.Lock()
 		count++
 		mu.Unlock()
@@ -160,8 +160,8 @@ func TestDeltasCarryRoleAndDuckling(t *testing.T) {
 
 	var gotRole config.Role
 	var gotDuckling config.DucklingID
-	loop.OnDelta = func(role config.Role, d config.DucklingID, text string) {
-		gotRole, gotDuckling = role, d
+	loop.OnDelta = func(tn *Turn, _ string) {
+		gotRole, gotDuckling = tn.Role, loop.Duckling.ID
 	}
 	turn := &Turn{Role: config.RoleReviewer, Prompt: "x", Contract: "freeform", MaxTurns: 1}
 	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {

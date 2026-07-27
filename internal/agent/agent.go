@@ -27,6 +27,11 @@ type Turn struct {
 	Contract  string
 	MaxTurns  int
 	Anonymize bool
+	// Round and Index identify this turn within the run, so streamed tokens
+	// can be attached to it rather than to whichever turn the same duckling
+	// took last.
+	Round int
+	Index int
 }
 
 // Outcome is the result of a turn.
@@ -72,7 +77,7 @@ type Loop struct {
 	MaxTurns       int
 	RepairAttempts int
 	// OnDelta, if set, receives streamed text as it arrives. Display only.
-	OnDelta func(role config.Role, duckling config.DucklingID, text string)
+	OnDelta func(turn *Turn, text string)
 	// RunWriter, if set, receives LLM call records.
 	RunWriter RunLogWriter
 }
@@ -392,7 +397,7 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		defer close(done)
 		for d := range ch {
 			if d.Text != "" {
-				loop.OnDelta(turn.Role, loop.Duckling.ID, d.Text)
+				loop.OnDelta(turn, d.Text)
 			}
 		}
 	}()
@@ -408,7 +413,7 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		resp, err = loop.Provider.Chat(ctx, req)
 		if err == nil && len(resp.Choices) > 0 {
 			if text := resp.Choices[0].Message.Content; text != "" {
-				loop.OnDelta(turn.Role, loop.Duckling.ID, text)
+				loop.OnDelta(turn, text)
 			}
 		}
 	}

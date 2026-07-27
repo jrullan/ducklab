@@ -62,7 +62,7 @@ func (f *tourFixture) params(t *testing.T) *TournamentParams {
 			return nil
 		},
 	}
-	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string) (*agent.Outcome, error) {
+	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
 		if turn.Role == config.RoleJudge {
 			return &agent.Outcome{Text: "judged", Parsed: f.judgeOut}, nil
 		}
@@ -219,11 +219,11 @@ func TestJudgePromptIsAnonymous(t *testing.T) {
 	p := f.params(t)
 	var judgePrompt string
 	inner := p.Runner
-	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string) (*agent.Outcome, error) {
+	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
 		if turn.Role == config.RoleJudge {
 			judgePrompt = prompt
 		}
-		return inner(ctx, turn, d, prompt, belt)
+		return inner(ctx, turn, d, prompt, belt, round, index)
 	}
 	if _, err := ExecuteTournament(context.Background(), p); err != nil {
 		t.Fatal(err)

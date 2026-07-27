@@ -231,7 +231,7 @@ func runContestant(ctx context.Context, p *TournamentParams, i int) (e struct {
 	if runner == nil {
 		runner = defaultRunner(&p.ExecuteParams)
 	}
-	if _, err := runner(ctx, turn, duckling, p.Prompt, belt); err != nil {
+	if _, err := runner(ctx, turn, duckling, p.Prompt, belt, 1, i); err != nil {
 		e.err = fmt.Errorf("contestant %d: %w", i, err)
 		return e
 	}
@@ -280,7 +280,7 @@ func judge(ctx context.Context, p *TournamentParams, cands []conv.Candidate) (*a
 		duckling = p.Roster[config.RoleJudge]
 	}
 
-	out, err := runner(ctx, turn, duckling, prompt, belt)
+	out, err := runner(ctx, turn, duckling, prompt, belt, 1, p.Contestants)
 	if err != nil {
 		return nil, err
 	}

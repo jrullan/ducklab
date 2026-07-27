@@ -1,3 +1,4 @@
+import { deltaKey } from "../store/runs";
 import type { DucklabEvent } from "./events";
 
 /**
@@ -47,24 +48,24 @@ export class DeltaBatcher {
 }
 
 /**
- * Merges a batch of deltas into one text fragment per (run, duckling).
+ * Merges a batch of deltas into one text fragment per (run, turn).
  *
  * Concatenating here rather than in the store means the store performs one
- * assignment per duckling per frame instead of one per token.
+ * assignment per turn per frame instead of one per token.
  */
 export function mergeDeltas(batch: readonly DucklabEvent[]): Map<string, Map<string, string>> {
   const byRun = new Map<string, Map<string, string>>();
   for (const e of batch) {
     const runId = e.run_id ?? "";
     if (!runId) continue;
-    const duckling = String(e.data?.duckling ?? "unknown");
+    const key = deltaKey(e.data);
     const text = String(e.data?.text ?? "");
     let forRun = byRun.get(runId);
     if (!forRun) {
       forRun = new Map();
       byRun.set(runId, forRun);
     }
-    forRun.set(duckling, (forRun.get(duckling) ?? "") + text);
+    forRun.set(key, (forRun.get(key) ?? "") + text);
   }
   return byRun;
 }
