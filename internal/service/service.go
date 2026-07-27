@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
@@ -344,9 +345,7 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	id := slugify(filepath.Base(absPath))
 	cfg := config.DefaultProject(id, name)
 	cfg.Created = time.Now().UTC().Format(time.RFC3339)
-	if req.Describe != "" {
-		// TODO: set description
-	}
+	cfg.Describe = req.Describe
 	// Auto-detect gate
 	gate, gateCmd, err := verify.Detect(absPath)
 	if err == nil {
@@ -416,6 +415,61 @@ func (s *Service) ProjectList(ctx context.Context) ([]*Project, error) {
 	return projects, nil
 }
 
+// ProjectGet returns a registered project by id.
+//
+// The GET /v1/projects/{id} handler used to call ProjectOpen with the id,
+// which takes a path: the id was resolved relative to the engine's working
+// directory and the endpoint answered 404 for every project that existed.
+func (s *Service) ProjectGet(ctx context.Context, id string) (*Project, error) {
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	return s.ProjectOpen(ctx, entry.Path)
+}
+
+// ProjectUpdate applies dotted keys to a project's config and saves it.
+//
+// Keys are applied to a copy and written only if every one of them is valid,
+// so a typo in the second key cannot leave the first half-applied.
+func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]string) (*Project, error) {
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(entry.Path, ".ducklab", "project.toml")
+	cfg, err := config.LoadProject(path)
+	if err != nil {
+		return nil, err
+	}
+	updated := *cfg
+	for _, k := range sortedKeys(keys) {
+		if err := config.SetKey(&updated, k, keys[k]); err != nil {
+			return nil, err
+		}
+	}
+	if err := config.SaveProject(path, &updated); err != nil {
+		return nil, err
+	}
+	// The registry carries the display name too, so a rename that only reached
+	// project.toml would leave `project list` showing the old one.
+	if updated.Name != cfg.Name {
+		if err := s.registry.Rename(id, updated.Name); err != nil {
+			return nil, err
+		}
+	}
+	return s.ProjectOpen(ctx, entry.Path)
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ProjectStatus returns project status.
 func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error) {
 	entry, err := s.registry.Get(id)
@@ -444,9 +498,37 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 		taskCounts[t.Status]++
 	}
 	return &Status{
-		TaskCounts: taskCounts,
-		ActiveRuns: active,
+		StageProgress: stageProgress(entry.Path),
+		TaskCounts:    taskCounts,
+		ActiveRuns:    active,
 	}, nil
+}
+
+// stageProgress reports where each artifact stage stands. It was never
+// populated, so `stage_progress` came back null and no client could show the
+// one thing the cycle view exists to show.
+func stageProgress(root string) map[string]string {
+	out := map[string]string{}
+	for stage, kind := range map[string]artifact.Kind{
+		"intake": artifact.KindRequirements,
+		"spec":   artifact.KindSpec,
+		"plan":   artifact.KindPlan,
+	} {
+		doc, err := artifact.Load(root, kind)
+		switch {
+		case err != nil:
+			out[stage] = "unknown"
+		case doc == nil || len(doc.Sections) == 0:
+			if prop, _ := artifact.LoadProposed(root, kind); prop != nil && len(prop.Sections) > 0 {
+				out[stage] = "proposed"
+			} else {
+				out[stage] = "empty"
+			}
+		default:
+			out[stage] = "approved"
+		}
+	}
+	return out
 }
 
 // DucklingList lists ducklings.

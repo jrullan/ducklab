@@ -238,6 +238,7 @@ type Project struct {
 	Schema   int         `toml:"schema" json:"schema"`
 	ID       string      `toml:"id" json:"id"`
 	Name     string      `toml:"name" json:"name"`
+	Describe string      `toml:"describe" json:"describe"`
 	Created  string      `toml:"created" json:"created"`
 	Autonomy Autonomy    `toml:"autonomy" json:"autonomy"`
 	Verify   Verify      `toml:"verify" json:"verify"`

@@ -98,6 +98,21 @@ func (r *Registry) Register(path, name string) (string, error) {
 	return id, nil
 }
 
+// Rename changes a project's display name.
+//
+// Register does not do this: on a path it already knows it refreshes
+// LastOpened and returns, leaving the old name in place. Reusing it to rename
+// was a silent no-op — the name changed in project.toml and nowhere else.
+func (r *Registry) Rename(id, name string) error {
+	for i := range r.Projects {
+		if r.Projects[i].ID == id {
+			r.Projects[i].Name = name
+			return r.Save()
+		}
+	}
+	return fmt.Errorf("project %q not found", id)
+}
+
 // Get returns a project by ID.
 func (r *Registry) Get(id string) (*ProjectEntry, error) {
 	for i, p := range r.Projects {

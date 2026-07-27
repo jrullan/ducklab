@@ -432,9 +432,25 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, project)
 }
 
+func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
+	var keys map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&keys); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	project, err := s.svc.ProjectUpdate(r.Context(), r.PathValue("id"), keys)
+	if err != nil {
+		// An unknown or mistyped key is the caller's mistake, not a server
+		// fault, and it must say which key.
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, project)
+}
+
 func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	project, err := s.svc.ProjectOpen(r.Context(), id)
+	project, err := s.svc.ProjectGet(r.Context(), id)
 	if err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return

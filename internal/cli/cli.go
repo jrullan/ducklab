@@ -190,20 +190,6 @@ func engineCmd(verb string, args []string) int {
 	}
 }
 
-func projectCmd(verb string, args []string, repo string) int {
-	switch verb {
-	case "init":
-		fmt.Println("project init: use the engine API directly for now")
-		return 0
-	case "list":
-		fmt.Println("project list: use the engine API directly for now")
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "unknown project command: %s\n", verb)
-		return 2
-	}
-}
-
 func ducklingCmd(verb string, args []string) int {
 	switch verb {
 	case "list":

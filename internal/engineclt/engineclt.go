@@ -58,6 +58,36 @@ func (c *Client) do(method, path string, body interface{}) (*http.Response, erro
 	return c.HTTPClient.Do(req)
 }
 
+// APIError is an error the engine reported, unwrapped from its JSON envelope.
+type APIError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *APIError) Error() string { return e.Message }
+
+// httpError turns a non-2xx response into the message the engine actually
+// sent. Without it every failure reached the user as the whole envelope —
+// the URL, the status line, and the raw JSON — burying the one sentence that
+// says what to fix.
+func httpError(method, path string, resp *http.Response) error {
+	body, _ := io.ReadAll(resp.Body)
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil && env.Error.Message != "" {
+		return &APIError{Status: resp.StatusCode, Code: env.Error.Code, Message: env.Error.Message}
+	}
+	return &APIError{
+		Status:  resp.StatusCode,
+		Message: fmt.Sprintf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(body))),
+	}
+}
+
 func (c *Client) get(path string, result interface{}) error {
 	resp, err := c.do("GET", path, nil)
 	if err != nil {
@@ -65,8 +95,7 @@ func (c *Client) get(path string, result interface{}) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GET %s: %s: %s", path, resp.Status, string(body))
+		return httpError("GET", path, resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }
@@ -78,8 +107,7 @@ func (c *Client) post(path string, body interface{}, result interface{}) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("POST %s: %s: %s", path, resp.Status, string(body))
+		return httpError("POST", path, resp)
 	}
 	if result != nil {
 		return json.NewDecoder(resp.Body).Decode(result)
@@ -94,8 +122,22 @@ func (c *Client) put(path string, body interface{}, result interface{}) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("PUT %s: %s: %s", path, resp.Status, string(b))
+		return httpError("PUT", path, resp)
+	}
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+func (c *Client) patch(path string, body interface{}, result interface{}) error {
+	resp, err := c.do("PATCH", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return httpError("PATCH", path, resp)
 	}
 	if result != nil {
 		return json.NewDecoder(resp.Body).Decode(result)
@@ -120,11 +162,12 @@ func (c *Client) ProjectList() ([]map[string]interface{}, error) {
 }
 
 // ProjectInit initializes a project.
-func (c *Client) ProjectInit(path, name string, gitInit bool) (map[string]interface{}, error) {
+func (c *Client) ProjectInit(path, name, describe string, gitInit bool) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects", map[string]interface{}{
 		"path":     path,
 		"name":     name,
+		"describe": describe,
 		"git_init": gitInit,
 	}, &result)
 	return result, err
@@ -173,6 +216,27 @@ func (c *Client) RunEvents(id string) ([]interface{}, error) {
 	}
 	events, _ := result["events"].([]interface{})
 	return events, nil
+}
+
+// ProjectGet returns one project by id.
+func (c *Client) ProjectGet(id string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+id, &result)
+	return result, err
+}
+
+// ProjectStatus returns a project's stage progress, task counts and active runs.
+func (c *Client) ProjectStatus(id string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+id+"/status", &result)
+	return result, err
+}
+
+// ProjectUpdate applies dotted config keys to a project.
+func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.patch("/v1/projects/"+id, keys, &result)
+	return result, err
 }
 
 // RunAccept accepts a run.
