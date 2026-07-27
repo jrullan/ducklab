@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -339,5 +341,67 @@ func TestStripThinkingLeavesOrdinaryContentAlone(t *testing.T) {
 		if got := stripThinking(in); got != in {
 			t.Errorf("stripThinking(%q) = %q; ordinary content must not change", in, got)
 		}
+	}
+}
+
+// A streamed response does not always carry finish_reason: the chunk that
+// would have said "tool_calls" can simply be absent. Dispatch used to be gated
+// on that reason alone, so the calls were dropped in silence and the turn
+// ended treating the model's narration as its final answer.
+//
+// Measured as an A/B on one task and one pair of ducklings: without streaming
+// the implementer made five tool calls, patched the file and passed; with
+// streaming it made two, never patched, and the reviewer was handed nothing.
+func TestToolCallsAreDispatchedWithoutAFinishReason(t *testing.T) {
+	fake := provider.NewFake("f")
+	var call int
+	fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
+		call++
+		if call == 1 {
+			// Tool calls present, finish_reason absent — what a stream gives.
+			tc := provider.ToolCall{ID: "c1", Type: "function"}
+			tc.Function.Name = "fs_read"
+			tc.Function.Arguments = `{"path":"add.go"}`
+			return &provider.ChatResponse{
+				Choices: []provider.Choice{{
+					Message:      provider.Message{Role: "assistant", ToolCalls: []provider.ToolCall{tc}},
+					FinishReason: "",
+				}},
+				Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 5},
+			}
+		}
+		return &provider.ChatResponse{
+			Choices: []provider.Choice{{
+				Message:      provider.Message{Role: "assistant", Content: "Read it."},
+				FinishReason: provider.FinishStop,
+			}},
+			Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 5},
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loop := &Loop{
+		Provider: fake,
+		Duckling: &DucklingConfig{ID: "pato", Model: "m", Caps: provider.Capabilities{NativeTools: true}},
+		Registry: tools.NewRegistry(),
+		Budget:   budget.NewTracker(&budget.Budget{MaxUSD: 10, MaxTokens: 1e6, MaxTurns: 50, MaxWallclockS: 600}),
+		MaxTurns: 4,
+	}
+	turn := &Turn{Role: config.RoleImplementer, Prompt: "read add.go",
+		Toolbelt: []string{"fs_read"}, Contract: "freeform", MaxTurns: 4}
+
+	out, err := RunTurn(context.Background(), loop, turn,
+		&tools.ExecContext{ProjectRoot: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.ToolCalls) != 1 {
+		t.Fatalf("tool calls dispatched = %d, want 1: a call with no finish_reason was dropped", len(out.ToolCalls))
+	}
+	if out.ToolCalls[0].Name != "fs_read" {
+		t.Errorf("dispatched %q", out.ToolCalls[0].Name)
 	}
 }

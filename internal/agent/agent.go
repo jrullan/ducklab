@@ -293,7 +293,18 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 
 		// Handle tool calls (native dialect)
-		if useNative && provider.IsToolCalls(finishReason) {
+		//
+		// Gated on the tool calls themselves, not only on finish_reason. A
+		// streamed response does not always carry one — the chunk that would
+		// have said "tool_calls" can be absent — and gating on the reason
+		// alone meant the calls were dropped in silence and the turn ended
+		// treating the model's own narration as its final answer.
+		//
+		// Measured as an A/B on the same task and the same ducklings: without
+		// streaming the implementer made five calls, patched the file and
+		// passed; with streaming it made two, never patched, and the reviewer
+		// was handed nothing to review.
+		if useNative && (provider.IsToolCalls(finishReason) || len(choice.Message.ToolCalls) > 0) {
 			toolCalls := choice.Message.ToolCalls
 			conversation = append(conversation, choice.Message)
 			for _, tc := range toolCalls {
