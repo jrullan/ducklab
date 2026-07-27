@@ -232,6 +232,19 @@ func (c *Client) ProjectStatus(id string) (map[string]interface{}, error) {
 	return result, err
 }
 
+// ProjectForget unregisters a project, leaving the directory alone.
+func (c *Client) ProjectForget(id string) error {
+	resp, err := c.do("DELETE", "/v1/projects/"+id, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return httpError("DELETE", "/v1/projects/"+id, resp)
+	}
+	return nil
+}
+
 // ProjectUpdate applies dotted config keys to a project.
 func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]interface{}, error) {
 	var result map[string]interface{}

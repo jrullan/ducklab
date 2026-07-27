@@ -307,3 +307,49 @@ func TestShutdownThenRestartLeavesRunResumable(t *testing.T) {
 func fakeRunState(id, projectID string) *runState {
 	return &runState{run: &runlog.Run{ID: id, ProjectID: projectID, Status: "running"}}
 }
+
+// The registry was append-only: a throwaway project stayed in every client's
+// list for good, and the only way out was hand-editing the daemon's state.
+func TestProjectForgetUnregistersWithoutTouchingTheDirectory(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "Temp", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProjectForget(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.ProjectList(context.Background())
+	for _, got := range list {
+		if got.ID == p.ID {
+			t.Error("the project is still registered")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".ducklab")); err != nil {
+		t.Errorf("forget deleted files it should not have touched: %v", err)
+	}
+	if err := s.ProjectForget(context.Background(), p.ID); err == nil {
+		t.Error("forgetting an unknown project should fail, not silently succeed")
+	}
+}
+
+// MarkMissing computed the flag and ProjectList dropped it, so a deleted
+// directory looked like a perfectly healthy project to every client.
+func TestProjectListReportsMissingDirectories(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "Temp", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.ProjectList(context.Background())
+	for _, got := range list {
+		if got.ID == p.ID && !got.Missing {
+			t.Error("a project whose directory is gone was reported as present")
+		}
+	}
+}

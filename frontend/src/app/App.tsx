@@ -70,9 +70,12 @@ export function App() {
       c.projects()
         .then((ps) => {
           setProjects(ps);
-          // Only fall back to the first project when the stored one is gone,
-          // not on every load.
-          setProjectId((cur) => (ps.some((p) => p.id === cur) ? cur : (ps[0]?.id ?? "")));
+          // Prefer a project that is actually on disk. Falling back to a
+          // missing one shows empty views that read as "nothing to do here".
+          const live = ps.filter((p) => !p.missing);
+          setProjectId((cur) =>
+            ps.some((p) => p.id === cur && !p.missing) ? cur : (live[0]?.id ?? ps[0]?.id ?? ""),
+          );
         })
         .catch(() => {});
       c.health().then((h) => setEngineVersion(h.version)).catch(() => {});
@@ -155,7 +158,7 @@ export function App() {
           >
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name || p.id}
+                {(p.name || p.id) + (p.missing ? " (missing)" : "")}
               </option>
             ))}
           </select>

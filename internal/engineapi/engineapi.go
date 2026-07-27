@@ -448,6 +448,14 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, project)
 }
 
+func (s *Server) handleProjectForget(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.ProjectForget(r.Context(), r.PathValue("id")); err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	project, err := s.svc.ProjectGet(r.Context(), id)

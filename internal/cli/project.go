@@ -44,11 +44,25 @@ func projectCmd(verb string, args []string, repo string) int {
 			return 2
 		}
 		return projectSetKeys(client, repo, map[string]string{args[0]: strings.Join(args[1:], " ")})
+	case "remove", "forget":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab project remove <id>")
+			return 2
+		}
+		// It takes an explicit id rather than defaulting to the current repo:
+		// unregistering is not the sort of thing to do by standing in a
+		// directory and typing a short command.
+		if err := client.ProjectForget(args[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("%s unregistered; the directory is untouched\n", args[0])
+		return 0
 	case "status":
 		return projectStatusCmd(client, repo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown project command: %s\n", verb)
-		fmt.Fprintln(os.Stderr, "usage: ducklab project init|list|show|describe|set|status")
+		fmt.Fprintln(os.Stderr, "usage: ducklab project init|list|show|describe|set|status|remove")
 		return 2
 	}
 }

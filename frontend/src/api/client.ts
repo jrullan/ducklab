@@ -13,6 +13,9 @@ export interface Project {
   name: string;
   gate?: string;
   autonomy?: string;
+  /** The directory is gone. Selecting one of these silently produced an empty
+   * board that read as "no tasks" rather than "this project is not there". */
+  missing?: boolean;
 }
 
 export interface Run {

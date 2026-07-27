@@ -261,6 +261,10 @@ type Project struct {
 	Config   *config.Project `json:"config"`
 	Gate     string          `json:"gate"`
 	Autonomy string          `json:"autonomy"`
+	// Missing is true when the path no longer exists. MarkMissing computed it
+	// and ProjectList then dropped it on the floor, so every client saw a
+	// deleted project as a perfectly healthy one.
+	Missing bool `json:"missing,omitempty"`
 }
 
 // Status is the project status.
@@ -406,9 +410,10 @@ func (s *Service) ProjectList(ctx context.Context) ([]*Project, error) {
 	var projects []*Project
 	for _, e := range entries {
 		p := &Project{
-			ID:   e.ID,
-			Path: e.Path,
-			Name: e.Name,
+			ID:      e.ID,
+			Path:    e.Path,
+			Name:    e.Name,
+			Missing: e.Missing,
 		}
 		projects = append(projects, p)
 	}
@@ -468,6 +473,21 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ProjectForget unregisters a project. It does not touch the directory.
+//
+// Until this existed the registry was append-only: a project could be added
+// and never removed, so a throwaway repo stayed in every client's list for
+// good and the only remedy was hand-editing the daemon's state file.
+func (s *Service) ProjectForget(ctx context.Context, id string) error {
+	if _, err := s.registry.Get(id); err != nil {
+		return err
+	}
+	s.projMu.Lock()
+	delete(s.projects, id)
+	s.projMu.Unlock()
+	return s.registry.Unregister(id)
 }
 
 // ProjectStatus returns project status.
