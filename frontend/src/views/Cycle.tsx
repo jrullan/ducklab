@@ -24,8 +24,18 @@ const STAGES = [
 
 type StageDef = (typeof STAGES)[number];
 
-export function Cycle({ client, projectId }: { client: EngineClient; projectId: string }) {
-  const [active, setActive] = useState<StageDef>(STAGES[0]);
+export function Cycle({
+  client,
+  projectId,
+  stage,
+}: {
+  client: EngineClient;
+  projectId: string;
+  stage?: string;
+}) {
+  const [active, setActive] = useState<StageDef>(
+    () => STAGES.find((s) => s.stage === stage) ?? STAGES[0],
+  );
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [errors, setErrors] = useState<TraceError[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +82,18 @@ export function Cycle({ client, projectId }: { client: EngineClient; projectId: 
   const sections = artifact?.sections ?? [];
   // Only the breaks this stage can answer for: showing a plan's dangling
   // references while the user is reading requirements is noise.
-  const mine = errors.filter((e) => e.id.startsWith(active.prefix + "-"));
+  //
+  // Matched against the ids this document actually contains, not against the
+  // artifact's own prefix. The plan's prefix is M, but its breaks land on
+  // tasks (T-), so a prefix test meant a task implementing nothing was never
+  // marked on the one tab that could show it.
+  const broken = new Set<string>();
+  for (const s of sections) {
+    if (errors.some((e) => e.id === s.id)) broken.add(s.id);
+    for (const c of s.children ?? []) {
+      if (errors.some((e) => e.id === c.id)) broken.add(c.id);
+    }
+  }
 
   return (
     <div data-testid="cycle-view" className="flex gap-6">
@@ -140,7 +161,7 @@ export function Cycle({ client, projectId }: { client: EngineClient; projectId: 
 
         <ol className="space-y-3">
           {sections.map((s) => (
-            <SectionCard key={s.id} section={s} broken={mine.some((e) => e.id === s.id)} />
+            <SectionCard key={s.id} section={s} broken={broken} />
           ))}
         </ol>
       </div>
@@ -214,12 +235,15 @@ function Spans({ spans }: { spans: Span[] }) {
   );
 }
 
-function SectionCard({ section, broken }: { section: Section; broken: boolean }) {
+function SectionCard({ section, broken }: { section: Section; broken: Set<string> }) {
   return (
     <li
       data-testid="cycle-section"
-      data-broken={broken ? "true" : "false"}
-      className={"rounded-card border p-3 " + (broken ? "border-serious" : "border-hairline")}
+      data-broken={broken.has(section.id) ? "true" : "false"}
+      className={
+        "rounded-card border p-3 " +
+        (broken.has(section.id) ? "border-serious" : "border-hairline")
+      }
     >
       <div className="flex items-baseline gap-2">
         <span className="font-mono text-xs text-ink-muted">{section.id}</span>
@@ -234,9 +258,21 @@ function SectionCard({ section, broken }: { section: Section; broken: boolean })
       {section.children && section.children.length > 0 && (
         <ul className="mt-2 space-y-1 pl-3 border-l border-hairline">
           {section.children.map((c) => (
-            <li key={c.id} className="text-xs">
+            <li
+              key={c.id}
+              data-testid="cycle-child"
+              data-id={c.id}
+              data-broken={broken.has(c.id) ? "true" : "false"}
+              className={"text-xs " + (broken.has(c.id) ? "text-serious" : "")}
+            >
               <span className="font-mono text-ink-muted">{c.id}</span>{" "}
               <span className="text-ink">{c.title}</span>
+              {/* A task's Implements line is the edge that makes the plan
+                  traceable. Rendering only id and title made the Plan tab look
+                  like it had no traceability at all, when every task had it. */}
+              {c.implements && c.implements.length > 0 && (
+                <span className="text-ink-muted"> — implements {c.implements.join(", ")}</span>
+              )}
             </li>
           ))}
         </ul>

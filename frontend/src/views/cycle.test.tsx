@@ -114,3 +114,53 @@ describe("Cycle", () => {
     await waitFor(() => expect(asked.some((p) => p.includes("/artifacts/plan"))).toBe(true));
   });
 });
+
+const PLAN = {
+  kind: "plan",
+  version: 1,
+  approved: true,
+  markdown: "",
+  sections: [
+    {
+      id: "M-001",
+      title: "Foundation",
+      body: "",
+      children: [
+        { id: "T-001", title: "Authentication", body: "", implements: ["SPEC-007"] },
+        { id: "T-002", title: "Orphan work", body: "" },
+      ],
+    },
+  ],
+};
+
+describe("Cycle, plan tab", () => {
+  const client = () =>
+    clientWith((p) => {
+      if (p.includes("/artifacts/plan")) return json(PLAN);
+      if (p.includes("/artifacts/")) return json({ ...REQUIREMENTS, sections: null });
+      if (p.includes("/trace/check"))
+        return json({ errors: [{ kind: "unjustified_task", id: "T-002", detail: "task implements no spec section" }] });
+      return json({}, 404);
+    });
+
+  // A task's Implements line is the edge that makes the plan traceable. Showing
+  // only id and title made the tab look like the plan referenced nothing.
+  it("shows what each task implements", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    await waitFor(() => expect(screen.getAllByTestId("cycle-child")).toHaveLength(2));
+    const t1 = screen.getAllByTestId("cycle-child").find((el) => el.dataset.id === "T-001")!;
+    expect(t1.textContent).toContain("SPEC-007");
+  });
+
+  // The plan's prefix is M but its breaks land on tasks, so a prefix test never
+  // matched and the one tab that could show the problem never did.
+  it("marks a task the spine flagged, not just top-level sections", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    await waitFor(() => expect(screen.getAllByTestId("cycle-child")).toHaveLength(2));
+    const kids = screen.getAllByTestId("cycle-child");
+    expect(kids.find((el) => el.dataset.id === "T-002")!.dataset.broken).toBe("true");
+    expect(kids.find((el) => el.dataset.id === "T-001")!.dataset.broken).toBe("false");
+  });
+});

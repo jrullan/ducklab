@@ -4,7 +4,7 @@
 export type Route =
   | { name: "overview" }
   | { name: "runs" }
-  | { name: "cycle" }
+  | { name: "cycle"; stage?: string }
   | { name: "board" }
   | { name: "run"; id: string }
   | { name: "ducklings" }
@@ -17,7 +17,8 @@ export function parseRoute(hash: string): Route {
     case "runs":
       return arg ? { name: "run", id: arg } : { name: "runs" };
     case "cycle":
-      return { name: "cycle" };
+      // #/cycle/plan opens straight on a tab, so a pop-out can carry one.
+      return arg ? { name: "cycle", stage: arg } : { name: "cycle" };
     case "board":
       return { name: "board" };
     case "ducklings":
@@ -36,7 +37,7 @@ export function routeHref(route: Route): string {
     case "runs":
       return "#/runs";
     case "cycle":
-      return "#/cycle";
+      return route.stage ? `#/cycle/${route.stage}` : "#/cycle";
     case "board":
       return "#/board";
     case "ducklings":
