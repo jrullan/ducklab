@@ -568,19 +568,19 @@ func (s *Service) DucklingTest(ctx context.Context, id, prompt string, stream bo
 
 // RunRequest is a run request.
 type RunRequest struct {
-	TaskID       string         `json:"task_id"`
-	Mode         string         `json:"mode"`
-	Ducklings    []string       `json:"ducklings"`
-	Rounds       int            `json:"rounds"`
-	Verify       string         `json:"verify"`
-	Budget       *budget.Budget `json:"budget"`
-	Autonomy     string         `json:"autonomy"`
+	TaskID    string         `json:"task_id"`
+	Mode      string         `json:"mode"`
+	Ducklings []string       `json:"ducklings"`
+	Rounds    int            `json:"rounds"`
+	Verify    string         `json:"verify"`
+	Budget    *budget.Budget `json:"budget"`
+	Autonomy  string         `json:"autonomy"`
 	// NoStream turns off token streaming for this run. The default is to
 	// stream, because the desktop exists to watch a run happen.
-	NoStream     bool           `json:"no_stream"`
-	DryRun       bool           `json:"dry_run"`
-	Parallel     bool           `json:"parallel"`
-	UnsafeWrites bool           `json:"unsafe_writes"`
+	NoStream     bool `json:"no_stream"`
+	DryRun       bool `json:"dry_run"`
+	Parallel     bool `json:"parallel"`
+	UnsafeWrites bool `json:"unsafe_writes"`
 }
 
 // RunDetail is a run detail.
@@ -610,13 +610,13 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// Create run
 	runID := runlog.GenerateRunID()
 	run := &runlog.Run{
-		ID:           runID,
-		ProjectID:    projectID,
-		Stage:        "build",
-		Mode:         req.Mode,
-		TaskID:       req.TaskID,
-		Status:       "running",
-		StartedAt:    time.Now().UTC().Format(time.RFC3339),
+		ID:        runID,
+		ProjectID: projectID,
+		Stage:     "build",
+		Mode:      req.Mode,
+		TaskID:    req.TaskID,
+		Status:    "running",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		// Streaming on unless a caller opts out.
 		//
 		// It used to be off unless a client asked, and no client ever asked —
@@ -973,6 +973,30 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("git add: %w", err))
 		return err
 	}
+
+	// Accepting work that is already committed is a no-op, not a failure.
+	//
+	// Two runs of the same task produce the same fix; accepting the second
+	// after the first left the tree clean made git exit 1 with "nothing to
+	// commit", the raw error reached the user, and a run whose gate was green
+	// and whose reviewer approved was marked FAILED. The person did nothing
+	// wrong and the run did nothing wrong.
+	if clean, cerr := git.IsClean(); cerr == nil && clean {
+		head, _ := git.HeadSHA()
+		rs.run.Accepted = true
+		rs.run.CommitSHA = head
+		rs.run.Status = "done"
+		rs.run.Resolution = "accepted; the tree already carried this change"
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		clearPending(rs.run)
+		rs.writer.AppendEvent("human", map[string]interface{}{
+			"action": "accept", "detail": "nothing to commit; the change was already in the tree",
+		})
+		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
+		rs.writer.WriteState()
+		return nil
+	}
+
 	// Commit
 	trailers := map[string]string{
 		"Ducklab-Run": rs.run.ID,
@@ -1027,9 +1051,9 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	}
 
 	req := RunRequest{
-		TaskID:       rs.run.TaskID,
-		Mode:         rs.run.Mode,
-		Autonomy:     rs.run.Autonomy,
+		TaskID:   rs.run.TaskID,
+		Mode:     rs.run.Mode,
+		Autonomy: rs.run.Autonomy,
 		// A resumed run keeps whatever it was started with.
 		NoStream:     !rs.run.Stream,
 		UnsafeWrites: rs.run.UnsafeWrites,

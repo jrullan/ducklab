@@ -68,6 +68,16 @@ func (p *OpenAICompat) Chat(ctx context.Context, req ChatRequest) (ChatResponse,
 // ChatStream sends a streaming chat request.
 func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<- Delta) (ChatResponse, error) {
 	req.Stream = true
+	// Ask for usage explicitly. An OpenAI-compatible endpoint omits it from a
+	// streamed response unless told to include it, so without this every
+	// streamed run recorded zero tokens and zero cost — and a budget that
+	// counts zero is a budget that never stops anything (I3).
+	//
+	// Measured against vLLM: no usage in any chunk without the flag; a final
+	// usage chunk with prompt, completion and total with it.
+	if req.StreamOptions == nil {
+		req.StreamOptions = &StreamOptions{IncludeUsage: true}
+	}
 	return p.doChatStream(ctx, req, ch)
 }
 
@@ -321,6 +331,10 @@ type sseScanner struct {
 	buf      []byte
 	eventVal string
 	err      error
+	// eof records that the reader is exhausted. It is separate from err
+	// because a reader can hand back data and io.EOF together, and the data
+	// still has to be parsed.
+	eof bool
 }
 
 func newSSEScanner(r io.Reader) *sseScanner {
@@ -340,6 +354,22 @@ func (s *sseScanner) scan() bool {
 			return false
 		}
 		idx := strings.Index(string(s.buf), "\n\n")
+		if idx < 0 && s.eof {
+			// No delimiter left and the stream is finished: whatever remains
+			// is the final frame, terminator or not.
+			rest := strings.TrimSpace(string(s.buf))
+			s.buf = nil
+			if rest == "" {
+				return false
+			}
+			for _, line := range strings.Split(rest, "\n") {
+				if after, ok := strings.CutPrefix(line, "data: "); ok {
+					s.eventVal = after
+					return true
+				}
+			}
+			return false
+		}
 		if idx >= 0 {
 			event := string(s.buf[:idx])
 			s.buf = s.buf[idx+2:]
@@ -364,12 +394,20 @@ func (s *sseScanner) scan() bool {
 			s.buf = s.buf[:len(s.buf)+n]
 		}
 		if err == io.EOF {
-			if len(s.buf) > 0 {
-				s.eventVal = string(s.buf)
-				s.buf = nil
-				return true
+			// A reader may return data AND io.EOF in the same call — http
+			// bodies routinely do, strings.Reader never does. Emitting the
+			// whole remaining buffer as one event here handed the parser
+			// several concatenated frames as a single malformed one, and it
+			// dropped the lot.
+			//
+			// That is why a live run streamed content correctly and still
+			// recorded zero tokens: usage is the last chunk before EOF, so it
+			// was always in the part that got swallowed.
+			s.eof = true
+			if len(s.buf) == 0 {
+				return false
 			}
-			return false
+			continue
 		}
 		if err != nil {
 			s.err = err

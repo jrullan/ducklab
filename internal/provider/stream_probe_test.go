@@ -2,6 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -33,8 +37,9 @@ func TestLiveStreamProbe(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	resp, err := p.ChatStream(ctx, ChatRequest{
-		Model:    os.Getenv("DUCKLAB_PROBE_MODEL"),
-		Messages: []Message{{Role: "user", Content: "Say hello in five words."}},
+		Model:     os.Getenv("DUCKLAB_PROBE_MODEL"),
+		Messages:  []Message{{Role: "user", Content: "Say hello in five words."}},
+		MaxTokens: func() *int { n := 64; return &n }(),
 	}, ch)
 	close(ch)
 	<-done
@@ -45,6 +50,12 @@ func TestLiveStreamProbe(t *testing.T) {
 	if n == 0 {
 		t.Error("no deltas arrived; the endpoint streams but our client saw nothing")
 	}
+	// A streamed run used to record zero tokens, which silently disabled every
+	// budget: a limit that counts nothing never stops anything (I3).
+	if resp.Usage.CompletionTokens == 0 {
+		t.Error("no usage on a streamed response; budgets cannot be enforced")
+	}
+	t.Logf("usage: prompt=%d completion=%d", resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 }
 
 // The scanner was constructed with a full-length buffer, so its read window
@@ -136,5 +147,99 @@ func TestStreamedToolCallsAreReassembled(t *testing.T) {
 	}
 	if got[0].Type != "function" {
 		t.Errorf("type = %q; a call the server will accept needs one", got[0].Type)
+	}
+}
+
+// The bytes vLLM actually sends, replayed. A streamed run recorded zero
+// tokens, and zero-token budgets stop nothing (I3) — but reading the parser
+// did not show why, so this replays a captured stream instead of arguing
+// about it.
+func TestStreamedUsageIsCaptured(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`,
+		"",
+		`data: {"choices":[{"index":0,"delta":{"content":" there"},"finish_reason":"length"}]}`,
+		"",
+		`data: {"choices":[],"usage":{"prompt_tokens":11,"total_tokens":16,"completion_tokens":5}}`,
+		"",
+		"data: [DONE]",
+		"",
+		"",
+	}, "\n")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&got)
+		if got["stream_options"] == nil {
+			t.Error("stream_options missing: the server sends no usage without it")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat("probe", srv.URL, "")
+	ch := make(chan Delta, 64)
+	go func() {
+		for range ch {
+		}
+	}()
+	resp, err := p.ChatStream(context.Background(), ChatRequest{Model: "m"}, ch)
+	close(ch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.CompletionTokens != 5 || resp.Usage.PromptTokens != 11 {
+		t.Errorf("usage = %+v, want prompt 11 completion 5", resp.Usage)
+	}
+	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content != "hi there" {
+		t.Errorf("content lost: %+v", resp.Choices)
+	}
+}
+
+// A reader may return data AND io.EOF in the same call — http bodies routinely
+// do, strings.Reader never does. The scanner used to emit everything left as
+// one event on EOF, handing the parser several concatenated frames as a single
+// malformed one; it dropped the lot. Live runs still looked fine because only
+// the tail was affected — which is exactly where usage lives.
+type eofWithData struct {
+	data []byte
+	done bool
+}
+
+func (r *eofWithData) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	n := copy(p, r.data)
+	return n, io.EOF
+}
+
+func TestSSEScannerHandlesDataDeliveredWithEOF(t *testing.T) {
+	body := "data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: [DONE]\n\n"
+	s := newSSEScanner(&eofWithData{data: []byte(body)})
+
+	var got []string
+	for s.scan() {
+		got = append(got, s.event())
+	}
+	want := []string{`{"a":1}`, `{"b":2}`, "[DONE]"}
+	if !slices.Equal(got, want) {
+		t.Errorf("events = %q, want %q", got, want)
+	}
+}
+
+// A final frame with no blank line after it must still be delivered.
+func TestSSEScannerDeliversAnUnterminatedFinalFrame(t *testing.T) {
+	s := newSSEScanner(&eofWithData{data: []byte("data: {\"a\":1}\n\ndata: {\"b\":2}")})
+	var got []string
+	for s.scan() {
+		got = append(got, s.event())
+	}
+	if !slices.Equal(got, []string{`{"a":1}`, `{"b":2}`}) {
+		t.Errorf("events = %q; the last frame was lost", got)
 	}
 }

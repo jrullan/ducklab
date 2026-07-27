@@ -353,3 +353,53 @@ func TestProjectListReportsMissingDirectories(t *testing.T) {
 		}
 	}
 }
+
+// Two runs of the same task produce the same fix. Accepting the second after
+// the first left the tree clean made git exit 1 with "nothing to commit", the
+// raw error reached the user, and a run whose gate was green and whose
+// reviewer approved was marked FAILED. Neither the person nor the run did
+// anything wrong.
+func TestAcceptingAnAlreadyCommittedChangeIsNotAFailure(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-dup", ProjectID: p.ID, TaskID: "T-001", Stage: "build",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	// The tree is clean: Init already committed everything.
+	res, err := s.RunAccept(context.Background(), "r-dup", "")
+	if err != nil {
+		t.Fatalf("accept failed on a clean tree: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Error("no commit reported; it should name the commit already carrying the change")
+	}
+
+	detail, err := s.RunGet(context.Background(), "r-dup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := detail.Run
+	if got.Status != "done" || !got.Accepted {
+		t.Errorf("status=%q accepted=%v, want done/true", got.Status, got.Accepted)
+	}
+	if got.PendingKind != "" {
+		t.Errorf("still waiting for someone: pending_kind=%q", got.PendingKind)
+	}
+}

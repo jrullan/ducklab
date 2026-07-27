@@ -13,17 +13,21 @@ import (
 
 // ChatRequest is a request to a model.
 type ChatRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []Message              `json:"messages"`
-	Tools       []Tool                 `json:"tools,omitempty"`
-	ToolChoice  interface{}            `json:"tool_choice,omitempty"`
-	Temperature *float64               `json:"temperature,omitempty"`
-	TopP        *float64               `json:"top_p,omitempty"`
-	MaxTokens   *int                   `json:"max_tokens,omitempty"`
-	Stop        []string               `json:"stop,omitempty"`
-	Stream      bool                   `json:"stream,omitempty"`
-	JSONMode    bool                   `json:"json_mode,omitempty"`
-	Extra       map[string]interface{} `json:"extra,omitempty"`
+	Model       string      `json:"model"`
+	Messages    []Message   `json:"messages"`
+	Tools       []Tool      `json:"tools,omitempty"`
+	ToolChoice  interface{} `json:"tool_choice,omitempty"`
+	Temperature *float64    `json:"temperature,omitempty"`
+	TopP        *float64    `json:"top_p,omitempty"`
+	MaxTokens   *int        `json:"max_tokens,omitempty"`
+	Stop        []string    `json:"stop,omitempty"`
+	Stream      bool        `json:"stream,omitempty"`
+	// StreamOptions asks the server for usage on a streamed response. Without
+	// it an OpenAI-compatible endpoint sends no usage at all, and a streamed
+	// run records zero tokens — which silently disables every budget.
+	StreamOptions *StreamOptions         `json:"stream_options,omitempty"`
+	JSONMode      bool                   `json:"json_mode,omitempty"`
+	Extra         map[string]interface{} `json:"extra,omitempty"`
 }
 
 // Message is a chat message.
@@ -43,6 +47,11 @@ type ToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+}
+
+// StreamOptions are the OpenAI streaming extras.
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // Tool is a tool definition.
