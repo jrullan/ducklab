@@ -421,14 +421,27 @@ func resolveProjectID(client *engineclt.Client, repo string) (string, int) {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return "", 1
 	}
+	// Walk up looking for the registered root, the way git finds .git. A user
+	// deep in src/ has not left the project, and telling them so is a worse
+	// answer than finding it.
+	byPath := map[string]string{}
 	for _, p := range projects {
-		if p["path"] == abs {
-			if id, ok := p["id"].(string); ok {
-				return id, 0
-			}
+		path, _ := p["path"].(string)
+		if id, ok := p["id"].(string); ok && path != "" {
+			byPath[path] = id
 		}
 	}
-	fmt.Fprintf(os.Stderr, "error: no ducklab project at %s\n", abs)
+	for dir := abs; ; {
+		if id, ok := byPath[dir]; ok {
+			return id, 0
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	fmt.Fprintf(os.Stderr, "error: no ducklab project at %s or any parent\n", abs)
 	return "", 2
 }
 

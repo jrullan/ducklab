@@ -10,23 +10,42 @@ import (
 )
 
 // stageCmd runs intake, spec or plan and follows the council to its gate.
+// A stage takes an optional subcommand acting on the proposal it left behind:
+// `ducklab intake accept`. Without one it runs the stage.
 func stageCmd(stage string, args []string, repo string) int {
 	from, yes := "", false
+	sub := ""
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
+		switch a := args[i]; a {
 		case "--from":
-			if i+1 < len(args) {
-				from = args[i+1]
-				i++
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --from needs a file")
+				return 2
 			}
+			from = args[i+1]
+			i++
 		case "--yes":
 			yes = true
+		case "accept", "reject", "diff":
+			sub = a
+		default:
+			// Never silently ignore an argument. This used to fall through,
+			// so `ducklab intake accept` — which the command itself told you
+			// to run — started a fresh multi-minute council instead, and the
+			// proposal the user meant to accept was overwritten by its result.
+			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--yes]\n       ducklab %s accept|reject|diff\n", stage, stage)
+			return 2
 		}
 	}
 
 	client, projectID, code := project(repo)
 	if code != 0 {
 		return code
+	}
+
+	if sub != "" {
+		return proposalCmd(client, projectID, stage, sub)
 	}
 
 	req := map[string]interface{}{}
@@ -63,8 +82,37 @@ func stageCmd(stage string, args []string, repo string) int {
 	if yes {
 		return promoteArtifact(client, projectID, kind)
 	}
-	fmt.Printf("\naccept with:  ducklab %s accept\nreject with: leave it; the draft stays at .ducklab/docs/%s.md.proposed\n", stage, kind)
+	fmt.Printf("\naccept with:  ducklab %s accept\nreject with:  ducklab %s reject\n", stage, stage)
 	return code
+}
+
+// proposalCmd acts on the proposal a stage already produced, without running a
+// model. Accepting is a human gate (05 §1.1), not a stage.
+func proposalCmd(client *engineclt.Client, projectID, stage, sub string) int {
+	kind := artifactFor(stage)
+	got, err := client.ArtifactGet(projectID, kind)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	proposal, ok := got["proposal"].(map[string]interface{})
+	if !ok {
+		fmt.Fprintf(os.Stderr, "error: no pending %s proposal — run `ducklab %s` first\n", kind, stage)
+		return 2
+	}
+
+	switch sub {
+	case "diff":
+		fmt.Printf("%s\n", strings.TrimRight(str(proposal["diff"]), "\n"))
+		return 0
+	case "reject":
+		// The draft stays on disk. A rejected proposal is evidence about what
+		// the ducklings did, and deleting it would destroy the only record.
+		fmt.Printf("left in place: .ducklab/docs/%s.md.proposed\nre-run with:  ducklab %s\n", kind, stage)
+		return 0
+	default:
+		return promoteArtifact(client, projectID, kind)
+	}
 }
 
 func promoteArtifact(client *engineclt.Client, projectID, kind string) int {
