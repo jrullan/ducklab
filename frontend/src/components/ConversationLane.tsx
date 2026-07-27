@@ -3,6 +3,7 @@ import type { TurnBlock, ToolCall } from "../lib/runview";
 import { ducklingColor } from "../lib/colors";
 import { DuckAvatar } from "./DuckAvatar";
 import { StatusChip } from "./StatusChip";
+import { Prose } from "./Prose";
 
 /**
  * One turn in the conversation.
@@ -73,13 +74,23 @@ export function ConversationTurn({
           is not. Only `streamed` was rendered, and it comes from token_delta
           events that arrive solely during a live run — so a lane showed a
           participant, its tool calls, and no word of what was actually said. */}
-      {(streamed || (block.text && !block.verdict)) && (
+      {/* Raw while tokens are still arriving — a half-written fence or bold
+          marker cannot be parsed without guessing at what comes next — and
+          rendered once the turn has settled. */}
+      {streamed ? (
         <pre
           data-testid="turn-text"
           className="mt-1 whitespace-pre-wrap font-mono text-sm text-ink-secondary"
         >
-          {streamed || block.text}
+          {streamed}
         </pre>
+      ) : (
+        block.text &&
+        !block.verdict && (
+          <div data-testid="turn-text">
+            <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+          </div>
+        )
       )}
     </article>
   );

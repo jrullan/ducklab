@@ -94,3 +94,38 @@ describe("parseProse, the constructs a spec actually contains", () => {
     });
   });
 });
+
+// The text protocol carries tool calls inside ```ducklab fences. Reformatting
+// their contents would rewrite what a duckling actually said.
+describe("parseProse and fenced blocks", () => {
+  it("keeps a fenced block verbatim, with its language", () => {
+    const blocks = parseProse('Doing it.\n\n```ducklab\n{"tool": "fs_read"}\n```\n\nDone.');
+    expect(blocks.map((b) => b.kind)).toEqual(["para", "code", "para"]);
+    const code = blocks[1]!;
+    expect(code.kind === "code" && code.lang).toBe("ducklab");
+    expect(code.kind === "code" && code.text).toBe('{"tool": "fs_read"}');
+  });
+
+  it("does not treat markdown inside a fence as markdown", () => {
+    const blocks = parseProse("```\n**not bold** and - not a bullet\n```");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.kind === "code" && blocks[0]!.text).toBe("**not bold** and - not a bullet");
+  });
+});
+
+// Two trailing spaces are markdown's hard line break. Models use it to
+// separate labelled points, and joining them ran three statements together.
+describe("parseProse and hard line breaks", () => {
+  it("keeps lines the model broke on purpose apart", () => {
+    const blocks = parseProse(
+      "**Changed:** add.go  \n**Why:** it was wrong  \n**Did not do:** anything else",
+    );
+    expect(blocks).toHaveLength(3);
+    expect(blocks.every((b) => b.kind === "para")).toBe(true);
+  });
+
+  it("still joins ordinary wrapped prose", () => {
+    const blocks = parseProse("A responsive web app\nfor a consultancy.");
+    expect(blocks).toHaveLength(1);
+  });
+});

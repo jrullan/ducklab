@@ -14,6 +14,7 @@
  */
 
 export type Block =
+  | { kind: "code"; lang: string; text: string }
   | { kind: "para"; spans: Span[] }
   | { kind: "list"; items: Span[][] }
   | { kind: "heading"; level: number; spans: Span[] }
@@ -26,6 +27,7 @@ export type Span =
   | { kind: "code"; text: string };
 
 const BULLET = /^\s*[-*+]\s+/;
+const FENCE = /^\s*```(\w*)\s*$/;
 const HEADING = /^\s*(#{1,6})\s+(.*)$/;
 const RULE = /^\s*([-*_])\1{2,}\s*$/;
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
@@ -65,6 +67,20 @@ export function parseProse(body: string, suppress: string[] = ["implements", "de
     const line = lines[i]!;
 
     if (isSuppressedField(line, suppress)) continue;
+
+    // A fenced block is verbatim. The text protocol puts tool calls inside
+    // ```ducklab fences, so treating their contents as prose would rewrite
+    // what a duckling actually said.
+    const fence = FENCE.exec(line);
+    if (fence) {
+      flushAll();
+      const lang = fence[1] ?? "";
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !FENCE.test(lines[i]!)) body.push(lines[i++]!);
+      blocks.push({ kind: "code", lang, text: body.join("\n") });
+      continue;
+    }
 
     const rule = RULE.test(line);
     if (rule) {
@@ -111,6 +127,12 @@ export function parseProse(body: string, suppress: string[] = ["implements", "de
     }
     flushList();
     para.push(line.trim());
+    // Two trailing spaces are markdown's hard line break. Models use it to
+    // separate labelled points — "**Changed:** …", "**Why:** …" — and joining
+    // those into one paragraph ran three distinct statements together.
+    if (/\s\s+$/.test(line)) {
+      flushPara();
+    }
   }
   flushAll();
   return blocks;
