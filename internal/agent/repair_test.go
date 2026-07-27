@@ -314,3 +314,30 @@ func TestDeclaredOutputCapIsRespected(t *testing.T) {
 		t.Errorf("max_tokens = %v, want %d", got, want)
 	}
 }
+
+// A closing tag with no opening one. The provider suppressed the marker that
+// starts the block but not the one that ends it, so the reply arrived as
+// reasoning, then </think>, then the answer — and the reasoning was recorded
+// verbatim as what the model said.
+//
+// Measured against a live endpoint: "Tests pass.\n</think>\n\n**Changed:**
+// `add.go` …" was written into the run log as the implementer's message.
+func TestStripThinkingHandlesADanglingCloseTag(t *testing.T) {
+	got := stripThinking("Tests pass.\n</think>\n\n**Changed:** `add.go` — a + b.")
+	if want := "**Changed:** `add.go` — a + b."; got != want {
+		t.Errorf("stripThinking() = %q, want %q", got, want)
+	}
+}
+
+// Content that never mentions thinking must survive untouched, and a stray
+// mention inside prose must not eat the answer around it.
+func TestStripThinkingLeavesOrdinaryContentAlone(t *testing.T) {
+	for _, in := range []string{
+		"**Changed:** add.go",
+		"I was thinking about the </think> tag in the parser docs.",
+	} {
+		if got := stripThinking(in); got != in {
+			t.Errorf("stripThinking(%q) = %q; ordinary content must not change", in, got)
+		}
+	}
+}

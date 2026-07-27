@@ -630,7 +630,33 @@ func stripThinking(content string) string {
 	if i := strings.Index(cleaned, "<think>"); i >= 0 {
 		cleaned = cleaned[:i]
 	}
+	// A closing tag with no opening one: the provider suppressed the marker
+	// that starts the block but not the one that ends it, so the response
+	// arrives as reasoning, then </think>, then the real answer.
+	//
+	// Seen against a live endpoint: a message began "Tests pass.\n</think>\n\n
+	// **Changed:** add.go …", and the model's private reasoning was recorded
+	// verbatim as its answer.
+	//
+	// The tag must be alone on its line. Prose that merely mentions the tag —
+	// documentation about this very parser, say — keeps it, because a rule
+	// that cut at any occurrence would silently delete the first half of a
+	// legitimate answer. That is not hypothetical: it is what the first
+	// version of this did, and a test caught it.
+	if rest, ok := afterDanglingClose(cleaned); ok {
+		cleaned = rest
+	}
 	return strings.TrimSpace(cleaned)
+}
+
+func afterDanglingClose(s string) (string, bool) {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "</think>" {
+			return strings.Join(lines[i+1:], "\n"), true
+		}
+	}
+	return "", false
 }
 
 // DefaultMaxOutputTokens caps a single completion when a duckling declares no

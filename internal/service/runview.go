@@ -31,7 +31,57 @@ func (s *Service) RunDiff(ctx context.Context, id string) (string, error) {
 
 // RunTranscript returns the human-readable conversation.
 func (s *Service) RunTranscript(ctx context.Context, id string) (string, error) {
-	return s.readRunFile(id, "transcript.md")
+	// Built from the event log rather than a second file.
+	//
+	// It used to read transcript.md, which nothing ever wrote, so the endpoint
+	// answered an empty document for every run that has ever existed. The
+	// events are the record; deriving the transcript from them means there is
+	// one source of truth instead of two that can disagree.
+	if md, err := s.readRunFile(id, "transcript.md"); err == nil && strings.TrimSpace(md) != "" {
+		return md, nil
+	}
+	events, err := runlog.ReadEvents(s.RunDir(id))
+	if err != nil {
+		return "", err
+	}
+	return renderTranscript(events), nil
+}
+
+// renderTranscript turns a run's events into readable markdown.
+func renderTranscript(events []*runlog.Event) string {
+	var b strings.Builder
+	for _, e := range events {
+		switch e.Type {
+		case "message":
+			role, _ := e.Data["role"].(string)
+			duckling, _ := e.Data["duckling"].(string)
+			content, _ := e.Data["content"].(string)
+			if content == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "## %s", role)
+			if duckling != "" {
+				fmt.Fprintf(&b, " · %s", duckling)
+			}
+			b.WriteString("\n\n")
+			b.WriteString(strings.TrimSpace(content))
+			b.WriteString("\n\n")
+		case "tool_call":
+			name, _ := e.Data["tool"].(string)
+			ok, present := e.Data["ok"].(bool)
+			status := ""
+			switch {
+			case !present:
+				status = ""
+			case ok:
+				status = " · ok"
+			default:
+				status = " · failed"
+			}
+			fmt.Fprintf(&b, "`%s`%s\n\n", name, status)
+		}
+	}
+	return b.String()
 }
 
 // RunVerify returns the gate output, tail-limited.

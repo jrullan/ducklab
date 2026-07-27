@@ -195,3 +195,31 @@ describe("diff parsing", () => {
     expect(touchesTests([])).toBe(false);
   });
 });
+
+// turn_start and turn_end bracketed a turn whose content was never rendered:
+// nothing filled `text`, so every lane showed a participant header above an
+// empty bubble even once the engine started recording what was said.
+describe("buildTurns and what the model said", () => {
+  it("puts a message's content in its turn", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" } },
+      { seq: 2, type: "message", run_id: "r", data: { round: 1, turn: 0, role: "implementer", content: "I fixed add.go." } },
+      { seq: 3, type: "tool_call", run_id: "r", data: { tool: "fs_patch", ok: true } },
+      { seq: 4, type: "turn_end", run_id: "r", data: { round: 1, turn: 0 } },
+    ] as never);
+
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.text).toBe("I fixed add.go.");
+    expect(turns[0]!.toolCalls.map((c) => c.tool)).toEqual(["fs_patch"]);
+    expect(turns[0]!.done).toBe(true);
+  });
+
+  it("keeps a message that arrives outside a turn instead of dropping it", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "message", run_id: "r", data: { round: 1, turn: 2, role: "reviewer", duckling: "pato-dos", content: "Looks right." } },
+    ] as never);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.text).toBe("Looks right.");
+    expect(turns[0]!.role).toBe("reviewer");
+  });
+});

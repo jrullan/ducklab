@@ -156,6 +156,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
 
+			// What the model actually said, and what it did.
+			//
+			// turn_start and turn_end bracketed a turn whose content was never
+			// recorded anywhere: the run log held eleven events and not one
+			// carried a message, /transcript answered an empty document, and
+			// the desktop's conversation lanes had nothing to render. The text
+			// existed the whole time — it fed the internal transcript one line
+			// above — it just never left the process.
+			emitMessage(params, round, i, turn.Role, duckling, outcome)
+
 			// Fold the turn's parsed contract value into the round state.
 			switch v := outcome.Parsed.(type) {
 			case *agent.Verdict:
@@ -306,4 +316,57 @@ func emit(params *ExecuteParams, kind string, data map[string]interface{}) {
 	if params.OnEvent != nil {
 		params.OnEvent(kind, data)
 	}
+}
+
+// emitMessage records a turn's content and its tool calls.
+//
+// Tool calls are separate events rather than a field on the message: the
+// timeline renders them in order, and a turn that made forty fs_read calls
+// must not put forty payloads inside one record.
+func emitMessage(params *ExecuteParams, round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome) {
+	if outcome == nil {
+		return
+	}
+	if text := strings.TrimSpace(outcome.Text); text != "" {
+		emit(params, "message", map[string]interface{}{
+			"round": round, "turn": turn,
+			"role": string(role), "duckling": string(duckling),
+			"content":    text,
+			"tokens_in":  outcome.TokensIn,
+			"tokens_out": outcome.TokensOut,
+			"repairs":    outcome.Repairs,
+		})
+	}
+	for _, tc := range outcome.ToolCalls {
+		data := map[string]interface{}{
+			"round": round, "turn": turn,
+			"role": string(role), "duckling": string(duckling),
+			// "tool", not "name": both existing consumers — the CLI's stream
+			// printer and the desktop's timeline — already read this key.
+			"tool": tc.Name,
+			"args": string(tc.Args),
+		}
+		if tc.Result != nil {
+			data["ok"] = !tc.Result.IsError
+			// The result is summarised, not stored whole: a single fs_read can
+			// return an entire file, and forty of them would make the run log
+			// larger than the repository it describes.
+			data["result"] = summariseToolResult(tc.Result.Content)
+		}
+		if tc.Digest != "" {
+			data["digest"] = tc.Digest
+		}
+		emit(params, "tool_call", data)
+	}
+}
+
+// maxToolResultBytes bounds what a tool result contributes to the log (I3).
+const maxToolResultBytes = 512
+
+func summariseToolResult(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxToolResultBytes {
+		return s
+	}
+	return s[:maxToolResultBytes] + fmt.Sprintf("\n… %d bytes truncated", len(s)-maxToolResultBytes)
 }

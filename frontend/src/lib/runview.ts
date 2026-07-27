@@ -87,6 +87,29 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         current = null;
         break;
       }
+      case "message": {
+        // What the model said. Nothing filled `text` before, so every lane
+        // rendered a participant header above an empty bubble even when the
+        // engine had the content.
+        const content = String(d.content ?? "");
+        if (current) {
+          current.text = content;
+        } else {
+          // A message outside a turn still belongs in the lane rather than
+          // being dropped on the floor.
+          blocks.push({
+            key: keyFor(Number(d.round ?? 1), Number(d.turn ?? 0)),
+            round: Number(d.round ?? 1),
+            turn: Number(d.turn ?? 0),
+            role: String(d.role ?? ""),
+            duckling: String(d.duckling ?? ""),
+            toolCalls: [],
+            text: content,
+            done: true,
+          });
+        }
+        break;
+      }
       case "tool_call": {
         current?.toolCalls.push({
           seq: e.seq ?? 0,

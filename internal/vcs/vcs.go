@@ -39,10 +39,32 @@ func (g *Git) HasGit() bool {
 	return err == nil
 }
 
-// Init initializes a git repository.
+// Init creates the repository and gives it a first commit.
+//
+// A repo with no commits has no HEAD, and every run that asks for a diff dies
+// on "fatal: ambiguous argument 'HEAD'" after the ducklings have already done
+// the work. `project init --git-init` used to leave exactly that: a project
+// that looked ready and could not complete a single run.
 func (g *Git) Init() error {
-	_, err := g.run("init")
-	return err
+	if _, err := g.run("init"); err != nil {
+		return err
+	}
+	if sha, err := g.HeadSHA(); err == nil && strings.TrimSpace(sha) != "" {
+		return nil // an existing history; leave it alone
+	}
+	if _, err := g.run("add", "-A"); err != nil {
+		return err
+	}
+	// --allow-empty so a brand-new directory still gets a root commit; without
+	// it an empty repo stays HEAD-less and the problem survives.
+	//
+	// shellEscape because run joins its arguments into one command line: an
+	// unquoted message loses everything after the first space.
+	if _, err := g.run("commit", "--allow-empty", "-m",
+		shellEscape("Initial commit (created by ducklab project init)")); err != nil {
+		return fmt.Errorf("initial commit: %w", err)
+	}
+	return nil
 }
 
 // CurrentBranch returns the current branch name.

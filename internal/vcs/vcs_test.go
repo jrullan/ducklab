@@ -274,3 +274,21 @@ func TestPruneWorktreesClearsStaleRecords(t *testing.T) {
 	}
 	g.WorktreeRemove(wt)
 }
+
+// A repo with no commits has no HEAD, so every run that asks for a diff dies
+// on "fatal: ambiguous argument 'HEAD'" — after the ducklings have already
+// done the work. Measured: a real pair run patched add.go, verified it, and
+// then failed at the reviewer's diff.
+func TestInitLeavesARepoThatCanBeDiffed(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.HeadSHA(); err != nil {
+		t.Fatalf("no HEAD after Init: %v", err)
+	}
+	if _, err := g.Diff(); err != nil {
+		t.Errorf("a freshly initialised repo cannot be diffed: %v", err)
+	}
+}
