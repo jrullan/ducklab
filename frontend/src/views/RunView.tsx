@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EngineClient, Candidate, Run } from "../api/client";
 import { useRuns } from "../store/runs";
+import type { DucklabEvent } from "../api/events";
 import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, parseDiff } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
@@ -21,6 +22,32 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const events = useRuns((s) => s.events[runId] ?? []);
   const deltas = useRuns((s) => s.deltas[runId] ?? {});
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
+
+  // Fetch the run's history on open.
+  //
+  // The store is fed by the live event stream, so everything derived from
+  // events — the conversation, the gate, the tool timeline — was empty for any
+  // run that finished before this client connected. Opening a completed run
+  // showed a blank lane beside a header saying it passed. Clients hold no
+  // state (I11), so the record has to come from the engine each time.
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .run(runId)
+      .then((d) => {
+        if (!cancelled) {
+          useRuns.getState().resyncRun(d.run, d.events as DucklabEvent[]);
+        }
+      })
+      .catch(() => {
+        // A run the engine does not know is already handled below by the
+        // "no such run" branch; a transient failure must not blank what the
+        // live stream has delivered.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, runId]);
 
   const [tab, setTab] = useState<Tab>("diff");
   const [diff, setDiff] = useState("");
