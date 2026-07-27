@@ -145,13 +145,23 @@ func (s *Spine) Check() []TraceError {
 		}
 	}
 
+	// A section that records what will NOT be built has nothing for a task to
+	// implement, and demanding one turns the check into noise the reader
+	// learns to skip — the same reasoning that exempts a `wont` requirement
+	// above. It is keyed on the marker, never on the title: guessing that a
+	// section headed "Out of Scope" is non-normative would make the spine
+	// depend on prose a model happened to write.
 	for _, sp := range s.Spec.Sections {
-		if !coveredSpecs[sp.ID] && len(sp.Implements) > 0 {
-			errs = append(errs, TraceError{
-				Kind: UnimplementedSpec, ID: sp.ID,
-				Detail: "no task implements this spec section",
-			})
+		if coveredSpecs[sp.ID] || len(sp.Implements) == 0 {
+			continue
 		}
+		if nonNormative(sp) {
+			continue
+		}
+		errs = append(errs, TraceError{
+			Kind: UnimplementedSpec, ID: sp.ID,
+			Detail: "no task implements this spec section",
+		})
 	}
 
 	sort.Slice(errs, func(i, j int) bool {
@@ -174,6 +184,18 @@ type Node struct {
 
 // Walk returns the chain around an id: what it implements, and what implements
 // it. This is what `trace show` and the desktop's rail render.
+// nonNormative reports whether a section describes absence rather than
+// behaviour, and so needs no task.
+func nonNormative(sec Section) bool {
+	for _, f := range []string{"priority", "status", "normative"} {
+		switch strings.ToLower(strings.TrimSpace(sec.Field(f))) {
+		case "wont", "won't", "out_of_scope", "out of scope", "non-normative", "false", "no":
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Spine) Walk(id string) (*Node, error) {
 	if sec := s.Requirements.Section(id); sec != nil {
 		n := &Node{ID: id, Kind: "requirement", Title: sec.Title}

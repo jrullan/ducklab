@@ -209,3 +209,47 @@ func hasError(errs []TraceError, kind TraceErrorKind, id string) bool {
 }
 
 var _ = filepath.Join
+
+// A spec section that records what will NOT be built has nothing for a task to
+// implement. Demanding one turns the check into noise, exactly as a `wont`
+// requirement with no spec section would.
+func TestNonNormativeSpecSectionNeedsNoTask(t *testing.T) {
+	spine := &Spine{
+		Requirements: &Document{Sections: []Section{{ID: "REQ-001", Title: "Out of scope"}}},
+		Spec: &Document{Sections: []Section{
+			{ID: "SPEC-001", Title: "Login", Implements: []string{"REQ-001"}},
+			{ID: "SPEC-009", Title: "Out of Scope", Implements: []string{"REQ-001"},
+				Fields: map[string]string{"priority": "wont"}},
+		}},
+		Plan: &Document{Sections: []Section{{ID: "M-01", Children: []Section{
+			{ID: "T-001", Title: "Login", Implements: []string{"SPEC-001"}},
+		}}}},
+	}
+	for _, e := range spine.Check() {
+		if e.ID == "SPEC-009" {
+			t.Errorf("SPEC-009 is marked wont and was still flagged: %s", e.Detail)
+		}
+	}
+}
+
+// The exemption keys on the marker, never on the title. A spine that inferred
+// "non-normative" from prose a model happened to write would silently drop
+// real gaps whenever a section was named unluckily.
+func TestOutOfScopeTitleAloneDoesNotExempt(t *testing.T) {
+	spine := &Spine{
+		Requirements: &Document{Sections: []Section{{ID: "REQ-001", Title: "Scope"}}},
+		Spec: &Document{Sections: []Section{
+			{ID: "SPEC-009", Title: "Out of Scope", Implements: []string{"REQ-001"}},
+		}},
+		Plan: &Document{},
+	}
+	found := false
+	for _, e := range spine.Check() {
+		if e.ID == "SPEC-009" && e.Kind == UnimplementedSpec {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an unmarked section was exempted on its title alone")
+	}
+}

@@ -148,6 +148,8 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 	case Intake:
 		b.WriteString("## Your task\n\nWrite the project's requirements.\n\n")
 		if seed != "" {
+			b.WriteString("A requirement describing what is explicitly out of scope must " +
+				"carry **Priority:** wont.\n\n")
 			b.WriteString("## The brief you were given\n\n")
 			b.WriteString(strings.TrimSpace(seed))
 			b.WriteString("\n\n")
@@ -166,7 +168,10 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			return "", fmt.Errorf("spec needs requirements: run `ducklab intake` first")
 		}
 		b.WriteString("## Your task\n\nWrite the specification for these requirements. " +
-			"Every section must carry an **Implements:** line naming the requirements it covers.\n\n")
+			"Every section must carry an **Implements:** line naming the requirements it covers.\n\n" +
+			"A section that records what will NOT be built must also carry " +
+			"**Priority:** wont, so the traceability check knows not to ask for " +
+			"a task that implements it.\n\n")
 		b.WriteString("## Requirements\n\n")
 		for _, r := range approved {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", r.ID, r.Title, strings.TrimSpace(r.Body))
