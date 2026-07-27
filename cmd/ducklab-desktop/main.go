@@ -53,7 +53,10 @@ func main() {
 	// The frontend reads its connection details from window.ducklab. They are
 	// injected rather than fetched so the UI never has to know where the
 	// engine's state directory lives.
-	application.NewWindow(application.WebviewWindowOptions{
+	// app.Window.NewWithOptions, NOT the package-level application.NewWindow:
+	// the latter constructs a window but never registers it with the app, so
+	// the process starts, serves assets, and shows nothing.
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "ducklab",
 		Width:     1440,
 		Height:    900,
