@@ -99,3 +99,42 @@ func TestSSEScannerHandlesAnEventLargerThanItsBuffer(t *testing.T) {
 		t.Fatal("a large event deadlocked the scanner")
 	}
 }
+
+// Streamed tool calls arrive in fragments: the name in one chunk, the
+// arguments split across several more, each tagged with an index. They used to
+// be appended as if each fragment were a whole call, so the assistant message
+// sent back carried one call with a name and no arguments and several with a
+// slice of JSON and no name. vLLM answered 400 "Expecting value: line 1 column
+// 10" and the run died right after streaming its first turn perfectly.
+func TestStreamedToolCallsAreReassembled(t *testing.T) {
+	var a toolCallAccumulator
+	frag := func(i int, id, name, args string) streamToolCall {
+		var f streamToolCall
+		f.Index, f.ID = i, id
+		f.Function.Name, f.Function.Arguments = name, args
+		return f
+	}
+	// Two interleaved calls, as a model emitting them in parallel would.
+	a.add(frag(0, "call_a", "fs_read", ""))
+	a.add(frag(1, "call_b", "fs_patch", ""))
+	a.add(frag(0, "", "", `{"path":`))
+	a.add(frag(1, "", "", `{"path":"b.go"}`))
+	a.add(frag(0, "", "", `"a.go"}`))
+
+	got := a.result()
+	if len(got) != 2 {
+		t.Fatalf("got %d tool calls, want 2 — fragments were counted as calls", len(got))
+	}
+	if got[0].ID != "call_a" || got[0].Function.Name != "fs_read" {
+		t.Errorf("first call lost its identity: %+v", got[0])
+	}
+	if got[0].Function.Arguments != `{"path":"a.go"}` {
+		t.Errorf("arguments = %q, want valid reassembled JSON", got[0].Function.Arguments)
+	}
+	if got[1].Function.Arguments != `{"path":"b.go"}` {
+		t.Errorf("second call's arguments = %q", got[1].Function.Arguments)
+	}
+	if got[0].Type != "function" {
+		t.Errorf("type = %q; a call the server will accept needs one", got[0].Type)
+	}
+}

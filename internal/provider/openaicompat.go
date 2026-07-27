@@ -181,7 +181,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	}
 
 	var fullText strings.Builder
-	var toolCalls []ToolCall
+	var acc toolCallAccumulator
 	var usage Usage
 	var finishReason string
 
@@ -194,8 +194,11 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string     `json:"content"`
-					ToolCalls []ToolCall `json:"tool_calls"`
+					Content string `json:"content"`
+					// Streamed tool calls arrive in fragments identified by
+					// index: the name in one chunk, the arguments split across
+					// several more. They are not whole ToolCalls.
+					ToolCalls []streamToolCall `json:"tool_calls"`
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
@@ -214,8 +217,8 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 					return ChatResponse{}, ctx.Err()
 				}
 			}
-			if len(c.Delta.ToolCalls) > 0 {
-				toolCalls = append(toolCalls, c.Delta.ToolCalls...)
+			for _, frag := range c.Delta.ToolCalls {
+				acc.add(frag)
 			}
 			if c.FinishReason != "" {
 				finishReason = c.FinishReason
@@ -240,13 +243,76 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 			Message: Message{
 				Role:      "assistant",
 				Content:   fullText.String(),
-				ToolCalls: toolCalls,
+				ToolCalls: acc.result(),
 			},
 			FinishReason: finishReason,
 		}},
 		Usage:        usage,
 		FinishReason: finishReason,
 	}, nil
+}
+
+// streamToolCall is one fragment of a tool call as it arrives over SSE.
+type streamToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// toolCallAccumulator reassembles streamed tool calls.
+//
+// The fragments used to be appended as if each were a complete call, which
+// produced one tool call per chunk: the first with a name and no arguments,
+// the rest with a slice of JSON and no name. Sent back in the next request,
+// the server rejected it — vLLM answered 400 "Expecting value: line 1 column
+// 10" while trying to parse a truncated arguments string. A run therefore
+// streamed its first turn beautifully and then died.
+type toolCallAccumulator struct {
+	order []int
+	byIdx map[int]*ToolCall
+}
+
+func (a *toolCallAccumulator) add(f streamToolCall) {
+	if a.byIdx == nil {
+		a.byIdx = map[int]*ToolCall{}
+	}
+	tc, ok := a.byIdx[f.Index]
+	if !ok {
+		tc = &ToolCall{}
+		a.byIdx[f.Index] = tc
+		a.order = append(a.order, f.Index)
+	}
+	// Identity arrives once, in whichever fragment carries it; arguments
+	// arrive in pieces and must be concatenated in order.
+	if f.ID != "" {
+		tc.ID = f.ID
+	}
+	if f.Type != "" {
+		tc.Type = f.Type
+	}
+	if f.Function.Name != "" {
+		tc.Function.Name = f.Function.Name
+	}
+	tc.Function.Arguments += f.Function.Arguments
+}
+
+func (a *toolCallAccumulator) result() []ToolCall {
+	if len(a.order) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(a.order))
+	for _, i := range a.order {
+		tc := *a.byIdx[i]
+		if tc.Type == "" {
+			tc.Type = "function"
+		}
+		out = append(out, tc)
+	}
+	return out
 }
 
 // sseScanner scans SSE events.
