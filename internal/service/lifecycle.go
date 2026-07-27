@@ -279,3 +279,15 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	})
 	w.WriteState()
 }
+
+// clearPending wipes the human-gate block when a run stops waiting.
+//
+// A finished run that still advertises pending_kind is stale state: the inbox
+// filters on status today and so hides it, but anything keying on the field
+// alone — a future badge, a report, RunAnswer — would treat a committed run as
+// still blocked.
+func clearPending(run *runlog.Run) {
+	run.PendingKind = ""
+	run.PendingSince = ""
+	run.PendingData = nil
+}

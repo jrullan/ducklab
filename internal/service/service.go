@@ -866,6 +866,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	rs.run.CommitSHA = sha
 	rs.run.Status = "done"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
 	rs.writer.AppendEvent("human", map[string]interface{}{"action": "accept"})
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
 	rs.writer.WriteState()
@@ -943,6 +944,7 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	rs.run.Status = "failed"
 	rs.run.Verdict = "ABORTED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
 	// The run stays in the map: it is still inspectable through RunGet and
 	// still on disk. Deleting it made an aborted run vanish from run list.
@@ -1035,6 +1037,7 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	rs.run.Status = "done"
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
 	return w.WriteState()

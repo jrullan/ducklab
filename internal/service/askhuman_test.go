@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -187,5 +188,21 @@ func TestRunAnswerUnknownRun(t *testing.T) {
 	s := newTestService(t)
 	if err := s.RunAnswer(context.Background(), "r-nope", "q", "a"); err == nil {
 		t.Error("answered a run that does not exist")
+	}
+}
+
+// A run that has been accepted, rejected or aborted is no longer waiting for
+// anyone, and must not keep advertising that it is.
+func TestTerminalRunsClearThePendingBlock(t *testing.T) {
+	for _, name := range []string{"accept", "reject", "abort"} {
+		run := &runlog.Run{
+			ID: "r-x", Status: "paused", PendingKind: "gate",
+			PendingSince: "2026-07-26T12:00:00Z",
+			PendingData:  map[string]interface{}{"verdict": "PASSED"},
+		}
+		clearPending(run)
+		if run.PendingKind != "" || run.PendingSince != "" || run.PendingData != nil {
+			t.Errorf("%s: pending block survived: %+v", name, run)
+		}
 	}
 }
