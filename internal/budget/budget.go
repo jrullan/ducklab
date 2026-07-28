@@ -173,6 +173,16 @@ func NewTracker(b *Budget) *Tracker {
 
 // Check checks if the budget is exceeded.
 func (t *Tracker) Check() (string, bool) {
+	// Refresh the clock before judging it.
+	//
+	// UpdateWallclock existed and nothing called it, so Spend.WallclockS stayed
+	// at zero and Exceeded compared 0 >= MaxWallclockS — always false. The
+	// wallclock budget has never stopped anything. A run that sat ten minutes
+	// on its first turn should have been cut off by it and was not.
+	//
+	// Check runs before every model call, which is the only place a run can be
+	// stopped anyway.
+	t.Spend.UpdateWallclock()
 	return t.Budget.Exceeded(t.Spend)
 }
 

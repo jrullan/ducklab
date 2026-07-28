@@ -1,6 +1,7 @@
 package budget
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,5 +102,37 @@ func TestWallclock(t *testing.T) {
 	s.UpdateWallclock()
 	if s.Snapshot().WallclockS <= 0 {
 		t.Error("wallclock should be positive")
+	}
+}
+
+// UpdateWallclock existed and nothing called it, so WallclockS stayed at zero
+// and Exceeded compared 0 >= MaxWallclockS — always false. The wallclock
+// budget has never stopped anything: a run that sat ten minutes on its first
+// turn should have been cut off by it and was not.
+func TestWallclockBudgetActuallyStopsARun(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 1})
+	// Pretend the run started two seconds ago.
+	tracker.Spend.StartTime = time.Now().Add(-2 * time.Second)
+
+	msg, exceeded := tracker.Check()
+	if !exceeded {
+		t.Fatal("a run two seconds into a one-second budget was allowed to continue")
+	}
+	if !strings.Contains(msg, "wallclock") {
+		t.Errorf("message = %q, should name the budget that stopped it", msg)
+	}
+}
+
+// A run inside its budget must not be stopped, and the clock must be reported
+// rather than left at zero.
+func TestWallclockIsMeasuredNotAssumed(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 3600})
+	tracker.Spend.StartTime = time.Now().Add(-5 * time.Second)
+
+	if _, exceeded := tracker.Check(); exceeded {
+		t.Fatal("a run well inside its budget was stopped")
+	}
+	if got := tracker.Spend.Snapshot().WallclockS; got < 4 {
+		t.Errorf("wallclock = %.1fs, want about 5: it is not being measured", got)
 	}
 }
