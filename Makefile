@@ -84,7 +84,10 @@ PREFIX ?= $(HOME)/.local
 # destroyed the only copy.
 install: build
 	@mkdir -p $(PREFIX)/bin
-	@for b in ducklab ducklab-engine; do \
+	@# The desktop joins them when it has been built. It needs cgo and the
+	@# frontend bundle, so `build` does not produce it, but an installed path
+	@# is what an AppArmor profile matches on — see packaging/apparmor.
+	@for b in ducklab ducklab-engine $$([ -x bin/ducklab-desktop ] && echo ducklab-desktop); do \
 	  t=$(PREFIX)/bin/$$b; \
 	  if [ -e $$t ] && ! cmp -s bin/$$b $$t; then \
 	    mv $$t $$t.bak && echo "  backed up $$t -> $$t.bak"; \

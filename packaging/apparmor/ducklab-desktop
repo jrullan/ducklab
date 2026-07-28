@@ -1,0 +1,29 @@
+# AppArmor profile for ducklab-desktop.
+#
+# Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which stops
+# unprivileged processes from creating user namespaces. WebKitGTK builds its
+# renderer sandbox with bubblewrap, which needs one, so the app dies at startup
+# with:
+#
+#   bwrap: setting up uid map: Permission denied
+#   ERROR: Failed to fully launch dbus-proxy: Child process exited with code 1
+#
+# This grants that one permission to this one binary, which is how Ubuntu
+# intends it to be handled — /etc/apparmor.d/ch-checkns and linux-sandbox have
+# the same shape. The alternatives are worse: turning the sysctl off weakens
+# every process on the machine, and WEBKIT_DISABLE_DBUS_PROXY or
+# WEBKIT_FORCE_SANDBOX=0 turn off the browser sandbox that is protecting us
+# from the pages our own ducklings can influence.
+#
+# Install:
+#   sudo cp packaging/apparmor/ducklab-desktop /etc/apparmor.d/ducklab-desktop
+#   sudo apparmor_parser -r /etc/apparmor.d/ducklab-desktop
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile ducklab-desktop /home/*/.local/bin/ducklab-desktop flags=(unconfined) {
+  userns,
+
+  include if exists <local/ducklab-desktop>
+}
