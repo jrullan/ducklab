@@ -202,6 +202,10 @@ func routeTable() []Route {
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAnswer }},
 
 		// The cycle
+		{Method: "POST", Path: "/v1/projects/{id}/reviews", Auth: true,
+			Request: service.ReviewRequest{}, Response: runlog.Run{},
+			Summary: "Review an accepted task", ClientMethod: "ReviewStart",
+			handler: func(s *Server) http.HandlerFunc { return s.handleReviewStart }},
 		{Method: "POST", Path: "/v1/projects/{id}/stages/{stage}", Auth: true,
 			Request: service.StageRequest{}, Response: runlog.Run{},
 			Summary: "Run intake, spec or plan", ClientMethod: "StageStart",

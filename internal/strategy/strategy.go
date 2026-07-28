@@ -101,3 +101,46 @@ func validRole(r config.Role) bool {
 	}
 	return false
 }
+
+// ReviewScript returns the review stage's conversation (05 §1).
+//
+// Solo is one reviewer reading the diff. Council adds a second reviewer and a
+// human turn, for work where one opinion is not enough.
+//
+// The reviewer sees the diff and nothing else. It is reading committed work,
+// so there is no implementer transcript to be swayed by — and there will not
+// be one later either, because a review that adopted the author's reasoning
+// would stop being a second reading (I7).
+func ReviewScript(council bool) *Script {
+	turns := []Turn{{
+		Role:     config.RoleReviewer,
+		Toolbelt: "full", // narrowed to the reviewer's read-only ceiling
+		Contract: "verdict",
+		MaxTurns: 8,
+	}}
+	if council {
+		turns = append(turns,
+			Turn{
+				// Conditional: the scheduler skips it unless a human is
+				// available (05 §4.4).
+				Role:     config.RoleHuman,
+				Contract: "freeform",
+				MaxTurns: 1,
+			},
+			Turn{
+				Role:     config.RoleReviewer,
+				Toolbelt: "full",
+				Contract: "verdict",
+				MaxTurns: 8,
+			},
+		)
+	}
+	return &Script{
+		Name:  "review",
+		Turns: turns,
+		// One pass. A review is a reading, not a negotiation: re-reading until
+		// the verdict changes is how a review becomes a rubber stamp.
+		Until:     "true",
+		MaxRounds: 1,
+	}
+}

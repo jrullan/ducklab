@@ -309,3 +309,43 @@ func joinAny(v interface{}) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// reviewCmd implements `ducklab review <task> [--mode council]` (03 §3).
+func reviewCmd(args []string, repo string) int {
+	taskID, mode := "", "solo"
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; a {
+		case "--mode":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --mode needs solo or council")
+				return 2
+			}
+			mode = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(a, "-") || taskID != "" {
+				fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
+				fmt.Fprintln(os.Stderr, "usage: ducklab review <task> [--mode solo|council]")
+				return 2
+			}
+			taskID = a
+		}
+	}
+	if taskID == "" {
+		fmt.Fprintln(os.Stderr, "usage: ducklab review <task> [--mode solo|council]")
+		return 2
+	}
+
+	client, projectID, code := project(repo)
+	if code != 0 {
+		return code
+	}
+	run, err := client.ReviewStart(projectID, taskID, mode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	runID := str(run["id"])
+	fmt.Printf("review of %s started (run %s)\n", taskID, runID)
+	return followRun(client, runID)
+}

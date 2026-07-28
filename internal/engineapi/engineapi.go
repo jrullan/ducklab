@@ -448,6 +448,20 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, project)
 }
 
+func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request) {
+	var req service.ReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.ReviewStart(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
 func (s *Server) handleProjectForget(w http.ResponseWriter, r *http.Request) {
 	if err := s.svc.ProjectForget(r.Context(), r.PathValue("id")); err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())

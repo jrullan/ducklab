@@ -234,6 +234,14 @@ func (g *Git) ApplyPatch(patch string) error {
 	return nil
 }
 
+// ShowCommit returns the diff a commit introduced.
+//
+// This is what the review stage reads: a review is of the work that was
+// accepted, not of whatever happens to be uncommitted now.
+func (g *Git) ShowCommit(sha string) (string, error) {
+	return g.run("show", "--format=", "--patch", sha)
+}
+
 // DiffAgainst returns the diff of the working tree against a commit, including
 // files git does not yet track. A contestant that creates a new file must have
 // it captured, or its patch silently loses the work.

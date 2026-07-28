@@ -245,6 +245,14 @@ func (c *Client) ProjectForget(id string) error {
 	return nil
 }
 
+// ReviewStart reviews an accepted task's committed diff.
+func (c *Client) ReviewStart(projectID, taskID, mode string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/reviews",
+		map[string]string{"task_id": taskID, "mode": mode}, &result)
+	return result, err
+}
+
 // ProjectUpdate applies dotted config keys to a project.
 func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]interface{}, error) {
 	var result map[string]interface{}
