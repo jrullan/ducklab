@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,7 +63,7 @@ func (f *tourFixture) params(t *testing.T) *TournamentParams {
 			return nil
 		},
 	}
-	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
+	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, tc TurnContext) (*agent.Outcome, error) {
 		if turn.Role == config.RoleJudge {
 			return &agent.Outcome{Text: "judged", Parsed: f.judgeOut}, nil
 		}
@@ -219,11 +220,11 @@ func TestJudgePromptIsAnonymous(t *testing.T) {
 	p := f.params(t)
 	var judgePrompt string
 	inner := p.Runner
-	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
+	p.Runner = func(ctx context.Context, turn *Turn, d config.DucklingID, prompt string, belt []string, tc TurnContext) (*agent.Outcome, error) {
 		if turn.Role == config.RoleJudge {
 			judgePrompt = prompt
 		}
-		return inner(ctx, turn, d, prompt, belt, round, index)
+		return inner(ctx, turn, d, prompt, belt, tc)
 	}
 	if _, err := ExecuteTournament(context.Background(), p); err != nil {
 		t.Fatal(err)
@@ -404,5 +405,59 @@ func TestAnonymiseCandidatesUsedByTournament(t *testing.T) {
 	cands := conv.AnonymiseCandidates([]conv.Candidate{{Diff: "+x"}, {Diff: "+y"}})
 	if cands[0].Label != "A" || cands[1].Label != "B" {
 		t.Errorf("labels = %q, %q", cands[0].Label, cands[1].Label)
+	}
+}
+
+// A contestant must work in its own worktree. The runner had no way to be told
+// where that was, so every contestant edited the shared tree: their patches
+// came back empty, the judge correctly found nothing to choose between, and
+// the work still landed in the repository with no one having picked it.
+//
+// Measured on the first tournament this project ever ran: both candidate
+// patches were zero bytes, the resolution was no_winner, and add.go in the
+// main tree was fixed anyway.
+func TestEachContestantWorksInItsOwnWorkspace(t *testing.T) {
+	var mu sync.Mutex
+	var roots []string
+
+	p := &TournamentParams{
+		ExecuteParams: ExecuteParams{Prompt: "fix it"},
+		Contestants:   2,
+		Ducklings:     []config.DucklingID{"pato-uno", "pato-dos"},
+		NewWorkspace: func(_ context.Context, label string) (Workspace, error) {
+			var closed int32
+			return &fakeWorkspace{label: label, patch: "--- a\n+++ b\n@@ -1 +1 @@\n+fixed\n", closed: &closed}, nil
+		},
+		GateIn: func(context.Context, string) (string, string, error) { return "green", "", nil },
+		Apply:  func(string) error { return nil },
+	}
+	p.Runner = func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+		mu.Lock()
+		roots = append(roots, tc.Root)
+		mu.Unlock()
+		if turn.Role == config.RoleJudge {
+			return &agent.Outcome{Parsed: &agent.Choice{Choice: "A", Reason: "first"}}, nil
+		}
+		return &agent.Outcome{Text: "done"}, nil
+	}
+
+	if _, err := ExecuteTournament(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	sort.Strings(roots)
+	// Two contestants and a judge. The judge arbitrates over patches and has
+	// no tree of its own.
+	var contestantRoots []string
+	for _, r := range roots {
+		if r != "" {
+			contestantRoots = append(contestantRoots, r)
+		}
+	}
+	if len(contestantRoots) != 2 {
+		t.Fatalf("contestants given a workspace: %d, want 2 (roots=%q)", len(contestantRoots), roots)
+	}
+	if contestantRoots[0] == contestantRoots[1] {
+		t.Errorf("both contestants were pointed at %q; they must not share a tree", contestantRoots[0])
 	}
 }

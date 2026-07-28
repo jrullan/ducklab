@@ -16,10 +16,24 @@ import (
 // Injected rather than called directly so the round scheduler — the part that
 // must be deterministic — can be tested without a provider, a repo, or a
 // model. The default implementation calls agent.RunTurn.
-// round and index identify WHICH turn this is, not just what kind. Streamed
-// tokens have to be attributable to one turn: keyed by duckling alone, a
-// council's second architect turn appended to the first one's text.
-type TurnRunner func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, round, index int) (*agent.Outcome, error)
+// TurnContext is where a turn sits and where it works.
+type TurnContext struct {
+	// Round and Index identify WHICH turn this is, not just what kind.
+	// Streamed tokens have to be attributable to one turn: keyed by duckling
+	// alone, a council's second architect turn appended to the first one's.
+	Round int
+	Index int
+	// Root is the tree this turn may touch. Empty means the project root.
+	//
+	// A tournament creates an isolated worktree per contestant and then had no
+	// way to tell the runner about it, so every contestant edited the shared
+	// tree instead. Their patches came back empty, the judge correctly found
+	// nothing to choose between, and the work still landed in the repository
+	// with no one having picked it.
+	Root string
+}
+
+type TurnRunner func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error)
 
 // GateRunner runs the project's verification and reports green/red/none.
 type GateRunner func(ctx context.Context) (gate string, log string, err error)
@@ -141,7 +155,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				"round": round, "turn": i, "role": string(turn.Role), "duckling": string(duckling),
 			})
 
-			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, round, i)
+			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: i})
 			if outcome != nil {
 				result.Outcome = outcome
 			}
@@ -300,10 +314,10 @@ func registryFrom(params *ExecuteParams) *tools.Registry {
 }
 
 func defaultRunner(params *ExecuteParams) TurnRunner {
-	return func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, round, index int) (*agent.Outcome, error) {
+	return func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
 		return agent.RunTurn(ctx, params.AgentLoop, &agent.Turn{
-			Round:     round,
-			Index:     index,
+			Round:     tc.Round,
+			Index:     tc.Index,
 			Role:      t.Role,
 			Duckling:  duckling,
 			Prompt:    prompt,

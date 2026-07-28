@@ -141,7 +141,7 @@ func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config
 
 // runnerFor returns a TurnRunner that picks the loop matching each turn's role.
 func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.DucklingID, ectx *tools.ExecContext) strategy.TurnRunner {
-	return func(ctx context.Context, t *strategy.Turn, d config.DucklingID, prompt string, belt []string, round, index int) (*agent.Outcome, error) {
+	return func(ctx context.Context, t *strategy.Turn, d config.DucklingID, prompt string, belt []string, tc strategy.TurnContext) (*agent.Outcome, error) {
 		if d == "" {
 			d = roster[t.Role]
 		}
@@ -154,10 +154,15 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 		turnCtx := *ectx
 		turnCtx.Role = t.Role
 		turnCtx.Duckling = d
+		// A contestant works in its own worktree. Leaving the project root
+		// here is what let every tournament contestant edit the shared tree.
+		if tc.Root != "" {
+			turnCtx.ProjectRoot = tc.Root
+		}
 		return agent.RunTurn(ctx, loop, &agent.Turn{
 			Role: t.Role, Duckling: d, Prompt: prompt, Toolbelt: belt,
 			Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
-			Round: round, Index: index,
+			Round: tc.Round, Index: tc.Index,
 		}, &turnCtx)
 	}
 }

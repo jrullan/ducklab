@@ -231,7 +231,9 @@ func runContestant(ctx context.Context, p *TournamentParams, i int) (e struct {
 	if runner == nil {
 		runner = defaultRunner(&p.ExecuteParams)
 	}
-	if _, err := runner(ctx, turn, duckling, p.Prompt, belt, 1, i); err != nil {
+	// Root is what makes the isolation real: without it the contestant
+	// works in the shared tree and its workspace stays untouched.
+	if _, err := runner(ctx, turn, duckling, p.Prompt, belt, TurnContext{Round: 1, Index: i, Root: ws.Root()}); err != nil {
 		e.err = fmt.Errorf("contestant %d: %w", i, err)
 		return e
 	}
@@ -280,7 +282,7 @@ func judge(ctx context.Context, p *TournamentParams, cands []conv.Candidate) (*a
 		duckling = p.Roster[config.RoleJudge]
 	}
 
-	out, err := runner(ctx, turn, duckling, prompt, belt, 1, p.Contestants)
+	out, err := runner(ctx, turn, duckling, prompt, belt, TurnContext{Round: 1, Index: p.Contestants})
 	if err != nil {
 		return nil, err
 	}
