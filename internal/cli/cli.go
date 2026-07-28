@@ -135,6 +135,8 @@ func Run(args []string) int {
 		return reviewCmd(remaining[1:], repo)
 	case "release":
 		return releaseCmd(verb, cmdArgs, repo)
+	case "bug":
+		return bugCmd(verb, cmdArgs, repo)
 	case "task":
 		return taskCmd(verb, cmdArgs, repo)
 	case "trace":

@@ -202,6 +202,15 @@ func routeTable() []Route {
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAnswer }},
 
 		// The cycle
+		{Method: "GET", Path: "/v1/projects/{id}/bugs", Auth: true,
+			Summary: "List bugs", ClientMethod: "BugList",
+			handler: func(s *Server) http.HandlerFunc { return s.handleBugList }},
+		{Method: "POST", Path: "/v1/projects/{id}/bugs", Auth: true,
+			Request: service.BugRequest{}, Summary: "Report a bug", ClientMethod: "BugAdd",
+			handler: func(s *Server) http.HandlerFunc { return s.handleBugAdd }},
+		{Method: "POST", Path: "/v1/projects/{id}/bugs/{bug}/status", Auth: true,
+			Summary: "Move a bug", ClientMethod: "BugMove",
+			handler: func(s *Server) http.HandlerFunc { return s.handleBugMove }},
 		{Method: "POST", Path: "/v1/projects/{id}/releases", Auth: true,
 			Request: service.ReleaseRequest{}, Response: runlog.Run{},
 			Summary: "Plan a release", ClientMethod: "ReleasePlan",

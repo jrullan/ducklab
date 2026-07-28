@@ -402,3 +402,99 @@ func releaseCmd(verb string, args []string, repo string) int {
 		return 2
 	}
 }
+
+// bugCmd implements `ducklab bug add|list|status` (05 §6).
+func bugCmd(verb string, args []string, repo string) int {
+	client, projectID, code := project(repo)
+	if code != 0 {
+		return code
+	}
+
+	switch verb {
+	case "add":
+		req := map[string]string{"severity": "normal"}
+		var title []string
+		for i := 0; i < len(args); i++ {
+			switch args[i] {
+			case "--severity":
+				if i+1 < len(args) {
+					req["severity"] = args[i+1]
+					i++
+				}
+			case "--body":
+				if i+1 < len(args) {
+					req["body"] = args[i+1]
+					i++
+				}
+			case "--body-file":
+				if i+1 < len(args) {
+					data, err := os.ReadFile(args[i+1])
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "error: %v\n", err)
+						return 2
+					}
+					req["body"] = string(data)
+					i++
+				}
+			case "--reporter":
+				if i+1 < len(args) {
+					req["reporter"] = args[i+1]
+					i++
+				}
+			default:
+				title = append(title, args[i])
+			}
+		}
+		req["title"] = strings.Join(title, " ")
+		b, err := client.BugAdd(projectID, req)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("%s  %s\n", str(b["id"]), str(b["title"]))
+		return 0
+
+	case "", "list":
+		openOnly := false
+		for _, a := range args {
+			if a == "--open" {
+				openOnly = true
+			}
+		}
+		bugs, err := client.BugList(projectID, openOnly)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		if len(bugs) == 0 {
+			fmt.Println("no bugs")
+			return 0
+		}
+		fmt.Printf("%-8s %-10s %-12s %s\n", "ID", "SEVERITY", "STATUS", "TITLE")
+		for _, b := range bugs {
+			fmt.Printf("%-8s %-10s %-12s %s\n",
+				str(b["id"]), str(b["severity"]), str(b["status"]), str(b["title"]))
+		}
+		return 0
+
+	case "status":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab bug status <id> <status>")
+			return 2
+		}
+		b, err := client.BugMove(projectID, args[0], args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		fmt.Printf("%s is now %s\n", str(b["id"]), str(b["status"]))
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown bug command: %s\n", verb)
+		fmt.Fprintln(os.Stderr, "usage: ducklab bug add <title> [--severity s] [--body-file f]")
+		fmt.Fprintln(os.Stderr, "       ducklab bug list [--open]")
+		fmt.Fprintln(os.Stderr, "       ducklab bug status <id> <status>")
+		return 2
+	}
+}

@@ -357,3 +357,91 @@ func (d *DB) ListRuns() ([]*Run, error) {
 	}
 	return runs, rows.Err()
 }
+
+// Bug is one report in the operate loop (05 §6).
+type Bug struct {
+	ID          string
+	Title       string
+	Body        string
+	Severity    string
+	Status      string
+	DuplicateOf string
+	TaskID      string
+	Source      string
+	Reporter    string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+// CreateBug inserts a bug.
+func (d *DB) CreateBug(b *Bug) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if b.CreatedAt == "" {
+		b.CreatedAt = now
+	}
+	b.UpdatedAt = now
+	_, err := d.db.Exec(`INSERT INTO bug (id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.ID, b.Title, b.Body, b.Severity, b.Status,
+		nullable(b.DuplicateOf), nullable(b.TaskID), b.Source, b.Reporter, b.CreatedAt, b.UpdatedAt)
+	return err
+}
+
+// nullable keeps an empty foreign key out of the column.
+//
+// duplicate_of and task_id REFERENCE other rows, and "" is not a row. Writing
+// the empty string would leave a reference to a bug that does not exist and
+// make every later join quietly wrong.
+func nullable(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// GetBug returns one bug.
+func (d *DB) GetBug(id string) (*Bug, error) {
+	var b Bug
+	var dup, task sql.NullString
+	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at
+		FROM bug WHERE id = ?`, id).Scan(
+		&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status, &dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	b.DuplicateOf, b.TaskID = dup.String, task.String
+	return &b, nil
+}
+
+// ListBugs returns every bug, oldest first. Ordering for a person is the
+// caller's job: urgency is a product decision, not a storage one.
+func (d *DB) ListBugs() ([]*Bug, error) {
+	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at
+		FROM bug ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Bug
+	for rows.Next() {
+		var b Bug
+		var dup, task sql.NullString
+		if err := rows.Scan(&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status,
+			&dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, err
+		}
+		b.DuplicateOf, b.TaskID = dup.String, task.String
+		out = append(out, &b)
+	}
+	return out, rows.Err()
+}
+
+// UpdateBug writes a bug's mutable fields.
+func (d *DB) UpdateBug(b *Bug) error {
+	b.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
+		duplicate_of = ?, task_id = ?, updated_at = ? WHERE id = ?`,
+		b.Title, b.Body, b.Severity, b.Status,
+		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt, b.ID)
+	return err
+}

@@ -245,6 +245,34 @@ func (c *Client) ProjectForget(id string) error {
 	return nil
 }
 
+// BugAdd reports a bug.
+func (c *Client) BugAdd(projectID string, req map[string]string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/bugs", req, &result)
+	return result, err
+}
+
+// BugList lists a project's bugs, worst first.
+func (c *Client) BugList(projectID string, openOnly bool) ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	path := "/v1/projects/" + projectID + "/bugs"
+	if openOnly {
+		path += "?open=true"
+	}
+	err := c.get(path, &result)
+	return result.Items, err
+}
+
+// BugMove changes a bug's status.
+func (c *Client) BugMove(projectID, bugID, status string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/status",
+		map[string]string{"status": status}, &result)
+	return result, err
+}
+
 // ReleasePlan drafts the notes for the next release.
 func (c *Client) ReleasePlan(projectID, bump string) (map[string]interface{}, error) {
 	var result map[string]interface{}

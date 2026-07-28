@@ -448,6 +448,45 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, project)
 }
 
+func (s *Server) handleBugAdd(w http.ResponseWriter, r *http.Request) {
+	var req service.BugRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	b, err := s.svc.BugAdd(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, b)
+}
+
+func (s *Server) handleBugList(w http.ResponseWriter, r *http.Request) {
+	bugs, err := s.svc.BugList(r.Context(), r.PathValue("id"), r.URL.Query().Get("open") == "true")
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": bugs, "total": len(bugs)})
+}
+
+func (s *Server) handleBugMove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	b, err := s.svc.BugMove(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Status)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, b)
+}
+
 func (s *Server) handleReleasePlan(w http.ResponseWriter, r *http.Request) {
 	var req service.ReleaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
