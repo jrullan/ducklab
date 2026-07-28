@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -479,5 +480,35 @@ func TestAppendToAClosedLogFails(t *testing.T) {
 	w.Close()
 	if err := w.AppendEvent("human", nil); err == nil {
 		t.Error("appending to a closed log succeeded; the event went nowhere")
+	}
+}
+
+// A split run spent its architect's whole turn producing a good decomposition
+// and then died inside phase 3 on a raw "fatal: not a git repository". Every
+// mode needs a HEAD — to branch from, to diff against, to build a worktree on
+// — so finding out first costs nothing and saves the work.
+func TestARunRefusesAProjectItCannotWorkIn(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.registry.Register(dir, "no-git")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.RunStart(context.Background(), id, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err == nil {
+		t.Fatal("a run started in a directory that is not a repository")
+	}
+	// The message has to say what to do, not just what is wrong.
+	if !strings.Contains(err.Error(), "project init") {
+		t.Errorf("the refusal does not say how to fix it: %v", err)
+	}
+
+	runs, _ := s.RunList(context.Background(), RunFilter{ProjectID: id})
+	if len(runs) != 0 {
+		t.Errorf("a run record was created for a project that cannot host one: %d", len(runs))
 	}
 }

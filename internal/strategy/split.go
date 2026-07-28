@@ -149,6 +149,10 @@ type SplitResult struct {
 	Retried bool
 	// SeamRoundsUsed is how many pair rounds the integrated tree needed.
 	SeamRoundsUsed int
+	// Outcome is the turn that stopped the run, carried so the caller can
+	// turn a question into a pause instead of a failure. A run that asks a
+	// person something has not failed; it is waiting.
+	Outcome *agent.Outcome
 }
 
 // DefaultSeamRounds is how many pair rounds a red integration gets (05 §4.5).
@@ -171,7 +175,7 @@ func ExecuteSplit(ctx context.Context, p *SplitParams) (*SplitResult, error) {
 	result := &SplitResult{}
 
 	// --- phase 1 & 2: decompose, then validate ownership ---
-	decomp, owned, retried, err := decomposeWithRetry(ctx, p)
+	decomp, owned, retried, err := decomposeWithRetry(ctx, p, result)
 	result.Retried = retried
 	if err != nil {
 		return result, err
@@ -179,7 +183,7 @@ func ExecuteSplit(ctx context.Context, p *SplitParams) (*SplitResult, error) {
 	result.Subtasks = decomp.Subtasks
 
 	// --- phase 3: the subtasks run concurrently, each in its own worktree ---
-	roots, cleanup, err := runSubtasks(ctx, p, decomp.Subtasks)
+	roots, cleanup, err := runSubtasks(ctx, p, decomp.Subtasks, result)
 	defer cleanup()
 	if err != nil {
 		return result, err
@@ -252,8 +256,8 @@ func seamPrompt(task string, files []string) string {
 // One retry, not a loop: an architect that cannot separate the files twice is
 // telling you the task does not decompose, and asking a third time is how a
 // mode degrades into pretending it can.
-func decomposeWithRetry(ctx context.Context, p *SplitParams) (*agent.Decomposition, [][]string, bool, error) {
-	prompt := p.Prompt
+func decomposeWithRetry(ctx context.Context, p *SplitParams, result *SplitResult) (*agent.Decomposition, [][]string, bool, error) {
+	prompt := decomposePrompt(p.Prompt)
 	for attempt := 0; attempt < 2; attempt++ {
 		turn := &Turn{
 			Role:     config.RoleArchitect,
@@ -279,6 +283,9 @@ func decomposeWithRetry(ctx context.Context, p *SplitParams) (*agent.Decompositi
 			"duckling": string(duckling),
 		})
 		out, err := runner(ctx, turn, duckling, prompt, belt, TurnContext{Round: attempt + 1, Index: 0})
+		if out != nil {
+			result.Outcome = out
+		}
 		if err != nil {
 			return nil, nil, attempt > 0, err
 		}
@@ -307,10 +314,38 @@ func decomposeWithRetry(ctx context.Context, p *SplitParams) (*agent.Decompositi
 		emit(&p.ExecuteParams, "decomposition_rejected", map[string]interface{}{
 			"detail": verr.Error(),
 		})
-		prompt = p.Prompt + "\n\n## Your previous decomposition was rejected\n\n" +
+		prompt = decomposePrompt(p.Prompt) + "\n\n## Your previous decomposition was rejected\n\n" +
 			verr.Error() + "\n\nEvery file must have exactly one owner. Try again.\n"
 	}
 	return nil, nil, true, fmt.Errorf("split: no valid decomposition")
+}
+
+// decomposePrompt states the job.
+//
+// The first real split run failed because this did not exist: the architect
+// was handed the task prompt, a read-only toolbelt and a json:decomposition
+// contract it had never been told about. It explored, tried to write the files
+// itself with a tool it did not have, and ran out of turns having produced
+// nothing. A contract name is not an instruction — the model never sees it.
+func decomposePrompt(task string) string {
+	return task + `
+
+## Your task
+
+Do NOT implement anything. Break this work into ` + fmt.Sprint(agent.MinSubtasks) + ` to ` +
+		fmt.Sprint(agent.MaxSubtasks) + ` subtasks that can be built independently and at the
+same time, then stop.
+
+Every subtask must list the files it alone will create or edit. Two subtasks
+may not name the same file: the pieces are combined afterwards by copying each
+one's files, with no model involved, and that is only safe when every file has
+exactly one owner. If the work cannot be divided that way, say so rather than
+inventing a division.
+
+Answer with JSON and nothing else:
+
+{"subtasks":[{"title":"...","files":["path/one.go"],"body":"what to build"}]}
+`
 }
 
 // runSubtasks runs phase 3: every subtask concurrently, each in its own tree.
@@ -318,10 +353,11 @@ func decomposeWithRetry(ctx context.Context, p *SplitParams) (*agent.Decompositi
 // The returned cleanup releases the workspaces, and must run even when a
 // subtask fails — a worktree left registered makes the next run's `worktree
 // add` fail on a path git still believes in.
-func runSubtasks(ctx context.Context, p *SplitParams, subtasks []agent.Subtask) ([]string, func(), error) {
+func runSubtasks(ctx context.Context, p *SplitParams, subtasks []agent.Subtask, result *SplitResult) ([]string, func(), error) {
 	roots := make([]string, len(subtasks))
 	spaces := make([]Workspace, len(subtasks))
 	errs := make([]error, len(subtasks))
+	var mu sync.Mutex
 
 	cleanup := func() {
 		for _, ws := range spaces {
@@ -370,6 +406,14 @@ func runSubtasks(ctx context.Context, p *SplitParams, subtasks []agent.Subtask) 
 			})
 			out, err := runner(ctx, turn, duckling, subtaskPrompt(subtasks[i]), belt,
 				TurnContext{Round: 1, Index: i, Root: ws.Root()})
+			if out != nil && out.Pending != nil {
+				// One subtask stopping to ask stops the run: the pieces are
+				// parts, not alternatives, so there is nothing to integrate
+				// until the question is answered.
+				mu.Lock()
+				result.Outcome = out
+				mu.Unlock()
+			}
 			if err != nil {
 				errs[i] = fmt.Errorf("subtask %q: %w", subtasks[i].Title, err)
 				return

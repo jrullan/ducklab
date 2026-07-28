@@ -600,10 +600,33 @@ type RunFilter struct {
 	Status    string `json:"status"`
 }
 
+// checkRunnable reports why a project cannot host a run, in words that say
+// what to do about it.
+func checkRunnable(path string) error {
+	git := vcs.New(path)
+	if !git.HasGit() {
+		return fmt.Errorf("%s is not a git repository; run `ducklab project init --git-init` there", path)
+	}
+	if _, err := git.HeadSHA(); err != nil {
+		return fmt.Errorf("%s has no commits yet, so there is nothing to branch from or diff against; make one first", path)
+	}
+	return nil
+}
+
 // RunStart starts a run. Returns immediately with the run in running status.
 func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest) (*runlog.Run, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
+		return nil, err
+	}
+	// Checked before any model is asked for anything.
+	//
+	// A split run spent its architect's whole turn producing a good
+	// decomposition and then died inside phase 3 on a raw "fatal: not a git
+	// repository". Every mode needs a HEAD — to branch from, to diff against,
+	// to build a worktree on — so a project without one cannot run at all, and
+	// finding that out first costs nothing.
+	if err := checkRunnable(entry.Path); err != nil {
 		return nil, err
 	}
 

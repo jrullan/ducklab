@@ -285,6 +285,12 @@ func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.E
 	}
 
 	res, err := strategy.ExecuteSplit(ctx, sp)
+	if res != nil && err != nil {
+		// A run that stops to ask a person has not failed; it is waiting.
+		// Returning the raw error here marked the first real split run FAILED
+		// because its architect asked a question.
+		err = pendingOrErr(&strategy.ExecuteResult{Outcome: res.Outcome}, err)
+	}
 	if res != nil {
 		mc.rs.writer.AppendEvent("split_result", map[string]interface{}{
 			"subtasks": len(res.Subtasks), "integrated": res.Integrated,

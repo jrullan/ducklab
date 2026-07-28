@@ -8,6 +8,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/tools"
 )
 
 func decomp(subtasks ...agent.Subtask) *agent.Decomposition {
@@ -307,5 +308,49 @@ func TestSplitStopsAfterItsSeamRounds(t *testing.T) {
 	}
 	if res.Gate != "red" {
 		t.Errorf("gate = %q; a run that never went green must say so", res.Gate)
+	}
+}
+
+// A run that stops to ask a person has not failed; it is waiting. The first
+// real split run was marked FAILED because its architect asked a question, and
+// the outcome carrying that question was dropped on the way out.
+func TestSplitCarriesOutTheQuestionItStoppedOn(t *testing.T) {
+	pending := &tools.PendingQuestion{ID: "q1", Question: "Which package?"}
+	p := (&splitFixture{decompositions: []*agent.Decomposition{goodDecomp}}).params()
+	p.Runner = func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleArchitect {
+			return &agent.Outcome{Pending: pending}, tools.ErrHumanNeeded
+		}
+		return &agent.Outcome{Text: "done"}, nil
+	}
+
+	res, err := ExecuteSplit(context.Background(), p)
+	if err == nil {
+		t.Fatal("the run continued past a question")
+	}
+	if res.Outcome == nil || res.Outcome.Pending == nil {
+		t.Fatal("the question was dropped; the caller cannot turn it into a pause")
+	}
+	if res.Outcome.Pending.Question != "Which package?" {
+		t.Errorf("question = %q", res.Outcome.Pending.Question)
+	}
+}
+
+// A contract name is not an instruction: the model never sees it. The first
+// real split run failed because the architect was handed the task prompt, a
+// read-only toolbelt and a json:decomposition contract it had never been told
+// about — it tried to do the work itself and ran out of turns.
+func TestTheArchitectIsToldToDecompose(t *testing.T) {
+	got := decomposePrompt("Add a math helper and a string helper.")
+	for _, want := range []string{
+		"Add a math helper", // the task survives
+		"Do NOT implement",  // and is not what it should do
+		"subtasks",
+		"same file",    // the constraint that makes integration safe
+		`{"subtasks":`, // the shape to answer in
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the decomposition prompt never mentions %q", want)
+		}
 	}
 }
