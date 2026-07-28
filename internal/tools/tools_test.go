@@ -296,3 +296,60 @@ func TestRegistry(t *testing.T) {
 		t.Error("Get(\"nonexistent\") should fail")
 	}
 }
+
+// .ducklab/runs holds every run's llm.jsonl: the full prompt and response of
+// every duckling that has worked here. A tool that can read it hands a
+// reviewer the implementer's reasoning transcript, which I7 exists to prevent.
+//
+// Measured: a triager searching a project pulled 290 KB of a run's own
+// llm.jsonl into a tool result, and the next request was refused for exceeding
+// the model's context.
+func TestTheRunLogIsNotProjectContent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ducklab", "runs", "r-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ducklab", "runs", "r-1", "llm.jsonl"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range []string{
+		".ducklab/runs/r-1/llm.jsonl",
+		".ducklab/runs",
+		"./.ducklab/runs/r-1/../r-1/llm.jsonl",
+	} {
+		if _, err := PathJail(root, p); err == nil {
+			t.Errorf("%q was reachable", p)
+		}
+	}
+}
+
+// The documents stay readable: a duckling reading the plan it is implementing
+// is the point, and requirements and specs are meant to be read.
+func TestTheProjectDocumentsStayReadable(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ducklab", "docs", "plan.md"), []byte("# plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PathJail(root, ".ducklab/docs/plan.md"); err != nil {
+		t.Errorf("the plan became unreadable: %v", err)
+	}
+}
+
+// Truncating in silence hands a model half a file and lets it reason about the
+// half as though it were the whole.
+func TestCapResultSaysItTruncated(t *testing.T) {
+	got := CapResult(strings.Repeat("x", 100), 20)
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("a truncated result does not say so: %q", got)
+	}
+	if len(got) <= 20 {
+		t.Error("the marker replaced the content instead of preceding it")
+	}
+	if short := CapResult("small", 100); short != "small" {
+		t.Errorf("an uncapped result was altered: %q", short)
+	}
+}

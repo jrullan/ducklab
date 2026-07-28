@@ -158,7 +158,42 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if err != nil {
 		return ErrorResult("unknown tool %q", name), nil
 	}
-	return t.Execute(ctx, ectx, args)
+	res, err := t.Execute(ctx, ectx, args)
+	if res != nil {
+		// Capped here rather than in each tool, so a tool cannot forget.
+		//
+		// Only the exec tools capped their own output. A triager searching a
+		// project got a 290 KB result back — most of it the run's own
+		// llm.jsonl — and the next request was refused for exceeding the
+		// model's context by a factor of one. I3 says nothing is unbounded,
+		// and a tool result is the largest thing a turn can pull in.
+		res.Content = CapResult(res.Content, MaxToolResultBytes)
+	}
+	return res, err
+}
+
+// MaxToolResultBytes bounds what one tool call can add to a conversation.
+const MaxToolResultBytes = 32768
+
+// IsHarnessPath reports whether a path belongs to ducklab's own record rather
+// than to the project.
+//
+// .ducklab/runs holds every run's llm.jsonl: the full prompt and response of
+// every duckling that has worked here. A tool that can read it hands a
+// reviewer the implementer's reasoning transcript, which I7 exists to prevent,
+// and hands any turn a file larger than the context it is running in — a
+// triager pulled 290 KB of it into a search result and the next request was
+// refused outright.
+//
+// The documents under .ducklab/docs stay readable: artifact_read is a tool,
+// requirements and specs are meant to be read, and a duckling reading the plan
+// it is implementing is the point.
+func IsHarnessPath(root, abs string) bool {
+	runs, err := filepath.EvalSymlinks(filepath.Join(root, ".ducklab", "runs"))
+	if err != nil {
+		runs = filepath.Join(root, ".ducklab", "runs")
+	}
+	return abs == runs || strings.HasPrefix(abs, runs+string(filepath.Separator))
 }
 
 // PathJail resolves a path within the project root and validates it doesn't escape.
@@ -182,6 +217,9 @@ func PathJail(root, path string) (string, error) {
 		if !strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) && abs != rootAbs {
 			return "", fmt.Errorf("path escapes root: %s", path)
 		}
+		if IsHarnessPath(root, abs) {
+			return "", fmt.Errorf("%s is ducklab's own run log, not project content", path)
+		}
 		return abs, nil
 	}
 	// Relative path: join with root and evaluate
@@ -198,6 +236,9 @@ func PathJail(root, path string) (string, error) {
 		if !strings.HasPrefix(absParent, rootAbs+string(filepath.Separator)) && absParent != rootAbs {
 			return "", fmt.Errorf("path escapes root: %s", path)
 		}
+		if IsHarnessPath(root, joined) {
+			return "", fmt.Errorf("%s is ducklab's own run log, not project content", path)
+		}
 		return joined, nil
 	}
 	rootAbs, err := filepath.EvalSymlinks(root)
@@ -206,6 +247,9 @@ func PathJail(root, path string) (string, error) {
 	}
 	if !strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) && abs != rootAbs {
 		return "", fmt.Errorf("path escapes root: %s", path)
+	}
+	if IsHarnessPath(root, abs) {
+		return "", fmt.Errorf("%s is ducklab's own run log, not project content", path)
 	}
 	return abs, nil
 }
@@ -433,8 +477,15 @@ func CapResult(result string, maxBytes int) string {
 	if len(result) <= maxBytes {
 		return result
 	}
-	// Tail-biased: keep the end
-	return result[len(result)-maxBytes:]
+	// Tail-biased: an error or a failing assertion is at the end of output,
+	// and that is what a turn most often needs.
+	//
+	// Said out loud. Truncating in silence hands a model half a file and lets
+	// it reason about the half as though it were the whole: it will conclude
+	// a function is missing that was simply cut off.
+	dropped := len(result) - maxBytes
+	return fmt.Sprintf("[%d bytes truncated; showing the last %d]\n%s",
+		dropped, maxBytes, result[dropped:])
 }
 
 // ParseArgs parses JSON arguments into a struct.
