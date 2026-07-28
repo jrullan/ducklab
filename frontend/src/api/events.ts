@@ -202,6 +202,7 @@ export const KNOWN_EVENT_TYPES = [
   "message",
   "proposal",
   "verdict",
+  "candidate",
   "resolution",
   "human",
   "human_needed",

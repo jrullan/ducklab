@@ -120,6 +120,14 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 	// --- phase 2: label anonymously, by content ---
 	cands = conv.AnonymiseCandidates(cands)
 	result.Candidates = cands
+	// One event per candidate, carrying the label the judge will see and the
+	// gate that decides whether it is even eligible. No duckling: the label is
+	// assigned by content and the candidate files record no author either.
+	for _, c := range cands {
+		emit(&p.ExecuteParams, "candidate", map[string]interface{}{
+			"label": c.Label, "gate": c.Gate, "bytes": len(c.Diff),
+		})
+	}
 	green := conv.GreenCandidates(cands)
 
 	// --- phase 3: resolve ---
@@ -231,12 +239,29 @@ func runContestant(ctx context.Context, p *TournamentParams, i int) (e struct {
 	if runner == nil {
 		runner = defaultRunner(&p.ExecuteParams)
 	}
+	// A tournament emitted no events at all: no turns, no tool calls, no
+	// messages. On screen it was a run that started and then said nothing for
+	// several minutes, which is indistinguishable from one that hung.
+	//
+	// Contestants are identified by slot, not by the A/B label — that is
+	// assigned afterwards, by content, precisely so it does not correlate with
+	// run order.
+	emit(&p.ExecuteParams, "turn_start", map[string]interface{}{
+		"round": 1, "turn": i, "role": string(config.RoleImplementer),
+		"duckling": string(duckling), "contestant": i,
+	})
+
 	// Root is what makes the isolation real: without it the contestant
 	// works in the shared tree and its workspace stays untouched.
-	if _, err := runner(ctx, turn, duckling, p.Prompt, belt, TurnContext{Round: 1, Index: i, Root: ws.Root()}); err != nil {
+	outcome, err := runner(ctx, turn, duckling, p.Prompt, belt, TurnContext{Round: 1, Index: i, Root: ws.Root()})
+	if err != nil {
 		e.err = fmt.Errorf("contestant %d: %w", i, err)
 		return e
 	}
+	emitMessage(&p.ExecuteParams, 1, i, config.RoleImplementer, duckling, outcome)
+	emit(&p.ExecuteParams, "turn_end", map[string]interface{}{
+		"round": 1, "turn": i, "role": string(config.RoleImplementer),
+	})
 
 	patch, err := ws.Patch()
 	if err != nil {
@@ -282,10 +307,21 @@ func judge(ctx context.Context, p *TournamentParams, cands []conv.Candidate) (*a
 		duckling = p.Roster[config.RoleJudge]
 	}
 
+	// The judge sits in the slot after the last contestant, so a lane renders
+	// it below the work it is arbitrating.
+	emit(&p.ExecuteParams, "turn_start", map[string]interface{}{
+		"round": 1, "turn": p.Contestants, "role": string(config.RoleJudge),
+		"duckling": string(duckling),
+	})
 	out, err := runner(ctx, turn, duckling, prompt, belt, TurnContext{Round: 1, Index: p.Contestants})
 	if err != nil {
 		return nil, err
 	}
+	emitMessage(&p.ExecuteParams, 1, p.Contestants, config.RoleJudge, duckling, out)
+	emit(&p.ExecuteParams, "turn_end", map[string]interface{}{
+		"round": 1, "turn": p.Contestants, "role": string(config.RoleJudge),
+	})
+
 	choice, ok := out.Parsed.(*agent.Choice)
 	if !ok || choice == nil {
 		return nil, fmt.Errorf("judge did not produce a choice")

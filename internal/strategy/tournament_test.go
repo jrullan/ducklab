@@ -461,3 +461,71 @@ func TestEachContestantWorksInItsOwnWorkspace(t *testing.T) {
 		t.Errorf("both contestants were pointed at %q; they must not share a tree", contestantRoots[0])
 	}
 }
+
+// A tournament emitted no events at all: no turns, no tool calls, no messages.
+// On screen it was a run that started and then said nothing for minutes, which
+// is indistinguishable from one that hung.
+func TestTournamentReportsWhatItIsDoing(t *testing.T) {
+	var mu sync.Mutex
+	var kinds []string
+	var candidates []map[string]interface{}
+
+	p := &TournamentParams{
+		ExecuteParams: ExecuteParams{
+			Prompt: "fix it",
+			OnEvent: func(kind string, data map[string]interface{}) {
+				mu.Lock()
+				defer mu.Unlock()
+				kinds = append(kinds, kind)
+				if kind == "candidate" {
+					candidates = append(candidates, data)
+				}
+			},
+		},
+		Contestants: 2,
+		Ducklings:   []config.DucklingID{"pato-uno", "pato-dos"},
+		NewWorkspace: func(_ context.Context, label string) (Workspace, error) {
+			var closed int32
+			return &fakeWorkspace{label: label, patch: "--- a\n+++ b\n@@ -1 +1 @@\n+fixed " + label + "\n", closed: &closed}, nil
+		},
+		GateIn: func(context.Context, string) (string, string, error) { return "green", "", nil },
+		Apply:  func(string) error { return nil },
+	}
+	p.Runner = func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleJudge {
+			return &agent.Outcome{Text: `{"choice":"A"}`, Parsed: &agent.Choice{Choice: "A", Reason: "first"}}, nil
+		}
+		return &agent.Outcome{Text: "patched it"}, nil
+	}
+
+	if _, err := ExecuteTournament(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	count := map[string]int{}
+	for _, k := range kinds {
+		count[k]++
+	}
+	// Two contestants and one judge.
+	if count["turn_start"] != 3 || count["turn_end"] != 3 {
+		t.Errorf("turns started/ended = %d/%d, want 3/3: %v", count["turn_start"], count["turn_end"], count)
+	}
+	if count["message"] != 3 {
+		t.Errorf("messages = %d, want 3: nothing said is nothing shown", count["message"])
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("candidate events = %d, want 2", len(candidates))
+	}
+
+	// The label is what the judge sees, and it must come with the gate that
+	// decides eligibility. The author must not: candidate files record no
+	// author either, and the label is assigned by content on purpose.
+	for _, c := range candidates {
+		if c["label"] == nil || c["gate"] == nil {
+			t.Errorf("candidate event missing label or gate: %v", c)
+		}
+		if _, leaked := c["duckling"]; leaked {
+			t.Errorf("candidate event names its author: %v", c)
+		}
+	}
+}
