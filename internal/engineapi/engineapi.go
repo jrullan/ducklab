@@ -471,6 +471,24 @@ func (s *Server) handleBugList(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": bugs, "total": len(bugs)})
 }
 
+func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
+func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.BugPromote(r.Context(), r.PathValue("id"), r.PathValue("bug"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, out)
+}
+
 func (s *Server) handleBugMove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Status string `json:"status"`

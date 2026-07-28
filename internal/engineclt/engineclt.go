@@ -265,6 +265,20 @@ func (c *Client) BugList(projectID string, openOnly bool) ([]map[string]interfac
 	return result.Items, err
 }
 
+// BugTriage classifies the open bugs.
+func (c *Client) BugTriage(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/bugs/triage", nil, &result)
+	return result, err
+}
+
+// BugPromote turns a bug into a task.
+func (c *Client) BugPromote(projectID, bugID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/promote", nil, &result)
+	return result, err
+}
+
 // BugMove changes a bug's status.
 func (c *Client) BugMove(projectID, bugID, status string) (map[string]interface{}, error) {
 	var result map[string]interface{}

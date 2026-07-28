@@ -477,6 +477,30 @@ func bugCmd(verb string, args []string, repo string) int {
 		}
 		return 0
 
+	case "triage":
+		run, err := client.BugTriage(projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		runID := str(run["id"])
+		fmt.Printf("triage started (run %s)\n", runID)
+		return followRun(client, runID)
+
+	case "promote":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab bug promote <id>")
+			return 2
+		}
+		out, err := client.BugPromote(projectID, args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		fmt.Printf("%s is now task %s (%s)\n", str(out["bug"]), str(out["task"]), str(out["status"]))
+		fmt.Printf("\nrun it with: ducklab run %s --mode pair\n", str(out["task"]))
+		return 0
+
 	case "status":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab bug status <id> <status>")
@@ -494,6 +518,8 @@ func bugCmd(verb string, args []string, repo string) int {
 		fmt.Fprintf(os.Stderr, "unknown bug command: %s\n", verb)
 		fmt.Fprintln(os.Stderr, "usage: ducklab bug add <title> [--severity s] [--body-file f]")
 		fmt.Fprintln(os.Stderr, "       ducklab bug list [--open]")
+		fmt.Fprintln(os.Stderr, "       ducklab bug triage")
+		fmt.Fprintln(os.Stderr, "       ducklab bug promote <id>")
 		fmt.Fprintln(os.Stderr, "       ducklab bug status <id> <status>")
 		return 2
 	}

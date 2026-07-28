@@ -196,3 +196,55 @@ func TestEmptyResponseIsAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestTriageParsesAClassification(t *testing.T) {
+	got, err := ParseContract("json:triage", `{"severity":"high","duplicate_of":null,
+		"component":"auth","suspected_files":["auth.go"],"reproducible":true,
+		"task_title":"Fix session timeout","reason":"the timer resets on every request"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := got.(*Triage)
+	if !ok || tr == nil {
+		t.Fatalf("got %T", got)
+	}
+	if tr.Severity != "high" || tr.Component != "auth" || tr.TaskTitle == "" {
+		t.Errorf("parsed %+v", tr)
+	}
+	if tr.Reproducible == nil || !*tr.Reproducible {
+		t.Error("reproducible was lost")
+	}
+}
+
+// A bug whose reproducibility is unknown is not the same as one known not to
+// reproduce, and flattening them would close real reports.
+func TestTriageKeepsUnknownReproducibilityDistinctFromFalse(t *testing.T) {
+	unknown, err := ParseContract("json:triage", `{"severity":"low","reproducible":null,"reason":"no steps given"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := unknown.(*Triage).Reproducible; r != nil {
+		t.Errorf("unknown reproducibility became %v", *r)
+	}
+	no, err := ParseContract("json:triage", `{"severity":"low","reproducible":false,"reason":"cannot reproduce"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := no.(*Triage).Reproducible; r == nil || *r {
+		t.Error("a definite no was lost")
+	}
+}
+
+// A classification with no reason cannot be argued with, and it goes in front
+// of a person who has to decide whether to trust it.
+func TestTriageRequiresAReason(t *testing.T) {
+	if _, err := ParseContract("json:triage", `{"severity":"high","reason":"  "}`); err == nil {
+		t.Error("a classification with no reason was accepted")
+	}
+}
+
+func TestTriageRejectsAnUnknownSeverity(t *testing.T) {
+	if _, err := ParseContract("json:triage", `{"severity":"spicy","reason":"x"}`); err == nil {
+		t.Error("an unknown severity was accepted")
+	}
+}

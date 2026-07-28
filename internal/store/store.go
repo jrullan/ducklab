@@ -445,3 +445,33 @@ func (d *DB) UpdateBug(b *Bug) error {
 		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt, b.ID)
 	return err
 }
+
+// AddTrace records an edge in the traceability graph.
+//
+// Idempotent: the primary key is the whole edge, so recording the same link
+// twice is a no-op rather than an error. Promoting a bug that was already
+// promoted should not fail on bookkeeping.
+func (d *DB) AddTrace(fromKind, fromID, toKind, toID string) error {
+	_, err := d.db.Exec(`INSERT OR IGNORE INTO traceability (from_kind, from_id, to_kind, to_id)
+		VALUES (?, ?, ?, ?)`, fromKind, fromID, toKind, toID)
+	return err
+}
+
+// TracesFrom lists the edges leaving a node.
+func (d *DB) TracesFrom(kind, id string) ([]string, error) {
+	rows, err := d.db.Query(`SELECT to_kind || ':' || to_id FROM traceability
+		WHERE from_kind = ? AND from_id = ? ORDER BY to_kind, to_id`, kind, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

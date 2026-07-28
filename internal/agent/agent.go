@@ -559,6 +559,8 @@ func getRolePrompt(role config.Role) string {
 		return architectPrompt
 	case config.RoleScribe:
 		return scribePrompt
+	case config.RoleTriager:
+		return triagerPrompt
 	default:
 		return "You are a duckling in ducklab."
 	}
@@ -916,3 +918,21 @@ func applySampling(req *provider.ChatRequest, d *DucklingConfig) {
 	}
 	req.MaxTokens = outputCap(d.Params.MaxTokens)
 }
+
+// triagerPrompt is 04 §6.6, verbatim.
+//
+// The instruction to answer null when unsure is the important line: a missed
+// duplicate costs a second look, a wrongly closed one loses a real report.
+const triagerPrompt = `You are the triager. Classify one bug report.
+
+Reply with one JSON object:
+{"severity":"critical"|"high"|"normal"|"low",
+ "duplicate_of": "B-012" | null,
+ "component": "short name or empty",
+ "suspected_files": ["path", …],
+ "reproducible": true|false|null,
+ "task_title": "imperative one-liner for the fix task, or empty if not actionable",
+ "reason": "one sentence"}
+
+Base "duplicate_of" only on the open bugs you were given. If you are unsure,
+answer null; a missed duplicate is cheaper than a wrongly closed bug.`

@@ -203,6 +203,8 @@ export const KNOWN_EVENT_TYPES = [
   "proposal",
   "verdict",
   "candidate",
+  "triage_failed",
+  "triage",
   "release_drafted",
   "review_written",
   "split_result",

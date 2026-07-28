@@ -78,6 +78,8 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseChoice(text)
 	case contract == "json:decomposition":
 		return parseDecomposition(text)
+	case contract == "json:triage":
+		return parseTriage(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
 	case strings.HasPrefix(contract, "markdown_sections:"):
@@ -322,4 +324,46 @@ func parseDecomposition(text string) (*Decomposition, error) {
 		}
 	}
 	return &d, nil
+}
+
+// Triage is the triager's contract: one bug, classified (04 §6.6).
+type Triage struct {
+	Severity string `json:"severity"`
+	// DuplicateOf is a bug id or empty. A pointer so "absent" and "not a
+	// duplicate" are the same answer rather than two.
+	DuplicateOf    string   `json:"duplicate_of"`
+	Component      string   `json:"component"`
+	SuspectedFiles []string `json:"suspected_files"`
+	// Reproducible is nil when the triager could not tell. A bug whose
+	// reproducibility is unknown is not the same as one known not to
+	// reproduce, and flattening them would close real reports.
+	Reproducible *bool `json:"reproducible"`
+	// TaskTitle is empty when the bug is not actionable.
+	TaskTitle string `json:"task_title"`
+	Reason    string `json:"reason"`
+}
+
+var validTriageSeverities = map[string]bool{
+	"critical": true, "high": true, "normal": true, "low": true,
+}
+
+func parseTriage(text string) (*Triage, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, fmt.Errorf("triage contract: %w", err)
+	}
+	var t Triage
+	if err := json.Unmarshal([]byte(raw), &t); err != nil {
+		return nil, fmt.Errorf("triage contract: %w", err)
+	}
+	t.Severity = strings.ToLower(strings.TrimSpace(t.Severity))
+	if !validTriageSeverities[t.Severity] {
+		return nil, fmt.Errorf("triage contract: severity %q, want critical, high, normal or low", t.Severity)
+	}
+	if strings.TrimSpace(t.Reason) == "" {
+		// A classification with no reason cannot be argued with, and this one
+		// is going in front of a person who has to decide whether to trust it.
+		return nil, fmt.Errorf("triage contract: no reason given")
+	}
+	return &t, nil
 }
