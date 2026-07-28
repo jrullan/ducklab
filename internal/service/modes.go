@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -215,8 +216,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	case "tournament":
 		return s.runTournament(ctx, mc, base)
 
+	case "split":
+		return s.runSplit(ctx, mc, base)
+
 	default:
-		return fmt.Errorf("unknown mode %q (available: solo, pair, tournament)", mc.rs.run.Mode)
+		return fmt.Errorf("unknown mode %q (available: solo, pair, tournament, split)", mc.rs.run.Mode)
 	}
 }
 
@@ -263,6 +267,58 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 		}
 	}
 	return err
+}
+
+func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.ExecuteParams) error {
+	scratch := filepath.Join(mc.entry.Path, ".ducklab", "worktrees")
+	sp := &strategy.SplitParams{
+		ExecuteParams: base,
+		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
+		GateIn: func(ctx context.Context, root string) (string, string, error) {
+			res, err := verify.Run(root, mc.projCfg.Verify)
+			if err != nil {
+				return "none", "", err
+			}
+			return gateWord(res), res.Output, nil
+		},
+		CopyFile: copyOwnedFile,
+	}
+
+	res, err := strategy.ExecuteSplit(ctx, sp)
+	if res != nil {
+		mc.rs.writer.AppendEvent("split_result", map[string]interface{}{
+			"subtasks": len(res.Subtasks), "integrated": res.Integrated,
+			"gate": res.Gate, "retried": res.Retried, "seam_rounds": res.SeamRoundsUsed,
+		})
+	}
+	return err
+}
+
+// copyOwnedFile copies one integrated file, reporting whether it existed.
+//
+// A file a subtask claimed and never created is not an error: deciding a file
+// was unnecessary is a legitimate outcome, and removing the target copy would
+// discard whatever was there before.
+func copyOwnedFile(from, to string) (bool, error) {
+	data, err := os.ReadFile(from)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return false, err
+	}
+	// Preserve the mode of what was written, so an executable stays one.
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(from); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := os.WriteFile(to, data, mode); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func distinctDucklings(roster map[config.Role]config.DucklingID, all map[config.DucklingID]config.Duckling, n int) []config.DucklingID {

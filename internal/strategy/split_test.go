@@ -1,10 +1,13 @@
 package strategy
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/config"
 )
 
 func decomp(subtasks ...agent.Subtask) *agent.Decomposition {
@@ -137,5 +140,172 @@ func TestIntegrateRefusesMismatchedWorkspaces(t *testing.T) {
 		func(string, string) (bool, error) { return true, nil })
 	if err == nil {
 		t.Error("integration ran with fewer workspaces than ownership lists")
+	}
+}
+
+// splitFixture drives ExecuteSplit without models or a filesystem.
+type splitFixture struct {
+	decompositions []*agent.Decomposition // one per architect attempt
+	architectCalls int
+	subtaskRoots   []string
+	copied         []string
+	gates          []string // consumed in order
+	gateCalls      int
+	seamPrompts    []string
+	mu             sync.Mutex
+}
+
+func (f *splitFixture) params() *SplitParams {
+	p := &SplitParams{
+		ExecuteParams: ExecuteParams{ProjectRoot: "/repo", Prompt: "build the thing"},
+		NewWorkspace: func(_ context.Context, label string) (Workspace, error) {
+			var closed int32
+			return &fakeWorkspace{label: label, patch: "", closed: &closed}, nil
+		},
+		GateIn: func(context.Context, string) (string, string, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			g := "green"
+			if f.gateCalls < len(f.gates) {
+				g = f.gates[f.gateCalls]
+			}
+			f.gateCalls++
+			return g, "", nil
+		},
+		CopyFile: func(from, to string) (bool, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.copied = append(f.copied, from+" -> "+to)
+			return true, nil
+		},
+	}
+	p.Runner = func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch turn.Role {
+		case config.RoleArchitect:
+			i := f.architectCalls
+			f.architectCalls++
+			if i < len(f.decompositions) {
+				return &agent.Outcome{Parsed: f.decompositions[i]}, nil
+			}
+			return &agent.Outcome{Parsed: f.decompositions[len(f.decompositions)-1]}, nil
+		case config.RoleImplementer:
+			if tc.Root != "" {
+				f.subtaskRoots = append(f.subtaskRoots, tc.Root)
+			} else {
+				f.seamPrompts = append(f.seamPrompts, prompt)
+			}
+			return &agent.Outcome{Text: "done"}, nil
+		default:
+			return &agent.Outcome{Parsed: &agent.Verdict{Verdict: "approve"}}, nil
+		}
+	}
+	return p
+}
+
+var goodDecomp = &agent.Decomposition{Subtasks: []agent.Subtask{
+	{Title: "api", Files: []string{"src/api.go"}},
+	{Title: "store", Files: []string{"src/store.go"}},
+}}
+
+func TestSplitRunsEachSubtaskInItsOwnTreeThenIntegrates(t *testing.T) {
+	f := &splitFixture{decompositions: []*agent.Decomposition{goodDecomp}}
+	res, err := ExecuteSplit(context.Background(), f.params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.subtaskRoots) != 2 || f.subtaskRoots[0] == f.subtaskRoots[1] {
+		t.Errorf("subtask roots = %v; each piece needs its own tree", f.subtaskRoots)
+	}
+	if len(res.Integrated) != 2 {
+		t.Errorf("integrated = %v, want both owned files", res.Integrated)
+	}
+	if res.Gate != "green" {
+		t.Errorf("gate = %q", res.Gate)
+	}
+}
+
+// The architect gets exactly one more attempt, and it must be told what
+// clashed or the retry is a coin flip.
+func TestSplitRetriesTheArchitectOnceWithTheConflictNamed(t *testing.T) {
+	clashing := &agent.Decomposition{Subtasks: []agent.Subtask{
+		{Title: "api", Files: []string{"src/shared.go"}},
+		{Title: "store", Files: []string{"src/shared.go"}},
+	}}
+	f := &splitFixture{decompositions: []*agent.Decomposition{clashing, goodDecomp}}
+	res, err := ExecuteSplit(context.Background(), f.params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Retried {
+		t.Error("the run does not record that the first decomposition was refused")
+	}
+	if f.architectCalls != 2 {
+		t.Errorf("architect called %d times, want 2", f.architectCalls)
+	}
+}
+
+// Refusing beats degrading: a task that will not decompose is a task for
+// another mode, not a merge handed to a model.
+func TestSplitRefusesRatherThanMergingWithAModel(t *testing.T) {
+	clashing := &agent.Decomposition{Subtasks: []agent.Subtask{
+		{Title: "api", Files: []string{"src/shared.go"}},
+		{Title: "store", Files: []string{"src/shared.go"}},
+	}}
+	f := &splitFixture{decompositions: []*agent.Decomposition{clashing, clashing}}
+	_, err := ExecuteSplit(context.Background(), f.params())
+	if err == nil {
+		t.Fatal("two clashing decompositions were accepted")
+	}
+	if !strings.Contains(err.Error(), "src/shared.go") {
+		t.Errorf("the refusal does not name the clash: %v", err)
+	}
+	if len(f.copied) != 0 {
+		t.Error("files were integrated despite the refusal")
+	}
+}
+
+// Each piece verified alone, so a red integration is a seam. The pair is
+// pointed at the seam rather than told to start over.
+func TestSplitFixesSeamsWhenTheIntegrationIsRed(t *testing.T) {
+	f := &splitFixture{
+		decompositions: []*agent.Decomposition{goodDecomp},
+		gates:          []string{"red", "green"},
+	}
+	res, err := ExecuteSplit(context.Background(), f.params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SeamRoundsUsed != 1 {
+		t.Errorf("seam rounds = %d, want 1", res.SeamRoundsUsed)
+	}
+	if res.Gate != "green" {
+		t.Errorf("gate = %q after the seam round", res.Gate)
+	}
+	if len(f.seamPrompts) == 0 {
+		t.Fatal("no seam round ran")
+	}
+	if !strings.Contains(f.seamPrompts[0], "src/api.go") ||
+		!strings.Contains(f.seamPrompts[0], "Do not reimplement") {
+		t.Errorf("the seam prompt does not point at the integration: %q", f.seamPrompts[0])
+	}
+}
+
+// A red tree that stays red must stop, not grind.
+func TestSplitStopsAfterItsSeamRounds(t *testing.T) {
+	f := &splitFixture{
+		decompositions: []*agent.Decomposition{goodDecomp},
+		gates:          []string{"red", "red", "red", "red", "red"},
+	}
+	res, err := ExecuteSplit(context.Background(), f.params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SeamRoundsUsed != DefaultSeamRounds {
+		t.Errorf("seam rounds = %d, want %d", res.SeamRoundsUsed, DefaultSeamRounds)
+	}
+	if res.Gate != "red" {
+		t.Errorf("gate = %q; a run that never went green must say so", res.Gate)
 	}
 }
