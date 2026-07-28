@@ -405,3 +405,62 @@ func TestToolCallsAreDispatchedWithoutAFinishReason(t *testing.T) {
 		t.Errorf("dispatched %q", out.ToolCalls[0].Name)
 	}
 }
+
+// Dialect B was told the syntax and never the vocabulary. The preamble says
+// "you act only through the tools you are given" and then gave none, so a
+// text-protocol duckling had to guess names — and guessed from the only name
+// in front of it, the fs_write in the @payload example. A reviewer, whose
+// ceiling is read-only, was measured asking for fs_write for exactly that
+// reason.
+func TestTextProtocolIsToldWhichToolsItHas(t *testing.T) {
+	reg := tools.NewRegistry()
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review it",
+		Toolbelt: []string{"fs_read", "fs_search"}}
+
+	msgs := BuildMessages(turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Registry: reg}, false)
+	var system string
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system += m.Content
+		}
+	}
+
+	for _, want := range []string{"Your tools", "fs_read", "fs_search"} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the prompt never mentions %q", want)
+		}
+	}
+	// The catalogue has to be the belt, not a superset: naming a tool the role
+	// cannot use invites a refused call and a wasted turn.
+	if strings.Contains(system, "- `fs_write`") {
+		t.Error("a tool outside the belt was listed as available")
+	}
+}
+
+// A turn with no tools that is not told so spends its budget trying to call
+// one.
+func TestATurnWithNoToolsIsToldSo(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "x"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, false)
+	var system string
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system += m.Content
+		}
+	}
+	if !strings.Contains(system, "no tools") {
+		t.Error("a turn with an empty toolbelt is not told it has none")
+	}
+}
+
+// Native tool calling carries the schemas in the request, so the catalogue
+// would be a second, drifting copy.
+func TestNativeDialectGetsNoTextCatalogue(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "x", Toolbelt: []string{"fs_read"}},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "Your tools") {
+			t.Error("the native dialect was given a text tool catalogue as well")
+		}
+	}
+}

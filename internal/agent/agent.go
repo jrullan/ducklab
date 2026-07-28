@@ -431,6 +431,40 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 	return resp, err
 }
 
+// toolCatalogue lists the tools this turn may actually call.
+//
+// Dialect B was told the syntax and never the vocabulary. The preamble says
+// "you act only through the tools you are given" and then gave none, so a
+// text-protocol duckling had to guess names — and guessed from the only name
+// in front of it, the fs_write in the @payload example. A reviewer, whose
+// ceiling is read-only, was measured asking for fs_write for exactly that
+// reason.
+//
+// Native tool calling never had this problem: the request carries the schemas.
+func toolCatalogue(turn *Turn, ectx *tools.ExecContext) string {
+	if len(turn.Toolbelt) == 0 {
+		// Said out loud. A turn with no tools that is not told so will spend
+		// its budget trying to call one.
+		return "\n\nYou have no tools for this turn. Answer from what you have been given."
+	}
+	registry := ectx.Registry
+	var b strings.Builder
+	b.WriteString("\n\n## Your tools\n\nThese are the only tools you may call. " +
+		"Anything else is refused.\n\n")
+	for _, name := range turn.Toolbelt {
+		if registry == nil {
+			fmt.Fprintf(&b, "- `%s`\n", name)
+			continue
+		}
+		t, err := registry.Get(name)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, "- `%s` — %s\n", name, t.Description())
+	}
+	return b.String()
+}
+
 // BuildMessages builds the message list for a turn.
 func BuildMessages(turn *Turn, ectx *tools.ExecContext, useNative bool) []provider.Message {
 	var messages []provider.Message
@@ -482,6 +516,7 @@ func main() {}
 
 - When you are finished and have no tool to call, reply with your answer and no
   ` + "```ducklab" + ` block at all.`
+		system += toolCatalogue(turn, ectx)
 	}
 	messages = append(messages, provider.Message{Role: "system", Content: system})
 

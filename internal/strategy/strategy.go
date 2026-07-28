@@ -140,7 +140,12 @@ func ReviewScript(council bool) *Script {
 		Turns: turns,
 		// One pass. A review is a reading, not a negotiation: re-reading until
 		// the verdict changes is how a review becomes a rubber stamp.
-		Until:     "true",
+		//
+		// Said with the identifiers the expression language already has. Its
+		// set is closed on purpose (05 §3.3), and adding a `true` literal to
+		// spell a one-round script would be widening a language to avoid
+		// learning it.
+		Until:     "round == 1",
 		MaxRounds: 1,
 	}
 }
