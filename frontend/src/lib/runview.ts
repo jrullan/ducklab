@@ -72,9 +72,31 @@ export interface PendingHuman {
  */
 export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   const blocks: TurnBlock[] = [];
-  let current: TurnBlock | null = null;
+  const byKey = new Map<string, TurnBlock>();
+  // The turn most recently opened, used only for events that do not say which
+  // turn they belong to.
+  let last: TurnBlock | null = null;
 
   const keyFor = (round: number, turn: number) => `${round}:${turn}`;
+
+  /**
+   * The turn an event belongs to.
+   *
+   * This used to be a single `current` pointer advanced by turn_start and
+   * cleared by turn_end, which assumes turns happen one after another. A
+   * tournament runs its contestants in parallel, so their events interleave:
+   * the second turn_start replaced the first, everything after it landed in
+   * the wrong lane, and the first contestant was left thinking forever above
+   * an orphaned block holding its own words.
+   *
+   * Events that carry round and turn are routed by them. Older events that do
+   * not fall back to the last opened turn, which is correct for every
+   * sequential mode.
+   */
+  const blockFor = (d: Record<string, unknown>): TurnBlock | null => {
+    if (d.round === undefined && d.turn === undefined) return last;
+    return byKey.get(keyFor(Number(d.round ?? 1), Number(d.turn ?? 0))) ?? last;
+  };
 
   for (const e of events) {
     const d = e.data ?? {};
@@ -82,8 +104,9 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
       case "turn_start": {
         const round = Number(d.round ?? 1);
         const turn = Number(d.turn ?? 0);
-        current = {
-          key: keyFor(round, turn),
+        const key = keyFor(round, turn);
+        const block: TurnBlock = {
+          key,
           round,
           turn,
           role: String(d.role ?? ""),
@@ -92,12 +115,14 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           text: "",
           done: false,
         };
-        blocks.push(current);
+        byKey.set(key, block);
+        last = block;
+        blocks.push(block);
         break;
       }
       case "turn_end": {
-        if (current) current.done = true;
-        current = null;
+        const b = blockFor(d);
+        if (b) b.done = true;
         break;
       }
       case "message": {
@@ -107,13 +132,14 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         const content = String(d.content ?? "");
         const verdict = d.verdict ? String(d.verdict) : undefined;
         const findings = Array.isArray(d.findings) ? (d.findings as Finding[]) : undefined;
-        if (current) {
-          current.text = content;
-          current.verdict = verdict;
-          current.findings = findings;
+        const b = blockFor(d);
+        if (b) {
+          b.text = content;
+          b.verdict = verdict;
+          b.findings = findings;
         } else {
-          // A message outside a turn still belongs in the lane rather than
-          // being dropped on the floor.
+          // A message with no turn of its own still belongs in the lane rather
+          // than being dropped on the floor.
           blocks.push({
             key: keyFor(Number(d.round ?? 1), Number(d.turn ?? 0)),
             round: Number(d.round ?? 1),
@@ -130,7 +156,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "tool_call": {
-        current?.toolCalls.push({
+        blockFor(d)?.toolCalls.push({
           seq: e.seq ?? 0,
           tool: String(d.tool ?? "?"),
           ok: d.ok !== false,
@@ -139,7 +165,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "policy_violation": {
-        current?.toolCalls.push({
+        blockFor(d)?.toolCalls.push({
           seq: e.seq ?? 0,
           tool: String(d.tool ?? "?"),
           ok: false,

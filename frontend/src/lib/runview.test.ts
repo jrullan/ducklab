@@ -223,3 +223,53 @@ describe("buildTurns and what the model said", () => {
     expect(turns[0]!.role).toBe("reviewer");
   });
 });
+
+// A tournament runs its contestants in parallel, so their events interleave.
+// buildTurns advanced a single `current` pointer, so the second turn_start
+// replaced the first: everything after it landed in the wrong lane, and the
+// first contestant was left thinking forever above an orphaned block holding
+// its own words. Jose's screenshot showed three lanes for two contestants.
+describe("buildTurns with turns that overlap", () => {
+  const interleaved = [
+    { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" } },
+    { seq: 2, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "implementer", duckling: "pato-dos" } },
+    { seq: 3, type: "tool_call", run_id: "r", data: { round: 1, turn: 1, tool: "fs_read", ok: true } },
+    { seq: 4, type: "tool_call", run_id: "r", data: { round: 1, turn: 0, tool: "fs_patch", ok: true } },
+    { seq: 5, type: "message", run_id: "r", data: { round: 1, turn: 1, content: "B did it" } },
+    { seq: 6, type: "turn_end", run_id: "r", data: { round: 1, turn: 1 } },
+    { seq: 7, type: "message", run_id: "r", data: { round: 1, turn: 0, content: "A did it" } },
+    { seq: 8, type: "turn_end", run_id: "r", data: { round: 1, turn: 0 } },
+  ] as never;
+
+  it("makes one lane per turn, not one per interleaving", () => {
+    const turns = buildTurns(interleaved);
+    expect(turns).toHaveLength(2);
+  });
+
+  it("gives each turn its own words and its own tools", () => {
+    const turns = buildTurns(interleaved);
+    const a = turns.find((t) => t.turn === 0)!;
+    const b = turns.find((t) => t.turn === 1)!;
+    expect(a.text).toBe("A did it");
+    expect(b.text).toBe("B did it");
+    expect(a.toolCalls.map((c) => c.tool)).toEqual(["fs_patch"]);
+    expect(b.toolCalls.map((c) => c.tool)).toEqual(["fs_read"]);
+  });
+
+  it("ends both turns, so neither is left thinking", () => {
+    const turns = buildTurns(interleaved);
+    expect(turns.every((t) => t.done)).toBe(true);
+  });
+
+  // Older events carry no round or turn. A sequential run must still work.
+  it("falls back to the open turn for events that do not say which they are", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer" } },
+      { seq: 2, type: "tool_call", run_id: "r", data: { tool: "fs_read", ok: true } },
+      { seq: 3, type: "turn_end", run_id: "r", data: {} },
+    ] as never);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.toolCalls).toHaveLength(1);
+    expect(turns[0]!.done).toBe(true);
+  });
+});
