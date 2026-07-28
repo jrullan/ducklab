@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
 )
@@ -39,8 +38,12 @@ func projectCmd(verb string, args []string, repo string) int {
 		return projectSetKeys(client, repo, map[string]string{"describe": strings.Join(args, " ")})
 	case "set":
 		if len(args) < 2 {
-			fmt.Fprintf(os.Stderr, "usage: ducklab project set <key> <value>\nkeys: %s\n",
-				strings.Join(config.Keys(), ", "))
+			// The engine lists the settable keys when it rejects one, and it is
+			// the only side that knows them. Duplicating the list here meant
+			// importing a domain package into a client that must not have one
+			// (AC-16) — and a second copy to fall out of date.
+			fmt.Fprintln(os.Stderr, "usage: ducklab project set <key> <value>")
+			fmt.Fprintln(os.Stderr, "hint: any key ducklab does not know is rejected with the full list")
 			return 2
 		}
 		return projectSetKeys(client, repo, map[string]string{args[0]: strings.Join(args[1:], " ")})

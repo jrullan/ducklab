@@ -12,13 +12,16 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
-// Version is the CLI version, set from build.Version at startup.
-var Version = build.Version
+// Version is the CLI version. cmd/ducklab injects it from internal/build.
+//
+// The CLI may not import a domain package (AC-16), and that includes reaching
+// for the version constant directly: the rule is about what the client can
+// reach, not about how harmless this particular symbol is.
+var Version = "dev"
 
 // Run runs the CLI.
 func Run(args []string) int {
