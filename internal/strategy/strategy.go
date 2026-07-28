@@ -149,3 +149,22 @@ func ReviewScript(council bool) *Script {
 		MaxRounds: 1,
 	}
 }
+
+// ReleaseScript is the one turn a release involves a model in (05 §9.1).
+//
+// The scribe writes prose and touches nothing: what shipped is collected
+// deterministically before this runs, and the document's inventory is rendered
+// from that record rather than from anything the model says.
+func ReleaseScript() *Script {
+	return &Script{
+		Name: "release",
+		Turns: []Turn{{
+			Role:     config.RoleScribe,
+			Toolbelt: "full", // narrowed to the scribe's read-only ceiling
+			Contract: "freeform",
+			MaxTurns: 4,
+		}},
+		Until:     "round == 1",
+		MaxRounds: 1,
+	}
+}

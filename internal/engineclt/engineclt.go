@@ -245,6 +245,20 @@ func (c *Client) ProjectForget(id string) error {
 	return nil
 }
 
+// ReleasePlan drafts the notes for the next release.
+func (c *Client) ReleasePlan(projectID, bump string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/releases", map[string]string{"bump": bump}, &result)
+	return result, err
+}
+
+// ReleaseCut promotes a drafted release and tags it.
+func (c *Client) ReleaseCut(projectID, version string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/releases/"+version+"/cut", nil, &result)
+	return result, err
+}
+
 // ReviewStart reviews an accepted task's committed diff.
 func (c *Client) ReviewStart(projectID, taskID, mode string) (map[string]interface{}, error) {
 	var result map[string]interface{}

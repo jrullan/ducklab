@@ -234,6 +234,52 @@ func (g *Git) ApplyPatch(patch string) error {
 	return nil
 }
 
+// Tags lists the repository's tags.
+func (g *Git) Tags() ([]string, error) {
+	out, err := g.run("tag", "--list")
+	if err != nil {
+		return nil, err
+	}
+	var tags []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags, nil
+}
+
+// RevListAfter lists the commits reachable from HEAD but not from a ref.
+func (g *Git) RevListAfter(ref string) ([]string, error) {
+	out, err := g.run("rev-list", ref+"..HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var shas []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if sha := strings.TrimSpace(line); sha != "" {
+			shas = append(shas, sha)
+		}
+	}
+	return shas, nil
+}
+
+// Tag creates an annotated tag on HEAD.
+//
+// Annotated rather than lightweight: a release is a claim about a moment, and
+// an annotated tag records who made it and when. A lightweight tag is a
+// pointer with no story.
+func (g *Git) Tag(name, message string) error {
+	_, err := g.run("tag", "-a", name, "-m", shellEscape(message))
+	return err
+}
+
+// HasTag reports whether a tag already exists.
+func (g *Git) HasTag(name string) bool {
+	out, err := g.run("tag", "--list", name)
+	return err == nil && strings.TrimSpace(out) != ""
+}
+
 // ShowCommit returns the diff a commit introduced.
 //
 // This is what the review stage reads: a review is of the work that was

@@ -349,3 +349,56 @@ func reviewCmd(args []string, repo string) int {
 	fmt.Printf("review of %s started (run %s)\n", taskID, runID)
 	return followRun(client, runID)
 }
+
+// releaseCmd implements `ducklab release plan|cut` (05 §9.1).
+func releaseCmd(verb string, args []string, repo string) int {
+	client, projectID, code := project(repo)
+	if code != 0 {
+		return code
+	}
+
+	switch verb {
+	case "", "plan":
+		bump := "minor"
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--bump" && i+1 < len(args) {
+				bump = args[i+1]
+				i++
+			}
+		}
+		run, err := client.ReleasePlan(projectID, bump)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		runID := str(run["id"])
+		fmt.Printf("release plan started (run %s)\n", runID)
+		code = followRun(client, runID)
+		fmt.Println("\ncut it with:  ducklab release cut <version>")
+		return code
+
+	case "cut":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab release cut <version>")
+			return 2
+		}
+		out, err := client.ReleaseCut(projectID, args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("released %s\n", str(out["version"]))
+		fmt.Printf("  notes:  %s\n", str(out["notes"]))
+		fmt.Printf("  tag:    %s\n", str(out["tag"]))
+		if c := str(out["commit"]); c != "" {
+			fmt.Printf("  commit: %s\n", c[:min(9, len(c))])
+		}
+		return 0
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown release command: %s\n", verb)
+		fmt.Fprintln(os.Stderr, "usage: ducklab release plan [--bump major|minor|patch]")
+		fmt.Fprintln(os.Stderr, "       ducklab release cut <version>")
+		return 2
+	}
+}

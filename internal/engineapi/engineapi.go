@@ -448,6 +448,29 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, project)
 }
 
+func (s *Server) handleReleasePlan(w http.ResponseWriter, r *http.Request) {
+	var req service.ReleaseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.ReleasePlan(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
+func (s *Server) handleReleaseCut(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.ReleaseCut(r.Context(), r.PathValue("id"), r.PathValue("version"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, out)
+}
+
 func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request) {
 	var req service.ReviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

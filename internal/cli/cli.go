@@ -133,6 +133,8 @@ func Run(args []string) int {
 		return stageCmd(noun, remaining[1:], repo)
 	case "review":
 		return reviewCmd(remaining[1:], repo)
+	case "release":
+		return releaseCmd(verb, cmdArgs, repo)
 	case "task":
 		return taskCmd(verb, cmdArgs, repo)
 	case "trace":
