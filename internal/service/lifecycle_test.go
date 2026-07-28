@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -401,5 +402,82 @@ func TestAcceptingAnAlreadyCommittedChangeIsNotAFailure(t *testing.T) {
 	}
 	if got.PendingKind != "" {
 		t.Errorf("still waiting for someone: pending_kind=%q", got.PendingKind)
+	}
+}
+
+// Close left eventsF non-nil, so a later AppendEvent wrote to a closed
+// descriptor and returned an error every caller ignored. state.json kept
+// updating — WriteState writes by path — while the events explaining the state
+// vanished. Accepting a run recorded the commit and never recorded the accept,
+// so every client still thought the run was waiting for a person: the desktop
+// showed "waiting for you" and an enabled Accept button above the commit it
+// had just made.
+func TestAcceptIsWrittenToTheRunLog(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-log", ProjectID: p.ID, TaskID: "T-001", Stage: "build",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.AppendEvent("human_needed", map[string]interface{}{"kind": "gate"})
+	// The run finished, so its writer is closed — the state every accept
+	// actually happens in.
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	// Reproduce the state the real failure happened in: the run finished, so
+	// its writer is still attached to the runState and closed. A recovered run
+	// alone would not catch this — its writer is nil, so ensureWriter opens a
+	// fresh one and the bug hides.
+	s.runsMu.RLock()
+	rs := s.runs["r-log"]
+	s.runsMu.RUnlock()
+	if rs == nil {
+		t.Fatal("run not recovered")
+	}
+	rs.writer = w
+
+	if _, err := s.RunAccept(context.Background(), "r-log", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := s.RunGet(context.Background(), "r-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range detail.Events {
+		kinds = append(kinds, e.Type)
+	}
+	for _, want := range []string{"human", "run_end"} {
+		if !slices.Contains(kinds, want) {
+			t.Errorf("no %q event in the log: %v", want, kinds)
+		}
+	}
+}
+
+// A writer that has been closed must say so rather than swallowing writes.
+func TestAppendToAClosedLogFails(t *testing.T) {
+	dir := t.TempDir()
+	w, err := runlog.NewWriter(dir, &runlog.Run{ID: "r-x", StartedAt: "now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := w.AppendEvent("human", nil); err == nil {
+		t.Error("appending to a closed log succeeded; the event went nowhere")
 	}
 }

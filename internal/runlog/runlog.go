@@ -89,6 +89,7 @@ type Writer struct {
 	run       *Run
 	eventsMu  sync.Mutex
 	eventsSeq int
+	closed    bool
 	eventsF   *os.File
 	llmMu     sync.Mutex
 	llmSeq    int
@@ -151,6 +152,9 @@ func openWriter(projectRoot string, run *Run, resume bool) (*Writer, error) {
 
 // Close closes the writer.
 func (w *Writer) Close() error {
+	w.eventsMu.Lock()
+	w.closed = true
+	w.eventsMu.Unlock()
 	if w.eventsF != nil {
 		w.eventsF.Close()
 	}
@@ -158,6 +162,18 @@ func (w *Writer) Close() error {
 		w.llmF.Close()
 	}
 	return nil
+}
+
+// Closed reports whether this writer has been closed.
+//
+// Close left eventsF non-nil, so a later AppendEvent wrote to a closed
+// descriptor and returned an error that callers ignored. State kept updating —
+// WriteState writes by path — while the events that explain the state
+// vanished. Accepting a run recorded the commit and never recorded the accept.
+func (w *Writer) Closed() bool {
+	w.eventsMu.Lock()
+	defer w.eventsMu.Unlock()
+	return w.closed
 }
 
 // WriteState writes state.json atomically.
@@ -174,6 +190,11 @@ func (w *Writer) WriteState() error {
 func (w *Writer) AppendEvent(eventType string, data map[string]interface{}) error {
 	w.eventsMu.Lock()
 	defer w.eventsMu.Unlock()
+	if w.closed {
+		// Named rather than surfaced as a raw "file already closed", because
+		// the caller's mistake is reusing the writer, not the write itself.
+		return fmt.Errorf("append %s: run log is closed", eventType)
+	}
 	w.eventsSeq++
 	e := Event{
 		TS:    time.Now().UTC().Format(time.RFC3339Nano),

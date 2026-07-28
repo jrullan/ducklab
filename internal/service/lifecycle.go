@@ -49,7 +49,11 @@ func (s *Service) attachWriter(rs *runState, w *runlog.Writer) {
 func (s *Service) ensureWriter(rs *runState) (*runlog.Writer, error) {
 	rs.wmu.Lock()
 	defer rs.wmu.Unlock()
-	if rs.writer != nil {
+	// A closed writer must not be handed back. Close leaves the struct in
+	// place, so reusing one made every later append fail silently — the run's
+	// own accept never reached its log while state.json recorded the commit.
+	// OpenWriter appends and recovers the sequence, so reopening is safe.
+	if rs.writer != nil && !rs.writer.Closed() {
 		return rs.writer, nil
 	}
 	if rs.projectPath == "" {

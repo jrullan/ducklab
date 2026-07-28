@@ -989,11 +989,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Resolution = "accepted; the tree already carried this change"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
-		rs.writer.AppendEvent("human", map[string]interface{}{
-			"action": "accept", "detail": "nothing to commit; the change was already in the tree",
-		})
-		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
-		rs.writer.WriteState()
+		if err := s.logResolution(rs, "accept"); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -1012,10 +1010,30 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	rs.run.Status = "done"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
-	rs.writer.AppendEvent("human", map[string]interface{}{"action": "accept"})
-	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
-	rs.writer.WriteState()
+	// Logged, not assumed. These appends were ignored, and when the writer had
+	// been closed they failed silently: state.json recorded the commit while
+	// the log never recorded that a person accepted anything. Every client
+	// derives "is this still waiting for me" from those events, so the desktop
+	// went on offering Accept on a run it had already committed.
+	if err := s.logResolution(rs, "accept"); err != nil {
+		return err
+	}
 	return nil
+}
+
+// logResolution records a human decision and closes the run out.
+func (s *Service) logResolution(rs *runState, action string) error {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return fmt.Errorf("open run log: %w", err)
+	}
+	if err := w.AppendEvent("human", map[string]interface{}{"action": action}); err != nil {
+		return err
+	}
+	if err := w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict}); err != nil {
+		return err
+	}
+	return w.WriteState()
 }
 
 // RunResume resumes a paused run.
