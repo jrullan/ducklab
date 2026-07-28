@@ -76,6 +76,8 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseVerdict(text)
 	case contract == "choice":
 		return parseChoice(text)
+	case contract == "json:decomposition":
+		return parseDecomposition(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
 	case strings.HasPrefix(contract, "markdown_sections:"):
@@ -267,4 +269,57 @@ func stripCodeFences(s string) string {
 		lines = lines[:len(lines)-1]
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// Subtask is one piece of a decomposition, with the files it alone may touch.
+type Subtask struct {
+	Title string   `json:"title"`
+	Files []string `json:"files"`
+	Body  string   `json:"body"`
+}
+
+// Decomposition is the `split` architect's contract: a task broken into pieces
+// that own disjoint files.
+//
+// File ownership is what makes the later integration a copy rather than a
+// merge. A weak model asked to merge whole files destroys working code, so the
+// decomposition either yields disjoint ownership or the mode refuses (05 §4.5).
+type Decomposition struct {
+	Subtasks []Subtask `json:"subtasks"`
+}
+
+// MinSubtasks and MaxSubtasks bound a decomposition (05 §4.5).
+//
+// One subtask is not a decomposition — it is the original task with extra
+// machinery. Beyond five, the seams outnumber the work.
+const (
+	MinSubtasks = 2
+	MaxSubtasks = 5
+)
+
+func parseDecomposition(text string) (*Decomposition, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, fmt.Errorf("decomposition contract: %w", err)
+	}
+	var d Decomposition
+	if err := json.Unmarshal([]byte(raw), &d); err != nil {
+		return nil, fmt.Errorf("decomposition contract: %w", err)
+	}
+	if len(d.Subtasks) < MinSubtasks || len(d.Subtasks) > MaxSubtasks {
+		return nil, fmt.Errorf("decomposition contract: %d subtasks, want %d to %d",
+			len(d.Subtasks), MinSubtasks, MaxSubtasks)
+	}
+	for i, st := range d.Subtasks {
+		if strings.TrimSpace(st.Title) == "" {
+			return nil, fmt.Errorf("decomposition contract: subtask %d has no title", i)
+		}
+		if len(st.Files) == 0 {
+			// A subtask owning nothing cannot be integrated: phase 4 copies by
+			// ownership, so there would be nothing to copy and its work would
+			// be silently dropped.
+			return nil, fmt.Errorf("decomposition contract: subtask %q claims no files", st.Title)
+		}
+	}
+	return &d, nil
 }
