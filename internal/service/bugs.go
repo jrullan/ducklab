@@ -343,6 +343,23 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[
 		bug.Status(rec.Status) == bug.Closed {
 		return nil, fmt.Errorf("%s is %s; there is nothing to build", bugID, rec.Status)
 	}
+	// Checked before anything is written.
+	//
+	// This used to run after the task and the edge existed, so promoting an
+	// untriaged bug created both and then failed on the status move, leaving a
+	// task nobody asked for wired to a bug that had not moved.
+	//
+	// An untriaged bug is refused on purpose: promote follows triage in the
+	// loop (05 §6), and a bug nobody has classified is one nobody has decided
+	// is worth building.
+	next, err := bug.Move(bug.Status(rec.Status), bug.InProgress)
+	if err != nil {
+		if bug.Status(rec.Status) == bug.Open {
+			return nil, fmt.Errorf("%s has not been triaged yet; run `ducklab bug triage` "+
+				"or set it with `ducklab bug status %s triaged`", bugID, bugID)
+		}
+		return nil, err
+	}
 
 	n, err := db.NextSequence("task", "T")
 	if err != nil {
@@ -365,10 +382,6 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[
 	}
 
 	rec.TaskID = taskID
-	next, err := bug.Move(bug.Status(rec.Status), bug.InProgress)
-	if err != nil {
-		return nil, err
-	}
 	rec.Status = string(next)
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
