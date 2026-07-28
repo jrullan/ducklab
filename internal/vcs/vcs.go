@@ -114,8 +114,13 @@ func (g *Git) AddAll() error {
 }
 
 // Commit creates a commit.
+//
+// The message is escaped because run joins its arguments into one shell
+// command line: an unquoted "ducklab: release v0.1.0" reached git as four
+// pathspecs and the commit failed. CommitWithTrailer had always escaped;
+// this one had not, and the tests that used it discarded the error.
 func (g *Git) Commit(message string) (string, error) {
-	_, err := g.run("commit", "-m", message)
+	_, err := g.run("commit", "-m", shellEscape(message))
 	if err != nil {
 		return "", err
 	}

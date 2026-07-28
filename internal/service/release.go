@@ -302,12 +302,20 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		return nil, fmt.Errorf("release cut: %q is not a version like v1.2.3", version)
 	}
 
-	draft := release.Path(entry.Path, v) + ".proposed"
+	final := release.Path(entry.Path, v)
+	draft := final + ".proposed"
 	body, err := os.ReadFile(draft)
-	if err != nil {
+	if os.IsNotExist(err) {
+		// A cut that failed after promoting the document leaves the notes in
+		// place and no tag. Reading them lets the retry finish the job instead
+		// of reporting a draft that is missing because it already succeeded
+		// halfway.
+		body, err = os.ReadFile(final)
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("release cut: no draft for %s; run `ducklab release plan` first", v)
 		}
+	}
+	if err != nil {
 		return nil, err
 	}
 
@@ -318,7 +326,6 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		return nil, fmt.Errorf("release cut: %s is already tagged", v)
 	}
 
-	final := release.Path(entry.Path, v)
 	if err := os.WriteFile(final, body, 0o644); err != nil {
 		return nil, err
 	}

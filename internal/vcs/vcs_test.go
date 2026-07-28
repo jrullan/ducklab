@@ -292,3 +292,32 @@ func TestInitLeavesARepoThatCanBeDiffed(t *testing.T) {
 		t.Errorf("a freshly initialised repo cannot be diffed: %v", err)
 	}
 }
+
+// run joins its arguments into one shell command line, so an unescaped
+// multi-word message reached git as several pathspecs. "ducklab: release
+// v0.1.0" failed with `pathspec 'release' did not match any file(s)`, and the
+// tests that used Commit had been discarding its error.
+func TestCommitKeepsAMultiWordMessage(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	want := "ducklab: release v0.1.0"
+	if _, err := g.Commit(want); err != nil {
+		t.Fatalf("a multi-word commit message failed: %v", err)
+	}
+	out, err := g.run("log", "-1", "--format=%s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != want {
+		t.Errorf("message = %q, want %q", strings.TrimSpace(out), want)
+	}
+}
