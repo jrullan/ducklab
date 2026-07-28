@@ -3,15 +3,18 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/store"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -361,11 +364,23 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[
 		return nil, err
 	}
 
-	n, err := db.NextSequence("task", "T")
+	// The id comes from the plan, not from a database sequence.
+	//
+	// Tasks live in docs/plan.md — it is what `task list`, the board and
+	// `ducklab run` all read. A sequence that knew only the bug table handed
+	// out T-001 in a project whose plan already had T-001 through T-010: the
+	// promoted task was invisible to every command, and the one the CLI told
+	// you to run was a different task with the same name.
+	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
 	}
-	taskID := fmt.Sprintf("T-%03d", n)
+	taskID, err := appendPlanTask(entry.Path, rec)
+	if err != nil {
+		return nil, err
+	}
+	// Recorded in the database too, so a bug's task can be found without
+	// parsing a document, but the document is what allocated the id.
 	if err := db.CreateTask(&store.Task{
 		ID:     taskID,
 		Title:  rec.Title,
@@ -398,4 +413,67 @@ func promotedTaskBody(b *store.Bug) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// bugsMilestoneTitle names the milestone promoted bugs land under.
+//
+// Their own milestone rather than the last one: a fix is not part of the
+// feature that happened to be planned most recently, and burying it there
+// would misreport what that milestone contained.
+//
+// It is found by title, not by a memorable id. The first version used
+// "M-BUGS", which is not an id this project's own parser accepts — ids are
+// PREFIX-<digits> — so the heading was silently unrecognised and the task it
+// contained was read as a child of whatever milestone came before it.
+const bugsMilestoneTitle = "Reported bugs"
+
+// appendPlanTask adds a task to the plan document and returns its id.
+func appendPlanTask(projectRoot string, rec *store.Bug) (string, error) {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return "", err
+	}
+	if plan == nil {
+		plan = &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}}
+	}
+
+	var existing []artifact.Section
+	for _, m := range plan.Sections {
+		existing = append(existing, m.Children...)
+	}
+	taskID := fmt.Sprintf("T-%03d", stage.NextFree(existing, "T"))
+
+	task := artifact.Section{
+		ID:    taskID,
+		Title: rec.Title,
+		Body:  promotedTaskBody(rec),
+	}
+
+	placed := false
+	for i := range plan.Sections {
+		if plan.Sections[i].Title == bugsMilestoneTitle {
+			plan.Sections[i].Children = append(plan.Sections[i].Children, task)
+			placed = true
+			break
+		}
+	}
+	if !placed {
+		plan.Sections = append(plan.Sections, artifact.Section{
+			ID:       fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")),
+			Title:    bugsMilestoneTitle,
+			Children: []artifact.Section{task},
+		})
+	}
+	plan.Front.Kind = artifact.KindPlan
+	// A project may legitimately have bugs and no plan: the spec allows a
+	// build on a hand-written task with no requirements at all (05 §1).
+	// Promoting into one creates the plan rather than refusing.
+	if err := os.MkdirAll(artifact.DocsDir(projectRoot), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
+		[]byte(artifact.Render(plan)), 0o644); err != nil {
+		return "", err
+	}
+	return taskID, nil
 }

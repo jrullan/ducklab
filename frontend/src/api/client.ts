@@ -90,6 +90,21 @@ export interface Task {
   body?: string;
 }
 
+/** One report in the operate loop. Mirrors bug.Bug. */
+export interface Bug {
+  id: string;
+  title: string;
+  body?: string;
+  severity: string;
+  status: string;
+  duplicate_of?: string;
+  task_id?: string;
+  source: string;
+  reporter?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 /** A tournament candidate. There is no author field, by design (I7). */
 export interface Candidate {
   label: string;
@@ -216,6 +231,26 @@ export class EngineClient {
   }
   traceShow(projectId: string, id: string) {
     return this.request<Record<string, unknown>>("GET", `/v1/projects/${projectId}/trace/${id}`);
+  }
+  bugs(projectId: string, openOnly = false) {
+    const q = openOnly ? "?open=true" : "";
+    return this.request<{ items: Bug[] | null; total: number }>(
+      "GET",
+      `/v1/projects/${projectId}/bugs${q}`,
+    ).then((r) => r.items ?? []);
+  }
+  /** Move a bug. The engine refuses transitions the loop does not allow, so
+   * the error it returns is the one worth showing. */
+  moveBug(projectId: string, bugId: string, status: string) {
+    return this.request<Bug>("POST", `/v1/projects/${projectId}/bugs/${bugId}/status`, {
+      status,
+    });
+  }
+  promoteBug(projectId: string, bugId: string) {
+    return this.request<{ bug: string; task: string; status: string }>(
+      "POST",
+      `/v1/projects/${projectId}/bugs/${bugId}/promote`,
+    );
   }
   tasks(projectId: string) {
     // items is null, not [], when a project has no plan yet.

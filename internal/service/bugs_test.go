@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bug"
 )
 
@@ -92,6 +93,7 @@ func TestPromoteCarriesTheReportAndLinksIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = task
 	if !strings.Contains(task.Body, "3. it returns to /login") {
 		t.Errorf("the reproduction steps did not survive: %q", task.Body)
 	}
@@ -180,5 +182,84 @@ func TestPromotingAnUntriagedBugCreatesNothing(t *testing.T) {
 	edges, _ := db.TracesFrom("bug", "B-001")
 	if len(edges) != 0 {
 		t.Errorf("an edge was left behind: %v", edges)
+	}
+}
+
+// Tasks live in docs/plan.md — it is what `task list`, the board and
+// `ducklab run` all read. A sequence that knew only the bug table handed out
+// T-001 in a project whose plan already had T-001 through T-010: the promoted
+// task was invisible to every command, and the one the CLI told you to run was
+// a different task with the same name.
+func TestPromotedTaskJoinsThePlanWithAFreeID(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "Login loops"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := s.BugPromote(context.Background(), id, "B-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, _ := out["task"].(string)
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	var promoted bool
+	for _, task := range tasks {
+		seen[task.ID]++
+		if task.ID == taskID {
+			promoted = true
+			if task.Title != "Login loops" {
+				t.Errorf("the promoted task reads %q", task.Title)
+			}
+		}
+	}
+	if !promoted {
+		t.Errorf("the promoted task %s is not in the plan: %v", taskID, seen)
+	}
+	for tid, n := range seen {
+		if n > 1 {
+			t.Errorf("%s appears %d times; the id collided", tid, n)
+		}
+	}
+}
+
+// The bugs milestone gets a real id. The first version used "M-BUGS", which is
+// not an id this project's own parser accepts — ids are PREFIX-<digits> — so
+// the heading was silently unrecognised and the task under it was read as a
+// child of whatever milestone came before.
+func TestThePromotedTaskGetsItsOwnMilestone(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	s.BugAdd(context.Background(), id, BugRequest{Title: "Login loops"})
+	s.BugMove(context.Background(), id, "B-001", "triaged")
+	out, err := s.BugPromote(context.Background(), id, "B-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID, _ := out["task"].(string)
+
+	tasks, _ := s.TaskList(context.Background(), id)
+	var milestone string
+	for _, task := range tasks {
+		if task.ID == taskID {
+			milestone = task.Milestone
+		}
+	}
+	if milestone == "" {
+		t.Fatalf("%s has no milestone; its heading was not recognised", taskID)
+	}
+	// It must not have been absorbed into a milestone that already existed.
+	for _, task := range tasks {
+		if task.ID != taskID && task.Milestone == milestone {
+			t.Errorf("%s landed in %s alongside %s, an existing milestone", taskID, milestone, task.ID)
+		}
 	}
 }
