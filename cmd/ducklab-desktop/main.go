@@ -48,6 +48,10 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(assets),
 		},
+		// One binding, and only because the engine has no screen. See picker.go.
+		Services: []application.Service{
+			application.NewService(&Picker{}),
+		},
 	})
 
 	// The frontend reads its connection details from window.ducklab. They are
@@ -71,9 +75,10 @@ func main() {
 		MinWidth:  1024,
 		MinHeight: 700,
 		JS: fmt.Sprintf(
-			`window.ducklab = { baseUrl: %q, token: %q, version: %q };`+
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q };`+
 				`if (%q) location.hash = %q;`,
 			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Version,
+			ChooseDirectoryFQN(),
 			route, route,
 		),
 	})

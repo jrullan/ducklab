@@ -9,6 +9,7 @@ export type Route =
   | { name: "review" }
   | { name: "release" }
   | { name: "reports" }
+  | { name: "projects" }
   | { name: "run"; id: string }
   | { name: "ducklings" }
   | { name: "settings" };
@@ -31,6 +32,8 @@ export function parseRoute(hash: string): Route {
       return { name: "release" };
     case "reports":
       return { name: "reports" };
+    case "projects":
+      return { name: "projects" };
     case "ducklings":
       return { name: "ducklings" };
     case "settings":
@@ -56,6 +59,8 @@ export function routeHref(route: Route): string {
       return "#/release";
     case "reports":
       return "#/reports";
+    case "projects":
+      return "#/projects";
     case "ducklings":
       return "#/ducklings";
     case "settings":

@@ -11,6 +11,7 @@ import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
 import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
+import { Projects } from "../views/Projects";
 import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
@@ -23,7 +24,13 @@ const VERSION = "0.4.0";
 
 declare global {
   interface Window {
-    ducklab?: { baseUrl: string; token: string };
+    ducklab?: {
+      baseUrl: string;
+      token: string;
+      /** Wails binding name for the native folder chooser. Absent outside the
+       * desktop. */
+      chooseDirectory?: string;
+    };
   }
 }
 
@@ -36,8 +43,24 @@ const NAV: { route: Route; label: string }[] = [
   { route: { name: "release" }, label: "Release" },
   { route: { name: "reports" }, label: "Reports" },
   { route: { name: "ducklings" }, label: "Ducklings" },
+  { route: { name: "projects" }, label: "Projects" },
   { route: { name: "settings" }, label: "Settings" },
 ];
+
+/** Every view that needs a project says the same thing and points at the one
+ * place that fixes it. Before this it said "No project registered yet." and
+ * stopped — true, and a dead end. */
+function NoProject() {
+  return (
+    <p className="m-4 text-ink-muted" data-testid="cycle-no-project">
+      No project yet.{" "}
+      <a href={routeHref({ name: "projects" })} className="text-ink underline">
+        Create one
+      </a>
+      .
+    </p>
+  );
+}
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
@@ -227,9 +250,7 @@ export function App() {
               <Cycle client={client} projectId={projectId} stage={route.stage} />
             </div>
           ) : (
-            <p className="m-4 text-ink-muted" data-testid="cycle-no-project">
-              No project registered yet.
-            </p>
+            <NoProject />
           ))}
         {route.name === "board" &&
           (client && projectId ? (
@@ -237,7 +258,7 @@ export function App() {
               <Board client={client} projectId={projectId} tab={route.tab} />
             </div>
           ) : (
-            <p className="m-4 text-ink-muted">No project registered yet.</p>
+            <NoProject />
           ))}
         {route.name === "review" &&
           (client && projectId ? (
@@ -245,7 +266,7 @@ export function App() {
               <Review client={client} projectId={projectId} />
             </div>
           ) : (
-            <p className="m-4 text-ink-muted">No project registered yet.</p>
+            <NoProject />
           ))}
         {route.name === "release" &&
           (client && projectId ? (
@@ -253,7 +274,7 @@ export function App() {
               <Release client={client} projectId={projectId} />
             </div>
           ) : (
-            <p className="m-4 text-ink-muted">No project registered yet.</p>
+            <NoProject />
           ))}
         {route.name === "reports" &&
           (client && projectId ? (
@@ -261,8 +282,23 @@ export function App() {
               <Reports client={client} projectId={projectId} />
             </div>
           ) : (
-            <p className="m-4 text-ink-muted">No project registered yet.</p>
+            <NoProject />
           ))}
+        {route.name === "projects" && client && (
+          <div className="p-4">
+            <Projects
+              client={client}
+              selected={projectId}
+              onSelect={(id) => {
+                setProjectId(id);
+                localStorage.setItem("ducklab.project", id);
+              }}
+              onChanged={() => {
+                client.projects().then(setProjects).catch(() => {});
+              }}
+            />
+          </div>
+        )}
         {route.name === "ducklings" && <Ducklings ducklings={ducklings} />}
         {route.name === "settings" && (
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />

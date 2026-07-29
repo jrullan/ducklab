@@ -253,6 +253,25 @@ export class EngineClient {
   projects() {
     return this.request<{ items: Project[] }>("GET", "/v1/projects").then((r) => r.items ?? []);
   }
+  /** Create or adopt a project at a path. A folder that is already a project
+   * is opened rather than refused, so pointing at an existing one is not a
+   * mistake the person has to undo. */
+  projectInit(path: string, name: string, gitInit: boolean) {
+    return this.request<Project>("POST", "/v1/projects", {
+      path,
+      name,
+      git_init: gitInit,
+    });
+  }
+  /** Change what the engine records about a project. Keys are the same ones
+   * `ducklab project set` takes. */
+  projectUpdate(id: string, keys: Record<string, string>) {
+    return this.request<Project>("PATCH", `/v1/projects/${id}`, keys);
+  }
+  /** Forget a project. The engine unregisters it; the files stay. */
+  projectForget(id: string) {
+    return this.request<unknown>("DELETE", `/v1/projects/${id}`);
+  }
   projectStatus(id: string) {
     return this.request<Record<string, unknown>>("GET", `/v1/projects/${id}/status`);
   }
