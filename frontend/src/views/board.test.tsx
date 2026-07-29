@@ -367,3 +367,55 @@ describe("Board — the gate before the run", () => {
     expect(screen.queryByTestId("gate-check")).toBeNull();
   });
 });
+
+// Reported from a real session: an accepted task still showed Build it, with a
+// mode picker and duckling checkboxes — apparatus for a decision nobody is
+// making. The controls follow the task's state now.
+describe("Board — an accepted task", () => {
+  const client = (status: string) =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([{ id: "T-006", title: "A thing", milestone: "M-003", status }])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() =>
+        Promise.resolve([
+          { id: "pato-atom", provider: "p", model: "m" },
+          { id: "pato-sonnet", provider: "p", model: "m" },
+        ]),
+      ),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      gateRun: vi.fn(() => Promise.resolve({ green: true, exit_code: 0, output: "", command: "", gate: "tests", duration_s: 0 })),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+      reviewStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
+    }) as unknown as EngineClient;
+
+  const open = async (status: string) => {
+    render(<Board client={client(status)} projectId="p" />);
+    fireEvent.click(await screen.findByText("A thing"));
+    return screen.findByTestId("task-runner");
+  };
+
+  it("offers Review, and not the build apparatus", async () => {
+    await open("accepted");
+    expect(screen.getByTestId("review-start")).toBeTruthy();
+    for (const id of ["run-start", "run-mode", "run-duckling-pato-atom", "test-first-start"]) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+  });
+
+  // Still possible — a result can be regretted — but it says what it is rather
+  // than sitting there as the obvious next step.
+  it("keeps building available, and says what it means", async () => {
+    await open("accepted");
+    expect(screen.getByTestId("run-again")).toBeTruthy();
+    expect(screen.getByTestId("accepted-note").textContent).toContain("already done");
+  });
+
+  it("leaves an unfinished task exactly as it was", async () => {
+    await open("todo");
+    expect(screen.getByTestId("run-start")).toBeTruthy();
+    expect(screen.getByTestId("run-mode")).toBeTruthy();
+    expect(screen.getByTestId("test-first-start")).toBeTruthy();
+    expect(screen.queryByTestId("review-start")).toBeNull();
+    expect(screen.queryByTestId("accepted-note")).toBeNull();
+  });
+});

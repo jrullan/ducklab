@@ -353,6 +353,9 @@ function TaskRunner({
   const [chosen, setChosen] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
+  // Accepted work is not waiting to be built. The controls follow the task's
+  // state rather than being offered whatever it is.
+  const accepted = task.status === "accepted";
   const [failure, setFailure] = useState<string | null>(null);
 
   const go = async (what: "run" | "test" | "review") => {
@@ -377,33 +380,42 @@ function TaskRunner({
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
       <GateState client={client} projectId={projectId} gate={gate} command={gateCommand} />
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="mode"
-          data-testid="run-mode"
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-          className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-        >
-          {MODES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => void go("run")}
-          disabled={busy}
-          data-testid="run-start"
-          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-        >
-          {busy ? "Starting…" : "Build it"}
-        </button>
+        {/* A task that is already accepted is not waiting to be built, and its
+            mode and duckling pickers are apparatus for a decision nobody is
+            making. Building again is still possible — a result can be
+            regretted — but it says what it is rather than sitting there as the
+            obvious next step. */}
+        {!accepted && (
+          <select
+            aria-label="mode"
+            data-testid="run-mode"
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          >
+            {MODES.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
+        {!accepted && (
+          <button
+            type="button"
+            onClick={() => void go("run")}
+            disabled={busy}
+            data-testid="run-start"
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          >
+            {busy ? "Starting…" : "Build it"}
+          </button>
+        )}
         {/* Only where a test would change something the gate can see. A
             compiler, a linter or a bespoke script gives a new test nothing to
             hook into, and the engine refuses — so the button is absent rather
             than present and failing. */}
-        {gate === "tests" && (
+        {gate === "tests" && !accepted && (
           <button
             type="button"
             onClick={() => void go("test")}
@@ -415,12 +427,10 @@ function TaskRunner({
             Test first
           </button>
         )}
-        {/* Only for work that has been accepted: there is no commit to read
-            otherwise, and the engine refuses with exactly that. */}
         {/* Only on work that has been accepted: a review reads the commit, and
             there is no commit until then. The engine refuses with exactly
             that, and a button that only ever errors is worse than none. */}
-        {task.status === "accepted" && (
+        {accepted && (
           <button
             type="button"
             onClick={() => void go("review")}
@@ -431,9 +441,28 @@ function TaskRunner({
             Review
           </button>
         )}
+        {accepted && (
+          <button
+            type="button"
+            onClick={() => void go("run")}
+            disabled={busy}
+            data-testid="run-again"
+            title="Starts another run against a task that is already done"
+            className="text-xs text-ink-muted underline"
+          >
+            build again
+          </button>
+        )}
       </div>
 
-      {ducklings.length > 1 && (
+      {accepted && (
+        <p className="text-xs text-ink-muted" data-testid="accepted-note">
+          Already accepted. Reviewing reads the commit; building again starts a new run against
+          work that is already done.
+        </p>
+      )}
+
+      {!accepted && ducklings.length > 1 && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
           {ducklings.map((d) => (
             <label key={d.id} className="flex items-center gap-1">
