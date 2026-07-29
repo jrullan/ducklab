@@ -114,7 +114,7 @@ func TestRenderIsHonestAboutAnEmptyRelease(t *testing.T) {
 	if strings.Contains(got, "exciting") {
 		t.Error("prose was rendered for a release with nothing in it")
 	}
-	if !strings.Contains(got, "No accepted work") {
+	if !strings.Contains(got, "No user-visible changes.") {
 		t.Errorf("an empty release does not say so:\n%s", got)
 	}
 }

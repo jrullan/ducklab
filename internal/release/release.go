@@ -164,7 +164,10 @@ func Render(n Notes, prose string) string {
 	fmt.Fprintf(&b, "# %s\n\n", n.Version)
 
 	if count(n) == 0 {
-		b.WriteString("No accepted work since the last release.\n")
+		// The exact wording AC-58 asks for. A release document that says
+		// nothing shipped is a statement someone may act on, so it says the
+		// same thing every time rather than a phrasing that drifts.
+		b.WriteString("No user-visible changes.\n")
 		return b.String()
 	}
 
