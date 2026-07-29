@@ -36,6 +36,12 @@ type Service struct {
 	cfg       *config.Global
 	registry  *registry.Registry
 	ducklings *duckling.Registry
+	// configPath is where cfg came from. Writing ducklings and providers back
+	// is the only reason the service needs to know.
+	configPath string
+	// cfgMu guards cfg and the registries it feeds, which a config edit
+	// rebuilds while runs may be reading them.
+	cfgMu     sync.RWMutex
 	bus       *bus.Bus
 	runs      map[string]*runState
 	runsMu    sync.RWMutex
@@ -73,6 +79,10 @@ type runState struct {
 // Options are service options.
 type Options struct {
 	Bus *bus.Bus
+	// ConfigPath is the file the global config was loaded from, so changes to
+	// ducklings and providers can be written back. Empty makes those
+	// operations fail with a clear message rather than appear to work.
+	ConfigPath string
 }
 
 // New creates a new service.
@@ -83,14 +93,15 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 	}
 
 	s := &Service{
-		cfg:       cfg,
-		registry:  reg,
-		ducklings: duckling.NewRegistry(),
-		bus:       opts.Bus,
-		runs:      make(map[string]*runState),
-		providers: make(map[config.ProviderID]provider.Provider),
-		projects:  make(map[string]*projectState),
-		queue:     newRunQueue(cfg.Engine.MaxConcurrentRuns),
+		cfg:        cfg,
+		configPath: opts.ConfigPath,
+		registry:   reg,
+		ducklings:  duckling.NewRegistry(),
+		bus:        opts.Bus,
+		runs:       make(map[string]*runState),
+		providers:  make(map[config.ProviderID]provider.Provider),
+		projects:   make(map[string]*projectState),
+		queue:      newRunQueue(cfg.Engine.MaxConcurrentRuns),
 	}
 
 	// Register providers

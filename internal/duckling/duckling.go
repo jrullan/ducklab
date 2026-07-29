@@ -77,6 +77,15 @@ func (r *Registry) Register(d *Duckling) error {
 	return nil
 }
 
+// Unregister removes a duckling.
+//
+// Needed because ducklings can now be deleted while the engine runs. Without
+// it a removed duckling stays reachable until a restart, so the config and the
+// engine disagree about what exists.
+func (r *Registry) Unregister(id config.DucklingID) {
+	delete(r.ducklings, id)
+}
+
 // RegisterProvider registers a provider for ducklings.
 func (r *Registry) RegisterProvider(p provider.Provider) {
 	r.providers[config.ProviderID(p.ID())] = p

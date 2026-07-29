@@ -28,6 +28,11 @@ export interface ConfigBudget {
   max_wallclock_s?: number;
 }
 
+export interface ConfigCaps {
+  context_tokens?: number;
+  native_tools?: boolean;
+}
+
 export interface ConfigCost {
   input_per_mtok?: number;
   output_per_mtok?: number;
@@ -287,6 +292,17 @@ export interface ServiceCandidateView {
   label?: string;
 }
 
+export interface ServiceDucklingView {
+  caps?: ConfigCaps;
+  cost?: ConfigCost;
+  id?: string;
+  model?: string;
+  notes?: string;
+  params?: ConfigSamplingParams;
+  provider?: string;
+  roles?: string[];
+}
+
 export interface ServiceInitRequest {
   describe?: string;
   git_init?: boolean;
@@ -302,6 +318,16 @@ export interface ServiceProject {
   missing?: boolean;
   name?: string;
   path?: string;
+}
+
+export interface ServiceProviderView {
+  api_key_env?: string;
+  base_url?: string;
+  headers?: Record<string, string>;
+  id?: string;
+  in_use?: string[];
+  key_present?: boolean;
+  kind?: string;
 }
 
 export interface ServiceReleaseRequest {
@@ -402,6 +428,8 @@ export const OPERATIONS = [
   { id: "Bench", method: "POST", path: "/v1/bench" },
   { id: "BenchGet", method: "GET", path: "/v1/bench/{suite}/{stamp}" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
+  { id: "DucklingRemove", method: "DELETE", path: "/v1/ducklings/{id}" },
+  { id: "DucklingSet", method: "PUT", path: "/v1/ducklings/{id}" },
   { id: "DucklingProbe", method: "POST", path: "/v1/ducklings/{id}/probe" },
   { id: "DucklingTest", method: "POST", path: "/v1/ducklings/{id}/test" },
   { id: "Engine", method: "GET", path: "/v1/engine" },
@@ -442,6 +470,9 @@ export const OPERATIONS = [
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
   { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
+  { id: "ProviderList", method: "GET", path: "/v1/providers" },
+  { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
+  { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
   { id: "RunList", method: "GET", path: "/v1/runs" },
   { id: "RunGet", method: "GET", path: "/v1/runs/{id}" },
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },

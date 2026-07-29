@@ -90,6 +90,21 @@ export interface Task {
   body?: string;
 }
 
+/** A configured endpoint. Mirrors service.ProviderView.
+ *
+ * There is no key field and there never will be: a provider records the name
+ * of an environment variable, and the engine reads the value at call time. */
+export type ProviderView = {
+  id: string;
+  kind: string;
+  base_url: string;
+  api_key_env?: string;
+  /** Whether that variable is set in the engine's environment. */
+  key_present: boolean;
+  /** Ducklings that would break if this provider went away. */
+  in_use?: string[];
+};
+
 /** One past bench run. Mirrors service.BenchSummary. */
 export type BenchSummary = {
   suite: string;
@@ -274,6 +289,32 @@ export class EngineClient {
   }
   projectStatus(id: string) {
     return this.request<Record<string, unknown>>("GET", `/v1/projects/${id}/status`);
+  }
+  /** Configured providers. Carries the *name* of the key's environment
+   * variable and whether it is set — never a key (I10). */
+  providers() {
+    return this.request<{ items: ProviderView[] | null }>("GET", "/v1/providers").then(
+      (r) => r.items ?? [],
+    );
+  }
+  providerSet(id: string, body: Partial<ProviderView>) {
+    return this.request<unknown>("PUT", `/v1/providers/${id}`, body);
+  }
+  providerRemove(id: string) {
+    return this.request<unknown>("DELETE", `/v1/providers/${id}`);
+  }
+  ducklingSet(id: string, body: Record<string, unknown>) {
+    return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
+  }
+  ducklingRemove(id: string) {
+    return this.request<unknown>("DELETE", `/v1/ducklings/${id}`);
+  }
+  ducklingTest(id: string, prompt: string) {
+    return this.request<{ text: string; prompt_tokens?: number; completion_tokens?: number; cost_usd?: number }>(
+      "POST",
+      `/v1/ducklings/${id}/test`,
+      { prompt },
+    );
   }
   ducklings() {
     return this.request<{ items: Duckling[] }>("GET", "/v1/ducklings").then((r) => r.items ?? []);

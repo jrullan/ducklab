@@ -1,44 +1,453 @@
-import type { Duckling } from "../api/client";
+/**
+ * Ducklings — the fleet, and the endpoints it is reached through (08 §4.8).
+ *
+ * The premise of the project is comparing models, so being unable to add one
+ * without hand-editing a TOML file and restarting the engine was the gap that
+ * mattered most on this page.
+ *
+ * There is no field for an API key and there will not be one. A provider
+ * records the *name* of an environment variable; the engine reads the value at
+ * call time (I10). This page can therefore say "this needs OPENROUTER_API_KEY
+ * and it is not set" without a key ever passing through it.
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import type { Duckling, EngineClient, ProviderView } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
-import { EmptyState } from "../components/EmptyState";
 
-/** The roster of models, with the dialect each one actually speaks. */
-export function Ducklings({ ducklings }: { ducklings: readonly Duckling[] }) {
-  if (ducklings.length === 0) {
-    return <EmptyState message="No ducklings configured. Add one in config.toml." />;
-  }
-  const order = ducklings.map((d) => d.id);
+const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
+
+export function Ducklings({ client }: { client: EngineClient }) {
+  const [ducklings, setDucklings] = useState<Duckling[]>([]);
+  const [providers, setProviders] = useState<ProviderView[]>([]);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    Promise.all([client.ducklings(), client.providers()])
+      .then(([d, p]) => {
+        setDucklings(d);
+        setProviders(p);
+      })
+      .catch((err) => setFailure(err instanceof Error ? err.message : String(err)));
+  }, [client]);
+
+  useEffect(load, [load]);
+
+  // One place for "it worked" and "it did not", so no caller has to remember
+  // to both clear the error and reload.
+  const done = (err?: unknown) => {
+    setFailure(err ? (err instanceof Error ? err.message : String(err)) : null);
+    if (!err) {
+      setEditing(null);
+      load();
+    }
+  };
+
   return (
-    <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="ducklings">
-      {ducklings.map((d) => (
-        <div key={d.id} className="rounded-card border border-hairline p-3" data-testid="duckling-card">
-          <header className="flex items-center gap-2">
-            <DuckAvatar id={d.id} roster={order} />
-            <span className="text-md">{d.id}</span>
-          </header>
-          <dl className="mt-2 text-sm text-ink-secondary">
-            <div className="flex justify-between"><dt>provider</dt><dd>{d.provider}</dd></div>
-            <div className="flex justify-between"><dt>model</dt><dd className="font-mono">{d.model}</dd></div>
-            <div className="flex justify-between">
-              <dt>tools</dt>
-              <dd>{d.caps?.native_tools ? "native" : "text protocol"}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>context</dt>
-              <dd className="tabular-nums">{(d.caps?.context_tokens ?? 0).toLocaleString()}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>cost / Mtok out</dt>
-              <dd className="tabular-nums">{money(d.cost?.output_per_mtok ?? 0)}</dd>
-            </div>
-          </dl>
-          {(d.cost?.output_per_mtok ?? 0) === 0 && (
-            <div className="mt-2"><StatusChip role="good" label="local — no USD cost" /></div>
-          )}
+    <div data-testid="ducklings-view" className="space-y-4 p-4">
+      {failure && (
+        <p className="text-critical" data-testid="fleet-error">
+          {failure}
+        </p>
+      )}
+
+      <ProviderSection client={client} providers={providers} onDone={done} />
+
+      <section className="rounded-card border border-hairline p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-ink">Ducklings</h3>
+          <button
+            type="button"
+            onClick={() => setEditing(editing === "" ? null : "")}
+            data-testid="duckling-add"
+            disabled={providers.length === 0}
+            className="ml-auto rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
+          >
+            Add duckling
+          </button>
         </div>
-      ))}
+        {providers.length === 0 && (
+          // Said, rather than left as a disabled button with no explanation.
+          <p className="mb-2 text-sm text-ink-muted">
+            Add a provider first — a duckling is a model reached through one.
+          </p>
+        )}
+
+        {editing !== null && (
+          <DucklingForm
+            key={editing}
+            client={client}
+            providers={providers}
+            existing={ducklings.find((d) => d.id === editing)}
+            onDone={done}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+
+        {ducklings.length === 0 ? (
+          <p className="text-sm text-ink-muted">None configured.</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="ducklings">
+            {ducklings.map((d) => (
+              <DucklingCard
+                key={d.id}
+                duckling={d}
+                roster={ducklings.map((x) => x.id)}
+                provider={providers.find((p) => p.id === d.provider)}
+                onEdit={() => setEditing(d.id)}
+                onRemove={() => void client.ducklingRemove(d.id).then(() => done()).catch(done)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function DucklingCard({
+  duckling: d,
+  roster,
+  provider,
+  onEdit,
+  onRemove,
+}: {
+  duckling: Duckling;
+  roster: string[];
+  provider?: ProviderView;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-card border border-hairline p-3" data-testid={`duckling-card-${d.id}`}>
+      <header className="flex items-center gap-2">
+        <DuckAvatar id={d.id} roster={roster} />
+        <span className="text-md">{d.id}</span>
+        <span className="ml-auto flex gap-1">
+          <button
+            type="button"
+            onClick={onEdit}
+            data-testid={`duckling-edit-${d.id}`}
+            className="rounded border border-hairline px-2 py-0.5 text-xs"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            data-testid={`duckling-remove-${d.id}`}
+            className="rounded border border-hairline px-2 py-0.5 text-xs"
+          >
+            Remove
+          </button>
+        </span>
+      </header>
+      <dl className="mt-2 text-sm text-ink-secondary">
+        <div className="flex justify-between"><dt>provider</dt><dd>{d.provider}</dd></div>
+        <div className="flex justify-between"><dt>model</dt><dd className="font-mono">{d.model}</dd></div>
+        <div className="flex justify-between">
+          <dt>tools</dt>
+          <dd>{d.caps?.native_tools ? "native" : "text protocol"}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt>context</dt>
+          <dd className="tabular-nums">{(d.caps?.context_tokens ?? 0).toLocaleString()}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt>cost / Mtok out</dt>
+          <dd className="tabular-nums">{money(d.cost?.output_per_mtok ?? 0)}</dd>
+        </div>
+      </dl>
+      {/* A duckling whose provider has no key will fail on its first call.
+          Said here, where someone is choosing which one to run. */}
+      {provider && provider.api_key_env && !provider.key_present && (
+        <div className="mt-2">
+          <StatusChip role="critical" label={`${provider.api_key_env} not set`} />
+        </div>
+      )}
+      {(d.cost?.output_per_mtok ?? 0) === 0 && (
+        <div className="mt-2"><StatusChip role="good" label="local — no USD cost" /></div>
+      )}
+    </div>
+  );
+}
+
+function ProviderSection({
+  client,
+  providers,
+  onDone,
+}: {
+  client: EngineClient;
+  providers: readonly ProviderView[];
+  onDone: (err?: unknown) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [id, setId] = useState("");
+  const [url, setUrl] = useState("");
+  const [keyEnv, setKeyEnv] = useState("");
+
+  const save = () => {
+    void client
+      .providerSet(id.trim(), { base_url: url.trim(), api_key_env: keyEnv.trim(), kind: "openai" })
+      .then(() => {
+        setOpen(false);
+        setId("");
+        setUrl("");
+        setKeyEnv("");
+        onDone();
+      })
+      .catch(onDone);
+  };
+
+  return (
+    <section className="rounded-card border border-hairline p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <h3 className="text-ink">Providers</h3>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          data-testid="provider-add"
+          className="ml-auto rounded border border-hairline px-2 py-0.5 text-xs"
+        >
+          Add provider
+        </button>
+      </div>
+
+      {open && (
+        <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="provider-form">
+          <input
+            aria-label="provider id"
+            data-testid="provider-id"
+            placeholder="openrouter"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            className="w-36 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          />
+          <input
+            aria-label="base url"
+            data-testid="provider-url"
+            placeholder="https://openrouter.ai/api/v1"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="min-w-64 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          />
+          <input
+            aria-label="api key environment variable"
+            data-testid="provider-key-env"
+            placeholder="OPENROUTER_API_KEY"
+            value={keyEnv}
+            onChange={(e) => setKeyEnv(e.target.value)}
+            className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          />
+          <button
+            type="button"
+            onClick={save}
+            disabled={!id.trim() || !url.trim()}
+            data-testid="provider-save"
+            className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+          >
+            Save
+          </button>
+          <p className="w-full text-xs text-ink-muted">
+            That last field is the <em>name</em> of an environment variable, not a key. Ducklab
+            never stores or transmits the key itself — the engine reads that variable when it makes
+            a call. Leave it empty for a local server that needs none.
+          </p>
+        </div>
+      )}
+
+      {providers.length === 0 ? (
+        <p className="text-sm text-ink-muted">None configured.</p>
+      ) : (
+        <ul className="space-y-1">
+          {providers.map((p) => (
+            <li
+              key={p.id}
+              data-testid={`provider-row-${p.id}`}
+              className="flex flex-wrap items-center gap-2 p-1"
+            >
+              <span className="text-ink">{p.id}</span>
+              <span className="font-mono text-xs text-ink-muted">{p.base_url}</span>
+              {p.api_key_env ? (
+                <StatusChip
+                  role={p.key_present ? "good" : "critical"}
+                  label={p.key_present ? `${p.api_key_env} set` : `${p.api_key_env} not set`}
+                />
+              ) : (
+                <span className="text-xs text-ink-muted">no key needed</span>
+              )}
+              {p.in_use && p.in_use.length > 0 && (
+                <span className="text-xs text-ink-muted">used by {p.in_use.join(", ")}</span>
+              )}
+              <button
+                type="button"
+                data-testid={`provider-remove-${p.id}`}
+                onClick={() => void client.providerRemove(p.id).then(() => onDone()).catch(onDone)}
+                className="ml-auto rounded border border-hairline px-2 py-0.5 text-xs"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function DucklingForm({
+  client,
+  providers,
+  existing,
+  onDone,
+  onCancel,
+}: {
+  client: EngineClient;
+  providers: readonly ProviderView[];
+  existing?: Duckling;
+  onDone: (err?: unknown) => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState(existing?.id ?? "");
+  const [provider, setProvider] = useState(existing?.provider ?? providers[0]?.id ?? "");
+  const [model, setModel] = useState(existing?.model ?? "");
+  const [roles, setRoles] = useState<string[]>(existing?.roles ?? []);
+  const [contextTokens, setContextTokens] = useState(String(existing?.caps?.context_tokens ?? ""));
+  const [nativeTools, setNativeTools] = useState(existing?.caps?.native_tools !== false);
+  const [costIn, setCostIn] = useState(String(existing?.cost?.input_per_mtok ?? 0));
+  const [costOut, setCostOut] = useState(String(existing?.cost?.output_per_mtok ?? 0));
+
+  const save = () => {
+    void client
+      .ducklingSet(id.trim(), {
+        provider,
+        model: model.trim(),
+        roles,
+        caps: { native_tools: nativeTools, context_tokens: Number(contextTokens) || 0 },
+        cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
+      })
+      .then(() => onDone())
+      .catch(onDone);
+  };
+
+  return (
+    <div className="mb-3 space-y-2 rounded border border-hairline p-2" data-testid="duckling-form">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          aria-label="duckling id"
+          data-testid="duckling-id"
+          placeholder="pato-sonnet"
+          value={id}
+          // The id is the name runs and reports are recorded under, so
+          // changing it would orphan every measurement already taken.
+          disabled={Boolean(existing)}
+          onChange={(e) => setId(e.target.value)}
+          className="w-40 rounded border border-hairline bg-surface2 px-2 py-1 text-sm disabled:opacity-60"
+        />
+        <select
+          aria-label="provider"
+          data-testid="duckling-provider"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+          className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+        >
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.id}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="model"
+          data-testid="duckling-model"
+          placeholder="anthropic/claude-sonnet-4.5"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          className="min-w-56 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        <label className="flex items-center gap-1">
+          context
+          <input
+            aria-label="context tokens"
+            data-testid="duckling-context"
+            value={contextTokens}
+            onChange={(e) => setContextTokens(e.target.value)}
+            className="w-24 rounded border border-hairline bg-surface2 px-2 py-1"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={nativeTools}
+            data-testid="duckling-native-tools"
+            onChange={(e) => setNativeTools(e.target.checked)}
+          />
+          native tool calling
+        </label>
+        <label className="flex items-center gap-1">
+          $/Mtok in
+          <input
+            aria-label="cost in"
+            data-testid="duckling-cost-in"
+            value={costIn}
+            onChange={(e) => setCostIn(e.target.value)}
+            className="w-20 rounded border border-hairline bg-surface2 px-2 py-1"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          out
+          <input
+            aria-label="cost out"
+            data-testid="duckling-cost-out"
+            value={costOut}
+            onChange={(e) => setCostOut(e.target.value)}
+            className="w-20 rounded border border-hairline bg-surface2 px-2 py-1"
+          />
+        </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+        <span>roles:</span>
+        {ROLES.map((r) => (
+          <label key={r} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={roles.includes(r)}
+              data-testid={`duckling-role-${r}`}
+              onChange={(e) =>
+                setRoles((cur) => (e.target.checked ? [...cur, r] : cur.filter((x) => x !== r)))
+              }
+            />
+            {r}
+          </label>
+        ))}
+        <span className="text-xs text-ink-muted">empty means any role — the roster decides</span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={!id.trim() || !model.trim() || !provider}
+          data-testid="duckling-save"
+          className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-hairline px-2 py-1 text-sm"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

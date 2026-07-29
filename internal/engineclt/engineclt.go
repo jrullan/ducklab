@@ -130,6 +130,18 @@ func (c *Client) put(path string, body interface{}, result interface{}) error {
 	return nil
 }
 
+func (c *Client) delete(path string) error {
+	resp, err := c.do("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return httpError("DELETE", path, resp)
+	}
+	return nil
+}
+
 func (c *Client) patch(path string, body interface{}, result interface{}) error {
 	resp, err := c.do("PATCH", path, body)
 	if err != nil {
@@ -229,6 +241,35 @@ func (c *Client) Bench(suite string, ducklings, modes []string, keep bool) (rend
 		"suite": suite, "ducklings": ducklings, "modes": modes, "keep": keep,
 	}, &result)
 	return result.Rendered, result.Path, err
+}
+
+// ProviderList returns configured providers. Never carries a key (I10).
+func (c *Client) ProviderList() ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	err := c.get("/v1/providers", &result)
+	return result.Items, err
+}
+
+// ProviderSet adds or replaces a provider.
+func (c *Client) ProviderSet(id string, body map[string]interface{}) error {
+	return c.put("/v1/providers/"+id, body, nil)
+}
+
+// ProviderRemove removes a provider.
+func (c *Client) ProviderRemove(id string) error {
+	return c.delete("/v1/providers/" + id)
+}
+
+// DucklingSet adds or replaces a duckling.
+func (c *Client) DucklingSet(id string, body map[string]interface{}) error {
+	return c.put("/v1/ducklings/"+id, body, nil)
+}
+
+// DucklingRemove removes a duckling.
+func (c *Client) DucklingRemove(id string) error {
+	return c.delete("/v1/ducklings/" + id)
 }
 
 // RunDiff returns a run's diff and, when it was flagged, the part of it that

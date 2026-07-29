@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Overview } from "./Overview";
-import { Ducklings } from "./Ducklings";
 import { Settings } from "./Settings";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
@@ -52,25 +51,6 @@ describe("Overview", () => {
     useRuns.getState().setRuns([{ ...run, verdict: "" }]);
     render(<Overview spentToday={0} budget={2} />);
     expect(screen.getByTestId("overview").textContent).toContain("—");
-  });
-});
-
-describe("Ducklings", () => {
-  it("reports the dialect each model actually speaks", () => {
-    render(<Ducklings ducklings={[
-      { id: "pato-uno", provider: "beelink", model: "gemma-4", caps: { native_tools: false, context_tokens: 65536 }, cost: { input_per_mtok: 0, output_per_mtok: 0 } },
-      { id: "pato-dos", provider: "openrouter", model: "qwen", caps: { native_tools: true, context_tokens: 131072 }, cost: { input_per_mtok: 0.2, output_per_mtok: 0.6 } },
-    ]} />);
-    const cards = screen.getAllByTestId("duckling-card");
-    expect(cards[0]!.textContent).toContain("text protocol");
-    expect(cards[1]!.textContent).toContain("native");
-  });
-
-  it("marks a free local model rather than showing $0.0000 alone", () => {
-    render(<Ducklings ducklings={[
-      { id: "local", provider: "beelink", model: "m", cost: { input_per_mtok: 0, output_per_mtok: 0 } },
-    ]} />);
-    expect(screen.getByTestId("ducklings").textContent).toContain("local — no USD cost");
   });
 });
 

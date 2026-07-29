@@ -246,6 +246,62 @@ func (s *Server) handleBenchGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleProviderList(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
+}
+
+func (s *Server) handleProviderSet(w http.ResponseWriter, r *http.Request) {
+	var view service.ProviderView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.ProviderSet(r.PathValue("id"), view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
+}
+
+func (s *Server) handleProviderRemove(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.ProviderRemove(r.PathValue("id")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
+}
+
+func (s *Server) handleDucklingSet(w http.ResponseWriter, r *http.Request) {
+	var view service.DucklingView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.DucklingSet(r.PathValue("id"), view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	list, err := s.svc.DucklingList(r.Context())
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": list})
+}
+
+func (s *Server) handleDucklingRemove(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.DucklingRemove(r.PathValue("id")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	list, err := s.svc.DucklingList(r.Context())
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": list})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {

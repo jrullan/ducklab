@@ -50,7 +50,7 @@ func main() {
 	b := bus.New(256)
 
 	// Create service
-	svc, err := service.New(cfg, service.Options{Bus: b})
+	svc, err := service.New(cfg, service.Options{Bus: b, ConfigPath: configPath})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: create service: %v\n", err)
 		os.Exit(1)

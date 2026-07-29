@@ -75,7 +75,8 @@ describe("Projects", () => {
   });
 
   describe("forget", () => {
-    let confirmSpy: ReturnType<typeof vi.spyOn>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let confirmSpy: any;
     beforeEach(() => {
       confirmSpy = vi.spyOn(window, "confirm");
     });

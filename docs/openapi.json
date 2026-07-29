@@ -78,6 +78,21 @@
         ],
         "type": "object"
       },
+      "ConfigCaps": {
+        "properties": {
+          "context_tokens": {
+            "type": "integer"
+          },
+          "native_tools": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "context_tokens",
+          "native_tools"
+        ],
+        "type": "object"
+      },
       "ConfigCost": {
         "properties": {
           "input_per_mtok": {
@@ -977,6 +992,46 @@
         ],
         "type": "object"
       },
+      "ServiceDucklingView": {
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/ConfigCaps"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/ConfigCost"
+          },
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ConfigSamplingParams"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "caps",
+          "cost",
+          "id",
+          "model",
+          "params",
+          "provider"
+        ],
+        "type": "object"
+      },
       "ServiceInitRequest": {
         "properties": {
           "describe": {
@@ -1031,6 +1086,44 @@
           "id",
           "name",
           "path"
+        ],
+        "type": "object"
+      },
+      "ServiceProviderView": {
+        "properties": {
+          "api_key_env": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "in_use": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key_present": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_url",
+          "id",
+          "key_present",
+          "kind"
         ],
         "type": "object"
       },
@@ -1515,6 +1608,72 @@
           }
         ],
         "summary": "List ducklings"
+      }
+    },
+    "/v1/ducklings/{id}": {
+      "delete": {
+        "operationId": "DucklingRemove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove a duckling"
+      },
+      "put": {
+        "operationId": "DucklingSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceDucklingView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add or replace a duckling"
       }
     },
     "/v1/ducklings/{id}/probe": {
@@ -3024,6 +3183,113 @@
           }
         ],
         "summary": "Walk the spine from an id"
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "operationId": "ProviderList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceProviderView"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Configured providers. Carries the name of the key's environment variable, never a key (I10)."
+      }
+    },
+    "/v1/providers/{id}": {
+      "delete": {
+        "operationId": "ProviderRemove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove a provider"
+      },
+      "put": {
+        "operationId": "ProviderSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceProviderView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add or replace a provider"
       }
     },
     "/v1/runs": {

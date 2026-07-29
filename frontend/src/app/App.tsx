@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EngineClient, type Duckling, type Project } from "../api/client";
+import { EngineClient, type Project } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
@@ -65,7 +65,6 @@ function NoProject() {
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
-  const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   // The chosen project survives a reload: a view that silently reset to the
   // first project every refresh would show someone else's cycle.
@@ -111,7 +110,6 @@ export function App() {
       // stale the moment anything ran. The same defect existed in the CLI's
       // `run list`.
       c.runs(projectRef.current).then(useRuns.getState().setRuns).catch((e) => setError(String(e)));
-      c.ducklings().then(setDucklings).catch(() => {});
       c.projects()
         .then((ps) => {
           setProjects(ps);
@@ -299,7 +297,7 @@ export function App() {
             />
           </div>
         )}
-        {route.name === "ducklings" && <Ducklings ducklings={ducklings} />}
+        {route.name === "ducklings" && client && <Ducklings client={client} />}
         {route.name === "settings" && (
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />
         )}

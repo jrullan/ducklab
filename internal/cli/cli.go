@@ -138,6 +138,8 @@ func Run(args []string) int {
 		return benchCmd(remaining[1:], repo)
 	case "report":
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
+	case "provider":
+		return providerCmd(verb, cmdArgs)
 	case "roster":
 		return rosterCmd(verb, cmdArgs, repo)
 	case "intake", "spec", "plan":
@@ -214,6 +216,26 @@ func engineCmd(verb string, args []string) int {
 
 func ducklingCmd(verb string, args []string) int {
 	switch verb {
+	case "set", "remove":
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		client := engineclt.New(info)
+		if verb == "remove" {
+			if len(args) < 1 {
+				fmt.Fprintln(os.Stderr, "usage: ducklab duckling remove <id>")
+				return 2
+			}
+			if err := client.DucklingRemove(args[0]); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 1
+			}
+			fmt.Printf("duckling %s removed\n", args[0])
+			return 0
+		}
+		return ducklingSetCmd(client, args)
 	case "list":
 		info, err := daemon.ReadEngineJSON()
 		if err != nil {
