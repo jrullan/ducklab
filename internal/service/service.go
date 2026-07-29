@@ -740,7 +740,10 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
 		ShellPolicy:  projCfg.Shell,
+		Verify:       projCfg.Verify,
 		Answers:      rs.answers(),
+		// A project skill shadows a global one of the same name (05 §7).
+		GlobalSkillsDir: globalSkillsDir(),
 	}
 
 	// Build the turn that would be sent
@@ -832,7 +835,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
 		ShellPolicy:  projCfg.Shell,
+		Verify:       projCfg.Verify,
 		Answers:      rs.answers(),
+		// A project skill shadows a global one of the same name (05 §7).
+		GlobalSkillsDir: globalSkillsDir(),
 	}
 
 	roster, rosterWarning := s.resolveRoster(projCfg)
@@ -929,6 +935,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			"files":   tamper.Files,
 			"message": verify.TamperMessage,
 		})
+	}
+
+	// A run may have proposed a skill (05 §7.1). Validated here, on the tree
+	// the human is about to accept, so an unusable skill is caught before it
+	// is committed rather than the first time a duckling reaches for it.
+	if problems := validateProposedSkills(entry.Path); len(problems) > 0 {
+		rs.writer.AppendEvent("skill_problems", map[string]interface{}{"problems": problems})
 	}
 
 	// Check if human gate is needed

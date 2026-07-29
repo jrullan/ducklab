@@ -317,6 +317,16 @@ export interface ServiceRunRequest {
   verify?: string;
 }
 
+export interface ServiceSkillSummary {
+  args?: SkillArg[];
+  description?: string;
+  name?: string;
+  problems?: string[];
+  runnable?: boolean;
+  scope?: string;
+  version?: number;
+}
+
 export interface ServiceStageRequest {
   autonomy?: string;
   from?: string;
@@ -350,6 +360,12 @@ export interface ServiceTaskView {
   milestone?: string;
   status?: string;
   title?: string;
+}
+
+export interface SkillArg {
+  name?: string;
+  required?: boolean;
+  type?: string;
 }
 
 
@@ -386,6 +402,8 @@ export const OPERATIONS = [
   { id: "RosterSuggest", method: "GET", path: "/v1/projects/{id}/roster/suggest" },
   { id: "RosterApply", method: "POST", path: "/v1/projects/{id}/roster/suggest" },
   { id: "RunStart", method: "POST", path: "/v1/projects/{id}/runs" },
+  { id: "SkillList", method: "GET", path: "/v1/projects/{id}/skills" },
+  { id: "SkillGet", method: "GET", path: "/v1/projects/{id}/skills/{name}" },
   { id: "StageStart", method: "POST", path: "/v1/projects/{id}/stages/{stage}" },
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },

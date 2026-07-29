@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 )
@@ -392,5 +393,43 @@ func TestJailRefusesANewFileUnderASymlinkedDirectory(t *testing.T) {
 	}
 	if _, err := PathJail(root, "link/new/file.go"); err == nil {
 		t.Error("PathJail followed a symlink out of the root")
+	}
+}
+
+// I3: nothing is unbounded. RunShell took a context and a timeout and used
+// neither, so `sleep 999` — or an npm install waiting on a prompt — hung the
+// run until someone noticed. The shell policy's timeout_s was decorative.
+func TestShellStopsAtItsTimeout(t *testing.T) {
+	ectx := &ExecContext{ProjectRoot: t.TempDir(), ShellPolicy: config.ShellPolicy{Mode: "yolo"}}
+	start := time.Now()
+	out, code, err := RunShell(context.Background(), ectx, "sleep 30", 1)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunShell returned a transport error rather than a timed-out command: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("waited %v for a 1s timeout", elapsed)
+	}
+	if code == 0 {
+		t.Error("a command that was killed reported success")
+	}
+	if !strings.Contains(out, "timed out") {
+		t.Errorf("output does not say why the command stopped: %q", out)
+	}
+}
+
+// A cancelled run must not leave a command running behind it.
+func TestShellStopsWhenTheRunIsCancelled(t *testing.T) {
+	ectx := &ExecContext{ProjectRoot: t.TempDir(), ShellPolicy: config.ShellPolicy{Mode: "yolo"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+
+	start := time.Now()
+	if _, code, _ := RunShell(ctx, ectx, "sleep 30", 300); code == 0 {
+		t.Error("a cancelled command reported success")
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("waited %v after cancellation", elapsed)
 	}
 }

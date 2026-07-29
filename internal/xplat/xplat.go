@@ -4,6 +4,7 @@
 package xplat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // OS represents the operating system.
@@ -158,6 +160,32 @@ func Shell(workdir string, env []string, cmd string) *exec.Cmd {
 	if env != nil {
 		c.Env = env
 	}
+	return c
+}
+
+// ShellContext is Shell, bound to a context and killed as a group.
+//
+// Shell alone produces a command nothing can stop: cancelling the run leaves
+// it running, and the shell policy's timeout_s has no way to take effect. Use
+// this for anything a model can start.
+func ShellContext(ctx context.Context, workdir string, env []string, cmd string) *exec.Cmd {
+	var c *exec.Cmd
+	if CurrentOS() == Windows {
+		c = exec.CommandContext(ctx, "cmd", "/C", cmd)
+	} else {
+		c = exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
+	}
+	c.Dir = workdir
+	if env != nil {
+		c.Env = env
+	}
+	setProcessGroup(c)
+	c.Cancel = func() error { return killProcessGroup(c) }
+	// A killed shell can leave a child holding the output pipe, and Wait blocks
+	// on that pipe rather than on the process. Without this the timeout returns
+	// only once the orphan happens to exit, which is the bug it was meant to
+	// fix wearing a different hat.
+	c.WaitDelay = 2 * time.Second
 	return c
 }
 

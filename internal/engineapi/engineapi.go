@@ -146,6 +146,28 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleSkillList(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.SkillList(r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
+	sk, problems, err := s.svc.SkillGet(r.PathValue("id"), r.PathValue("name"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{
+		"name": sk.Name, "description": sk.Description, "version": sk.Version,
+		"scope": sk.Scope, "entry": sk.Entry, "body": sk.Body,
+		"args": sk.Args, "problems": problems,
+	})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {

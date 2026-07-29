@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/jrullan/ducklab/internal/verify"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -83,15 +84,19 @@ func (t *VerifyRun) Schema() interface{} {
 
 // Execute runs the tool.
 func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
-	// The verify command is stored in the exec context by the orchestrator
-	// For now, we look for common verification commands
-	// This is a placeholder; the real implementation will use the project's verify config
-	cmd := "go test ./..."
-	output, exitCode, err := RunShell(ctx, ectx, cmd, 900)
+	// The same code path as the gate that decides the run, deliberately.
+	//
+	// This used to run "go test ./..." hardcoded. On a project whose gate was
+	// "go build" a model called it, was told exit 0, and stopped — and the
+	// real gate then failed on work it had been told was fine. A tool that
+	// answers a different question from the one being asked is worse than no
+	// tool.
+	res, err := verify.Run(ectx.ProjectRoot, ectx.Verify)
 	if err != nil {
 		return ErrorResult("verify_run: %v", err), nil
 	}
-	result := fmt.Sprintf("gate: tests\ncmd: %s\nexit: %d\n%s", cmd, exitCode, CapResult(output, 32768))
+	exitCode := res.ExitCode
+	result := fmt.Sprintf("gate: %s\ncmd: %s\nexit: %d\n%s", res.Gate, res.Command, exitCode, CapResult(res.Output, MaxToolResultBytes))
 	if exitCode != 0 {
 		return &Result{Content: result, IsError: true}, nil
 	}

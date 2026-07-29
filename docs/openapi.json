@@ -1077,6 +1077,45 @@
         ],
         "type": "object"
       },
+      "ServiceSkillSummary": {
+        "properties": {
+          "args": {
+            "items": {
+              "$ref": "#/components/schemas/SkillArg"
+            },
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "runnable": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "runnable",
+          "scope",
+          "version"
+        ],
+        "type": "object"
+      },
       "ServiceStageRequest": {
         "properties": {
           "autonomy": {
@@ -1202,6 +1241,25 @@
           "milestone",
           "status",
           "title"
+        ],
+        "type": "object"
+      },
+      "SkillArg": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "required",
+          "type"
         ],
         "type": "object"
       }
@@ -2339,6 +2397,94 @@
           }
         ],
         "summary": "Start a run"
+      }
+    },
+    "/v1/projects/{id}/skills": {
+      "get": {
+        "operationId": "SkillList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceSkillSummary"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Skills available to a project, project shadowing global"
+      }
+    },
+    "/v1/projects/{id}/skills/{name}": {
+      "get": {
+        "operationId": "SkillGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One skill, with its body and any validation problems"
       }
     },
     "/v1/projects/{id}/stages/{stage}": {

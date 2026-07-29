@@ -27,17 +27,44 @@ func TestRoleToolbeltReturnsACopy(t *testing.T) {
 
 func TestAvailableFiltersUnimplementedTools(t *testing.T) {
 	r := NewRegistry()
-	// skill_run is in the implementer's ceiling but arrives in v0.6. The
+	// mcp_call is in the implementer's ceiling but is not built yet. The
 	// ceiling lists the spec's full set so adding a tool later needs no edit
 	// there; Available filters it to what actually exists.
-	if !RoleAllows(config.RoleImplementer, "skill_run") {
-		t.Fatal("test assumption broken: skill_run should be in the implementer ceiling")
+	if !RoleAllows(config.RoleImplementer, "mcp_call") {
+		t.Fatal("test assumption broken: mcp_call should be in the implementer ceiling")
 	}
 	for _, name := range r.Available(config.RoleImplementer) {
-		if name == "skill_run" {
+		if name == "mcp_call" {
 			t.Error("Available returned a tool that is not registered")
 		}
 	}
+}
+
+// Skills landed and must now reach the role that uses them — and only that one.
+// A reviewer that could run a skill could run a script, and "the reviewer
+// evaluates, it never rewrites" would hold by convention instead of by
+// construction.
+func TestSkillToolsReachTheImplementerAndNoOneElse(t *testing.T) {
+	r := NewRegistry()
+	for _, name := range []string{"skill_list", "skill_read", "skill_run"} {
+		if !contains(r.Available(config.RoleImplementer), name) {
+			t.Errorf("%s is registered but the implementer cannot see it", name)
+		}
+		for _, role := range []config.Role{config.RoleReviewer, config.RoleJudge, config.RoleArchitect} {
+			if contains(r.Available(role), name) {
+				t.Errorf("%s reached the %s", name, role)
+			}
+		}
+	}
+}
+
+func contains(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }
 
 // artifact_read landed in v0.4 and must now reach the roles that need it.

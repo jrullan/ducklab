@@ -173,6 +173,22 @@ func (c *Client) ProjectInit(path, name, describe string, gitInit bool) (map[str
 	return result, err
 }
 
+// SkillList lists the skills available to a project.
+func (c *Client) SkillList(projectID string) ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	err := c.get("/v1/projects/"+projectID+"/skills", &result)
+	return result.Items, err
+}
+
+// SkillGet returns one skill.
+func (c *Client) SkillGet(projectID, name string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/skills/"+name, &result)
+	return result, err
+}
+
 // RunDiff returns a run's diff and, when it was flagged, the part of it that
 // touches tests.
 func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {

@@ -144,6 +144,8 @@ func Run(args []string) int {
 		return reviewCmd(remaining[1:], repo)
 	case "release":
 		return releaseCmd(verb, cmdArgs, repo)
+	case "skill":
+		return skillCmd(verb, cmdArgs, repo)
 	case "bug":
 		return bugCmd(verb, cmdArgs, repo)
 	case "task":
@@ -878,6 +880,11 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 		case "verdict":
 			verdict, _ = e.Data["verdict"].(string)
 			fmt.Printf("  verdict: %s\n", verdict)
+		case "skill_problems":
+			fmt.Println("  ⚠ a skill this run wrote will not load:")
+			for _, p := range asStrings(e.Data["problems"]) {
+				fmt.Printf("      %s\n", p)
+			}
 		case "tests_modified":
 			// Printed before the gate line, because a green verdict on a run
 			// that rewrote its own tests is the one that most needs reading

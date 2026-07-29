@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -70,7 +71,17 @@ type ExecContext struct {
 	Autonomy     config.Autonomy
 	UnsafeWrites bool
 	ShellPolicy  config.ShellPolicy
-	Registry     *Registry
+	// Verify is the project's gate. verify_run runs this and nothing else:
+	// a tool that runs a different command from the gate that decides tells a
+	// model its work passes when it does not.
+	Verify config.Verify
+	// ShellEnv is the environment for shell and skill commands. Nil means the
+	// engine's own, which is the default.
+	ShellEnv []string
+	// GlobalSkillsDir is the machine-wide skills directory. A project skill of
+	// the same name shadows what is here (05 §7).
+	GlobalSkillsDir string
+	Registry        *Registry
 }
 
 // Result is the result of a tool execution.
@@ -123,6 +134,11 @@ func (r *Registry) registerBuiltins() {
 	// Lifecycle documents (read-only: a model proposes, it does not write)
 	r.Register(&ArtifactRead{})
 	r.Register(&TaskRead{})
+	// Skills (05 §7). The documentation-only form is the default: reading a
+	// skill cannot do anything to the project.
+	r.Register(&SkillList{})
+	r.Register(&SkillRead{})
+	r.Register(&SkillRun{})
 	// Version control (read-only)
 	r.Register(&GitStatus{})
 	r.Register(&GitDiff{})
@@ -592,7 +608,14 @@ func RunShell(ctx context.Context, ectx *ExecContext, cmd string, timeoutS int) 
 		timeoutS = 120
 	}
 
-	shellCmd := xplat.Shell(ectx.ProjectRoot, nil, cmd)
+	// I3: nothing is unbounded. This took a context and a timeout and used
+	// neither, so `sleep 999` — or an install waiting on a prompt nobody was
+	// there to answer — held the run open until a person noticed. The policy's
+	// timeout_s was decorative.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS)*time.Second)
+	defer cancel()
+
+	shellCmd := xplat.ShellContext(ctx, ectx.ProjectRoot, ectx.ShellEnv, cmd)
 	output, err := shellCmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
@@ -601,6 +624,19 @@ func RunShell(ctx context.Context, ectx *ExecContext, cmd string, timeoutS int) 
 		} else {
 			return string(output), -1, err
 		}
+	}
+	// Say which limit ended it. A model reading "exit code: -1" and no output
+	// concludes the command failed and tries a different one; reading that it
+	// ran out of time, it can ask for longer or do less.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		reason := fmt.Sprintf("\n[command timed out after %ds and was killed]", timeoutS)
+		if errors.Is(ctxErr, context.Canceled) {
+			reason = "\n[run cancelled; command was killed]"
+		}
+		if exitCode == 0 {
+			exitCode = -1
+		}
+		return string(output) + reason, exitCode, nil
 	}
 	return string(output), exitCode, nil
 }
