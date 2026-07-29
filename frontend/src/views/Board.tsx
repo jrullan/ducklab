@@ -46,8 +46,16 @@ function severityRole(sev: string): "critical" | "serious" | "warning" | "good" 
   }
 }
 
-export function Board({ client, projectId }: { client: EngineClient; projectId: string }) {
-  const [board, setBoard] = useState<"tasks" | "bugs">("tasks");
+export function Board({
+  client,
+  projectId,
+  tab,
+}: {
+  client: EngineClient;
+  projectId: string;
+  tab?: string;
+}) {
+  const [board, setBoard] = useState<"tasks" | "bugs">(tab === "bugs" ? "bugs" : "tasks");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);

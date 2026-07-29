@@ -189,7 +189,7 @@ export function App() {
         {route.name === "board" &&
           (client && projectId ? (
             <div className="p-4">
-              <Board client={client} projectId={projectId} />
+              <Board client={client} projectId={projectId} tab={route.tab} />
             </div>
           ) : (
             <p className="m-4 text-ink-muted">No project registered yet.</p>
