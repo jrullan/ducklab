@@ -318,6 +318,24 @@ func (s *Server) handleTestStart(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, run)
 }
 
+func (s *Server) handleProjectGate(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.ProjectGate(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
+func (s *Server) handleProjectGateAdopt(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.ProjectGateAdopt(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {

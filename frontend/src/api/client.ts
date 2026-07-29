@@ -18,6 +18,20 @@ export interface Project {
   missing?: boolean;
 }
 
+/** A project's gate, and what could be. Mirrors service.GateStatus. */
+export type GateStatus = {
+  mode: string;
+  command: string;
+  detected: string;
+  detected_command?: string;
+  /** Detection found something the project is not using — the only case worth
+   * acting on. */
+  adoptable: boolean;
+  /** What runs currently produce at best. Spelled out because "none" does not
+   * obviously mean "nothing can ever pass". */
+  best_verdict: string;
+};
+
 export interface Run {
   id: string;
   project_id: string;
@@ -290,6 +304,16 @@ export class EngineClient {
    * `ducklab project set` takes. */
   projectUpdate(id: string, keys: Record<string, string>) {
     return this.request<Project>("PATCH", `/v1/projects/${id}`, keys);
+  }
+  /** The configured gate beside the one detection finds today. */
+  projectGate(id: string) {
+    return this.request<GateStatus>("GET", `/v1/projects/${id}/gate`);
+  }
+  /** Adopt the detected gate. Never automatic: a gate decides what a verdict
+   * means, and changing that silently makes two runs incomparable while both
+   * claim to have been measured the same way. */
+  projectGateAdopt(id: string) {
+    return this.request<GateStatus>("POST", `/v1/projects/${id}/gate`);
   }
   /** Forget a project. The engine unregisters it; the files stay. */
   projectForget(id: string) {

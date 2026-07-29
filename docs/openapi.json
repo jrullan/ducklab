@@ -1032,6 +1032,36 @@
         ],
         "type": "object"
       },
+      "ServiceGateStatus": {
+        "properties": {
+          "adoptable": {
+            "type": "boolean"
+          },
+          "best_verdict": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "detected": {
+            "type": "string"
+          },
+          "detected_command": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "adoptable",
+          "best_verdict",
+          "command",
+          "detected",
+          "mode"
+        ],
+        "type": "object"
+      },
       "ServiceInitRequest": {
         "properties": {
           "describe": {
@@ -2265,6 +2295,76 @@
           }
         ],
         "summary": "Move a bug"
+      }
+    },
+    "/v1/projects/{id}/gate": {
+      "get": {
+        "operationId": "ProjectGate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceGateStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The configured gate beside the one detection finds today"
+      },
+      "post": {
+        "operationId": "ProjectGateAdopt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceGateStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Adopt the detected gate. Never automatic: a gate decides what a verdict means."
       }
     },
     "/v1/projects/{id}/releases": {

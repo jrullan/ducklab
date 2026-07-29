@@ -280,6 +280,20 @@ func (c *Client) TestStart(projectID, taskID, duckling string) (map[string]inter
 	return result, err
 }
 
+// ProjectGate reports the configured gate and the detectable one.
+func (c *Client) ProjectGate(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/gate", &result)
+	return result, err
+}
+
+// ProjectGateAdopt writes the detected gate into the project.
+func (c *Client) ProjectGateAdopt(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/gate", nil, &result)
+	return result, err
+}
+
 // RunDiff returns a run's diff and, when it was flagged, the part of it that
 // touches tests.
 func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {

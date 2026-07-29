@@ -120,3 +120,59 @@ describe("Projects", () => {
     expect(screen.queryByTestId("project-browse")).toBeNull();
   });
 });
+
+describe("Projects — the gate", () => {
+  const gate = (o: Partial<Record<string, unknown>> = {}) => ({
+    mode: "none", command: "", detected: "none", adoptable: false,
+    best_verdict: "UNVERIFIED", ...o,
+  });
+
+  function clientWithGate(g: Record<string, unknown>) {
+    const c = clientWith([p({ id: "alpha" })]) as unknown as Record<string, unknown>;
+    c.projectGate = vi.fn(() => Promise.resolve(g));
+    c.projectGateAdopt = vi.fn(() =>
+      Promise.resolve(gate({ mode: "tests", command: "go test ./...", best_verdict: "PASSED" })),
+    );
+    return c as unknown as EngineClient;
+  }
+
+  // The failure mode is that nobody notices, so the chip says the consequence
+  // rather than the setting.
+  it("says a project with no gate can never pass", async () => {
+    render(
+      <Projects client={clientWithGate(gate())} selected="" onSelect={noop} onChanged={noop} />,
+    );
+    expect((await screen.findByTestId("gate-none")).textContent).toContain("UNVERIFIED");
+  });
+
+  it("offers the detected gate, naming the command", async () => {
+    const client = clientWithGate(
+      gate({ detected: "tests", detected_command: "go test ./...", adoptable: true }),
+    );
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    const adopt = await screen.findByTestId("gate-adopt");
+    expect(adopt.textContent).toContain("go test ./...");
+    fireEvent.click(adopt);
+    await waitFor(() => expect(client.projectGateAdopt).toHaveBeenCalledWith("alpha"));
+    // And the chip goes away, because the problem did.
+    await waitFor(() => expect(screen.queryByTestId("gate-none")).toBeNull());
+  });
+
+  // Nothing to detect: offering a button that cannot help is worse than none.
+  it("offers nothing when there is nothing runnable", async () => {
+    render(
+      <Projects client={clientWithGate(gate())} selected="" onSelect={noop} onChanged={noop} />,
+    );
+    await screen.findByTestId("gate-none");
+    expect(screen.queryByTestId("gate-adopt")).toBeNull();
+  });
+
+  it("says nothing at all about a project that has a gate", async () => {
+    const client = clientWithGate(
+      gate({ mode: "tests", command: "go test ./...", best_verdict: "PASSED" }),
+    );
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    expect((await screen.findByTestId("gate-ok")).textContent).toBe("gate tests");
+    expect(screen.queryByTestId("gate-none")).toBeNull();
+  });
+});

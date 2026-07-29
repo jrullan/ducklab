@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { EngineClient, Project } from "../api/client";
+import type { EngineClient, GateStatus, Project } from "../api/client";
 import { canChooseDirectory, chooseDirectory } from "../lib/picker";
 import { StatusChip } from "../components/StatusChip";
 
@@ -32,13 +32,25 @@ export function Projects({
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   const [gitInit, setGitInit] = useState(true);
+  const [gates, setGates] = useState<Record<string, GateStatus>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
 
   const load = useCallback(() => {
     client
       .projects()
-      .then(setProjects)
+      .then((ps) => {
+        setProjects(ps);
+        // A project that cannot produce PASSED is the thing people discover
+        // three runs in. Asked for here, where they are already looking.
+        for (const p of ps) {
+          if (p.missing) continue;
+          client
+            .projectGate(p.id)
+            .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
+            .catch(() => {});
+        }
+      })
       .catch((err) => setFailure(err instanceof Error ? err.message : String(err)));
   }, [client]);
 
@@ -213,7 +225,15 @@ export function Projects({
                     {/* Not a warning chip on a missing project: it is the whole
                         reason the board looks empty, so it is stated plainly. */}
                     {p.missing && <StatusChip role="critical" label="folder is gone" />}
-                    {p.gate && <span className="text-xs text-ink-muted">gate {p.gate}</span>}
+                    <GateChip
+                      status={gates[p.id]}
+                      onAdopt={() =>
+                        void client
+                          .projectGateAdopt(p.id)
+                          .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
+                          .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                      }
+                    />
                     <span className="font-mono text-xs text-ink-muted">{p.path}</span>
                     <span className="ml-auto flex gap-1">
                       <button
@@ -244,5 +264,37 @@ export function Projects({
         )}
       </section>
     </div>
+  );
+}
+
+/** What a project's gate is, and the one thing worth doing about it.
+ *
+ * A gate with nothing runnable behind it means every run ends UNVERIFIED — the
+ * failure mode is that nobody notices, so this says the consequence rather
+ * than the setting. */
+function GateChip({ status, onAdopt }: { status?: GateStatus; onAdopt: () => void }) {
+  if (!status) return null;
+  if (status.mode !== "none") {
+    return (
+      <span className="text-xs text-ink-muted" data-testid="gate-ok">
+        gate {status.mode}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1" data-testid="gate-none">
+      <StatusChip role="serious" label="no gate — runs end UNVERIFIED" />
+      {status.adoptable && (
+        <button
+          type="button"
+          onClick={onAdopt}
+          data-testid="gate-adopt"
+          title={status.detected_command}
+          className="rounded border border-hairline px-2 py-0.5 text-xs"
+        >
+          use {status.detected_command}
+        </button>
+      )}
+    </span>
   );
 }

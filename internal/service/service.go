@@ -928,6 +928,14 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"exit": gateResult.ExitCode,
 	})
 
+	// A run with no gate ends UNVERIFIED, which is honest and easy to miss.
+	// Said here, once, with the fix — rather than leaving someone to wonder on
+	// the third run why nothing ever passes.
+	if advice := gateAdvice(entry.Path, projCfg.Verify); advice != "" {
+		rs.run.Warning = advice
+		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": advice})
+	}
+
 	// Compute verdict
 	verdict := verify.Verdict(gateResult)
 	rs.run.Verdict = verdict

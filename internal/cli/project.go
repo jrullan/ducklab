@@ -61,11 +61,13 @@ func projectCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Printf("%s unregistered; the directory is untouched\n", args[0])
 		return 0
+	case "gate":
+		return projectGateCmd(client, repo, args)
 	case "status":
 		return projectStatusCmd(client, repo)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown project command: %s\n", verb)
-		fmt.Fprintln(os.Stderr, "usage: ducklab project init|list|show|describe|set|status|remove")
+		fmt.Fprintln(os.Stderr, "usage: ducklab project init|list|show|describe|set|gate|status|remove")
 		return 2
 	}
 }
@@ -122,8 +124,62 @@ func projectInit(client *engineclt.Client, args []string, repo string) int {
 	// init is idempotent (03 §3.2): on an existing project it prints and exits
 	// 0 rather than complaining.
 	fmt.Printf("%s  %s\n", str(p["id"]), str(p["path"]))
-	if gate := str(p["gate"]); gate != "" {
+	// Never silently. A project with no gate cannot produce PASSED, and
+	// finding that out on the third run is the friction this removes.
+	gate := str(p["gate"])
+	if gate == "" || gate == "none" {
+		fmt.Println("  gate: none — nothing here is runnable yet, so every run will end UNVERIFIED")
+		fmt.Println("        once there is code:  ducklab project gate --adopt")
+	} else {
 		fmt.Printf("  gate: %s\n", gate)
+	}
+	return 0
+}
+
+// projectGateCmd is `ducklab project gate [--adopt]`.
+func projectGateCmd(client *engineclt.Client, repo string, args []string) int {
+	adopt := false
+	for _, a := range args {
+		if a == "--adopt" {
+			adopt = true
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "unknown flag: %s\n", a)
+		fmt.Fprintln(os.Stderr, "usage: ducklab project gate [--adopt]")
+		return 2
+	}
+
+	projectID, code := resolveProjectID(client, repo)
+	if code != 0 {
+		return code
+	}
+	get := client.ProjectGate
+	if adopt {
+		get = client.ProjectGateAdopt
+	}
+	st, err := get(projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	mode := str(st["mode"])
+	fmt.Printf("gate:        %s", mode)
+	if cmd := str(st["command"]); cmd != "" {
+		fmt.Printf("  (%s)", cmd)
+	}
+	fmt.Println()
+	// Spelled out, because "mode: none" does not obviously mean "nothing can
+	// ever pass".
+	fmt.Printf("best verdict: %s\n", str(st["best_verdict"]))
+
+	if adoptable, _ := st["adoptable"].(bool); adoptable {
+		fmt.Printf("\ndetected:    %s  (%s)\n", str(st["detected"]), str(st["detected_command"]))
+		fmt.Println("adopt it:    ducklab project gate --adopt")
+	} else if mode == "none" {
+		fmt.Println("\nnothing runnable was found here. Set one by hand once there is:")
+		fmt.Println("  ducklab project set verify.mode tests")
+		fmt.Println("  ducklab project set verify.tests \"<command>\"")
 	}
 	return 0
 }
