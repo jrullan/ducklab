@@ -52,7 +52,7 @@ criterion, as written, is met.
 | AC-21 | done | Two repairs then `ErrContract`; never a guessed choice (I6). |
 | AC-22 | done | `Until` parses the expression; `os.Exit(1)` is a load-time error. |
 | AC-23 | done | `ask_human` checkpoints and resumes without blocking a goroutine. |
-| AC-24 | partial | `ducklab report` exists. Not checked against the exact table in 03 §3.10, including the `solo baseline:` line. |
+| AC-24 | done | Checked against 03 §3.10: the columns, the underscored token counts and the `solo baseline:` line. It was wrong until this was written — the CLI had its own renderer. |
 | AC-25 | done | `max_concurrent_runs` queues; `internal/service/queue_test.go`. |
 | AC-26 | done | `token_delta` streams; a slow subscriber gets `overflow` and the run is unaffected. |
 
@@ -113,8 +113,8 @@ criterion, as written, is met.
 |----|-------|------|
 | AC-58 | done | `release plan --bump` produces the document; the empty case prints exactly `No user-visible changes.` The wording was wrong until writing this file caught it. |
 | AC-59 | **no** | Deploy recipes are a column in the database. No runner, no CLI, no view. |
-| AC-60 | **no** | No `bench` command. |
-| AC-61 | partial | `report` exists. Measured-vs-estimated separation and the `~` marker are unverified, and there is no desktop table. |
+| AC-60 | done | `bench --suite std --ducklings a --modes solo,pair` runs every cell in a throwaway project and writes the results JSON; the grid order is fixed, so two runs diff cleanly. Verified against pato-atom. |
+| AC-61 | partial | The `~` marker works and is tested; it was unreachable before, because nothing ever set the flag. There is still no desktop table. |
 | AC-62 | **no** | No Reports view, so no charts. |
 
 ## v0.8 — Split, and opening the harness
@@ -137,9 +137,9 @@ Not assessed. Its criteria are about the whole thing being finished.
 
 | | Count |
 |---|---|
-| done | 43 |
-| partial | 15 |
-| no | 9 |
+| done | 45 |
+| partial | 14 |
+| no | 8 |
 
 Counted from the tables above, not by hand: the first draft of this file said
 34/22/11 because I estimated instead of counting.
@@ -148,11 +148,10 @@ Counted from the tables above, not by hand: the first draft of this file said
 
 Read together rather than one by one, three things stand out.
 
-**Nothing measures anything yet.** `bench`, the Reports view, the charts and
-the measured-vs-estimated split are all missing, and `report` has never been
-checked against its own spec. P9 in the vision is "measurable, or it didn't
-happen" — and the harness for comparing ducklings, which is most of why
-Ducklab exists, is the least built part of it.
+**Measurement exists now, on the CLI side.** `bench` runs a versioned suite,
+`report` prints the table 03 §3.10 specifies, and estimated counts are marked
+rather than silently summed with measured ones. What is still missing is the
+desktop half: no Reports view, so no charts (AC-62) and no table (AC-61).
 
 **Two v0.1 criteria are still open**, and both are ergonomic: the engine does
 not auto-start, and the version has no sha. The first has been worked around
