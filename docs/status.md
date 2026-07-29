@@ -114,8 +114,8 @@ criterion, as written, is met.
 | AC-58 | done | `release plan --bump` produces the document; the empty case prints exactly `No user-visible changes.` The wording was wrong until writing this file caught it. |
 | AC-59 | **no** | Deploy recipes are a column in the database. No runner, no CLI, no view. |
 | AC-60 | done | `bench --suite std --ducklings a --modes solo,pair` runs every cell in a throwaway project and writes the results JSON; the grid order is fixed, so two runs diff cleanly. Verified against pato-atom. |
-| AC-61 | partial | The `~` marker works and is tested; it was unreachable before, because nothing ever set the flag. There is still no desktop table. |
-| AC-62 | **no** | No Reports view, so no charts. |
+| AC-61 | done | The `~` marker works in the CLI and in the desktop per-duckling table, on the row rather than on a total. |
+| AC-62 | partial | Reports exists with the outcome mix on the status palette, the pass-rate bars with the solo baseline drawn, a Table toggle on each chart, and a Bench tab. **Cost and tokens over time is not built** — the report endpoint does no time bucketing, and half a time series is worse than none. Date-range filters exist; mode/duckling/task filters do not. |
 
 ## v0.8 — Split, and opening the harness
 
@@ -137,9 +137,9 @@ Not assessed. Its criteria are about the whole thing being finished.
 
 | | Count |
 |---|---|
-| done | 45 |
+| done | 46 |
 | partial | 14 |
-| no | 8 |
+| no | 7 |
 
 Counted from the tables above, not by hand: the first draft of this file said
 34/22/11 because I estimated instead of counting.
@@ -148,10 +148,15 @@ Counted from the tables above, not by hand: the first draft of this file said
 
 Read together rather than one by one, three things stand out.
 
-**Measurement exists now, on the CLI side.** `bench` runs a versioned suite,
-`report` prints the table 03 §3.10 specifies, and estimated counts are marked
-rather than silently summed with measured ones. What is still missing is the
-desktop half: no Reports view, so no charts (AC-62) and no table (AC-61).
+**Measurement exists now, and it immediately said something uncomfortable.**
+The first bench had two very different ducklings — an FP8 30B on a GB10 and a
+Q4 35B on a Strix Halo — both score 5/5. That is a suite measuring below both
+their ceilings, not a tie. std v2 adds four harder tasks; the Bench tab now
+says so out loud when every cell passes and more than one duckling ran,
+because a wall of 100% otherwise reads as a triumph.
+
+What remains is the time series: cost and tokens over time need bucketing the
+report endpoint does not do.
 
 **Two v0.1 criteria are still open**, and both are ergonomic: the engine does
 not auto-start, and the version has no sha. The first has been worked around
