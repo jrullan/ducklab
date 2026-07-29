@@ -160,13 +160,21 @@ func Std() Suite {
 						"\t\t\tt.Errorf(\"RoundDown(%d) = %d, want %d\", c.in, got, c.want)\n\t\t}\n\t}\n}\n",
 				},
 			},
-			// The five above are a floor: a model that fails them cannot be
-			// used for anything. They do not discriminate — the first real
-			// bench had two very different ducklings both score 5/5, which
-			// says the suite was measuring below both their ceilings.
+			// These four were meant to be where the ceiling is. They are not:
+			// both ducklings scored 9/9 on v2, exactly as they had 5/5 on v1.
 			//
-			// These four are where the ceiling is. Each has a correct answer
-			// that is short, and a plausible answer that passes some cases.
+			// The reason is that all four are canonical. LRU and
+			// merge-intervals are among the most reproduced exercises in
+			// existence and a bounded worker pool is in every Go tutorial, so
+			// a model has not reasoned its way to them — it has seen them.
+			// Difficulty for a person and difficulty for a language model are
+			// different axes, and these were built along the wrong one. See
+			// docs/decisions/0005.
+			//
+			// They stay: they raise the floor, they exercise concurrency and
+			// multi-file edits which the first five do not, and the effort
+			// they cost differs sharply even where the verdict does not —
+			// B-004 took one duckling twice the tokens of the other.
 			{
 				ID:    "B-006",
 				Title: "Implement an LRU cache",

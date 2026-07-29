@@ -104,11 +104,16 @@ function BenchDetail({ result }: { result: BenchResult }) {
 
       {/* A suite everyone passes compares as little as one nobody passes. Said
           here, because a wall of 100% reads as a triumph rather than as a
-          benchmark that has stopped discriminating. */}
+          benchmark that has stopped discriminating.
+          
+          It points at the effort chart rather than stopping at the bad news:
+          when every model solves every task, what they spent doing it is the
+          only thing left that differs — and on the run that prompted this, one
+          duckling used twice the tokens of the other on the same task. */}
       {groups.length > 1 && groups.every((g) => g.rate === 100) && (
         <p className="rounded-card border border-serious p-2 text-sm text-serious" data-testid="no-discrimination">
-          Every cell passed. This suite is below the ceiling of these ducklings, so it does not
-          tell them apart.
+          Every cell passed, so this suite does not tell these ducklings apart on correctness.
+          What they spent is below.
         </p>
       )}
 
@@ -120,6 +125,17 @@ function BenchDetail({ result }: { result: BenchResult }) {
         />
       </ChartFrame>
 
+      <ChartFrame
+        title="Tokens spent"
+        note="two models can both be right and not cost the same"
+        table={<CellTable cells={result.cells} />}
+      >
+        <BarChart
+          bars={groups.map((g) => ({ key: g.key, value: g.tokens, n: g.cells }))}
+          unit=""
+        />
+      </ChartFrame>
+
       <section className="rounded-card border border-hairline p-3">
         <h3 className="mb-2 text-ink">Every cell</h3>
         <CellTable cells={result.cells} />
@@ -128,14 +144,15 @@ function BenchDetail({ result }: { result: BenchResult }) {
   );
 }
 
-type Group = { key: string; cells: number; passed: number; rate: number };
+type Group = { key: string; cells: number; passed: number; rate: number; tokens: number };
 
 function groupCells(cells: readonly BenchCell[]): Group[] {
   const by = new Map<string, Group>();
   for (const c of cells) {
     const key = `${c.duckling} / ${c.mode}`;
-    const g = by.get(key) ?? { key, cells: 0, passed: 0, rate: 0 };
+    const g = by.get(key) ?? { key, cells: 0, passed: 0, rate: 0, tokens: 0 };
     g.cells++;
+    g.tokens += c.tokens;
     if (c.verdict === "PASSED") g.passed++;
     by.set(key, g);
   }

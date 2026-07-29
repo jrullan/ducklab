@@ -115,7 +115,9 @@ export function BarChart({
   baselineLabel?: string;
   unit?: string;
 }) {
-  const max = Math.max(100, ...bars.map((b) => b.value));
+  // 100 is the floor for a percentage axis, and wrong for anything else: a
+  // token count of 30_000 against a floor of 100 draws every bar full width.
+  const max = unit === "%" ? Math.max(100, ...bars.map((b) => b.value)) : Math.max(1, ...bars.map((b) => b.value));
   const sorted = [...bars].sort((a, b) => b.value - a.value);
   return (
     <div data-testid="bar-chart" className="relative">
@@ -137,7 +139,7 @@ export function BarChart({
               style={{ width: `${(b.value / max) * 100}%`, background: "var(--series-1)" }}
             />
             <span className="ml-2 text-xs text-ink">
-              {b.value.toFixed(1)}
+              {unit === "%" ? b.value.toFixed(1) : b.value.toLocaleString()}
               {unit}
             </span>
             <span className="ml-2 text-xs text-ink-muted">n={b.n}</span>

@@ -149,11 +149,16 @@ Counted from the tables above, not by hand: the first draft of this file said
 Read together rather than one by one, three things stand out.
 
 **Measurement exists now, and it immediately said something uncomfortable.**
-The first bench had two very different ducklings — an FP8 30B on a GB10 and a
-Q4 35B on a Strix Halo — both score 5/5. That is a suite measuring below both
-their ceilings, not a tie. std v2 adds four harder tasks; the Bench tab now
-says so out loud when every cell passes and more than one duckling ran,
-because a wall of 100% otherwise reads as a triumph.
+Two very different ducklings — an FP8 30B on a GB10 and a Q4 35B on a Strix
+Halo — scored 5/5 on std v1 and then 9/9 on std v2, which was written
+specifically to separate them. The suite does not discriminate on correctness,
+and adding canonical algorithm problems did not change that, because those are
+the answers a model is most likely to have memorised
+([decision 0005](decisions/0005-canonical-tasks-do-not-discriminate.md)).
+
+It does discriminate on effort: 34,765 tokens against 72,293 on the same task.
+The Bench view says both things now — that the suite ties on correctness, and
+what the models spent getting there.
 
 What remains is the time series: cost and tokens over time need bucketing the
 report endpoint does not do.

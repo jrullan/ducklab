@@ -137,9 +137,11 @@ describe("Reports — Bench tab", () => {
     ]);
     render(<Reports client={client} projectId="p" />);
     fireEvent.click(await screen.findByTestId("reports-tab-bench"));
-    expect((await screen.findByTestId("no-discrimination")).textContent).toContain(
-      "does not tell them apart",
-    );
+    const warning = await screen.findByTestId("no-discrimination");
+    expect(warning.textContent).toContain("does not tell these ducklings apart");
+    // And it points at what still differs rather than stopping at the bad news.
+    expect(warning.textContent).toContain("What they spent");
+    expect(screen.getByTestId("chart-Tokens spent")).toBeTruthy();
   });
 
   it("says nothing of the sort when the ducklings differ", async () => {
