@@ -35,6 +35,12 @@ export interface TurnBlock {
    * contestant slot. Two lanes with the same role and the same duckling are
    * otherwise indistinguishable, which is exactly what a split produces. */
   subject?: string;
+  /** True when another turn was open at the same time.
+   *
+   * Lanes are stacked, so concurrency reads as sequence: a reviewer of a split
+   * cannot tell whether two pieces ran together or one after the other, and
+   * those are different claims about what the models were given. */
+  concurrent?: boolean;
   /** A reviewer's turn is a verdict, not prose. Present only when the engine
    * parsed one, so the lane can render findings instead of a JSON blob. */
   verdict?: string;
@@ -80,6 +86,8 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   // The turn most recently opened, used only for events that do not say which
   // turn they belong to.
   let last: TurnBlock | null = null;
+  // Turns that have started and not yet ended.
+  const open = new Set<TurnBlock>();
 
   const keyFor = (round: number, turn: number) => `${round}:${turn}`;
 
@@ -123,11 +131,18 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         byKey.set(key, block);
         last = block;
         blocks.push(block);
+        // Anything already open overlaps this one, and this one overlaps them.
+        if (open.size > 0) {
+          block.concurrent = true;
+          for (const o of open) o.concurrent = true;
+        }
+        open.add(block);
         break;
       }
       case "turn_end": {
         const b = blockFor(d);
         if (b) b.done = true;
+        open.delete(b ?? ({} as TurnBlock));
         break;
       }
       case "message": {

@@ -55,6 +55,14 @@ export function ConversationTurn({
             {block.subject}
           </span>
         )}
+        {/* Lanes are stacked, so without this concurrency reads as sequence —
+            and "two models worked at once" is a different claim from "one
+            model worked twice". */}
+        {block.concurrent && (
+          <span className="text-ink-muted" data-testid="turn-concurrent" title="ran at the same time as another turn">
+            ∥ in parallel
+          </span>
+        )}
         {!block.done && (
           <span className="text-ink-muted" data-testid="in-flight">
             thinking…

@@ -445,7 +445,7 @@ func runCmd(verb string, args []string, repo string) int {
 	if verb == "" {
 		// ducklab run <task-id>
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament] [--ducklings a,b] [--rounds n] [--dry-run] [--yes] [--no-wait]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament|split] [--ducklings a,b] [--rounds n] [--dry-run] [--yes] [--no-wait]")
 			return 2
 		}
 		taskID := args[0]

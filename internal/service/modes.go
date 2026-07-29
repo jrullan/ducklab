@@ -271,8 +271,13 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 
 func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.ExecuteParams) error {
 	scratch := filepath.Join(mc.entry.Path, ".ducklab", "worktrees")
+	var subtaskDucklings []config.DucklingID
+	for _, id := range mc.req.Ducklings {
+		subtaskDucklings = append(subtaskDucklings, config.DucklingID(id))
+	}
 	sp := &strategy.SplitParams{
 		ExecuteParams: base,
+		Ducklings:     subtaskDucklings,
 		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
 			res, err := verify.Run(root, mc.projCfg.Verify)

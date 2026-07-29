@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -352,5 +353,42 @@ func TestTheArchitectIsToldToDecompose(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the decomposition prompt never mentions %q", want)
 		}
+	}
+}
+
+// Split exists for work beyond one model's reach (05 §4.5), so a person who
+// knows which piece is the hard one should be able to put the stronger duckling
+// on it. Fewer names than subtasks is not an error: the list runs out and the
+// roster covers the rest.
+func TestSubtasksCanGoToDifferentDucklings(t *testing.T) {
+	var mu sync.Mutex
+	assigned := map[string]config.DucklingID{}
+
+	p := (&splitFixture{decompositions: []*agent.Decomposition{goodDecomp}}).params()
+	p.Ducklings = []config.DucklingID{"pato-fuerte"}
+	p.Roster = map[config.Role]config.DucklingID{config.RoleImplementer: "pato-normal"}
+	p.Runner = func(_ context.Context, turn *Turn, d config.DucklingID, _ string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleImplementer && tc.Root != "" {
+			mu.Lock()
+			assigned[tc.Root] = d
+			mu.Unlock()
+		}
+		if turn.Role == config.RoleArchitect {
+			return &agent.Outcome{Parsed: goodDecomp}, nil
+		}
+		return &agent.Outcome{Text: "done"}, nil
+	}
+
+	if _, err := ExecuteSplit(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	var got []config.DucklingID
+	for _, d := range assigned {
+		got = append(got, d)
+	}
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	want := []config.DucklingID{"pato-fuerte", "pato-normal"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("assignments = %v, want the named duckling first and the roster for the rest", got)
 	}
 }

@@ -129,6 +129,16 @@ type FileCopier func(from, to string) (copied bool, err error)
 // SplitParams configures a split run.
 type SplitParams struct {
 	ExecuteParams
+	// Ducklings assigns a duckling per subtask, positionally. Empty means the
+	// roster's implementer builds every piece.
+	//
+	// Unlike a tournament, this is not about decorrelation — subtasks are
+	// parts, not competing answers. It is about capacity: split exists for
+	// work beyond one model's reach (05 §4.5), and a person who knows which
+	// piece is the hard one should be able to put the stronger duckling on it.
+	// Fewer names than subtasks is not an error; the list simply runs out and
+	// the roster covers the rest.
+	Ducklings []config.DucklingID
 	// NewWorkspace isolates each subtask, exactly as it does a contestant.
 	NewWorkspace WorkspaceFactory
 	// GateIn runs verification inside a tree.
@@ -396,7 +406,10 @@ func runSubtasks(ctx context.Context, p *SplitParams, subtasks []agent.Subtask, 
 				runner = defaultRunner(&p.ExecuteParams)
 			}
 			duckling := config.DucklingID("")
-			if p.Roster != nil {
+			if i < len(p.Ducklings) {
+				duckling = p.Ducklings[i]
+			}
+			if duckling == "" && p.Roster != nil {
 				duckling = p.Roster[config.RoleImplementer]
 			}
 

@@ -188,8 +188,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <ToolTimeline calls={timeline} />
       </div>
 
+      {/* A tab with nothing in it is dimmed and counted, so an empty one reads
+          as "there was none" rather than "something failed to load". A run
+          with no candidates is not a broken run — solo, pair and split never
+          have any. */}
       <nav className="mt-3 flex gap-2 border-b border-hairline px-4">
-        {(["diff", "verify", "candidates"] as Tab[]).map((t) => (
+        {([
+          ["diff", diff ? undefined : "empty"],
+          ["verify", verify ? undefined : "no output"],
+          ["candidates", candidates.length ? String(candidates.length) : "none"],
+        ] as [Tab, string | undefined][]).map(([t, note]) => (
           <button
             key={t}
             type="button"
@@ -198,18 +206,37 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             className={`px-2 py-1 text-sm ${tab === t ? "text-ink" : "text-ink-muted"}`}
           >
             {t}
+            {note && <span className="ml-1 text-xs text-ink-muted">{note}</span>}
           </button>
         ))}
       </nav>
 
       <div className="p-2">
-        {tab === "diff" && <DiffView files={parseDiff(diff)} />}
-        {tab === "verify" && (
-          <pre className="overflow-x-auto bg-surface2 p-2 font-mono text-xs">{verify || "no output"}</pre>
-        )}
+        {tab === "diff" &&
+          (diff ? (
+            <DiffView files={parseDiff(diff)} />
+          ) : (
+            <p className="p-2 text-sm text-ink-muted" data-testid="diff-empty">
+              {run.status === "running"
+                ? "Nothing written yet."
+                : "This run changed no files."}
+            </p>
+          ))}
+        {tab === "verify" &&
+          (verify ? (
+            <pre className="overflow-x-auto bg-surface2 p-2 font-mono text-xs">{verify}</pre>
+          ) : (
+            <p className="p-2 text-sm text-ink-muted" data-testid="verify-empty">
+              {gate?.unverified
+                ? "No gate could run, so nothing was verified."
+                : "The gate ran and printed nothing, which is what passing looks like."}
+            </p>
+          ))}
         {tab === "candidates" &&
           (candidates.length === 0 ? (
-            <p className="p-2 text-ink-muted">This run has no candidates.</p>
+            <p className="p-2 text-sm text-ink-muted">
+              Only a tournament produces candidates; this run is {run.mode}.
+            </p>
           ) : (
             <div className="flex flex-col gap-2">
               {candidates.map((c) => (

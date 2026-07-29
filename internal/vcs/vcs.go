@@ -144,13 +144,27 @@ func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
-// Diff returns the working tree diff.
+// Diff returns the working tree diff, including files git has never seen.
+//
+// `git diff HEAD` alone shows nothing for a file that was created rather than
+// edited, so a run that adds files recorded an empty diff: a split integrated
+// two new files, passed its gate, and left diff.patch at zero bytes while the
+// desktop said "No changes yet." on work that had changed everything.
+//
+// The intent-to-add is what makes them visible. DiffAgainst already did this
+// and said why; this one did not.
 func (g *Git) Diff() (string, error) {
+	if _, err := g.run("add", "-AN"); err != nil {
+		return "", err
+	}
 	return g.run("diff", "HEAD")
 }
 
-// DiffStat returns the diff stat.
+// DiffStat returns the diff stat, including untracked files.
 func (g *Git) DiffStat() (string, error) {
+	if _, err := g.run("add", "-AN"); err != nil {
+		return "", err
+	}
 	return g.run("diff", "--stat", "HEAD")
 }
 

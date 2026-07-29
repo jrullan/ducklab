@@ -301,3 +301,38 @@ describe("what a turn was working on", () => {
     expect(turns[0]!.subject).toBeUndefined();
   });
 });
+
+// Lanes are stacked, so concurrency reads as sequence: a reviewer of a split
+// cannot tell whether two pieces ran together or one after the other, and
+// those are different claims about what the models were given.
+describe("turns that overlapped", () => {
+  it("marks both sides of an overlap", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer" } },
+      { seq: 2, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "implementer" } },
+      { seq: 3, type: "turn_end", run_id: "r", data: { round: 1, turn: 1 } },
+      { seq: 4, type: "turn_end", run_id: "r", data: { round: 1, turn: 0 } },
+    ] as never);
+    expect(turns.map((t) => t.concurrent)).toEqual([true, true]);
+  });
+
+  it("leaves turns that took their turns alone", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer" } },
+      { seq: 2, type: "turn_end", run_id: "r", data: { round: 1, turn: 0 } },
+      { seq: 3, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "reviewer" } },
+      { seq: 4, type: "turn_end", run_id: "r", data: { round: 1, turn: 1 } },
+    ] as never);
+    expect(turns.some((t) => t.concurrent)).toBe(false);
+  });
+
+  // A turn still running when another starts is an overlap, even though
+  // neither has ended.
+  it("marks an overlap that has not finished yet", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer" } },
+      { seq: 2, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "implementer" } },
+    ] as never);
+    expect(turns.every((t) => t.concurrent)).toBe(true);
+  });
+});

@@ -321,3 +321,30 @@ func TestCommitKeepsAMultiWordMessage(t *testing.T) {
 		t.Errorf("message = %q, want %q", strings.TrimSpace(out), want)
 	}
 }
+
+// `git diff HEAD` does not show files git has never seen, so a run that
+// created files rather than editing them recorded an empty diff. A split run
+// integrated two new files, passed its gate, and left diff.patch at zero
+// bytes; the desktop showed "No changes yet." on work that had changed
+// everything.
+//
+// DiffAgainst already knew this — its comment says a contestant creating a new
+// file must have it captured — and Diff did not.
+func TestDiffIncludesFilesGitHasNeverSeen(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "brand-new.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := g.Diff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "brand-new.go") {
+		t.Errorf("a newly created file is missing from the diff:\n%q", diff)
+	}
+}
