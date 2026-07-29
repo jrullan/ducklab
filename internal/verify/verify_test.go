@@ -3,7 +3,9 @@ package verify
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 )
@@ -142,5 +144,46 @@ func TestRunNoneModeSkipsExecution(t *testing.T) {
 	}
 	if Verdict(res) != "UNVERIFIED" {
 		t.Errorf("verdict = %q, want UNVERIFIED", Verdict(res))
+	}
+}
+
+// I3: nothing is unbounded. The gate ignored its own timeout_s, so a command
+// that hangs — a test waiting on input, a dev server started by mistake — held
+// the run open until a person noticed. It runs on every round of every run,
+// which makes it the worst place for this.
+func TestTheGateStopsAtItsTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sleeps")
+	}
+	start := time.Now()
+	res, err := Run(t.TempDir(), config.Verify{
+		Mode: "custom", Custom: "sleep 30", TimeoutS: 1,
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("a timed-out gate should be a result, not a transport error: %v", err)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("waited %v for a 1s timeout", elapsed)
+	}
+	if res.ExitCode == 0 {
+		t.Error("a gate that was killed reported success")
+	}
+	if !strings.Contains(res.Output, "timed out") {
+		t.Errorf("the output does not say why it stopped: %q", res.Output)
+	}
+	// A gate that ran out of time verified nothing, and calling that FAILED
+	// would blame the code for our limit (05 §5.2).
+	if got := Verdict(res); got != "UNVERIFIED" {
+		t.Errorf("verdict = %s, want UNVERIFIED", got)
+	}
+}
+
+// A gate that finishes inside its budget is untouched.
+func TestAQuickGateIsUnaffected(t *testing.T) {
+	res, err := Run(t.TempDir(), config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30})
+	if err != nil || res.ExitCode != 0 {
+		t.Errorf("res = %+v, err = %v", res, err)
 	}
 }

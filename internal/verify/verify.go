@@ -3,10 +3,12 @@
 package verify
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -120,7 +122,19 @@ func Run(root string, cfg config.Verify) (*Result, error) {
 		}, nil
 	}
 
-	shellCmd := xplat.Shell(root, nil, cmd)
+	// I3: nothing is unbounded, and this is the worst place to forget it — the
+	// gate runs on every round of every run. timeout_s was read from the
+	// config, stored, and never applied, so a command that hangs held the run
+	// open until a person noticed.
+	timeoutS := cfg.TimeoutS
+	if timeoutS <= 0 {
+		timeoutS = 900
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutS)*time.Second)
+	defer cancel()
+	started := time.Now()
+
+	shellCmd := xplat.ShellContext(ctx, root, nil, cmd)
 	output, err := shellCmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
@@ -135,6 +149,21 @@ func Run(root string, cfg config.Verify) (*Result, error) {
 				Output:   fmt.Sprintf("gate command failed to start: %v", err),
 			}, nil
 		}
+	}
+
+	if ctx.Err() != nil {
+		// Nothing was verified, so the verdict must be UNVERIFIED rather than
+		// FAILED: the code did not fail, our limit did (05 §5.2). GateNone is
+		// what Verdict reads for that.
+		return &Result{
+			Gate:    GateNone,
+			Command: cmd,
+			// Non-zero, so nothing downstream reads a killed gate as a pass.
+			ExitCode: -1,
+			Output: fmt.Sprintf("%s\n[the gate timed out after %ds and was killed]",
+				string(output), timeoutS),
+			Duration: time.Since(started).Seconds(),
+		}, nil
 	}
 
 	return &Result{
