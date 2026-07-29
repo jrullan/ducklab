@@ -14,7 +14,6 @@ import type { Artifact, EngineClient, Section, TraceError } from "../api/client"
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
-import { EmptyState } from "../components/EmptyState";
 
 const STAGES = [
   { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ" },
@@ -41,6 +40,9 @@ export function Cycle({
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
+  const [brief, setBrief] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [startedRun, setStartedRun] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,6 +78,26 @@ export function Cycle({
       setFailure(err instanceof Error ? err.message : String(err));
     } finally {
       setPromoting(false);
+    }
+  }
+
+  // Starting a stage is the step that was missing: the view could accept a
+  // proposal but not produce one, so the first thing anyone wants to do had to
+  // be done from a terminal.
+  async function start() {
+    setStarting(true);
+    setFailure(null);
+    try {
+      const run = await client.stageStart(projectId, active.stage, { from: brief.trim() });
+      setStartedRun(run.id);
+      setBrief("");
+      // The run is where the work is visible. Not navigated to automatically:
+      // someone who just wrote a brief may want to read it back, and a view
+      // that jumps out from under them is a view that lost their place.
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -153,10 +175,64 @@ export function Cycle({
 
         {loading && <div className="text-sm text-ink-muted">Loading…</div>}
 
-        {!loading && sections.length === 0 && !artifact?.proposal && (
-          <EmptyState
-            message={`No ${active.label.toLowerCase()} yet — run \`ducklab ${active.stage}\` to draft it.`}
-          />
+        {!loading && !artifact?.proposal && (
+          <section data-testid="cycle-start" className="mb-6 rounded-card border border-hairline p-3">
+            <div className="mb-2 text-sm text-ink">
+              {sections.length === 0 ? `Draft the ${active.label.toLowerCase()}` : `Redraft the ${active.label.toLowerCase()}`}
+            </div>
+            {active.stage === "intake" && (
+              <>
+                <textarea
+                  aria-label="brief"
+                  data-testid="cycle-brief"
+                  rows={4}
+                  placeholder="What do you want built? A paragraph is enough. A file path works too."
+                  value={brief}
+                  onChange={(e) => setBrief(e.target.value)}
+                  className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+                />
+                <p className="mb-2 text-xs text-ink-muted">
+                  Leave it empty and the council will interview you instead, asking questions you
+                  answer in the run.
+                </p>
+              </>
+            )}
+            {active.stage !== "intake" && (
+              <p className="mb-2 text-xs text-ink-muted">
+                {active.stage === "spec"
+                  ? "Reads the accepted requirements and proposes a specification."
+                  : "Reads the accepted spec and proposes milestones and tasks."}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void start()}
+                disabled={starting}
+                data-testid="cycle-run"
+                className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+              >
+                {starting ? "Starting…" : sections.length === 0 ? "Draft it" : "Redraft"}
+              </button>
+              {startedRun && (
+                <a
+                  href={`#/runs/${startedRun}`}
+                  data-testid="cycle-run-link"
+                  className="text-sm text-ink underline"
+                >
+                  watch the run
+                </a>
+              )}
+              {sections.length > 0 && (
+                // Said out loud: redrafting does not overwrite anything until
+                // the proposal is accepted, and a person about to click a
+                // button on work they already approved deserves to know that.
+                <span className="text-xs text-ink-muted">
+                  leaves the accepted document alone until you accept the proposal
+                </span>
+              )}
+            </div>
+          </section>
         )}
 
         <ol className="space-y-3">

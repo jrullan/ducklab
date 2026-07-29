@@ -164,3 +164,94 @@ describe("Cycle, plan tab", () => {
     expect(kids.find((el) => el.dataset.id === "T-001")!.dataset.broken).toBe("false");
   });
 });
+
+describe("Cycle — starting a stage", () => {
+  const client = (over: Record<string, unknown> = {}) =>
+    ({
+      artifact: vi.fn(() => Promise.resolve({ kind: "requirements", body: "", sections: [] })),
+      traceCheck: vi.fn(() => Promise.resolve([])),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-42" })),
+      promote: vi.fn(() => Promise.resolve({})),
+      ...over,
+    }) as unknown as EngineClient;
+
+  // The view could accept a proposal but not produce one, so the first thing
+  // anyone wants to do had to be done from a terminal.
+  it("starts intake with a pasted brief", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+
+    fireEvent.change(screen.getByTestId("cycle-brief"), {
+      target: { value: "A tool that tracks bird sightings." },
+    });
+    fireEvent.click(screen.getByTestId("cycle-run"));
+
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
+        from: "A tool that tracks bird sightings.",
+      }),
+    );
+    // The run is where the work is visible, so it is offered — not jumped to,
+    // which would lose the place of someone re-reading what they wrote.
+    expect((await screen.findByTestId("cycle-run-link")).getAttribute("href")).toBe("#/runs/r-42");
+  });
+
+  it("starts intake with no brief at all", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("cycle-run"));
+    await waitFor(() => expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "" }));
+  });
+
+  // Spec and plan read what came before; there is nothing to paste.
+  it("offers no brief on spec or plan", async () => {
+    render(<Cycle client={client()} projectId="p" stage="spec" />);
+    await screen.findByTestId("cycle-start");
+    expect(screen.queryByTestId("cycle-brief")).toBeNull();
+  });
+
+  it("shows the engine's refusal rather than failing silently", async () => {
+    const c = client({
+      stageStart: vi.fn(() => Promise.reject(new Error("requirements are not accepted yet"))),
+    });
+    render(<Cycle client={c} projectId="p" stage="spec" />);
+    fireEvent.click(await screen.findByTestId("cycle-run"));
+    expect((await screen.findByTestId("cycle-error")).textContent).toContain("not accepted yet");
+  });
+
+  // A proposal is already waiting for a decision; offering to make another
+  // would bury the one that needs answering.
+  it("hides the start control while a proposal is pending", async () => {
+    const c = client({
+      artifact: vi.fn(() =>
+        Promise.resolve({
+          kind: "requirements",
+          body: "",
+          sections: [],
+          proposal: { diff: "diff --git a/x b/x\n" },
+        }),
+      ),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-proposal");
+    expect(screen.queryByTestId("cycle-start")).toBeNull();
+  });
+
+  // Redrafting an accepted document must not read as overwriting it.
+  it("says a redraft leaves the accepted document alone", async () => {
+    const c = client({
+      artifact: vi.fn(() =>
+        Promise.resolve({
+          kind: "requirements",
+          body: "",
+          sections: [{ id: "REQ-001", title: "A thing", body: "" }],
+        }),
+      ),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    const start = await screen.findByTestId("cycle-start");
+    expect(start.textContent).toContain("leaves the accepted document alone");
+    expect(screen.getByTestId("cycle-run").textContent).toContain("Redraft");
+  });
+});

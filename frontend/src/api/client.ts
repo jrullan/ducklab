@@ -365,6 +365,20 @@ export class EngineClient {
   }
   /** Promote a proposal to the artifact. This is the human gate (05 §1.1) —
    * the only caller is a person clicking Accept, never a model. */
+  /** Start intake, spec or plan.
+   *
+   * `from` seeds intake: a file path if it reads as one, otherwise the brief
+   * text itself — the engine treats an unreadable path as the brief, so
+   * pasting a sentence needs no file. */
+  stageStart(projectId: string, stage: string, opts: { from?: string; mode?: string } = {}) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
+      stage,
+      from: opts.from ?? "",
+      mode: opts.mode ?? "",
+      stream: true,
+    });
+  }
+
   promote(projectId: string, kind: string, approvedBy = "human") {
     return this.request<Artifact>("POST", `/v1/projects/${projectId}/artifacts/${kind}/promote`, {
       approved_by: approvedBy,

@@ -60,6 +60,9 @@ ducklab-engine &
 
 ## A cycle, end to end
 
+From the desktop: **Projects → New project**, then **Cycle → Draft it**. From
+a terminal:
+
 ```bash
 cd ~/dev/myproject
 git init                                    # ducklab needs a git repo
@@ -78,6 +81,29 @@ ducklab release plan --bump minor           # what shipped
 
 Each stage writes a `.proposed` file first and waits for you. `accept` promotes
 it; `reject` leaves the original untouched. Nothing is committed without you.
+
+## Adding a model
+
+Local and hosted models sit side by side, which is the point — a local model is
+worth knowing about relative to something stronger.
+
+```bash
+ducklab provider set openrouter --url https://openrouter.ai/api/v1 \
+                                --key-env OPENROUTER_API_KEY
+ducklab duckling set pato-sonnet --provider openrouter \
+                                 --model anthropic/claude-sonnet-4.5 \
+                                 --roles reviewer,judge --context 200000 \
+                                 --cost-in 3.0 --cost-out 15.0
+ducklab duckling test pato-sonnet --prompt "say OK"
+```
+
+`--key-env` is the **name** of an environment variable, never a key. The engine
+reads that variable when it makes a call, so no key is written to config, sent
+over the API, or kept in shell history. `ducklab provider list` says whether
+each one is actually set — that is the commonest reason a hosted model fails.
+
+The same is available in the desktop under **Ducklings**, and takes effect
+immediately: no engine restart.
 
 ## The five modes
 
