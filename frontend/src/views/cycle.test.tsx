@@ -472,7 +472,6 @@ describe("Cycle — what the run will actually do", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve([])),
-      roster: vi.fn(() => Promise.resolve({ entries: [] })),
       runBrief: vi.fn(() => Promise.resolve("")),
       roster: vi.fn(() => Promise.resolve({ entries: roster })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
