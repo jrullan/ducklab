@@ -90,6 +90,29 @@ export interface Task {
   body?: string;
 }
 
+/** One aggregated group in a report. Mirrors report.Row. */
+export type ReportRow = {
+  key: string;
+  runs: number;
+  passed: number;
+  unverified: number;
+  failed: number;
+  tokens: number;
+  cost_usd: number;
+  wallclock_ms: number;
+  /** True when any run in the group had token counts by estimate. Never
+   * summed with measured counts without saying so (04 §7). */
+  estimated: boolean;
+};
+
+/** One mode measured against the solo baseline. Mirrors report.Delta. */
+export type ReportDelta = {
+  key: string;
+  pass_rate: number;
+  points_vs_baseline: number;
+  n: number;
+};
+
 /** One report in the operate loop. Mirrors bug.Bug. */
 export interface Bug {
   id: string;
@@ -279,6 +302,24 @@ export class EngineClient {
       `/v1/projects/${projectId}/bugs/${bugId}/promote`,
     );
   }
+  /** The solo-baseline comparison (03 §3.10). `rendered` is the engine's own
+   * table; the rows are for charting. */
+  report(projectId: string, by: "mode" | "duckling" | "role" | "task", since = "") {
+    const q = new URLSearchParams({ by });
+    if (since) q.set("since", since);
+    return this.request<{
+      by: string;
+      baseline: string;
+      rows: ReportRow[] | null;
+      deltas: ReportDelta[] | null;
+      rendered: string;
+    }>("GET", `/v1/projects/${projectId}/report?${q}`).then((r) => ({
+      ...r,
+      rows: r.rows ?? [],
+      deltas: r.deltas ?? [],
+    }));
+  }
+
   reviews(projectId: string) {
     return this.request<{ items: ReviewSummary[] | null }>(
       "GET",

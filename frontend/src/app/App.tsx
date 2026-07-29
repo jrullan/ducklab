@@ -10,6 +10,7 @@ import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
 import { Release } from "../views/Release";
+import { Reports } from "../views/Reports";
 import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
@@ -33,6 +34,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: { name: "board" }, label: "Board" },
   { route: { name: "review" }, label: "Review" },
   { route: { name: "release" }, label: "Release" },
+  { route: { name: "reports" }, label: "Reports" },
   { route: { name: "ducklings" }, label: "Ducklings" },
   { route: { name: "settings" }, label: "Settings" },
 ];
@@ -249,6 +251,14 @@ export function App() {
           (client && projectId ? (
             <div className="p-4">
               <Release client={client} projectId={projectId} />
+            </div>
+          ) : (
+            <p className="m-4 text-ink-muted">No project registered yet.</p>
+          ))}
+        {route.name === "reports" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Reports client={client} projectId={projectId} />
             </div>
           ) : (
             <p className="m-4 text-ink-muted">No project registered yet.</p>
