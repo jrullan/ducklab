@@ -87,6 +87,13 @@ install: build
 	@# The desktop joins them when it has been built. It needs cgo and the
 	@# frontend bundle, so `build` does not produce it, but an installed path
 	@# is what an AppArmor profile matches on — see packaging/apparmor.
+	@# Which means install ships whatever bin/ducklab-desktop happens to be.
+	@# Say so when that is older than the frontend it claims to bundle: the
+	@# alternative is a desktop that silently shows the previous build, and
+	@# the next hour goes to debugging a UI change that was never in it.
+	@if [ -x bin/ducklab-desktop ] && [ -n "$$(find frontend/src frontend/index.html -newer bin/ducklab-desktop 2>/dev/null)" ]; then \
+	  echo "  warning: bin/ducklab-desktop predates frontend/src — run 'make desktop' to rebuild the bundle"; \
+	fi
 	@for b in ducklab ducklab-engine $$([ -x bin/ducklab-desktop ] && echo ducklab-desktop); do \
 	  t=$(PREFIX)/bin/$$b; \
 	  if [ -e $$t ] && ! cmp -s bin/$$b $$t; then \
