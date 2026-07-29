@@ -94,33 +94,30 @@ install: build
 	@if [ -x bin/ducklab-desktop ] && [ -n "$$(find frontend/src frontend/index.html -newer bin/ducklab-desktop 2>/dev/null)" ]; then \
 	  echo "  warning: bin/ducklab-desktop predates frontend/src — run 'make desktop' to rebuild the bundle"; \
 	fi
-	@rm -f .install-changed
 	@for b in ducklab ducklab-engine $$([ -x bin/ducklab-desktop ] && echo ducklab-desktop); do \
 	  t=$(PREFIX)/bin/$$b; \
 	  if [ -e $$t ] && ! cmp -s bin/$$b $$t; then \
 	    mv $$t $$t.bak && echo "  backed up $$t -> $$t.bak"; \
-	    echo $$b >> .install-changed; \
-	  elif [ ! -e $$t ]; then \
-	    echo $$b >> .install-changed; \
 	  fi; \
 	  install -m 755 bin/$$b $$t && echo "  installed $$t"; \
 	done
 	@# A running engine keeps serving the binary it started with. Installing a
 	@# new one changes nothing until it restarts, and the symptom is a route
-	@# that 405s or a fix that appears not to have worked — twice now, hours
-	@# each time.
+	@# that 405s or a fix that appears not to have worked.
 	@#
-	@# Only when the binary actually changed. Warning on every install with an
-	@# engine up would fire when nothing was different, and a warning that is
-	@# usually wrong is one people stop reading.
-	@if grep -qx ducklab-engine .install-changed 2>/dev/null; then \
-	  pid=$$(pgrep -x ducklab-engine 2>/dev/null | head -1); \
-	  if [ -n "$$pid" ]; then \
-	    echo "  warning: engine (pid $$pid) is still running the previous build"; \
+	@# Compared against the *sources*, not the binary. Go stamps vcs.revision
+	@# into every build, so the bytes change on every commit even when no Go
+	@# file did — the first version of this check compared bytes and fired
+	@# after frontend-only work, twice, which is how a warning stops being
+	@# read.
+	@pid=$$(pgrep -x ducklab-engine 2>/dev/null | head -1); \
+	if [ -n "$$pid" ]; then \
+	  age=$$(ps -o etimes= -p $$pid 2>/dev/null | tr -d ' '); \
+	  if [ -n "$$age" ] && [ -n "$$(find cmd internal -name '*.go' -newermt "-$$age seconds" -print -quit 2>/dev/null)" ]; then \
+	    echo "  warning: engine (pid $$pid) started before the newest Go change"; \
 	    echo "           restart it, or your change is not in effect"; \
 	  fi; \
 	fi
-	@rm -f .install-changed
 	@echo "ducklab $$($(PREFIX)/bin/ducklab --version 2>/dev/null | head -1)"
 
 .PHONY: install

@@ -16,5 +16,3 @@ fake-engine-bin
 frontend/test-results/
 frontend/playwright-report/
 
-# make install scratch: which binaries actually changed
-.install-changed
