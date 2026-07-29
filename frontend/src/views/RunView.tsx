@@ -82,6 +82,22 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const timeline = buildTimeline(events);
   const budget = run.budget;
 
+  // A run is still working while it runs or waits its turn, and while it is
+  // paused — a pause is a waiting state, not an ending (01 §7.1).
+  const isWorking = run.status === "running" || run.status === "queued" || run.status === "paused";
+  // The human gate is the one state where accepting or rejecting means
+  // anything. A run paused on a question needs an answer instead: accepting
+  // work that has not finished would commit a half-done change.
+  const atHumanGate = run.status === "paused" && run.pending_kind === "gate";
+  const outcome = (() => {
+    if (isWorking) return "";
+    if (run.accepted) {
+      return run.commit_sha ? `accepted · ${run.commit_sha.slice(0, 7)}` : "accepted";
+    }
+    if (run.status === "failed" || run.verdict === "FAILED") return "not accepted";
+    return "finished";
+  })();
+
   const onAccept = async () => {
     const store = useRuns.getState();
     store.beginAccept(runId);
@@ -100,31 +116,51 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <span className="text-md">{run.task_id}</span>
         <span className="text-ink-secondary">{run.mode}</span>
         <StatusChip role={verdictStatus(run.verdict as Verdict)} label={verdictLabel(run.verdict as Verdict)} />
-        <div className="ml-auto flex gap-2">
-          <button
-            type="button"
-            onClick={onAccept}
-            disabled={run.verdict === "FAILED" || acceptState.kind === "pending"}
-            data-testid="accept-button"
-            className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-          >
-            {acceptState.kind === "pending" ? "Accepting…" : "Accept"}
-          </button>
-          <button
-            type="button"
-            onClick={() => client.reject(runId).catch(() => {})}
-            className="rounded border border-hairline px-2 py-1 text-sm"
-          >
-            Reject
-          </button>
-          <button
-            type="button"
-            onClick={() => client.abort(runId).catch(() => {})}
-            data-testid="abort-button"
-            className="rounded border border-hairline px-2 py-1 text-sm"
-          >
-            Abort
-          </button>
+        <div className="ml-auto flex items-center gap-2">
+          {/* A decision that has been made is not still open. These used to be
+              shown on every run whatever its state, so an accepted run went on
+              offering Accept, Reject and Abort as if nothing had happened —
+              and clicking one would have asked the engine to redo a decision
+              that was already recorded. */}
+          {atHumanGate && (
+            <>
+              <button
+                type="button"
+                onClick={onAccept}
+                disabled={run.verdict === "FAILED" || acceptState.kind === "pending"}
+                data-testid="accept-button"
+                className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+              >
+                {acceptState.kind === "pending" ? "Accepting…" : "Accept"}
+              </button>
+              <button
+                type="button"
+                onClick={() => client.reject(runId).catch(() => {})}
+                data-testid="reject-button"
+                className="rounded border border-hairline px-2 py-1 text-sm"
+              >
+                Reject
+              </button>
+            </>
+          )}
+          {isWorking && (
+            <button
+              type="button"
+              onClick={() => client.abort(runId).catch(() => {})}
+              data-testid="abort-button"
+              className="rounded border border-hairline px-2 py-1 text-sm"
+            >
+              Abort
+            </button>
+          )}
+          {outcome && (
+            // What became of it, in the space the buttons used to occupy: the
+            // question "is there anything for me to do here" is answered
+            // either way, never by an absence.
+            <span className="text-sm text-ink-secondary" data-testid="run-outcome">
+              {outcome}
+            </span>
+          )}
         </div>
       </header>
 

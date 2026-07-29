@@ -211,3 +211,66 @@ describe("RunView and a run that edited tests", () => {
       return json({});
     });
 });
+
+// The buttons belong to a decision, and a decision that has been made is not
+// still open. Reported from a real session: an accepted run went on offering
+// Accept, Reject and Abort, as if nothing had happened.
+describe("RunView — what can still be decided", () => {
+  const client = () =>
+    clientWith((path) => {
+      if (path.endsWith("/diff")) return json({ diff: "" });
+      if (path.endsWith("/verify")) return json({ output: "" });
+      if (path.endsWith("/candidates")) return json({ items: [] });
+      return json({});
+    });
+
+  const show = (over: Record<string, unknown>) => {
+    useRuns.setState({ runs: {}, connection: "open" });
+    useRuns.getState().setRun({ ...run, ...over });
+    render(<RunView runId="r-1" client={client()} />);
+  };
+
+  it("offers nothing to decide on a run that was accepted", async () => {
+    show({ status: "done", verdict: "PASSED", accepted: true, commit_sha: "e60dc7fe1234" });
+    await screen.findByTestId("run-view");
+    for (const id of ["accept-button", "reject-button", "abort-button"]) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+    // And says what became of it, which is the thing worth knowing.
+    expect(screen.getByTestId("run-outcome").textContent).toContain("e60dc7f");
+  });
+
+  it("offers nothing on a rejected or failed run", async () => {
+    show({ status: "done", verdict: "FAILED", accepted: false });
+    await screen.findByTestId("run-view");
+    expect(screen.queryByTestId("accept-button")).toBeNull();
+    expect(screen.queryByTestId("abort-button")).toBeNull();
+  });
+
+  // A run still working can be stopped, and nothing else: there is no result
+  // to accept yet.
+  it("offers only Abort while a run is working", async () => {
+    show({ status: "running", verdict: "" });
+    await screen.findByTestId("run-view");
+    expect(screen.getByTestId("abort-button")).toBeTruthy();
+    expect(screen.queryByTestId("accept-button")).toBeNull();
+  });
+
+  // Paused at the human gate is the one state where all three make sense.
+  it("offers the full decision at the human gate", async () => {
+    show({ status: "paused", pending_kind: "gate", verdict: "PASSED" });
+    await screen.findByTestId("run-view");
+    for (const id of ["accept-button", "reject-button", "abort-button"]) {
+      expect(screen.getByTestId(id)).toBeTruthy();
+    }
+  });
+
+  // A run paused on a question needs an answer, not a verdict: accepting work
+  // that has not finished would commit a half-done change.
+  it("does not offer Accept while a question is unanswered", async () => {
+    show({ status: "paused", pending_kind: "question", verdict: "" });
+    await screen.findByTestId("run-view");
+    expect(screen.queryByTestId("accept-button")).toBeNull();
+    expect(screen.getByTestId("abort-button")).toBeTruthy();
+  });
+});
