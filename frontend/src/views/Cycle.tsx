@@ -14,6 +14,7 @@ import type { Artifact, EngineClient, Section, TraceError } from "../api/client"
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
+import { StageGate } from "../components/StageGate";
 
 const STAGES = [
   { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ" },
@@ -51,8 +52,6 @@ export function Cycle({
   // someone types into, and this is the one a past run was given.
   const [askedFor, setAskedFor] = useState("");
   const [showAsked, setShowAsked] = useState(false);
-  const [note, setNote] = useState("");
-  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,18 +115,27 @@ export function Cycle({
   // The third answer. Accept and reject are a verdict on a document that is
   // usually almost right, and "almost" had no button: rejecting left the draft
   // alone and redrafting regenerated the parts you were happy with.
-  async function requestChanges() {
-    if (!note.trim()) return;
-    setAsking(true);
+  async function requestChanges(text: string) {
     setFailure(null);
     try {
-      const run = await client.stageStart(projectId, active.stage, { revise: note.trim() });
+      const run = await client.stageStart(projectId, active.stage, { revise: text });
       setStartedRun(run.id);
-      setNote("");
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAsking(false);
+    }
+  }
+
+  // Closing the run matters as much as the verdict: a proposal left undecided
+  // sits in the inbox claiming to wait for an answer that was given by walking
+  // away. The draft stays on disk — it is the only record of what the
+  // ducklings produced.
+  async function reject() {
+    setFailure(null);
+    try {
+      if (artifact?.proposal?.run_id) await client.reject(artifact.proposal.run_id);
+      await load();
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -222,36 +230,30 @@ export function Cycle({
 
         {artifact?.proposal && (
           <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <div>
-                <div className="text-sm font-medium text-ink">Proposal awaiting your decision</div>
-                {artifact.proposal.ducklings && (
-                  <div className="text-xs text-ink-muted">
-                    from {artifact.proposal.ducklings.join(", ")}
-                  </div>
-                )}
-              </div>
-              {/* No Reject button: rejecting is leaving it alone. A button that
-                  deleted the draft would destroy the evidence of what the
-                  ducklings actually produced. */}
-              <button
-                type="button"
-                data-testid="proposal-view-toggle"
-                aria-pressed={proposalAsDiff}
-                onClick={() => setProposalAsDiff((v) => !v)}
-                className="mr-2 rounded border border-hairline px-2 py-1 text-xs text-ink-secondary"
-              >
-                {proposalAsDiff ? "Read it" : "What changed"}
-              </button>
-              <button
-                data-testid="cycle-accept"
-                disabled={promoting}
-                onClick={() => void accept()}
-                className="rounded border border-hairline px-3 py-1 text-sm text-ink disabled:opacity-50"
-              >
-                {promoting ? "Accepting…" : "Accept"}
-              </button>
-            </div>
+            <StageGate
+              title="Proposal awaiting your decision"
+              subtitle={
+                artifact.proposal.ducklings
+                  ? `from ${artifact.proposal.ducklings.join(", ")}`
+                  : undefined
+              }
+              accepting={promoting}
+              onAccept={() => void accept()}
+              onReject={() => void reject()}
+              onRequestChanges={requestChanges}
+              revisionRun={startedRun}
+              extraAction={
+                <button
+                  type="button"
+                  data-testid="proposal-view-toggle"
+                  aria-pressed={proposalAsDiff}
+                  onClick={() => setProposalAsDiff((v) => !v)}
+                  className="rounded border border-hairline px-2 py-1 text-xs text-ink-secondary"
+                >
+                  {proposalAsDiff ? "Read it" : "What changed"}
+                </button>
+              }
+            />
             {proposalAsDiff ? (
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             ) : artifact.proposal.sections && artifact.proposal.sections.length > 0 ? (
@@ -269,44 +271,6 @@ export function Cycle({
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             )}
 
-            <div className="mt-3 border-t border-hairline pt-3" data-testid="request-changes">
-              <textarea
-                aria-label="what to change"
-                data-testid="change-note"
-                rows={2}
-                placeholder="Right except SPEC-004 — locking an angle should also stop the opposite vertex from being dragged."
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
-              />
-              <div className="mt-1 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void requestChanges()}
-                  disabled={asking || !note.trim()}
-                  data-testid="request-changes-button"
-                  className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-                >
-                  {asking ? "Asking…" : "Request changes"}
-                </button>
-                {startedRun && (
-                  // The link lives here as well as in the start panel, which
-                  // is hidden while a proposal is pending — so asking for a
-                  // change used to leave no way to watch what it did.
-                  <a
-                    href={`#/runs/${startedRun}`}
-                    data-testid="cycle-run-link"
-                    className="text-sm text-ink underline"
-                  >
-                    watch the run
-                  </a>
-                )}
-                <span className="text-xs text-ink-muted">
-                  The draft goes back with your note. Everything you did not mention is meant to
-                  come back unchanged — compare with What changed before accepting.
-                </span>
-              </div>
-            </div>
           </section>
         )}
 

@@ -256,13 +256,15 @@ describe("RunView — what can still be decided", () => {
     expect(screen.queryByTestId("accept-button")).toBeNull();
   });
 
-  // Paused at the human gate is the one state where all three make sense.
-  it("offers the full decision at the human gate", async () => {
-    show({ status: "paused", pending_kind: "gate", verdict: "PASSED" });
+  // At a gate the run is not working — it is waiting for this decision — so
+  // Abort has nothing to stop. Offering it beside Reject made them look like
+  // two ways to say no, when only one records a decision.
+  it("offers accept and reject at the gate, and not abort", async () => {
+    show({ status: "paused", pending_kind: "gate", verdict: "PASSED", stage: "build" });
     await screen.findByTestId("run-view");
-    for (const id of ["accept-button", "reject-button", "abort-button"]) {
-      expect(screen.getByTestId(id)).toBeTruthy();
-    }
+    expect(screen.getByTestId("accept-button")).toBeTruthy();
+    expect(screen.getByTestId("reject-button")).toBeTruthy();
+    expect(screen.queryByTestId("abort-button")).toBeNull();
   });
 
   // A run paused on a question needs an answer, not a verdict: accepting work

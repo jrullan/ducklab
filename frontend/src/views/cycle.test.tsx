@@ -420,7 +420,7 @@ describe("Cycle — asking for a change", () => {
         revise: "SPEC-004 should also stop the opposite vertex dragging",
       }),
     );
-    expect((await screen.findByTestId("cycle-run-link")).getAttribute("href")).toBe("#/runs/r-2");
+    expect((await screen.findByTestId("revision-run-link")).getAttribute("href")).toBe("#/runs/r-2");
   });
 
   it("will not ask for nothing", async () => {
@@ -436,7 +436,9 @@ describe("Cycle — asking for a change", () => {
   // it is the diff. Said where the promise is made.
   it("points at how to check what actually changed", async () => {
     render(<Cycle client={client()} projectId="p" />);
-    expect((await screen.findByTestId("request-changes")).textContent).toContain("What changed");
+    expect((await screen.findByTestId("request-changes")).textContent).toContain(
+      "check what changed",
+    );
   });
 
   // No draft on the table, nothing to revise.

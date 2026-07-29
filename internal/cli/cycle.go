@@ -15,7 +15,14 @@ import (
 func stageCmd(stage string, args []string, repo string) int {
 	from, yes := "", false
 	sub := ""
+	var revArgs []string
 	for i := 0; i < len(args); i++ {
+		// Everything after `revise` is the note, not more flags. A note is
+		// prose and will contain words the parser would otherwise reject.
+		if sub == "revise" {
+			revArgs = append(revArgs, args[i])
+			continue
+		}
 		switch a := args[i]; a {
 		case "--from":
 			if i+1 >= len(args) {
@@ -26,7 +33,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			i++
 		case "--yes":
 			yes = true
-		case "accept", "reject", "diff":
+		case "accept", "reject", "diff", "revise":
 			sub = a
 		default:
 			// Never silently ignore an argument. This used to fall through,
@@ -34,7 +41,9 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--yes]\n       ducklab %s accept|reject|diff\n", stage, stage)
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--yes]\n"+
+				"       ducklab %s accept|reject|diff\n"+
+				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
 		}
 	}
@@ -45,7 +54,7 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 
 	if sub != "" {
-		return proposalCmd(client, projectID, stage, sub)
+		return proposalCmd(client, projectID, stage, sub, revArgs)
 	}
 
 	req := map[string]interface{}{}
@@ -88,7 +97,7 @@ func stageCmd(stage string, args []string, repo string) int {
 
 // proposalCmd acts on the proposal a stage already produced, without running a
 // model. Accepting is a human gate (05 §1.1), not a stage.
-func proposalCmd(client *engineclt.Client, projectID, stage, sub string) int {
+func proposalCmd(client *engineclt.Client, projectID, stage, sub string, revArgs []string) int {
 	kind := artifactFor(stage)
 	got, err := client.ArtifactGet(projectID, kind)
 	if err != nil {
@@ -108,8 +117,40 @@ func proposalCmd(client *engineclt.Client, projectID, stage, sub string) int {
 	case "reject":
 		// The draft stays on disk. A rejected proposal is evidence about what
 		// the ducklings did, and deleting it would destroy the only record.
-		fmt.Printf("left in place: .ducklab/docs/%s.md.proposed\nre-run with:  ducklab %s\n", kind, stage)
+		//
+		// The run is closed, though: a proposal left undecided sits in the
+		// inbox claiming to wait for an answer that was given by walking away.
+		if runID := str(proposal["run_id"]); runID != "" {
+			if err := client.RunReject(runID, "rejected at the stage gate"); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not close run %s: %v\n", runID, err)
+			}
+		}
+		fmt.Printf("left in place: .ducklab/docs/%s.md.proposed\n", kind)
+		fmt.Printf("re-run with:   ducklab %s\n", stage)
+		fmt.Printf("or revise it:  ducklab %s revise \"what to change\"\n", stage)
 		return 0
+
+	case "revise":
+		// The third answer, in the terminal as in the desktop. Accept and
+		// reject are a verdict on a document that is usually almost right, and
+		// re-running regenerates the parts that were fine.
+		note := strings.TrimSpace(strings.Join(revArgs, " "))
+		if note == "" {
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s revise \"what to change\"\n", stage)
+			return 2
+		}
+		run, err := client.StageStart(projectID, stage, map[string]interface{}{
+			"stage": stage, "revise": note, "stream": true,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		runID := str(run["id"])
+		fmt.Printf("revising %s (run %s)\n", kind, runID)
+		code := followRun(client, runID)
+		fmt.Printf("\nread it:      ducklab %s diff\nthen:         ducklab %s accept\n", stage, stage)
+		return code
 	default:
 		return promoteArtifact(client, projectID, kind)
 	}

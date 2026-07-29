@@ -11,6 +11,7 @@ import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { StatusChip } from "../components/StatusChip";
+import { StageGate } from "../components/StageGate";
 import { money, tokens, duration } from "../lib/format";
 import { verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 
@@ -55,8 +56,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [verify, setVerify] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [answer, setAnswer] = useState("");
-  const [note, setNote] = useState("");
-  const [asking, setAsking] = useState(false);
   const [revisionRun, setRevisionRun] = useState<string | null>(null);
 
   useEffect(() => {
@@ -106,19 +105,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     return "finished";
   })();
 
-  const requestChanges = async () => {
-    if (!note.trim()) return;
-    setAsking(true);
+  const requestChanges = async (text: string) => {
     try {
-      const started = await client.stageStart(run.project_id, stageToRevise, {
-        revise: note.trim(),
-      });
+      const started = await client.stageStart(run.project_id, stageToRevise, { revise: text });
       setRevisionRun(started.id);
-      setNote("");
     } catch (e) {
       useRuns.getState().failAccept(runId, e instanceof Error ? e.message : String(e));
-    } finally {
-      setAsking(false);
     }
   };
 
@@ -146,7 +138,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               offering Accept, Reject and Abort as if nothing had happened —
               and clicking one would have asked the engine to redo a decision
               that was already recorded. */}
-          {atHumanGate && (
+          {atHumanGate && !stageToRevise && (
             <>
               <button
                 type="button"
@@ -167,7 +159,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </button>
             </>
           )}
-          {isWorking && (
+          {isWorking && !atHumanGate && (
             <button
               type="button"
               onClick={() => client.abort(runId).catch(() => {})}
@@ -189,36 +181,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       </header>
 
       {atHumanGate && stageToRevise && (
-        <section className="m-2 rounded-card border border-hairline p-3" data-testid="request-changes">
-          <textarea
-            aria-label="what to change"
-            data-testid="change-note"
-            rows={2}
-            placeholder="Right except SPEC-004 — locking an angle should also stop the opposite vertex from being dragged."
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+        <section className="m-2 rounded-card border border-serious p-3">
+          <StageGate
+            title="Proposal awaiting your decision"
+            subtitle={`${run.stage} · ${run.task_id || run.id}`}
+            accepting={acceptState.kind === "pending"}
+            onAccept={onAccept}
+            onReject={() => void client.reject(runId).catch(() => {})}
+            onRequestChanges={requestChanges}
+            revisionRun={revisionRun}
           />
-          <div className="mt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void requestChanges()}
-              disabled={asking || !note.trim()}
-              data-testid="request-changes-button"
-              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-            >
-              {asking ? "Asking…" : "Request changes"}
-            </button>
-            {revisionRun && (
-              <a href={`#/runs/${revisionRun}`} data-testid="revision-run-link" className="text-sm text-ink underline">
-                watch the revision
-              </a>
-            )}
-            <span className="text-xs text-ink-muted">
-              The draft goes back with your note. Everything you did not mention is meant to come
-              back unchanged.
-            </span>
-          </div>
         </section>
       )}
 
