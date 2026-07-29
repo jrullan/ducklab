@@ -253,6 +253,17 @@ func (w *Writer) WriteDiff(diff string) error {
 	return os.WriteFile(path, []byte(diff), 0o644)
 }
 
+// WriteBrief writes what a person asked for, verbatim.
+//
+// A stage's output is only judgeable against its input, and the input was
+// reachable only by reading llm.jsonl and finding it embedded in a prompt.
+// Kept beside diff.patch and verify.log because it is the same kind of thing:
+// evidence about this run that outlives it.
+func (w *Writer) WriteBrief(brief string) error {
+	path := filepath.Join(w.runDir, "brief.md")
+	return os.WriteFile(path, []byte(brief), 0o644)
+}
+
 // WriteTestHunks writes the part of the diff that touches tests (05 §5.3).
 //
 // Kept as its own file rather than recomputed from diff.patch, so what the

@@ -92,6 +92,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		if data, err := os.ReadFile(seed); err == nil {
 			seed = string(data)
 		}
+		// Kept as its own file. Comparing requirements against what was asked
+		// for is the first thing anyone does with them, and the brief was
+		// reachable only by digging it out of a prompt in llm.jsonl.
+		rs.writer.WriteBrief(seed)
 		// A --from that is not a readable path is treated as the brief text
 		// itself: a user pasting a sentence should not have to make a file.
 	}
@@ -211,6 +215,10 @@ func (s *Service) ArtifactGet(ctx context.Context, projectID, kind string) (map[
 		"sections": sectionViews(current.Sections),
 		"version":  current.Front.Version,
 		"approved": current.Front.Approved(),
+		// Which run produced this. Carried so a client can go and fetch what
+		// that run was asked for; the proposal already said it and the
+		// accepted document did not, so the brief vanished on acceptance.
+		"run_id": current.Front.RunID,
 	}
 	if proposed != nil {
 		out["proposal"] = map[string]interface{}{

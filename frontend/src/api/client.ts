@@ -78,6 +78,9 @@ export interface Artifact {
   approved: boolean;
   markdown: string;
   sections: Section[] | null;
+  /** The run that produced this document, so a client can fetch what it was
+   * asked for. */
+  run_id?: string;
   /** Present only while a stage's output is awaiting the human gate. */
   proposal?: {
     diff: string;
@@ -424,6 +427,10 @@ export class EngineClient {
     return this.request<{ items: Candidate[] }>("GET", `/v1/runs/${id}/candidates`).then(
       (r) => r.items ?? [],
     );
+  }
+  /** What a person asked this run for. Empty for runs that were not seeded. */
+  runBrief(id: string) {
+    return this.request<{ brief: string }>("GET", `/v1/runs/${id}/brief`).then((r) => r.brief ?? "");
   }
   runVerify(id: string, tail = 500) {
     return this.request<{ output: string }>("GET", `/v1/runs/${id}/verify?tail=${tail}`).then(

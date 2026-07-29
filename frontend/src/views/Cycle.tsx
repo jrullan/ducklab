@@ -47,6 +47,10 @@ export function Cycle({
   // draft is deciding whether the content is right, and a diff answers a
   // different question — what changed.
   const [proposalAsDiff, setProposalAsDiff] = useState(false);
+  // Named for what it is, not what it does: `brief` is already the textarea
+  // someone types into, and this is the one a past run was given.
+  const [askedFor, setAskedFor] = useState("");
+  const [showAsked, setShowAsked] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,6 +76,25 @@ export function Cycle({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // What was asked for, so the document can be read against it. The run id
+  // comes from whichever version is on screen: the proposal while one is
+  // pending, the accepted document afterwards.
+  const briefRun = artifact?.proposal?.run_id ?? artifact?.run_id;
+  useEffect(() => {
+    if (!briefRun) {
+      setAskedFor("");
+      return;
+    }
+    let cancelled = false;
+    client
+      .runBrief(briefRun)
+      .then((b) => !cancelled && setAskedFor(b))
+      .catch(() => !cancelled && setAskedFor(""));
+    return () => {
+      cancelled = true;
+    };
+  }, [client, briefRun]);
 
   async function accept() {
     setPromoting(true);
@@ -148,6 +171,33 @@ export function Cycle({
           <div data-testid="cycle-error" className="mb-4 text-sm text-critical">
             {failure}
           </div>
+        )}
+
+        {/* Checking that requirements match what was asked for is the first
+            thing anyone does with them, and the brief was previously reachable
+            only by digging it out of a prompt in the run log.
+
+            Collapsed: it is a reference, not the subject. */}
+        {askedFor && (
+          <section className="mb-4 rounded-card border border-hairline" data-testid="asked-for-panel">
+            <button
+              type="button"
+              onClick={() => setShowAsked((v) => !v)}
+              aria-expanded={showAsked}
+              data-testid="asked-for-toggle"
+              className="w-full px-3 py-2 text-left text-sm text-ink-secondary"
+            >
+              {showAsked ? "▾" : "▸"} What you asked for
+            </button>
+            {showAsked && (
+              <pre
+                data-testid="asked-for"
+                className="overflow-x-auto whitespace-pre-wrap border-t border-hairline px-3 py-2 text-sm text-ink"
+              >
+                {askedFor}
+              </pre>
+            )}
+          </section>
         )}
 
         {artifact?.proposal && (

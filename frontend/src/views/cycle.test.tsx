@@ -314,3 +314,66 @@ describe("Cycle — reading a proposal", () => {
     expect(proposal.textContent).not.toContain("kind: requirements");
   });
 });
+
+describe("Cycle — what was asked for", () => {
+  const withBrief = (artifact: Record<string, unknown>, brief = "Build a triangle tool.") =>
+    ({
+      artifact: vi.fn(() => Promise.resolve(artifact)),
+      traceCheck: vi.fn(() => Promise.resolve([])),
+      runBrief: vi.fn(() => Promise.resolve(brief)),
+      promote: vi.fn(() => Promise.resolve({})),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+    }) as unknown as EngineClient;
+
+  // Checking that requirements match what was asked for is the first thing
+  // anyone does with them, and the brief was reachable only by digging it out
+  // of a prompt in the run log.
+  it("offers the brief of the run that produced the accepted document", async () => {
+    const client = withBrief({
+      kind: "requirements",
+      markdown: "",
+      sections: [{ id: "REQ-001", title: "A thing", body: "" }],
+      run_id: "r-42",
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    fireEvent.click(await screen.findByTestId("asked-for-toggle"));
+    expect((await screen.findByTestId("asked-for")).textContent).toContain("triangle tool");
+    expect(client.runBrief).toHaveBeenCalledWith("r-42");
+  });
+
+  // While a proposal is pending, the brief to compare against is the one that
+  // produced the proposal, not the older accepted version's.
+  it("prefers the pending proposal's run", async () => {
+    const client = withBrief({
+      kind: "requirements",
+      markdown: "",
+      sections: [],
+      run_id: "r-old",
+      proposal: { diff: "", sections: [{ id: "REQ-001", title: "x", body: "" }], run_id: "r-new" },
+    });
+    render(<Cycle client={client} projectId="p" />);
+    await screen.findByTestId("asked-for-toggle");
+    expect(client.runBrief).toHaveBeenCalledWith("r-new");
+  });
+
+  // Collapsed, because it is a reference and not the subject.
+  it("starts collapsed", async () => {
+    const client = withBrief({ kind: "requirements", markdown: "", sections: [], run_id: "r-42" });
+    render(<Cycle client={client} projectId="p" />);
+    await screen.findByTestId("asked-for-toggle");
+    expect(screen.queryByTestId("asked-for")).toBeNull();
+  });
+
+  // Most stages are not seeded with one, and an empty panel promising a brief
+  // is worse than no panel.
+  it("shows nothing when the run had no brief", async () => {
+    const client = withBrief(
+      { kind: "requirements", markdown: "", sections: [], run_id: "r-42" },
+      "",
+    );
+    render(<Cycle client={client} projectId="p" />);
+    await screen.findByTestId("cycle-view");
+    expect(screen.queryByTestId("asked-for-panel")).toBeNull();
+  });
+});

@@ -36,6 +36,13 @@ func (s *Service) RunTestHunks(ctx context.Context, id string) (string, error) {
 	return s.readRunFile(id, "tests.patch")
 }
 
+// RunBrief returns what a person asked this run for.
+//
+// Empty for every run that was not seeded with one, which is most of them.
+func (s *Service) RunBrief(ctx context.Context, id string) (string, error) {
+	return s.readRunFile(id, "brief.md")
+}
+
 // RunTranscript returns the human-readable conversation.
 func (s *Service) RunTranscript(ctx context.Context, id string) (string, error) {
 	// Built from the event log rather than a second file.

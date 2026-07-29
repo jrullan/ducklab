@@ -495,6 +495,7 @@ export const OPERATIONS = [
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },
   { id: "RunAccept", method: "POST", path: "/v1/runs/{id}/accept" },
   { id: "RunAnswer", method: "POST", path: "/v1/runs/{id}/answer" },
+  { id: "RunBrief", method: "GET", path: "/v1/runs/{id}/brief" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },

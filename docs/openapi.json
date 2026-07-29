@@ -3644,6 +3644,35 @@
         "summary": "Answer a pending question"
       }
     },
+    "/v1/runs/{id}/brief": {
+      "get": {
+        "operationId": "RunBrief",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "What a person asked this run for, verbatim"
+      }
+    },
     "/v1/runs/{id}/candidates": {
       "get": {
         "operationId": "RunCandidates",

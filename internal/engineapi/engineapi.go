@@ -336,6 +336,12 @@ func (s *Server) handleProjectGateAdopt(w http.ResponseWriter, r *http.Request) 
 	s.json(w, http.StatusOK, st)
 }
 
+func (s *Server) handleRunBrief(w http.ResponseWriter, r *http.Request) {
+	// Absent for most runs, which is not an error: only a seeded stage has one.
+	brief, _ := s.svc.RunBrief(r.Context(), r.PathValue("id"))
+	s.json(w, http.StatusOK, map[string]interface{}{"brief": brief})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {
