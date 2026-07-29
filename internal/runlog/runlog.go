@@ -40,6 +40,18 @@ type Run struct {
 	Budget        BudgetState            `json:"budget"`
 	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
 	TestsModified bool                   `json:"tests_modified"`
+	// NoChanges is true when the run finished without touching a file.
+	//
+	// It happens when the work was already in the tree — usually because an
+	// earlier task did more than its share. That is a real outcome and worth
+	// recording, but it is not evidence that a mode can build anything, and
+	// counting it as a pass inflates exactly the number this project exists to
+	// measure honestly.
+	//
+	// Without it, the same situation produced PASSED under pair and FAILED
+	// under tournament: no mode had a concept for "there was nothing to do",
+	// so each improvised a different one.
+	NoChanges bool `json:"no_changes,omitempty"`
 	// Spend is what each duckling actually cost in this run, keyed by id.
 	//
 	// The run's totals cannot answer "which model was expensive", and the

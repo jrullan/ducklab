@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -53,6 +54,13 @@ type TournamentResult struct {
 	Candidates []conv.Candidate
 	Rounds     int
 	Err        error
+	// NothingToApply is true when the winning candidate changed no files.
+	//
+	// That is a real answer, not a fault: a contestant that reads the tree and
+	// finds the task already satisfied is right to write nothing. It used to
+	// reach `git apply` as an empty patch and fail the whole run, so a correct
+	// judgement was recorded as FAILED.
+	NothingToApply bool
 }
 
 // ExecuteTournament runs N implementers independently and arbitrates (05 §4.3).
@@ -97,10 +105,18 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 
 	var cands []conv.Candidate
 	var firstErr error
-	for _, e := range entries {
+	for i, e := range entries {
 		if e.err != nil {
 			// One contestant failing is not the run failing: the others may
 			// still produce a green candidate.
+			//
+			// Said out loud, though. A contestant used to vanish with no
+			// trace, leaving a "tournament" of one — which is not a
+			// tournament, and the reader had no way to know it had become
+			// one.
+			emit(&p.ExecuteParams, "contestant_failed", map[string]interface{}{
+				"contestant": i, "duckling": string(ducklingFor(p, i)), "error": e.err.Error(),
+			})
 			if firstErr == nil {
 				firstErr = e.err
 			}
@@ -138,7 +154,7 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 		result.Resolution = ResolutionShortCircuit
 		result.Winner = green[0].Label
 		result.Reason = "only candidate whose verification passed"
-		if err := p.Apply(green[0].Diff); err != nil {
+		if err := applyWinner(result, p, green[0].Diff); err != nil {
 			result.Err = err
 			return result, err
 		}
@@ -159,7 +175,7 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 			result.Resolution = ResolutionJudgePick
 			result.Winner = green[0].Label
 			result.Reason = "judge named an unavailable candidate; applied the first green one"
-			if err := p.Apply(green[0].Diff); err != nil {
+			if err := applyWinner(result, p, green[0].Diff); err != nil {
 				result.Err = err
 				return result, err
 			}
@@ -167,7 +183,7 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 		}
 		result.Resolution = ResolutionJudgePick
 		result.Winner = win.Label
-		if err := p.Apply(win.Diff); err != nil {
+		if err := applyWinner(result, p, win.Diff); err != nil {
 			result.Err = err
 			return result, err
 		}
@@ -194,12 +210,45 @@ func ExecuteTournament(ctx context.Context, p *TournamentParams) (*TournamentRes
 		}
 		result.Resolution = ResolutionJudgePickRed
 		result.Winner = win.Label
-		if err := p.Apply(win.Diff); err != nil {
+		if err := applyWinner(result, p, win.Diff); err != nil {
 			result.Err = err
 			return result, err
 		}
 		return result, nil
 	}
+}
+
+// applyWinner applies the chosen candidate, or records that there was nothing
+// to apply.
+//
+// An empty diff is a finding, not an error. A contestant that reads the tree,
+// runs the gate, and reports that the task is already satisfied has done its
+// job — and on a real run one did exactly that, correctly, and the run was
+// marked FAILED because `git apply` refuses an empty patch.
+//
+// Whether the task really was already done is a question for the person at the
+// gate, not for this function. It records what happened and lets them see it.
+func applyWinner(result *TournamentResult, p *TournamentParams, diff string) error {
+	if strings.TrimSpace(diff) == "" {
+		result.NothingToApply = true
+		if result.Reason != "" {
+			result.Reason += "; "
+		}
+		result.Reason += "the winning candidate changed nothing — it reports the task was already satisfied"
+		return nil
+	}
+	return p.Apply(diff)
+}
+
+// ducklingFor names the model a contestant slot runs, for reporting.
+//
+// Empty when the roster decides, which is the normal case and is honest: the
+// slot has no name of its own to give.
+func ducklingFor(p *TournamentParams, i int) config.DucklingID {
+	if i < len(p.Ducklings) {
+		return p.Ducklings[i]
+	}
+	return ""
 }
 
 // runContestant executes one implementer in its own workspace and captures the

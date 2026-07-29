@@ -30,18 +30,56 @@ type Row struct {
 	// Estimated is true when any run in this group had estimated token counts.
 	// Measured and estimated numbers are never silently mixed (04 §7).
 	Estimated bool `json:"estimated"`
+	// Builds counts the runs in this group that could have reached PASSED.
+	//
+	// Only a build run has an executable gate. An artifact stage — intake,
+	// spec, plan — writes a document and ends UNVERIFIED by design, so its
+	// pass rate is always zero and comparing it against a build mode's is a
+	// category error dressed up as a measurement.
+	Builds int `json:"builds"`
+	// NoChanges counts runs that finished without touching a file, because the
+	// work was already in the tree.
+	//
+	// Kept out of the pass rate. A run that wrote nothing is not evidence that
+	// a mode can build: on a real session, one of pair's two "passes" changed
+	// no files, and pair's reported +25 points over solo rested on a sample of
+	// one real build and one no-op.
+	NoChanges int `json:"no_changes"`
+	// NoChangePasses is how many of those also reached PASSED, so they can be
+	// taken off both sides of the rate rather than only the denominator.
+	NoChangePasses int `json:"no_change_passes"`
 }
 
-// PassRate is the share of runs that reached PASSED.
+// Comparable reports whether this group's pass rate means anything.
+//
+// A group of nothing but artifact stages has a pass rate of zero because
+// nothing in it could ever pass, not because anything went wrong.
+func (r Row) Comparable() bool { return r.Builds > 0 }
+
+// Effective is the runs that carry information about whether a mode works:
+// the ones that actually attempted something.
+func (r Row) Effective() int { return r.Runs - r.NoChanges }
+
+// PassRate is the share of attempts that reached PASSED.
 //
 // UNVERIFIED is deliberately NOT counted as a pass: nothing was executed, and
 // counting it would inflate exactly the number the project is trying to
 // measure honestly (P3).
+//
+// Runs that changed no file are left out of both sides. They passed because
+// the work was already there, which says nothing about the mode — and one such
+// run was half of pair's reported 100%.
 func (r Row) PassRate() float64 {
-	if r.Runs == 0 {
+	if r.Effective() == 0 {
 		return 0
 	}
-	return float64(r.Passed) / float64(r.Runs) * 100
+	// Passed counts every PASSED, including the no-change ones, so they come
+	// off the top as well as off the bottom.
+	passed := r.Passed - r.NoChangePasses
+	if passed < 0 {
+		passed = 0
+	}
+	return float64(passed) / float64(r.Effective()) * 100
 }
 
 func (r Row) avg(total int64) int64 {
@@ -83,6 +121,10 @@ type Delta struct {
 	PassRate float64 `json:"pass_rate"`
 	Points   float64 `json:"points_vs_baseline"`
 	N        int     `json:"n"`
+	// OneRun marks a delta drawn from a single run, where the pass rate can
+	// only be 0 or 100 and therefore says nothing about the mode. Not a
+	// threshold judgement: one sample is not a rate at all.
+	OneRun bool `json:"one_run,omitempty"`
 }
 
 // Resolution counts how tournaments ended.
@@ -127,6 +169,20 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 				groups[key] = g
 			}
 			g.Runs++
+			// Only a build run could have passed. An artifact stage ends
+			// UNVERIFIED by design, and counting its zero against a build
+			// mode's rate is a category error dressed as a measurement.
+			if r.Stage == "build" || r.Stage == "" {
+				g.Builds++
+			}
+			// A run that touched nothing passed because the work was already
+			// there. Counted, and kept out of the rate.
+			if r.NoChanges {
+				g.NoChanges++
+				if r.Verdict == "PASSED" {
+					g.NoChangePasses++
+				}
+			}
 			switch r.Verdict {
 			case "PASSED":
 				g.Passed++
@@ -200,9 +256,20 @@ func computeDeltas(rows []Row) []Delta {
 		if r.Key == BaselineMode {
 			continue
 		}
+		// A mode that only ever ran artifact stages is not in this race.
+		//
+		// council writes documents and ends UNVERIFIED by design, so its pass
+		// rate is zero forever. Reported against a build baseline it read as
+		// "council is 75 points worse than solo", which is not a finding about
+		// council — it is a comparison of two different jobs.
+		if !r.Comparable() {
+			continue
+		}
 		out = append(out, Delta{
 			Key: r.Key, PassRate: r.PassRate(),
 			Points: r.PassRate() - baseline.PassRate(), N: r.Runs,
+			// One run gives 0% or 100% and nothing else, so it is not a rate.
+			OneRun: r.Runs == 1,
 		})
 	}
 	return out
@@ -281,7 +348,31 @@ func Render(rep *Report) string {
 		} else {
 			fmt.Fprintf(&b, "%s baseline: %.1f%% passed (n=%d)\n", BaselineMode, base.PassRate(), base.Runs)
 			for _, d := range rep.Deltas {
-				fmt.Fprintf(&b, "%-14s %.1f%% passed  (%+.1f pts, n=%d)\n", d.Key+":", d.PassRate, d.Points, d.N)
+				fmt.Fprintf(&b, "%-14s %.1f%% passed  (%+.1f pts, n=%d)", d.Key+":", d.PassRate, d.Points, d.N)
+				if d.OneRun {
+					// Said rather than left to the reader to notice: one run
+					// gives 0% or 100% and nothing in between.
+					b.WriteString("  — one run, so this is not a rate yet")
+				}
+				b.WriteString("\n")
+			}
+			// Named rather than silently absent. A mode that vanished from the
+			// comparison with no explanation reads as a bug in the report.
+			for _, r := range rep.Rows {
+				if r.Key != BaselineMode && !r.Comparable() {
+					fmt.Fprintf(&b, "%-14s not compared — %d artifact stage(s), which have no gate to pass\n",
+						r.Key+":", r.Runs)
+				}
+			}
+			// Said where the rate is read. A rate computed over three runs and
+			// presented beside a count of four is a rate the reader cannot
+			// check, and the difference is exactly the runs that did nothing.
+			for _, r := range rep.Rows {
+				if r.NoChanges > 0 {
+					fmt.Fprintf(&b,
+						"%-14s %d of %d runs changed no file (the work was already there) and are left out of the rate\n",
+						r.Key+":", r.NoChanges, r.Runs)
+				}
 			}
 		}
 	}

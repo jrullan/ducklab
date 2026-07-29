@@ -1023,6 +1023,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	diff, _ := git.Diff()
 	rs.writer.WriteDiff(diff)
 
+	// A run that touched nothing is a distinct outcome, and every mode used to
+	// invent its own: pair recorded PASSED, tournament died applying an empty
+	// patch. Recorded here, once, where the diff is already in hand.
+	if strings.TrimSpace(diff) == "" {
+		rs.run.NoChanges = true
+		rs.writer.AppendEvent("no_changes", map[string]interface{}{
+			"detail": "this run changed no files — the work was already in the tree",
+		})
+	}
+
 	// A gate is only worth what the tests are worth. A change that edits both
 	// at once goes green either way, so the test hunks are pulled out and put
 	// in front of the person deciding (05 §5.3). Never blocked: sometimes a
