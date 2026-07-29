@@ -19,3 +19,4 @@ engineer.
 | [0003](0003-apparmor-userns.md) | The desktop ships an AppArmor profile rather than lowering a sysctl |
 | [0004](0004-verify-run-shares-the-gate.md) | `verify_run` calls the gate's own code path |
 | [0005](0005-canonical-tasks-do-not-discriminate.md) | Canonical problems do not discriminate between models |
+| [0006](0006-test-first.md) | The test is written first, by a different model, and read by a person |
