@@ -303,6 +303,15 @@ export interface ServiceDucklingView {
   roles?: string[];
 }
 
+export interface ServiceGateResult {
+  command?: string;
+  duration_s?: number;
+  exit_code?: number;
+  gate?: string;
+  green?: boolean;
+  output?: string;
+}
+
 export interface ServiceGateStatus {
   adoptable?: boolean;
   best_verdict?: string;
@@ -465,6 +474,7 @@ export const OPERATIONS = [
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
+  { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
   { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
   { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },

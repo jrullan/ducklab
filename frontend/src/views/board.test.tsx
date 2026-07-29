@@ -187,7 +187,8 @@ describe("Board — starting the work", () => {
           { id: "pato-sonnet", provider: "openrouter", model: "claude" },
         ]),
       ),
-      projectGate: vi.fn(() => Promise.resolve({ mode: "tests" })),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      gateRun: vi.fn(() => Promise.resolve({ green: false, exit_code: 1, output: "", command: "go test ./...", gate: "tests", duration_s: 0.1 })),
       runStart: vi.fn(() => Promise.resolve({ id: "r-9" })),
       testStart: vi.fn(() => Promise.resolve({ id: "r-10" })),
       reviewStart: vi.fn(() => Promise.resolve({ id: "r-11" })),
@@ -280,7 +281,8 @@ describe("Board — test first only where it can work", () => {
       tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-001", status: "todo" }])),
       bugs: vi.fn(() => Promise.resolve([])),
       ducklings: vi.fn(() => Promise.resolve([])),
-      projectGate: vi.fn(() => Promise.resolve({ mode })),
+      projectGate: vi.fn(() => Promise.resolve({ mode, command: "sh check.sh" })),
+      gateRun: vi.fn(() => Promise.resolve({ green: true, exit_code: 0, output: "", command: "sh check.sh", gate: mode, duration_s: 0.1 })),
       runStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
       testStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
     }) as unknown as EngineClient;
@@ -301,4 +303,67 @@ describe("Board — test first only where it can work", () => {
       expect(screen.getByTestId("run-start")).toBeTruthy();
     });
   }
+});
+
+// Knowing the gate is red before starting is what makes a green afterwards
+// mean anything. It was only visible from a terminal.
+describe("Board — the gate before the run", () => {
+  const client = (mode: string, green: boolean) =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-001", status: "todo" }])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode, command: "sh scripts/check.sh" })),
+      gateRun: vi.fn(() =>
+        Promise.resolve({ green, exit_code: green ? 0 : 1, output: "", command: "sh scripts/check.sh", gate: mode, duration_s: 0.2 }),
+      ),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+    }) as unknown as EngineClient;
+
+  const openRail = async () => {
+    fireEvent.click(await screen.findByText("A thing"));
+    return screen.findByTestId("gate-state");
+  };
+
+  it("names the command that will decide the run", async () => {
+    render(<Board client={client("custom", false)} projectId="p" />);
+    expect((await openRail()).textContent).toContain("sh scripts/check.sh");
+  });
+
+  // Not on load: a gate can be a whole test suite, and a panel that ran one on
+  // every click would make looking expensive.
+  it("does not run the gate until asked", async () => {
+    const c = client("custom", false);
+    render(<Board client={c} projectId="p" />);
+    await openRail();
+    expect(c.gateRun).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("gate-check"));
+    await waitFor(() => expect(c.gateRun).toHaveBeenCalledWith("p"));
+  });
+
+  it("says red, and why that is worth knowing first", async () => {
+    render(<Board client={client("custom", false)} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("gate-check"));
+    const state = await screen.findByTestId("gate-state");
+    await waitFor(() => expect(state.textContent).toContain("red now"));
+    expect(state.textContent).toContain("a green afterwards means something");
+  });
+
+  it("says green without the warning", async () => {
+    render(<Board client={client("tests", true)} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("gate-check"));
+    const state = await screen.findByTestId("gate-state");
+    await waitFor(() => expect(state.textContent).toContain("green now"));
+    expect(state.textContent).not.toContain("means something");
+  });
+
+  // With no gate there is nothing to check and nothing a run can prove.
+  it("says a run cannot pass at all without a gate", async () => {
+    render(<Board client={client("none", false)} projectId="p" />);
+    expect((await openRail()).textContent).toContain("UNVERIFIED");
+    expect(screen.queryByTestId("gate-check")).toBeNull();
+  });
 });

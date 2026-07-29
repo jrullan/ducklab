@@ -18,6 +18,16 @@ export interface Project {
   missing?: boolean;
 }
 
+/** A gate that was actually run. Mirrors service.GateResult. */
+export type GateResult = {
+  gate: string;
+  command: string;
+  exit_code: number;
+  output: string;
+  duration_s: number;
+  green: boolean;
+};
+
 /** A project's gate, and what could be. Mirrors service.GateStatus. */
 export type GateStatus = {
   mode: string;
@@ -365,6 +375,12 @@ export class EngineClient {
   /** The configured gate beside the one detection finds today. */
   projectGate(id: string) {
     return this.request<GateStatus>("GET", `/v1/projects/${id}/gate`);
+  }
+  /** Run the gate now. On demand, never on a page load: a gate can be a whole
+   * test suite, and a screen that ran one every time it opened would make
+   * looking expensive — which is how people stop looking. */
+  gateRun(id: string) {
+    return this.request<GateResult>("POST", `/v1/projects/${id}/gate/run`);
   }
   /** Adopt the detected gate. Never automatic: a gate decides what a verdict
    * means, and changing that silently makes two runs incomparable while both

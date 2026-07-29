@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Bug, Duckling, EngineClient, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 
@@ -62,6 +62,7 @@ export function Board({
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   // Which gate the project has, so the rail offers only what can work here.
   const [gate, setGate] = useState("");
+  const [gateCommand, setGateCommand] = useState("");
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
@@ -80,7 +81,13 @@ export function Board({
     // still has tasks worth looking at, and losing both to one error tells the
     // reader less than showing what survived.
     client.ducklings().then(setDucklings).catch(() => {});
-    client.projectGate(projectId).then((g) => setGate(g.mode)).catch(() => {});
+    client
+      .projectGate(projectId)
+      .then((g) => {
+        setGate(g.mode);
+        setGateCommand(g.command);
+      })
+      .catch(() => {});
     const [t, b] = await Promise.allSettled([client.tasks(projectId), client.bugs(projectId)]);
     const problems: string[] = [];
     if (t.status === "fulfilled") setTasks(t.value);
@@ -272,6 +279,7 @@ export function Board({
             projectId={projectId}
             ducklings={ducklings}
             gate={gate}
+            gateCommand={gateCommand}
           />
         )}
       </aside>
@@ -285,12 +293,14 @@ function TaskRail({
   projectId,
   ducklings,
   gate,
+  gateCommand,
 }: {
   task: Task;
   client: EngineClient;
   projectId: string;
   ducklings: readonly Duckling[];
   gate: string;
+  gateCommand: string;
 }) {
   return (
     <div className="space-y-2">
@@ -309,6 +319,7 @@ function TaskRail({
         projectId={projectId}
         ducklings={ducklings}
         gate={gate}
+        gateCommand={gateCommand}
       />
     </div>
   );
@@ -329,12 +340,14 @@ function TaskRunner({
   projectId,
   ducklings,
   gate,
+  gateCommand,
 }: {
   task: Task;
   client: EngineClient;
   projectId: string;
   ducklings: readonly Duckling[];
   gate: string;
+  gateCommand: string;
 }) {
   const [mode, setMode] = useState<string>("solo");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -362,6 +375,7 @@ function TaskRunner({
 
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
+      <GateState client={client} projectId={projectId} gate={gate} command={gateCommand} />
       <div className="flex flex-wrap items-center gap-2">
         <select
           aria-label="mode"
@@ -492,6 +506,73 @@ function Row({ label, value }: { label: string; value?: string }) {
     <div className="flex gap-2">
       <dt className="w-24 shrink-0">{label}</dt>
       <dd className="text-ink-secondary">{value}</dd>
+    </div>
+  );
+}
+
+/** What will decide this run, and whether it passes right now.
+ *
+ * The state is not fetched on load. A gate is a whole test suite on a real
+ * project, and a panel that ran one every time someone clicked a task would
+ * make looking expensive — which is how people stop looking. So the command is
+ * always shown and the answer is one click away.
+ *
+ * Knowing the gate is red before starting is what makes a green afterwards
+ * mean anything: red to green is the run doing something, green to green is a
+ * run that may have done nothing at all.
+ */
+function GateState({
+  client,
+  projectId,
+  gate,
+  command,
+}: {
+  client: EngineClient;
+  projectId: string;
+  gate: string;
+  command: string;
+}) {
+  const [result, setResult] = useState<GateResult | null>(null);
+  const [running, setRunning] = useState(false);
+
+  if (!gate || gate === "none") {
+    return (
+      <div className="text-xs text-serious" data-testid="gate-state">
+        No gate — this run can only reach UNVERIFIED.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="gate-state">
+      <span className="text-ink-muted">gate</span>
+      <span className="font-mono text-ink-secondary">{command || gate}</span>
+      {result ? (
+        <StatusChip
+          role={result.green ? "good" : "critical"}
+          label={result.green ? "green now" : "red now"}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setRunning(true);
+            client
+              .gateRun(projectId)
+              .then(setResult)
+              .catch(() => setResult(null))
+              .finally(() => setRunning(false));
+          }}
+          disabled={running}
+          data-testid="gate-check"
+          className="rounded border border-hairline px-2 py-0.5 disabled:opacity-40"
+        >
+          {running ? "running…" : "check now"}
+        </button>
+      )}
+      {result && !result.green && (
+        <span className="text-ink-muted">red before the run — a green afterwards means something</span>
+      )}
     </div>
   );
 }

@@ -136,3 +136,41 @@ func gateAdvice(projectRoot string, v config.Verify) string {
 		"this project has no gate, so no run can do better than UNVERIFIED — "+
 			"but %q looks runnable here now. Adopt it with: ducklab project gate --adopt", cmd)
 }
+
+// GateResult is a gate that was actually run.
+type GateResult struct {
+	Gate     string  `json:"gate"`
+	Command  string  `json:"command"`
+	ExitCode int     `json:"exit_code"`
+	Output   string  `json:"output"`
+	Duration float64 `json:"duration_s"`
+	// Green is the one thing a reader wants first, computed rather than left
+	// to every client to derive from an exit code.
+	Green bool `json:"green"`
+}
+
+// GateRun executes the project's gate and reports what happened.
+//
+// On demand, never on a page load. A gate is a whole test suite on a real
+// project, and a screen that ran one every time it opened would make looking
+// expensive — which is how people stop looking.
+func (s *Service) GateRun(ctx context.Context, projectID string) (*GateResult, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, err
+	}
+	res, err := verify.Run(entry.Path, projCfg.Verify)
+	if err != nil {
+		return nil, err
+	}
+	return &GateResult{
+		Gate: string(res.Gate), Command: res.Command,
+		ExitCode: res.ExitCode, Output: res.Output, Duration: res.Duration,
+		// A gate that could not run is not green, whatever its exit code says.
+		Green: res.ExitCode == 0 && res.Gate != verify.GateNone,
+	}, nil
+}

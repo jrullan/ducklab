@@ -1032,6 +1032,37 @@
         ],
         "type": "object"
       },
+      "ServiceGateResult": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "duration_s": {
+            "type": "number"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "green": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "duration_s",
+          "exit_code",
+          "gate",
+          "green",
+          "output"
+        ],
+        "type": "object"
+      },
       "ServiceGateStatus": {
         "properties": {
           "adoptable": {
@@ -2373,6 +2404,42 @@
           }
         ],
         "summary": "Adopt the detected gate. Never automatic: a gate decides what a verdict means."
+      }
+    },
+    "/v1/projects/{id}/gate/run": {
+      "post": {
+        "operationId": "GateRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceGateResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run the gate now and report what happened. On demand: a gate can be a whole test suite."
       }
     },
     "/v1/projects/{id}/releases": {
