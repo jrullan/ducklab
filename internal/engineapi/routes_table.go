@@ -77,6 +77,17 @@ type ducklingTestResponse struct {
 	CostUSD   float64 `json:"cost_usd"`
 }
 
+type skillNewRequest struct {
+	Name string `json:"name"`
+	// Runnable scaffolds a run.sh too. Documentation-only is the default,
+	// because it is the cheap and safe form (05 §7).
+	Runnable bool `json:"runnable"`
+}
+
+type skillRunRequest struct {
+	Args map[string]interface{} `json:"args"`
+}
+
 type diffResponse struct {
 	Diff string `json:"diff"`
 	// Tests is the part of Diff that touches test files, when the run was
@@ -180,6 +191,14 @@ func routeTable() []Route {
 		{Method: "GET", Path: "/v1/projects/{id}/skills/{name}", Auth: true,
 			Summary: "One skill, with its body and any validation problems", ClientMethod: "SkillGet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleSkillGet }},
+		{Method: "POST", Path: "/v1/projects/{id}/skills", Auth: true,
+			Request: skillNewRequest{}, Summary: "Scaffold a skill directory",
+			ClientMethod: "SkillNew",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillNew }},
+		{Method: "POST", Path: "/v1/projects/{id}/skills/{name}/run", Auth: true,
+			Request: skillRunRequest{}, Summary: "Run a skill. No model is involved.",
+			ClientMethod: "SkillRun",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillRun }},
 		{Method: "GET", Path: "/v1/runs", Auth: true,
 			Response: listOf{Items: []runlog.Run{}}, Summary: "List runs", ClientMethod: "RunList",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunList }},

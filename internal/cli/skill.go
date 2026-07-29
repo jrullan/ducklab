@@ -106,9 +106,64 @@ func skillCmd(verb string, args []string, repo string) int {
 		}
 		return 1
 
+	case "new":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab skill new <name> [--runnable]")
+			return 2
+		}
+		runnable := false
+		for _, a := range args[1:] {
+			if a == "--runnable" {
+				runnable = true
+			}
+		}
+		dir, err := client.SkillNew(projectID, args[0], runnable)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("created %s\n", dir)
+		// The scaffold deliberately fails validate: every field it leaves as
+		// TODO is one a human has to answer, and saying so now beats letting
+		// them find out at the first skill_run.
+		fmt.Println("fill in the TODOs, then:  ducklab skill validate " + args[0])
+		return 0
+
+	case "run":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab skill run <name> [--arg k=v]...")
+			return 2
+		}
+		params := map[string]interface{}{}
+		for i := 1; i < len(args); i++ {
+			if args[i] != "--arg" || i+1 >= len(args) {
+				continue
+			}
+			k, v, ok := strings.Cut(args[i+1], "=")
+			if !ok {
+				fmt.Fprintf(os.Stderr, "error: --arg wants k=v, got %q\n", args[i+1])
+				return 2
+			}
+			params[k] = v
+			i++
+		}
+		out, failed, err := client.SkillRun(projectID, args[0], params)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Print(out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Println()
+		}
+		if failed {
+			return 1
+		}
+		return 0
+
 	default:
 		fmt.Fprintf(os.Stderr, "unknown skill command: %s\n", verb)
-		fmt.Fprintln(os.Stderr, "usage: ducklab skill list|show|validate")
+		fmt.Fprintln(os.Stderr, "usage: ducklab skill list|show|new|run|validate")
 		return 2
 	}
 }

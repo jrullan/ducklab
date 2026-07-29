@@ -251,5 +251,31 @@ func Validate(sk *Skill) []string {
 	if sk.Entry == "" && strings.TrimSpace(sk.Body) == "" {
 		problems = append(problems, "a skill with no entry is documentation, but its body is empty")
 	}
+
+	// A scaffold has the shape validate looks for and none of the content:
+	// "TODO — say what this does. Use when TODO." is a sentence with a "Use
+	// when" in it, and it passed. A validator that certifies a scaffold
+	// certifies nothing, and a duckling would then pick the skill by reading
+	// TODO.
+	//
+	// This matches the scaffold's own text, not the word. A skill that is
+	// genuinely about TODO comments — "Collect TODO comments into an issue
+	// list" — is not an unfilled scaffold, and rejecting it would be the same
+	// mistake in the other direction.
+	if isPlaceholder(sk.Description) {
+		problems = append(problems, "description is still the scaffold's; say what this does and when to use it")
+	}
+	for _, a := range sk.Args {
+		if strings.EqualFold(strings.TrimSpace(a.Name), "TODO") {
+			problems = append(problems, "an argument is still named TODO; name it or delete it")
+		}
+	}
 	return problems
+}
+
+// isPlaceholder reports whether text is what `ducklab skill new` wrote.
+func isPlaceholder(text string) bool {
+	t := strings.TrimSpace(text)
+	return strings.HasPrefix(strings.ToUpper(t), "TODO") ||
+		strings.Contains(strings.ToUpper(t), "USE WHEN TODO")
 }

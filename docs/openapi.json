@@ -500,6 +500,33 @@
         ],
         "type": "object"
       },
+      "EngineapiskillNewRequest": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "runnable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "runnable"
+        ],
+        "type": "object"
+      },
+      "EngineapiskillRunRequest": {
+        "properties": {
+          "args": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "args"
+        ],
+        "type": "object"
+      },
       "EngineapitraceCheckResponse": {
         "properties": {
           "errors": {
@@ -2448,6 +2475,43 @@
           }
         ],
         "summary": "Skills available to a project, project shadowing global"
+      },
+      "post": {
+        "operationId": "SkillNew",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiskillNewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Scaffold a skill directory"
       }
     },
     "/v1/projects/{id}/skills/{name}": {
@@ -2485,6 +2549,53 @@
           }
         ],
         "summary": "One skill, with its body and any validation problems"
+      }
+    },
+    "/v1/projects/{id}/skills/{name}/run": {
+      "post": {
+        "operationId": "SkillRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiskillRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run a skill. No model is involved."
       }
     },
     "/v1/projects/{id}/stages/{stage}": {

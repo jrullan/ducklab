@@ -150,6 +150,15 @@ export interface EngineapirosterSetRequest {
   role?: string;
 }
 
+export interface EngineapiskillNewRequest {
+  name?: string;
+  runnable?: boolean;
+}
+
+export interface EngineapiskillRunRequest {
+  args?: Record<string, unknown>;
+}
+
 export interface EngineapitraceCheckResponse {
   errors?: Record<string, string>[];
 }
@@ -403,7 +412,9 @@ export const OPERATIONS = [
   { id: "RosterApply", method: "POST", path: "/v1/projects/{id}/roster/suggest" },
   { id: "RunStart", method: "POST", path: "/v1/projects/{id}/runs" },
   { id: "SkillList", method: "GET", path: "/v1/projects/{id}/skills" },
+  { id: "SkillNew", method: "POST", path: "/v1/projects/{id}/skills" },
   { id: "SkillGet", method: "GET", path: "/v1/projects/{id}/skills/{name}" },
+  { id: "SkillRun", method: "POST", path: "/v1/projects/{id}/skills/{name}/run" },
   { id: "StageStart", method: "POST", path: "/v1/projects/{id}/stages/{stage}" },
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },

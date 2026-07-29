@@ -189,6 +189,27 @@ func (c *Client) SkillGet(projectID, name string) (map[string]interface{}, error
 	return result, err
 }
 
+// SkillNew scaffolds a skill directory.
+func (c *Client) SkillNew(projectID, name string, runnable bool) (string, error) {
+	var result struct {
+		Dir string `json:"dir"`
+	}
+	err := c.post("/v1/projects/"+projectID+"/skills",
+		map[string]interface{}{"name": name, "runnable": runnable}, &result)
+	return result.Dir, err
+}
+
+// SkillRun runs a skill. No model is involved.
+func (c *Client) SkillRun(projectID, name string, args map[string]interface{}) (string, bool, error) {
+	var result struct {
+		Output string `json:"output"`
+		Failed bool   `json:"failed"`
+	}
+	err := c.post("/v1/projects/"+projectID+"/skills/"+name+"/run",
+		map[string]interface{}{"args": args}, &result)
+	return result.Output, result.Failed, err
+}
+
 // RunDiff returns a run's diff and, when it was flagged, the part of it that
 // touches tests.
 func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {

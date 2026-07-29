@@ -168,6 +168,41 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleSkillNew(w http.ResponseWriter, r *http.Request) {
+	var req skillNewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	dir, err := s.svc.SkillNew(r.PathValue("id"), req.Name, req.Runnable)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"dir": dir})
+}
+
+func (s *Server) handleSkillRun(w http.ResponseWriter, r *http.Request) {
+	var req skillRunRequest
+	// An empty body is a skill with no arguments, not a malformed request.
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	// Two different failures, kept apart. A skill that ran and exited non-zero
+	// is an answer and carries its output; a project that could not be opened
+	// is an error and carries a message. Collapsing them reported "the skill
+	// failed" with nothing in it, for a skill that had never run.
+	out, failed, err := s.svc.SkillRun(r.Context(), r.PathValue("id"), r.PathValue("name"), req.Args)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"output": out, "failed": failed})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {

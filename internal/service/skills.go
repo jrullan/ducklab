@@ -1,8 +1,15 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+
+	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/tools"
 
 	"github.com/jrullan/ducklab/internal/skill"
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -101,4 +108,83 @@ func validateProposedSkills(projectRoot string) []string {
 		}
 	}
 	return out
+}
+
+// SkillNew scaffolds a skill directory (03 §3.9).
+//
+// Written by the engine, not the client: clients hold no state (I11), and a
+// CLI that wrote into a project would be a second thing that can create files
+// there.
+func (s *Service) SkillNew(projectID, name string, runnable bool) (string, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return "", err
+	}
+	if !skillNameRe.MatchString(name) {
+		return "", fmt.Errorf("skill name %q must be lowercase letters, digits and dashes", name)
+	}
+	dir := filepath.Join(skill.ProjectDir(entry.Path), name)
+	if _, err := os.Stat(dir); err == nil {
+		// Never overwrite: a scaffold that clobbers the skill someone was
+		// halfway through writing is worse than an error.
+		return "", fmt.Errorf("skill %q already exists at %s", name, dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+
+	// The template's description is a sentence with a "Use when", because that
+	// is what validate demands and what a duckling actually chooses by. A
+	// scaffold that fails its own validator teaches the wrong shape.
+	manifest := "---\nname: " + name + "\n" +
+		"description: TODO — say what this does. Use when TODO.\nversion: 1\n"
+	if runnable {
+		manifest += "args:\n  - name: TODO\n    type: string\n    required: true\nentry: run.sh\ntimeout_s: 120\n"
+	}
+	manifest += "---\n\nTODO: what a duckling needs to know to use this.\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(manifest), 0o644); err != nil {
+		return "", err
+	}
+	if runnable {
+		script := "#!/bin/sh\n# Arguments arrive as --name=value and as DUCKLAB_ARG_NAME.\n# DUCKLAB_SKILL_DIR is this directory.\nset -e\n\necho \"TODO\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
+}
+
+var skillNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// SkillRun runs a skill from a client, for a human testing one.
+//
+// Same code path as the tool a duckling calls, so a skill that works here
+// works there. It is not a run: nothing is logged as a model call, because no
+// model was involved.
+func (s *Service) SkillRun(ctx context.Context, projectID, name string, args map[string]interface{}) (output string, failed bool, err error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return "", false, err
+	}
+	projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return "", false, err
+	}
+	ectx := &tools.ExecContext{
+		ProjectRoot:     entry.Path,
+		ShellPolicy:     projCfg.Shell,
+		Verify:          projCfg.Verify,
+		GlobalSkillsDir: globalSkillsDir(),
+	}
+	payload, err := json.Marshal(map[string]interface{}{"name": name, "args": args})
+	if err != nil {
+		return "", false, err
+	}
+	res, err := (&tools.SkillRun{}).Execute(ctx, ectx, payload)
+	if err != nil {
+		return "", false, err
+	}
+	// The skill ran and exited non-zero. That is an answer, not a transport
+	// failure, and the caller needs the output to see why.
+	return res.Content, res.IsError, nil
 }

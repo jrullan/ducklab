@@ -218,3 +218,39 @@ func TestNoSkillsDirectoryIsNotAnError(t *testing.T) {
 		t.Errorf("all=%v problems=%v", all, problems)
 	}
 }
+
+// A validator that green-lights a scaffold is a validator that certifies
+// nothing. `ducklab skill new` writes "TODO — say what this does. Use when
+// TODO.", which has the shape validate looks for — a sentence, a "Use when" —
+// and none of the content. It passed, and a duckling would then have picked
+// the skill by reading TODO.
+func TestValidateRejectsAnUnfilledScaffold(t *testing.T) {
+	sk := &Skill{
+		Name:        "pdf-extract",
+		Description: "TODO — say what this does. Use when TODO.",
+		Version:     1,
+		Body:        "TODO: what a duckling needs to know to use this.",
+		Args:        []Arg{{Name: "TODO", Type: "string", Required: true}},
+	}
+	problems := strings.Join(Validate(sk), "; ")
+	if problems == "" {
+		t.Fatal("an untouched scaffold was reported as valid")
+	}
+	if !strings.Contains(problems, "TODO") {
+		t.Errorf("problems do not name what is unfilled: %q", problems)
+	}
+}
+
+// The word is only a problem where a human was meant to write something. A
+// skill that legitimately talks about TODO comments is not a scaffold.
+func TestValidateAllowsTheWordWhereItIsContent(t *testing.T) {
+	sk := &Skill{
+		Name:        "todo-sweep",
+		Description: "Collect TODO comments into an issue list. Use before a release.",
+		Version:     1,
+		Body:        "It greps for TODO and FIXME.",
+	}
+	if got := Validate(sk); len(got) != 0 {
+		t.Errorf("a skill about TODOs was rejected: %v", got)
+	}
+}
