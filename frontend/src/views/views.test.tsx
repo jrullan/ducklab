@@ -274,3 +274,56 @@ describe("RunView — what can still be decided", () => {
     expect(screen.getByTestId("abort-button")).toBeTruthy();
   });
 });
+
+// The human gate of a stage run appears in two places — the Cycle view and the
+// run itself — and only one of them had the third answer. Someone watching the
+// work happen had to go and find another screen to say "almost".
+describe("RunView — asking a stage for changes", () => {
+  const show = (over: Record<string, unknown>) => {
+    useRuns.setState({ runs: {}, connection: "open" });
+    useRuns.getState().setRun({ ...run, status: "paused", pending_kind: "gate", ...over });
+  };
+
+  // The real request path, so the body is asserted as the engine would see it.
+  const recording = (sent: { path?: string; body?: string }) =>
+    clientWith((path, init) => {
+      if (init?.method === "POST" && path.includes("/stages/")) {
+        sent.path = path;
+        sent.body = String(init.body);
+        return json({ id: "r-2" });
+      }
+      if (path.endsWith("/diff")) return json({ diff: "" });
+      if (path.endsWith("/verify")) return json({ output: "" });
+      if (path.endsWith("/candidates")) return json({ items: [] });
+      return json({});
+    });
+
+  it("sends the note as a revision of that stage", async () => {
+    show({ stage: "spec", project_id: "p" });
+    const sent: { path?: string; body?: string } = {};
+    render(<RunView runId="r-1" client={recording(sent)} />);
+
+    fireEvent.change(await screen.findByTestId("change-note"), {
+      target: { value: "SPEC-004 should lock the opposite vertex too" },
+    });
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+
+    await waitFor(() => expect(sent.path).toBe("/v1/projects/p/stages/spec"));
+    expect(JSON.parse(sent.body!).revise).toBe("SPEC-004 should lock the opposite vertex too");
+  });
+
+  // A build run produces code. There is no draft to send back to anyone.
+  it("offers nothing to revise on a build run", async () => {
+    show({ stage: "build", project_id: "p" });
+    render(<RunView runId="r-1" client={recording({})} />);
+    await screen.findByTestId("run-view");
+    expect(screen.queryByTestId("request-changes-button")).toBeNull();
+  });
+
+  it("offers nothing to revise once the gate is answered", async () => {
+    show({ stage: "spec", project_id: "p", status: "done", accepted: true, pending_kind: "" });
+    render(<RunView runId="r-1" client={recording({})} />);
+    await screen.findByTestId("run-view");
+    expect(screen.queryByTestId("request-changes-button")).toBeNull();
+  });
+});

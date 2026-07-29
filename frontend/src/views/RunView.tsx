@@ -55,6 +55,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [verify, setVerify] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [answer, setAnswer] = useState("");
+  const [note, setNote] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [revisionRun, setRevisionRun] = useState<string | null>(null);
 
   useEffect(() => {
     client
@@ -89,6 +92,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // anything. A run paused on a question needs an answer instead: accepting
   // work that has not finished would commit a half-done change.
   const atHumanGate = run.status === "paused" && run.pending_kind === "gate";
+  // A stage run's gate is a decision about a document, so it has the third
+  // answer the Cycle view has: send it back with a note. It appeared in only
+  // one of the two places the same gate shows up, so someone watching the work
+  // happen had to go and find another screen to say "almost".
+  const stageToRevise = ["intake", "spec", "plan"].includes(run.stage) ? run.stage : "";
   const outcome = (() => {
     if (isWorking) return "";
     if (run.accepted) {
@@ -97,6 +105,22 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     if (run.status === "failed" || run.verdict === "FAILED") return "not accepted";
     return "finished";
   })();
+
+  const requestChanges = async () => {
+    if (!note.trim()) return;
+    setAsking(true);
+    try {
+      const started = await client.stageStart(run.project_id, stageToRevise, {
+        revise: note.trim(),
+      });
+      setRevisionRun(started.id);
+      setNote("");
+    } catch (e) {
+      useRuns.getState().failAccept(runId, e instanceof Error ? e.message : String(e));
+    } finally {
+      setAsking(false);
+    }
+  };
 
   const onAccept = async () => {
     const store = useRuns.getState();
@@ -163,6 +187,40 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
         </div>
       </header>
+
+      {atHumanGate && stageToRevise && (
+        <section className="m-2 rounded-card border border-hairline p-3" data-testid="request-changes">
+          <textarea
+            aria-label="what to change"
+            data-testid="change-note"
+            rows={2}
+            placeholder="Right except SPEC-004 — locking an angle should also stop the opposite vertex from being dragged."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+          />
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void requestChanges()}
+              disabled={asking || !note.trim()}
+              data-testid="request-changes-button"
+              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+            >
+              {asking ? "Asking…" : "Request changes"}
+            </button>
+            {revisionRun && (
+              <a href={`#/runs/${revisionRun}`} data-testid="revision-run-link" className="text-sm text-ink underline">
+                watch the revision
+              </a>
+            )}
+            <span className="text-xs text-ink-muted">
+              The draft goes back with your note. Everything you did not mention is meant to come
+              back unchanged.
+            </span>
+          </div>
+        </section>
+      )}
 
       {acceptState.kind === "error" && (
         <p className="m-2 text-critical" data-testid="accept-error">
