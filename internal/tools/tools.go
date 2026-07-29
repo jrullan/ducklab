@@ -198,6 +198,21 @@ func IsHarnessPath(root, abs string) bool {
 
 // PathJail resolves a path within the project root and validates it doesn't escape.
 // Returns the absolute path and whether it's inside the root.
+// existingAncestor resolves the closest ancestor of a path that exists,
+// following symlinks.
+//
+// It stops at the filesystem root, so it always terminates.
+func existingAncestor(path string) (string, error) {
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return resolved, nil
+		}
+		if parent := filepath.Dir(dir); parent == dir {
+			return "", fmt.Errorf("no existing ancestor of %s", path)
+		}
+	}
+}
+
 func PathJail(root, path string) (string, error) {
 	if root == "" {
 		return "", fmt.Errorf("project root is required")
@@ -226,14 +241,22 @@ func PathJail(root, path string) (string, error) {
 	joined := filepath.Join(root, clean)
 	abs, err := filepath.EvalSymlinks(joined)
 	if err != nil {
-		// If the file doesn't exist yet, check the parent
-		parent := filepath.Dir(joined)
-		absParent, err2 := filepath.EvalSymlinks(parent)
+		// The path does not exist yet, which is the normal case for a write.
+		// Resolve the nearest ancestor that does exist and check that instead.
+		//
+		// Checking only the immediate parent was wrong twice over: a file in a
+		// directory that also did not exist was refused outright — though
+		// fs_write creates parents and says so — and it was refused as "path
+		// escapes root", which is a claim about a path that was always inside
+		// it. Walking up is still safe: a symlink can only redirect through a
+		// component that exists, so the nearest existing ancestor is where any
+		// escape would have to happen.
+		absAncestor, err2 := existingAncestor(joined)
 		if err2 != nil {
-			return "", fmt.Errorf("path escapes root: %v", err)
+			return "", fmt.Errorf("path escapes root: %v", err2)
 		}
 		rootAbs, _ := filepath.EvalSymlinks(root)
-		if !strings.HasPrefix(absParent, rootAbs+string(filepath.Separator)) && absParent != rootAbs {
+		if !strings.HasPrefix(absAncestor, rootAbs+string(filepath.Separator)) && absAncestor != rootAbs {
 			return "", fmt.Errorf("path escapes root: %s", path)
 		}
 		if IsHarnessPath(root, joined) {

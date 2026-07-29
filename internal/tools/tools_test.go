@@ -353,3 +353,44 @@ func TestCapResultSaysItTruncated(t *testing.T) {
 		t.Errorf("an uncapped result was altered: %q", short)
 	}
 }
+
+// A new file in a new directory is the ordinary case for work that adds a
+// package, and fs_write's own description promises it creates parents. The
+// jail used to check exactly one level up, so a path two levels deep into
+// nothing was rejected — and rejected as "path escapes root", which is a
+// different and alarming claim about a path that was always inside it. A real
+// split run burned six minutes and its whole token budget re-reading that
+// message before giving up.
+func TestJailAllowsAPathWhoseDirectoriesDoNotExistYet(t *testing.T) {
+	root := t.TempDir()
+	got, err := PathJail(root, "fixture/nested/deeper/file.go")
+	if err != nil {
+		t.Fatalf("PathJail: %v", err)
+	}
+	if want := filepath.Join(root, "fixture/nested/deeper/file.go"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// The escape check must survive the walk: an ancestor that does not exist
+// cannot be used to climb out of the root.
+func TestJailStillRefusesToEscapeThroughDirectoriesThatDoNotExist(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{"../outside/new/file.go", "nope/../../outside/file.go"} {
+		if _, err := PathJail(root, p); err == nil {
+			t.Errorf("PathJail(%q) allowed an escape", p)
+		}
+	}
+}
+
+// A symlink pointing out of the root is still an escape even when the file
+// beyond it has not been created.
+func TestJailRefusesANewFileUnderASymlinkedDirectory(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PathJail(root, "link/new/file.go"); err == nil {
+		t.Error("PathJail followed a symlink out of the root")
+	}
+}
