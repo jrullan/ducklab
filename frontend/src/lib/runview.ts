@@ -31,6 +31,10 @@ export interface TurnBlock {
   toolCalls: ToolCall[];
   text: string;
   done: boolean;
+  /** What this turn was working on: a split's subtask, a tournament's
+   * contestant slot. Two lanes with the same role and the same duckling are
+   * otherwise indistinguishable, which is exactly what a split produces. */
+  subject?: string;
   /** A reviewer's turn is a verdict, not prose. Present only when the engine
    * parsed one, so the lane can render findings instead of a JSON blob. */
   verdict?: string;
@@ -111,6 +115,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           turn,
           role: String(d.role ?? ""),
           duckling: String(d.duckling ?? ""),
+          subject: subjectOf(d),
           toolCalls: [],
           text: "",
           done: false,
@@ -177,6 +182,19 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
     }
   }
   return blocks;
+}
+
+/** What a turn was working on, if the event says.
+ *
+ * A split runs its subtasks concurrently on the same duckling, so its lanes
+ * read "pato-atom implementer" twice with nothing to tell them apart — which
+ * is the question the screen should answer without anyone opening the run log.
+ */
+function subjectOf(d: Record<string, unknown>): string | undefined {
+  if (typeof d.subtask === "string" && d.subtask) return d.subtask;
+  if (typeof d.bug === "string" && d.bug) return d.bug;
+  if (typeof d.contestant === "number") return `candidate ${d.contestant + 1}`;
+  return undefined;
 }
 
 /**

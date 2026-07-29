@@ -50,6 +50,11 @@ export function ConversationTurn({
         )}
         <span style={{ color: tint }}>{who}</span>
         <span className="text-ink-muted">{block.role}</span>
+        {block.subject && (
+          <span className="text-ink-secondary" data-testid="turn-subject">
+            {block.subject}
+          </span>
+        )}
         {!block.done && (
           <span className="text-ink-muted" data-testid="in-flight">
             thinking…

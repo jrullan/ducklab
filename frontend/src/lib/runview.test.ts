@@ -273,3 +273,31 @@ describe("buildTurns with turns that overlap", () => {
     expect(turns[0]!.done).toBe(true);
   });
 });
+
+// A split runs its subtasks concurrently on the same duckling, so its lanes
+// read "pato-atom implementer" twice with nothing to tell them apart — which
+// is the question the screen should answer without anyone opening the run log.
+describe("what a turn was working on", () => {
+  it("carries a split's subtask into the lane", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer", duckling: "pato-atom", subtask: "Add mathutil.go" } },
+      { seq: 2, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "implementer", duckling: "pato-atom", subtask: "Add strutil.go" } },
+    ] as never);
+    expect(turns.map((t) => t.subject)).toEqual(["Add mathutil.go", "Add strutil.go"]);
+  });
+
+  it("names a tournament's contestant slot", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "implementer", contestant: 0 } },
+      { seq: 2, type: "turn_start", run_id: "r", data: { round: 1, turn: 1, role: "implementer", contestant: 1 } },
+    ] as never);
+    expect(turns.map((t) => t.subject)).toEqual(["candidate 1", "candidate 2"]);
+  });
+
+  it("leaves an ordinary turn with no subject rather than inventing one", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", run_id: "r", data: { round: 1, turn: 0, role: "reviewer" } },
+    ] as never);
+    expect(turns[0]!.subject).toBeUndefined();
+  });
+});
