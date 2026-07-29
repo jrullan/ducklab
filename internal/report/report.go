@@ -135,14 +135,28 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			default:
 				g.Failed++
 			}
-			// Budget.Tokens is the run's total; providers do not report the
-			// split per run, so there is one field rather than two that
-			// would be half fiction.
-			g.Tokens += r.Budget.Tokens
-			g.CostUSD += r.Budget.USD
-			g.WallMs += r.WallclockMs
-			if r.TokensEstimated {
-				g.Estimated = true
+			// Grouped by duckling, the numbers are that duckling's share.
+			// Adding the run's total to every row was what made the rows
+			// identical: three models, one run, the whole cost three times.
+			if by == "duckling" {
+				spend := r.Spend[key]
+				g.Tokens += spend.Tokens
+				g.CostUSD += spend.CostUSD
+				if spend.Estimated {
+					g.Estimated = true
+				}
+				// Wallclock stays the run's: two models in one run did not
+				// each take the whole time, but nothing records how it split,
+				// and inventing a division would be worse than a known
+				// overlap.
+				g.WallMs += r.WallclockMs
+			} else {
+				g.Tokens += r.Budget.Tokens
+				g.CostUSD += r.Budget.USD
+				g.WallMs += r.WallclockMs
+				if r.TokensEstimated {
+					g.Estimated = true
+				}
 			}
 		}
 		if r.Resolution != "" {
@@ -207,11 +221,15 @@ func keysFor(r *runlog.Run, by string) []string {
 		}
 		return []string{r.TaskID}
 	case "duckling":
+		// What each model actually did, not what the roster said it might.
+		//
+		// This read the roster and gave every duckling in it the run's whole
+		// cost. A solo run names six roles and calls one model, so five models
+		// were credited with work they never did and the totals came out
+		// tripled — with every row identical, which is how it was noticed.
 		var out []string
-		seen := map[string]bool{}
-		for _, id := range r.Roster {
-			if id != "" && !seen[id] {
-				seen[id] = true
+		for id, spend := range r.Spend {
+			if id != "" && spend.Calls > 0 {
 				out = append(out, id)
 			}
 		}

@@ -92,10 +92,22 @@ func TestRunsWithoutAVerdictAreExcluded(t *testing.T) {
 	}
 }
 
+// Grouping by duckling counts the models that actually made calls.
+//
+// This used to be written with rosters, which is what made it pass while the
+// numbers were wrong: a roster names a duckling per role whether or not that
+// role ran. Written with spend, it says what it means.
 func TestGroupByDuckling(t *testing.T) {
+	spent := func(r *runlog.Run, ids ...string) *runlog.Run {
+		r.Spend = map[string]runlog.DucklingSpend{}
+		for _, id := range ids {
+			r.Spend[id] = runlog.DucklingSpend{Calls: 1, Tokens: 5000, CostUSD: 0.005}
+		}
+		return r
+	}
 	rep := Build([]*runlog.Run{
-		run("pair", "PASSED", map[string]string{"implementer": "pato-local", "reviewer": "pato-nube"}),
-		run("solo", "FAILED", map[string]string{"implementer": "pato-local"}),
+		spent(run("pair", "PASSED", nil), "pato-local", "pato-nube"),
+		spent(run("solo", "FAILED", nil), "pato-local"),
 	}, Options{By: "duckling"})
 
 	if len(rep.Rows) != 2 {

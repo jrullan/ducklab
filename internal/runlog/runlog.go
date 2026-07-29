@@ -40,6 +40,14 @@ type Run struct {
 	Budget        BudgetState            `json:"budget"`
 	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
 	TestsModified bool                   `json:"tests_modified"`
+	// Spend is what each duckling actually cost in this run, keyed by id.
+	//
+	// The run's totals cannot answer "which model was expensive", and the
+	// roster cannot either: it names a duckling for every role whether or not
+	// that role ran. A solo run lists six roles and calls one model, so
+	// attributing the run to its roster credited five models with work they
+	// never did — and reported the run's whole cost against each of them.
+	Spend map[string]DucklingSpend `json:"spend,omitempty"`
 	// TokensEstimated is true when any model call in this run reported no
 	// usage and its tokens were counted by estimate.
 	//
@@ -47,6 +55,16 @@ type Run struct {
 	// (AC-61), and the run is the only place that knows.
 	TokensEstimated bool   `json:"tokens_estimated,omitempty"`
 	Warning         string `json:"warning,omitempty"`
+}
+
+// DucklingSpend is one model's share of a run.
+type DucklingSpend struct {
+	Calls   int     `json:"calls"`
+	Tokens  int64   `json:"tokens"`
+	CostUSD float64 `json:"cost_usd"`
+	// Estimated is true when any of those calls reported no usage and its
+	// tokens were counted by estimate.
+	Estimated bool `json:"estimated,omitempty"`
 }
 
 // BudgetState tracks budget spend in a run.

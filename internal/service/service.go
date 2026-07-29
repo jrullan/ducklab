@@ -849,10 +849,50 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 	// One estimated call makes the run's total an estimate. Reports mark it;
 	// without this the marker in Render was unreachable and every number
 	// looked measured.
-	if call.Estimated && a.run != nil {
-		a.run.TokensEstimated = true
+	if a.run != nil {
+		if call.Estimated {
+			a.run.TokensEstimated = true
+		}
+		// Attributed here because this is the only place that sees which
+		// duckling made a call and what it cost, together.
+		if a.run.Spend == nil {
+			a.run.Spend = map[string]runlog.DucklingSpend{}
+		}
+		d := a.run.Spend[call.Duckling]
+		d.Calls++
+		d.Tokens += callTokens(call.Usage)
+		d.CostUSD += call.CostUSD
+		if call.Estimated {
+			d.Estimated = true
+		}
+		a.run.Spend[call.Duckling] = d
 	}
 	return err
+}
+
+// callTokens reads one call's total from whatever the provider reported.
+//
+// Providers disagree about the names. A missing key means a call whose tokens
+// nobody counted, which is different from a call that used none — but the
+// difference is already carried by Estimated, so this returns what it can.
+func callTokens(usage map[string]interface{}) int64 {
+	num := func(keys ...string) int64 {
+		for _, k := range keys {
+			switch v := usage[k].(type) {
+			case float64:
+				return int64(v)
+			case int64:
+				return v
+			case int:
+				return int64(v)
+			}
+		}
+		return 0
+	}
+	if total := num("total_tokens", "total"); total > 0 {
+		return total
+	}
+	return num("prompt_tokens", "input_tokens") + num("completion_tokens", "output_tokens")
 }
 
 // executeRun executes a run in the background.

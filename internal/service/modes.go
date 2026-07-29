@@ -386,6 +386,14 @@ func (s *Service) Report(ctx context.Context, projectID string, opts report.Opti
 	if err != nil {
 		return nil, err
 	}
+	// Runs made before spend was recorded have none. Dropping them from the
+	// per-duckling table would quietly shrink the history the table exists to
+	// summarise, and the information is not lost — it was never rolled up.
+	if entry, err := s.registry.Get(projectID); err == nil {
+		for _, r := range runs {
+			backfillSpend(entry.Path, r)
+		}
+	}
 	return report.Build(runs, opts), nil
 }
 
