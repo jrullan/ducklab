@@ -216,6 +216,48 @@ var referenceSolutions = map[string]map[string]string{
 			"\ttotal := 0\n\tfor _, k := range keys {\n\t\ttotal += Get(m, k)\n\t}\n\treturn total\n}\n",
 	},
 	"B-005": {"round.go": "package bench\n\nfunc RoundDown(n int) int { return n / 10 * 10 }\n"},
+	"B-006": {"lru.go": "package bench\n\nimport \"container/list\"\n\n" +
+		"type entry struct {\n\tkey string\n\tvalue int\n}\n\n" +
+		"type LRU struct {\n\tcap int\n\tll *list.List\n\titems map[string]*list.Element\n}\n\n" +
+		"func NewLRU(capacity int) *LRU {\n" +
+		"\treturn &LRU{cap: capacity, ll: list.New(), items: map[string]*list.Element{}}\n}\n\n" +
+		"func (c *LRU) Get(key string) (int, bool) {\n" +
+		"\tel, ok := c.items[key]\n\tif !ok {\n\t\treturn 0, false\n\t}\n" +
+		"\tc.ll.MoveToFront(el)\n\treturn el.Value.(*entry).value, true\n}\n\n" +
+		"func (c *LRU) Put(key string, value int) {\n" +
+		"\tif el, ok := c.items[key]; ok {\n" +
+		"\t\tel.Value.(*entry).value = value\n\t\tc.ll.MoveToFront(el)\n\t\treturn\n\t}\n" +
+		"\tc.items[key] = c.ll.PushFront(&entry{key, value})\n" +
+		"\tif c.cap > 0 && c.ll.Len() > c.cap {\n" +
+		"\t\tback := c.ll.Back()\n\t\tc.ll.Remove(back)\n\t\tdelete(c.items, back.Value.(*entry).key)\n\t}\n}\n"},
+	"B-007": {"intervals.go": "package bench\n\nimport \"sort\"\n\n" +
+		"func Merge(in [][2]int) [][2]int {\n" +
+		"\tif len(in) == 0 {\n\t\treturn nil\n\t}\n" +
+		"\txs := make([][2]int, len(in))\n\tcopy(xs, in)\n" +
+		"\tsort.Slice(xs, func(i, j int) bool { return xs[i][0] < xs[j][0] })\n" +
+		"\tout := [][2]int{xs[0]}\n" +
+		"\tfor _, iv := range xs[1:] {\n\t\tlast := &out[len(out)-1]\n" +
+		"\t\tif iv[0] <= last[1] {\n\t\t\tif iv[1] > last[1] {\n\t\t\t\tlast[1] = iv[1]\n\t\t\t}\n" +
+		"\t\t\tcontinue\n\t\t}\n\t\tout = append(out, iv)\n\t}\n\treturn out\n}\n"},
+	"B-008": {"pool.go": "package bench\n\nimport \"sync\"\n\n" +
+		"func Map(in []int, workers int, f func(int) int) []int {\n" +
+		"\tout := make([]int, len(in))\n" +
+		"\tif workers < 1 {\n\t\tworkers = 1\n\t}\n" +
+		"\tjobs := make(chan int)\n\tvar wg sync.WaitGroup\n" +
+		"\tfor w := 0; w < workers; w++ {\n\t\twg.Add(1)\n" +
+		"\t\tgo func() {\n\t\t\tdefer wg.Done()\n" +
+		"\t\t\tfor i := range jobs {\n\t\t\t\tout[i] = f(in[i])\n\t\t\t}\n\t\t}()\n\t}\n" +
+		"\tfor i := range in {\n\t\tjobs <- i\n\t}\n\tclose(jobs)\n\twg.Wait()\n\treturn out\n}\n"},
+	"B-009": {
+		"record.go": "package bench\n\n" +
+			"type Record struct {\n\tName string\n\tAge  int\n\tCity string\n}\n\n" +
+			"var saved []Record\n\nfunc Save(r Record) { saved = append(saved, r) }\n\n" +
+			"func Saved() []Record { return saved }\n\nfunc Reset() { saved = nil }\n",
+		"importer.go": "package bench\n\nfunc ImportOne() { Save(Record{Name: \"ada\", Age: 36, City: \"london\"}) }\n",
+		"seed.go": "package bench\n\nfunc SeedTwo() {\n" +
+			"\tSave(Record{Name: \"grace\", Age: 45, City: \"arlington\"})\n" +
+			"\tSave(Record{Name: \"edsger\", Age: 42, City: \"austin\"})\n}\n",
+	},
 }
 
 // A task nobody can pass measures as little as one everybody passes.
@@ -248,7 +290,10 @@ func TestEveryStdTaskIsSolvable(t *testing.T) {
 			write(task.Files)
 			write(solution)
 
-			cmd := exec.Command("go", "test", "./...")
+			// The task's own gate, not a hardcoded one: B-008 is decided by
+			// the race detector, and running it without would pass a solution
+			// the real cell would fail.
+			cmd := exec.Command("sh", "-c", task.Verify.Tests)
 			cmd.Dir = dir
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Errorf("%s is not solvable by its own reference answer:\n%s", task.ID, out)
