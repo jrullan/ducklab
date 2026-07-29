@@ -336,3 +336,29 @@ describe("turns that overlapped", () => {
     expect(turns.every((t) => t.concurrent)).toBe(true);
   });
 });
+
+// A proposal's diff has no file headers.
+//
+// artifact.LineDiff compares two documents, not two trees, so it emits @@ and
+// +/- lines and nothing else. parseDiff required a `+++ ` line before it would
+// create a file, so every proposal parsed to zero files and the Cycle view
+// said "No changes yet." over a 78-line draft.
+describe("a diff with no file header", () => {
+  it("still parses", () => {
+    const files = parseDiff("@@ -1,1 +1,3 @@\n-\n+## REQ-001 — A thing\n+\n+**Priority:** must\n");
+    expect(files).toHaveLength(1);
+    expect(files[0]!.hunks.join("\n")).toContain("REQ-001");
+  });
+
+  it("does not disturb a diff that has headers", () => {
+    const files = parseDiff(
+      "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+y\n" +
+        "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-p\n+q\n",
+    );
+    expect(files.map((f) => f.path)).toEqual(["a.go", "b.go"]);
+  });
+
+  it("is empty for an empty diff", () => {
+    expect(parseDiff("")).toHaveLength(0);
+  });
+});

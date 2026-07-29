@@ -356,6 +356,14 @@ export function parseDiff(diff: string): DiffFile[] {
       files.push(current);
     } else if (line.startsWith("@@")) {
       flushHunk();
+      if (!current) {
+        // A diff of two documents rather than two trees — what a stage's
+        // proposal carries — has no file header at all. Without this the
+        // hunks belonged to no file, parseDiff returned nothing, and the
+        // Cycle view reported "No changes yet." over a whole draft.
+        current = { path: "", hunks: [], isTest: false };
+        files.push(current);
+      }
       hunk.push(line);
     } else if (current && (hunk.length || line.startsWith("---"))) {
       if (!line.startsWith("---")) hunk.push(line);

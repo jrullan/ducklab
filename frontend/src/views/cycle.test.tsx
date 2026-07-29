@@ -255,3 +255,62 @@ describe("Cycle — starting a stage", () => {
     expect(screen.getByTestId("cycle-run").textContent).toContain("Redraft");
   });
 });
+
+describe("Cycle — reading a proposal", () => {
+  const withProposal = (proposal: Record<string, unknown>) =>
+    ({
+      artifact: vi.fn(() =>
+        Promise.resolve({ kind: "requirements", markdown: "", sections: [], proposal }),
+      ),
+      traceCheck: vi.fn(() => Promise.resolve([])),
+      promote: vi.fn(() => Promise.resolve({})),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+    }) as unknown as EngineClient;
+
+  // Deciding whether to accept requirements means reading them. A first draft
+  // has nothing to diff against, so the diff was 78 lines of "+" — and before
+  // this it was not even that, because the headerless diff parsed to nothing
+  // and the panel said "No changes yet." over a whole document.
+  it("shows the proposed document, not a diff", async () => {
+    const client = withProposal({
+      diff: "@@ -1,1 +1,3 @@\n-\n+## REQ-001 — Add a sighting\n",
+      sections: [
+        { id: "REQ-001", title: "Add a sighting", body: "The tool shall record a sighting." },
+        { id: "REQ-002", title: "List the tally", body: "Sorted by count." },
+      ],
+    });
+    render(<Cycle client={client} projectId="p" />);
+    const proposal = await screen.findByTestId("cycle-proposal");
+    expect(proposal.textContent).toContain("REQ-001");
+    expect(proposal.textContent).toContain("The tool shall record a sighting.");
+    expect(screen.getByTestId("proposal-sections")).toBeTruthy();
+  });
+
+  // The diff answers a different question — what changed — which matters on a
+  // redraft and not on a first one.
+  it("offers the diff as a second view", async () => {
+    const client = withProposal({
+      diff: "@@ -1,1 +1,2 @@\n-old line\n+new line\n",
+      sections: [{ id: "REQ-001", title: "A thing", body: "" }],
+    });
+    render(<Cycle client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("proposal-view-toggle"));
+    await waitFor(() => expect(screen.queryByTestId("proposal-sections")).toBeNull());
+    expect(screen.getByTestId("cycle-proposal").textContent).toContain("new line");
+  });
+
+  // A draft the section parser did not understand is still a draft a person
+  // can read and reject.
+  it("falls back to the whole document when no sections parsed", async () => {
+    const client = withProposal({
+      diff: "",
+      markdown: "---\nkind: requirements\n---\n\n## Something the parser missed\n",
+      sections: [],
+    });
+    render(<Cycle client={client} projectId="p" />);
+    const proposal = await screen.findByTestId("cycle-proposal");
+    expect(proposal.textContent).toContain("Something the parser missed");
+    // And not the frontmatter, which is for machines.
+    expect(proposal.textContent).not.toContain("kind: requirements");
+  });
+});

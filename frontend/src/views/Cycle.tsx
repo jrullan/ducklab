@@ -43,6 +43,10 @@ export function Cycle({
   const [brief, setBrief] = useState("");
   const [starting, setStarting] = useState(false);
   const [startedRun, setStartedRun] = useState<string | null>(null);
+  // What a proposal is shown as. Reading comes first: a person accepting a
+  // draft is deciding whether the content is right, and a diff answers a
+  // different question — what changed.
+  const [proposalAsDiff, setProposalAsDiff] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -148,7 +152,7 @@ export function Cycle({
 
         {artifact?.proposal && (
           <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
               <div>
                 <div className="text-sm font-medium text-ink">Proposal awaiting your decision</div>
                 {artifact.proposal.ducklings && (
@@ -161,6 +165,15 @@ export function Cycle({
                   deleted the draft would destroy the evidence of what the
                   ducklings actually produced. */}
               <button
+                type="button"
+                data-testid="proposal-view-toggle"
+                aria-pressed={proposalAsDiff}
+                onClick={() => setProposalAsDiff((v) => !v)}
+                className="mr-2 rounded border border-hairline px-2 py-1 text-xs text-ink-secondary"
+              >
+                {proposalAsDiff ? "Read it" : "What changed"}
+              </button>
+              <button
                 data-testid="cycle-accept"
                 disabled={promoting}
                 onClick={() => void accept()}
@@ -169,7 +182,22 @@ export function Cycle({
                 {promoting ? "Accepting…" : "Accept"}
               </button>
             </div>
-            <DiffView files={parseDiff(artifact.proposal.diff)} />
+            {proposalAsDiff ? (
+              <DiffView files={parseDiff(artifact.proposal.diff)} />
+            ) : artifact.proposal.sections && artifact.proposal.sections.length > 0 ? (
+              <ol className="space-y-3" data-testid="proposal-sections">
+                {artifact.proposal.sections.map((s) => (
+                  <SectionCard key={s.id} section={s} broken={new Set()} />
+                ))}
+              </ol>
+            ) : artifact.proposal.markdown ? (
+              // No sections parsed but a document exists: show it whole rather
+              // than nothing. A draft the parser did not understand is still a
+              // draft a person can read and reject.
+              <Prose body={stripFront(artifact.proposal.markdown)} suppress={[]} />
+            ) : (
+              <DiffView files={parseDiff(artifact.proposal.diff)} />
+            )}
           </section>
         )}
 
@@ -312,4 +340,15 @@ function SectionCard({ section, broken }: { section: Section; broken: Set<string
       )}
     </li>
   );
+}
+
+/** Drops the frontmatter a document carries for machines.
+ *
+ * The card above already says which ducklings wrote it and that it is awaiting
+ * a decision; repeating that as raw YAML is noise between a person and the
+ * thing they are deciding about. */
+function stripFront(md: string): string {
+  if (!md.startsWith("---\n")) return md;
+  const end = md.indexOf("\n---\n", 4);
+  return end < 0 ? md : md.slice(end + 5);
 }

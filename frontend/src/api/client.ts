@@ -65,7 +65,15 @@ export interface Artifact {
   markdown: string;
   sections: Section[] | null;
   /** Present only while a stage's output is awaiting the human gate. */
-  proposal?: { diff: string; run_id?: string; ducklings?: string[] };
+  proposal?: {
+    diff: string;
+    /** The proposed document itself. A first draft has nothing to diff
+     * against, so this is what a person actually reads to decide. */
+    markdown?: string;
+    sections?: Section[] | null;
+    run_id?: string;
+    ducklings?: string[];
+  };
 }
 
 /** A break in the traceability spine. Produced deterministically, never by a
