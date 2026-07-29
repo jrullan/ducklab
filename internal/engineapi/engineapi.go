@@ -505,6 +505,42 @@ func (s *Server) handleBugMove(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, b)
 }
 
+func (s *Server) handleReviewList(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.ReviewList(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleReviewGet(w http.ResponseWriter, r *http.Request) {
+	md, err := s.svc.ReviewGet(r.Context(), r.PathValue("id"), r.PathValue("task"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"markdown": md})
+}
+
+func (s *Server) handleReleaseList(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.ReleaseList(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
+func (s *Server) handleReleaseGet(w http.ResponseWriter, r *http.Request) {
+	md, err := s.svc.ReleaseGet(r.Context(), r.PathValue("id"), r.PathValue("version"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"markdown": md})
+}
+
 func (s *Server) handleReleasePlan(w http.ResponseWriter, r *http.Request) {
 	var req service.ReleaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

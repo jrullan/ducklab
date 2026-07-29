@@ -66,6 +66,9 @@ func Latest(tags []string) (Version, bool) {
 	return out, found
 }
 
+// Newer reports whether a is a later version than b.
+func Newer(a, b Version) bool { return less(b, a) }
+
 func less(a, b Version) bool {
 	if a.Major != b.Major {
 		return a.Major < b.Major

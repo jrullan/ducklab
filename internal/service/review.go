@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -247,4 +248,91 @@ func writeReview(projectRoot string, rec review.Record) (string, error) {
 		return path, nil
 	}
 	return rel, nil
+}
+
+// ReviewSummary is one filed review, enough to list without reading the body.
+type ReviewSummary struct {
+	TaskID     string `json:"task_id"`
+	Verdict    string `json:"verdict"`
+	Findings   int    `json:"findings"`
+	CommitSHA  string `json:"commit,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	ReviewedAt string `json:"reviewed_at,omitempty"`
+}
+
+// ReviewList returns the reviews on file, newest first.
+func (s *Service) ReviewList(ctx context.Context, projectID string) ([]ReviewSummary, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	names, err := os.ReadDir(review.Dir(entry.Path))
+	if os.IsNotExist(err) {
+		// A project nobody has reviewed has no directory, and that is not an
+		// error — it is the answer.
+		return []ReviewSummary{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReviewSummary, 0, len(names))
+	for _, n := range names {
+		if n.IsDir() || !strings.HasSuffix(n.Name(), ".md") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(review.Dir(entry.Path), n.Name()))
+		if err != nil {
+			continue
+		}
+		out = append(out, summariseReview(strings.TrimSuffix(n.Name(), ".md"), string(body)))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ReviewedAt != out[j].ReviewedAt {
+			return out[i].ReviewedAt > out[j].ReviewedAt
+		}
+		return out[i].TaskID < out[j].TaskID
+	})
+	return out, nil
+}
+
+// ReviewGet returns one review's markdown.
+func (s *Service) ReviewGet(ctx context.Context, projectID, taskID string) (string, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return "", err
+	}
+	body, err := os.ReadFile(review.Path(entry.Path, taskID))
+	if os.IsNotExist(err) {
+		return "", fmt.Errorf("no review of %s; run `ducklab review %s`", taskID, taskID)
+	}
+	return string(body), err
+}
+
+// summariseReview reads the frontmatter a review wrote about itself.
+//
+// Parsed from the document rather than tracked in a second index: the file is
+// the record, and an index beside it is one more thing that can disagree with
+// what is on disk.
+func summariseReview(taskID, body string) ReviewSummary {
+	sum := ReviewSummary{TaskID: taskID}
+	for _, line := range strings.Split(body, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			if strings.HasPrefix(line, "## ") {
+				sum.Findings++
+			}
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "verdict":
+			sum.Verdict = strings.TrimSpace(v)
+		case "commit":
+			sum.CommitSHA = strings.TrimSpace(v)
+		case "mode":
+			sum.Mode = strings.TrimSpace(v)
+		case "reviewed_at":
+			sum.ReviewedAt = strings.TrimSpace(v)
+		}
+	}
+	return sum
 }

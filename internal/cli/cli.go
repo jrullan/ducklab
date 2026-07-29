@@ -492,13 +492,27 @@ func runCmd(verb string, args []string, repo string) int {
 	}
 	switch verb {
 	case "list":
-		info, err := daemon.ReadEngineJSON()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "engine not running")
-			return 9
+		// Scoped to the project you are standing in.
+		//
+		// It listed every run the engine knew, from every project, so `run
+		// list` in one repo showed another's work. I was misled by it twice
+		// while building this: once reading a stage's result off the wrong
+		// project, once wiring a monitor to the first row. --all is there for
+		// when the whole picture is what you want.
+		all := false
+		for _, a := range args {
+			if a == "--all" {
+				all = true
+			}
 		}
-		client := engineclt.New(info)
-		runs, err := client.RunList("")
+		client, projectID, code := project(repo)
+		if code != 0 {
+			return code
+		}
+		if all {
+			projectID = ""
+		}
+		runs, err := client.RunList(projectID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

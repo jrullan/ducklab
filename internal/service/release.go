@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -354,4 +355,108 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 	return map[string]interface{}{
 		"version": v.String(), "tag": v.String(), "commit": sha, "notes": rel,
 	}, nil
+}
+
+// ReleaseSummary is one release, cut or drafted.
+type ReleaseSummary struct {
+	Version    string `json:"version"`
+	Since      string `json:"since,omitempty"`
+	Tasks      int    `json:"tasks"`
+	Unverified int    `json:"unverified,omitempty"`
+	// Drafted is true while the notes are still awaiting a person. A draft and
+	// a cut release are not the same claim, and a list that showed them alike
+	// would let an unapproved one be read as shipped.
+	Drafted bool `json:"drafted"`
+	Tagged  bool `json:"tagged"`
+}
+
+// ReleaseList returns the releases on file, newest version first.
+func (s *Service) ReleaseList(ctx context.Context, projectID string) ([]ReleaseSummary, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	names, err := os.ReadDir(release.Dir(entry.Path))
+	if os.IsNotExist(err) {
+		return []ReleaseSummary{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	tags, _ := vcs.New(entry.Path).Tags()
+	tagged := map[string]bool{}
+	for _, t := range tags {
+		tagged[t] = true
+	}
+
+	out := make([]ReleaseSummary, 0, len(names))
+	for _, n := range names {
+		if n.IsDir() {
+			continue
+		}
+		name := n.Name()
+		draft := strings.HasSuffix(name, ".proposed")
+		name = strings.TrimSuffix(name, ".proposed")
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		version := strings.TrimSuffix(name, ".md")
+		body, err := os.ReadFile(filepath.Join(release.Dir(entry.Path), n.Name()))
+		if err != nil {
+			continue
+		}
+		sum := summariseRelease(version, string(body))
+		sum.Drafted = draft
+		sum.Tagged = tagged[version]
+		out = append(out, sum)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, aok := release.ParseVersion(out[i].Version)
+		b, bok := release.ParseVersion(out[j].Version)
+		if aok && bok {
+			return release.Newer(a, b)
+		}
+		return out[i].Version > out[j].Version
+	})
+	return out, nil
+}
+
+// ReleaseGet returns one release's markdown, draft or final.
+func (s *Service) ReleaseGet(ctx context.Context, projectID, version string) (string, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return "", err
+	}
+	v, ok := release.ParseVersion(version)
+	if !ok {
+		return "", fmt.Errorf("%q is not a version like v1.2.3", version)
+	}
+	final := release.Path(entry.Path, v)
+	if body, err := os.ReadFile(final); err == nil {
+		return string(body), nil
+	}
+	body, err := os.ReadFile(final + ".proposed")
+	if os.IsNotExist(err) {
+		return "", fmt.Errorf("no release %s", v)
+	}
+	return string(body), err
+}
+
+func summariseRelease(version, body string) ReleaseSummary {
+	sum := ReleaseSummary{Version: version}
+	for _, line := range strings.Split(body, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "since":
+			sum.Since = strings.TrimSpace(v)
+		case "tasks":
+			fmt.Sscanf(strings.TrimSpace(v), "%d", &sum.Tasks)
+		case "unverified":
+			fmt.Sscanf(strings.TrimSpace(v), "%d", &sum.Unverified)
+		}
+	}
+	return sum
 }

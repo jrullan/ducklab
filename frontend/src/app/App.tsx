@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EngineClient, type Duckling, type Project } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
@@ -9,6 +9,8 @@ import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
+import { Release } from "../views/Release";
+import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
 import { parseRoute, routeHref, type Route } from "./routes";
@@ -29,6 +31,8 @@ const NAV: { route: Route; label: string }[] = [
   { route: { name: "runs" }, label: "Runs" },
   { route: { name: "cycle" }, label: "Cycle" },
   { route: { name: "board" }, label: "Board" },
+  { route: { name: "review" }, label: "Review" },
+  { route: { name: "release" }, label: "Release" },
   { route: { name: "ducklings" }, label: "Ducklings" },
   { route: { name: "settings" }, label: "Settings" },
 ];
@@ -46,6 +50,14 @@ export function App() {
   const [engineVersion, setEngineVersion] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<EngineClient | null>(null);
+
+  // The stream and its handlers outlive any one project, so they read the
+  // choice through a ref rather than capturing whichever was current when the
+  // connection opened.
+  const projectRef = useRef(projectId);
+  useEffect(() => {
+    projectRef.current = projectId;
+  }, [projectId]);
 
   const connection = useRuns((s) => s.connection);
   const runs = useRuns((s) => s.runs);
@@ -66,7 +78,14 @@ export function App() {
     setClient(c);
 
     const refresh = () => {
-      c.runs().then(useRuns.getState().setRuns).catch((e) => setError(String(e)));
+      // Scoped to the chosen project.
+      //
+      // Overview and Runs read this store, and it used to hold every run the
+      // engine knew, from every project, fetched once at startup — so those
+      // two views ignored the dropdown that every other view obeys, and went
+      // stale the moment anything ran. The same defect existed in the CLI's
+      // `run list`.
+      c.runs(projectRef.current).then(useRuns.getState().setRuns).catch((e) => setError(String(e)));
       c.ducklings().then(setDucklings).catch(() => {});
       c.projects()
         .then((ps) => {
@@ -94,6 +113,15 @@ export function App() {
       baseUrl: cfg.baseUrl,
       token: cfg.token,
       onEvent: (e) => {
+        // The stream carries every project's events. Without this filter a run
+        // started elsewhere appeared in Overview and Runs — and since a
+        // run_start now creates a record, it would arrive as a new row rather
+        // than merely updating one.
+        //
+        // Events with no project_id are kept: heartbeats and token_delta carry
+        // none, and dropping them would silence the connection indicator and
+        // every streamed turn.
+        if (e.project_id && projectRef.current && e.project_id !== projectRef.current) return;
         if (batcher.push(e)) return;
         useRuns.getState().applyEvent(e);
       },
@@ -123,6 +151,21 @@ export function App() {
       batcher.drain();
     };
   }, []);
+
+  // Changing project reloads what the project-blind store holds. Without
+  // this the switch changed four views and left two showing the old one's
+  // work.
+  useEffect(() => {
+    if (!client || !projectId) return;
+    let cancelled = false;
+    client
+      .runs(projectId)
+      .then((rs) => !cancelled && useRuns.getState().setRuns(rs))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, projectId]);
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).
   const degraded = connection === "reconnecting" || connection === "closed";
@@ -190,6 +233,22 @@ export function App() {
           (client && projectId ? (
             <div className="p-4">
               <Board client={client} projectId={projectId} tab={route.tab} />
+            </div>
+          ) : (
+            <p className="m-4 text-ink-muted">No project registered yet.</p>
+          ))}
+        {route.name === "review" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Review client={client} projectId={projectId} />
+            </div>
+          ) : (
+            <p className="m-4 text-ink-muted">No project registered yet.</p>
+          ))}
+        {route.name === "release" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Release client={client} projectId={projectId} />
             </div>
           ) : (
             <p className="m-4 text-ink-muted">No project registered yet.</p>

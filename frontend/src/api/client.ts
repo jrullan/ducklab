@@ -105,6 +105,28 @@ export interface Bug {
   updated_at: string;
 }
 
+/** One filed review, enough to list without reading the body. */
+export interface ReviewSummary {
+  task_id: string;
+  verdict: string;
+  findings: number;
+  commit?: string;
+  mode?: string;
+  reviewed_at?: string;
+}
+
+export interface ReleaseSummary {
+  version: string;
+  since?: string;
+  tasks: number;
+  unverified?: number;
+  /** Still awaiting a person. A draft and a cut release are not the same
+   * claim, and showing them alike would let an unapproved one read as
+   * shipped. */
+  drafted: boolean;
+  tagged: boolean;
+}
+
 /** A tournament candidate. There is no author field, by design (I7). */
 export interface Candidate {
   label: string;
@@ -251,6 +273,30 @@ export class EngineClient {
       "POST",
       `/v1/projects/${projectId}/bugs/${bugId}/promote`,
     );
+  }
+  reviews(projectId: string) {
+    return this.request<{ items: ReviewSummary[] | null }>(
+      "GET",
+      `/v1/projects/${projectId}/reviews`,
+    ).then((r) => r.items ?? []);
+  }
+  review(projectId: string, taskId: string) {
+    return this.request<{ markdown: string }>(
+      "GET",
+      `/v1/projects/${projectId}/reviews/${taskId}`,
+    ).then((r) => r.markdown ?? "");
+  }
+  releases(projectId: string) {
+    return this.request<{ items: ReleaseSummary[] | null }>(
+      "GET",
+      `/v1/projects/${projectId}/releases`,
+    ).then((r) => r.items ?? []);
+  }
+  release(projectId: string, version: string) {
+    return this.request<{ markdown: string }>(
+      "GET",
+      `/v1/projects/${projectId}/releases/${version}`,
+    ).then((r) => r.markdown ?? "");
   }
   tasks(projectId: string) {
     // items is null, not [], when a project has no plan yet.
