@@ -207,7 +207,12 @@ export class EngineClient {
     return this.request<{ run: Run; events: unknown[] }>("GET", `/v1/runs/${id}`);
   }
   runDiff(id: string) {
-    return this.request<{ diff: string }>("GET", `/v1/runs/${id}/diff`).then((r) => r.diff ?? "");
+    return this.request<{ diff: string; tests?: string }>("GET", `/v1/runs/${id}/diff`).then((r) => ({
+      diff: r.diff ?? "",
+      // Present only for a run flagged for editing tests it was not asked to
+      // touch (05 §5.3).
+      tests: r.tests ?? "",
+    }));
   }
   runCandidates(id: string) {
     return this.request<{ items: Candidate[] }>("GET", `/v1/runs/${id}/candidates`).then(

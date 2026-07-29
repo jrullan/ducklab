@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -94,13 +96,20 @@ func Run(args []string) int {
 				cmdArgs = remaining[2:]
 			}
 		case "run":
-			if remaining[1] == "list" || remaining[1] == "show" || remaining[1] == "watch" || remaining[1] == "accept" || remaining[1] == "reject" || remaining[1] == "answer" || remaining[1] == "abort" || remaining[1] == "gc" || remaining[1] == "resume" {
+			if runVerbs[remaining[1]] {
 				verb = remaining[1]
 				cmdArgs = remaining[2:]
-			} else {
-				// First arg is a task ID
+			} else if taskIDRe.MatchString(remaining[1]) {
+				// A task ID: ducklab run T-001
 				verb = ""
 				cmdArgs = remaining[1:]
+			} else {
+				// Anything else used to be treated as a task ID, so a
+				// mistyped or newly added subcommand started a model run
+				// instead of reporting itself. A typo should not cost tokens.
+				fmt.Fprintf(os.Stderr, "unknown run command: %s\n", remaining[1])
+				fmt.Fprintf(os.Stderr, "  a task ID looks like T-001; subcommands are: %s\n", runVerbList())
+				return 2
 			}
 		default:
 			verb = remaining[1]
@@ -441,6 +450,25 @@ func resolveProjectID(client *engineclt.Client, repo string) (string, int) {
 	return "", 2
 }
 
+// runVerbs are the subcommands of `ducklab run`. Anything else in that
+// position must look like a task ID.
+var runVerbs = map[string]bool{
+	"list": true, "show": true, "watch": true, "diff": true, "accept": true,
+	"reject": true, "answer": true, "abort": true, "gc": true, "resume": true,
+}
+
+// taskIDRe is the shape of an ID on the traceability spine (02 §3).
+var taskIDRe = regexp.MustCompile(`^[A-Za-z]+-\d+$`)
+
+func runVerbList() string {
+	names := make([]string, 0, len(runVerbs))
+	for v := range runVerbs {
+		names = append(names, v)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 func runCmd(verb string, args []string, repo string) int {
 	if verb == "" {
 		// ducklab run <task-id>
@@ -540,6 +568,40 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Printf("run %s: %s (task %s)\n", run["id"], run["status"], run["task_id"])
 		fmt.Printf("  verdict: %s\n", run["verdict"])
+		return 0
+	case "diff":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run diff <run-id> [--tests]")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		diff, tests, warning, err := engineclt.New(info).RunDiff(args[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		// --tests narrows to the hunks the guard pulled out, which is what the
+		// warning tells a reader to look at.
+		if len(args) > 1 && args[1] == "--tests" {
+			if tests == "" {
+				fmt.Println("this run changed no test files")
+				return 0
+			}
+			fmt.Print(tests)
+			return 0
+		}
+		// Unflagged, the whole diff. Flagged, the test hunks come first,
+		// because being read before the decision is the entire point.
+		if tests != "" {
+			fmt.Printf("⚠ %s\n\n", warning)
+			fmt.Print(tests)
+			fmt.Println()
+		}
+		fmt.Print(diff)
 		return 0
 	case "accept":
 		if len(args) < 1 {
@@ -681,6 +743,21 @@ func runCmd(verb string, args []string, repo string) int {
 	}
 }
 
+// asStrings reads a JSON array of strings out of an event payload.
+func asStrings(v interface{}) []string {
+	items, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds int) int {
 	if repo == "" {
 		repo = "."
@@ -801,6 +878,15 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 		case "verdict":
 			verdict, _ = e.Data["verdict"].(string)
 			fmt.Printf("  verdict: %s\n", verdict)
+		case "tests_modified":
+			// Printed before the gate line, because a green verdict on a run
+			// that rewrote its own tests is the one that most needs reading
+			// (05 §5.3). Not a blocker; the accept command is unchanged.
+			fmt.Printf("  ⚠ %v\n", e.Data["message"])
+			for _, f := range asStrings(e.Data["files"]) {
+				fmt.Printf("      %s\n", f)
+			}
+			fmt.Printf("      ducklab run diff %s --tests\n", runID)
 		case "human_needed":
 			status = "paused"
 			fmt.Printf("  ⏸ waiting for you (%v) — ducklab run accept %s\n", e.Data["kind"], runID)

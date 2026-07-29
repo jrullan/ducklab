@@ -175,3 +175,59 @@ describe("RunView", () => {
     expect(container.querySelector('[data-testid="conversation"]')!.innerHTML).not.toContain("pato-uno");
   });
 });
+
+// A gate is only worth what the tests are worth. When a run edits tests the
+// task never asked about, those hunks go in front of the person deciding — not
+// somewhere below in a diff they may not scroll (05 §5.3).
+describe("RunView and a run that edited tests", () => {
+  const testDiff = "diff --git a/add_test.go b/add_test.go\n--- a/add_test.go\n+++ b/add_test.go\n@@ -1 +1 @@\n-want := 4\n+want := 6\n";
+
+  const tamperClient = () =>
+    clientWith((path) => {
+      if (path.endsWith("/diff"))
+        return json({ diff: "diff --git a/add.go b/add.go\n--- a/add.go\n+++ b/add.go\n@@ -1 +1 @@\n+return a * b\n" + testDiff, tests: testDiff });
+      if (path.endsWith("/verify")) return json({ output: "ok" });
+      if (path.endsWith("/candidates")) return json({ items: [] });
+      return json({});
+    });
+
+  beforeEach(() => useRuns.setState({ runs: {}, connection: "open" }));
+
+  it("puts the test hunks in front of the reader, with the reason", async () => {
+    useRuns.getState().setRun(run);
+    render(<RunView runId="r-1" client={tamperClient()} />);
+
+    const flagged = await screen.findByTestId("tests-modified");
+    expect(flagged.textContent).toContain("read these hunks before accepting");
+    expect(flagged.textContent).toContain("want := 6");
+    // Above the full diff, not buried in it.
+    const views = screen.getAllByTestId("diff-view");
+    expect(views).toHaveLength(2);
+    expect(flagged.contains(views[0]!)).toBe(true);
+    expect(flagged.compareDocumentPosition(views[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByTestId("tab-diff").textContent).toContain("edits tests");
+  });
+
+  // Sometimes a test is genuinely wrong. Ducklab reports; the human decides.
+  it("does not block accepting", async () => {
+    useRuns.getState().setRun(run);
+    render(<RunView runId="r-1" client={tamperClient()} />);
+    await screen.findByTestId("tests-modified");
+    expect(screen.getByTestId("accept-button").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("says nothing when the run touched no tests", async () => {
+    useRuns.getState().setRun(run);
+    render(<RunView runId="r-1" client={okClientForTamper()} />);
+    await screen.findByTestId("diff-view");
+    expect(screen.queryByTestId("tests-modified")).toBeNull();
+  });
+
+  const okClientForTamper = () =>
+    clientWith((path) => {
+      if (path.endsWith("/diff")) return json({ diff: "diff --git a/add.go b/add.go\n--- a/add.go\n+++ b/add.go\n@@ -1 +1 @@\n+return a + b\n" });
+      if (path.endsWith("/verify")) return json({ output: "ok" });
+      if (path.endsWith("/candidates")) return json({ items: [] });
+      return json({});
+    });
+});

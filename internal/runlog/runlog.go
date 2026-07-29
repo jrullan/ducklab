@@ -247,6 +247,15 @@ func (w *Writer) WriteDiff(diff string) error {
 	return os.WriteFile(path, []byte(diff), 0o644)
 }
 
+// WriteTestHunks writes the part of the diff that touches tests (05 §5.3).
+//
+// Kept as its own file rather than recomputed from diff.patch, so what the
+// human gate showed at decision time survives a later change to the globs.
+func (w *Writer) WriteTestHunks(hunks string) error {
+	path := filepath.Join(w.runDir, "tests.patch")
+	return os.WriteFile(path, []byte(hunks), 0o644)
+}
+
 // WriteTranscript writes transcript.md.
 func (w *Writer) WriteTranscript(content string) error {
 	path := filepath.Join(w.runDir, "transcript.md")

@@ -79,6 +79,16 @@ type ducklingTestResponse struct {
 
 type diffResponse struct {
 	Diff string `json:"diff"`
+	// Tests is the part of Diff that touches test files, when the run was
+	// flagged for editing tests the task never asked about (05 §5.3). Sent
+	// separately so a client shows it first rather than hoping the reader
+	// scrolls to it.
+	Tests string `json:"tests,omitempty"`
+	// Warning is what to tell the reader about Tests. Sent by the engine
+	// rather than composed by each client: the CLI may not import verify
+	// (AC-16), and three clients inventing three wordings for the same
+	// finding is three things to keep in step.
+	Warning string `json:"warning,omitempty"`
 }
 
 type verifyResponse struct {

@@ -210,6 +210,10 @@ type Verify struct {
 	Lint     string `toml:"lint" json:"lint"`
 	Custom   string `toml:"custom" json:"custom"`
 	TimeoutS int    `toml:"timeout_s" json:"timeout_s"`
+	// TestGlobs says where this project's tests live, for the tampering
+	// guard (05 §5.3). Empty means verify.DefaultTestGlobs, which covers the
+	// usual Go, Python and TypeScript conventions.
+	TestGlobs []string `toml:"test_globs" json:"test_globs"`
 }
 
 // Roster maps roles to ducklings.

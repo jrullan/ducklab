@@ -173,6 +173,20 @@ func (c *Client) ProjectInit(path, name, describe string, gitInit bool) (map[str
 	return result, err
 }
 
+// RunDiff returns a run's diff and, when it was flagged, the part of it that
+// touches tests.
+func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {
+	var result struct {
+		Diff    string `json:"diff"`
+		Tests   string `json:"tests"`
+		Warning string `json:"warning"`
+	}
+	if err := c.get("/v1/runs/"+id+"/diff", &result); err != nil {
+		return "", "", "", err
+	}
+	return result.Diff, result.Tests, result.Warning, nil
+}
+
 // RunStart starts a run.
 func (c *Client) RunStart(projectID string, req map[string]interface{}) (map[string]interface{}, error) {
 	var result map[string]interface{}

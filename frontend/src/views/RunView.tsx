@@ -51,12 +51,22 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
   const [tab, setTab] = useState<Tab>("diff");
   const [diff, setDiff] = useState("");
+  const [testHunks, setTestHunks] = useState("");
   const [verify, setVerify] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [answer, setAnswer] = useState("");
 
   useEffect(() => {
-    client.runDiff(runId).then(setDiff).catch(() => setDiff(""));
+    client
+      .runDiff(runId)
+      .then((d) => {
+        setDiff(d.diff);
+        setTestHunks(d.tests);
+      })
+      .catch(() => {
+        setDiff("");
+        setTestHunks("");
+      });
     client.runVerify(runId).then(setVerify).catch(() => setVerify(""));
     client.runCandidates(runId).then(setCandidates).catch(() => setCandidates([]));
   }, [runId, client, run?.status]);
@@ -194,7 +204,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           have any. */}
       <nav className="mt-3 flex gap-2 border-b border-hairline px-4">
         {([
-          ["diff", diff ? undefined : "empty"],
+          ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
           ["verify", verify ? undefined : "no output"],
           ["candidates", candidates.length ? String(candidates.length) : "none"],
         ] as [Tab, string | undefined][]).map(([t, note]) => (
@@ -212,6 +222,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       </nav>
 
       <div className="p-2">
+        {/* The test hunks come first, above the rest of the diff, because the
+            whole point is that they are read before the decision and not
+            after. Not a blocker — sometimes a test is genuinely wrong (05
+            §5.3) — so the Accept button stays exactly where it was. */}
+        {tab === "diff" && testHunks && (
+          <section
+            className="mb-3 rounded-card border border-serious p-2"
+            data-testid="tests-modified"
+          >
+            <p className="mb-2 text-sm text-serious">
+              this change edits tests; read these hunks before accepting
+            </p>
+            <DiffView files={parseDiff(testHunks)} />
+          </section>
+        )}
         {tab === "diff" &&
           (diff ? (
             <DiffView files={parseDiff(diff)} />

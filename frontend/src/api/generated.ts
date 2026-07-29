@@ -50,6 +50,7 @@ export interface ConfigProject {
   autonomy?: string;
   budget?: ConfigBudget;
   created?: string;
+  describe?: string;
   git?: ConfigGit;
   github?: ConfigGitHub;
   id?: string;
@@ -82,6 +83,7 @@ export interface ConfigVerify {
   custom?: string;
   lint?: string;
   mode?: string;
+  test_globs?: string[];
   tests?: string;
   timeout_s?: number;
 }
@@ -116,6 +118,8 @@ export interface EngineapianswerRequest {
 
 export interface EngineapidiffResponse {
   diff?: string;
+  tests?: string;
+  warning?: string;
 }
 
 export interface EngineapiducklingTestRequest {
@@ -243,6 +247,14 @@ export interface ServiceAcceptResult {
   commit_sha?: string;
 }
 
+export interface ServiceBugRequest {
+  body?: string;
+  reporter?: string;
+  severity?: string;
+  source?: string;
+  title?: string;
+}
+
 export interface ServiceCandidateView {
   diff?: string;
   gate?: string;
@@ -261,8 +273,18 @@ export interface ServiceProject {
   config?: ConfigProject;
   gate?: string;
   id?: string;
+  missing?: boolean;
   name?: string;
   path?: string;
+}
+
+export interface ServiceReleaseRequest {
+  bump?: string;
+}
+
+export interface ServiceReviewRequest {
+  mode?: string;
+  task_id?: string;
 }
 
 export interface ServiceRosterEntry {
@@ -287,9 +309,9 @@ export interface ServiceRunRequest {
   dry_run?: boolean;
   ducklings?: string[];
   mode?: string;
+  no_stream?: boolean;
   parallel?: boolean;
   rounds?: number;
-  stream?: boolean;
   task_id?: string;
   unsafe_writes?: boolean;
   verify?: string;
@@ -341,10 +363,24 @@ export const OPERATIONS = [
   { id: "Health", method: "GET", path: "/v1/health" },
   { id: "ProjectList", method: "GET", path: "/v1/projects" },
   { id: "ProjectInit", method: "POST", path: "/v1/projects" },
+  { id: "ProjectForget", method: "DELETE", path: "/v1/projects/{id}" },
   { id: "ProjectGet", method: "GET", path: "/v1/projects/{id}" },
+  { id: "ProjectUpdate", method: "PATCH", path: "/v1/projects/{id}" },
   { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
   { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
+  { id: "BugList", method: "GET", path: "/v1/projects/{id}/bugs" },
+  { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
+  { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },
+  { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
+  { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
+  { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
+  { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
+  { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },
+  { id: "ReleaseCut", method: "POST", path: "/v1/projects/{id}/releases/{version}/cut" },
   { id: "Report", method: "GET", path: "/v1/projects/{id}/report" },
+  { id: "ReviewList", method: "GET", path: "/v1/projects/{id}/reviews" },
+  { id: "ReviewStart", method: "POST", path: "/v1/projects/{id}/reviews" },
+  { id: "ReviewGet", method: "GET", path: "/v1/projects/{id}/reviews/{task}" },
   { id: "RosterGet", method: "GET", path: "/v1/projects/{id}/roster" },
   { id: "RosterSet", method: "PUT", path: "/v1/projects/{id}/roster" },
   { id: "RosterSuggest", method: "GET", path: "/v1/projects/{id}/roster/suggest" },

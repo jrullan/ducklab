@@ -29,6 +29,13 @@ func (s *Service) RunDiff(ctx context.Context, id string) (string, error) {
 	return s.readRunFile(id, "diff.patch")
 }
 
+// RunTestHunks returns the test-file part of the diff for a flagged run.
+//
+// Empty for every run that did not touch tests, which is most of them.
+func (s *Service) RunTestHunks(ctx context.Context, id string) (string, error) {
+	return s.readRunFile(id, "tests.patch")
+}
+
 // RunTranscript returns the human-readable conversation.
 func (s *Service) RunTranscript(ctx context.Context, id string) (string, error) {
 	// Built from the event log rather than a second file.

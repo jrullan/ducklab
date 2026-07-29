@@ -149,6 +149,9 @@
           "created": {
             "type": "string"
           },
+          "describe": {
+            "type": "string"
+          },
           "git": {
             "$ref": "#/components/schemas/ConfigGit"
           },
@@ -187,6 +190,7 @@
           "autonomy",
           "budget",
           "created",
+          "describe",
           "git",
           "github",
           "id",
@@ -276,6 +280,12 @@
           "mode": {
             "type": "string"
           },
+          "test_globs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "tests": {
             "type": "string"
           },
@@ -288,6 +298,7 @@
           "custom",
           "lint",
           "mode",
+          "test_globs",
           "tests",
           "timeout_s"
         ],
@@ -388,6 +399,12 @@
       "EngineapidiffResponse": {
         "properties": {
           "diff": {
+            "type": "string"
+          },
+          "tests": {
+            "type": "string"
+          },
+          "warning": {
             "type": "string"
           }
         },
@@ -825,6 +842,33 @@
         ],
         "type": "object"
       },
+      "ServiceBugRequest": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "reporter": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "reporter",
+          "severity",
+          "source",
+          "title"
+        ],
+        "type": "object"
+      },
       "ServiceCandidateView": {
         "properties": {
           "diff": {
@@ -880,6 +924,9 @@
           "id": {
             "type": "string"
           },
+          "missing": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -894,6 +941,32 @@
           "id",
           "name",
           "path"
+        ],
+        "type": "object"
+      },
+      "ServiceReleaseRequest": {
+        "properties": {
+          "bump": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bump"
+        ],
+        "type": "object"
+      },
+      "ServiceReviewRequest": {
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "task_id"
         ],
         "type": "object"
       },
@@ -970,14 +1043,14 @@
           "mode": {
             "type": "string"
           },
+          "no_stream": {
+            "type": "boolean"
+          },
           "parallel": {
             "type": "boolean"
           },
           "rounds": {
             "type": "integer"
-          },
-          "stream": {
-            "type": "boolean"
           },
           "task_id": {
             "type": "string"
@@ -995,9 +1068,9 @@
           "dry_run",
           "ducklings",
           "mode",
+          "no_stream",
           "parallel",
           "rounds",
-          "stream",
           "task_id",
           "unsafe_writes",
           "verify"
@@ -1405,6 +1478,33 @@
       }
     },
     "/v1/projects/{id}": {
+      "delete": {
+        "operationId": "ProjectForget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unregister a project"
+      },
       "get": {
         "operationId": "ProjectGet",
         "parameters": [
@@ -1438,6 +1538,53 @@
           }
         ],
         "summary": "Get a project"
+      },
+      "patch": {
+        "operationId": "ProjectUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceProject"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update project config keys"
       }
     },
     "/v1/projects/{id}/artifacts/{kind}": {
@@ -1514,6 +1661,329 @@
         "summary": "Accept a pending proposal"
       }
     },
+    "/v1/projects/{id}/bugs": {
+      "get": {
+        "operationId": "BugList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List bugs"
+      },
+      "post": {
+        "operationId": "BugAdd",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceBugRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Report a bug"
+      }
+    },
+    "/v1/projects/{id}/bugs/triage": {
+      "post": {
+        "operationId": "BugTriage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Triage the open bugs"
+      }
+    },
+    "/v1/projects/{id}/bugs/{bug}/promote": {
+      "post": {
+        "operationId": "BugPromote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Promote a bug to a task"
+      }
+    },
+    "/v1/projects/{id}/bugs/{bug}/status": {
+      "post": {
+        "operationId": "BugMove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Move a bug"
+      }
+    },
+    "/v1/projects/{id}/releases": {
+      "get": {
+        "operationId": "ReleaseList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List releases"
+      },
+      "post": {
+        "operationId": "ReleasePlan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Plan a release"
+      }
+    },
+    "/v1/projects/{id}/releases/{version}": {
+      "get": {
+        "operationId": "ReleaseGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a release"
+      }
+    },
+    "/v1/projects/{id}/releases/{version}/cut": {
+      "post": {
+        "operationId": "ReleaseCut",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cut a planned release"
+      }
+    },
     "/v1/projects/{id}/report": {
       "get": {
         "operationId": "Report",
@@ -1548,6 +2018,116 @@
           }
         ],
         "summary": "Solo-baseline comparison"
+      }
+    },
+    "/v1/projects/{id}/reviews": {
+      "get": {
+        "operationId": "ReviewList",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List reviews"
+      },
+      "post": {
+        "operationId": "ReviewStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Review an accepted task"
+      }
+    },
+    "/v1/projects/{id}/reviews/{task}": {
+      "get": {
+        "operationId": "ReviewGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a review"
       }
     },
     "/v1/projects/{id}/roster": {

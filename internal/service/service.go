@@ -910,6 +910,27 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	diff, _ := git.Diff()
 	rs.writer.WriteDiff(diff)
 
+	// A gate is only worth what the tests are worth. A change that edits both
+	// at once goes green either way, so the test hunks are pulled out and put
+	// in front of the person deciding (05 §5.3). Never blocked: sometimes a
+	// test is genuinely wrong. Only never hidden.
+	//
+	// The task's own words decide whether this is a surprise. A task that says
+	// "add tests for X" does not need a warning about tests changing, and a
+	// warning that is always on is one nobody reads.
+	var taskText string
+	if task := s.findTask(ctx, rs.run.ProjectID, rs.run.TaskID); task != nil {
+		taskText = task.Title + "\n" + task.Body
+	}
+	if tamper := verify.CheckTampering(diff, taskText, projCfg.Verify.TestGlobs); tamper.Flagged() {
+		rs.run.TestsModified = true
+		rs.writer.WriteTestHunks(tamper.Hunks)
+		rs.writer.AppendEvent("tests_modified", map[string]interface{}{
+			"files":   tamper.Files,
+			"message": verify.TamperMessage,
+		})
+	}
+
 	// Check if human gate is needed
 	if rs.run.Autonomy == "manual" || rs.run.Autonomy == "guarded" {
 		if verdict == "PASSED" || verdict == "UNVERIFIED" {

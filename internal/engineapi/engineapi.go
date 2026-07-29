@@ -17,6 +17,7 @@ import (
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/service"
+	"github.com/jrullan/ducklab/internal/verify"
 )
 
 // Server is the engine API server.
@@ -151,7 +152,14 @@ func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
-	s.json(w, http.StatusOK, map[string]interface{}{"diff": diff})
+	// tests.patch exists only for a flagged run, so its absence is the normal
+	// case and not an error.
+	tests, _ := s.svc.RunTestHunks(r.Context(), r.PathValue("id"))
+	warning := ""
+	if tests != "" {
+		warning = verify.TamperMessage
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"diff": diff, "tests": tests, "warning": warning})
 }
 
 func (s *Server) handleRunCandidates(w http.ResponseWriter, r *http.Request) {
