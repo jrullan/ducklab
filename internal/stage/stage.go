@@ -48,6 +48,11 @@ type Params struct {
 	// Seed is an existing document to work from (`--from brief.txt`) instead
 	// of interviewing the human.
 	Seed string
+	// Rounds overrides the script's limit. A round is the whole turn sequence
+	// — draft, critique, revise — not one turn, and the loop stops early when
+	// the reviewer approves, so raising this costs nothing on a draft that
+	// converges.
+	Rounds int
 	// Mode picks the script. Empty means council, which is the spec's answer
 	// for an artifact stage (05 §4.4).
 	Mode string
@@ -107,6 +112,9 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	}
 
 	script := strategy.ArtifactScript(kind.Prefix(), p.Mode)
+	if p.Rounds > 0 {
+		script.MaxRounds = p.Rounds
+	}
 	raw, err := p.Execute(ctx, script, prompt)
 	if err != nil {
 		return nil, err

@@ -26,6 +26,9 @@ type StageRequest struct {
 	Mode  string `json:"mode"`
 	// From seeds intake with an existing document instead of interviewing.
 	From string `json:"from"`
+	// Rounds overrides the script's own limit. Zero means the script decides,
+	// which is two for a council.
+	Rounds int `json:"rounds"`
 	// Revise is what to change about the draft already on the table. Set only
 	// when revising: it turns the run from "write this document" into "edit
 	// this one", which is the answer to a proposal that is almost right.
@@ -143,6 +146,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		RunID:       rs.run.ID,
 		Seed:        seed,
 		Mode:        req.Mode,
+		Rounds:      req.Rounds,
 		Revision:    req.Revise,
 		Ducklings:   ducklingList(roster),
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {

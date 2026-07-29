@@ -192,6 +192,7 @@ describe("Cycle — starting a stage", () => {
       expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
         from: "A tool that tracks bird sightings.",
         mode: "council",
+        rounds: 2,
       }),
     );
     // The run is where the work is visible, so it is offered — not jumped to,
@@ -203,7 +204,7 @@ describe("Cycle — starting a stage", () => {
     const c = client();
     render(<Cycle client={c} projectId="p" />);
     fireEvent.click(await screen.findByTestId("cycle-run"));
-    await waitFor(() => expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "council" }));
+    await waitFor(() => expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "council", rounds: 2 }));
   });
 
   // Spec and plan read what came before; there is nothing to paste.
@@ -488,7 +489,7 @@ describe("Cycle — what the run will actually do", () => {
   // tokens: which models, and whether one will critique the other.
   it("names who drafts and who critiques", async () => {
     render(<Cycle client={client(twoDucks)} projectId="p" />);
-    expect((await screen.findByTestId("stage-who")).textContent).toBe(
+    expect((await screen.findByTestId("stage-who")).textContent).toContain(
       "pato-sonnet drafts, pato-local critiques",
     );
   });
@@ -517,16 +518,77 @@ describe("Cycle — what the run will actually do", () => {
     fireEvent.change(await screen.findByTestId("stage-mode"), { target: { value: "solo" } });
     fireEvent.click(screen.getByTestId("cycle-run"));
     await waitFor(() =>
-      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "solo" }),
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "solo", rounds: 2 }),
     );
   });
 
-  it("defaults to council", async () => {
+  it("defaults to council, two rounds", async () => {
     const c = client(twoDucks);
     render(<Cycle client={c} projectId="p" />);
     fireEvent.click(await screen.findByTestId("cycle-run"));
     await waitFor(() =>
-      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "council" }),
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
+        from: "",
+        mode: "council",
+        rounds: 2,
+      }),
     );
+  });
+});
+
+describe("Cycle — how many rounds", () => {
+  const twoDucks = [
+    { role: "architect", duckling: "pato-sonnet", source: "project" },
+    { role: "reviewer", duckling: "pato-local", source: "default" },
+  ];
+  const client = () =>
+    ({
+      artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
+      traceCheck: vi.fn(() => Promise.resolve([])),
+      runBrief: vi.fn(() => Promise.resolve("")),
+      roster: vi.fn(() => Promise.resolve({ entries: twoDucks })),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+      promote: vi.fn(() => Promise.resolve({})),
+    }) as unknown as EngineClient;
+
+  it("sends the chosen limit", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    fireEvent.change(await screen.findByTestId("stage-rounds"), { target: { value: "4" } });
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
+        from: "",
+        mode: "council",
+        rounds: 4,
+      }),
+    );
+  });
+
+  // A ceiling, not a plan: the loop stops when the reviewer approves, so the
+  // number is what it will do at most.
+  it("says the extra rounds only happen without approval", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    expect((await screen.findByTestId("stage-who")).textContent).toContain("does not approve");
+  });
+
+  it("says nothing about going round again at one round", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    fireEvent.change(await screen.findByTestId("stage-rounds"), { target: { value: "1" } });
+    expect(screen.getByTestId("stage-who").textContent).not.toContain("round again");
+  });
+
+  // Solo has no reviewer, so there is nothing for a second round to react to.
+  it("offers no round count for solo", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    fireEvent.change(await screen.findByTestId("stage-mode"), { target: { value: "solo" } });
+    expect(screen.queryByTestId("stage-rounds")).toBeNull();
+  });
+
+  it("refuses zero", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    const input = await screen.findByTestId("stage-rounds");
+    fireEvent.change(input, { target: { value: "0" } });
+    expect((input as HTMLInputElement).value).toBe("1");
   });
 });

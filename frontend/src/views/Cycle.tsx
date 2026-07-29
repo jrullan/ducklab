@@ -44,6 +44,7 @@ export function Cycle({
   const [brief, setBrief] = useState("");
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState("council");
+  const [rounds, setRounds] = useState(2);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [startedRun, setStartedRun] = useState<string | null>(null);
   // What a proposal is shown as. Reading comes first: a person accepting a
@@ -158,6 +159,7 @@ export function Cycle({
       const run = await client.stageStart(projectId, active.stage, {
         from: brief.trim(),
         mode,
+        rounds,
       });
       setStartedRun(run.id);
       setBrief("");
@@ -331,8 +333,24 @@ export function Cycle({
                 <option value="council">council — one drafts, another critiques</option>
                 <option value="solo">solo — one model, one draft</option>
               </select>
+              {mode === "council" && (
+                <label className="flex items-center gap-1 text-xs text-ink-secondary">
+                  at most
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    aria-label="rounds"
+                    data-testid="stage-rounds"
+                    value={rounds}
+                    onChange={(e) => setRounds(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-14 rounded border border-hairline bg-surface2 px-2 py-1"
+                  />
+                  {rounds === 1 ? "round" : "rounds"}
+                </label>
+              )}
               <span data-testid="stage-who" className="text-xs text-ink-muted">
-                {describeRun(mode, roster)}
+                {describeRun(mode, roster, rounds)}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -463,7 +481,7 @@ function stripFront(md: string): string {
  * the architect alone: naming a reviewer that will never be asked would be
  * worse than naming nobody.
  */
-function describeRun(mode: string, roster: readonly RosterEntry[]): string {
+function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): string {
   const who = (role: string) => roster.find((r) => r.role === role)?.duckling;
   const architect = who("architect");
   if (!architect) return "roster not loaded";
@@ -474,5 +492,8 @@ function describeRun(mode: string, roster: readonly RosterEntry[]): string {
     // (05 §3.2). Said here, where the choice is still open.
     return `${architect} drafts and critiques its own draft — set a second duckling in Ducklings`;
   }
-  return `${architect} drafts, ${reviewer} critiques`;
+  // The stop condition is the reviewer approving, so the limit is a ceiling
+  // and not a plan: raising it costs nothing on a draft that converges.
+  return `${architect} drafts, ${reviewer} critiques` +
+    (rounds > 1 ? `, and they go round again if ${reviewer} does not approve` : "");
 }

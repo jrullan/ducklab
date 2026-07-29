@@ -394,6 +394,7 @@ export interface ServiceStageRequest {
   from?: string;
   mode?: string;
   revise?: string;
+  rounds?: number;
   stage?: string;
   stream?: boolean;
 }

@@ -318,3 +318,23 @@ func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
 		t.Error("a run with no note was told to revise")
 	}
 }
+
+// A round is the whole sequence — draft, critique, revise — and the loop stops
+// early when the reviewer approves. So raising the limit costs nothing on a
+// draft that converges and buys another lap on one that does not.
+func TestRoundsOverridesTheScriptsLimit(t *testing.T) {
+	council := strategy.ArtifactScript("REQ", "council")
+	if council.MaxRounds != 2 {
+		t.Fatalf("test assumption broken: council MaxRounds = %d", council.MaxRounds)
+	}
+	// Zero leaves the script's own answer alone.
+	for _, c := range []struct{ rounds, want int }{{0, 2}, {1, 1}, {4, 4}} {
+		s := strategy.ArtifactScript("REQ", "council")
+		if c.rounds > 0 {
+			s.MaxRounds = c.rounds
+		}
+		if s.MaxRounds != c.want {
+			t.Errorf("rounds %d gave MaxRounds %d, want %d", c.rounds, s.MaxRounds, c.want)
+		}
+	}
+}

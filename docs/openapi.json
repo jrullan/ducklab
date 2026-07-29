@@ -1346,6 +1346,9 @@
           "revise": {
             "type": "string"
           },
+          "rounds": {
+            "type": "integer"
+          },
           "stage": {
             "type": "string"
           },
@@ -1358,6 +1361,7 @@
           "from",
           "mode",
           "revise",
+          "rounds",
           "stage",
           "stream"
         ],

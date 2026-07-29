@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/daemon"
@@ -14,6 +15,8 @@ import (
 // `ducklab intake accept`. Without one it runs the stage.
 func stageCmd(stage string, args []string, repo string) int {
 	from, yes := "", false
+	mode := ""
+	rounds := 0
 	sub := ""
 	var revArgs []string
 	for i := 0; i < len(args); i++ {
@@ -33,6 +36,25 @@ func stageCmd(stage string, args []string, repo string) int {
 			i++
 		case "--yes":
 			yes = true
+		case "--mode":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --mode needs council or solo")
+				return 2
+			}
+			mode = args[i+1]
+			i++
+		case "--rounds":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --rounds needs a number")
+				return 2
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 1 {
+				fmt.Fprintf(os.Stderr, "error: --rounds wants a number of 1 or more, got %q\n", args[i+1])
+				return 2
+			}
+			rounds = n
+			i++
 		case "accept", "reject", "diff", "revise":
 			sub = a
 		default:
@@ -41,7 +63,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--yes]\n"+
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--mode council|solo] [--rounds N] [--yes]\n"+
 				"       ducklab %s accept|reject|diff\n"+
 				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
@@ -63,6 +85,12 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 	if yes {
 		req["autonomy"] = "auto"
+	}
+	if mode != "" {
+		req["mode"] = mode
+	}
+	if rounds > 0 {
+		req["rounds"] = rounds
 	}
 
 	run, err := client.StageStart(projectID, stage, req)

@@ -466,7 +466,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -476,6 +476,7 @@ export class EngineClient {
       // right.
       revise: opts.revise ?? "",
       mode: opts.mode ?? "",
+      rounds: opts.rounds ?? 0,
       stream: true,
     });
   }
