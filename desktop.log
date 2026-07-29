@@ -1,0 +1,7 @@
+9:39AM INF Build Info: Wails=v3.0.0-alpha2.118 Compiler=go1.25.0 CGO_ENABLED=1 CGO_LDFLAGS= GOOS=linux vcs=git vcs.time=2026-07-29T13:24:50Z vcs.modified=true CGO_CFLAGS= CGO_CPPFLAGS= CGO_CXXFLAGS= GOARCH=amd64 GOAMD64=v1 vcs.revision=5e5b242888b6da6f6e309678a87bfe6e8b775751 -buildmode=exe -compiler=gc
+9:39AM INF Platform Info: ID=ubuntu Name=Ubuntu Version=24.04 Branding=24.04.4 LTS (Noble Numbat) GTK=4.14.5 WebKitGTK=2.52.3
+9:39AM INF AssetServer Info: middleware=true handler=true
+Overriding existing handler for signal 10. Set JSC_SIGNAL_FOR_GC if you want WebKit to use a different signal
+9:39AM INF [AssetFileServerFS] Handling request url=/ file=.
+9:39AM INF [AssetFileServerFS] Handling request url=/assets/index-CR27dwmC.js file=assets/index-CR27dwmC.js
+9:39AM INF [AssetFileServerFS] Handling request url=/assets/index-BzK5K_i2.css file=assets/index-BzK5K_i2.css
