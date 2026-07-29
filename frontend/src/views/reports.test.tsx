@@ -104,3 +104,76 @@ describe("Reports", () => {
     expect((await screen.findByText(/nothing to measure/)).textContent).toBeTruthy();
   });
 });
+
+describe("Reports — Bench tab", () => {
+  const cell = (o: Partial<Record<string, unknown>> & { task: string }) => ({
+    duckling: "pato-atom", mode: "solo", run_id: "r", verdict: "PASSED",
+    tokens: 1000, estimated: false, cost_usd: 0, wallclock_ms: 60000, ...o,
+  });
+
+  const benchClient = (cells: unknown[]) =>
+    ({
+      report: vi.fn(() => Promise.resolve({ by: "mode", baseline: "solo", rows: [], deltas: [], rendered: "" })),
+      benchList: vi.fn(() =>
+        Promise.resolve([
+          { suite: "std", suite_version: 2, started_at: "", stamp: "20260729-130000", cells: cells.length, passed: cells.length, errors: 0 },
+        ]),
+      ),
+      benchGet: vi.fn(() =>
+        Promise.resolve({
+          result: { suite: "std", suite_version: 2, started_at: "", ducklings: ["pato-atom", "pato-local"], modes: ["solo"], cells },
+          rendered: "",
+        }),
+      ),
+    }) as unknown as EngineClient;
+
+  // A benchmark everyone passes compares as little as one nobody passes. A
+  // wall of 100% reads as a triumph unless the page says otherwise — which is
+  // exactly what the first real bench looked like.
+  it("says when a suite stopped telling ducklings apart", async () => {
+    const client = benchClient([
+      cell({ task: "B-001", duckling: "pato-atom" }),
+      cell({ task: "B-001", duckling: "pato-local" }),
+    ]);
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    expect((await screen.findByTestId("no-discrimination")).textContent).toContain(
+      "does not tell them apart",
+    );
+  });
+
+  it("says nothing of the sort when the ducklings differ", async () => {
+    const client = benchClient([
+      cell({ task: "B-001", duckling: "pato-atom" }),
+      cell({ task: "B-001", duckling: "pato-local", verdict: "FAILED" }),
+    ]);
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    await screen.findByTestId("cell-table");
+    expect(screen.queryByTestId("no-discrimination")).toBeNull();
+  });
+
+  // A harness failure and a model failure are different findings.
+  it("shows a cell that could not run as its own outcome", async () => {
+    const client = benchClient([cell({ task: "B-001", verdict: "", error: "engine died" })]);
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    const rows = await screen.findAllByTestId("cell-row");
+    expect(rows[0]!.textContent).toContain("could not run");
+  });
+
+  it("marks an estimated token count", async () => {
+    const client = benchClient([cell({ task: "B-001", estimated: true })]);
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    const rows = await screen.findAllByTestId("cell-row");
+    expect(rows[0]!.textContent).toContain("~");
+  });
+
+  // A project with no runs still has benches worth looking at.
+  it("reaches the bench tab from a project with nothing to measure", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    render(<Reports client={client} projectId="p" />);
+    expect(await screen.findByTestId("reports-tab-bench")).toBeTruthy();
+  });
+});

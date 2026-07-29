@@ -263,6 +263,16 @@ export interface ServiceAcceptResult {
   commit_sha?: string;
 }
 
+export interface ServiceBenchSummary {
+  cells?: number;
+  errors?: number;
+  passed?: number;
+  stamp?: string;
+  started_at?: string;
+  suite?: string;
+  suite_version?: number;
+}
+
 export interface ServiceBugRequest {
   body?: string;
   reporter?: string;
@@ -388,7 +398,9 @@ export interface SkillArg {
 
 /** Every endpoint, derived from the engine's route table. */
 export const OPERATIONS = [
+  { id: "BenchList", method: "GET", path: "/v1/bench" },
   { id: "Bench", method: "POST", path: "/v1/bench" },
+  { id: "BenchGet", method: "GET", path: "/v1/bench/{suite}/{stamp}" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
   { id: "DucklingProbe", method: "POST", path: "/v1/ducklings/{id}/probe" },
   { id: "DucklingTest", method: "POST", path: "/v1/ducklings/{id}/test" },

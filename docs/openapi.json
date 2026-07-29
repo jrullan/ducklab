@@ -897,6 +897,41 @@
         ],
         "type": "object"
       },
+      "ServiceBenchSummary": {
+        "properties": {
+          "cells": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "stamp": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          },
+          "suite_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cells",
+          "errors",
+          "passed",
+          "stamp",
+          "started_at",
+          "suite",
+          "suite_version"
+        ],
+        "type": "object"
+      },
       "ServiceBugRequest": {
         "properties": {
           "body": {
@@ -1337,6 +1372,45 @@
   "openapi": "3.1.0",
   "paths": {
     "/v1/bench": {
+      "get": {
+        "operationId": "BenchList",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceBenchSummary"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Past bench results, newest first"
+      },
       "post": {
         "operationId": "Bench",
         "requestBody": {
@@ -1363,6 +1437,43 @@
           }
         ],
         "summary": "Run a benchmark suite. No project; every cell is a throwaway."
+      }
+    },
+    "/v1/bench/{suite}/{stamp}": {
+      "get": {
+        "operationId": "BenchGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suite",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stamp",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One bench result"
       }
     },
     "/v1/ducklings": {

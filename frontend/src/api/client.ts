@@ -90,6 +90,43 @@ export interface Task {
   body?: string;
 }
 
+/** One past bench run. Mirrors service.BenchSummary. */
+export type BenchSummary = {
+  suite: string;
+  suite_version: number;
+  started_at: string;
+  stamp: string;
+  cells: number;
+  passed: number;
+  errors: number;
+};
+
+/** One (task, duckling, mode) measurement. Mirrors bench.Cell. */
+export type BenchCell = {
+  task: string;
+  duckling: string;
+  mode: string;
+  run_id: string;
+  verdict: string;
+  tokens: number;
+  estimated: boolean;
+  cost_usd: number;
+  wallclock_ms: number;
+  /** Set when the harness could not run the cell, which is not the same as a
+   * task the model failed. */
+  error?: string;
+};
+
+/** A whole bench invocation. Mirrors bench.Result. */
+export type BenchResult = {
+  suite: string;
+  suite_version: number;
+  started_at: string;
+  ducklings: string[];
+  modes: string[];
+  cells: BenchCell[];
+};
+
 /** One aggregated group in a report. Mirrors report.Row. */
 export type ReportRow = {
   key: string;
@@ -318,6 +355,21 @@ export class EngineClient {
       rows: r.rows ?? [],
       deltas: r.deltas ?? [],
     }));
+  }
+
+  /** Past bench results, newest first. Not project-scoped: a bench measures
+   * the models, not a repo. */
+  benchList() {
+    return this.request<{ items: BenchSummary[] | null }>("GET", "/v1/bench").then(
+      (r) => r.items ?? [],
+    );
+  }
+
+  benchGet(suite: string, stamp: string) {
+    return this.request<{ result: BenchResult; rendered: string }>(
+      "GET",
+      `/v1/bench/${suite}/${stamp}`,
+    );
   }
 
   reviews(projectId: string) {

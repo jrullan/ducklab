@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { EngineClient, ReportDelta, ReportRow } from "../api/client";
 import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
+import { Bench } from "./Bench";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -20,6 +21,7 @@ const RANGES = [
 ] as const;
 
 export function Reports({ client, projectId }: { client: EngineClient; projectId: string }) {
+  const [tab, setTab] = useState<"runs" | "bench">("runs");
   const [since, setSince] = useState("");
   const [byMode, setByMode] = useState<{ rows: ReportRow[]; deltas: ReportDelta[] } | null>(null);
   const [byDuckling, setByDuckling] = useState<ReportRow[]>([]);
@@ -49,6 +51,34 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
     void load();
   }, [load]);
 
+  // The tabs live above everything, including the loading and empty states: a
+  // project with no runs still has benches worth looking at, and hiding the
+  // tab behind "nothing to measure" would make them unreachable.
+  const tabs = (
+    <div className="mb-3 flex gap-2 border-b border-hairline">
+      {(["runs", "bench"] as const).map((t) => (
+        <button
+          key={t}
+          type="button"
+          onClick={() => setTab(t)}
+          data-testid={`reports-tab-${t}`}
+          className={`px-2 py-1 text-sm ${tab === t ? "text-ink" : "text-ink-muted"}`}
+        >
+          {t === "runs" ? "This project" : "Bench"}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (tab === "bench") {
+    return (
+      <div data-testid="reports-view">
+        {tabs}
+        <Bench client={client} />
+      </div>
+    );
+  }
+
   if (loading && !byMode) return <p className="text-ink-muted">Loading…</p>;
   if (failure) {
     return (
@@ -63,11 +93,17 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
   const best = (byMode?.deltas ?? []).slice().sort((a, b) => b.points_vs_baseline - a.points_vs_baseline)[0];
 
   if (rows.length === 0) {
-    return <EmptyState message="No finished runs yet — there is nothing to measure." />;
+    return (
+      <div data-testid="reports-view">
+        {tabs}
+        <EmptyState message="No finished runs yet — there is nothing to measure." />
+      </div>
+    );
   }
 
   return (
     <div data-testid="reports-view" className="space-y-4">
+      {tabs}
       <div className="flex items-center gap-2">
         {RANGES.map((r) => (
           <button

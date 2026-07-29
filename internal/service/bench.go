@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bench"
@@ -283,4 +285,92 @@ func (s *Service) publishBench(kind string, cell bench.Cell, n, total int) {
 			"verdict": cell.Verdict, "error": cell.Error,
 		},
 	})
+}
+
+// BenchSummary is one past result, for a list.
+type BenchSummary struct {
+	Suite     string `json:"suite"`
+	Version   int    `json:"suite_version"`
+	StartedAt string `json:"started_at"`
+	Stamp     string `json:"stamp"`
+	Cells     int    `json:"cells"`
+	Passed    int    `json:"passed"`
+	Errors    int    `json:"errors"`
+}
+
+// BenchList returns past results, newest first.
+//
+// Reading the files rather than a database: a bench result is a document a
+// person can keep, mail, or diff against another machine's, and putting the
+// index somewhere else would make the files second-class.
+func (s *Service) BenchList() ([]BenchSummary, error) {
+	dataDir, err := xplat.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(dataDir, "bench")
+	suites, err := os.ReadDir(root)
+	if err != nil {
+		return nil, nil // no bench has ever run, which is not an error
+	}
+	var out []BenchSummary
+	for _, suite := range suites {
+		if !suite.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(root, suite.Name()))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if filepath.Ext(f.Name()) != ".json" {
+				continue
+			}
+			res, err := readBenchResult(filepath.Join(root, suite.Name(), f.Name()))
+			if err != nil {
+				continue // an unreadable result is not a reason to hide the rest
+			}
+			sum := BenchSummary{
+				Suite: res.Suite, Version: res.SuiteVersion, StartedAt: res.StartedAt,
+				Stamp: strings.TrimSuffix(f.Name(), ".json"), Cells: len(res.Cells),
+			}
+			for _, c := range res.Cells {
+				if c.Passed() {
+					sum.Passed++
+				}
+				if c.Error != "" {
+					sum.Errors++
+				}
+			}
+			out = append(out, sum)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Stamp > out[j].Stamp })
+	return out, nil
+}
+
+// BenchGet returns one past result.
+func (s *Service) BenchGet(suite, stamp string) (*bench.Result, error) {
+	dataDir, err := xplat.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	// Neither component may escape the bench directory: both arrive from a
+	// client, and a stamp of "../../.." would otherwise read anything.
+	if strings.ContainsAny(suite+stamp, "/\\") || strings.Contains(suite+stamp, "..") {
+		return nil, fmt.Errorf("bad suite or stamp")
+	}
+	return readBenchResult(bench.Path(dataDir, suite, stamp))
+}
+
+func readBenchResult(path string) (*bench.Result, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var res bench.Result
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }

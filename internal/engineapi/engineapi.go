@@ -226,6 +226,26 @@ func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleBenchList(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.BenchList()
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (s *Server) handleBenchGet(w http.ResponseWriter, r *http.Request) {
+	res, err := s.svc.BenchGet(r.PathValue("suite"), r.PathValue("stamp"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{
+		"result": res, "rendered": bench.Render(*res),
+	})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {
