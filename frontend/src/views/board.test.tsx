@@ -63,7 +63,10 @@ describe("Board", () => {
     const rail = screen.getByTestId("board-rail");
     await waitFor(() => expect(rail.textContent).toContain("T-003"));
     expect(rail.textContent).toContain("T-002"); // its dependency
-    expect(rail.textContent).toContain("ducklab run T-003");
+    // The rail used to print the terminal command, because the desktop had no
+    // way to start a run. It has one now.
+    expect(screen.getByTestId("task-runner")).toBeTruthy();
+    expect(rail.textContent).not.toContain("ducklab run");
   });
 
   it("says there is nothing rather than showing five empty columns", async () => {
@@ -168,5 +171,100 @@ describe("Board, the bugs half", () => {
 
     fireEvent.click(screen.getByText("Slow export")); // in progress, has a task
     expect(screen.getByTestId("bug-rail").textContent).toContain("ducklab run T-009");
+  });
+});
+
+describe("Board — starting the work", () => {
+  const task = { id: "T-001", title: "A thing", milestone: "M-001", status: "todo" };
+
+  const runClient = (over: Record<string, unknown> = {}) =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([task])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() =>
+        Promise.resolve([
+          { id: "pato-local", provider: "beelink", model: "qwen" },
+          { id: "pato-sonnet", provider: "openrouter", model: "claude" },
+        ]),
+      ),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-9" })),
+      testStart: vi.fn(() => Promise.resolve({ id: "r-10" })),
+      reviewStart: vi.fn(() => Promise.resolve({ id: "r-11" })),
+      ...over,
+    }) as unknown as EngineClient;
+
+  const openRail = async () => {
+    fireEvent.click(await screen.findByText("A thing"));
+    return screen.findByTestId("task-runner");
+  };
+
+  it("starts a build run in the chosen mode", async () => {
+    const client = runClient();
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+
+    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "pair" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() =>
+      expect(client.runStart).toHaveBeenCalledWith("p", "T-001", { mode: "pair", ducklings: [] }),
+    );
+    expect((await screen.findByTestId("run-link")).getAttribute("href")).toBe("#/runs/r-9");
+  });
+
+  // tournament and split assign ducklings positionally, so the order the boxes
+  // were ticked is the order they are sent.
+  it("sends the chosen ducklings in the order they were picked", async () => {
+    const client = runClient();
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+
+    fireEvent.click(screen.getByTestId("run-duckling-pato-sonnet"));
+    fireEvent.click(screen.getByTestId("run-duckling-pato-local"));
+    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+
+    await waitFor(() =>
+      expect(client.runStart).toHaveBeenCalledWith("p", "T-001", {
+        mode: "tournament",
+        ducklings: ["pato-sonnet", "pato-local"],
+      }),
+    );
+  });
+
+  it("writes the test first, by the chosen duckling", async () => {
+    const client = runClient();
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("run-duckling-pato-sonnet"));
+    fireEvent.click(screen.getByTestId("test-first-start"));
+    await waitFor(() => expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "pato-sonnet"));
+  });
+
+  // There is no commit to read until the work was accepted, and the engine
+  // refuses with exactly that. A button that only ever errors is worse than none.
+  it("offers Review only on work that was accepted", async () => {
+    render(<Board client={runClient()} projectId="p" />);
+    await openRail();
+    expect(screen.queryByTestId("review-start")).toBeNull();
+  });
+
+  it("offers Review on an accepted task", async () => {
+    const client = runClient({
+      tasks: vi.fn(() => Promise.resolve([{ ...task, status: "accepted" }])),
+    });
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("review-start"));
+    await waitFor(() => expect(client.reviewStart).toHaveBeenCalledWith("p", "T-001"));
+  });
+
+  it("shows the engine's refusal rather than failing silently", async () => {
+    const client = runClient({
+      runStart: vi.fn(() => Promise.reject(new Error("task T-001 is not ready"))),
+    });
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect((await screen.findByTestId("run-error")).textContent).toContain("not ready");
   });
 });

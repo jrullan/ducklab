@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Bug, EngineClient, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 
@@ -57,6 +57,9 @@ export function Board({
 }) {
   const [board, setBoard] = useState<"tasks" | "bugs">(tab === "bugs" ? "bugs" : "tasks");
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Needed to offer a choice of ducklings when starting a run. Failing to load
+  // them is not worth blocking the board over: with none, the roster decides.
+  const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
@@ -74,6 +77,7 @@ export function Board({
     // failing must not blank the other: a project whose bugs cannot be read
     // still has tasks worth looking at, and losing both to one error tells the
     // reader less than showing what survived.
+    client.ducklings().then(setDucklings).catch(() => {});
     const [t, b] = await Promise.allSettled([client.tasks(projectId), client.bugs(projectId)]);
     const problems: string[] = [];
     if (t.status === "fulfilled") setTasks(t.value);
@@ -259,14 +263,29 @@ export function Board({
         ) : isBugs ? (
           <BugRail bug={current as Bug} />
         ) : (
-          <TaskRail task={current as Task} />
+          <TaskRail
+            task={current as Task}
+            client={client}
+            projectId={projectId}
+            ducklings={ducklings}
+          />
         )}
       </aside>
     </div>
   );
 }
 
-function TaskRail({ task }: { task: Task }) {
+function TaskRail({
+  task,
+  client,
+  projectId,
+  ducklings,
+}: {
+  task: Task;
+  client: EngineClient;
+  projectId: string;
+  ducklings: readonly Duckling[];
+}) {
   return (
     <div className="space-y-2">
       <div className="font-mono text-xs text-ink-muted">{task.id}</div>
@@ -278,12 +297,141 @@ function TaskRail({ task }: { task: Task }) {
         <Row label="depends on" value={task.depends_on?.join(", ")} />
       </dl>
       {task.body && <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>}
-      {/* The command, not a button: starting a run is the engine's job and the
-          desktop has no run-start path yet. Showing a dead button would be
-          worse than showing the thing that works. */}
-      <div className="rounded border border-hairline p-2 font-mono text-xs text-ink-secondary">
-        ducklab run {task.id} --mode pair
+      <TaskRunner task={task} client={client} projectId={projectId} ducklings={ducklings} />
+    </div>
+  );
+}
+
+const MODES = ["solo", "pair", "tournament", "split"] as const;
+
+/** Starting the work, from the place the work is listed.
+ *
+ * Every mode needs a different number of ducklings, so the picker is a list
+ * rather than a single choice: `tournament` and `split` assign them
+ * positionally, and `solo` uses the first. Choosing none means the project's
+ * roster decides, which is the normal case.
+ */
+function TaskRunner({
+  task,
+  client,
+  projectId,
+  ducklings,
+}: {
+  task: Task;
+  client: EngineClient;
+  projectId: string;
+  ducklings: readonly Duckling[];
+}) {
+  const [mode, setMode] = useState<string>("solo");
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [started, setStarted] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const go = async (what: "run" | "test" | "review") => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const run =
+        what === "run"
+          ? await client.runStart(projectId, task.id, { mode, ducklings: chosen })
+          : what === "test"
+            ? await client.testStart(projectId, task.id, chosen[0] ?? "")
+            : await client.reviewStart(projectId, task.id);
+      setStarted(run.id);
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="mode"
+          data-testid="run-mode"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+        >
+          {MODES.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => void go("run")}
+          disabled={busy}
+          data-testid="run-start"
+          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+        >
+          {busy ? "Starting…" : "Build it"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void go("test")}
+          disabled={busy}
+          data-testid="test-first-start"
+          title="Write the failing test first, by a model that will not implement it"
+          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+        >
+          Test first
+        </button>
+        {/* Only for work that has been accepted: there is no commit to read
+            otherwise, and the engine refuses with exactly that. */}
+        {/* Only on work that has been accepted: a review reads the commit, and
+            there is no commit until then. The engine refuses with exactly
+            that, and a button that only ever errors is worse than none. */}
+        {task.status === "accepted" && (
+          <button
+            type="button"
+            onClick={() => void go("review")}
+            disabled={busy}
+            data-testid="review-start"
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          >
+            Review
+          </button>
+        )}
       </div>
+
+      {ducklings.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+          {ducklings.map((d) => (
+            <label key={d.id} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                data-testid={`run-duckling-${d.id}`}
+                checked={chosen.includes(d.id)}
+                onChange={(e) =>
+                  setChosen((cur) =>
+                    e.target.checked ? [...cur, d.id] : cur.filter((x) => x !== d.id),
+                  )
+                }
+              />
+              {d.id}
+            </label>
+          ))}
+          <span className="text-ink-muted">
+            {chosen.length === 0 ? "none chosen — the roster decides" : "in this order"}
+          </span>
+        </div>
+      )}
+
+      {failure && (
+        <p className="text-xs text-critical" data-testid="run-error">
+          {failure}
+        </p>
+      )}
+      {started && (
+        <a href={`#/runs/${started}`} data-testid="run-link" className="text-xs text-ink underline">
+          watch run {started}
+        </a>
+      )}
     </div>
   );
 }

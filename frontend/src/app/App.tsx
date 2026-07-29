@@ -297,7 +297,7 @@ export function App() {
             />
           </div>
         )}
-        {route.name === "ducklings" && client && <Ducklings client={client} />}
+        {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
         {route.name === "settings" && (
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />
         )}

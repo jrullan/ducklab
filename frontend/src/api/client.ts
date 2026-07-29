@@ -112,6 +112,15 @@ export interface Task {
   body?: string;
 }
 
+/** One role and the duckling that will play it. Mirrors service.RosterEntry. */
+export type RosterEntry = {
+  role: string;
+  duckling: string;
+  /** "project" when project.toml declares it, "default" when the engine chose.
+   * A person needs to know which assignments are theirs. */
+  source: string;
+};
+
 /** A configured endpoint. Mirrors service.ProviderView.
  *
  * There is no key field and there never will be: a provider records the name
@@ -305,6 +314,51 @@ export class EngineClient {
   projectUpdate(id: string, keys: Record<string, string>) {
     return this.request<Project>("PATCH", `/v1/projects/${id}`, keys);
   }
+  /** Start a build run. Returns immediately; the work is watched on the run. */
+  runStart(
+    projectId: string,
+    taskId: string,
+    opts: { mode?: string; ducklings?: string[]; rounds?: number; yes?: boolean } = {},
+  ) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
+      task_id: taskId,
+      mode: opts.mode || "solo",
+      ducklings: opts.ducklings ?? [],
+      rounds: opts.rounds ?? 0,
+      autonomy: opts.yes ? "yolo" : "",
+    });
+  }
+
+  /** Write the failing test for a task, before the code exists. */
+  testStart(projectId: string, taskId: string, duckling = "") {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/tests`, {
+      task_id: taskId,
+      duckling,
+    });
+  }
+
+  /** Review an accepted task. */
+  reviewStart(projectId: string, taskId: string) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/reviews`, { task_id: taskId });
+  }
+
+  /** The roster as it will actually be used — including the roles the engine
+   * filled in, which the file does not declare. */
+  roster(projectId: string) {
+    return this.request<{ entries: RosterEntry[] | null; warning?: string }>(
+      "GET",
+      `/v1/projects/${projectId}/roster`,
+    ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
+  }
+  rosterSet(projectId: string, role: string, duckling: string) {
+    return this.request<unknown>("PUT", `/v1/projects/${projectId}/roster`, { role, duckling });
+  }
+
+  /** Ask a duckling to say something, to find out whether it answers at all. */
+  ducklingProbe(id: string) {
+    return this.request<Record<string, unknown>>("POST", `/v1/ducklings/${id}/probe`);
+  }
+
   /** The configured gate beside the one detection finds today. */
   projectGate(id: string) {
     return this.request<GateStatus>("GET", `/v1/projects/${id}/gate`);

@@ -12,14 +12,14 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Duckling, EngineClient, ProviderView } from "../api/client";
+import type { Duckling, EngineClient, ProviderView, RosterEntry } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
 
 const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
 
-export function Ducklings({ client }: { client: EngineClient }) {
+export function Ducklings({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -99,12 +99,91 @@ export function Ducklings({ client }: { client: EngineClient }) {
                 provider={providers.find((p) => p.id === d.provider)}
                 onEdit={() => setEditing(d.id)}
                 onRemove={() => void client.ducklingRemove(d.id).then(() => done()).catch(done)}
+                client={client}
               />
             ))}
           </div>
         )}
       </section>
+
+      {projectId && <RosterSection client={client} projectId={projectId} ducklings={ducklings} />}
     </div>
+  );
+}
+
+/** Which duckling plays which role in this project.
+ *
+ * Shown as it will actually be used, not as the file declares it: an
+ * undeclared role still gets a duckling, and hiding that would make the roster
+ * look emptier than the runs behave. The source of each assignment is marked,
+ * because a person needs to know which ones are theirs. */
+function RosterSection({
+  client,
+  projectId,
+  ducklings,
+}: {
+  client: EngineClient;
+  projectId: string;
+  ducklings: readonly Duckling[];
+}) {
+  const [entries, setEntries] = useState<RosterEntry[]>([]);
+  const [warning, setWarning] = useState<string | undefined>();
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    client
+      .roster(projectId)
+      .then((r) => {
+        setEntries(r.entries);
+        setWarning(r.warning);
+      })
+      .catch(() => {});
+  }, [client, projectId]);
+
+  useEffect(load, [load]);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="rounded-card border border-hairline p-3" data-testid="roster-section">
+      <h3 className="mb-2 text-ink">Roster for this project</h3>
+      {warning && (
+        // Running both sides on one duckling measures self-consistency, not
+        // review (05 §3.2). Recorded, not blocked.
+        <p className="mb-2 text-sm text-serious" data-testid="roster-warning">
+          {warning}
+        </p>
+      )}
+      {failure && <p className="mb-2 text-sm text-critical">{failure}</p>}
+      <ul className="space-y-1">
+        {entries.map((e) => (
+          <li key={e.role} className="flex items-center gap-2 text-sm" data-testid={`roster-${e.role}`}>
+            <span className="w-28 text-ink-secondary">{e.role}</span>
+            <select
+              aria-label={`duckling for ${e.role}`}
+              data-testid={`roster-select-${e.role}`}
+              value={e.duckling}
+              onChange={(ev) =>
+                void client
+                  .rosterSet(projectId, e.role, ev.target.value)
+                  .then(load)
+                  .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+              }
+              className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+            >
+              {ducklings.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.id}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-ink-muted">
+              {e.source === "project" ? "yours" : "chosen by the engine"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -114,13 +193,35 @@ function DucklingCard({
   provider,
   onEdit,
   onRemove,
+  client,
 }: {
   duckling: Duckling;
   roster: string[];
   provider?: ProviderView;
   onEdit: () => void;
   onRemove: () => void;
+  client: EngineClient;
 }) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  // The only way to find out a duckling answers at all before committing a run
+  // to it. A hosted model with an unset key looks identical to a working one
+  // until something actually calls it.
+  const onTest = () => {
+    setTesting(true);
+    setResult(null);
+    client
+      .ducklingTest(d.id, "Reply with exactly: OK")
+      .then((r) =>
+        setResult(
+          `${r.text.trim().slice(0, 80)}  (${r.prompt_tokens ?? 0} in, ${r.completion_tokens ?? 0} out, $${(r.cost_usd ?? 0).toFixed(4)})`,
+        ),
+      )
+      .catch((err) => setResult(err instanceof Error ? err.message : String(err)))
+      .finally(() => setTesting(false));
+  };
+
   return (
     <div className="rounded-card border border-hairline p-3" data-testid={`duckling-card-${d.id}`}>
       <header className="flex items-center gap-2">
@@ -134,6 +235,16 @@ function DucklingCard({
             className="rounded border border-hairline px-2 py-0.5 text-xs"
           >
             Edit
+          </button>
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={testing}
+            data-testid={`duckling-test-${d.id}`}
+            title="Send one short prompt and report what came back"
+            className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
+          >
+            {testing ? "…" : "Test"}
           </button>
           <button
             type="button"
@@ -170,6 +281,11 @@ function DucklingCard({
       )}
       {(d.cost?.output_per_mtok ?? 0) === 0 && (
         <div className="mt-2"><StatusChip role="good" label="local — no USD cost" /></div>
+      )}
+      {result && (
+        <p className="mt-2 break-words text-xs text-ink-secondary" data-testid={`duckling-result-${d.id}`}>
+          {result}
+        </p>
       )}
     </div>
   );

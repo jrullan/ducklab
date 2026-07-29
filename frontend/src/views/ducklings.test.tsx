@@ -27,7 +27,7 @@ describe("Ducklings", () => {
       [duckling({ id: "pato-local", caps: { native_tools: false, context_tokens: 65536 } })],
       [provider({ id: "local", key_present: true })],
     );
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     const card = await screen.findByTestId("duckling-card-pato-local");
     expect(card.textContent).toContain("text protocol");
     expect(card.textContent).toContain("65,536");
@@ -39,7 +39,7 @@ describe("Ducklings", () => {
       [duckling({ id: "pato-sonnet", provider: "openrouter" })],
       [provider({ id: "openrouter", api_key_env: "OPENROUTER_API_KEY", key_present: false })],
     );
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     expect((await screen.findByTestId("duckling-card-pato-sonnet")).textContent).toContain(
       "OPENROUTER_API_KEY not set",
     );
@@ -48,7 +48,7 @@ describe("Ducklings", () => {
 
   it("says nothing about keys for a local provider that needs none", async () => {
     const client = clientWith([], [provider({ id: "local" })]);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     expect((await screen.findByTestId("provider-row-local")).textContent).toContain("no key needed");
   });
 
@@ -56,7 +56,7 @@ describe("Ducklings", () => {
   // key, so nobody can be led into pasting one.
   it("offers no field for a key, only for the variable's name", async () => {
     const client = clientWith([], []);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("provider-add"));
     const form = screen.getByTestId("provider-form");
     expect(form.textContent).toContain("name");
@@ -69,7 +69,7 @@ describe("Ducklings", () => {
 
   it("adds a provider", async () => {
     const client = clientWith([], []);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("provider-add"));
     fireEvent.change(screen.getByTestId("provider-id"), { target: { value: "openrouter" } });
     fireEvent.change(screen.getByTestId("provider-url"), {
@@ -92,7 +92,7 @@ describe("Ducklings", () => {
   // before there is one would promise something that cannot work.
   it("will not add a duckling before there is a provider", async () => {
     const client = clientWith([], []);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     await waitFor(() =>
       expect(screen.getByTestId("duckling-add").hasAttribute("disabled")).toBe(true),
     );
@@ -101,7 +101,7 @@ describe("Ducklings", () => {
 
   it("adds a duckling with roles and capabilities", async () => {
     const client = clientWith([], [provider({ id: "openrouter" })]);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("duckling-add"));
     fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "pato-sonnet" } });
     fireEvent.change(screen.getByTestId("duckling-model"), {
@@ -127,7 +127,7 @@ describe("Ducklings", () => {
   // every measurement already taken.
   it("will not let an existing duckling be renamed", async () => {
     const client = clientWith([duckling({ id: "pato-local" })], [provider({ id: "local" })]);
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("duckling-edit-pato-local"));
     expect(screen.getByTestId("duckling-id").hasAttribute("disabled")).toBe(true);
   });
@@ -137,7 +137,7 @@ describe("Ducklings", () => {
     (client.providerRemove as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('provider "local" is used by [pato-local]'),
     );
-    render(<Ducklings client={client} />);
+    render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("provider-remove-local"));
     expect((await screen.findByTestId("fleet-error")).textContent).toContain("is used by");
   });
