@@ -323,3 +323,25 @@ func TestPromotingAnArtifactClosesItsRun(t *testing.T) {
 		t.Error("accepted = false after a human promoted its artifact")
 	}
 }
+
+// A stage run pauses for a human, and the human accepts the run. That must
+// promote the document, because the decision is the same decision.
+//
+// Reported from a real session: intake ran, its run was accepted, and the
+// Cycle view still said "proposal awaiting your decision" — because accepting
+// a run committed the tree while promoting the artifact was a separate action
+// on a different screen. Two buttons for one decision, and the one people
+// reach for first did nothing visible.
+func TestAcceptingAStageRunPromotesItsArtifact(t *testing.T) {
+	for _, stage := range []string{"intake", "spec", "plan"} {
+		if kind := artifactKindForStage(stage); kind == "" {
+			t.Errorf("stage %q has no artifact, so accepting its run promotes nothing", stage)
+		}
+	}
+	// A build run has no artifact to promote and must be left alone.
+	for _, stage := range []string{"build", "review", "release", ""} {
+		if kind := artifactKindForStage(stage); kind != "" {
+			t.Errorf("stage %q was mapped to artifact %q", stage, kind)
+		}
+	}
+}

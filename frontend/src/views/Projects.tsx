@@ -56,8 +56,19 @@ export function Projects({
 
   useEffect(load, [load]);
 
+  // Said before it is sent. `~` is a shell feature the engine cannot expand
+  // for you, and a relative path means nothing to a daemon — one real session
+  // typed "~/dev/calculator" and got a project in a folder named "~".
+  const pathProblem = (() => {
+    const p = path.trim();
+    if (!p) return null;
+    if (p.startsWith("~")) return "~ is a shell shortcut. Write the full path, or use Choose….";
+    if (!p.startsWith("/")) return "Give a full path starting with /, or use Choose….";
+    return null;
+  })();
+
   const create = async () => {
-    if (!path.trim()) return;
+    if (!path.trim() || pathProblem) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -153,13 +164,18 @@ export function Projects({
           <button
             type="button"
             onClick={() => void create()}
-            disabled={busy || !path.trim()}
+            disabled={busy || !path.trim() || Boolean(pathProblem)}
             data-testid="project-create"
             className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
           >
             {busy ? "Creating…" : "Create"}
           </button>
         </div>
+        {pathProblem && (
+          <p className="mt-2 text-sm text-serious" data-testid="path-problem">
+            {pathProblem}
+          </p>
+        )}
         <p className="mt-2 text-xs text-ink-muted">
           A folder that is already a ducklab project is adopted rather than refused. Runs need a
           git repository — leave the box ticked unless the folder already has one.

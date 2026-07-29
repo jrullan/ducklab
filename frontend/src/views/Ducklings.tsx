@@ -19,6 +19,23 @@ import { money } from "../lib/format";
 
 const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
 
+/** What each role is for, in the words of the prompt each one actually gets.
+ *
+ * Taken from the system prompts in internal/agent, not invented here: a
+ * description that drifts from what the model is told is worse than none,
+ * because it is believed. */
+const ROLE_HELP: Record<string, string> = {
+  architect:
+    "Turns intent into a written artifact another model, with no memory of the conversation, can act on. Read-only: requirements, spec and plan.",
+  implementer: "Changes the code until the task is done and the gate passes. The only role that writes.",
+  reviewer:
+    "Reads a change it did not write, and is told not to be agreeable. The tests have already run; their result is given to it and is not its to dispute.",
+  judge:
+    "Picks between candidates labelled A, B, … in a tournament. It is not told who wrote them and must not ask.",
+  triager: "Classifies a bug report: severity, suspected files, whether it duplicates another.",
+  scribe: "Writes release notes and changelog entries from the list of accepted work.",
+};
+
 export function Ducklings({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [providers, setProviders] = useState<ProviderView[]>([]);
@@ -155,10 +172,11 @@ function RosterSection({
         </p>
       )}
       {failure && <p className="mb-2 text-sm text-critical">{failure}</p>}
-      <ul className="space-y-1">
+      <ul className="space-y-3">
         {entries.map((e) => (
-          <li key={e.role} className="flex items-center gap-2 text-sm" data-testid={`roster-${e.role}`}>
-            <span className="w-28 text-ink-secondary">{e.role}</span>
+          <li key={e.role} className="text-sm" data-testid={`roster-${e.role}`}>
+            <div className="flex items-center gap-2">
+              <span className="w-28 text-ink-secondary">{e.role}</span>
             <select
               aria-label={`duckling for ${e.role}`}
               data-testid={`roster-select-${e.role}`}
@@ -177,9 +195,19 @@ function RosterSection({
                 </option>
               ))}
             </select>
-            <span className="text-xs text-ink-muted">
-              {e.source === "project" ? "yours" : "chosen by the engine"}
-            </span>
+              <span className="text-xs text-ink-muted">
+                {e.source === "project" ? "yours" : "chosen by the engine"}
+              </span>
+            </div>
+            {/* What the role is for, said next to the choice rather than in
+                documentation elsewhere. Deciding which model should review is
+                a different question from deciding which should implement, and
+                the names alone do not carry that. */}
+            {ROLE_HELP[e.role] && (
+              <p className="ml-28 pl-2 text-xs text-ink-muted" data-testid={`roster-help-${e.role}`}>
+                {ROLE_HELP[e.role]}
+              </p>
+            )}
           </li>
         ))}
       </ul>

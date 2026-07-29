@@ -142,3 +142,73 @@ describe("Ducklings", () => {
     expect((await screen.findByTestId("fleet-error")).textContent).toContain("is used by");
   });
 });
+
+describe("Ducklings — the roster", () => {
+  const rosterClient = (entries: unknown[]) =>
+    ({
+      ducklings: vi.fn(() =>
+        Promise.resolve([
+          { id: "pato-local", provider: "beelink", model: "qwen" },
+          { id: "pato-sonnet", provider: "openrouter", model: "claude" },
+        ]),
+      ),
+      providers: vi.fn(() => Promise.resolve([])),
+      roster: vi.fn(() => Promise.resolve({ entries })),
+      rosterSet: vi.fn(() => Promise.resolve({})),
+    }) as unknown as EngineClient;
+
+  // Choosing which model reviews is a different question from choosing which
+  // implements, and the role names alone do not carry that.
+  it("says what each role is for, beside the choice", async () => {
+    const client = rosterClient([
+      { role: "implementer", duckling: "pato-local", source: "default" },
+      { role: "reviewer", duckling: "pato-sonnet", source: "project" },
+    ]);
+    render(<Ducklings client={client} projectId="p" />);
+
+    expect((await screen.findByTestId("roster-help-reviewer")).textContent).toContain(
+      "did not write",
+    );
+    expect(screen.getByTestId("roster-help-implementer").textContent).toContain("writes");
+  });
+
+  // A person needs to know which assignments are theirs and which the engine
+  // filled in, or they cannot tell a decision from a default.
+  it("marks whose choice each assignment was", async () => {
+    const client = rosterClient([
+      { role: "implementer", duckling: "pato-local", source: "default" },
+      { role: "reviewer", duckling: "pato-sonnet", source: "project" },
+    ]);
+    render(<Ducklings client={client} projectId="p" />);
+    expect((await screen.findByTestId("roster-implementer")).textContent).toContain(
+      "chosen by the engine",
+    );
+    expect(screen.getByTestId("roster-reviewer").textContent).toContain("yours");
+  });
+
+  it("assigns a role to another duckling", async () => {
+    const client = rosterClient([{ role: "reviewer", duckling: "pato-local", source: "default" }]);
+    render(<Ducklings client={client} projectId="p" />);
+    fireEvent.change(await screen.findByTestId("roster-select-reviewer"), {
+      target: { value: "pato-sonnet" },
+    });
+    await waitFor(() =>
+      expect(client.rosterSet).toHaveBeenCalledWith("p", "reviewer", "pato-sonnet"),
+    );
+  });
+
+  // Running both sides on one duckling measures self-consistency, not review.
+  it("shows the engine's warning about an undecorrelated roster", async () => {
+    const client = {
+      ...(rosterClient([{ role: "reviewer", duckling: "pato-local", source: "default" }]) as object),
+      roster: vi.fn(() =>
+        Promise.resolve({
+          entries: [{ role: "reviewer", duckling: "pato-local", source: "default" }],
+          warning: "implementer and reviewer are the same duckling",
+        }),
+      ),
+    } as unknown as EngineClient;
+    render(<Ducklings client={client} projectId="p" />);
+    expect((await screen.findByTestId("roster-warning")).textContent).toContain("same duckling");
+  });
+});

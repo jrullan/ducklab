@@ -596,3 +596,20 @@ func (s *Service) gateSummary(r *runlog.Run) string {
 	}
 	return strings.TrimSpace(out)
 }
+
+// artifactKindForStage maps a stage to the document its run proposes.
+//
+// Empty for stages that write no artifact: a build run's human gate is about
+// code, and promoting something there would be inventing a decision nobody
+// made.
+func artifactKindForStage(stage string) string {
+	switch stage {
+	case "intake":
+		return "requirements"
+	case "spec":
+		return "spec"
+	case "plan":
+		return "plan"
+	}
+	return ""
+}

@@ -286,6 +286,43 @@ type Status struct {
 	ActiveRuns    int               `json:"active_runs"`
 }
 
+// resolveProjectPath turns a path a person typed into one the engine can use.
+//
+// Two things go wrong otherwise, and both did.
+//
+// `~` is a shell feature. A client sending "~/dev/calculator" made a directory
+// literally named "~", nested under wherever the engine was launched from. The
+// project worked perfectly and was somewhere nobody would ever look.
+//
+// A relative path resolves against the engine's working directory, which is
+// wherever someone happened to start the daemon — arbitrary, invisible from
+// any client, and not what the person meant by "calculator". Refused rather
+// than guessed: there is no correct guess.
+func resolveProjectPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("a project path is required")
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot expand ~: %w", err)
+		}
+		return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/")), nil
+	}
+	if strings.HasPrefix(path, "~") {
+		// "~user/x" is a shell feature this does not implement. Treating it as
+		// a relative directory would repeat the original bug in a new shape.
+		return "", fmt.Errorf("%q: another user's home directory is not supported; give a full path", path)
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf(
+			"%q is relative, and the engine has no idea what it is relative to — "+
+				"it runs as a daemon, not in your shell. Give a full path, or use the folder chooser.", path)
+	}
+	return filepath.Clean(path), nil
+}
+
 // InitRequest is a project init request.
 type InitRequest struct {
 	Path     string `json:"path"`
@@ -296,7 +333,7 @@ type InitRequest struct {
 
 // ProjectOpen opens a project.
 func (s *Service) ProjectOpen(ctx context.Context, path string) (*Project, error) {
-	absPath, err := filepath.Abs(path)
+	absPath, err := resolveProjectPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +363,7 @@ func (s *Service) ProjectOpen(ctx context.Context, path string) (*Project, error
 
 // ProjectInit initializes a new project.
 func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, error) {
-	absPath, err := filepath.Abs(req.Path)
+	absPath, err := resolveProjectPath(req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,6 +1085,24 @@ func (s *Service) failRun(rs *runState, err error) {
 
 // acceptRun accepts a run and commits.
 func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message string) error {
+	// A stage run's human gate is the decision to promote its document. There
+	// is one decision, so there is one action: accepting the run accepts the
+	// artifact.
+	//
+	// Before this they were separate — accept the run on one screen, promote
+	// the artifact on another — and the first real user accepted the run,
+	// watched the Cycle view go on saying "proposal awaiting your decision",
+	// and had no way to know why.
+	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
+		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, "human"); err != nil {
+			// Not fatal: a run whose proposal was already promoted by hand is
+			// still a run worth accepting, and the promote says so itself.
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": fmt.Sprintf("promote %s: %v", kind, err),
+			})
+		}
+	}
+
 	git := vcs.New(entry.Path)
 	if message == "" {
 		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)

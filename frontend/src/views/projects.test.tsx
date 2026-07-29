@@ -176,3 +176,39 @@ describe("Projects — the gate", () => {
     expect(screen.queryByTestId("gate-none")).toBeNull();
   });
 });
+
+describe("Projects — the path field", () => {
+  // A real session typed "~/dev/calculator" and got a project in a folder
+  // literally named "~", nested under wherever the engine was launched. It
+  // worked perfectly and was somewhere nobody would look.
+  it("refuses a path starting with ~ before sending it", async () => {
+    const client = clientWith([]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.change(screen.getByTestId("project-path"), {
+      target: { value: "~/dev/calculator" },
+    });
+    expect((await screen.findByTestId("path-problem")).textContent).toContain("shell shortcut");
+    expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByTestId("project-create"));
+    expect(client.projectInit).not.toHaveBeenCalled();
+  });
+
+  // A relative path means nothing to a daemon: it resolves against wherever
+  // somebody started the engine.
+  it("refuses a relative path", async () => {
+    const client = clientWith([]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "dev/calculator" } });
+    expect((await screen.findByTestId("path-problem")).textContent).toContain("full path");
+  });
+
+  it("accepts a full path", async () => {
+    const client = clientWith([]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.change(screen.getByTestId("project-path"), {
+      target: { value: "/home/someone/dev/calculator" },
+    });
+    expect(screen.queryByTestId("path-problem")).toBeNull();
+    expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(false);
+  });
+});
