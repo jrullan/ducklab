@@ -24,9 +24,12 @@ phase order — there are v0.8 features here and two open v0.1 criteria.
 [`docs/status.md`](docs/status.md) has all 67 acceptance criteria with what is
 built, what is half built and what is missing, and does not round up.
 
-The largest missing piece: **nothing measures anything yet.** `bench`, the
-Reports view and the charts are unbuilt, and comparing ducklings is most of why
-Ducklab exists.
+Measurement works: `ducklab bench` runs a versioned suite and Reports charts
+the result. What it found is that the suite does not yet tell two very
+different local models apart — see
+[decision 0005](docs/decisions/0005-canonical-tasks-do-not-discriminate.md).
+
+Still missing: deploy recipes, MCP, GitHub commands, and engine auto-start.
 
 ## Install
 
@@ -154,7 +157,7 @@ through the ordinary write guard — so reviewing a new skill is reading a diff.
 
 ```bash
 make            # vet, test, build the frontend
-go test ./...   # 28 packages
+go test ./...   # 30 packages
 cd frontend && npx vitest run
 make cross      # linux/amd64, linux/arm64, darwin/arm64, windows/amd64
 ```
