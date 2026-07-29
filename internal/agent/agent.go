@@ -270,13 +270,29 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 
 		// Handle truncation
+		//
+		// The nudge used to be appended to `conversation` and then the *same*
+		// req was resent. req.Messages was assigned before the append and
+		// carries its own length, so the new message never reached the model:
+		// the retry was the identical request, and it produced the identical
+		// answer.
+		//
+		// That is how a run was lost. A model deliberating in circles — "let me
+		// implement this now… actually, I just realized…" a dozen times over —
+		// filled its output budget, got a retry that said nothing, filled it
+		// again, and the run was marked FAILED.
 		if provider.IsLength(finishReason) {
-			// Retry once with terse instruction
-			conversation = append(conversation, provider.Message{
-				Role:    "user",
-				Content: "Be terse. Your previous response was truncated.",
+			retry := req
+			// A fresh slice, so the nudge is actually in the request and the
+			// original conversation is not mutated by an aliased append.
+			retry.Messages = append(append([]provider.Message{}, conversation...), provider.Message{
+				Role: "user",
+				Content: "Your previous reply was cut off because it was too long. " +
+					"Stop deliberating and act: call a tool, or give your final answer in " +
+					"a few sentences. If you have concluded that the task needs no change, " +
+					"say exactly that and stop.",
 			})
-			resp2, err2 := loop.Provider.Chat(ctx, req)
+			resp2, err2 := loop.Provider.Chat(ctx, retry)
 			if err2 != nil || len(resp2.Choices) == 0 {
 				return nil, ErrTruncated
 			}
@@ -285,6 +301,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			if provider.IsLength(finishReason) {
 				return nil, ErrTruncated
 			}
+			// The retried answer is what the turn continues from, so the
+			// conversation must carry the nudge that produced it.
+			conversation = retry.Messages
 		}
 
 		// Handle content filter
