@@ -87,3 +87,24 @@ func TestThePromptSaysWhatIsEnforced(t *testing.T) {
 		t.Error("the prompt lost the task")
 	}
 }
+
+// Test-first needs a gate that runs a test suite. Nothing else gives a test
+// anything to hook into.
+//
+// Found by clicking it on a project whose gate is a custom script: the model
+// explored, understood the task, and then tried to patch the gate script
+// itself to add assertions — because in that project the gate script is the
+// only place an assertion could live. The write guard refused it, correctly,
+// and the run had nowhere left to go.
+func TestTestFirstNeedsATestGate(t *testing.T) {
+	for _, mode := range []string{"none", "build", "lint", "custom", ""} {
+		if err := checkTestGate(mode); err == nil {
+			t.Errorf("mode %q was accepted; a test written under it changes nothing", mode)
+		} else if !strings.Contains(err.Error(), "verify.mode tests") {
+			t.Errorf("mode %q: the error does not say how to fix it: %v", mode, err)
+		}
+	}
+	if err := checkTestGate("tests"); err != nil {
+		t.Errorf("a tests gate was refused: %v", err)
+	}
+}

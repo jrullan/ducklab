@@ -187,6 +187,7 @@ describe("Board — starting the work", () => {
           { id: "pato-sonnet", provider: "openrouter", model: "claude" },
         ]),
       ),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests" })),
       runStart: vi.fn(() => Promise.resolve({ id: "r-9" })),
       testStart: vi.fn(() => Promise.resolve({ id: "r-10" })),
       reviewStart: vi.fn(() => Promise.resolve({ id: "r-11" })),
@@ -267,4 +268,37 @@ describe("Board — starting the work", () => {
     fireEvent.click(screen.getByTestId("run-start"));
     expect((await screen.findByTestId("run-error")).textContent).toContain("not ready");
   });
+});
+
+// Test-first needs a gate that runs tests. A compiler, a linter or a bespoke
+// script gives a new test nothing to hook into — proved on a real project,
+// where the model reasoned its way to patching the gate script itself because
+// that was the only place an assertion could live.
+describe("Board — test first only where it can work", () => {
+  const withGate = (mode: string) =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-001", status: "todo" }])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode })),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
+      testStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
+    }) as unknown as EngineClient;
+
+  it("offers it under a tests gate", async () => {
+    render(<Board client={withGate("tests")} projectId="p" />);
+    fireEvent.click(await screen.findByText("A thing"));
+    expect(await screen.findByTestId("test-first-start")).toBeTruthy();
+  });
+
+  for (const mode of ["custom", "build", "lint", "none"]) {
+    it(`offers nothing under a ${mode} gate`, async () => {
+      render(<Board client={withGate(mode)} projectId="p" />);
+      fireEvent.click(await screen.findByText("A thing"));
+      await screen.findByTestId("task-runner");
+      expect(screen.queryByTestId("test-first-start")).toBeNull();
+      // Building still works; it is only the test that has nowhere to land.
+      expect(screen.getByTestId("run-start")).toBeTruthy();
+    });
+  }
 });

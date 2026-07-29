@@ -60,6 +60,8 @@ export function Board({
   // Needed to offer a choice of ducklings when starting a run. Failing to load
   // them is not worth blocking the board over: with none, the roster decides.
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
+  // Which gate the project has, so the rail offers only what can work here.
+  const [gate, setGate] = useState("");
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
@@ -78,6 +80,7 @@ export function Board({
     // still has tasks worth looking at, and losing both to one error tells the
     // reader less than showing what survived.
     client.ducklings().then(setDucklings).catch(() => {});
+    client.projectGate(projectId).then((g) => setGate(g.mode)).catch(() => {});
     const [t, b] = await Promise.allSettled([client.tasks(projectId), client.bugs(projectId)]);
     const problems: string[] = [];
     if (t.status === "fulfilled") setTasks(t.value);
@@ -268,6 +271,7 @@ export function Board({
             client={client}
             projectId={projectId}
             ducklings={ducklings}
+            gate={gate}
           />
         )}
       </aside>
@@ -280,11 +284,13 @@ function TaskRail({
   client,
   projectId,
   ducklings,
+  gate,
 }: {
   task: Task;
   client: EngineClient;
   projectId: string;
   ducklings: readonly Duckling[];
+  gate: string;
 }) {
   return (
     <div className="space-y-2">
@@ -297,7 +303,13 @@ function TaskRail({
         <Row label="depends on" value={task.depends_on?.join(", ")} />
       </dl>
       {task.body && <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>}
-      <TaskRunner task={task} client={client} projectId={projectId} ducklings={ducklings} />
+      <TaskRunner
+        task={task}
+        client={client}
+        projectId={projectId}
+        ducklings={ducklings}
+        gate={gate}
+      />
     </div>
   );
 }
@@ -316,11 +328,13 @@ function TaskRunner({
   client,
   projectId,
   ducklings,
+  gate,
 }: {
   task: Task;
   client: EngineClient;
   projectId: string;
   ducklings: readonly Duckling[];
+  gate: string;
 }) {
   const [mode, setMode] = useState<string>("solo");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -371,16 +385,22 @@ function TaskRunner({
         >
           {busy ? "Starting…" : "Build it"}
         </button>
-        <button
-          type="button"
-          onClick={() => void go("test")}
-          disabled={busy}
-          data-testid="test-first-start"
-          title="Write the failing test first, by a model that will not implement it"
-          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-        >
-          Test first
-        </button>
+        {/* Only where a test would change something the gate can see. A
+            compiler, a linter or a bespoke script gives a new test nothing to
+            hook into, and the engine refuses — so the button is absent rather
+            than present and failing. */}
+        {gate === "tests" && (
+          <button
+            type="button"
+            onClick={() => void go("test")}
+            disabled={busy}
+            data-testid="test-first-start"
+            title="Write the failing test first, by a model that will not implement it"
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          >
+            Test first
+          </button>
+        )}
         {/* Only for work that has been accepted: there is no commit to read
             otherwise, and the engine refuses with exactly that. */}
         {/* Only on work that has been accepted: a review reads the commit, and

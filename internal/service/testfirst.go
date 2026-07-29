@@ -62,12 +62,8 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	if err != nil {
 		return nil, err
 	}
-	// Without an executable gate there is nothing for a test to turn red, and
-	// the whole flow reduces to writing a file nobody runs.
-	if verify.Gate(projCfg.Verify.Mode) == "none" {
-		return nil, fmt.Errorf(
-			"this project has no gate, so a test cannot be verified to fail. " +
-				"Set one first:  ducklab project set verify.mode tests  &&  ducklab project set verify.tests \"<command>\"")
+	if err := checkTestGate(projCfg.Verify.Mode); err != nil {
+		return nil, err
 	}
 
 	run := &runlog.Run{
@@ -257,4 +253,33 @@ func testFirstPrompt(task, gateCommand string) string {
 	b.WriteString("\nThe filesystem tools will refuse any path that is not a test file. " +
 		"That is deliberate, not a mistake to work around.\n")
 	return b.String()
+}
+
+// checkTestGate refuses a project whose gate does not run tests.
+//
+// A compiler, a linter or a bespoke script gives a new test nothing to hook
+// into: it can be written and the gate will not notice, so "the gate went red"
+// — the one fact this whole flow rests on — cannot mean what it says.
+//
+// Found the hard way. On a project gated by a custom HTML checker, the model
+// reasoned its way to the only place an assertion could live and tried to
+// patch the gate script itself. The write guard refused, correctly, and the
+// run had nowhere left to go.
+//
+// A custom gate that does run tests is welcome; it just has to say so, which
+// is what verify.mode = tests is for.
+func checkTestGate(mode string) error {
+	if verify.Gate(mode) == verify.GateTests {
+		return nil
+	}
+	what := "no gate"
+	if mode != "" && mode != "none" {
+		what = fmt.Sprintf("a %q gate", mode)
+	}
+	return fmt.Errorf(
+		"test-first needs a gate that runs tests, and this project has %s. "+
+			"A test written now would change nothing the gate can see.\n"+
+			"If your gate does run tests, say so:\n"+
+			"  ducklab project set verify.mode tests\n"+
+			"  ducklab project set verify.tests \"<command>\"", what)
 }
