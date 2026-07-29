@@ -525,9 +525,21 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 			b.WriteString("\n" + strings.TrimSpace(task.Body) + "\n")
 		}
 		if len(task.Implements) > 0 {
-			fmt.Fprintf(&b, "\nThis task delivers %s.\n", strings.Join(task.Implements, ", "))
+			// Who else delivers these sections, and therefore what is not this
+			// task's to write.
+			//
+			// This used to say "This task delivers SPEC-003" and then hand over
+			// the whole section. Every section in a real plan is delivered by
+			// two to five tasks — one project had five on SPEC-002 — so the
+			// sentence was false and the model reasonably read the section as
+			// its scope. Twice in one session a task implemented its sibling's
+			// work as well, the gate went green because the code was correct,
+			// and the next run found nothing left to do.
+			b.WriteString(scopeNote(task.Implements, s.siblingTasks(ctx, projectID, taskID, task.Implements)))
 			if spec := s.specSections(projectRoot, task.Implements); spec != "" {
-				b.WriteString("\n## The specification it delivers\n\n" + spec)
+				// "contributes to", not "delivers": the heading was half the
+				// instruction the model was following.
+				b.WriteString("\n## The specification this task contributes to\n\n" + spec)
 			}
 		}
 	} else {
@@ -539,6 +551,68 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 		b.WriteString(artifact.RenderFailedAttempts(prior))
 	}
 	return b.String()
+}
+
+// scopeNote tells a task what is its part of a spec section, and what is not.
+//
+// The wording is the whole mechanism. It used to say "This task delivers
+// SPEC-003" and then hand over the whole section, and every section in a real
+// plan is delivered by several tasks — one project had five on SPEC-002 — so
+// the sentence was false and the model reasonably read the section as its
+// scope. Twice in one session a task implemented its sibling's work as well;
+// the gate went green because the code was correct, and the next run found
+// nothing left to do.
+func scopeNote(implements []string, siblings []TaskView) string {
+	if len(siblings) == 0 {
+		return fmt.Sprintf("\nThis task delivers %s.\n", strings.Join(implements, ", "))
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nThis task delivers **part of** %s. "+
+		"The rest of those sections belongs to other tasks:\n\n", strings.Join(implements, ", "))
+	for _, sib := range siblings {
+		fmt.Fprintf(&b, "- %s — %s\n", sib.ID, sib.Title)
+	}
+	// A real dependency needs an answer other than "do all of it", or the
+	// model will do all of it — which is exactly what happened.
+	b.WriteString("\nDo not implement those. Work another task has been given is work that will " +
+		"be done twice or not at all, and either way the plan stops meaning anything. If your " +
+		"part genuinely cannot stand without something listed above, write the smallest thing " +
+		"that lets yours work and say so in your summary — do not deliver the whole of it.\n")
+	return b.String()
+}
+
+// siblingTasks are the other tasks that deliver any of the same spec sections.
+//
+// They are what this task must not implement. Named rather than merely
+// excluded: "do not do more than your task" is advice a model cannot check
+// itself against, and "T-004 does the geometry calculations" is a fact it can.
+func (s *Service) siblingTasks(ctx context.Context, projectID, taskID string, implements []string) []TaskView {
+	tasks, err := s.TaskList(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	mine := map[string]bool{}
+	for _, id := range implements {
+		mine[strings.ToUpper(strings.TrimSpace(id))] = true
+	}
+	var out []TaskView
+	for _, t := range tasks {
+		if strings.EqualFold(t.ID, taskID) {
+			continue
+		}
+		// Work already accepted is not a warning, it is the tree the task is
+		// being written against — and the model can read it there.
+		if t.Status == "accepted" {
+			continue
+		}
+		for _, id := range t.Implements {
+			if mine[strings.ToUpper(strings.TrimSpace(id))] {
+				out = append(out, t)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (s *Service) findTask(ctx context.Context, projectID, taskID string) *TaskView {
