@@ -10,7 +10,40 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/skill"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
+
+// markPending flags skills this run wrote or changed but nobody has accepted.
+//
+// A skill only becomes usable after the human accepts the run that created it
+// (05 §7.1). Without this a model can write its own instructions and follow
+// them in the same turn, and the gate the spec puts between those two steps
+// never happens.
+//
+// Only project skills: a global skill lives outside any repo and was put there
+// by a person.
+func markPending(ectx *ExecContext, skills []*skill.Skill) {
+	if ectx.ProjectRoot == "" || ectx.AllowUnacceptedSkills {
+		return
+	}
+	projectRoot := ectx.ProjectRoot
+	g := vcs.New(projectRoot)
+	for _, sk := range skills {
+		if sk.Scope == skill.ScopeProject && !g.PathIsCommitted(sk.Dir) {
+			sk.Pending = true
+		}
+	}
+}
+
+// pendingRefusal is what a model is told instead of the skill.
+//
+// It names the state and the fix, and carries none of the skill's own text:
+// the body is the injection, so quoting it in the refusal would be the same
+// leak by another route.
+func pendingRefusal(name string) *Result {
+	return ErrorResult("skill %q was written or changed by this run and is not usable yet. "+
+		"A skill becomes available once a human accepts the run that wrote it.", name)
+}
 
 // SkillList lists the skills available to the project.
 type SkillList struct{}
@@ -30,7 +63,8 @@ func (t *SkillList) Schema() interface{} { return NewSchema() }
 // Execute runs the tool.
 func (t *SkillList) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	all, problems := skill.List(ectx.ProjectRoot, ectx.GlobalSkillsDir)
-	if len(all) == 0 {
+	markPending(ectx, all)
+	if len(all) == 0 && len(problems) == 0 {
 		// Said plainly, so a model does not spend a turn trying different
 		// spellings of a skill that was never there.
 		return SuccessResult("No skills are available in this project."), nil
@@ -40,6 +74,11 @@ func (t *SkillList) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 		kind := "read with skill_read"
 		if sk.Runnable() {
 			kind = "run with skill_run"
+		}
+		// Listed rather than hidden. A model that cannot see it retries under
+		// other names; a model told it is pending knows to stop.
+		if sk.Pending {
+			kind = "pending acceptance — not usable in this run"
 		}
 		fmt.Fprintf(&b, "- %s (%s): %s\n", sk.Name, kind, strings.TrimSpace(sk.Description))
 	}
@@ -81,6 +120,10 @@ func (t *SkillRead) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	sk, err := skill.Find(ectx.ProjectRoot, ectx.GlobalSkillsDir, a.Name)
 	if err != nil {
 		return ErrorResult("%v", err), nil
+	}
+	markPending(ectx, []*skill.Skill{sk})
+	if sk.Pending {
+		return pendingRefusal(sk.Name), nil
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n%s\n", sk.Name, strings.TrimSpace(sk.Description))
@@ -149,6 +192,10 @@ func (t *SkillRun) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	sk, err := skill.Find(ectx.ProjectRoot, ectx.GlobalSkillsDir, a.Name)
 	if err != nil {
 		return ErrorResult("%v", err), nil
+	}
+	markPending(ectx, []*skill.Skill{sk})
+	if sk.Pending {
+		return pendingRefusal(sk.Name), nil
 	}
 	if !sk.Runnable() {
 		return ErrorResult("skill %q is documentation, not a script; read it with skill_read", sk.Name), nil

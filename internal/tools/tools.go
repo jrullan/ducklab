@@ -81,7 +81,17 @@ type ExecContext struct {
 	// GlobalSkillsDir is the machine-wide skills directory. A project skill of
 	// the same name shadows what is here (05 §7).
 	GlobalSkillsDir string
-	Registry        *Registry
+	// AllowUnacceptedSkills lets a skill be read and run before the run that
+	// wrote it is accepted.
+	//
+	// False everywhere a model is driving, which is the default so that a new
+	// call site that forgets this gets the safe behaviour. True only for a
+	// person at a terminal: `ducklab skill run` is how someone tests a skill
+	// they just wrote, and requiring them to commit it first to try it would
+	// make writing one miserable. They are the accepter; there is nobody left
+	// to protect them from.
+	AllowUnacceptedSkills bool
+	Registry              *Registry
 }
 
 // Result is the result of a tool execution.

@@ -45,6 +45,12 @@ func skillCmd(verb string, args []string, repo string) int {
 			if b, _ := sk["runnable"].(bool); b {
 				kind = "run"
 			}
+			if b, _ := sk["pending"].(bool); b {
+				// A duckling cannot use this until the run that wrote it is
+				// accepted (05 §7.1), and a person wondering why needs to see
+				// the reason here rather than in a run log.
+				kind += " pending"
+			}
 			fmt.Printf("  %-24s %-8s %-5s %s\n", name, str(sk["scope"]), kind, str(sk["description"]))
 			if problems := strs(sk["problems"]); len(problems) > 0 {
 				// Beside the skill rather than only under `skill validate`:

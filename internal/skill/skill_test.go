@@ -254,3 +254,50 @@ func TestValidateAllowsTheWordWhereItIsContent(t *testing.T) {
 		t.Errorf("a skill about TODOs was rejected: %v", got)
 	}
 }
+
+// The exact failure 05 §7 names — "skills whose description is a bare noun
+// phrase are rejected" — and the validator let it through.
+//
+// `pato-atom`, asked to write a skill, produced "Naming convention for
+// exported functions in this project". That is a label. It passed because the
+// check looked for a word from a list that included `for`, and a noun phrase
+// says `for` all the time.
+func TestValidateRejectsANounPhraseThatHappensToSayFor(t *testing.T) {
+	for _, desc := range []string{
+		"Naming convention for exported functions in this project",
+		"Helper for parsing configuration files quickly",
+		"Utilities for the database layer if needed",
+	} {
+		sk := &Skill{Name: "x", Description: desc, Version: 1, Body: "b"}
+		if got := Validate(sk); len(got) == 0 {
+			t.Errorf("noun phrase accepted: %q", desc)
+		}
+	}
+	for _, desc := range []string{
+		"How this project names exported functions. Use before adding any new exported function.",
+		"Extract tables from a PDF. Use when a task references one.",
+		"Append a changelog entry. Call this whenever behaviour changes.",
+		"Runs the migration. Reach for it after editing a model.",
+	} {
+		sk := &Skill{Name: "x", Description: desc, Version: 1, Body: "b"}
+		if got := Validate(sk); len(got) != 0 {
+			t.Errorf("a description that says when was rejected: %q → %v", desc, got)
+		}
+	}
+}
+
+// An underscore in a directory name is ordinary, and the rule against it was
+// invented here rather than taken from the spec. A model that writes
+// `naming_convention` has done nothing wrong.
+func TestValidateAcceptsUnderscoresInNames(t *testing.T) {
+	sk := &Skill{Name: "naming_convention", Description: "Names things in this project. Use when naming.", Version: 1, Body: "b"}
+	if got := Validate(sk); len(got) != 0 {
+		t.Errorf("underscore name rejected: %v", got)
+	}
+	for _, bad := range []string{"Naming Convention", "naming convention", "-leading", "naming/convention"} {
+		sk := &Skill{Name: bad, Description: "Names things in this project. Use when naming.", Version: 1, Body: "b"}
+		if got := Validate(sk); len(got) == 0 {
+			t.Errorf("name %q accepted", bad)
+		}
+	}
+}

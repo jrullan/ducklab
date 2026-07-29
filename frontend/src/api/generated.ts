@@ -330,6 +330,7 @@ export interface ServiceSkillSummary {
   args?: SkillArg[];
   description?: string;
   name?: string;
+  pending?: boolean;
   problems?: string[];
   runnable?: boolean;
   scope?: string;

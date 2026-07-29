@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jrullan/ducklab/internal/skill"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,7 +282,75 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := os.WriteFile(absPath, []byte(a.Content), 0o644); err != nil {
 		return ErrorResult("write: %v", err), nil
 	}
-	return SuccessResult("wrote %s (%d bytes)", a.Path, len(a.Content)), nil
+	msg := fmt.Sprintf("wrote %s (%d bytes)", a.Path, len(a.Content))
+	if note := skillLayoutNote(a.Path); note != "" {
+		msg += "\n" + note
+	}
+	if note := skillManifestNote(a.Path, a.Content); note != "" {
+		msg += "\n" + note
+	}
+	return SuccessResult("%s", msg), nil
+}
+
+// skillManifestNote validates a SKILL.md as it is written.
+//
+// Validation already ran at the human gate, which is too late for the model:
+// three runs in a row wrote a skill that would not load and each got back
+// "wrote 143 bytes". Saying it here costs one parse and lands while the turn
+// is still open.
+//
+// The write is not refused. The skills directory is deliberately unprivileged
+// (05 §7.1), and a half-written manifest on the way to a good one is normal.
+func skillManifestNote(path, content string) string {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(path, "./")))
+	rest, ok := strings.CutPrefix(clean, ".ducklab/skills/")
+	if !ok {
+		return ""
+	}
+	dir, file, found := strings.Cut(rest, "/")
+	if !found || file != "SKILL.md" {
+		return ""
+	}
+	sk, err := skill.Parse(content)
+	if err != nil {
+		return fmt.Sprintf("note: this skill will not load: %v", err)
+	}
+	if sk.Name == "" {
+		sk.Name = dir
+	}
+	// Dir is left empty on purpose: the entry-exists check would fail for a
+	// run.sh the model is about to write next, and warning about that would be
+	// noise, not help.
+	if problems := skill.Validate(sk); len(problems) > 0 {
+		return "note: this skill will not load — " + strings.Join(problems, "; ")
+	}
+	return ""
+}
+
+// skillLayoutNote warns about a file written straight into the skills
+// directory.
+//
+// A skill is a directory with a SKILL.md in it, and nothing tells a model
+// that. The first duckling asked to write one wrote
+// `.ducklab/skills/naming-convention.md`, which is not a skill and never
+// becomes one — `skill list` then said "no skills" and the model had no way to
+// connect the two.
+//
+// Said at the write, because that is the only moment the model can still fix
+// it. The write itself is allowed: the skills directory is not privileged, and
+// refusing a write there would be a new rule where a sentence will do.
+func skillLayoutNote(path string) string {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(path, "./")))
+	const prefix = ".ducklab/skills/"
+	rest, ok := strings.CutPrefix(clean, prefix)
+	if !ok || rest == "" || strings.Contains(rest, "/") {
+		return "" // outside the skills directory, or properly inside a skill
+	}
+	name := strings.TrimSuffix(rest, filepath.Ext(rest))
+	return fmt.Sprintf("note: this is not a skill. A skill is a directory with a manifest: "+
+		"%s%s/SKILL.md, with YAML frontmatter (name, description, version) and the "+
+		"instructions as the body. Add an `entry: run.sh` only if it needs to execute something.",
+		prefix, name)
 }
 
 // FSPatch patches a file with search/replace edits.
@@ -344,7 +413,14 @@ func (t *FSPatch) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
 		return ErrorResult("write: %v", err), nil
 	}
-	return SuccessResult("patched %s (%d edits)", a.Path, len(a.Edits)), nil
+	// The same notes fs_write carries. A model fixing one problem in a
+	// manifest needs to hear about the next one, and it usually fixes by
+	// patching.
+	msg := fmt.Sprintf("patched %s (%d edits)", a.Path, len(a.Edits))
+	if note := skillManifestNote(a.Path, content); note != "" {
+		msg += "\n" + note
+	}
+	return SuccessResult("%s", msg), nil
 }
 
 // FSDelete deletes a file.

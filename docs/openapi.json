@@ -1118,6 +1118,9 @@
           "name": {
             "type": "string"
           },
+          "pending": {
+            "type": "boolean"
+          },
           "problems": {
             "items": {
               "type": "string"

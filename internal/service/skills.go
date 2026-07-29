@@ -10,6 +10,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/vcs"
 
 	"github.com/jrullan/ducklab/internal/skill"
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -34,8 +35,11 @@ type SkillSummary struct {
 	Description string      `json:"description"`
 	Scope       skill.Scope `json:"scope"`
 	Runnable    bool        `json:"runnable"`
-	Version     int         `json:"version"`
-	Args        []skill.Arg `json:"args,omitempty"`
+	// Pending is a skill a run wrote that nobody has accepted yet. Shown, not
+	// hidden: a person needs to know why a duckling could not use it.
+	Pending bool        `json:"pending,omitempty"`
+	Version int         `json:"version"`
+	Args    []skill.Arg `json:"args,omitempty"`
 	// Problems is what `skill validate` would say. Carried in the list so a
 	// broken skill is visible where someone is already looking, rather than
 	// only when they think to validate it.
@@ -49,12 +53,14 @@ func (s *Service) SkillList(projectID string) ([]SkillSummary, error) {
 		return nil, err
 	}
 	all, problems := skill.List(entry.Path, globalSkillsDir())
+	g := vcs.New(entry.Path)
 
 	out := make([]SkillSummary, 0, len(all)+len(problems))
 	for _, sk := range all {
 		out = append(out, SkillSummary{
 			Name: sk.Name, Description: sk.Description, Scope: sk.Scope,
 			Runnable: sk.Runnable(), Version: sk.Version, Args: sk.Args,
+			Pending:  sk.Scope == skill.ScopeProject && !g.PathIsCommitted(sk.Dir),
 			Problems: skill.Validate(sk),
 		})
 	}
@@ -175,6 +181,10 @@ func (s *Service) SkillRun(ctx context.Context, projectID, name string, args map
 		ShellPolicy:     projCfg.Shell,
 		Verify:          projCfg.Verify,
 		GlobalSkillsDir: globalSkillsDir(),
+		// A person ran this command. They are the one the acceptance gate
+		// protects, and testing a skill you just wrote is the reason to have
+		// the command at all.
+		AllowUnacceptedSkills: true,
 	}
 	payload, err := json.Marshal(map[string]interface{}{"name": name, "args": args})
 	if err != nil {

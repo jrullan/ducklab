@@ -53,6 +53,11 @@ type Skill struct {
 	Dir string `yaml:"-" json:"dir"`
 	// Scope is where it was found.
 	Scope Scope `yaml:"-" json:"scope"`
+	// Pending is true for a skill that is not yet accepted: written or
+	// changed by a run and not committed (05 §7.1). A pending skill is listed
+	// but cannot be read or run — its body goes into a model's context, so a
+	// model that could read an unreviewed one could write its own prompt.
+	Pending bool `yaml:"-" json:"pending,omitempty"`
 }
 
 // Runnable reports whether the skill has something to execute.
@@ -133,6 +138,16 @@ func List(projectRoot, globalDir string) ([]*Skill, []error) {
 		}
 		for _, e := range entries {
 			if !e.IsDir() {
+				// A file directly in the skills directory is not a skill and
+				// never will be. Reported rather than ignored: the first
+				// duckling asked to write one wrote
+				// `.ducklab/skills/naming-convention.md`, and nothing
+				// anywhere connected that file to "no skills are available".
+				if scope == ScopeProject {
+					problems = append(problems, fmt.Errorf(
+						"%s is a file, not a skill: a skill is a directory with a SKILL.md in it (%s/SKILL.md)",
+						e.Name(), strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))))
+				}
 				continue
 			}
 			sk, err := Load(filepath.Join(root, e.Name()), scope)
@@ -182,10 +197,20 @@ func ProjectDir(projectRoot string) string {
 	return filepath.Join(projectRoot, ".ducklab", "skills")
 }
 
-var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+// nameRe is the shape of a skill name, which is also its directory name.
+//
+// Underscores are allowed. Forbidding them was invented here rather than taken
+// from the spec, and it cost a real run: a duckling wrote `naming_convention`,
+// which is an ordinary directory name, and was told its skill would not load.
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // whenWord marks a description that says when to reach for the skill.
-var whenWord = regexp.MustCompile(`(?i)\b(use|when|whenever|reach for|if|after|before|for)\b`)
+//
+// `for` and `if` were in this list and had to come out. "Naming convention
+// **for** exported functions in this project" is exactly the bare noun phrase
+// 05 §7 says to reject, and it passed — a noun phrase says `for` all the time.
+// A signal that common signals nothing.
+var whenWord = regexp.MustCompile(`(?i)\b(use|used|when|whenever|reach for|after|before|call this)\b`)
 
 // Validate reports everything wrong with a skill.
 //

@@ -105,7 +105,7 @@ criterion, as written, is met.
 | AC-54 | partial | Runs under the policy and receives `DUCKLAB_ARG_*`. It times out — that was fixed this cycle — but **partial output on timeout has not been asserted**. |
 | AC-55 | done | Project shadows global, whole. |
 | AC-56 | **no** | MCP is a config type and nothing else. No client, no `mcp_call`. |
-| AC-57 | **partial, and the gap is a real one** | `skill validate` runs automatically on the run's diff. But a skill written during a run is **usable immediately** — skills are read from the working tree, so the "unusable until the run is accepted" half of the criterion does not hold. There is also no Skills view in the desktop. |
+| AC-57 | done | A skill written or changed by a run is listed as `pending acceptance` and cannot be read or run until the run is committed; `skill validate` runs on the diff automatically. Verified against `pato-atom`, which was refused twice. The desktop has no Skills view — tracked under AC-44 parity, not here. |
 
 ## v0.7 — Release, deploy, measurement
 
@@ -137,8 +137,8 @@ Not assessed. Its criteria are about the whole thing being finished.
 
 | | Count |
 |---|---|
-| done | 42 |
-| partial | 16 |
+| done | 43 |
+| partial | 15 |
 | no | 9 |
 
 Counted from the tables above, not by hand: the first draft of this file said
@@ -158,6 +158,8 @@ Ducklab exists, is the least built part of it.
 not auto-start, and the version has no sha. The first has been worked around
 by hand in every session, which is exactly how a gap survives eight phases.
 
-**AC-57 is the only gap that is a correctness problem.** A skill a duckling
-writes is usable the moment it is written, before anyone has accepted the run
-that created it. The spec puts the human accept between the two on purpose.
+**AC-57 was the only gap that was a correctness problem**, and it is closed:
+a skill a duckling writes is now pending until the run is accepted. What that
+work exposed is worth keeping in mind for the rest — the gate was easy, and
+five real runs were needed before a model could write a valid skill at all,
+because every piece of feedback arrived after the turn it was needed in.

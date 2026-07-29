@@ -88,6 +88,26 @@ func (g *Git) IsClean() (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+// PathIsCommitted reports whether a path matches what is committed.
+//
+// False for anything git does not know about, and for anything changed since
+// the last commit. Used to tell an accepted skill from one this run just
+// wrote (05 §7.1).
+//
+// A project with no git has nothing to accept against, so everything there
+// counts as committed: refusing every skill in a repo someone is trying out
+// would break the feature to enforce a gate that does not exist.
+func (g *Git) PathIsCommitted(path string) bool {
+	if !g.HasGit() {
+		return true
+	}
+	out, err := g.run("status", "--porcelain", "--", path)
+	if err != nil {
+		return true
+	}
+	return strings.TrimSpace(out) == ""
+}
+
 // CreateBranch creates and checks out a new branch from the current HEAD.
 func (g *Git) CreateBranch(name string) error {
 	_, err := g.run("checkout", "-b", name)
