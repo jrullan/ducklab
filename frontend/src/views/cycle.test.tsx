@@ -377,3 +377,85 @@ describe("Cycle — what was asked for", () => {
     expect(screen.queryByTestId("asked-for-panel")).toBeNull();
   });
 });
+
+describe("Cycle — asking for a change", () => {
+  const pending = {
+    kind: "requirements",
+    markdown: "",
+    sections: [],
+    proposal: {
+      diff: "@@ -1 +1 @@\n+x\n",
+      sections: [
+        { id: "SPEC-001", title: "Dragging", body: "" },
+        { id: "SPEC-004", title: "Locking", body: "" },
+      ],
+      run_id: "r-1",
+    },
+  };
+  const client = (over: Record<string, unknown> = {}) =>
+    ({
+      artifact: vi.fn(() => Promise.resolve(pending)),
+      traceCheck: vi.fn(() => Promise.resolve([])),
+      runBrief: vi.fn(() => Promise.resolve("")),
+      promote: vi.fn(() => Promise.resolve({})),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
+      ...over,
+    }) as unknown as EngineClient;
+
+  // Accept and reject are a verdict on a document that is usually almost
+  // right, and "almost" had no button: rejecting left the draft alone, and
+  // redrafting regenerated the sections you were happy with.
+  it("sends the note as a revision, not a fresh draft", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("request-changes");
+
+    fireEvent.change(screen.getByTestId("change-note"), {
+      target: { value: "SPEC-004 should also stop the opposite vertex dragging" },
+    });
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
+        revise: "SPEC-004 should also stop the opposite vertex dragging",
+      }),
+    );
+    expect((await screen.findByTestId("cycle-run-link")).getAttribute("href")).toBe("#/runs/r-2");
+  });
+
+  it("will not ask for nothing", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("request-changes");
+    expect(screen.getByTestId("request-changes-button").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+    expect(c.stageStart).not.toHaveBeenCalled();
+  });
+
+  // The promise is that everything unmentioned survives, and the way to check
+  // it is the diff. Said where the promise is made.
+  it("points at how to check what actually changed", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    expect((await screen.findByTestId("request-changes")).textContent).toContain("What changed");
+  });
+
+  // No draft on the table, nothing to revise.
+  it("offers nothing to revise when no proposal is pending", async () => {
+    const c = client({
+      artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    expect(screen.queryByTestId("request-changes")).toBeNull();
+  });
+
+  it("shows the engine's refusal rather than failing silently", async () => {
+    const c = client({
+      stageStart: vi.fn(() => Promise.reject(new Error("no ducklings available"))),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    fireEvent.change(await screen.findByTestId("change-note"), { target: { value: "change it" } });
+    fireEvent.click(screen.getByTestId("request-changes-button"));
+    expect((await screen.findByTestId("cycle-error")).textContent).toContain("no ducklings");
+  });
+});

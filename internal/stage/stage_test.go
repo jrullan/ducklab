@@ -3,6 +3,7 @@ package stage
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,7 +141,7 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 		artifact.KindPlan:         "## M-01 — Should not appear\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	prompt, err := BuildPrompt(root, Spec, "", current)
+	prompt, err := BuildPrompt(root, Spec, "", current, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +161,7 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	_, err := BuildPrompt(root, Spec, "", current)
+	_, err := BuildPrompt(root, Spec, "", current, "")
 	if err == nil {
 		t.Fatal("spec ran with no requirements")
 	}
@@ -172,7 +173,7 @@ func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 func TestPlanWithoutSpecFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindPlan)
-	_, err := BuildPrompt(root, Plan, "", current)
+	_, err := BuildPrompt(root, Plan, "", current, "")
 	if err == nil || !strings.Contains(err.Error(), "spec") {
 		t.Errorf("err = %v", err)
 	}
@@ -184,7 +185,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 		artifact.KindRequirements: "## REQ-007 — Existing\n\n**Priority:** must\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current)
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "")
 	if !strings.Contains(prompt, "REQ-008") {
 		t.Errorf("prompt does not state the next free id:\n%s", prompt)
 	}
@@ -197,7 +198,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 func TestIntakeWithoutASeedAsksTheHuman(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "", current)
+	prompt, _ := BuildPrompt(root, Intake, "", current, "")
 	if !strings.Contains(prompt, "Ask the human") {
 		t.Errorf("prompt does not ask for an interview:\n%s", prompt)
 	}
@@ -210,7 +211,7 @@ func TestPromptCarriesProjectMemory(t *testing.T) {
 	artifact.SaveMemory(root, m)
 
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current)
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "")
 	if !strings.Contains(prompt, "billing product") {
 		t.Errorf("project memory not injected:\n%s", prompt)
 	}
@@ -255,5 +256,65 @@ Here is the final version:
 	}
 	if !strings.Contains(rendered, "REQ-001 — Users can log in") {
 		t.Error("the actual requirement was lost")
+	}
+}
+
+// Accept and reject are a verdict on a document that is usually almost right,
+// and "almost" has no button. A revision is the third answer: keep it, change
+// this one thing.
+func TestARevisionAsksForAnEditNotANewDocument(t *testing.T) {
+	root := t.TempDir()
+	current := &artifact.Document{
+		Raw: "## SPEC-001 — Dragging\n\nVertices drag.\n\n## SPEC-004 — Locking\n\nAngles lock.\n",
+		Sections: []artifact.Section{
+			{ID: "SPEC-001", Title: "Dragging"},
+			{ID: "SPEC-004", Title: "Locking"},
+		},
+	}
+	got, err := BuildPrompt(root, Spec, "", current,
+		"SPEC-004 should stop the opposite vertex from being dragged")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"Revise the document below",
+		"opposite vertex",           // the note itself
+		"Change what the note asks", // and nothing else
+		"Keep every id",
+		"SPEC-001 — Dragging", // the document it must return unchanged
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the revision prompt is missing %q:\n%s", want, got)
+		}
+	}
+	// It must not still be asking for a fresh document, or the model gets two
+	// contradictory jobs and picks one.
+	for _, unwanted := range []string{"Write the specification", "Allocate new ids"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the revision prompt still asks for a new document (%q):\n%s", unwanted, got)
+		}
+	}
+}
+
+// Without a note, nothing changes: the ordinary drafting prompt.
+func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ducklab", "docs", "requirements.md"),
+		[]byte("---\nkind: requirements\napproved_by: human\n---\n\n## REQ-001 — A thing\n\nBody.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Write the specification") {
+		t.Errorf("the drafting prompt was lost:\n%s", got)
+	}
+	if strings.Contains(got, "Revise the document") {
+		t.Error("a run with no note was told to revise")
 	}
 }

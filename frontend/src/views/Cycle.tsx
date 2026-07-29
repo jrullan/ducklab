@@ -51,6 +51,8 @@ export function Cycle({
   // someone types into, and this is the one a past run was given.
   const [askedFor, setAskedFor] = useState("");
   const [showAsked, setShowAsked] = useState(false);
+  const [note, setNote] = useState("");
+  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,6 +113,24 @@ export function Cycle({
   // Starting a stage is the step that was missing: the view could accept a
   // proposal but not produce one, so the first thing anyone wants to do had to
   // be done from a terminal.
+  // The third answer. Accept and reject are a verdict on a document that is
+  // usually almost right, and "almost" had no button: rejecting left the draft
+  // alone and redrafting regenerated the parts you were happy with.
+  async function requestChanges() {
+    if (!note.trim()) return;
+    setAsking(true);
+    setFailure(null);
+    try {
+      const run = await client.stageStart(projectId, active.stage, { revise: note.trim() });
+      setStartedRun(run.id);
+      setNote("");
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAsking(false);
+    }
+  }
+
   async function start() {
     setStarting(true);
     setFailure(null);
@@ -248,6 +268,45 @@ export function Cycle({
             ) : (
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             )}
+
+            <div className="mt-3 border-t border-hairline pt-3" data-testid="request-changes">
+              <textarea
+                aria-label="what to change"
+                data-testid="change-note"
+                rows={2}
+                placeholder="Right except SPEC-004 — locking an angle should also stop the opposite vertex from being dragged."
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+              />
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void requestChanges()}
+                  disabled={asking || !note.trim()}
+                  data-testid="request-changes-button"
+                  className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+                >
+                  {asking ? "Asking…" : "Request changes"}
+                </button>
+                {startedRun && (
+                  // The link lives here as well as in the start panel, which
+                  // is hidden while a proposal is pending — so asking for a
+                  // change used to leave no way to watch what it did.
+                  <a
+                    href={`#/runs/${startedRun}`}
+                    data-testid="cycle-run-link"
+                    className="text-sm text-ink underline"
+                  >
+                    watch the run
+                  </a>
+                )}
+                <span className="text-xs text-ink-muted">
+                  The draft goes back with your note. Everything you did not mention is meant to
+                  come back unchanged — compare with What changed before accepting.
+                </span>
+              </div>
+            </div>
           </section>
         )}
 

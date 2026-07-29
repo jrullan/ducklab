@@ -393,6 +393,7 @@ export interface ServiceStageRequest {
   autonomy?: string;
   from?: string;
   mode?: string;
+  revise?: string;
   stage?: string;
   stream?: boolean;
 }

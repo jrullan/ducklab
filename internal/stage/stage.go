@@ -48,6 +48,10 @@ type Params struct {
 	// Seed is an existing document to work from (`--from brief.txt`) instead
 	// of interviewing the human.
 	Seed string
+	// Revision is what a person asked to be changed about the draft they were
+	// shown. Set only when revising, and it changes the job entirely: the
+	// architect edits an existing document rather than writing a new one.
+	Revision string
 	// Ducklings that took part, recorded in the artifact's frontmatter.
 	Ducklings []string
 	// Execute runs the conversation. Injected so the stage logic — prompt
@@ -85,7 +89,16 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, current)
+	// A revision works from the draft that was actually shown, which is the
+	// proposal when one is pending. Revising the accepted version instead
+	// would silently discard everything the last run produced.
+	base := current
+	if p.Revision != "" {
+		if proposed, _ := artifact.LoadProposed(p.ProjectRoot, kind); proposed != nil {
+			base = proposed
+		}
+	}
+	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +145,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 // Each stage sees only what it needs: intake sees the brief, spec sees approved
 // requirements, plan sees the spec. Feeding a stage the whole cycle would bury
 // the thing it is meant to work on.
-func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document) (string, error) {
+func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document, revision string) (string, error) {
 	var b strings.Builder
 
 	memory, err := artifact.LoadMemory(projectRoot)
@@ -142,6 +155,36 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 	if mc := memory.PromptContext(); mc != "" {
 		b.WriteString(mc)
 		b.WriteString("\n\n")
+	}
+
+	// A revision replaces the task, rather than adding to it.
+	//
+	// Accept and reject are a verdict on a document that is usually almost
+	// right, and "almost" has no button. This is the third answer: keep it,
+	// change this. The draft goes back with the note attached, so the
+	// architect edits rather than starts again — everything not mentioned is
+	// meant to survive, and the diff shown at the gate is how a person checks
+	// that it did.
+	if revision != "" {
+		var r strings.Builder
+		r.WriteString("## Your task\n\nRevise the document below. It was reviewed by the person " +
+			"who asked for it, and they want one thing changed.\n\n")
+		r.WriteString("## What they asked for\n\n")
+		r.WriteString(strings.TrimSpace(revision))
+		r.WriteString("\n\n## Rules for this revision\n\n")
+		r.WriteString("- Change what the note asks for, and nothing else. Every other section " +
+			"must come back **exactly as it is**, same id, same wording.\n")
+		r.WriteString("- Keep every id. A section that keeps its id and changes its text is a " +
+			"revision; a renumbered one breaks every reference to it.\n")
+		r.WriteString("- If the note asks for something that cannot be done, say so in the " +
+			"section rather than silently doing something else.\n")
+		r.WriteString("- Return the whole document, not a fragment.\n\n")
+		r.WriteString("## The document to revise\n\n")
+		r.WriteString(strings.TrimSpace(current.Raw))
+		r.WriteString("\n\n")
+		// The rest of the original task still applies — the format rules, what
+		// the ids mean — but the instruction to write a new document does not.
+		return r.String(), nil
 	}
 
 	switch name {

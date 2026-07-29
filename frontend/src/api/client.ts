@@ -463,10 +463,18 @@ export class EngineClient {
    * `from` seeds intake: a file path if it reads as one, otherwise the brief
    * text itself — the engine treats an unreadable path as the brief, so
    * pasting a sentence needs no file. */
-  stageStart(projectId: string, stage: string, opts: { from?: string; mode?: string } = {}) {
+  stageStart(
+    projectId: string,
+    stage: string,
+    opts: { from?: string; mode?: string; revise?: string } = {},
+  ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
       from: opts.from ?? "",
+      // Set only when revising: it turns the run from "write this document"
+      // into "edit this one", which is the answer to a draft that is almost
+      // right.
+      revise: opts.revise ?? "",
       mode: opts.mode ?? "",
       stream: true,
     });

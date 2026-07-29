@@ -1343,6 +1343,9 @@
           "mode": {
             "type": "string"
           },
+          "revise": {
+            "type": "string"
+          },
           "stage": {
             "type": "string"
           },
@@ -1354,6 +1357,7 @@
           "autonomy",
           "from",
           "mode",
+          "revise",
           "stage",
           "stream"
         ],
