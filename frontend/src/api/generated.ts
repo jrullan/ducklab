@@ -116,6 +116,13 @@ export interface EngineapianswerRequest {
   question_id?: string;
 }
 
+export interface EngineapibenchRequest {
+  ducklings?: string[];
+  keep?: boolean;
+  modes?: string[];
+  suite?: string;
+}
+
 export interface EngineapidiffResponse {
   diff?: string;
   tests?: string;
@@ -199,8 +206,7 @@ export interface ReportRow {
   key?: string;
   passed?: number;
   runs?: number;
-  tokens_in?: number;
-  tokens_out?: number;
+  tokens?: number;
   unverified?: number;
   wallclock_ms?: number;
 }
@@ -246,6 +252,7 @@ export interface RunlogRun {
   stream?: boolean;
   task_id?: string;
   tests_modified?: boolean;
+  tokens_estimated?: boolean;
   unsafe_writes?: boolean;
   verdict?: string;
   wallclock_ms?: number;
@@ -381,6 +388,7 @@ export interface SkillArg {
 
 /** Every endpoint, derived from the engine's route table. */
 export const OPERATIONS = [
+  { id: "Bench", method: "POST", path: "/v1/bench" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
   { id: "DucklingProbe", method: "POST", path: "/v1/ducklings/{id}/probe" },
   { id: "DucklingTest", method: "POST", path: "/v1/ducklings/{id}/test" },

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/bench"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -203,6 +204,28 @@ func (s *Server) handleSkillRun(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"output": out, "failed": failed})
 }
 
+func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
+	var req benchRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	res, path, err := s.svc.BenchRun(r.Context(), service.BenchOptions{
+		Suite: req.Suite, Ducklings: req.Ducklings, Modes: req.Modes, Keep: req.Keep,
+	})
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	// Rendered by the engine, like the report table: the CLI may not import
+	// bench either (AC-16), and one renderer cannot drift from another.
+	s.json(w, http.StatusOK, map[string]interface{}{
+		"result": res, "path": path, "rendered": bench.Render(*res),
+	})
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -345,7 +368,15 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	s.json(w, http.StatusOK, rep)
+	// The table travels rendered. The CLI may not import report (AC-16), so it
+	// grew a second renderer that drifted — it lost the avg_wall column, the
+	// underscored token counts and the estimated marker, and nothing noticed
+	// because both sides passed their own tests. One renderer, one table.
+	s.json(w, http.StatusOK, map[string]interface{}{
+		"by": rep.By, "baseline": rep.Baseline, "rows": rep.Rows,
+		"deltas": rep.Deltas, "resolved": rep.Resolved,
+		"rendered": report.Render(rep),
+	})
 }
 
 // parseSince accepts "30d", "12h", "90m".

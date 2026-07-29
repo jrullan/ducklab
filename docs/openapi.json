@@ -396,6 +396,35 @@
         ],
         "type": "object"
       },
+      "EngineapibenchRequest": {
+        "properties": {
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "keep": {
+            "type": "boolean"
+          },
+          "modes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ducklings",
+          "keep",
+          "modes",
+          "suite"
+        ],
+        "type": "object"
+      },
       "EngineapidiffResponse": {
         "properties": {
           "diff": {
@@ -663,10 +692,7 @@
           "runs": {
             "type": "integer"
           },
-          "tokens_in": {
-            "type": "integer"
-          },
-          "tokens_out": {
+          "tokens": {
             "type": "integer"
           },
           "unverified": {
@@ -683,8 +709,7 @@
           "key",
           "passed",
           "runs",
-          "tokens_in",
-          "tokens_out",
+          "tokens",
           "unverified",
           "wallclock_ms"
         ],
@@ -819,6 +844,9 @@
             "type": "string"
           },
           "tests_modified": {
+            "type": "boolean"
+          },
+          "tokens_estimated": {
             "type": "boolean"
           },
           "unsafe_writes": {
@@ -1308,6 +1336,35 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/bench": {
+      "post": {
+        "operationId": "Bench",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapibenchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run a benchmark suite. No project; every cell is a throwaway."
+      }
+    },
     "/v1/ducklings": {
       "get": {
         "operationId": "DucklingList",

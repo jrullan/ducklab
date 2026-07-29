@@ -40,7 +40,13 @@ type Run struct {
 	Budget        BudgetState            `json:"budget"`
 	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
 	TestsModified bool                   `json:"tests_modified"`
-	Warning       string                 `json:"warning,omitempty"`
+	// TokensEstimated is true when any model call in this run reported no
+	// usage and its tokens were counted by estimate.
+	//
+	// Reports must never sum measured and estimated numbers without saying so
+	// (AC-61), and the run is the only place that knows.
+	TokensEstimated bool   `json:"tokens_estimated,omitempty"`
+	Warning         string `json:"warning,omitempty"`
 }
 
 // BudgetState tracks budget spend in a run.

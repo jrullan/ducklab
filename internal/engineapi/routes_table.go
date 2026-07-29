@@ -88,6 +88,13 @@ type skillRunRequest struct {
 	Args map[string]interface{} `json:"args"`
 }
 
+type benchRequest struct {
+	Suite     string   `json:"suite"`
+	Ducklings []string `json:"ducklings"`
+	Modes     []string `json:"modes"`
+	Keep      bool     `json:"keep"`
+}
+
 type diffResponse struct {
 	Diff string `json:"diff"`
 	// Tests is the part of Diff that touches test files, when the run was
@@ -199,6 +206,11 @@ func routeTable() []Route {
 			Request: skillRunRequest{}, Summary: "Run a skill. No model is involved.",
 			ClientMethod: "SkillRun",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillRun }},
+		{Method: "POST", Path: "/v1/bench", Auth: true,
+			Request:      benchRequest{},
+			Summary:      "Run a benchmark suite. No project; every cell is a throwaway.",
+			ClientMethod: "Bench",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleBench }},
 		{Method: "GET", Path: "/v1/runs", Auth: true,
 			Response: listOf{Items: []runlog.Run{}}, Summary: "List runs", ClientMethod: "RunList",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunList }},

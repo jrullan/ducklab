@@ -210,6 +210,27 @@ func (c *Client) SkillRun(projectID, name string, args map[string]interface{}) (
 	return result.Output, result.Failed, err
 }
 
+// Bench runs a benchmark suite. It can take a long time: every cell is a real
+// run against a real model.
+func (c *Client) Bench(suite string, ducklings, modes []string, keep bool) (rendered, path string, err error) {
+	var result struct {
+		Rendered string `json:"rendered"`
+		Path     string `json:"path"`
+	}
+	// The default 30s timeout is right for asking the engine a question and
+	// wrong for asking it to spend an afternoon. Nothing here is unbounded
+	// (I3): the engine bounds every cell itself, and the suite is that bound
+	// times the number of cells.
+	long := *c
+	client := *c.HTTPClient
+	client.Timeout = 12 * time.Hour
+	long.HTTPClient = &client
+	err = long.post("/v1/bench", map[string]interface{}{
+		"suite": suite, "ducklings": ducklings, "modes": modes, "keep": keep,
+	}, &result)
+	return result.Rendered, result.Path, err
+}
+
 // RunDiff returns a run's diff and, when it was flagged, the part of it that
 // touches tests.
 func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {
@@ -487,7 +508,18 @@ func (c *Client) RunAnswer(id, questionID, answer string) error {
 // The connection has no client-side timeout: a run may sit at a human gate
 // for hours, and the engine's heartbeat keeps the socket alive.
 func (c *Client) StreamRunEvents(ctx context.Context, runID string, fromSeq int, fn func(SSEEvent) bool) error {
-	url := fmt.Sprintf("%s?run=%s&from_seq=%d", c.EventsURL(), runID, fromSeq)
+	return c.streamEvents(ctx, fmt.Sprintf("%s?run=%s&from_seq=%d", c.EventsURL(), runID, fromSeq), fn)
+}
+
+// StreamEvents follows every event the engine emits, not one run's.
+//
+// A bench has no run id of its own — it is many runs — so following it means
+// following the engine.
+func (c *Client) StreamEvents(ctx context.Context, fn func(SSEEvent) bool) error {
+	return c.streamEvents(ctx, c.EventsURL(), fn)
+}
+
+func (c *Client) streamEvents(ctx context.Context, url string, fn func(SSEEvent) bool) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err

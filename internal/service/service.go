@@ -776,10 +776,14 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 // runLogAdapter adapts runlog.Writer to agent.RunLogWriter.
 type runLogAdapter struct {
 	w *runlog.Writer
+	// run is here so a call with no usage can mark the whole run's totals as
+	// estimated. Reports must not sum measured and estimated numbers without
+	// saying so (AC-61), and this is the only place that sees both.
+	run *runlog.Run
 }
 
 func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
-	return a.w.AppendLLM(&runlog.LLMCall{
+	err := a.w.AppendLLM(&runlog.LLMCall{
 		Duckling:     call.Duckling,
 		Provider:     call.Provider,
 		Model:        call.Model,
@@ -794,6 +798,13 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 		CostSource:   call.CostSource,
 		FinishReason: call.FinishReason,
 	})
+	// One estimated call makes the run's total an estimate. Reports mark it;
+	// without this the marker in Render was unreachable and every number
+	// looked measured.
+	if call.Estimated && a.run != nil {
+		a.run.TokensEstimated = true
+	}
+	return err
 }
 
 // executeRun executes a run in the background.
@@ -851,7 +862,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: &runLogAdapter{w: rs.writer},
+		writer: &runLogAdapter{w: rs.writer, run: rs.run},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
 	if rs.run.Stream && s.bus != nil {

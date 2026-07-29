@@ -134,6 +134,8 @@ func Run(args []string) int {
 		return ducklingCmd(verb, cmdArgs)
 	case "run":
 		return runCmd(verb, cmdArgs, repo)
+	case "bench":
+		return benchCmd(remaining[1:], repo)
 	case "report":
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
 	case "roster":
@@ -409,8 +411,13 @@ func reportCmd(args []string, repo string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	fmt.Print(renderReport(rep))
-	return 0
+	// Printed as the engine rendered it. See handleReport.
+	if rendered := str(rep["rendered"]); rendered != "" {
+		fmt.Print(rendered)
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, "error: the engine returned no report")
+	return 1
 }
 
 // resolveProjectID maps --repo to the engine's project id.
@@ -941,75 +948,6 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 // The CLI renders rather than importing internal/report: it may import only
 // engineclt, daemon and xplat (01 §4.1), and that restriction is what keeps it
 // a client instead of growing a second implementation.
-func renderReport(rep map[string]interface{}) string {
-	var b strings.Builder
-	by, _ := rep["by"].(string)
-	if by == "" {
-		by = "mode"
-	}
-	fmt.Fprintf(&b, "%-12s %5s %7s %11s %7s %11s %8s\n",
-		by, "runs", "passed", "unverified", "failed", "avg_tokens", "avg_usd")
-
-	rows, _ := rep["rows"].([]interface{})
-	for _, raw := range rows {
-		r, _ := raw.(map[string]interface{})
-		runs := num(r["runs"])
-		avgTokens, avgCost := 0.0, 0.0
-		if runs > 0 {
-			avgTokens = (num(r["tokens_in"]) + num(r["tokens_out"])) / runs
-			avgCost = num(r["cost_usd"]) / runs
-		}
-		marker := ""
-		if est, _ := r["estimated"].(bool); est {
-			marker = "~"
-		}
-		fmt.Fprintf(&b, "%-12s %5.0f %7.0f %11.0f %7.0f %10.0f%s %8.4f\n",
-			str(r["key"]), runs, num(r["passed"]), num(r["unverified"]), num(r["failed"]),
-			avgTokens, marker, avgCost)
-	}
-
-	if by != "mode" {
-		return b.String()
-	}
-
-	b.WriteString("\n")
-	var baseRow map[string]interface{}
-	for _, raw := range rows {
-		if r, _ := raw.(map[string]interface{}); str(r["key"]) == "solo" {
-			baseRow = r
-		}
-	}
-	if baseRow == nil {
-		b.WriteString("no solo runs yet — without the baseline there is nothing to compare against.\n")
-		b.WriteString("run the same task with --mode solo to establish it.\n")
-		return b.String()
-	}
-	baseRuns := num(baseRow["runs"])
-	basePass := 0.0
-	if baseRuns > 0 {
-		basePass = num(baseRow["passed"]) / baseRuns * 100
-	}
-	fmt.Fprintf(&b, "solo baseline: %.1f%% passed (n=%.0f)\n", basePass, baseRuns)
-
-	deltas, _ := rep["deltas"].([]interface{})
-	for _, raw := range deltas {
-		d, _ := raw.(map[string]interface{})
-		fmt.Fprintf(&b, "%-14s %.1f%% passed  (%+.1f pts, n=%.0f)\n",
-			str(d["key"])+":", num(d["pass_rate"]), num(d["points_vs_baseline"]), num(d["n"]))
-	}
-
-	if res, _ := rep["resolutions"].([]interface{}); len(res) > 0 {
-		b.WriteString("\nresolutions: ")
-		var parts []string
-		for _, raw := range res {
-			r, _ := raw.(map[string]interface{})
-			parts = append(parts, fmt.Sprintf("%s=%.0f", str(r["kind"]), num(r["count"])))
-		}
-		b.WriteString(strings.Join(parts, " ") + "\n")
-	}
-	return b.String()
-}
-
 func num(v interface{}) float64 {
 	f, _ := v.(float64)
 	return f

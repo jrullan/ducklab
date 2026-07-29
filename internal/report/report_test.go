@@ -158,3 +158,46 @@ func TestEmptyReportDoesNotPanic(t *testing.T) {
 		t.Error("empty report rendered nothing at all")
 	}
 }
+
+// The table the spec prints (03 §3.10) has an avg_wall column and underscored
+// token counts. Render produced both; the CLI printed neither, because it had
+// its own renderer — AC-16 forbids it importing this package, so a second one
+// grew and drifted.
+//
+// This asserts the shape the CLI is now required to receive.
+func TestRenderMatchesTheSpecTable(t *testing.T) {
+	rep := Build([]*runlog.Run{
+		{Mode: "solo", Verdict: "PASSED", Budget: runlog.BudgetState{Tokens: 18_400}, WallclockMs: 72_000},
+		{Mode: "solo", Verdict: "FAILED", Budget: runlog.BudgetState{Tokens: 18_400}, WallclockMs: 72_000},
+		{Mode: "pair", Verdict: "PASSED", Budget: runlog.BudgetState{Tokens: 52_100}, WallclockMs: 243_000},
+	}, Options{By: "mode"})
+	got := Render(rep)
+
+	for _, want := range []string{
+		"avg_wall", // the column the CLI dropped
+		"18_400",   // underscored, as the spec prints them
+		"1m12s",    // a duration a person can read
+		"4m03s",    // zero-padded seconds
+		"solo baseline:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Render is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// AC-61: measured and estimated counts are never summed without saying so.
+func TestRenderMarksEstimatedCounts(t *testing.T) {
+	rep := Build([]*runlog.Run{
+		{Mode: "solo", Verdict: "PASSED", Budget: runlog.BudgetState{Tokens: 2000}, TokensEstimated: true},
+	}, Options{By: "mode"})
+	if got := Render(rep); !strings.Contains(got, "~") {
+		t.Errorf("an estimated count was printed as measured:\n%s", got)
+	}
+	rep = Build([]*runlog.Run{
+		{Mode: "solo", Verdict: "PASSED", Budget: runlog.BudgetState{Tokens: 2000}},
+	}, Options{By: "mode"})
+	if got := Render(rep); strings.Contains(got, "~") {
+		t.Errorf("a measured count was marked estimated:\n%s", got)
+	}
+}

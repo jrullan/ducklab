@@ -24,8 +24,7 @@ type Row struct {
 	Passed     int     `json:"passed"`
 	Unverified int     `json:"unverified"`
 	Failed     int     `json:"failed"`
-	TokensIn   int64   `json:"tokens_in"`
-	TokensOut  int64   `json:"tokens_out"`
+	Tokens     int64   `json:"tokens"`
 	CostUSD    float64 `json:"cost_usd"`
 	WallMs     int64   `json:"wallclock_ms"`
 	// Estimated is true when any run in this group had estimated token counts.
@@ -53,7 +52,7 @@ func (r Row) avg(total int64) int64 {
 }
 
 // AvgTokens returns the mean total tokens per run.
-func (r Row) AvgTokens() int64 { return r.avg(r.TokensIn + r.TokensOut) }
+func (r Row) AvgTokens() int64 { return r.avg(r.Tokens) }
 
 // AvgCost returns the mean cost per run.
 func (r Row) AvgCost() float64 {
@@ -136,9 +135,15 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			default:
 				g.Failed++
 			}
-			g.TokensOut += r.Budget.Tokens
+			// Budget.Tokens is the run's total; providers do not report the
+			// split per run, so there is one field rather than two that
+			// would be half fiction.
+			g.Tokens += r.Budget.Tokens
 			g.CostUSD += r.Budget.USD
 			g.WallMs += r.WallclockMs
+			if r.TokensEstimated {
+				g.Estimated = true
+			}
 		}
 		if r.Resolution != "" {
 			resolutions[r.Resolution]++
