@@ -272,6 +272,14 @@ func (c *Client) DucklingRemove(id string) error {
 	return c.delete("/v1/ducklings/" + id)
 }
 
+// TestStart writes the failing test for a task.
+func (c *Client) TestStart(projectID, taskID, duckling string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/tests",
+		map[string]interface{}{"task_id": taskID, "duckling": duckling}, &result)
+	return result, err
+}
+
 // RunDiff returns a run's diff and, when it was flagged, the part of it that
 // touches tests.
 func (c *Client) RunDiff(id string) (diff, tests, warning string, err error) {

@@ -1430,6 +1430,21 @@
         ],
         "type": "object"
       },
+      "ServiceTestFirstRequest": {
+        "properties": {
+          "duckling": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "duckling",
+          "task_id"
+        ],
+        "type": "object"
+      },
       "SkillArg": {
         "properties": {
           "name": {
@@ -3103,6 +3118,52 @@
           }
         ],
         "summary": "First task whose dependencies are met"
+      }
+    },
+    "/v1/projects/{id}/tests": {
+      "post": {
+        "operationId": "TestStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceTestFirstRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Write the failing test for a task, before the code exists"
       }
     },
     "/v1/projects/{id}/trace/check": {

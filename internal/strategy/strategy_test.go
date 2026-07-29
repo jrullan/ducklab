@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -228,5 +229,26 @@ func TestValidateAllowsHumanTurn(t *testing.T) {
 	}
 	if err := s.Validate(testRegistry(t)); err != nil {
 		t.Errorf("human turn rejected: %v", err)
+	}
+}
+
+// Every other script drives towards a green gate. This one is the opposite,
+// and reusing solo's condition cost two wasted rounds on a real run: the model
+// kept trying to make its own new test pass, which it cannot — the write guard
+// allows only test files — and should not, because passing is the failure.
+func TestTheTestFirstScriptStopsOnRed(t *testing.T) {
+	s := TestFirstScript()
+	if s.Until != `gate == "red"` {
+		t.Errorf("Until = %q, want it to stop when the gate goes red", s.Until)
+	}
+	if s.MaxRounds != 1 {
+		t.Errorf("MaxRounds = %d; there is no second attempt to loop towards", s.MaxRounds)
+	}
+	if len(s.Turns) != 1 || s.Turns[0].Role != config.RoleImplementer {
+		t.Errorf("turns = %+v", s.Turns)
+	}
+	// And it must still compile as an expression, or the run dies at load.
+	if _, err := conv.Compile(s.Until); err != nil {
+		t.Errorf("Until does not compile: %v", err)
 	}
 }

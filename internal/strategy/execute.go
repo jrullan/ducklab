@@ -85,6 +85,11 @@ func ExecuteSolo(ctx context.Context, params *ExecuteParams) (*ExecuteResult, er
 	return ExecuteScript(ctx, SoloScript(), params)
 }
 
+// ExecuteTestFirst writes the failing test for a task.
+func ExecuteTestFirst(ctx context.Context, params *ExecuteParams) (*ExecuteResult, error) {
+	return ExecuteScript(ctx, TestFirstScript(), params)
+}
+
 // ExecutePair executes the pair mode.
 func ExecutePair(ctx context.Context, params *ExecuteParams) (*ExecuteResult, error) {
 	return ExecuteScript(ctx, PairScript(), params)

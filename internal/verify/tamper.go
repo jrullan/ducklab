@@ -108,6 +108,18 @@ func diffFile(section string) string {
 	return ""
 }
 
+// IsTestPath reports whether a path is one of the project's test files.
+//
+// Shared with the write guard, so "what counts as a test" has one definition:
+// a guard that allowed a file the tampering check would not flag would be two
+// answers to one question.
+func IsTestPath(path string, globs []string) bool {
+	if len(globs) == 0 {
+		globs = DefaultTestGlobs
+	}
+	return matchesAny(path, globs)
+}
+
 // matchesAny reports whether a path matches any of the globs.
 //
 // A `dir/**` glob matches everything under dir at any depth; anything else is

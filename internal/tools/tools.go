@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jrullan/ducklab/internal/verify"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -71,6 +72,14 @@ type ExecContext struct {
 	Autonomy     config.Autonomy
 	UnsafeWrites bool
 	ShellPolicy  config.ShellPolicy
+	// TestPathsOnly restricts writes to test files.
+	//
+	// Set for a test-first run, where a duckling writes the test that will
+	// judge the implementation. Enforced here rather than asked for in a
+	// prompt: a prompt is a request, and this is a rule. Without it the model
+	// writes the implementation too, the gate goes green immediately, and the
+	// test has proved nothing.
+	TestPathsOnly bool
 	// Verify is the project's gate. verify_run runs this and nothing else:
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
@@ -312,7 +321,13 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		return ErrorResult("jail: %v", err)
 	}
 
-	// 2. Denylist
+	// 2. Test-first runs write tests and nothing else.
+	if ectx.TestPathsOnly && !verify.IsTestPath(path, ectx.Verify.TestGlobs) {
+		return ErrorResult("this run writes tests only, and %s is not one. "+
+			"Write the failing test; the implementation is the next run's job.", path)
+	}
+
+	// 3. Denylist
 	denylist := []string{
 		".git",
 		".ducklab/runs",

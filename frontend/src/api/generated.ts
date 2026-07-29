@@ -415,6 +415,11 @@ export interface ServiceTaskView {
   title?: string;
 }
 
+export interface ServiceTestFirstRequest {
+  duckling?: string;
+  task_id?: string;
+}
+
 export interface SkillArg {
   name?: string;
   required?: boolean;
@@ -468,6 +473,7 @@ export const OPERATIONS = [
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
+  { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
   { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
   { id: "ProviderList", method: "GET", path: "/v1/providers" },

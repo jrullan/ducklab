@@ -144,6 +144,8 @@ func Run(args []string) int {
 		return rosterCmd(verb, cmdArgs, repo)
 	case "intake", "spec", "plan":
 		return stageCmd(noun, remaining[1:], repo)
+	case "test":
+		return testFirstCmd(remaining[1:], repo)
 	case "review":
 		return reviewCmd(remaining[1:], repo)
 	case "release":

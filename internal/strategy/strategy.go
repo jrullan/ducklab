@@ -26,6 +26,33 @@ func SoloScript() *Script {
 	}
 }
 
+// TestFirstScript writes the failing test, and stops when the gate is red.
+//
+// The condition is inverted on purpose. Every other script drives towards a
+// green gate; here red is the goal, because a test that does not fail against
+// today's code has asserted nothing. Reusing the solo script made the model
+// spend two further rounds trying to make its own new test pass — which it
+// cannot, since the write guard allows it only test files, and should not,
+// since passing is the failure.
+//
+// One round. There is no second attempt to loop towards: either a failing test
+// was written or it was not, and a person reads it either way.
+func TestFirstScript() *Script {
+	return &Script{
+		Name: "test-first",
+		Turns: []Turn{
+			{
+				Role:     config.RoleImplementer,
+				Toolbelt: "full",
+				Contract: "edits",
+				MaxTurns: 24,
+			},
+		},
+		Until:     `gate == "red"`,
+		MaxRounds: 1,
+	}
+}
+
 // Script is a conversation script.
 type Script struct {
 	Name      string

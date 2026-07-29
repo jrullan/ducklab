@@ -433,3 +433,52 @@ func TestShellStopsWhenTheRunIsCancelled(t *testing.T) {
 		t.Fatalf("waited %v after cancellation", elapsed)
 	}
 }
+
+// A test-first run writes the test and nothing else.
+//
+// Without this the model writes the implementation in the same breath, the
+// gate goes green immediately, and the test has proved nothing — which is the
+// exact failure the whole flow exists to prevent. The restriction is enforced
+// here rather than asked for in a prompt, because a prompt is a request and
+// this is a rule.
+func TestATestFirstRunCanOnlyWriteTests(t *testing.T) {
+	root := t.TempDir()
+	ectx := &ExecContext{ProjectRoot: root, TestPathsOnly: true}
+
+	for _, path := range []string{"add_test.go", "tests/thing.py", "src/x.test.ts"} {
+		if guard := WriteGuard(ectx, path, []byte("x"), true); guard != nil {
+			t.Errorf("writing a test was refused: %s → %s", path, guard.Content)
+		}
+	}
+	for _, path := range []string{"add.go", "src/main.ts", "README.md"} {
+		guard := WriteGuard(ectx, path, []byte("x"), true)
+		if guard == nil {
+			t.Errorf("a test-first run wrote %s, which is not a test", path)
+			continue
+		}
+		if !strings.Contains(guard.Content, "test") {
+			t.Errorf("the refusal does not say why: %s", guard.Content)
+		}
+	}
+
+	// And the restriction is off by default: an ordinary run writes anything.
+	if guard := WriteGuard(&ExecContext{ProjectRoot: root}, "add.go", []byte("x"), true); guard != nil {
+		t.Errorf("an ordinary run was restricted: %s", guard.Content)
+	}
+}
+
+// A project that says where its tests live must be obeyed, or the restriction
+// refuses the very files it is meant to allow.
+func TestTestPathsOnlyUsesTheProjectsGlobs(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:   t.TempDir(),
+		TestPathsOnly: true,
+		Verify:        config.Verify{TestGlobs: []string{"checks/**"}},
+	}
+	if guard := WriteGuard(ectx, "checks/thing.go", []byte("x"), true); guard != nil {
+		t.Errorf("a project's own test path was refused: %s", guard.Content)
+	}
+	if guard := WriteGuard(ectx, "add_test.go", []byte("x"), true); guard == nil {
+		t.Error("the default globs still applied after the project named its own")
+	}
+}
