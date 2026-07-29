@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Artifact, EngineClient, Section, TraceError } from "../api/client";
+import type { Artifact, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
@@ -43,6 +43,8 @@ export function Cycle({
   const [promoting, setPromoting] = useState(false);
   const [brief, setBrief] = useState("");
   const [starting, setStarting] = useState(false);
+  const [mode, setMode] = useState("council");
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [startedRun, setStartedRun] = useState<string | null>(null);
   // What a proposal is shown as. Reading comes first: a person accepting a
   // draft is deciding whether the content is right, and a diff answers a
@@ -77,6 +79,16 @@ export function Cycle({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Who will actually do it. A button that says only "Draft it" hides the two
+  // things worth knowing before spending minutes and tokens: which models, and
+  // whether one of them is going to critique the other.
+  useEffect(() => {
+    client
+      .roster(projectId)
+      .then((r) => setRoster(r.entries))
+      .catch(() => setRoster([]));
+  }, [client, projectId]);
 
   // What was asked for, so the document can be read against it. The run id
   // comes from whichever version is on screen: the proposal while one is
@@ -143,7 +155,10 @@ export function Cycle({
     setStarting(true);
     setFailure(null);
     try {
-      const run = await client.stageStart(projectId, active.stage, { from: brief.trim() });
+      const run = await client.stageStart(projectId, active.stage, {
+        from: brief.trim(),
+        mode,
+      });
       setStartedRun(run.id);
       setBrief("");
       // The run is where the work is visible. Not navigated to automatically:
@@ -305,6 +320,21 @@ export function Cycle({
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
             )}
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+              <select
+                aria-label="mode"
+                data-testid="stage-mode"
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+              >
+                <option value="council">council — one drafts, another critiques</option>
+                <option value="solo">solo — one model, one draft</option>
+              </select>
+              <span data-testid="stage-who" className="text-xs text-ink-muted">
+                {describeRun(mode, roster)}
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -424,4 +454,25 @@ function stripFront(md: string): string {
   if (!md.startsWith("---\n")) return md;
   const end = md.indexOf("\n---\n", 4);
   return end < 0 ? md : md.slice(end + 5);
+}
+
+/** Names the ducklings that will actually take part.
+ *
+ * The roster resolves every role whether or not the project declares it, so
+ * this reports what the run will do rather than what the file says. Solo runs
+ * the architect alone: naming a reviewer that will never be asked would be
+ * worse than naming nobody.
+ */
+function describeRun(mode: string, roster: readonly RosterEntry[]): string {
+  const who = (role: string) => roster.find((r) => r.role === role)?.duckling;
+  const architect = who("architect");
+  if (!architect) return "roster not loaded";
+  if (mode === "solo") return `${architect} drafts, and nothing reviews it`;
+  const reviewer = who("reviewer");
+  if (!reviewer || reviewer === architect) {
+    // Both sides on one duckling measures self-consistency, not review
+    // (05 §3.2). Said here, where the choice is still open.
+    return `${architect} drafts and critiques its own draft — set a second duckling in Ducklings`;
+  }
+  return `${architect} drafts, ${reviewer} critiques`;
 }

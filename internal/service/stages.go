@@ -47,11 +47,18 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		return nil, err
 	}
 
+	// Recorded as what will actually run, not as a constant. A report that
+	// says every stage was a council when half were solo is a report that
+	// cannot answer the question it exists for.
+	mode := req.Mode
+	if mode == "" {
+		mode = "council"
+	}
 	run := &runlog.Run{
 		ID:        runlog.GenerateRunID(),
 		ProjectID: projectID,
 		Stage:     req.Stage,
-		Mode:      "council",
+		Mode:      mode,
 		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Autonomy:  orDefault(req.Autonomy, "guarded"),
@@ -75,7 +82,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
-	writer.AppendEvent("run_start", map[string]interface{}{"stage": req.Stage, "mode": "council"})
+	writer.AppendEvent("run_start", map[string]interface{}{"stage": req.Stage, "mode": mode})
 
 	go s.executeStage(runCtx, rs, entry.Path, req)
 	return run, nil
@@ -135,6 +142,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Stage:       stage.Name(req.Stage),
 		RunID:       rs.run.ID,
 		Seed:        seed,
+		Mode:        req.Mode,
 		Revision:    req.Revise,
 		Ducklings:   ducklingList(roster),
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {

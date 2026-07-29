@@ -252,3 +252,46 @@ func TestTheTestFirstScriptStopsOnRed(t *testing.T) {
 		t.Errorf("Until does not compile: %v", err)
 	}
 }
+
+// A stage always ran a council, whatever anyone asked for: the mode field
+// existed on the request and was never read. Council stays the default —
+// it is what 05 §4.4 names — but the choice is real, because council's value
+// is a second model critiquing the draft and that is not always worth its
+// cost.
+func TestAnArtifactStageCanRunSolo(t *testing.T) {
+	council := ArtifactScript("REQ", "")
+	if council.Name != "council" || len(council.Turns) < 3 {
+		t.Errorf("the default is not a council: %+v", council)
+	}
+	if got := ArtifactScript("REQ", "council"); got.Name != "council" {
+		t.Errorf("explicit council = %q", got.Name)
+	}
+
+	solo := ArtifactScript("REQ", "solo")
+	if solo.Name != "solo" {
+		t.Fatalf("solo = %q", solo.Name)
+	}
+	if len(solo.Turns) != 1 || solo.Turns[0].Role != config.RoleArchitect {
+		t.Errorf("solo should be one architect and nothing else: %+v", solo.Turns)
+	}
+	// No reviewer means no verdict to wait on, so waiting for one would hang
+	// the stage for its whole round budget.
+	if !strings.Contains(solo.Until, "round") {
+		t.Errorf("solo waits on a verdict nobody produces: %q", solo.Until)
+	}
+	if _, err := conv.Compile(solo.Until); err != nil {
+		t.Errorf("solo's Until does not compile: %v", err)
+	}
+	// Both must produce the same shape of document, or the mode changes what
+	// gets written rather than who writes it.
+	if solo.Turns[0].Contract != council.Turns[0].Contract {
+		t.Errorf("contracts differ: %q vs %q", solo.Turns[0].Contract, council.Turns[0].Contract)
+	}
+}
+
+// A typo should not stop someone drafting.
+func TestAnUnknownArtifactModeFallsBackToCouncil(t *testing.T) {
+	if got := ArtifactScript("REQ", "tournament"); got.Name != "council" {
+		t.Errorf("got %q, want the default", got.Name)
+	}
+}

@@ -48,6 +48,9 @@ type Params struct {
 	// Seed is an existing document to work from (`--from brief.txt`) instead
 	// of interviewing the human.
 	Seed string
+	// Mode picks the script. Empty means council, which is the spec's answer
+	// for an artifact stage (05 §4.4).
+	Mode string
 	// Revision is what a person asked to be changed about the draft they were
 	// shown. Set only when revising, and it changes the job entirely: the
 	// architect edits an existing document rather than writing a new one.
@@ -103,7 +106,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		return nil, err
 	}
 
-	script := strategy.CouncilScript(kind.Prefix())
+	script := strategy.ArtifactScript(kind.Prefix(), p.Mode)
 	raw, err := p.Execute(ctx, script, prompt)
 	if err != nil {
 		return nil, err
