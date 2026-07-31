@@ -33,19 +33,48 @@ Still missing: deploy recipes, MCP, GitHub commands, and engine auto-start.
 
 ## Install
 
-Needs Go 1.24+, Node 22+ for the desktop, and git.
+Needs Go 1.24+, Node 22+ for the desktop, and git. The repository is private,
+so clone with an authenticated client:
 
 ```bash
-make install          # ducklab, ducklab-engine, and the desktop if it is built
-make desktop          # rebuild the desktop's embedded frontend first
+gh repo clone jrullan/ducklab && cd ducklab
 ```
 
-`make install` installs to `~/.local/bin`. It warns when the desktop binary
-predates `frontend/src`, because it will happily install a stale one.
+### Linux
+
+The CLI and engine are pure Go. The desktop is a Wails v3 app and needs the
+GTK/WebKit development packages to build:
+
+```bash
+sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev   # Debian/Ubuntu names
+make desktop && make install
+```
 
 On Ubuntu 24.04+ the desktop also needs an AppArmor profile — see
 [decision 0003](docs/decisions/0003-apparmor-userns.md) and
 `packaging/apparmor/`.
+
+### macOS
+
+```bash
+xcode-select --install    # the desktop build links against WebKit
+brew install go node gh
+make desktop && make install
+```
+
+Honesty note: ducklab is developed and exercised daily on Linux. The CLI and
+engine cross-compile for `darwin/arm64` on every `make cross`, but no desktop
+build has been **verified on a Mac yet** — Wails v3 supports macOS, so it is
+expected to work, and the first person to try it is the test. If `make
+desktop` fails, `make install` still gives you the CLI and engine, and every
+capability is reachable from the CLI. Please report whatever breaks.
+
+### Both
+
+`make install` installs to `~/.local/bin` — make sure that is on your `PATH`
+(on macOS it usually is not: `echo 'export PATH="$HOME/.local/bin:$PATH"' >>
+~/.zshrc`). It warns when the desktop binary predates `frontend/src`, because
+it will happily install a stale one.
 
 ## Three binaries
 
@@ -55,10 +84,15 @@ On Ubuntu 24.04+ the desktop also needs an AppArmor profile — see
 | `ducklab` | The CLI client. Holds no state; it asks the engine. |
 | `ducklab-desktop` | The desktop app. Also a client, also holds no state. |
 
-Start the engine yourself for now — auto-start is specified and not built:
+Start the engine yourself for now — auto-start is specified and not built.
+Export any provider keys first: the engine reads them from its own
+environment at call time, so a key exported after the engine started is
+invisible to it.
 
 ```bash
+export OPENROUTER_API_KEY=...   # if you use a hosted provider
 ducklab-engine &
+ducklab-desktop &               # or work from the CLI
 ```
 
 ## A cycle, end to end
