@@ -322,8 +322,19 @@ export function Cycle({
 
         {!loading && !artifact?.proposal && (
           <section data-testid="cycle-start" className="mb-6 rounded-card border border-hairline p-3">
+            {/* "Redraft" undersold the normal case: growing a project. A brief
+                against approved requirements ADDS — the engine hands the
+                architect the whole document with orders to keep it — and the
+                cycle then carries the feature to spec and plan. Nobody could
+                know that from a button that only spoke of redrafting; the user
+                who found this gap asked whether features had to arrive as fake
+                bug reports. */}
             <div className="mb-2 text-sm text-ink">
-              {sections.length === 0 ? `Draft the ${active.label.toLowerCase()}` : `Redraft the ${active.label.toLowerCase()}`}
+              {sections.length === 0
+                ? `Draft the ${active.label.toLowerCase()}`
+                : active.stage === "intake"
+                  ? "Add to the requirements — a feature, a change of scope"
+                  : `Extend the ${active.label.toLowerCase()}`}
             </div>
             {active.stage === "intake" && (
               <>
@@ -331,14 +342,19 @@ export function Cycle({
                   aria-label="brief"
                   data-testid="cycle-brief"
                   rows={4}
-                  placeholder="What do you want built? A paragraph is enough. A file path works too."
+                  placeholder={
+                    sections.length === 0
+                      ? "What do you want built? A paragraph is enough. A file path works too."
+                      : "Describe the new feature. Existing requirements survive with their ids; the diff at the gate shows exactly what was added."
+                  }
                   value={brief}
                   onChange={(e) => setBrief(e.target.value)}
                   className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
                 />
                 <p className="mb-2 text-xs text-ink-muted">
-                  Leave it empty and the council will interview you instead, asking questions you
-                  answer in the run.
+                  {sections.length === 0
+                    ? "Leave it empty and the council will interview you instead, asking questions you answer in the run."
+                    : "Accept the new requirements, then run spec and plan the same way — each stage extends its document and the new tasks arrive with full traceability."}
                 </p>
               </>
             )}

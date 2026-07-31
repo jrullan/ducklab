@@ -200,7 +200,17 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 
 	switch name {
 	case Intake:
-		b.WriteString("## Your task\n\nWrite the project's requirements.\n\n")
+		if len(current.Sections) > 0 {
+			// The brief here is an ADDITION — a feature, a change — not a
+			// restatement of the product. Said explicitly, because "write the
+			// requirements" plus a brief describing one feature reads as
+			// "the requirements are this one feature".
+			b.WriteString("## Your task\n\nExtend the project's requirements. " +
+				"The brief below describes NEW work for an existing product; the " +
+				"approved requirements follow further down and must survive.\n\n")
+		} else {
+			b.WriteString("## Your task\n\nWrite the project's requirements.\n\n")
+		}
 		if seed != "" {
 			b.WriteString("A requirement describing what is explicitly out of scope must " +
 				"carry **Priority:** wont.\n\n")
@@ -250,11 +260,24 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 	// not have to guess and the orchestrator does not have to renumber.
 	kind := name.Kind()
 	if len(current.Sections) > 0 {
-		b.WriteString("## Sections that already exist\n\n")
-		for _, s := range current.Sections {
-			fmt.Fprintf(&b, "- %s — %s\n", s.ID, s.Title)
-		}
-		b.WriteString("\nKeep these ids for these items. ")
+		// The WHOLE document, not an id list. This used to show only ids and
+		// titles with "keep these ids for these items" — and a model cannot
+		// return unchanged what it was never given. Since the proposal replaces
+		// the document wholesale on accept, a re-run to add a feature would
+		// propose a document missing every body it had not seen: growing a
+		// project — the normal case after the first week — silently fought the
+		// person every time.
+		b.WriteString("## The document as it stands, already approved\n\n")
+		b.WriteString(strings.TrimSpace(current.Raw))
+		b.WriteString("\n\n## Rules for extending an approved document\n\n")
+		b.WriteString("- Your draft REPLACES this document wholesale, so return the WHOLE " +
+			"document: every section above comes back **exactly as it is** — same id, " +
+			"same wording — unless what you were asked for genuinely changes it.\n")
+		b.WriteString("- Add new sections for what is new. Never renumber an existing one: " +
+			"a kept id with changed text is an edit, a changed id breaks every " +
+			"reference to it.\n")
+		b.WriteString("- Removing a section is a decision a person makes, not you. If " +
+			"something seems obsolete, keep it and say so in its body.\n\n")
 	}
 	fmt.Fprintf(&b, "Allocate new ids from %s-%03d upward.\n",
 		kind.Prefix(), NextFree(current.Sections, kind.Prefix()))

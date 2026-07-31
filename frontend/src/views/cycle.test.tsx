@@ -670,3 +670,25 @@ describe("the trace rail's scope", () => {
     expect(screen.queryByTestId("trace-scope")).toBeNull();
   });
 });
+
+// "Do features have to arrive as fake bug reports?" — asked by the user,
+// because the flow that answers it (re-run intake with a brief; the cycle
+// carries it to spec and plan) existed and nothing named it. "Redraft the
+// requirements" undersold the normal case: growing a project.
+describe("adding a feature to a grown project", () => {
+  it("names the flow and promises the survivals", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+    await waitFor(() => expect(screen.getByTestId("cycle-start")).toBeTruthy());
+    const start = screen.getByTestId("cycle-start");
+    expect(start.textContent).toContain("Add to the requirements");
+    expect(
+      (screen.getByTestId("cycle-brief") as HTMLTextAreaElement).placeholder,
+    ).toContain("Existing requirements survive");
+    expect(start.textContent).toContain("full traceability");
+  });
+});
