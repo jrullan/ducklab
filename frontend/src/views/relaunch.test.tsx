@@ -24,6 +24,8 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
         { id: "pato-sonnet", provider: "openrouter", model: "s" },
       ]),
     ),
+    report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+    modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
     runStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
     // T-015 is blocked: this failed run is still its most recent.
     tasks: vi.fn(() =>

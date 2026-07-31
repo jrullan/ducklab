@@ -92,9 +92,11 @@ describe("Board", () => {
     const client = clientWith((p) =>
       p.includes("/bugs") || p.includes("/tasks") ? json({ items: null, total: 0 }) : json({}, 404),
     );
-    render(<Board client={client} projectId="p" />);
+    render(<Board client={client} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getByText(/Nothing here yet/)).toBeTruthy());
-    expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy();
+    // The controls survive: filing a bug from an empty project is the state
+    // that most needs them. The board switch lives in the Work subnav now.
+    expect(screen.getByTestId("bug-file")).toBeTruthy();
     expect(screen.getByText(/Nothing here yet/).textContent).not.toContain("ducklab ");
   });
 
@@ -544,7 +546,7 @@ describe("filing a bug from the desktop", () => {
 
   const openBugs = async (c: EngineClient) => {
     render(<Board client={c} projectId="p" tab="bugs" />);
-    await waitFor(() => expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("bug-file")).toBeTruthy());
   };
 
   it("files a report with the severity as given", async () => {
@@ -665,5 +667,41 @@ describe("what to start next", () => {
     render(<Board client={client(null)} projectId="p" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("task-next")).toBeNull();
+  });
+});
+// Decided outcomes — closed, duplicate, wontfix — are rightly not columns. But
+// they rendered NOWHERE: the record existed and no surface owned it, so a
+// closed report was unfindable without opening the database.
+describe("Board — decided bugs", () => {
+  const decided = {
+    id: "B-009", title: "Old crash on save", severity: "low", status: "closed",
+    source: "desktop", created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-02T00:00:00Z",
+  };
+  const client = () =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([])),
+      bugs: vi.fn(() => Promise.resolve([BUGS[0], decided])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+    }) as unknown as EngineClient;
+
+  it("folds them under the board, out of every column", async () => {
+    render(<Board client={client()} projectId="p" tab="bugs" />);
+    const archive = await screen.findByTestId("bugs-decided");
+    expect(archive.textContent).toContain("1 decided");
+    expect(archive.textContent).toContain("B-009");
+    // Not a column, and not in one.
+    for (const card of screen.getAllByTestId("board-card")) {
+      expect(card.textContent).not.toContain("B-009");
+    }
+  });
+
+  it("selects into the rail like anything else", async () => {
+    render(<Board client={client()} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByTestId("decided-bug"));
+    expect(screen.getByTestId("bug-rail").textContent).toContain("Old crash on save");
   });
 });

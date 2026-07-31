@@ -62,9 +62,7 @@ export function Board({
   // ignored it: two links, one unchanging screen. The toggle below navigates,
   // and the route is the only opinion about which board is showing.
   const board: "tasks" | "bugs" = tab === "bugs" ? "bugs" : "tasks";
-  const setBoard = (b: "tasks" | "bugs") => {
-    location.hash = b === "bugs" ? "#/board/bugs" : "#/board";
-  };
+
   const [tasks, setTasks] = useState<Task[]>([]);
   // Needed to offer a choice of ducklings when starting a run. Failing to load
   // them is not worth blocking the board over: with none, the roster decides.
@@ -182,6 +180,8 @@ export function Board({
   const isBugs = board === "bugs";
   const total = isBugs ? bugs.length : tasks.length;
   const shownCount = isBugs ? shownBugs.length : shownTasks.length;
+  const decidedStatuses = ["closed", "duplicate", "wontfix"];
+  const decided = bugs.filter((b) => decidedStatuses.includes(b.status));
   const current = isBugs
     ? (bugs.find((b) => b.id === selected) ?? null)
     : (tasks.find((t) => t.id === selected) ?? null);
@@ -224,23 +224,11 @@ export function Board({
           </div>
         )}
 
-        {/* Filters in one row above the board (08 §4.3). */}
+        {/* Filters in one row above the board (08 §4.3). The tasks/bugs
+            toggle that lived here is gone: the Work subnav switches boards,
+            and two controls for one choice on one screen was the duplication
+            it looked like. */}
         <div className="mb-3 flex items-center gap-2">
-          {(["tasks", "bugs"] as const).map((b) => (
-            <button
-              key={b}
-              data-testid={`board-toggle-${b}`}
-              aria-pressed={board === b}
-              onClick={() => setBoard(b)}
-              className={
-                "rounded border px-2 py-1 text-sm " +
-                (board === b ? "border-ink text-ink" : "border-hairline text-ink-muted")
-              }
-            >
-              {b} <span className="text-ink-muted">{b === "bugs" ? bugs.length : tasks.length}</span>
-            </button>
-          ))}
-
           {isBugs ? (
             <select
               data-testid="board-severity"
@@ -448,6 +436,34 @@ export function Board({
             );
           })}
         </div>
+
+        {/* Decided outcomes — closed, duplicate, wontfix — are rightly not
+            columns: a board that showed them would be mostly archive. But they
+            used to render NOWHERE, which is a different claim than "not a
+            column": the record existed and no surface owned it. Folded, below
+            the work, selectable like anything else. */}
+        {isBugs && decided.length > 0 && (
+          <details className="mt-3" data-testid="bugs-decided">
+            <summary className="cursor-pointer text-xs text-ink-muted">
+              {decided.length} decided — closed, duplicate or wontfix
+            </summary>
+            <ul className="mt-1 space-y-1">
+              {decided.map((b) => (
+                <li key={b.id}>
+                  <button
+                    type="button"
+                    data-testid="decided-bug"
+                    onClick={() => setSelected(b.id)}
+                    className="text-left text-sm text-ink-muted underline"
+                  >
+                    <span className="font-mono">{b.id}</span> {b.title}
+                    <span className="ml-1 text-xs">({b.status})</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
 
       <aside data-testid="board-rail" className="w-72 shrink-0">

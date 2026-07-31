@@ -12,7 +12,7 @@ import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { StatusChip } from "../components/StatusChip";
 import { DecisionCard } from "../components/DecisionCard";
-import { RunLauncher, type LaunchOpts } from "../components/RunLauncher";
+import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
@@ -73,6 +73,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // not of its position in this run's roster — otherwise the same model is blue
   // in one transcript and orange in the next.
   const [fleet, setFleet] = useState<Duckling[]>([]);
+  // The same feeds the Board's launcher gets. Without them the relaunch panel
+  // WAS the shared component and still behaved like a stranger — no saved
+  // line-ups on mode change, no measured cost beside the modes — which reads,
+  // correctly, as a second implementation.
+  const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  const [estimates, setEstimates] = useState<ModeEstimates>({});
   const [relaunched, setRelaunched] = useState<string | null>(null);
   // The task's own status, which is not the same question as this run's. A run
   // that failed and whose task was finished by a later run still reported
@@ -84,9 +90,28 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
+    client
+      .modeDefaults()
+      .then((d) => setPreferred(d.ducklings ?? {}))
+      .catch(() => setPreferred({}));
   }, [client]);
 
   const projectId = run?.project_id ?? "";
+  useEffect(() => {
+    if (!projectId) return;
+    void (async () => {
+      try {
+        const rep = await client.report(projectId, "mode");
+        const est: ModeEstimates = {};
+        for (const row of rep.rows) {
+          est[row.key] = { usd: row.cost_usd, runs: row.runs };
+        }
+        setEstimates(est);
+      } catch {
+        setEstimates({});
+      }
+    })();
+  }, [client, projectId]);
   const taskId = run?.task_id ?? "";
   useEffect(() => {
     if (!projectId || !taskId) return;
@@ -296,9 +321,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </p>
           ) : (
           <RunLauncher
+            // Remounted when the mode arrives: the run reaches the store in two
+            // steps (a run_start event, then the resync), and a launcher that
+            // read initialMode from the first was offering "solo" to relaunch a
+            // pair — the read-a-prop-once disease, again.
+            key={`${run.id}:${run.mode}`}
             ducklings={fleet}
             initialMode={run.mode}
             initialDucklings={relaunchDucklings}
+            preferred={preferred}
+            estimates={estimates}
             label="Run again"
             busy={relaunchBusy}
             onLaunch={relaunch}

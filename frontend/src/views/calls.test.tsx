@@ -26,6 +26,8 @@ const client = (calls: LLMCall[]) =>
     runCandidates: vi.fn(() => Promise.resolve([])),
     runLLM: vi.fn(() => Promise.resolve(calls)),
     ducklings: vi.fn(() => Promise.resolve([])),
+    report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+    modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
     tasks: vi.fn(() => Promise.resolve([])),
   }) as unknown as EngineClient;
 
