@@ -397,7 +397,22 @@ export class EngineClient {
 
     if (!res.ok) {
       const err = (parsed as { error?: { code?: string; message?: string } })?.error;
-      throw new ApiError(err?.message ?? `${method} ${path} failed`, res.status, err?.code);
+      // The engine answers unknown routes with the mux's plain-text 404, not
+      // its JSON error shape — which is exactly what an engine OLDER THAN THIS
+      // APP does for a route added since it started. The generic fallback
+      // ("POST /v1/bench/start failed") reported that state without naming it,
+      // and the one action that fixes it — restart the engine — went unsaid.
+      if (err?.message === undefined && (res.status === 404 || res.status === 405)) {
+        throw new ApiError(
+          `the engine does not know ${method} ${path} — it is older than this app. Restart the engine.`,
+          res.status,
+        );
+      }
+      throw new ApiError(
+        err?.message ?? `${method} ${path} failed (${res.status}${text ? `: ${text.slice(0, 120)}` : ""})`,
+        res.status,
+        err?.code,
+      );
     }
     return parsed as T;
   }
