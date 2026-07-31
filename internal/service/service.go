@@ -852,10 +852,13 @@ type runLogAdapter struct {
 	// estimated. Reports must not sum measured and estimated numbers without
 	// saying so (AC-61), and this is the only place that sees both.
 	run *runlog.Run
-	// mu guards the run fields updated below. Split runs its subtasks
-	// concurrently on one adapter, so two goroutines could write the spend map
-	// at once — a Go map does not survive that.
-	mu sync.Mutex
+	// mu guards the run fields updated below. It is the run state's wmu, not
+	// the adapter's own: split runs its subtasks concurrently on one adapter,
+	// so two goroutines could write the spend map at once — and the API
+	// goroutine serialises the same map whenever a client fetches the run. A
+	// private lock covered the first hazard and left the second one a
+	// concurrent map read-and-write crash waiting for a fetch mid-call.
+	mu *sync.Mutex
 	// onSpend, if set, runs after each call is attributed. Without it the
 	// budget meter sat at zero for the whole run and jumped to the final number
 	// at the end, which is exactly when knowing is no longer useful.
@@ -974,7 +977,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
 	}, req.Budget)
 	tracker := budget.NewTracker(&b)
-	rs.tracker = tracker
+	rs.setTracker(tracker)
 	recordLimits(rs, &b)
 
 	ectx := &tools.ExecContext{
@@ -1418,6 +1421,45 @@ func (s *Service) RunDir(runID string) string {
 }
 
 // RunGet returns a run detail.
+// snapshotRun returns a copy of the run that is safe to serve, and honest
+// while the run is still going.
+//
+// Safe: the Spend map is deep-copied under the same lock the adapter writes
+// it with, so a fetch mid-call cannot race the attribution of the call that
+// is landing. Honest: the aggregate budget is read from the live tracker for
+// a run that has not ended — recordSpend copies it onto the record only at
+// the end, so a fetch made mid-run served zeros, and a run view opened while
+// a slow local model worked showed a dead meter for the length of the call.
+// setTracker publishes the run's tracker under the lock snapshotRun reads it
+// with. Six run kinds assign it; a bare write at any of them would race the
+// first fetch.
+func (rs *runState) setTracker(t *budget.Tracker) {
+	rs.wmu.Lock()
+	rs.tracker = t
+	rs.wmu.Unlock()
+}
+
+func (rs *runState) snapshotRun() *runlog.Run {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	clone := *rs.run
+	if rs.run.Spend != nil {
+		clone.Spend = make(map[string]runlog.DucklingSpend, len(rs.run.Spend))
+		for k, v := range rs.run.Spend {
+			clone.Spend[k] = v
+		}
+	}
+	if (clone.Status == "running" || clone.Status == "paused") &&
+		rs.tracker != nil && rs.tracker.Spend != nil {
+		snap := rs.tracker.Spend.Snapshot()
+		clone.Budget.USD = snap.USD
+		clone.Budget.Tokens = snap.Tokens
+		clone.Budget.Turns = snap.Turns
+		clone.Budget.WallclockS = snap.WallclockS
+	}
+	return &clone
+}
+
 func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
@@ -1426,23 +1468,14 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
 	events, _ := runlog.ReadEvents(s.RunDir(id))
-	run := rs.run
+	run := rs.snapshotRun()
 	// Runs that failed before the reason was recorded on the run still have it
-	// in their event stream, and the events are already in hand here. A copy,
-	// because the stored run is shared and this is a read.
+	// in their event stream, and the events are already in hand here.
 	if run.Status == "failed" && run.Failure == "" {
-		if why := failureFromEvents(events); why != "" {
-			clone := *run
-			clone.Failure = why
-			run = &clone
-		}
+		run.Failure = failureFromEvents(events)
 	}
 	// Always recomputed: the stored copy cannot be allowed to disagree with
 	// the rules.
-	if run == rs.run {
-		clone := *run
-		run = &clone
-	}
 	run.Next = runNext(run)
 	return &RunDetail{
 		Run:    run,
@@ -1481,9 +1514,9 @@ func (s *Service) RunList(ctx context.Context, f RunFilter) ([]*runlog.Run, erro
 		// A copy with Next recomputed: the shared record must not be written
 		// while other readers hold it, and the stored list cannot be allowed to
 		// disagree with the rules.
-		clone := *rs.run
-		clone.Next = runNext(&clone)
-		runs = append(runs, &clone)
+		clone := rs.snapshotRun()
+		clone.Next = runNext(clone)
+		runs = append(runs, clone)
 	}
 	// Newest first, and deterministically.
 	//
@@ -1773,7 +1806,7 @@ func restoreAfterUnaccepted(rs *runState) {
 // zero for the whole run, and a triage's calls were attributed to nobody.
 func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapter {
 	return &runLogAdapter{
-		w: rs.writer, run: rs.run,
+		w: rs.writer, run: rs.run, mu: &rs.wmu,
 		onSpend: func() { s.publishSpend(rs, tracker) },
 	}
 }

@@ -67,6 +67,10 @@ export interface Run {
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
   next?: string[];
+  /** Per-duckling spend, attributed as each call lands. Served live for an
+   * active run, so a view opened mid-run starts from the truth instead of
+   * zeros. */
+  spend?: Record<string, { calls: number; tokens: number; cost_usd: number; estimated?: boolean }>;
   budget?: {
     usd: number;
     tokens: number;

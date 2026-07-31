@@ -233,7 +233,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	}
 	tracker := budget.NewTracker(limits)
 	recordLimits(rs, limits)
-	rs.tracker = tracker
+	rs.setTracker(tracker)
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}
 	cache := &loopCache{
 		svc: s, tracker: tracker,

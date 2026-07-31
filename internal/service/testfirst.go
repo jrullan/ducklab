@@ -135,7 +135,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	}
 	tracker := budget.NewTracker(limits)
 	recordLimits(rs, limits)
-	rs.tracker = tracker
+	rs.setTracker(tracker)
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
 		RunID:       rs.run.ID,

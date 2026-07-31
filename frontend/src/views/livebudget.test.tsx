@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
@@ -94,5 +94,67 @@ describe("the run's budget while it is running", () => {
     render(<RunView runId="r-1" client={client} />);
     await waitFor(() => expect(screen.getAllByTestId("budget-meter").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("spend-by-duckling")).toBeNull();
+  });
+});
+
+// The plan run's meter sat at zeros while luna drafted: the engine copies the
+// aggregate onto the record only when the run ends, so the mount-time fetch
+// served zeros, and no live event rescued the view until the NEXT call
+// finished — for a slow local model, minutes of dead meter. The engine now
+// serves the tracker's live numbers for an active run; this pins that a view
+// opened mid-run renders them, and that a streamed budget event still moves
+// the meter afterwards.
+describe("a run view opened mid-run", () => {
+  const midRun = {
+    id: "r-live", project_id: "calculator", stage: "plan", mode: "council",
+    status: "running", verdict: "", started_at: "2026-07-31T13:46:47Z",
+    roster: { architect: "luna" },
+    spend: {
+      luna: { calls: 4, tokens: 59202, cost_usd: 0.013 },
+      "pato-sonnet": { calls: 4, tokens: 69624, cost_usd: 0.234 },
+    },
+    budget: {
+      usd: 0.013, tokens: 59202, turns: 4, wallclock_s: 60,
+      limit: { usd: 5, tokens: 1500000, turns: 24, wallclock_s: 1800 },
+    },
+  } as unknown as Run;
+
+  const client = {
+    run: vi.fn(() => Promise.resolve({ run: midRun, events: [] })),
+    runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
+    runVerify: vi.fn(() => Promise.resolve("")),
+    runCandidates: vi.fn(() => Promise.resolve([])),
+    runLLM: vi.fn(() => Promise.resolve([])),
+    ducklings: vi.fn(() => Promise.resolve([])),
+    report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+    modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    tasks: vi.fn(() => Promise.resolve([])),
+  } as unknown as EngineClient;
+
+  it("renders the fetched spend without waiting for a live event", async () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-live" client={client} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    const meters = screen.getAllByTestId("budget-meter").map((m) => m.textContent).join(" ");
+    expect(meters).toContain("59.2k");
+    expect(screen.getByTestId("spend-by-duckling").textContent).toContain("luna");
+  });
+
+  it("keeps moving on the next streamed budget event", async () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-live" client={client} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    useRuns.getState().applyEvent({
+      type: "budget", run_id: "r-live", project_id: "calculator",
+      data: {
+        usd: 0.02, tokens: 80000, turns: 5, wallclock_s: 90,
+        limit: { usd: 5, tokens: 1500000, turns: 24, wallclock_s: 1800 },
+        ducklings: { luna: { calls: 5, tokens: 80000, cost_usd: 0.02 } },
+      },
+    } as never);
+    await waitFor(() => {
+      const meters = screen.getAllByTestId("budget-meter").map((m) => m.textContent).join(" ");
+      expect(meters).toContain("80.0k");
+    });
   });
 });

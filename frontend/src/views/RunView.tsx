@@ -154,7 +154,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // Only ducklings that actually spent something: the roster names one for every
   // role whether or not that role ran, and listing six models for a solo run
   // credits five with work they never did.
-  const perDuckling = Object.entries(live?.ducklings ?? {})
+  const perDuckling = Object.entries(live?.ducklings ?? run.spend ?? {})
     .filter(([, d]) => d.calls > 0)
     .sort((a, b) => b[1].tokens - a[1].tokens);
   // A judge's turns are anonymised; the mapping is dropped, not hidden.
