@@ -148,3 +148,36 @@ describe("a failure whose task was finished later", () => {
     expect(screen.queryByTestId("run-start")).toBeNull();
   });
 });
+
+// A run watched live said "waiting for you — gate" and showed nothing to
+// decide with. The legal actions travel only in the run fetch, which happened
+// once on mount — the pause event updates status but carries no buttons. The
+// controls appeared only after leaving for Now and coming back, because coming
+// back is a mount.
+describe("a run that pauses while being watched", () => {
+  it("fetches the new actions when the stream pauses the run", async () => {
+    const running = { ...failed, status: "running" as const, verdict: "", failure: undefined, next: ["abort"] };
+    const paused = {
+      ...running, status: "paused" as const, pending_kind: "gate",
+      next: ["accept", "request_changes", "reject"],
+    };
+    useRuns.setState({ runs: { "r-1": running }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    // First fetch answers "running"; every one after the pause answers with
+    // the decision, as the engine does — it updates the run before emitting.
+    let pausedNow = false;
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: pausedNow ? paused : running, events: [] })),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("decision-card")).toBeNull();
+
+    pausedNow = true;
+    // The live stream flips the status, exactly as applyEvent does on
+    // human_needed.
+    useRuns.setState({
+      runs: { "r-1": { ...running, status: "paused" as const, pending_kind: "gate" } },
+    });
+    await waitFor(() => expect(screen.getByTestId("decision-card")).toBeTruthy());
+  });
+});

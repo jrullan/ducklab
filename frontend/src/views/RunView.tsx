@@ -38,6 +38,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // run that finished before this client connected. Opening a completed run
   // showed a blank lane beside a header saying it passed. Clients hold no
   // state (I11), so the record has to come from the engine each time.
+  // Refetched whenever the live stream changes the run's state, not just on
+  // mount. The legal actions (run.next) are computed by the engine and travel
+  // only in this response — the pause event carries the kind but not the
+  // verdict buttons. Fetched once, a run watched live said "waiting for you"
+  // at the gate and showed nothing to decide with; the controls appeared only
+  // after leaving for Now and coming back, because coming back is a mount.
+  // The engine updates the run before emitting the event, so the refetch this
+  // triggers always finds the new actions.
+  const streamedStatus = run?.status ?? "";
+  const streamedPending = run?.pending_kind ?? "";
   useEffect(() => {
     let cancelled = false;
     client
@@ -55,7 +65,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     return () => {
       cancelled = true;
     };
-  }, [client, runId]);
+  }, [client, runId, streamedStatus, streamedPending]);
 
   const [tab, setTab] = useState<Tab>("diff");
   const [diff, setDiff] = useState("");
