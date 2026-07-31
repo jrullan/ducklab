@@ -345,3 +345,138 @@ func TestAcceptingAStageRunPromotesItsArtifact(t *testing.T) {
 		}
 	}
 }
+
+// Blocked was a column no task could ever enter. Nothing in the engine ever
+// assigned it, and the board's own test asserted it stayed empty.
+//
+// Meanwhile the plan had said "Depends on: T-001" since it was written, and
+// TaskNext had been reading it — it was the only thing in the product that knew
+// a task could be waiting on another. The board never showed it, so the only
+// way to learn a task was not ready was to run it and watch a model invent the
+// thing it depended on.
+func TestATaskWaitingOnAnotherIsBlocked(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tasks[1].Status != "blocked" {
+		t.Errorf("T-002 depends on an unaccepted T-001 but is %q", tasks[1].Status)
+	}
+	// A blocked task that does not say what blocked it sends you to the logs.
+	if !strings.Contains(tasks[1].Blocked, "T-001") {
+		t.Errorf("the reason does not name what it waits on: %q", tasks[1].Blocked)
+	}
+	// And T-001 itself waits on nothing.
+	if tasks[0].Status != "todo" || tasks[0].Blocked != "" {
+		t.Errorf("T-001 = %q / %q", tasks[0].Status, tasks[0].Blocked)
+	}
+}
+
+// A run that failed used to drop its task back into Todo, where it looked
+// exactly like one nobody had ever touched.
+func TestATaskWhoseRunFailedIsBlockedNotTodo(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	run := &runlog.Run{
+		ID: "r-1", ProjectID: id, TaskID: "T-001", Status: "failed",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, _ := runlog.NewWriter(dir, run)
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	tasks, _ := s.TaskList(context.Background(), id)
+	if tasks[0].Status != "blocked" {
+		t.Errorf("T-001's run failed but the task is %q", tasks[0].Status)
+	}
+	if !strings.Contains(tasks[0].Blocked, "failed") {
+		t.Errorf("the reason does not say the run failed: %q", tasks[0].Blocked)
+	}
+
+	// And it is not offered as the next thing to start: it needs a human to
+	// read the run first, not another lap against the same wall.
+	next, err := s.TaskNext(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != nil {
+		t.Errorf("TaskNext offered %s while every task is blocked", next.ID)
+	}
+}
+
+// The one moment the spine check can change a decision is before Accept, and
+// that was the one moment it could not see.
+//
+// LoadSpine read only approved artifacts, so a check run while a proposal sat
+// at its gate described the document the human had already accepted. The trace
+// rail in the desktop sits beside the Accept button and was reporting on last
+// week's plan.
+func TestTraceCheckReadsTheProposalYouAreAboutToAccept(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Login\n\n**Priority:** must\n",
+		artifact.KindSpec:         "## SPEC-001 — Sessions\n\n**Implements:** REQ-001\n",
+		artifact.KindPlan:         "## M-01 — Auth\n\n### T-001 — Tokens\n\n**Implements:** SPEC-001\n",
+	})
+
+	// The approved spine is clean.
+	res, err := s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("the approved spine is not clean: %v", res.Errors)
+	}
+	if len(res.Proposed) != 0 {
+		t.Errorf("nothing is proposed but the check claims %v", res.Proposed)
+	}
+
+	// A stage proposes a spec that implements a requirement nobody wrote.
+	artifact.WriteProposal(dir, artifact.KindSpec, &artifact.Document{
+		Sections: []artifact.Section{{
+			ID: "SPEC-001", Title: "Sessions", Implements: []string{"REQ-404"},
+		}},
+	}, "r-1", nil)
+
+	res, err = s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) == 0 {
+		t.Fatal("the proposal breaks the spine and the check said nothing — " +
+			"it read the approved spec instead")
+	}
+	// And it must say what it read, or a break in a pending document is
+	// indistinguishable from a break in the accepted one.
+	if len(res.Proposed) != 1 || res.Proposed[0] != "spec" {
+		t.Errorf("proposed = %v, want [spec]", res.Proposed)
+	}
+}
+
+// A stage that produced nothing must not blank the spine: substituting an empty
+// proposal for an approved document would report every requirement orphaned and
+// bury the real findings.
+func TestAnEmptyProposalIsNotASubstitute(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Login\n\n**Priority:** must\n",
+		artifact.KindSpec:         "## SPEC-001 — Sessions\n\n**Implements:** REQ-001\n",
+		artifact.KindPlan:         "## M-01 — Auth\n\n### T-001 — Tokens\n\n**Implements:** SPEC-001\n",
+	})
+	artifact.WriteProposal(dir, artifact.KindSpec, &artifact.Document{}, "r-1", nil)
+
+	res, err := s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Errorf("an empty proposal blanked the spine: %v", res.Errors)
+	}
+	if len(res.Proposed) != 0 {
+		t.Errorf("an empty proposal was reported as the checked document: %v", res.Proposed)
+	}
+}

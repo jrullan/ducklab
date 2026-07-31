@@ -100,6 +100,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 }
 
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
+	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
 
@@ -126,12 +127,15 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
 
-	tracker := budget.NewTracker(&budget.Budget{
+	limits := &budget.Budget{
 		MaxUSD:        projCfg.Budget.MaxUSD,
 		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	})
+	}
+	tracker := budget.NewTracker(limits)
+	recordLimits(rs, limits)
+	rs.tracker = tracker
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
 		RunID:       rs.run.ID,
@@ -147,6 +151,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		writer: &runLogAdapter{w: rs.writer, run: rs.run},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
+	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
 		ProjectRoot: projectRoot,

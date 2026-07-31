@@ -50,6 +50,8 @@ type DucklingView struct {
 	Params   config.SamplingParams `json:"params"`
 	Caps     config.Caps           `json:"caps"`
 	Cost     config.Cost           `json:"cost"`
+	// Color is one of the eight series slots, or 0 for "decide from the fleet".
+	Color int `json:"color,omitempty"`
 }
 
 // ProviderList returns every configured provider.
@@ -188,15 +190,35 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 	for _, r := range view.Roles {
 		roles = append(roles, config.Role(r))
 	}
+	// Eight slots is what the palette has; past that it stops clearing the
+	// colour-vision floor and a ninth colour would only look distinct.
+	if view.Color < 0 || view.Color > 8 {
+		return fmt.Errorf("duckling %q: color must be 1-8, or 0 to decide from the fleet; got %d",
+			id, view.Color)
+	}
+
 	d := config.Duckling{
 		Provider: config.ProviderID(view.Provider), Model: view.Model,
 		Roles: roles, Notes: view.Notes,
 		Params: view.Params, Caps: view.Caps, Cost: view.Cost,
+		Color: view.Color,
 	}
 
 	if s.cfg.Ducklings == nil {
 		s.cfg.Ducklings = map[config.DucklingID]config.Duckling{}
 	}
+	// The registry first, then the file. It used to be the other way round, and
+	// the registry step could fail — an edit went through Register, which
+	// refuses an id that already exists — so a save reported failure with the
+	// new values already on disk and the old ones still running.
+	//
+	// Replace cannot fail here: the id was validated above.
+	previousDuckling, getErr := s.ducklings.Get(config.DucklingID(id))
+	hadDuckling := getErr == nil
+	if err := s.ducklings.Replace(duckling.FromConfig(config.DucklingID(id), d)); err != nil {
+		return fmt.Errorf("register %q: %w", id, err)
+	}
+
 	previous, existed := s.cfg.Ducklings[config.DucklingID(id)]
 	s.cfg.Ducklings[config.DucklingID(id)] = d
 	if err := s.saveConfig(); err != nil {
@@ -205,10 +227,14 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 		} else {
 			delete(s.cfg.Ducklings, config.DucklingID(id))
 		}
+		// And put the registry back, or the engine would go on running a
+		// duckling the file does not describe.
+		if hadDuckling {
+			_ = s.ducklings.Replace(previousDuckling)
+		} else {
+			s.ducklings.Unregister(config.DucklingID(id))
+		}
 		return err
-	}
-	if err := s.ducklings.Register(duckling.FromConfig(config.DucklingID(id), d)); err != nil {
-		return fmt.Errorf("register %q: %w", id, err)
 	}
 	return nil
 }

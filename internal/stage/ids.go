@@ -7,6 +7,7 @@ package stage
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,6 +184,10 @@ func PlanTaskIDs(existing, produced []artifact.Section) []artifact.Section {
 
 	out := make([]artifact.Section, len(produced))
 	copy(out, produced)
+	// The architect numbers its own tasks and we renumber them, so a task it
+	// wrote as T-005 may land as T-007. Any "Depends on: T-005" it also wrote
+	// would then name a different task, or none. Remember what moved.
+	renamed := map[string]string{}
 	for i := range out {
 		children := make([]artifact.Section, len(out[i].Children))
 		copy(children, out[i].Children)
@@ -195,9 +200,43 @@ func PlanTaskIDs(existing, produced []artifact.Section) []artifact.Section {
 				next++
 			}
 			used[id] = true
+			if old := children[j].ID; old != "" && old != id {
+				renamed[old] = id
+			}
 			children[j].ID = id
 		}
 		out[i].Children = children
 	}
+	if len(renamed) > 0 {
+		for i := range out {
+			for j := range out[i].Children {
+				remapDeps(&out[i].Children[j], renamed)
+			}
+		}
+	}
 	return out
 }
+
+// remapDeps rewrites a task's "Depends on" edge after renumbering, in both the
+// parsed field and the body text the field was read from — the body is what
+// gets written back to plan.md, so changing only one of them would produce a
+// document that disagrees with itself.
+func remapDeps(t *artifact.Section, renamed map[string]string) {
+	dep := t.Field("depends on")
+	if dep == "" {
+		return
+	}
+	updated := taskIDRe.ReplaceAllStringFunc(dep, func(id string) string {
+		if to, ok := renamed[id]; ok {
+			return to
+		}
+		return id
+	})
+	if updated == dep {
+		return
+	}
+	t.Fields["depends on"] = updated
+	t.Body = strings.ReplaceAll(t.Body, "**Depends on:** "+dep, "**Depends on:** "+updated)
+}
+
+var taskIDRe = regexp.MustCompile(`T-\d+`)

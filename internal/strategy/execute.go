@@ -57,6 +57,13 @@ type ExecuteParams struct {
 	Diff func() (string, error)
 	// Roster maps a role to the duckling that plays it.
 	Roster map[config.Role]config.DucklingID
+	// TurnCaps overrides how many model calls one turn of a role may chain.
+	// Absent leaves whatever the script or the mode carries.
+	//
+	// Needed because tournament and split build their turns themselves rather
+	// than from a script, so walking a script's turns reaches four modes out of
+	// six and a setting that applies to some modes is worse than none.
+	TurnCaps map[config.Role]int
 	// OnEvent reports progress; optional.
 	OnEvent func(kind string, data map[string]interface{})
 }
@@ -165,6 +172,19 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				result.Outcome = outcome
 			}
 			if err != nil {
+				// What it managed to say and do before it died, recorded on the
+				// way out. This used to return first, so a turn that failed took
+				// its whole record with it: a run that patched a file seventeen
+				// times left a transcript of four events, and the only way to
+				// see the work was to read llm.jsonl by hand. The failure is
+				// exactly when that record is worth most.
+				if outcome != nil {
+					emitMessage(params, round, i, turn.Role, duckling, outcome)
+					emit(params, "turn_end", map[string]interface{}{
+						"round": round, "turn": i, "role": string(turn.Role),
+						"incomplete": true,
+					})
+				}
 				// A pause propagates untouched: the caller checkpoints the run
 				// and the loop resumes from the top once answered.
 				result.Error = err
@@ -221,7 +241,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			emit(params, "round_gate", map[string]interface{}{"result": gate, "round": round})
 			_ = log
 		}
+		// Whether this round actually touched the tree. It used to be hardcoded
+		// true, which was never read and never true in the interesting case.
 		state.Changed = true
+		if params.Diff != nil {
+			if diff, err := params.Diff(); err == nil {
+				state.Changed = strings.TrimSpace(diff) != ""
+			}
+		}
 
 		result.State = state
 		result.Records = append(result.Records, RoundRecord{
@@ -234,6 +261,23 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			return result, err
 		}
 		if done {
+			break
+		}
+
+		// Nothing another round could change. The tree is untouched and the
+		// gate is green, so the next implementer turn has nothing to write and
+		// the next reviewer turn will read the same empty diff and object to it
+		// again. T-007 burned three rounds this way: both ducklings agreed in
+		// prose that the work was already present, and the reviewer returned
+		// "request-changes" each time because its verdict contract has no way
+		// to say "the code is right, the plan is wrong". The loop cannot
+		// terminate on an objection the implementer cannot act on, so it is
+		// terminated here instead.
+		if !state.Changed && state.Gate == "green" {
+			emit(params, "settled", map[string]interface{}{
+				"round":  round,
+				"detail": "no round changed the tree and the gate is green — further rounds cannot alter either",
+			})
 			break
 		}
 	}
@@ -354,6 +398,22 @@ func emit(params *ExecuteParams, kind string, data map[string]interface{}) {
 // timeline renders them in order, and a turn that made forty fs_read calls
 // must not put forty payloads inside one record.
 func emitMessage(params *ExecuteParams, round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome) {
+	EmitTurnRecord(func(kind string, data map[string]interface{}) {
+		emit(params, kind, data)
+	}, round, turn, role, duckling, outcome)
+}
+
+// EmitTurnRecord writes what a turn said and did, through whatever writer the
+// caller has.
+//
+// Exported because the operate loop drives its own turns: triage runs one per
+// bug outside a script, and it wrote turn_start and turn_end around nothing at
+// all. The run showed a participant with an empty bubble, and the model's
+// reasoning — which is the whole content of a triage — never left the process.
+// Duplicating the event shapes here would have been two places to keep in step.
+func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome) {
+	emit := func(_ *ExecuteParams, kind string, data map[string]interface{}) { emitFn(kind, data) }
+	var params *ExecuteParams
 	if outcome == nil {
 		return
 	}
@@ -408,4 +468,13 @@ func summariseToolResult(s string) string {
 		return s
 	}
 	return s[:maxToolResultBytes] + fmt.Sprintf("\n… %d bytes truncated", len(s)-maxToolResultBytes)
+}
+
+// CapFor returns the call cap for a role: the configured one, else the fallback
+// the caller was going to use.
+func CapFor(caps map[config.Role]int, role config.Role, fallback int) int {
+	if n, ok := caps[role]; ok && n > 0 {
+		return n
+	}
+	return fallback
 }

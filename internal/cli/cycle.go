@@ -246,6 +246,11 @@ func taskCmd(verb string, args []string, repo string) int {
 			fmt.Printf("%-8s %-12s %-10s %-14s %s\n",
 				str(t["id"]), str(t["status"]), str(t["milestone"]),
 				joinAny(t["implements"]), str(t["title"]))
+			// A blocked row that does not say what blocked it is a row that
+			// sends you to the run log to find out.
+			if why := str(t["blocked"]); why != "" {
+				fmt.Printf("%-8s %s\n", "", why)
+			}
 		}
 		return 0
 
@@ -286,6 +291,9 @@ func taskCmd(verb string, args []string, repo string) int {
 				if dep := joinAny(t["depends_on"]); dep != "" {
 					fmt.Printf("  depends on: %s\n", dep)
 				}
+				if why := str(t["blocked"]); why != "" {
+					fmt.Printf("  blocked:    %s\n", why)
+				}
 				if body := str(t["body"]); body != "" {
 					fmt.Printf("\n%s\n", body)
 				}
@@ -310,10 +318,15 @@ func traceCmd(verb string, args []string, repo string) int {
 
 	switch verb {
 	case "", "check":
-		errs, err := client.TraceCheck(projectID)
+		errs, proposed, err := client.TraceCheck(projectID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
+		}
+		// Which document was checked changes what the answer means.
+		if len(proposed) > 0 {
+			fmt.Printf("checking the proposed %s — this is what you are about to accept.\n\n",
+				strings.Join(proposed, ", "))
 		}
 		if len(errs) == 0 {
 			fmt.Println("the cycle is linked end to end.")

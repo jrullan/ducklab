@@ -253,3 +253,117 @@ func TestOutOfScopeTitleAloneDoesNotExempt(t *testing.T) {
 		t.Error("an unmarked section was exempted on its title alone")
 	}
 }
+
+func planWith(tasks string) *Spine {
+	plan, _ := Parse("## M-01 — Work\n\n"+tasks, KindPlan)
+	reqs, _ := Parse("## REQ-001 — A\n\n**Priority:** must\n", KindRequirements)
+	spec, _ := Parse("## SPEC-001 — A\n\n**Implements:** REQ-001\n", KindSpec)
+	return &Spine{Requirements: reqs, Spec: spec, Plan: plan}
+}
+
+func kinds(errs []TraceError) []TraceErrorKind {
+	var out []TraceErrorKind
+	for _, e := range errs {
+		out = append(out, e.Kind)
+	}
+	return out
+}
+
+func hasKind(errs []TraceError, k TraceErrorKind) *TraceError {
+	for i := range errs {
+		if errs[i].Kind == k {
+			return &errs[i]
+		}
+	}
+	return nil
+}
+
+// Check walked the vertical spine only. The **Depends on:** field was parsed
+// and the board reads it to decide what is blocked, but nothing ever looked at
+// the graph it forms — so a plan could ship a wait that never ends.
+func TestADependencyOnANonexistentTaskIsReported(t *testing.T) {
+	errs := planWith(
+		"### T-001 — First\n\n**Implements:** SPEC-001\n\n" +
+			"### T-002 — Second\n\n**Implements:** SPEC-001\n**Depends on:** T-404\n",
+	).Check()
+
+	e := hasKind(errs, DanglingReference)
+	if e == nil {
+		t.Fatalf("a dependency on a task that does not exist was not reported: %v", kinds(errs))
+	}
+	if e.ID != "T-002" || e.Missing != "T-404" {
+		t.Errorf("error = %+v", *e)
+	}
+	// The board would show T-002 waiting on T-404 forever, so the reason must
+	// say the wait is permanent, not merely unmet.
+	if !strings.Contains(e.Detail, "never start") {
+		t.Errorf("the detail does not say the wait never ends: %q", e.Detail)
+	}
+}
+
+func TestATaskDependingOnItselfIsReported(t *testing.T) {
+	errs := planWith(
+		"### T-001 — Only\n\n**Implements:** SPEC-001\n**Depends on:** T-001\n",
+	).Check()
+	if e := hasKind(errs, DependencyCycle); e == nil {
+		t.Fatalf("a self-dependency was not reported: %v", kinds(errs))
+	}
+}
+
+// A cycle is fatal: every task in it sits in Blocked forever, waiting on
+// another that is waiting on it. With twenty tasks you cannot see it by eye.
+func TestACycleIsReportedOnceNamingEveryTaskInIt(t *testing.T) {
+	errs := planWith(
+		"### T-001 — First\n\n**Implements:** SPEC-001\n**Depends on:** T-003\n\n" +
+			"### T-002 — Second\n\n**Implements:** SPEC-001\n**Depends on:** T-001\n\n" +
+			"### T-003 — Third\n\n**Implements:** SPEC-001\n**Depends on:** T-002\n",
+	).Check()
+
+	var cycles []TraceError
+	for _, e := range errs {
+		if e.Kind == DependencyCycle {
+			cycles = append(cycles, e)
+		}
+	}
+	// A cycle is reachable from every task leading into it, so a plain walk
+	// finds it repeatedly. Three reports of one cycle read as three problems.
+	if len(cycles) != 1 {
+		t.Fatalf("got %d cycle reports, want 1: %+v", len(cycles), cycles)
+	}
+	for _, id := range []string{"T-001", "T-002", "T-003"} {
+		if !strings.Contains(cycles[0].Missing, id) {
+			t.Errorf("the cycle does not name %s: %q", id, cycles[0].Missing)
+		}
+	}
+}
+
+// Not a break: the plan is runnable, but its order lies. Working top to bottom
+// reaches the task before the thing it needs, and a model handed a task whose
+// prerequisite is missing writes the prerequisite too — which is how one task
+// eats another.
+func TestADependencyOnALaterTaskIsReported(t *testing.T) {
+	errs := planWith(
+		"### T-001 — Drag\n\n**Implements:** SPEC-001\n**Depends on:** T-002\n\n" +
+			"### T-002 — Solver\n\n**Implements:** SPEC-001\n",
+	).Check()
+
+	e := hasKind(errs, ForwardDependency)
+	if e == nil {
+		t.Fatalf("a dependency on a later task was not reported: %v", kinds(errs))
+	}
+	if e.ID != "T-001" || e.Missing != "T-002" {
+		t.Errorf("error = %+v", *e)
+	}
+}
+
+// The common case must stay silent, or the check becomes noise the reader
+// learns to skip.
+func TestABackwardDependencyIsNotAFinding(t *testing.T) {
+	errs := planWith(
+		"### T-001 — Solver\n\n**Implements:** SPEC-001\n\n" +
+			"### T-002 — Drag\n\n**Implements:** SPEC-001\n**Depends on:** T-001\n",
+	).Check()
+	if len(errs) != 0 {
+		t.Errorf("a well-ordered plan reported %+v", errs)
+	}
+}

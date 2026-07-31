@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -74,6 +75,13 @@ type runState struct {
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
+	// tracker is what the run has spent. Kept here so a panic can still record
+	// it: recordSpend runs before the error branch on an ordinary failure, but a
+	// panic skips straight to the deferred recover, and the run was written out
+	// with zero tokens and zero cost while its per-duckling breakdown — updated
+	// on every call — said otherwise. A run that contradicts itself is worse
+	// than one that admits it does not know.
+	tracker *budget.Tracker
 }
 
 // Options are service options.
@@ -172,6 +180,22 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 							FinishReason: provider.FinishStop,
 						}},
 						Usage: provider.Usage{PromptTokens: 80, CompletionTokens: 12},
+					}
+				}
+				// Without this the operate loop cannot be exercised at all: the
+				// triager's turn fails its contract, the run records
+				// triage_failed, and no test can tell a working triage from a
+				// broken one.
+				if strings.Contains(m.Content, "You are the triager") {
+					return &provider.ChatResponse{
+						Choices: []provider.Choice{{
+							Message: provider.Message{Role: "assistant", Content: `Looks like a hit-test bug.
+{"severity":"critical","duplicate_of":"","component":"vertex drag",
+ "suspected_files":["index.html"],"reproducible":true,
+ "task_title":"Fix the vertex hit test","reason":"the hit test never matches"}`},
+							FinishReason: provider.FinishStop,
+						}},
+						Usage: provider.Usage{PromptTokens: 70, CompletionTokens: 40},
 					}
 				}
 				if strings.Contains(m.Content, "You are the judge") {
@@ -828,6 +852,14 @@ type runLogAdapter struct {
 	// estimated. Reports must not sum measured and estimated numbers without
 	// saying so (AC-61), and this is the only place that sees both.
 	run *runlog.Run
+	// mu guards the run fields updated below. Split runs its subtasks
+	// concurrently on one adapter, so two goroutines could write the spend map
+	// at once — a Go map does not survive that.
+	mu sync.Mutex
+	// onSpend, if set, runs after each call is attributed. Without it the
+	// budget meter sat at zero for the whole run and jumped to the final number
+	// at the end, which is exactly when knowing is no longer useful.
+	onSpend func()
 }
 
 func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
@@ -850,6 +882,7 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 	// without this the marker in Render was unreachable and every number
 	// looked measured.
 	if a.run != nil {
+		a.mu.Lock()
 		if call.Estimated {
 			a.run.TokensEstimated = true
 		}
@@ -866,6 +899,10 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 			d.Estimated = true
 		}
 		a.run.Spend[call.Duckling] = d
+		a.mu.Unlock()
+		if a.onSpend != nil {
+			a.onSpend()
+		}
 	}
 	return err
 }
@@ -899,14 +936,7 @@ func callTokens(usage map[string]interface{}) int64 {
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
 	defer close(rs.done)
 	defer rs.writer.Close()
-	defer func() {
-		if r := recover(); r != nil {
-			rs.run.Status = "failed"
-			rs.run.Verdict = "ABORTED"
-			rs.writer.AppendEvent("error", map[string]interface{}{"error": fmt.Sprintf("panic: %v", r)})
-			rs.writer.WriteState()
-		}
-	}()
+	defer recoverRun(rs)
 
 	// Load project config
 	ducklabDir := filepath.Join(entry.Path, ".ducklab")
@@ -916,17 +946,36 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 
-	// Budget
-	b := req.Budget
-	if b == nil {
-		b = &budget.Budget{
-			MaxUSD:        projCfg.Budget.MaxUSD,
-			MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
-			MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
-			MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
+	// The tree as it stands, before the run touches it. What "reject" and
+	// "failed" restore; without it they were words on a record while the
+	// half-made edits stayed in the tree for the next attempt to trip over.
+	if git := vcs.New(entry.Path); git.HasGit() {
+		if snap, serr := git.SnapshotTree(); serr == nil {
+			rs.run.TreeSnapshot = snap
+			rs.writer.WriteState()
+		} else {
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": "could not snapshot the tree; a failure will leave its edits behind: " + serr.Error(),
+			})
 		}
 	}
-	tracker := budget.NewTracker(b)
+
+	// Budget: the defaults, with any limit the request named taking over.
+	//
+	// This used to be all-or-nothing — a request carrying a budget replaced the
+	// whole thing — so a client raising only the token ceiling set the other
+	// three limits to zero, and the tracker reads zero as a ceiling of zero. The
+	// run would fail before its first call, which is the opposite of what asking
+	// for more budget means.
+	b := mergeBudget(budget.Budget{
+		MaxUSD:        projCfg.Budget.MaxUSD,
+		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
+		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
+	}, req.Budget)
+	tracker := budget.NewTracker(&b)
+	rs.tracker = tracker
+	recordLimits(rs, &b)
 
 	ectx := &tools.ExecContext{
 		ProjectRoot:  entry.Path,
@@ -940,7 +989,25 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		GlobalSkillsDir: globalSkillsDir(),
 	}
 
+	// The line-up this run will use: what it asked for, else the one configured
+	// for its mode. Filled onto the request itself so every consumer sees it —
+	// tournament and split read req.Ducklings directly, and a preference that
+	// only reached solo and pair would be a preference that worked in two modes
+	// out of four.
+	req.Ducklings = s.ducklingsFor(rs.run.Mode, req.Ducklings)
+
 	roster, rosterWarning := s.resolveRoster(projCfg)
+	// Only tournament and split read req.Ducklings, so a person who picked a
+	// duckling for a solo run got the project roster's implementer instead and
+	// had no way to tell: the picker sits right there in the desktop offering a
+	// choice that did nothing. Applied before the roster is recorded, so the
+	// run says who actually ran.
+	assignChosenDucklings(roster, rs.run.Mode, req.Ducklings)
+	// Recomputed, not reused: a pick can put one duckling on both sides of a
+	// pair, and the warning resolveRoster produced was decided against the
+	// roster before the pick. It can also separate two that were the same, in
+	// which case the warning must go.
+	rosterWarning = bothSidesWarning(roster)
 	rs.run.Roster = rosterStrings(roster)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
@@ -950,27 +1017,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: &runLogAdapter{w: rs.writer, run: rs.run},
-		loops:  map[config.DucklingID]*agent.Loop{},
+		writer: &runLogAdapter{
+			w: rs.writer, run: rs.run,
+			onSpend: func() { s.publishSpend(rs, tracker) },
+		},
+		loops: map[config.DucklingID]*agent.Loop{},
 	}
-	if rs.run.Stream && s.bus != nil {
-		// token_delta is never persisted (01 §5.3): it is display state, and
-		// writing it would bloat events.jsonl with data no resume needs.
-		runID, projectID := rs.run.ID, rs.run.ProjectID
-		cache.onDelta = func(t *agent.Turn, text string) {
-			s.bus.Publish(bus.Event{
-				Type: "token_delta", RunID: runID, ProjectID: projectID,
-				TS: time.Now(),
-				Data: map[string]interface{}{
-					"role": string(t.Role), "duckling": string(t.Duckling),
-					// Which turn, not just which duckling: a council's second
-					// architect turn must not append to the first one's text.
-					"round": t.Round, "turn": t.Index,
-					"text": text,
-				},
-			})
-		}
-	}
+	s.attachStreaming(rs, cache)
 
 	dispatchErr := s.dispatchMode(ctx, &modeContext{
 		entry: entry, projCfg: projCfg, rs: rs, ectx: ectx,
@@ -1127,9 +1180,11 @@ func (s *Service) failRun(rs *runState, err error) {
 	}
 	rs.run.Status = "failed"
 	rs.run.Verdict = "FAILED"
+	rs.run.Failure = err.Error()
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("error", map[string]interface{}{"error": err.Error()})
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
+	restoreAfterUnaccepted(rs)
 	rs.writer.WriteState()
 }
 
@@ -1143,6 +1198,25 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// the artifact on another — and the first real user accepted the run,
 	// watched the Cycle view go on saying "proposal awaiting your decision",
 	// and had no way to know why.
+	// A triage's gate decides a classification, not a document and not a diff.
+	// Without this it fell through to the code path below, staged nothing, found
+	// the tree clean, and reported success — so Accept and Reject did the same
+	// thing and the whole triage was discarded with a green tick.
+	if rs.run.Stage == "triage" || rs.run.Stage == "operate" {
+		n, err := s.ApplyTriage(ctx, rs.run.ProjectID, rs.run.PendingData["proposals"])
+		if err != nil {
+			return err
+		}
+		rs.writer.AppendEvent("triage_applied", map[string]interface{}{"bugs": n})
+		clearPending(rs.run)
+		rs.run.Accepted = true
+		rs.run.Status = "done"
+		rs.run.Resolution = "accepted by human"
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		rs.writer.WriteState()
+		return nil
+	}
+
 	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
 		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, "human"); err != nil {
 			// Not fatal: a run whose proposal was already promoted by hand is
@@ -1181,6 +1255,15 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Resolution = "accepted; the tree already carried this change"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
+		// The report this task came from, if any: promoting a bug set its task
+		// id and moved it to in_progress, and nothing ever moved it again. The
+		// loop had an entrance and no exit.
+		if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
+			rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
+				"bug": id, "task": rs.run.TaskID,
+			})
+		}
+
 		if err := s.logResolution(rs, "accept"); err != nil {
 			return err
 		}
@@ -1202,6 +1285,15 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	rs.run.Status = "done"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
+	// The report this task came from, if any: promoting a bug set its task
+	// id and moved it to in_progress, and nothing ever moved it again. The
+	// loop had an entrance and no exit.
+	if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
+		rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
+			"bug": id, "task": rs.run.TaskID,
+		})
+	}
+
 	// Logged, not assumed. These appends were ignored, and when the writer had
 	// been closed they failed silently: state.json recorded the commit while
 	// the log never recorded that a person accepted anything. Every client
@@ -1302,6 +1394,9 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
+	// No restore here, deliberately: the goroutine is still dying and may have
+	// a write in flight. The cancel lands, it unwinds through failRun, and
+	// failRun restores — after the last writer has stopped.
 	// The run stays in the map: it is still inspectable through RunGet and
 	// still on disk. Deleting it made an aborted run vanish from run list.
 	return w.WriteState()
@@ -1334,10 +1429,37 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
 	events, _ := runlog.ReadEvents(s.RunDir(id))
+	run := rs.run
+	// Runs that failed before the reason was recorded on the run still have it
+	// in their event stream, and the events are already in hand here. A copy,
+	// because the stored run is shared and this is a read.
+	if run.Status == "failed" && run.Failure == "" {
+		if why := failureFromEvents(events); why != "" {
+			clone := *run
+			clone.Failure = why
+			run = &clone
+		}
+	}
 	return &RunDetail{
-		Run:    rs.run,
+		Run:    run,
 		Events: events,
 	}, nil
+}
+
+// failureFromEvents finds the reason a run failed in its event stream. The last
+// error wins: a run that failed while handling an earlier error died of the
+// second one.
+func failureFromEvents(events []*runlog.Event) string {
+	out := ""
+	for _, e := range events {
+		if e == nil || e.Type != "error" {
+			continue
+		}
+		if msg, ok := e.Data["error"].(string); ok && msg != "" {
+			out = msg
+		}
+	}
+	return out
 }
 
 // RunList lists runs.
@@ -1412,6 +1534,11 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
+	// Reject means no. It used to mean "no, but keep everything anyway": the
+	// record said FAILED while the half-made edits stayed in the tree, and the
+	// next attempt of the task found them and reasoned about work nobody had
+	// accepted as though it were the project's.
+	restoreAfterUnaccepted(rs)
 	return w.WriteState()
 }
 
@@ -1479,4 +1606,150 @@ func slugify(s string) string {
 		result = result[:32]
 	}
 	return result
+}
+
+// publishSpend tells watching clients what the run has spent so far, and which
+// duckling spent it.
+//
+// The totals were written to the run record only when the run ended, so the
+// desktop's meter read zero for however long the work took and then jumped to
+// the final number. In a mode with more than one model the question is usually
+// "which of them is burning this", and the answer existed the whole time — the
+// per-duckling attribution is computed on every call — it just never left the
+// process.
+//
+// Display only, so it is published to the bus and never appended to
+// events.jsonl: the totals are already in state.json and a replay reconstructs
+// them from llm.jsonl.
+func (s *Service) publishSpend(rs *runState, tracker *budget.Tracker) {
+	if s.bus == nil || tracker == nil || tracker.Spend == nil {
+		return
+	}
+	snap := tracker.Spend.Snapshot()
+
+	ducklings := map[string]interface{}{}
+	rs.wmu.Lock()
+	for id, d := range rs.run.Spend {
+		ducklings[id] = map[string]interface{}{
+			"calls": d.Calls, "tokens": d.Tokens, "cost_usd": d.CostUSD,
+			"estimated": d.Estimated,
+		}
+	}
+	limit := rs.run.Budget.Limit
+	rs.wmu.Unlock()
+
+	s.bus.Publish(bus.Event{
+		Type: "budget", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+		TS: time.Now(),
+		Data: map[string]interface{}{
+			"usd": snap.USD, "tokens": snap.Tokens, "turns": snap.Turns,
+			"wallclock_s": snap.WallclockS,
+			"limit": map[string]interface{}{
+				"usd": limit.USD, "tokens": limit.Tokens,
+				"turns": limit.Turns, "wallclock_s": limit.WallclockS,
+			},
+			// Keyed by duckling, because "the run has spent 300k" does not say
+			// which model to change.
+			"ducklings": ducklings,
+		},
+	})
+}
+
+// recoverRun turns a panic into a failed run instead of a dead engine.
+//
+// Only executeRun had this. The other five run goroutines — stage, review,
+// release, triage, test-first — had nothing, so a panic in any of them took the
+// whole process down and every other run in flight with it. The one that
+// actually happened, a backwards line range handed to fs_read, could have come
+// from a spec stage just as easily as from a build.
+//
+// The stack is kept. Without it a panic reported only its message — "slice
+// bounds out of range [92:78]" — and finding which of a hundred slice
+// expressions produced it meant reading the whole engine. A crash is the one
+// place where that much detail is worth the noise.
+func recoverRun(rs *runState) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	// What it spent before it died. Tokens were burned and money was charged
+	// whatever happened next, and a report that omits them understates the cost
+	// of exactly the runs worth being unhappy about.
+	recordSpend(rs, rs.tracker)
+	detail := fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack())
+	rs.run.Status = "failed"
+	rs.run.Verdict = "ABORTED"
+	rs.run.Failure = detail
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if rs.writer != nil {
+		rs.writer.AppendEvent("error", map[string]interface{}{"error": detail})
+	}
+	restoreAfterUnaccepted(rs)
+	if rs.writer != nil {
+		rs.writer.WriteState()
+	}
+}
+
+// attachStreaming makes a run's turns visible while they happen.
+//
+// Every run kind sets Stream: true on its record, and exactly one of the six
+// wired the callbacks that act on it — so a triage, a review, a release and a
+// test-first all claimed to stream and emitted nothing, and their lanes sat on
+// "thinking…" for the whole run with no way to tell work from a hang.
+//
+// Next to the cache rather than in each caller, for the same reason the budget
+// ceilings are: six call sites is six chances to forget.
+func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
+	if !rs.run.Stream || s.bus == nil {
+		return
+	}
+	runID, projectID := rs.run.ID, rs.run.ProjectID
+	publish := func(kind string) func(*agent.Turn, string) {
+		return func(t *agent.Turn, text string) {
+			s.bus.Publish(bus.Event{
+				Type: kind, RunID: runID, ProjectID: projectID,
+				TS: time.Now(),
+				Data: map[string]interface{}{
+					"role": string(t.Role), "duckling": string(t.Duckling),
+					// Which turn, not just which duckling: a council's second
+					// architect turn must not append to the first one's text.
+					"round": t.Round, "turn": t.Index,
+					"text": text,
+				},
+			})
+		}
+	}
+	// token_delta and reasoning_delta are never persisted (01 §5.3): they are
+	// display state, and writing them would bloat events.jsonl with data no
+	// resume needs.
+	cache.onDelta = publish("token_delta")
+	// Its own event type, not more token_delta: thinking appended to the answer
+	// would make the transcript show a model's false starts as its reply, and
+	// the contract parser reads that text.
+	cache.onReasoning = publish("reasoning_delta")
+}
+
+// restoreAfterUnaccepted puts the tree back to the run's start when the run
+// ended without its work being accepted. Quietly a no-op when there is nothing
+// recorded — stage runs and pre-git projects take no snapshot.
+func restoreAfterUnaccepted(rs *runState) {
+	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.run.Accepted {
+		return
+	}
+	git := vcs.New(rs.projectPath)
+	if err := git.RestoreTree(rs.run.TreeSnapshot); err != nil {
+		// Said, not swallowed: a person who believes the tree is clean will
+		// trust the next run's diff.
+		if rs.writer != nil {
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": "the tree could not be restored to the run's start: " + err.Error(),
+			})
+		}
+		return
+	}
+	if rs.writer != nil {
+		rs.writer.AppendEvent("tree_restored", map[string]interface{}{
+			"snapshot": rs.run.TreeSnapshot,
+		})
+	}
 }

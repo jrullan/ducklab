@@ -69,6 +69,11 @@ var transitions = map[Status][]Status{
 	Closed:     {},
 }
 
+// NextFrom lists the statuses reachable from one, in the loop's own order.
+func NextFrom(from Status) []Status {
+	return append([]Status{}, transitions[from]...)
+}
+
 // CanMove reports whether a bug may go from one status to another.
 func CanMove(from, to Status) bool {
 	for _, s := range transitions[from] {
@@ -126,6 +131,14 @@ type Bug struct {
 	Reporter    string   `json:"reporter,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
+	// Next are the statuses this bug may legally move to.
+	//
+	// Reported by the engine rather than worked out by each client: the loop's
+	// rules live here, and a UI that hardcoded them would drift the first time
+	// one changed. It also stops the opposite failure — a bug in a state the UI
+	// happens not to handle, sitting with nothing to click on it, which is what
+	// left a fixed report stuck at in_progress with no way to move it by hand.
+	Next []Status `json:"next,omitempty"`
 }
 
 // SortByUrgency orders bugs as someone deciding what to do next would want

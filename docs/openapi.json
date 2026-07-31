@@ -350,6 +350,9 @@
           "caps": {
             "$ref": "#/components/schemas/DucklingCapabilities"
           },
+          "color": {
+            "type": "integer"
+          },
           "cost": {
             "$ref": "#/components/schemas/ConfigCost"
           },
@@ -618,6 +621,9 @@
           "n": {
             "type": "integer"
           },
+          "one_run": {
+            "type": "boolean"
+          },
           "pass_rate": {
             "type": "number"
           },
@@ -689,6 +695,9 @@
       },
       "ReportRow": {
         "properties": {
+          "builds": {
+            "type": "integer"
+          },
           "cost_usd": {
             "type": "number"
           },
@@ -700,6 +709,12 @@
           },
           "key": {
             "type": "string"
+          },
+          "no_change_passes": {
+            "type": "integer"
+          },
+          "no_changes": {
+            "type": "integer"
           },
           "passed": {
             "type": "integer"
@@ -718,10 +733,13 @@
           }
         },
         "required": [
+          "builds",
           "cost_usd",
           "estimated",
           "failed",
           "key",
+          "no_change_passes",
+          "no_changes",
           "passed",
           "runs",
           "tokens",
@@ -730,8 +748,34 @@
         ],
         "type": "object"
       },
+      "RunlogBudgetLimits": {
+        "properties": {
+          "tokens": {
+            "type": "integer"
+          },
+          "turns": {
+            "type": "integer"
+          },
+          "usd": {
+            "type": "number"
+          },
+          "wallclock_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tokens",
+          "turns",
+          "usd",
+          "wallclock_s"
+        ],
+        "type": "object"
+      },
       "RunlogBudgetState": {
         "properties": {
+          "limit": {
+            "$ref": "#/components/schemas/RunlogBudgetLimits"
+          },
           "tokens": {
             "type": "integer"
           },
@@ -746,10 +790,33 @@
           }
         },
         "required": [
+          "limit",
           "tokens",
           "turns",
           "usd",
           "wallclock_s"
+        ],
+        "type": "object"
+      },
+      "RunlogDucklingSpend": {
+        "properties": {
+          "calls": {
+            "type": "integer"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "cost_usd",
+          "tokens"
         ],
         "type": "object"
       },
@@ -812,6 +879,9 @@
           "ended_at": {
             "type": "string"
           },
+          "failure": {
+            "type": "string"
+          },
           "gate": {
             "type": "string"
           },
@@ -820,6 +890,9 @@
           },
           "mode": {
             "type": "string"
+          },
+          "no_changes": {
+            "type": "boolean"
           },
           "pending_data": {
             "additionalProperties": {},
@@ -843,6 +916,12 @@
             },
             "type": "object"
           },
+          "spend": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RunlogDucklingSpend"
+            },
+            "type": "object"
+          },
           "stage": {
             "type": "string"
           },
@@ -863,6 +942,9 @@
           },
           "tokens_estimated": {
             "type": "boolean"
+          },
+          "tree_snapshot": {
+            "type": "string"
           },
           "unsafe_writes": {
             "type": "boolean"
@@ -947,6 +1029,29 @@
         ],
         "type": "object"
       },
+      "ServiceBudgetView": {
+        "properties": {
+          "max_tokens": {
+            "type": "integer"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "max_usd": {
+            "type": "number"
+          },
+          "max_wallclock_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_tokens",
+          "max_turns",
+          "max_usd",
+          "max_wallclock_s"
+        ],
+        "type": "object"
+      },
       "ServiceBugRequest": {
         "properties": {
           "body": {
@@ -996,6 +1101,9 @@
         "properties": {
           "caps": {
             "$ref": "#/components/schemas/ConfigCaps"
+          },
+          "color": {
+            "type": "integer"
           },
           "cost": {
             "$ref": "#/components/schemas/ConfigCost"
@@ -1113,6 +1221,55 @@
           "git_init",
           "name",
           "path"
+        ],
+        "type": "object"
+      },
+      "ServiceModeDefaultsView": {
+        "properties": {
+          "agent_max_turns": {
+            "type": "integer"
+          },
+          "ducklings": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "role_turns": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "rounds": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "script_role_turns": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "script_rounds": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent_max_turns",
+          "ducklings",
+          "role_turns",
+          "rounds",
+          "script_role_turns",
+          "script_rounds"
         ],
         "type": "object"
       },
@@ -1460,6 +1617,9 @@
       },
       "ServiceTaskView": {
         "properties": {
+          "blocked": {
+            "type": "string"
+          },
           "body": {
             "type": "string"
           },
@@ -1651,6 +1811,112 @@
           }
         ],
         "summary": "One bench result"
+      }
+    },
+    "/v1/defaults/budget": {
+      "get": {
+        "operationId": "BudgetDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceBudgetView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The budget every run starts with. It was invisible and immutable, so a run that hit the ceiling failed with a number nobody had chosen."
+      },
+      "put": {
+        "operationId": "BudgetDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceBudgetView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the default run budget"
+      }
+    },
+    "/v1/defaults/modes": {
+      "get": {
+        "operationId": "ModeDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceModeDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Per-mode defaults: rounds, the duckling line-up, and the per-turn model-call cap. All lived only in the scripts and the config."
+      },
+      "put": {
+        "operationId": "ModeDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceModeDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the per-mode defaults"
       }
     },
     "/v1/ducklings": {
@@ -2260,6 +2526,53 @@
           }
         ],
         "summary": "Triage the open bugs"
+      }
+    },
+    "/v1/projects/{id}/bugs/{bug}": {
+      "put": {
+        "operationId": "BugEdit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceBugRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Correct what a report says. A bug could be moved, triaged and promoted but never edited."
       }
     },
     "/v1/projects/{id}/bugs/{bug}/promote": {
@@ -3293,6 +3606,43 @@
           }
         ],
         "summary": "First task whose dependencies are met"
+      }
+    },
+    "/v1/projects/{id}/tasks/{task}": {
+      "delete": {
+        "operationId": "TaskRemove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove a task from the plan. Refused once a run has named it."
       }
     },
     "/v1/projects/{id}/tests": {

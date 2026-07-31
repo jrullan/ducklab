@@ -157,10 +157,62 @@ func (t *FSRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawMe
 		return ErrorResult("read: %v", err), nil
 	}
 	content := string(data)
+	// A range that reads backwards is a mistake in the call, not an empty file.
+	// Returning "" would tell the model those lines are blank and send it
+	// looking at the wrong thing; this tells it what to fix.
+	if a.Start > 0 && a.End > 0 && a.Start > a.End {
+		return ErrorResult("start line %d is after end line %d", a.Start, a.End), nil
+	}
+	total := len(strings.Split(content, "\n"))
+	from := a.Start
+	if from < 1 {
+		from = 1
+	}
 	if a.Start > 0 || a.End > 0 {
 		content = TruncateLines(content, a.Start, a.End)
 	}
-	return SuccessResult("%s", LineNumbers(content, 1)), nil
+
+	// Capped in lines, by this tool, before the generic byte cap can reach it.
+	//
+	// A 57 KB file does not fit the 32 KB result ceiling, so a plain read came
+	// back as "[10278 bytes truncated; showing the last 32768]" — tail-biased,
+	// which is right for a failing test's output and wrong for source, and
+	// stated in bytes while this tool speaks lines. A model given that has no
+	// way to work out which lines it holds, so it guesses windows. Measured: an
+	// implementer spent all 24 of its turns on 15 reads and 6 searches of one
+	// file and never wrote a line.
+	body, shown, truncated := numberedWithin(content, from, MaxToolResultBytes-512)
+	if truncated {
+		next := from + shown
+		body += fmt.Sprintf("\n[showing lines %d-%d of %d. Read the rest with "+
+			`{"path":%q,"start":%d,"end":%d}]`+"\n",
+			from, from+shown-1, total, a.Path, next, next+shown-1)
+	}
+	return SuccessResult("%s", body), nil
+}
+
+// numberedWithin renders content with its real line numbers, stopping at a line
+// boundary before a byte budget, and reports how many lines it kept.
+//
+// The budget is measured on the rendered text, not the raw: the line-number
+// prefix is six bytes a line, and a cap that ignores it overshoots by exactly
+// the amount that matters on a file with thousands of them.
+//
+// Head-biased, unlike the general result cap: a file is read from the top, and a
+// reader handed the end of one cannot tell what came before it.
+func numberedWithin(content string, from, maxBytes int) (string, int, bool) {
+	lines := strings.Split(content, "\n")
+	var b strings.Builder
+	kept := 0
+	for i, l := range lines {
+		rendered := fmt.Sprintf("%4d\t%s\n", from+i, l)
+		if b.Len()+len(rendered) > maxBytes {
+			return b.String(), kept, true
+		}
+		b.WriteString(rendered)
+		kept++
+	}
+	return b.String(), kept, false
 }
 
 // FSSearch searches file contents.
@@ -362,26 +414,86 @@ func (t *FSPatch) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSPatch) Description() string {
-	return "Apply search/replace edits to a file. Each search must match exactly once."
+	return "Apply search/replace edits to a file. Each search must match exactly once. " +
+		"Shape: " + fsPatchShapeHint
 }
+
+// fsPatchShapeHint is the canonical shape, stated in one place so the schema,
+// the description and every error message agree.
+const fsPatchShapeHint = `{"path":"f.go","edits":[{"search":"old text","replace":"new text"}]}` +
+	` (old_str/new_str and old_string/new_string are accepted too, and a single edit may be written flat)`
 
 // Schema returns the argument schema.
 func (t *FSPatch) Schema() interface{} {
 	return NewSchema().
 		AddString("path", "File path to patch", true).
-		AddArray("edits", "List of search/replace edits", &Property{
-			Type: "object",
-		}, true)
+		AddArray("edits", "Search/replace pairs. Each object needs the text to find "+
+			"(search, or old_str, or old_string) and its replacement (replace, or "+
+			"new_str, or new_string). An empty list is an error, not a no-op.",
+			&Property{Type: "object"}, true)
 }
 
+// fsPatchEdit is one search/replace pair.
+//
+// The aliases are not decoration. Models emit this shape from habit under
+// several names, and a run measured here sent `old_str`/`new_str` seven times
+// against a 612-line file: the keys were ignored, `edits` decoded empty, and the
+// tool answered "patched index.html (0 edits)" as a success each time. The model
+// reasonably concluded the task was done, the reviewer correctly found nothing,
+// and the work was never written.
+//
+// Accepting a synonym is not papering over a mismatch. The tool's job is to
+// apply the edit; which of four spellings the model used for "the old text" is
+// not information anyone needs.
 type fsPatchEdit struct {
 	Search  string `json:"search"`
 	Replace string `json:"replace"`
+
+	OldStr    string `json:"old_str"`
+	NewStr    string `json:"new_str"`
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+}
+
+// from returns the text to find, whichever key carried it.
+func (e fsPatchEdit) from() string {
+	return firstNonEmpty(e.Search, e.OldStr, e.OldString)
+}
+
+// to returns the replacement. Empty is legitimate — deleting a block is an edit
+// — so it is only ever read once `from` is known to be present.
+func (e fsPatchEdit) to() string {
+	return firstNonEmpty(e.Replace, e.NewStr, e.NewString)
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 type fsPatchArgs struct {
 	Path  string        `json:"path"`
 	Edits []fsPatchEdit `json:"edits"`
+
+	// A single edit written flat, without the wrapping array. This is the shape
+	// that produced the silent no-op: none of these keys exist on the canonical
+	// form, so the whole call decoded to a path and nothing to do.
+	fsPatchEdit
+}
+
+// edits returns the edits to apply, from either shape.
+func (a fsPatchArgs) edits() []fsPatchEdit {
+	if len(a.Edits) > 0 {
+		return a.Edits
+	}
+	if a.fsPatchEdit.from() != "" {
+		return []fsPatchEdit{a.fsPatchEdit}
+	}
+	return nil
 }
 
 // Execute runs the tool.
@@ -399,12 +511,31 @@ func (t *FSPatch) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		return ErrorResult("read: %v", err), nil
 	}
 	content := string(data)
-	for i, edit := range a.Edits {
-		count := strings.Count(content, edit.Search)
+	edits := a.edits()
+	// A patch that changes nothing is not a patch.
+	//
+	// This used to fall through: zero edits meant zero loop iterations, the
+	// original bytes were written back, and the tool answered "patched
+	// index.html (0 edits)" as a SUCCESS. A model that sent an argument shape
+	// this tool did not recognise was told seven times that it had edited the
+	// file. It stopped, satisfied; the reviewer found an untouched tree; the
+	// task was recorded as attempted and nothing had happened.
+	//
+	// The message names the shape, because the model has no other way to find
+	// out what was wrong with the call it just made.
+	if len(edits) == 0 {
+		return ErrorResult("no edits to apply. Send %s", fsPatchShapeHint), nil
+	}
+	for i, edit := range edits {
+		search := edit.from()
+		if search == "" {
+			return ErrorResult("edit %d has no text to find. Send %s", i, fsPatchShapeHint), nil
+		}
+		count := strings.Count(content, search)
 		if count != 1 {
 			return ErrorResult("edit %d: search string matches %d times (must be exactly 1)", i, count), nil
 		}
-		content = strings.Replace(content, edit.Search, edit.Replace, 1)
+		content = strings.Replace(content, search, edit.to(), 1)
 	}
 	// Write guard on the result
 	if guard := WriteGuard(ectx, a.Path, []byte(content), false); guard != nil {
@@ -416,7 +547,7 @@ func (t *FSPatch) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	// The same notes fs_write carries. A model fixing one problem in a
 	// manifest needs to hear about the next one, and it usually fixes by
 	// patching.
-	msg := fmt.Sprintf("patched %s (%d edits)", a.Path, len(a.Edits))
+	msg := fmt.Sprintf("patched %s (%d edits)", a.Path, len(edits))
 	if note := skillManifestNote(a.Path, content); note != "" {
 		msg += "\n" + note
 	}

@@ -116,13 +116,14 @@ func providerCmd(verb string, args []string) int {
 // ducklingSetCmd is `ducklab duckling set` and `remove`.
 func ducklingSetCmd(client *engineclt.Client, args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ducklab duckling set <id> --provider P --model M [--roles a,b] [--context N] [--no-native-tools] [--cost-in X --cost-out Y] [--notes ...]")
+		fmt.Fprintln(os.Stderr, "usage: ducklab duckling set <id> --provider P --model M [--roles a,b] [--context N] [--no-native-tools] [--cost-in X --cost-out Y] [--max-tokens N] [--temperature F] [--suppress-thinking] [--notes ...]")
 		return 2
 	}
 	id := args[0]
 	body := map[string]interface{}{}
 	caps := map[string]interface{}{}
 	cost := map[string]interface{}{}
+	params := map[string]interface{}{}
 
 	for i := 1; i < len(args); i++ {
 		next := func() (string, bool) {
@@ -181,6 +182,31 @@ func ducklingSetCmd(client *engineclt.Client, args []string) int {
 				}
 				cost["output_per_mtok"] = f
 			}
+		case "--max-tokens":
+			// The cap on one reply. A reasoning model without one spends its
+			// whole output budget thinking and returns nothing, which reads as
+			// a transport fault rather than a setting.
+			if v, ok := next(); ok {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: --max-tokens wants a number, got %q\n", v)
+					return 2
+				}
+				params["max_tokens"] = n
+			}
+		case "--temperature":
+			if v, ok := next(); ok {
+				f, err := strconv.ParseFloat(v, 64)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: --temperature wants a number, got %q\n", v)
+					return 2
+				}
+				params["temperature"] = f
+			}
+		case "--suppress-thinking":
+			params["disable_thinking"] = true
+		case "--allow-thinking":
+			params["disable_thinking"] = false
 		default:
 			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", args[i])
 			return 2
@@ -191,6 +217,9 @@ func ducklingSetCmd(client *engineclt.Client, args []string) int {
 	}
 	if len(cost) > 0 {
 		body["cost"] = cost
+	}
+	if len(params) > 0 {
+		body["params"] = params
 	}
 
 	if err := client.DucklingSet(id, body); err != nil {

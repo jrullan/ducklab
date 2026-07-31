@@ -582,6 +582,12 @@ func LineNumbers(content string, start int) string {
 }
 
 // TruncateLines truncates content to a line range.
+//
+// Each bound used to be clamped on its own, and nothing checked that the range
+// ran forwards. A model asked for lines 93 to 78 — a range that reads backwards
+// — and `lines[92:78]` panicked, which killed the goroutine running the turn
+// and took the whole run down with it. A helper that formats text must not be
+// able to do that whatever it is handed.
 func TruncateLines(content string, start, end int) string {
 	lines := strings.Split(content, "\n")
 	if start < 1 {
@@ -590,7 +596,7 @@ func TruncateLines(content string, start, end int) string {
 	if end < 1 || end > len(lines) {
 		end = len(lines)
 	}
-	if start > len(lines) {
+	if start > len(lines) || start > end {
 		return ""
 	}
 	return strings.Join(lines[start-1:end], "\n")

@@ -32,8 +32,16 @@ type ChatRequest struct {
 
 // Message is a chat message.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Reasoning is the model's thinking, when the endpoint separates it from
+	// the answer. Never sent back in a request: a reasoning block is a
+	// by-product of one turn, not part of the conversation.
+	//
+	// Two names for one thing. DeepSeek's own API and vLLM use
+	// reasoning_content; OpenRouter uses reasoning. Whichever arrives lands
+	// here, so nothing above this layer has to know which endpoint answered.
+	Reasoning  string     `json:"-"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
@@ -89,13 +97,22 @@ type Usage struct {
 	CompletionTokens int     `json:"completion_tokens"`
 	TotalTokens      int     `json:"total_tokens"`
 	CostUSD          float64 `json:"cost_usd,omitempty"` // OpenRouter extension
+	// ReasoningTokens is the share of CompletionTokens spent on thinking, when
+	// the endpoint reports it. Counted separately because "the run cost 400k
+	// tokens" and "the run cost 400k tokens, 380k of them thinking" call for
+	// different actions.
+	ReasoningTokens int `json:"-"`
 }
 
 // Delta is a streaming delta.
 type Delta struct {
-	Text     string `json:"text,omitempty"`
-	ToolName string `json:"tool_name,omitempty"`
-	Done     bool   `json:"done,omitempty"`
+	Text string `json:"text,omitempty"`
+	// Reasoning carries a fragment of thinking rather than of the answer. Kept
+	// apart from Text all the way to the screen: appending it to the answer
+	// would make the transcript show deliberation as if it were the reply.
+	Reasoning string `json:"reasoning,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+	Done      bool   `json:"done,omitempty"`
 }
 
 // Capabilities describes what a provider/model can do.

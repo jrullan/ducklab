@@ -16,6 +16,7 @@ import (
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/report"
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
@@ -28,12 +29,13 @@ import (
 // not enough. Loops are cached because building one probes capabilities, and
 // probing once per turn would cost a request per turn.
 type loopCache struct {
-	svc     *Service
-	tracker *budget.Tracker
-	writer  agent.RunLogWriter
-	onDelta func(*agent.Turn, string)
-	mu      sync.Mutex
-	loops   map[config.DucklingID]*agent.Loop
+	svc         *Service
+	tracker     *budget.Tracker
+	writer      agent.RunLogWriter
+	onDelta     func(*agent.Turn, string)
+	onReasoning func(*agent.Turn, string)
+	mu          sync.Mutex
+	loops       map[config.DucklingID]*agent.Loop
 }
 
 func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop, error) {
@@ -47,6 +49,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 		return nil, err
 	}
 	l.OnDelta = c.onDelta
+	l.OnReasoning = c.onReasoning
 	c.loops[id] = l
 	return l, nil
 }
@@ -130,14 +133,23 @@ func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config
 		out[role] = fallbackFor(role)
 	}
 
-	warning := ""
-	if out[config.RoleImplementer] != "" && out[config.RoleImplementer] == out[config.RoleReviewer] {
-		warning = fmt.Sprintf(
-			"%s is on both sides of the pair: this measures self-consistency, not review. "+
-				"Configure a second duckling, or set [roster] reviewer in project.toml.",
-			out[config.RoleImplementer])
+	return out, bothSidesWarning(out)
+}
+
+// bothSidesWarning reports a roster that puts one duckling on both sides.
+//
+// Recomputed after a run's picked ducklings are applied: the warning used to be
+// produced inside resolveRoster, and a picker that assigned the implementer
+// afterwards could create exactly this collision with the warning already
+// decided against the old roster.
+func bothSidesWarning(out map[config.Role]config.DucklingID) string {
+	if out[config.RoleImplementer] == "" || out[config.RoleImplementer] != out[config.RoleReviewer] {
+		return ""
 	}
-	return out, warning
+	return fmt.Sprintf(
+		"%s is on both sides of the pair: this measures self-consistency, not review. "+
+			"Configure a second duckling, or set [roster] reviewer in project.toml.",
+		out[config.RoleImplementer])
 }
 
 // runnerFor returns a TurnRunner that picks the loop matching each turn's role.
@@ -186,9 +198,15 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		TaskID:      mc.req.TaskID,
 		Prompt:      s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID),
 		ExecContext: mc.ectx,
-		Rounds:      mc.req.Rounds,
-		Runner:      s.runnerFor(mc.cache, mc.roster, mc.ectx),
-		Roster:      mc.roster,
+		// The request, then the configured default for this mode, then the
+		// script's own count. The counts lived only in the scripts, so changing
+		// how many times a reviewer got to push back meant editing Go.
+		Rounds: s.roundsFor(mc.rs.run.Mode, mc.req.Rounds),
+		Runner: s.runnerFor(mc.cache, mc.roster, mc.ectx),
+		Roster: mc.roster,
+		// So tournament and split, which build their own turns, honour the same
+		// per-role caps as every other mode.
+		TurnCaps: s.roleTurnCaps(),
 		Gate: func(ctx context.Context) (string, string, error) {
 			res, err := verify.Run(mc.entry.Path, mc.projCfg.Verify)
 			if err != nil {
@@ -206,11 +224,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 
 	switch mc.rs.run.Mode {
 	case "", "solo":
-		res, err := strategy.ExecuteSolo(ctx, &base)
+		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.SoloScript()), &base)
 		return pendingOrErr(res, err)
 
 	case "pair":
-		res, err := strategy.ExecutePair(ctx, &base)
+		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.PairScript()), &base)
 		return pendingOrErr(res, err)
 
 	case "tournament":
@@ -418,6 +436,21 @@ type pendingErr struct {
 func (e *pendingErr) Error() string { return e.err.Error() }
 func (e *pendingErr) Unwrap() error { return e.err }
 
+// recordLimits copies the ceilings a run was given onto its record.
+//
+// It lived at one of the six places a tracker is created, so five kinds of run —
+// stages, review, release, triage, test-first — wrote no limits at all and the
+// desktop drew their meters as 0 / 0. Next to the tracker rather than in each
+// caller, because that is the one place it cannot be forgotten.
+func recordLimits(rs *runState, b *budget.Budget) {
+	if rs == nil || b == nil {
+		return
+	}
+	rs.run.Budget.Limit = runlog.BudgetLimits{
+		USD: b.MaxUSD, Tokens: b.MaxTokens, Turns: b.MaxTurns, WallclockS: b.MaxWallclockS,
+	}
+}
+
 // recordSpend copies the budget tracker's totals onto the run record.
 func recordSpend(rs *runState, tracker *budget.Tracker) {
 	if tracker == nil || tracker.Spend == nil {
@@ -433,5 +466,40 @@ func recordSpend(rs *runState, tracker *budget.Tracker) {
 	// that ends any way at all still records its duration.
 	if started, err := time.Parse(time.RFC3339, rs.run.StartedAt); err == nil {
 		rs.run.WallclockMs = time.Since(started).Milliseconds()
+	}
+}
+
+// assignChosenDucklings applies the ducklings a person picked for this run to
+// the roles the mode will actually use.
+//
+// Tournament and split read req.Ducklings themselves, because both hand a list
+// to a strategy that assigns it positionally. Solo and pair read only the
+// roster, so a picker that offered a choice for those modes changed nothing —
+// pick pato-sonnet for a solo run and the project roster's implementer ran
+// instead, with nothing on screen to say so.
+//
+// Positional, matching split: first is the implementer, second the reviewer. A
+// solo run uses one duckling, so extra picks are the person's business and not
+// an error worth refusing a run over.
+func assignChosenDucklings(roster map[config.Role]config.DucklingID, mode string, chosen []string) {
+	if len(chosen) == 0 || roster == nil {
+		return
+	}
+	var roles []config.Role
+	switch mode {
+	case "", "solo":
+		roles = []config.Role{config.RoleImplementer}
+	case "pair":
+		roles = []config.Role{config.RoleImplementer, config.RoleReviewer}
+	default:
+		// tournament and split take the list whole; overwriting the roster here
+		// would fight the assignment they do themselves.
+		return
+	}
+	for i, role := range roles {
+		if i >= len(chosen) || chosen[i] == "" {
+			return
+		}
+		roster[role] = config.DucklingID(chosen[i])
 	}
 }

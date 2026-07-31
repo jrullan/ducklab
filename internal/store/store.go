@@ -53,6 +53,7 @@ func (d *DB) Migrate() error {
 	// Apply migrations in order
 	migrations := []Migration{
 		{Version: 1, Name: "001_init", SQL: migration001},
+		{Version: 2, Name: "002_triage_findings", SQL: migration002},
 	}
 
 	for _, m := range migrations {
@@ -253,6 +254,13 @@ type Task struct {
 	DependsOn   string
 	CreatedAt   string
 	UpdatedAt   string
+	// What the triage worked out. Kept on the bug because promoting it into a
+	// task is a separate act, often days later, and the classification is the
+	// half of the answer that says where to look.
+	Component      string
+	SuspectedFiles string // newline-separated, in the order the triager gave them
+	TaskTitle      string
+	TriageReason   string
 }
 
 // CreateTask creates a task.
@@ -371,6 +379,13 @@ type Bug struct {
 	Reporter    string
 	CreatedAt   string
 	UpdatedAt   string
+	// What the triage worked out. Kept on the bug because promoting it into a
+	// task is a separate act, often days later, and the classification is the
+	// half of the answer that says where to look.
+	Component      string
+	SuspectedFiles string // newline-separated, in the order the triager gave them
+	TaskTitle      string
+	TriageReason   string
 }
 
 // CreateBug inserts a bug.
@@ -403,9 +418,10 @@ func nullable(s string) interface{} {
 func (d *DB) GetBug(id string) (*Bug, error) {
 	var b Bug
 	var dup, task sql.NullString
-	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at
+	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason
 		FROM bug WHERE id = ?`, id).Scan(
-		&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status, &dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt)
+		&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status, &dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
+		&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +432,7 @@ func (d *DB) GetBug(id string) (*Bug, error) {
 // ListBugs returns every bug, oldest first. Ordering for a person is the
 // caller's job: urgency is a product decision, not a storage one.
 func (d *DB) ListBugs() ([]*Bug, error) {
-	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at
+	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason
 		FROM bug ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -427,7 +443,8 @@ func (d *DB) ListBugs() ([]*Bug, error) {
 		var b Bug
 		var dup, task sql.NullString
 		if err := rows.Scan(&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status,
-			&dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			&dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
+			&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason); err != nil {
 			return nil, err
 		}
 		b.DuplicateOf, b.TaskID = dup.String, task.String
@@ -440,9 +457,12 @@ func (d *DB) ListBugs() ([]*Bug, error) {
 func (d *DB) UpdateBug(b *Bug) error {
 	b.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
-		duplicate_of = ?, task_id = ?, updated_at = ? WHERE id = ?`,
+		duplicate_of = ?, task_id = ?, updated_at = ?,
+		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?
+		WHERE id = ?`,
 		b.Title, b.Body, b.Severity, b.Status,
-		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt, b.ID)
+		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt,
+		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.ID)
 	return err
 }
 
@@ -474,4 +494,30 @@ func (d *DB) TracesFrom(kind, id string) ([]string, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// What a triage worked out, kept.
+//
+// The classification lived only in the run's event stream, so promoting a bug
+// into a task carried the reporter's prose and nothing else: no component, no
+// suspected files, not even the title the triager had proposed. An implementer
+// started from "the left edge label does not update" and a 1361-line file, with
+// the answer to "where" already computed and thrown away.
+const migration002 = `
+ALTER TABLE bug ADD COLUMN component TEXT NOT NULL DEFAULT '';
+ALTER TABLE bug ADD COLUMN suspected_files TEXT NOT NULL DEFAULT '';
+ALTER TABLE bug ADD COLUMN task_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE bug ADD COLUMN triage_reason TEXT NOT NULL DEFAULT '';
+`
+
+// DeleteTask removes a task and the traceability edges that name it.
+//
+// The edges go too: an edge to a task that no longer exists is a break the
+// spine check would report forever, against something nobody can fix.
+func (d *DB) DeleteTask(id string) error {
+	if _, err := d.db.Exec(`DELETE FROM traceability WHERE (from_kind = 'task' AND from_id = ?) OR (to_kind = 'task' AND to_id = ?)`, id, id); err != nil {
+		return err
+	}
+	_, err := d.db.Exec(`DELETE FROM task WHERE id = ?`, id)
+	return err
 }

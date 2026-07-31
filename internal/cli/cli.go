@@ -87,7 +87,7 @@ func Run(args []string) int {
 		case "task", "trace":
 			verb = remaining[1]
 			cmdArgs = remaining[2:]
-		case "provider", "duckling", "roster":
+		case "provider", "duckling", "roster", "budget":
 			if remaining[1] == "list" || remaining[1] == "add" || remaining[1] == "probe" || remaining[1] == "test" || remaining[1] == "remove" || remaining[1] == "show" || remaining[1] == "set" || remaining[1] == "suggest" {
 				verb = remaining[1]
 				cmdArgs = remaining[2:]
@@ -140,6 +140,8 @@ func Run(args []string) int {
 		return reportCmd(append([]string{verb}, cmdArgs...), repo)
 	case "provider":
 		return providerCmd(verb, cmdArgs)
+	case "budget":
+		return budgetCmd(verb, cmdArgs)
 	case "roster":
 		return rosterCmd(verb, cmdArgs, repo)
 	case "intake", "spec", "plan":
@@ -506,7 +508,7 @@ func runCmd(verb string, args []string, repo string) int {
 	if verb == "" {
 		// ducklab run <task-id>
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament|split] [--ducklings a,b] [--rounds n] [--dry-run] [--yes] [--no-wait]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run <task-id> [--mode solo|pair|tournament|split] [--ducklings a,b] [--rounds n] [--max-tokens N] [--dry-run] [--yes] [--no-wait]")
 			return 2
 		}
 		taskID := args[0]
@@ -517,6 +519,7 @@ func runCmd(verb string, args []string, repo string) int {
 		noStream := false
 		var ducklings []string
 		rounds := 0
+		maxTokens := 0
 		for i := 1; i < len(args); i++ {
 			switch args[i] {
 			case "--mode":
@@ -534,6 +537,13 @@ func runCmd(verb string, args []string, repo string) int {
 					fmt.Sscanf(args[i+1], "%d", &rounds)
 					i++
 				}
+			case "--max-tokens":
+				// This run's ceiling only. The default lives in the engine
+				// config; `ducklab budget` shows and changes it.
+				if i+1 < len(args) {
+					fmt.Sscanf(args[i+1], "%d", &maxTokens)
+					i++
+				}
 			case "--dry-run":
 				dryRun = true
 			case "--yes":
@@ -549,7 +559,7 @@ func runCmd(verb string, args []string, repo string) int {
 				noStream = true
 			}
 		}
-		return runStart(taskID, mode, dryRun, yes, noWait, noStream, repo, ducklings, rounds)
+		return runStart(taskID, mode, dryRun, yes, noWait, noStream, repo, ducklings, rounds, maxTokens)
 	}
 	switch verb {
 	case "list":
@@ -601,6 +611,11 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Printf("run %s: %s (task %s)\n", run["id"], run["status"], run["task_id"])
 		fmt.Printf("  verdict: %s\n", run["verdict"])
+		// A run that says only FAILED sends you to events.jsonl. Some of these
+		// messages are written to be acted on.
+		if why := str(run["failure"]); why != "" {
+			fmt.Printf("  failure: %s\n", why)
+		}
 		return 0
 	case "diff":
 		if len(args) < 1 {
@@ -791,7 +806,7 @@ func asStrings(v interface{}) []string {
 	return out
 }
 
-func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds int) int {
+func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo string, ducklings []string, rounds, maxTokens int) int {
 	if repo == "" {
 		repo = "."
 	}
@@ -836,6 +851,11 @@ func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo stri
 	}
 	if rounds > 0 {
 		req["rounds"] = rounds
+	}
+	// Only the limit named: the engine fills every other one from the defaults,
+	// and a zero would be a ceiling of zero.
+	if maxTokens > 0 {
+		req["budget"] = map[string]interface{}{"max_tokens": maxTokens}
 	}
 	if yes {
 		req["autonomy"] = "yolo"

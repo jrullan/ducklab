@@ -1,5 +1,7 @@
 /ducklab
 /ducklab-engine
+/ducklab-desktop
+node_modules/
 *.exe
 *.test
 *.out

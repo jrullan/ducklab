@@ -67,6 +67,26 @@ type Run struct {
 	// (AC-61), and the run is the only place that knows.
 	TokensEstimated bool   `json:"tokens_estimated,omitempty"`
 	Warning         string `json:"warning,omitempty"`
+	// Failure is why the run failed, in the words the engine used.
+	//
+	// It was written only as an `error` event, and no client rendered it: the
+	// desktop's timeline handles tool calls and policy violations, so a failed
+	// run showed FAILED and nothing else. Finding out why meant opening
+	// events.jsonl by hand.
+	//
+	// Some of these messages exist specifically to be acted on. Split refuses a
+	// decomposition with `"x.go" is claimed by both "A" and "B"` — a sentence
+	// written to tell a person what to change, delivered nowhere. On the run
+	// rather than only in the event stream, because a run listed a week later
+	// should still be able to say why it died.
+	Failure string `json:"failure,omitempty"`
+	// TreeSnapshot is the working tree as it stood when the run started, as a
+	// git tree object. A run that ends without acceptance is restored to it:
+	// runs edit the shared tree live and commit only on accept, so a failed or
+	// rejected run used to leave its half-made edits behind — and the next
+	// attempt of the same task found them and concluded somebody had already
+	// fixed it.
+	TreeSnapshot string `json:"tree_snapshot,omitempty"`
 }
 
 // DucklingSpend is one model's share of a run.
@@ -85,6 +105,22 @@ type BudgetState struct {
 	Tokens     int64   `json:"tokens"`
 	Turns      int     `json:"turns"`
 	WallclockS float64 `json:"wallclock_s"`
+	// Limit is what this run was actually given. The desktop's meter used to
+	// hardcode 400000 / $2 / 24 turns, so a run started with a raised ceiling
+	// was drawn against a limit it did not have — and the bar looked full when
+	// the run had used a quarter of its budget.
+	Limit BudgetLimits `json:"limit"`
+}
+
+// BudgetLimits are one run's ceilings. Shared by every duckling and every turn:
+// the tracker is created once per run and handed to every model loop, so the
+// token limit is the total across the whole conversation, counting prompt and
+// completion on each call.
+type BudgetLimits struct {
+	USD        float64 `json:"usd"`
+	Tokens     int64   `json:"tokens"`
+	Turns      int     `json:"turns"`
+	WallclockS int     `json:"wallclock_s"`
 }
 
 // Event is a single event in events.jsonl.

@@ -177,6 +177,7 @@ func commitsAfter(root, sinceTag string) (map[string]bool, error) {
 }
 
 func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot string, notes release.Notes) {
+	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
 
@@ -226,18 +227,22 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 		return "", fmt.Errorf("load project config: %w", err)
 	}
 	roster, _ := s.resolveRoster(projCfg)
-	tracker := budget.NewTracker(&budget.Budget{
+	limits := &budget.Budget{
 		MaxUSD:        projCfg.Budget.MaxUSD,
 		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	})
+	}
+	tracker := budget.NewTracker(limits)
+	recordLimits(rs, limits)
+	rs.tracker = tracker
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer: &runLogAdapter{w: rs.writer},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
+	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
 		ProjectRoot: projectRoot,

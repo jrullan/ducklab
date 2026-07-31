@@ -394,7 +394,7 @@ func runSubtasks(ctx context.Context, p *SplitParams, subtasks []agent.Subtask, 
 				Role:     config.RoleImplementer,
 				Toolbelt: "full",
 				Contract: "edits",
-				MaxTurns: 24,
+				MaxTurns: CapFor(p.TurnCaps, config.RoleImplementer, 24),
 			}
 			belt, err := turn.ResolveToolbelt(registryFrom(&p.ExecuteParams))
 			if err != nil {

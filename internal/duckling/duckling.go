@@ -5,6 +5,7 @@ package duckling
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -21,6 +22,14 @@ type Duckling struct {
 	Params   config.SamplingParams `json:"params"`
 	Caps     Capabilities          `json:"caps"`
 	Cost     config.Cost           `json:"cost"`
+	// Color is which of the eight series slots this duckling is drawn in, or 0
+	// to let the fleet order decide.
+	//
+	// The colour used to come from a duckling's position in whatever list the
+	// view had to hand: the run's roster in a transcript, the fleet listing on
+	// the Ducklings page. So one model was blue as an architect and orange as an
+	// implementer, and a reader could never learn "orange is that one".
+	Color int `json:"color,omitempty"`
 }
 
 // Capabilities describes what a duckling can do.
@@ -77,6 +86,25 @@ func (r *Registry) Register(d *Duckling) error {
 	return nil
 }
 
+// Replace registers a duckling, overwriting any entry already under its id.
+//
+// Register deliberately refuses a duplicate — that guard is what catches the
+// same duckling being loaded twice at startup. Editing one is the opposite
+// case: the id is supposed to exist already. Routing an edit through Register
+// meant every save of an existing duckling failed with "already registered",
+// and it failed AFTER the new values had been written to config.toml — so the
+// file, the running engine and the screen all disagreed.
+//
+// Probed capabilities are not lost: they live in the caps cache, keyed by
+// provider and model, not on the entry being replaced.
+func (r *Registry) Replace(d *Duckling) error {
+	if d.ID == "" {
+		return fmt.Errorf("duckling id is required")
+	}
+	r.ducklings[d.ID] = d
+	return nil
+}
+
 // Unregister removes a duckling.
 //
 // Needed because ducklings can now be deleted while the engine runs. Without
@@ -101,11 +129,17 @@ func (r *Registry) Get(id config.DucklingID) (*Duckling, error) {
 }
 
 // List returns all registered ducklings.
+// List returns every registered duckling, by id.
+//
+// Sorted, because it used to range a map: the fleet came back in a different
+// order on every call, and anything downstream that assigned meaning by
+// position — the colour a duckling is drawn in, for one — changed on reload.
 func (r *Registry) List() []*Duckling {
 	result := make([]*Duckling, 0, len(r.ducklings))
 	for _, d := range r.ducklings {
 		result = append(result, d)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 
@@ -321,6 +355,7 @@ func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 		Notes:    cfg.Notes,
 		Params:   cfg.Params,
 		Cost:     cfg.Cost,
+		Color:    cfg.Color,
 		Caps:     Capabilities{ContextTokens: 32768},
 	}
 	// Declared capabilities were dropped here, so a duckling that says

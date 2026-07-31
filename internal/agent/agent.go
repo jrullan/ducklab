@@ -78,6 +78,16 @@ type Loop struct {
 	RepairAttempts int
 	// OnDelta, if set, receives streamed text as it arrives. Display only.
 	OnDelta func(turn *Turn, text string)
+	// OnReasoning, if set, receives streamed thinking as it arrives. Display
+	// only, and deliberately a separate callback: appending deliberation to the
+	// answer would make a transcript show a model's false starts as its reply.
+	//
+	// A model that reasons pays for those tokens whether or not anyone sees
+	// them. The parser used to read only delta.content, so thinking was
+	// generated, billed, and discarded before any event existed — which is why
+	// a run that looked idle for two minutes had nothing on screen to explain
+	// itself.
+	OnReasoning func(turn *Turn, text string)
 	// RunWriter, if set, receives LLM call records.
 	RunWriter RunLogWriter
 }
@@ -156,8 +166,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 	for turnNum := 1; turnNum <= maxTurns; turnNum++ {
 		// Budget check
+		// The outcome, not nil: by the time a budget runs out the turn has
+		// usually done real work — tool calls, tokens, cost — and returning nil
+		// threw all of it away. One run patched a file seventeen times and its
+		// transcript recorded four events, not one of them naming a tool call.
 		if msg, exceeded := loop.Budget.Check(); exceeded {
-			return nil, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+			return outcome, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
 		}
 
 		// Build request
@@ -199,7 +213,25 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				})
 			}
 			if err != nil {
-				return nil, fmt.Errorf("provider chat: %w", err)
+				// The call that failed, on the record. Only successful calls
+				// were written, so a run that died on its third attempt left
+				// two entries and no trace of the one that killed it — and
+				// llm.jsonl is the one place that could have said what was
+				// sent.
+				if loop.RunWriter != nil {
+					loop.RunWriter.AppendLLM(&LLMCallRecord{
+						Duckling:     string(loop.Duckling.ID),
+						Provider:     string(loop.Duckling.Provider),
+						Model:        loop.Duckling.Model,
+						Role:         string(turn.Role),
+						Request:      requestMap(req),
+						Response:     map[string]interface{}{"error": err.Error()},
+						LatencyMs:    time.Since(start).Milliseconds(),
+						Attempt:      1,
+						FinishReason: "error",
+					})
+				}
+				return outcome, fmt.Errorf("provider chat: %w", err)
 			}
 		}
 
@@ -216,15 +248,25 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 		// Check finish reason
 		if len(resp.Choices) == 0 {
-			return nil, fmt.Errorf("no response choices")
+			return outcome, fmt.Errorf("no response choices")
 		}
 		choice := resp.Choices[0]
 		finishReason := choice.FinishReason
 
-		// Strip an inline reasoning block before anything reads the content.
+		// Separate an inline reasoning block before anything reads the content.
 		// Doing it here means every downstream path — contract parsing, tool
 		// extraction, the transcript — sees the answer and not the thinking.
-		choice.Message.Content = stripThinking(choice.Message.Content)
+		//
+		// The thinking is kept rather than deleted: it was paid for, and the run
+		// view has a place to show it. Discarding it here is why a model that
+		// inlines its reasoning had an empty thinking section while its
+		// deliberation filled the answer lane.
+		if answer, thought := splitThinking(choice.Message.Content); thought != "" {
+			choice.Message.Content = answer
+			choice.Message.Reasoning = joinReasoning(choice.Message.Reasoning, thought)
+		} else {
+			choice.Message.Content = answer
+		}
 
 		// A response with tokens spent and nothing to show is a model that
 		// thought until its budget ran out. Saying so beats "empty response",
@@ -239,13 +281,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// Log the LLM call
 		if loop.RunWriter != nil {
 			latencyMs := time.Since(start).Milliseconds()
-			reqMap := map[string]interface{}{
-				"model":    req.Model,
-				"messages": req.Messages,
-			}
-			if len(req.Tools) > 0 {
-				reqMap["tools"] = req.Tools
-			}
+			reqMap := requestMap(req)
 			respMap := map[string]interface{}{
 				"content":       choice.Message.Content,
 				"finish_reason": finishReason,
@@ -260,7 +296,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				Role:         string(turn.Role),
 				Request:      reqMap,
 				Response:     respMap,
-				Usage:        map[string]interface{}{"prompt_tokens": resp.Usage.PromptTokens, "completion_tokens": resp.Usage.CompletionTokens},
+				Usage:        usageMap(resp.Usage),
 				CostUSD:      cost,
 				LatencyMs:    latencyMs,
 				Attempt:      1,
@@ -294,12 +330,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			})
 			resp2, err2 := loop.Provider.Chat(ctx, retry)
 			if err2 != nil || len(resp2.Choices) == 0 {
-				return nil, ErrTruncated
+				return outcome, ErrTruncated
 			}
 			choice = resp2.Choices[0]
 			finishReason = choice.FinishReason
 			if provider.IsLength(finishReason) {
-				return nil, ErrTruncated
+				return outcome, ErrTruncated
 			}
 			// The retried answer is what the turn continues from, so the
 			// conversation must carry the nudge that produced it.
@@ -308,7 +344,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 		// Handle content filter
 		if finishReason == provider.FinishContentFilter {
-			return nil, fmt.Errorf("content filter blocked response")
+			return outcome, fmt.Errorf("content filter blocked response")
 		}
 
 		// Handle tool calls (native dialect)
@@ -389,6 +425,20 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// Record turn
 	loop.Budget.RecordTurn()
 
+	// The loop ended by running out of turns, not by the model answering.
+	//
+	// Every iteration came back with tool calls and no text, so there is nothing
+	// to parse and the contract failure that follows would say "empty response"
+	// — true, and no help at all. Measured: a triager made six calls, every one
+	// a tool call, and reported that it had answered with nothing.
+	if len(outcome.ToolCalls) > 0 && strings.TrimSpace(outcome.Text) == "" {
+		return outcome, fmt.Errorf(
+			"%w: %s used all %d of its turns calling tools and never answered "+
+				"(%d tool calls, no text). Raise the turn cap for this role, or the "+
+				"task needs narrowing",
+			ErrNoAnswer, turn.Role, maxTurns, len(outcome.ToolCalls))
+	}
+
 	// Parse contract. The parsed value is kept: pair needs the reviewer's
 	// findings and tournament needs the judge's choice.
 	parsed, err := ParseContract(turn.Contract, outcome.Text)
@@ -417,7 +467,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 // dispatch and logging always operate on the assembled final response, never
 // on deltas. A dropped subscriber therefore cannot affect a run.
 func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest) (provider.ChatResponse, error) {
-	if loop.OnDelta == nil {
+	if loop.OnDelta == nil && loop.OnReasoning == nil {
 		return loop.Provider.Chat(ctx, req)
 	}
 
@@ -425,11 +475,29 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for d := range ch {
-			if d.Text != "" {
-				loop.OnDelta(turn, d.Text)
+		// Deltas used to go to the answer untouched, so a model that inlines its
+		// thinking filled the transcript lane with deliberation and bare
+		// `</think>` markers for the whole run. One splitter per call: a marker
+		// can be split across two chunks.
+		var split thinkSplitter
+		emit := func(answer, reasoning string) {
+			if answer != "" && loop.OnDelta != nil {
+				loop.OnDelta(turn, answer)
+			}
+			if reasoning != "" && loop.OnReasoning != nil {
+				loop.OnReasoning(turn, reasoning)
 			}
 		}
+		for d := range ch {
+			if d.Text != "" {
+				emit(split.Feed(d.Text))
+			}
+			// Already separated by the endpoint; nothing to parse.
+			if d.Reasoning != "" && loop.OnReasoning != nil {
+				loop.OnReasoning(turn, d.Reasoning)
+			}
+		}
+		emit(split.Flush())
 	}()
 
 	resp, err := loop.Provider.ChatStream(ctx, req, ch)
@@ -442,8 +510,17 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		// silently showing nothing for the whole turn.
 		resp, err = loop.Provider.Chat(ctx, req)
 		if err == nil && len(resp.Choices) > 0 {
+			if r := resp.Choices[0].Message.Reasoning; r != "" && loop.OnReasoning != nil {
+				loop.OnReasoning(turn, r)
+			}
 			if text := resp.Choices[0].Message.Content; text != "" {
-				loop.OnDelta(turn, text)
+				answer, thought := splitThinking(text)
+				if thought != "" && loop.OnReasoning != nil {
+					loop.OnReasoning(turn, thought)
+				}
+				if answer != "" && loop.OnDelta != nil {
+					loop.OnDelta(turn, answer)
+				}
 			}
 		}
 	}
@@ -615,7 +692,14 @@ Reply with one JSON object:
               "issue":"one sentence","fix":"one sentence"}]}
 
 If the gate result you were given is red, "approve" is not available to you.
-An empty findings list with "approve" is a legitimate answer.`
+An empty findings list with "approve" is a legitimate answer.
+
+If the diff is empty because the work the task asks for is already in the tree,
+the task is satisfied and "approve" is the correct verdict. Say so, and record
+what you noticed as a finding with severity "minor" — that this task delivered
+nothing is worth a human knowing, but it is not a defect the implementer can
+fix by writing code, and "request-changes" only asks it to try again against
+the same empty diff.`
 
 const architectPrompt = `You are the architect. You turn intent into a written artifact that another
 model, with no memory of this conversation, can act on.
@@ -749,6 +833,15 @@ func outputCap(declared *int) *int {
 	n := DefaultMaxOutputTokens
 	return &n
 }
+
+// ErrNoAnswer reports a turn that spent every one of its turns calling tools and
+// never produced the answer it was asked for.
+//
+// Worth its own error: the contract failure it used to become said "empty
+// response", which describes the parser's input rather than what the model did,
+// and points at the wrong fix — a repair prompt cannot help a model that has run
+// out of room to reply in.
+var ErrNoAnswer = errors.New("turn ended without an answer")
 
 // ErrThoughtOnly reports that a model spent its whole budget on hidden
 // reasoning and returned no answer.
@@ -955,3 +1048,37 @@ Reply with one JSON object:
 
 Base "duplicate_of" only on the open bugs you were given. If you are unsure,
 answer null; a missed duplicate is cheaper than a wrongly closed bug.`
+
+// usageMap is what goes to llm.jsonl for one call.
+//
+// reasoning_tokens is recorded when the endpoint reports it, and it is a share
+// of completion_tokens rather than an addition to them — summing the two would
+// double-count. "The run spent 400k tokens" and "the run spent 400k tokens, 380k
+// of them thinking" call for different actions, and only the second explains a
+// budget that ran out with nothing written.
+func usageMap(u provider.Usage) map[string]interface{} {
+	out := map[string]interface{}{
+		"prompt_tokens":     u.PromptTokens,
+		"completion_tokens": u.CompletionTokens,
+	}
+	if u.ReasoningTokens > 0 {
+		out["reasoning_tokens"] = u.ReasoningTokens
+	}
+	return out
+}
+
+// requestMap is what goes to llm.jsonl for one call's request.
+//
+// Shared with the failure path: a call that died has to record the same thing a
+// call that worked does, or the one entry anybody would want to read would be
+// the one written differently.
+func requestMap(req provider.ChatRequest) map[string]interface{} {
+	out := map[string]interface{}{
+		"model":    req.Model,
+		"messages": req.Messages,
+	}
+	if len(req.Tools) > 0 {
+		out["tools"] = req.Tools
+	}
+	return out
+}

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -147,15 +148,84 @@ func (p *OpenAICompat) doChat(ctx context.Context, req ChatRequest) (ChatRespons
 		body, _ := io.ReadAll(resp.Body)
 		return ChatResponse{}, fmt.Errorf("chat: %s: %s", resp.Status, string(body))
 	}
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return ChatResponse{}, fmt.Errorf("read response: %w", readErr)
+	}
+	// Checked before decoding: an empty body is not a malformed one, and
+	// "unexpected end of JSON input" describes our parser rather than the fact
+	// that the server sent nothing.
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ChatResponse{}, fmt.Errorf("%w: the server answered %s with an empty body",
+			ErrInvalidResponse, resp.Status)
+	}
 	var chatResp ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	if err := json.Unmarshal(body, &chatResp); err != nil {
 		return ChatResponse{}, fmt.Errorf("decode response: %w", err)
 	}
 	if len(chatResp.Choices) == 0 {
-		return ChatResponse{}, fmt.Errorf("%w: no choices", ErrInvalidResponse)
+		// What the provider actually said, and what kind of failure it is.
+		//
+		// OpenRouter answers 200 with an `error` object, so an upstream gateway
+		// timeout arrives looking like a well-formed response. Classed as
+		// ErrInvalidResponse it was not transient, so the retry policy never
+		// fired and a 504 — the thing retries exist for — killed the run on the
+		// first try.
+		msg, kind := providerFailure(body)
+		return ChatResponse{}, fmt.Errorf("%w: %s", kind, msg)
 	}
 	chatResp.FinishReason = chatResp.Choices[0].FinishReason
+	applyReasoning(body, &chatResp)
 	return chatResp, nil
+}
+
+// applyReasoning folds an endpoint's thinking fields into the response.
+//
+// A second pass rather than tags on Message, because Message is also what gets
+// sent back in a request: a field that decodes reasoning would also encode it,
+// and replaying a turn's deliberation to the model is not a conversation.
+//
+// The two names are the same thing under different vendors — DeepSeek's own API
+// and vLLM say reasoning_content, OpenRouter says reasoning. Handled here so
+// nothing above this layer has to know which endpoint answered.
+func applyReasoning(body []byte, out *ChatResponse) {
+	var side struct {
+		Choices []struct {
+			Message struct {
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			CompletionTokensDetails struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &side); err != nil {
+		return
+	}
+	for i := range side.Choices {
+		if i >= len(out.Choices) {
+			break
+		}
+		if r := firstNonEmpty(
+			side.Choices[i].Message.ReasoningContent,
+			side.Choices[i].Message.Reasoning,
+		); r != "" {
+			out.Choices[i].Message.Reasoning = r
+		}
+	}
+	out.Usage.ReasoningTokens = side.Usage.CompletionTokensDetails.ReasoningTokens
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch chan<- Delta) (ChatResponse, error) {
@@ -191,6 +261,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	}
 
 	var fullText strings.Builder
+	var fullReasoning strings.Builder
 	var acc toolCallAccumulator
 	var usage Usage
 	var finishReason string
@@ -205,6 +276,12 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 			Choices []struct {
 				Delta struct {
 					Content string `json:"content"`
+					// Two vendors, one thing: vLLM and DeepSeek's own API say
+					// reasoning_content, OpenRouter says reasoning. Read both
+					// so a duckling's endpoint does not decide whether its
+					// thinking is visible.
+					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
 					// Streamed tool calls arrive in fragments identified by
 					// index: the name in one chunk, the arguments split across
 					// several more. They are not whole ToolCalls.
@@ -219,6 +296,17 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		}
 		if len(chunk.Choices) > 0 {
 			c := chunk.Choices[0]
+			// Thinking first: it is produced before the answer, and emitting
+			// it in that order is what makes a live view show deliberation
+			// turning into a reply.
+			if r := firstNonEmpty(c.Delta.ReasoningContent, c.Delta.Reasoning); r != "" {
+				fullReasoning.WriteString(r)
+				select {
+				case ch <- Delta{Reasoning: r}:
+				case <-ctx.Done():
+					return ChatResponse{}, ctx.Err()
+				}
+			}
 			if c.Delta.Content != "" {
 				fullText.WriteString(c.Delta.Content)
 				select {
@@ -253,6 +341,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 			Message: Message{
 				Role:      "assistant",
 				Content:   fullText.String(),
+				Reasoning: fullReasoning.String(),
 				ToolCalls: acc.result(),
 			},
 			FinishReason: finishReason,
@@ -652,20 +741,30 @@ func (p *Fake) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) 
 }
 
 // ChatStream sends a streaming chat request.
+//
+// The same answer as Chat, delivered a piece at a time. It used to serve only
+// the pre-scripted queue and ignore ScriptFunc — which is how every test that
+// scripts by prompt (reviewer, judge, triager) silently stopped working the
+// moment a run streamed, and why nothing caught that five of the six run kinds
+// never wired their streaming callbacks at all. A double that behaves
+// differently on the path under test is not a double.
 func (p *Fake) ChatStream(ctx context.Context, req ChatRequest, ch chan<- Delta) (ChatResponse, error) {
-	p.requests = append(p.requests, req)
-	p.callCount++
-	if len(p.responses) == 0 {
-		return ChatResponse{}, errors.New("no more scripted responses")
+	resp, err := p.Chat(ctx, req)
+	if err != nil {
+		return ChatResponse{}, err
 	}
-	resp := p.responses[0]
-	p.responses = p.responses[1:]
-	// Simulate streaming
 	if len(resp.Choices) > 0 {
-		text := resp.Choices[0].Message.Content
-		for _, r := range text {
+		// Reasoning first, then the answer: that is the order a model produces
+		// them in, and a test of the split depends on it.
+		for _, d := range []Delta{
+			{Reasoning: resp.Choices[0].Message.Reasoning},
+			{Text: resp.Choices[0].Message.Content},
+		} {
+			if d.Reasoning == "" && d.Text == "" {
+				continue
+			}
 			select {
-			case ch <- Delta{Text: string(r)}:
+			case ch <- d:
 			case <-ctx.Done():
 				return ChatResponse{}, ctx.Err()
 			}
@@ -690,4 +789,87 @@ func (p *Fake) Models(ctx context.Context) ([]string, error) {
 // SetModels sets the available models.
 func (p *Fake) SetModels(models []string) {
 	p.models = models
+}
+
+// providerComplaint extracts why a response carried no choices.
+//
+// The shapes differ and none of them are documented together: OpenAI-compatible
+// servers use {"error":{"message":...}}, some return a bare {"error":"..."},
+// and OpenRouter adds a provider-specific {"metadata":{"raw":...}} underneath.
+// Whichever arrived beats "no choices", which named our own parser rather than
+// the cause and sent the reader looking in the wrong program.
+func providerComplaint(body []byte) string {
+	msg, _ := providerFailure(body)
+	return msg
+}
+
+// providerFailure extracts why a response carried no choices, and which kind of
+// failure it is so the retry policy can act on it.
+//
+// The status the upstream reported is inside the body, not on the HTTP response:
+// a 504 from the model's own provider reaches us as a 200 from OpenRouter. It is
+// the difference between a run that waits a moment and one that dies.
+func providerFailure(body []byte) (string, error) {
+	kind := error(ErrInvalidResponse)
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Error) > 0 {
+		var obj struct {
+			Message  string          `json:"message"`
+			Code     json.RawMessage `json:"code"`
+			Metadata struct {
+				Raw string `json:"raw"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(envelope.Error, &obj) == nil && obj.Message != "" {
+			msg := obj.Message
+			if len(obj.Code) > 0 && string(obj.Code) != "null" {
+				code := strings.Trim(string(obj.Code), `"`)
+				msg += " (" + code + ")"
+				kind = classifyUpstream(code, kind)
+			}
+			if obj.Metadata.Raw != "" {
+				msg += ": " + truncateForError(obj.Metadata.Raw)
+			}
+			// Bounded here too: a provider that returns a novel must not put the
+			// whole thing in a run's failure banner.
+			return truncateForError(msg), kind
+		}
+		var plain string
+		if json.Unmarshal(envelope.Error, &plain) == nil && plain != "" {
+			return plain, kind
+		}
+		return truncateForError(string(envelope.Error)), kind
+	}
+	// No error object either. The body is the only evidence there is, and an
+	// empty one is itself worth saying out loud.
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "no choices and an empty body", kind
+	}
+	return "no choices; the server said: " + truncateForError(string(body)), kind
+}
+
+// classifyUpstream turns the status the provider reported into the kind of
+// failure it is. Anything else keeps the caller's classification: a code we do
+// not recognise is not a reason to retry forever.
+func classifyUpstream(code string, fallback error) error {
+	switch code {
+	case "429":
+		return ErrRateLimit
+	case "500", "502", "503", "504", "408", "522", "524":
+		// The upstream was reachable and could not answer in time. That is what
+		// the retry policy exists for.
+		return ErrProviderUnavailable
+	}
+	return fallback
+}
+
+func truncateForError(s string) string {
+	const max = 400
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }

@@ -106,6 +106,7 @@ func short(sha string) string {
 
 // executeReview runs the reviewer and files what it said.
 func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot string, req ReviewRequest, diff, sourceRun string) {
+	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
 
@@ -120,18 +121,22 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
-	tracker := budget.NewTracker(&budget.Budget{
+	limits := &budget.Budget{
 		MaxUSD:        projCfg.Budget.MaxUSD,
 		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	})
+	}
+	tracker := budget.NewTracker(limits)
+	recordLimits(rs, limits)
+	rs.tracker = tracker
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer: &runLogAdapter{w: rs.writer},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
+	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
 		ProjectRoot: projectRoot,

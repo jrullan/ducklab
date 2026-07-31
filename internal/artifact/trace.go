@@ -24,6 +24,11 @@ const (
 	UnjustifiedTask   TraceErrorKind = "unjustified_task"
 	DanglingReference TraceErrorKind = "dangling_reference"
 	AcceptedDraftReq  TraceErrorKind = "accepted_task_on_draft_requirement"
+	// The horizontal edge: task → task. A cycle is fatal — every task in it
+	// waits forever. A forward dependency is a plan whose order contradicts its
+	// own graph: runnable, but not in the order it is written.
+	DependencyCycle   TraceErrorKind = "dependency_cycle"
+	ForwardDependency TraceErrorKind = "forward_dependency"
 )
 
 // TraceError is one break, with enough detail to act on.
@@ -63,6 +68,49 @@ func LoadSpine(projectRoot string) (*Spine, error) {
 		return nil, err
 	}
 	return &Spine{Requirements: reqs, Spec: spec, Plan: plan}, nil
+}
+
+// LoadSpinePending reads the spine with any pending proposal standing in for
+// the artifact it would replace, and reports which stages were substituted.
+//
+// LoadSpine reads only approved artifacts, so a check run while a proposal sat
+// at its gate described the document the human had already accepted — an
+// autopsy rather than a gate. The one moment the check is worth anything is
+// before Accept, and that was the one moment it could not see.
+//
+// The caller must be told what it is looking at: findings about a plan you are
+// about to accept and findings about the plan you accepted last week demand
+// different actions, and a rail that cannot tell them apart is worse than one
+// that says nothing.
+func LoadSpinePending(projectRoot string) (*Spine, []Kind, error) {
+	spine := &Spine{}
+	var proposed []Kind
+	for _, it := range []struct {
+		kind Kind
+		into **Document
+	}{
+		{KindRequirements, &spine.Requirements},
+		{KindSpec, &spine.Spec},
+		{KindPlan, &spine.Plan},
+	} {
+		doc, err := LoadProposed(projectRoot, it.kind)
+		if err != nil {
+			return nil, nil, err
+		}
+		// An empty proposal is not a substitute for an approved document: a
+		// stage that produced nothing would otherwise blank the spine and
+		// report every requirement orphaned.
+		if doc != nil && len(doc.Sections) > 0 {
+			*it.into = doc
+			proposed = append(proposed, it.kind)
+			continue
+		}
+		if doc, err = Load(projectRoot, it.kind); err != nil {
+			return nil, nil, err
+		}
+		*it.into = doc
+	}
+	return spine, proposed, nil
 }
 
 // Check walks the spine and reports every break.
@@ -164,6 +212,8 @@ func (s *Spine) Check() []TraceError {
 		})
 	}
 
+	errs = append(errs, checkDependencies(s.Plan)...)
+
 	sort.Slice(errs, func(i, j int) bool {
 		if errs[i].Kind != errs[j].Kind {
 			return errs[i].Kind < errs[j].Kind
@@ -171,6 +221,138 @@ func (s *Spine) Check() []TraceError {
 		return errs[i].ID < errs[j].ID
 	})
 	return errs
+}
+
+// checkDependencies walks the horizontal edge: task → task.
+//
+// Check has always walked the vertical spine — requirement to spec to task.
+// The **Depends on:** field was parsed, and the board reads it to decide what
+// is blocked, but nothing ever looked at the graph it forms. Two of the three
+// breaks below are permanent: a task that waits on a cycle or on a task that
+// does not exist waits forever, and the board can only show it sitting in
+// Blocked without saying the wait will never end.
+func checkDependencies(plan *Document) []TraceError {
+	var errs []TraceError
+
+	// Document order, which is what "later in the plan" means and what a person
+	// working top to bottom will actually follow.
+	var order []string
+	position := map[string]int{}
+	deps := map[string][]string{}
+	for _, m := range plan.Sections {
+		for _, task := range m.Children {
+			position[task.ID] = len(order)
+			order = append(order, task.ID)
+			deps[task.ID] = splitIDs(task.Field("depends on"))
+		}
+	}
+
+	for _, id := range order {
+		for _, dep := range deps[id] {
+			if dep == id {
+				errs = append(errs, TraceError{
+					Kind: DependencyCycle, ID: id,
+					Detail: "task depends on itself, so it can never start",
+				})
+				continue
+			}
+			at, exists := position[dep]
+			if !exists {
+				errs = append(errs, TraceError{
+					Kind: DanglingReference, ID: id,
+					Detail:  "depends on a task that does not exist, so it can never start",
+					Missing: dep,
+				})
+				continue
+			}
+			// Not a break, a smell: the plan is runnable but its order lies.
+			// Working top to bottom reaches this task before the thing it
+			// needs, and a model handed a task whose prerequisite is missing
+			// writes the prerequisite too — which is how one task eats another.
+			if at > position[id] {
+				errs = append(errs, TraceError{
+					Kind: ForwardDependency, ID: id,
+					Detail:  "depends on a task that comes later in the plan",
+					Missing: dep,
+				})
+			}
+		}
+	}
+
+	for _, cycle := range findCycles(order, deps) {
+		errs = append(errs, TraceError{
+			Kind: DependencyCycle, ID: cycle[0],
+			Detail:  "dependency cycle: none of these can ever start",
+			Missing: strings.Join(cycle, " → "),
+		})
+	}
+	return errs
+}
+
+// findCycles returns one entry per cycle, each naming the tasks in it. Reported
+// once against its lowest id rather than once per member: a four-task cycle
+// listed four times reads as four problems.
+func findCycles(order []string, deps map[string][]string) [][]string {
+	const (
+		unvisited = 0
+		onStack   = 1
+		done      = 2
+	)
+	state := map[string]int{}
+	var stack []string
+	var found [][]string
+
+	var walk func(id string)
+	walk = func(id string) {
+		state[id] = onStack
+		stack = append(stack, id)
+		for _, dep := range deps[id] {
+			switch state[dep] {
+			case unvisited:
+				if _, known := deps[dep]; known {
+					walk(dep)
+				}
+			case onStack:
+				// Everything from dep to the top of the stack is the cycle.
+				for i, s := range stack {
+					if s == dep {
+						cycle := append([]string{}, stack[i:]...)
+						sort.Strings(cycle)
+						found = append(found, cycle)
+						break
+					}
+				}
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[id] = done
+	}
+
+	for _, id := range order {
+		if state[id] == unvisited {
+			walk(id)
+		}
+	}
+	return dedupeCycles(found)
+}
+
+// A cycle is reachable from every task that leads into it, so a plain walk
+// finds the same one repeatedly.
+func dedupeCycles(cycles [][]string) [][]string {
+	seen := map[string]bool{}
+	var out [][]string
+	for _, c := range cycles {
+		if len(c) < 2 {
+			continue
+		}
+		key := strings.Join(c, ",")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, c)
+	}
+	return out
 }
 
 // Node is one step when walking the spine from an id.

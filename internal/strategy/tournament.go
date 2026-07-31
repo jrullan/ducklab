@@ -276,7 +276,7 @@ func runContestant(ctx context.Context, p *TournamentParams, i int) (e struct {
 		Role:     config.RoleImplementer,
 		Toolbelt: "full",
 		Contract: "edits",
-		MaxTurns: 24,
+		MaxTurns: CapFor(p.TurnCaps, config.RoleImplementer, 24),
 	}
 	belt, err := turn.ResolveToolbelt(registryFrom(&p.ExecuteParams))
 	if err != nil {

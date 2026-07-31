@@ -156,3 +156,64 @@ func ids(sections []artifact.Section) []string {
 	}
 	return out
 }
+
+// The architect numbers its own tasks and PlanTaskIDs renumbers them. A task it
+// wrote as T-002 can land as T-004, and a "Depends on: T-002" written next to
+// it would then name a different task — a silently wrong edge rather than an
+// obviously broken one. The board reads that edge to decide what is blocked.
+func TestRenumberingCarriesDependenciesWithIt(t *testing.T) {
+	existing := []artifact.Section{{
+		ID: "M-01", Title: "Groundwork",
+		Children: []artifact.Section{
+			{ID: "T-001", Title: "Scaffold"},
+			{ID: "T-002", Title: "Config loader"},
+		},
+	}}
+	// A second plan run: the model restarts its numbering at 001, and only
+	// "Scaffold" matches something that already exists.
+	produced := []artifact.Section{{
+		ID: "M-01", Title: "Groundwork",
+		Children: []artifact.Section{
+			{ID: "T-001", Title: "Scaffold"},
+			{
+				ID: "T-002", Title: "State model",
+				Body:   "**Depends on:** T-001\n",
+				Fields: map[string]string{"depends on": "T-001"},
+			},
+			{
+				ID: "T-003", Title: "Geometry",
+				Body:   "**Depends on:** T-002\n",
+				Fields: map[string]string{"depends on": "T-002"},
+			},
+		},
+	}}
+
+	out := PlanTaskIDs(existing, produced)
+	kids := out[0].Children
+	if kids[1].ID != "T-003" || kids[2].ID != "T-004" {
+		t.Fatalf("ids = %s, %s, %s", kids[0].ID, kids[1].ID, kids[2].ID)
+	}
+	// "State model" depended on Scaffold, which kept T-001.
+	if got := kids[1].Field("depends on"); got != "T-001" {
+		t.Errorf("State model depends on %q, want T-001", got)
+	}
+	// "Geometry" depended on "State model", which moved from T-002 to T-003.
+	if got := kids[2].Field("depends on"); got != "T-003" {
+		t.Errorf("Geometry depends on %q — it still names the id the model chose, "+
+			"which is now a different task", got)
+	}
+	// The body is what gets written to plan.md; a field that disagrees with it
+	// produces a document that contradicts itself on the next read.
+	if !strings.Contains(kids[2].Body, "**Depends on:** T-003") {
+		t.Errorf("the body was not rewritten: %q", kids[2].Body)
+	}
+}
+
+// The architect is asked for dependencies, and told not to invent them.
+func TestThePlanPromptAsksForDependencies(t *testing.T) {
+	for _, want := range []string{"**Depends on:**", "only where it is true"} {
+		if !strings.Contains(planInstruction, want) {
+			t.Errorf("the plan instruction never says %q", want)
+		}
+	}
+}

@@ -92,6 +92,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 }
 
 func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot string, req StageRequest) {
+	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
 
@@ -121,12 +122,15 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
 
-	tracker := budget.NewTracker(&budget.Budget{
+	limits := &budget.Budget{
 		MaxUSD:        projCfg.Budget.MaxUSD,
 		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	})
+	}
+	tracker := budget.NewTracker(limits)
+	recordLimits(rs, limits)
+	rs.tracker = tracker
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
 		RunID:       rs.run.ID,
@@ -139,6 +143,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		writer: &runLogAdapter{w: rs.writer},
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
+	s.attachStreaming(rs, cache)
 
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot: projectRoot,
@@ -146,11 +151,11 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		RunID:       rs.run.ID,
 		Seed:        seed,
 		Mode:        req.Mode,
-		Rounds:      req.Rounds,
+		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
 		Ducklings:   ducklingList(roster),
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
-			res, err := strategy.ExecuteScript(ctx, script, &strategy.ExecuteParams{
+			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script), &strategy.ExecuteParams{
 				ProjectRoot: projectRoot,
 				Prompt:      prompt,
 				ExecContext: ectx,
@@ -274,11 +279,13 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	// The trace check runs on promotion, not on demand: an artifact accepted
 	// into a broken spine should say so immediately, while the person who
 	// accepted it is still looking.
-	errs, err := s.TraceCheck(ctx, projectID)
+	res, err := s.TraceCheck(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"promoted": kind, "trace_errors": errs}, nil
+	// The proposal has just been consumed, so this reads approved artifacts —
+	// which is what a report about what was accepted should read.
+	return map[string]interface{}{"promoted": kind, "trace_errors": res.Errors}, nil
 }
 
 // resolveStageRun marks the run behind an accepted artifact as finished.
@@ -311,13 +318,25 @@ func (s *Service) resolveStageRun(runID, approvedBy string) {
 	}
 }
 
+// TraceResult is a spine check and what it was run against.
+type TraceResult struct {
+	Errors []artifact.TraceError `json:"errors"`
+	// Proposed names the stages whose pending proposal was checked instead of
+	// the approved artifact. Empty means every stage was the approved one.
+	Proposed []string `json:"proposed,omitempty"`
+}
+
 // TraceCheck walks the spine. Deterministic and model-free.
-func (s *Service) TraceCheck(ctx context.Context, projectID string) ([]artifact.TraceError, error) {
+//
+// A pending proposal stands in for the artifact it would replace, so the check
+// describes the document you are about to accept rather than the one you
+// accepted last week. That is the only moment it can change a decision.
+func (s *Service) TraceCheck(ctx context.Context, projectID string) (*TraceResult, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
 	}
-	spine, err := artifact.LoadSpine(entry.Path)
+	spine, proposed, err := artifact.LoadSpinePending(entry.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +344,11 @@ func (s *Service) TraceCheck(ctx context.Context, projectID string) ([]artifact.
 	if errs == nil {
 		errs = []artifact.TraceError{}
 	}
-	return errs, nil
+	out := &TraceResult{Errors: errs}
+	for _, k := range proposed {
+		out.Proposed = append(out.Proposed, string(k))
+	}
+	return out, nil
 }
 
 // TraceShow walks the spine from one id.
@@ -351,6 +374,10 @@ type TaskView struct {
 	DependsOn  []string `json:"depends_on,omitempty"`
 	Status     string   `json:"status"`
 	Body       string   `json:"body,omitempty"`
+	// Blocked says why, in one sentence, when Status is "blocked". A column
+	// that shows work stopped without saying what stopped it is a column that
+	// sends you reading run logs.
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // TaskList reads tasks from the plan and folds in what runs have done to them.
@@ -382,6 +409,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	// unstable — the same board could show two different columns on two
 	// consecutive loads.
 	status := map[string]string{}
+	blocked := map[string]string{}
 	for _, r := range runs {
 		if r.TaskID == "" || status[r.TaskID] != "" {
 			continue
@@ -394,7 +422,11 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		case r.Status == "paused":
 			status[r.TaskID] = "review"
 		default:
-			status[r.TaskID] = "todo"
+			// Failed and aborted used to land back in "todo", where a task that
+			// had been tried and broken looked exactly like one nobody had
+			// touched. The board could not tell you the difference.
+			status[r.TaskID] = "blocked"
+			blocked[r.TaskID] = "the last run " + r.Status + " — read it, then retry or change the task"
 		}
 	}
 
@@ -405,43 +437,59 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 			if st == "" {
 				st = "todo"
 			}
+			deps := splitList(t.Field("depends on"))
+			// A task whose dependencies are not accepted cannot be started, and
+			// the plan has said so all along — TaskNext has been reading this
+			// since it was written. The board just never showed it, so the only
+			// way to learn a task was not ready was to run it and watch a model
+			// invent the thing it depended on.
+			if st == "todo" {
+				if waiting := unmetDeps(deps, status); len(waiting) > 0 {
+					st = "blocked"
+					blocked[t.ID] = "waiting on " + strings.Join(waiting, ", ")
+				}
+			}
 			out = append(out, TaskView{
 				ID: t.ID, Title: t.Title, Milestone: m.ID,
 				Implements: t.Implements,
 				Complexity: t.Field("complexity"),
-				DependsOn:  splitList(t.Field("depends on")),
+				DependsOn:  deps,
 				Status:     st,
 				Body:       t.Body,
+				Blocked:    blocked[t.ID],
 			})
 		}
 	}
 	return out, nil
 }
 
-// TaskNext returns the first todo task whose dependencies are all accepted.
+// unmetDeps returns the dependencies that are not accepted yet, in the order
+// the task listed them. A dependency naming a task that does not exist counts
+// as unmet: a typo in the plan should stop the work, not quietly permit it.
+func unmetDeps(deps []string, status map[string]string) []string {
+	var waiting []string
+	for _, dep := range deps {
+		if status[dep] != "accepted" {
+			waiting = append(waiting, dep)
+		}
+	}
+	return waiting
+}
+
+// TaskNext returns the first task ready to be started.
+//
+// The dependency check used to live here, duplicated from nothing — it was the
+// only place in the product that knew a task could be waiting on another. Now
+// TaskList marks those blocked, so "todo" already means ready, and a task whose
+// last run failed is blocked rather than silently offered again as if it were
+// fresh work.
 func (s *Service) TaskNext(ctx context.Context, projectID string) (*TaskView, error) {
 	tasks, err := s.TaskList(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	done := map[string]bool{}
-	for _, t := range tasks {
-		if t.Status == "accepted" {
-			done[t.ID] = true
-		}
-	}
 	for i := range tasks {
-		if tasks[i].Status != "todo" {
-			continue
-		}
-		ready := true
-		for _, dep := range tasks[i].DependsOn {
-			if !done[dep] {
-				ready = false
-				break
-			}
-		}
-		if ready {
+		if tasks[i].Status == "todo" {
 			return &tasks[i], nil
 		}
 	}

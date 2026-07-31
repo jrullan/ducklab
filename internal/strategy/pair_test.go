@@ -243,3 +243,87 @@ func TestPairScriptValidates(t *testing.T) {
 		t.Fatalf("pair script does not validate: %v", err)
 	}
 }
+
+// T-007 burned three rounds of two models for nothing, and it cost real money.
+//
+// The task's work was already in the tree, so every implementer turn wrote
+// nothing and every reviewer turn read the same empty diff. The reviewer said
+// in prose that the implementation was complete and correct, then returned
+// "request-changes" anyway — its verdict contract offers no way to say "the
+// code is right, the plan is wrong", so its planning observation came back
+// dressed as a critical code finding with a file and a line number.
+//
+// Pair stops on `gate == "green" and verdict == "approve"`. A reviewer that
+// cannot approve makes that unreachable, and the loop runs to MaxRounds every
+// time. The implementer cannot act on the objection: there is no code to write.
+//
+// So the loop is cut where nothing can move it — an untouched tree behind a
+// green gate.
+func TestRoundsStopWhenNothingCanChange(t *testing.T) {
+	rec := &recorder{}
+	var settled map[string]interface{}
+	params := &ExecuteParams{
+		Prompt: "Add lock indicators.",
+		Runner: rec.runner(
+			&agent.Outcome{Text: "The lock indicators are already implemented. No changes needed."},
+			verdictOutcome("request-changes", agent.Finding{
+				Severity: "critical", File: "index.html", Line: 147,
+				Issue: "already fully implemented before this task attempt",
+				Fix:   "Verify task assignment",
+			}),
+			&agent.Outcome{Text: "Still nothing to do."},
+			verdictOutcome("request-changes"),
+			&agent.Outcome{Text: "Still nothing to do."},
+			verdictOutcome("request-changes"),
+		),
+		Roster: map[config.Role]config.DucklingID{
+			config.RoleImplementer: "pato-atom",
+			config.RoleReviewer:    "pato-sonnet",
+		},
+		Gate: func(context.Context) (string, string, error) { return "green", "", nil },
+		Diff: func() (string, error) { return "", nil },
+		OnEvent: func(kind string, data map[string]interface{}) {
+			if kind == "settled" {
+				settled = data
+			}
+		},
+	}
+	res, err := ExecuteScript(context.Background(), PairScript(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 1 {
+		t.Errorf("ran %d rounds against an empty diff; one was all that could be learned", res.Rounds)
+	}
+	if settled == nil {
+		t.Error("the run stopped without saying why — a human reading this sees a truncated loop")
+	}
+}
+
+// The cut must not fire while work is still landing: a reviewer asking for
+// changes on a real diff is the loop doing its job.
+func TestRoundsContinueWhileTheTreeIsMoving(t *testing.T) {
+	rec := &recorder{}
+	params := &ExecuteParams{
+		Prompt: "Add lock indicators.",
+		Runner: rec.runner(
+			&agent.Outcome{Text: "Wrote it."},
+			verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "a.go", Issue: "off by one", Fix: "n-1"}),
+			&agent.Outcome{Text: "Fixed."},
+			verdictOutcome("approve"),
+		),
+		Roster: map[config.Role]config.DucklingID{
+			config.RoleImplementer: "pato-atom",
+			config.RoleReviewer:    "pato-sonnet",
+		},
+		Gate: func(context.Context) (string, string, error) { return "green", "", nil },
+		Diff: func() (string, error) { return "--- a/a.go\n+++ b/a.go\n+x\n", nil },
+	}
+	res, err := ExecuteScript(context.Background(), PairScript(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 2 {
+		t.Errorf("ran %d rounds; the second round's fix and approval were cut off", res.Rounds)
+	}
+}

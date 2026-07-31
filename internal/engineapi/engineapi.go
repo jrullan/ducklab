@@ -250,6 +250,42 @@ func (s *Server) handleProviderList(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
 }
 
+func (s *Server) handleBudgetDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.BudgetDefaults())
+}
+
+func (s *Server) handleBudgetDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var view service.BudgetView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.BudgetDefaultsSet(view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	// The saved values back, so a client never shows a number the engine did
+	// not accept.
+	s.json(w, http.StatusOK, s.svc.BudgetDefaults())
+}
+
+func (s *Server) handleModeDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.ModeDefaults())
+}
+
+func (s *Server) handleModeDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var view service.ModeDefaultsView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.ModeDefaultsSet(view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.ModeDefaults())
+}
+
 func (s *Server) handleProviderSet(w http.ResponseWriter, r *http.Request) {
 	var view service.ProviderView
 	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
@@ -692,6 +728,29 @@ func (s *Server) handleBugList(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": bugs, "total": len(bugs)})
 }
 
+func (s *Server) handleBugEdit(w http.ResponseWriter, r *http.Request) {
+	var req service.BugRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	b, err := s.svc.BugEdit(r.Context(), r.PathValue("id"), r.PathValue("bug"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, b)
+}
+
+func (s *Server) handleTaskRemove(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.TaskRemove(r.Context(), r.PathValue("id"), r.PathValue("task"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, out)
+}
+
 func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -1072,12 +1131,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTraceCheck(w http.ResponseWriter, r *http.Request) {
-	errs, err := s.svc.TraceCheck(r.Context(), r.PathValue("id"))
+	res, err := s.svc.TraceCheck(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
-	s.json(w, http.StatusOK, map[string]interface{}{"errors": errs})
+	s.json(w, http.StatusOK, res)
 }
 
 // handleOpenAPI serves the document the clients are generated from.

@@ -112,6 +112,27 @@ type Defaults struct {
 	RepairAttempts     int      `toml:"repair_attempts" json:"repair_attempts"`
 	ToolResultMaxBytes int      `toml:"tool_result_max_bytes" json:"tool_result_max_bytes"`
 	AgentMaxTurns      int      `toml:"agent_max_turns" json:"agent_max_turns"`
+	// Rounds is how many rounds each mode runs, keyed by mode name. Absent or
+	// zero leaves the script's own limit alone.
+	//
+	// The counts lived only in the scripts — pair three, council two, tournament
+	// one — so the only way to change how many times a reviewer got to push back
+	// was to edit Go and rebuild.
+	Rounds map[string]int `toml:"rounds" json:"rounds"`
+	// RoleTurns caps the model calls one turn of a given role may chain, keyed
+	// by role. Absent or zero leaves the script's own cap alone.
+	//
+	// The caps were literals in five files — council 12, pair 24 and 8, triage
+	// 6 — so a triager that used all six of its turns calling tools and never
+	// answered told its reader to raise a number that could not be raised.
+	RoleTurns map[string]int `toml:"role_turns" json:"role_turns"`
+	// ModeDucklings is the duckling line-up to use for each mode when a run does
+	// not name one. Ordered: tournament and split assign positionally, and pair
+	// takes the first as implementer and the second as reviewer.
+	//
+	// A combination that works is a finding, and re-ticking the same boxes on
+	// every run is how a finding gets lost.
+	ModeDucklings map[string][]string `toml:"mode_ducklings" json:"mode_ducklings"`
 	HTTPTimeoutS       int      `toml:"http_timeout_s" json:"http_timeout_s"`
 	TransientRetries   int      `toml:"transient_retries" json:"transient_retries"`
 	Budget             Budget   `toml:"budget" json:"budget"`
@@ -173,6 +194,11 @@ type Duckling struct {
 	Params   SamplingParams `toml:"params" json:"params"`
 	Caps     Caps           `toml:"caps" json:"caps"`
 	Cost     Cost           `toml:"cost" json:"cost"`
+	// Color is which of the eight series slots this duckling is drawn in.
+	// 0 means the fleet order decides. A slot number rather than a hex, so the
+	// palette keeps its light and dark variants and a duckling cannot be given
+	// a colour that fails contrast in one theme.
+	Color int `toml:"color" json:"color"`
 }
 
 // MCP holds MCP server configuration.

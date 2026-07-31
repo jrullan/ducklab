@@ -357,3 +357,109 @@ func (g *Git) DeleteBranch(name string) error {
 	_, err := g.run("branch", "-D", name)
 	return err
 }
+
+// runWithIndex runs git against a temporary index file, so reading or building
+// a tree never disturbs the real one a person may be mid-staging in.
+func (g *Git) runWithIndex(indexFile string, args ...string) (string, error) {
+	cmd := xplat.Shell(g.Root, nil, "git "+strings.Join(args, " "))
+	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+indexFile)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), nil
+}
+
+// harnessExclude keeps ducklab's own record out of snapshots. The run log is
+// APPENDED TO while the run executes; a restore that rewound it would destroy
+// the evidence of the very failure being cleaned up after.
+const harnessExclude = `":(exclude).ducklab"`
+
+// SnapshotTree captures the working tree — tracked and untracked, .gitignore
+// respected — as a tree object, without touching the real index or the tree.
+//
+// Taken at run start so that a run which ends without acceptance can be undone.
+// Runs edit the shared working tree live (that is what the gate verifies), and
+// commits happen only on accept — so a failed or rejected run used to leave its
+// half-made edits sitting in the tree. The next attempt of the same task found
+// them, concluded somebody had already fixed it, and both the run and every
+// report measuring it were working on a lie.
+func (g *Git) SnapshotTree() (string, error) {
+	// The name only: git refuses a zero-byte index file, so the path must be
+	// free for it to create.
+	idx, err := os.CreateTemp("", "ducklab-snap-index-*")
+	if err != nil {
+		return "", err
+	}
+	idx.Close()
+	os.Remove(idx.Name())
+	defer os.Remove(idx.Name())
+
+	if _, err := g.runWithIndex(idx.Name(), "add", "-A", "--", ".", harnessExclude); err != nil {
+		return "", err
+	}
+	out, err := g.runWithIndex(idx.Name(), "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RestoreTree puts the working tree back to a snapshot: files the run changed
+// are rewritten, files it created are removed. Everything under .ducklab is
+// left alone, as is anything .gitignore hides.
+//
+// A person's own edits made WHILE the run was going are rolled back with it —
+// unavoidable in a shared tree, and the reason to keep hands off a project
+// while a run is working in it.
+func (g *Git) RestoreTree(snapshot string) error {
+	if strings.TrimSpace(snapshot) == "" {
+		return fmt.Errorf("no snapshot to restore")
+	}
+	idx, err := os.CreateTemp("", "ducklab-restore-index-*")
+	if err != nil {
+		return err
+	}
+	idx.Close()
+	os.Remove(idx.Name())
+	defer os.Remove(idx.Name())
+
+	// What exists now, measured the same way the snapshot was, so the two
+	// lists can be compared name for name.
+	if _, err := g.runWithIndex(idx.Name(), "add", "-A", "--", ".", harnessExclude); err != nil {
+		return err
+	}
+	nowOut, err := g.runWithIndex(idx.Name(), "ls-files")
+	if err != nil {
+		return err
+	}
+
+	// Write every snapshot file over the tree.
+	if _, err := g.runWithIndex(idx.Name(), "read-tree", snapshot); err != nil {
+		return err
+	}
+	if _, err := g.runWithIndex(idx.Name(), "checkout-index", "-a", "-f"); err != nil {
+		return err
+	}
+
+	// And delete what the run created: present now, absent from the snapshot.
+	thenOut, err := g.run("ls-tree", "-r", "--name-only", snapshot)
+	if err != nil {
+		return err
+	}
+	inSnapshot := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimSpace(thenOut), "\n") {
+		if name != "" {
+			inSnapshot[name] = true
+		}
+	}
+	for _, name := range strings.Split(strings.TrimSpace(nowOut), "\n") {
+		if name == "" || inSnapshot[name] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(g.Root, filepath.FromSlash(name))); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
+	}
+	return nil
+}

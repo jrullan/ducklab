@@ -315,6 +315,20 @@ func (c *Client) RunStart(projectID string, req map[string]interface{}) (map[str
 	return result, err
 }
 
+// BudgetDefaults reads the budget every run starts with.
+func (c *Client) BudgetDefaults() (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/defaults/budget", &result)
+	return result, err
+}
+
+// BudgetDefaultsSet replaces the default run budget.
+func (c *Client) BudgetDefaultsSet(body map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.put("/v1/defaults/budget", body, &result)
+	return result, err
+}
+
 // RunList lists runs.
 func (c *Client) RunList(projectID string) ([]map[string]interface{}, error) {
 	var result struct {
@@ -661,13 +675,16 @@ func (c *Client) TaskNext(projectID string) (map[string]interface{}, error) {
 	return result, err
 }
 
-// TraceCheck walks the whole spine.
-func (c *Client) TraceCheck(projectID string) ([]map[string]interface{}, error) {
+// TraceCheck walks the whole spine. The second return names the stages read
+// from a pending proposal rather than the approved artifact, so a caller can
+// say whether a break is in what is being decided or in what was accepted.
+func (c *Client) TraceCheck(projectID string) ([]map[string]interface{}, []string, error) {
 	var result struct {
-		Errors []map[string]interface{} `json:"errors"`
+		Errors   []map[string]interface{} `json:"errors"`
+		Proposed []string                 `json:"proposed"`
 	}
 	err := c.get(fmt.Sprintf("/v1/projects/%s/trace/check", projectID), &result)
-	return result.Errors, err
+	return result.Errors, result.Proposed, err
 }
 
 // TraceShow walks the spine from one id.
