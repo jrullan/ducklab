@@ -11,7 +11,7 @@ import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { StatusChip } from "../components/StatusChip";
-import { StageGate } from "../components/StageGate";
+import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
@@ -144,12 +144,22 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // The human gate is the one state where accepting or rejecting means
   // anything. A run paused on a question needs an answer instead: accepting
   // work that has not finished would commit a half-done change.
-  const atHumanGate = run.status === "paused" && run.pending_kind === "gate";
   // A stage run's gate is a decision about a document, so it has the third
   // answer the Cycle view has: send it back with a note. It appeared in only
   // one of the two places the same gate shows up, so someone watching the work
   // happen had to go and find another screen to say "almost".
   const stageToRevise = ["intake", "spec", "plan"].includes(run.stage) ? run.stage : "";
+  const next = run.next ?? [];
+  const decisionOpen = next.some((v) => ["accept", "reject", "resume", "request_changes"].includes(v));
+  // What accepting DOES, per kind. Three incidents were the person discovering
+  // it after the click.
+  const consequence = stageToRevise
+    ? `replaces the approved ${run.stage} and closes the run`
+    : run.stage === "triage"
+      ? `applies ${triage.length || "the"} classification${triage.length === 1 ? "" : "s"} to the report${triage.length === 1 ? "" : "s"}`
+      : next.includes("resume")
+        ? "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
+        : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";
     if (run.accepted) {
@@ -238,28 +248,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               offering Accept, Reject and Abort as if nothing had happened —
               and clicking one would have asked the engine to redo a decision
               that was already recorded. */}
-          {atHumanGate && !stageToRevise && (
-            <>
-              <button
-                type="button"
-                onClick={onAccept}
-                disabled={run.verdict === "FAILED" || acceptState.kind === "pending"}
-                data-testid="accept-button"
-                className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-              >
-                {acceptState.kind === "pending" ? "Accepting…" : "Accept"}
-              </button>
-              <button
-                type="button"
-                onClick={() => client.reject(runId).catch(() => {})}
-                data-testid="reject-button"
-                className="rounded border border-hairline px-2 py-1 text-sm"
-              >
-                Reject
-              </button>
-            </>
-          )}
-          {isWorking && !atHumanGate && (
+          {/* From the engine's list, not this view's opinion of the state:
+              the decision itself lives in the card below, the header keeps
+              only the one control that stops work in flight. */}
+          {next.includes("abort") && (
             <button
               type="button"
               onClick={() => client.abort(runId).catch(() => {})}
@@ -412,15 +404,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
-      {atHumanGate && stageToRevise && (
+      {/* One card for every kind of gate — stage, triage, build — and for a
+          run the engine's own restart paused. The verdict buttons come from
+          run.next; what varies by kind is the consequence and the evidence,
+          never the frame. */}
+      {decisionOpen && (
         <section className="m-2 rounded-card border border-serious p-3">
-          <StageGate
-            title="Proposal awaiting your decision"
+          <DecisionCard
+            next={next}
+            title={
+              stageToRevise ? "Proposal awaiting your decision" : "Waiting for your decision"
+            }
             subtitle={`${run.stage} · ${run.task_id || run.id}`}
+            consequence={consequence}
+            cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
             accepting={acceptState.kind === "pending"}
             onAccept={onAccept}
             onReject={() => void client.reject(runId).catch(() => {})}
-            onRequestChanges={requestChanges}
+            onRequestChanges={stageToRevise ? requestChanges : undefined}
+            onResume={() => void client.runResume(runId).catch(() => {})}
             revisionRun={revisionRun}
           />
         </section>

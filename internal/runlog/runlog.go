@@ -87,6 +87,11 @@ type Run struct {
 	// attempt of the same task found them and concluded somebody had already
 	// fixed it.
 	TreeSnapshot string `json:"tree_snapshot,omitempty"`
+	// Next are the actions a person may legally take on this run, in the order
+	// a client should offer them. Derived by the engine on every read and
+	// overwritten if a stale copy was persisted — clients render buttons from
+	// this list and never encode the loop's rules themselves.
+	Next []string `json:"next,omitempty"`
 }
 
 // DucklingSpend is one model's share of a run.

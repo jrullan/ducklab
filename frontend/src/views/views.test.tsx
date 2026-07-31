@@ -12,6 +12,9 @@ const run: Run = {
   pending_kind: "gate", pending_since: "2026-07-26T12:00:00Z",
   roster: { implementer: "pato-uno", reviewer: "pato-dos" },
   budget: { usd: 0.014, tokens: 184000, turns: 9, wallclock_s: 250 },
+  // What the engine states for a build run paused at a green gate. Fixtures
+  // carry it because the view renders from this list and nothing else.
+  next: ["accept", "reject"],
 };
 
 /** A client backed by a fetch stub, so views are exercised over the real
@@ -147,7 +150,7 @@ describe("RunView", () => {
     useRuns.getState().setRun(run);
     render(<RunView runId="r-1" client={okClient()} />);
 
-    fireEvent.click(screen.getByTestId("accept-button"));
+    fireEvent.click(screen.getByTestId("cycle-accept"));
     await waitFor(() => expect(screen.getByTestId("accept-committed")).toBeTruthy());
     expect(screen.getByTestId("accept-committed").textContent).toContain("e60dc7fe");
   });
@@ -162,16 +165,20 @@ describe("RunView", () => {
     });
     render(<RunView runId="r-1" client={failing} />);
 
-    fireEvent.click(screen.getByTestId("accept-button"));
+    fireEvent.click(screen.getByTestId("cycle-accept"));
     await waitFor(() => expect(screen.getByTestId("accept-error")).toBeTruthy());
     expect(screen.queryByTestId("accept-committed")).toBeNull();
     expect(useRuns.getState().runs["r-1"]!.commit_sha).toBeUndefined();
   });
 
-  it("disables accept on a failed verdict", () => {
-    useRuns.getState().setRun({ ...run, verdict: "FAILED" });
+  // A FAILED verdict has nothing to accept, and now the ENGINE says so: its
+  // next list omits the verb, so the button does not exist at all rather than
+  // existing disabled.
+  it("offers no accept on a failed verdict", () => {
+    useRuns.getState().setRun({ ...run, verdict: "FAILED", next: ["reject"] });
     render(<RunView runId="r-1" client={okClient()} />);
-    expect((screen.getByTestId("accept-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
+    expect(screen.getByTestId("reject-button")).toBeTruthy();
   });
 
   it("offers an inline answer when a question is pending", async () => {
@@ -245,7 +252,7 @@ describe("RunView and a run that edited tests", () => {
     useRuns.getState().setRun(run);
     render(<RunView runId="r-1" client={tamperClient()} />);
     await screen.findByTestId("tests-modified");
-    expect(screen.getByTestId("accept-button").hasAttribute("disabled")).toBe(false);
+    expect(screen.getByTestId("cycle-accept").hasAttribute("disabled")).toBe(false);
   });
 
   it("says nothing when the run touched no tests", async () => {
@@ -267,6 +274,9 @@ describe("RunView and a run that edited tests", () => {
 // The buttons belong to a decision, and a decision that has been made is not
 // still open. Reported from a real session: an accepted run went on offering
 // Accept, Reject and Abort, as if nothing had happened.
+// The buttons render from run.next — the engine's own list — and never from
+// this view's opinion of the state. These tests hand the view what the engine
+// would state and assert it draws exactly that.
 describe("RunView — what can still be decided", () => {
   const client = () =>
     clientWith((path) => {
@@ -283,7 +293,7 @@ describe("RunView — what can still be decided", () => {
   };
 
   it("offers nothing to decide on a run that was accepted", async () => {
-    show({ status: "done", verdict: "PASSED", accepted: true, commit_sha: "e60dc7fe1234" });
+    show({ status: "done", verdict: "PASSED", accepted: true, commit_sha: "e60dc7fe1234", next: [] });
     await screen.findByTestId("run-view");
     for (const id of ["accept-button", "reject-button", "abort-button"]) {
       expect(screen.queryByTestId(id)).toBeNull();
@@ -293,28 +303,28 @@ describe("RunView — what can still be decided", () => {
   });
 
   it("offers nothing on a rejected or failed run", async () => {
-    show({ status: "done", verdict: "FAILED", accepted: false });
+    show({ status: "done", verdict: "FAILED", accepted: false, next: [] });
     await screen.findByTestId("run-view");
-    expect(screen.queryByTestId("accept-button")).toBeNull();
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
     expect(screen.queryByTestId("abort-button")).toBeNull();
   });
 
   // A run still working can be stopped, and nothing else: there is no result
   // to accept yet.
   it("offers only Abort while a run is working", async () => {
-    show({ status: "running", verdict: "" });
+    show({ status: "running", verdict: "", pending_kind: undefined, next: ["abort"] });
     await screen.findByTestId("run-view");
     expect(screen.getByTestId("abort-button")).toBeTruthy();
-    expect(screen.queryByTestId("accept-button")).toBeNull();
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
   });
 
   // At a gate the run is not working — it is waiting for this decision — so
   // Abort has nothing to stop. Offering it beside Reject made them look like
   // two ways to say no, when only one records a decision.
   it("offers accept and reject at the gate, and not abort", async () => {
-    show({ status: "paused", pending_kind: "gate", verdict: "PASSED", stage: "build" });
+    show({ status: "paused", pending_kind: "gate", verdict: "PASSED", stage: "build", next: ["accept", "reject"] });
     await screen.findByTestId("run-view");
-    expect(screen.getByTestId("accept-button")).toBeTruthy();
+    expect(screen.getByTestId("cycle-accept")).toBeTruthy();
     expect(screen.getByTestId("reject-button")).toBeTruthy();
     expect(screen.queryByTestId("abort-button")).toBeNull();
   });
@@ -322,9 +332,9 @@ describe("RunView — what can still be decided", () => {
   // A run paused on a question needs an answer, not a verdict: accepting work
   // that has not finished would commit a half-done change.
   it("does not offer Accept while a question is unanswered", async () => {
-    show({ status: "paused", pending_kind: "question", verdict: "" });
+    show({ status: "paused", pending_kind: "question", verdict: "", next: ["answer", "abort"] });
     await screen.findByTestId("run-view");
-    expect(screen.queryByTestId("accept-button")).toBeNull();
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
     expect(screen.getByTestId("abort-button")).toBeTruthy();
   });
 });
@@ -335,7 +345,10 @@ describe("RunView — what can still be decided", () => {
 describe("RunView — asking a stage for changes", () => {
   const show = (over: Record<string, unknown>) => {
     useRuns.setState({ runs: {}, connection: "open" });
-    useRuns.getState().setRun({ ...run, status: "paused", pending_kind: "gate", ...over });
+    useRuns.getState().setRun({
+      ...run, status: "paused", pending_kind: "gate",
+      next: ["accept", "request_changes", "reject"], ...over,
+    });
   };
 
   // The real request path, so the body is asserted as the engine would see it.
@@ -375,7 +388,7 @@ describe("RunView — asking a stage for changes", () => {
   });
 
   it("offers nothing to revise once the gate is answered", async () => {
-    show({ stage: "spec", project_id: "p", status: "done", accepted: true, pending_kind: "" });
+    show({ stage: "spec", project_id: "p", status: "done", accepted: true, pending_kind: "", next: [] });
     render(<RunView runId="r-1" client={recording({})} />);
     await screen.findByTestId("run-view");
     expect(screen.queryByTestId("request-changes-button")).toBeNull();

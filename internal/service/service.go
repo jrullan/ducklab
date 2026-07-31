@@ -1440,6 +1440,13 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 			run = &clone
 		}
 	}
+	// Always recomputed: the stored copy cannot be allowed to disagree with
+	// the rules.
+	if run == rs.run {
+		clone := *run
+		run = &clone
+	}
+	run.Next = runNext(run)
 	return &RunDetail{
 		Run:    run,
 		Events: events,
@@ -1474,7 +1481,12 @@ func (s *Service) RunList(ctx context.Context, f RunFilter) ([]*runlog.Run, erro
 		if f.Status != "" && rs.run.Status != f.Status {
 			continue
 		}
-		runs = append(runs, rs.run)
+		// A copy with Next recomputed: the shared record must not be written
+		// while other readers hold it, and the stored list cannot be allowed to
+		// disagree with the rules.
+		clone := *rs.run
+		clone.Next = runNext(&clone)
+		runs = append(runs, &clone)
 	}
 	// Newest first, and deterministically.
 	//

@@ -213,7 +213,9 @@ function WaitingCard({
   onReject: () => void;
   acceptError?: string;
 }) {
-  const isGate = run.pending_kind === "gate";
+  // From the engine's list, never this card's opinion of the state
+  // (docs/ux-evaluation.md §5.4).
+  const next = run.next ?? [];
   return (
     <li data-testid="now-waiting-card" className="rounded-card border border-serious p-3">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -232,42 +234,45 @@ function WaitingCard({
         )}
       </div>
       <div className="mt-2 flex items-center gap-2">
-        {isGate ? (
-          <>
-            {/* The evidence — diff, transcript, gate output — is one click away
-                on the label. AC-34 holds: nothing optimistic, the commit shows
-                only when the engine confirms, which the run view handles. */}
-            <button
-              type="button"
-              data-testid="now-accept"
-              onClick={onAccept}
-              disabled={accepting || run.verdict === "FAILED"}
-              className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-            >
-              {accepting ? "Accepting…" : "Accept"}
-            </button>
-            <button
-              type="button"
-              data-testid="now-reject"
-              onClick={onReject}
-              className="rounded border border-hairline px-2 py-1 text-xs"
-            >
-              Reject
-            </button>
-            <a
-              href={routeHref({ name: "run", id: run.id })}
-              className="text-xs text-ink-muted underline"
-            >
-              see the evidence
-            </a>
-          </>
-        ) : (
+        {/* The evidence — diff, transcript, gate output — is one click away on
+            the label. AC-34 holds: nothing optimistic, the commit shows only
+            when the engine confirms, which the run view handles. */}
+        {next.includes("accept") && (
+          <button
+            type="button"
+            data-testid="now-accept"
+            onClick={onAccept}
+            disabled={accepting}
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          >
+            {accepting ? "Accepting…" : "Accept"}
+          </button>
+        )}
+        {next.includes("reject") && (
+          <button
+            type="button"
+            data-testid="now-reject"
+            onClick={onReject}
+            className="rounded border border-hairline px-2 py-1 text-xs"
+          >
+            Reject
+          </button>
+        )}
+        {next.includes("answer") && (
           <a
             href={routeHref({ name: "run", id: run.id })}
             data-testid="now-answer"
             className="text-xs text-ink underline"
           >
             a duckling asked a question — answer it
+          </a>
+        )}
+        {(next.includes("accept") || next.includes("resume")) && (
+          <a
+            href={routeHref({ name: "run", id: run.id })}
+            className="text-xs text-ink-muted underline"
+          >
+            see the evidence
           </a>
         )}
       </div>

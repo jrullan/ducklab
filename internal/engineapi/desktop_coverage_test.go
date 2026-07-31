@@ -37,7 +37,6 @@ var knownGaps = map[string]string{
 	"POST /v1/projects/{id}/roster/suggest":         "same",
 	"POST /v1/projects/{id}/releases/{version}/cut": "a release can be drafted from the desktop but not cut",
 	"GET /v1/runs/{id}/transcript":                  "the conversation is rebuilt from events; the engine's own rendering is unreachable",
-	"POST /v1/runs/{id}/resume":                     "a run paused by an engine restart can only be resumed from the CLI",
 	"GET /v1/engine":                                "engine version and paths; Settings shows a version it gets from the event stream",
 }
 

@@ -378,6 +378,9 @@ type TaskView struct {
 	// that shows work stopped without saying what stopped it is a column that
 	// sends you reading run logs.
 	Blocked string `json:"blocked,omitempty"`
+	// Next are the actions a person may legally start from this task, in the
+	// order a client should offer them (docs/ux-evaluation.md §5.4).
+	Next []string `json:"next,omitempty"`
 }
 
 // TaskList reads tasks from the plan and folds in what runs have done to them.
@@ -390,6 +393,12 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	if err != nil {
 		return nil, err
 	}
+	// The gate mode decides whether test-first is even offerable here.
+	gateMode := ""
+	if projCfg, cfgErr := config.LoadProject(entry.Path + "/.ducklab/project.toml"); cfgErr == nil {
+		gateMode = projCfg.Verify.Mode
+	}
+
 	plan, err := artifact.Load(entry.Path, artifact.KindPlan)
 	if err != nil {
 		return nil, err
@@ -410,8 +419,18 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	// consecutive loads.
 	status := map[string]string{}
 	blocked := map[string]string{}
+	// Whether TaskRemove would refuse: an accepted run pins its task for good,
+	// an open one until it is decided. Tracked here so the offered action and
+	// the refusal can never disagree.
+	pinned := map[string]bool{}
 	for _, r := range runs {
-		if r.TaskID == "" || status[r.TaskID] != "" {
+		if r.TaskID == "" {
+			continue
+		}
+		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
+			pinned[r.TaskID] = true
+		}
+		if status[r.TaskID] != "" {
 			continue
 		}
 		switch {
@@ -457,6 +476,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Status:     st,
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
+				Next:       taskNextActions(st, gateMode, !pinned[t.ID]),
 			})
 		}
 	}

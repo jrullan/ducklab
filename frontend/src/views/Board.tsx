@@ -528,6 +528,11 @@ function TaskRunner({
   // Accepted work is not waiting to be built. The controls follow the task's
   // state rather than being offered whatever it is.
   const accepted = task.status === "accepted";
+  // What may be started from here, stated by the engine. The conditionals
+  // below render from this list — the client stopped encoding "todo means
+  // Build it" the day those rules were wrong for the fourth time
+  // (docs/ux-evaluation.md §5.4).
+  const next = task.next ?? [];
   // And neither is work a run is already doing. Two runs against one task edit
   // the same tree at the same time, and the second one's diff contains the
   // first one's changes — which is not a result anybody can judge.
@@ -561,7 +566,7 @@ function TaskRunner({
             making. Building again is still possible — a result can be
             regretted — but it says what it is rather than sitting there as the
             obvious next step. */}
-        {!accepted && !running && (
+        {next.includes("run") && !accepted && (
           <RunLauncher
             ducklings={ducklings}
             preferred={preferred}
@@ -574,7 +579,7 @@ function TaskRunner({
             compiler, a linter or a bespoke script gives a new test nothing to
             hook into, and the engine refuses — so the button is absent rather
             than present and failing. */}
-        {gate === "tests" && !accepted && !running && (
+        {next.includes("test_first") && (
           <button
             type="button"
             onClick={() => void go("test")}
@@ -589,7 +594,7 @@ function TaskRunner({
         {/* Only on work that has been accepted: a review reads the commit, and
             there is no commit until then. The engine refuses with exactly
             that, and a button that only ever errors is worse than none. */}
-        {accepted && (
+        {next.includes("review") && (
           <button
             type="button"
             onClick={() => void go("review")}
@@ -624,9 +629,9 @@ function TaskRunner({
       {/* Only while nothing has run it. The engine refuses afterwards — the
           runs, the reports and the spine all name the task — and a button that
           only ever errors is worse than none. */}
-      {task.status === "todo" || task.status === "blocked" ? (
+      {next.includes("remove") && (
         <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
-      ) : null}
+      )}
 
       {accepted && (
         <p className="text-xs text-ink-muted" data-testid="accepted-note">

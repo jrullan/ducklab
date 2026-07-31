@@ -63,6 +63,10 @@ export interface Run {
   /** Why the run failed, in the engine's words. Some of these are written to be
    * acted on — split names the file two subtasks both claimed. */
   failure?: string;
+  /** The actions a person may legally take on this run, in the order to offer
+   * them. Stated by the engine; clients render buttons from this list and never
+   * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
+  next?: string[];
   budget?: {
     usd: number;
     tokens: number;
@@ -190,6 +194,9 @@ export interface Task {
   body?: string;
   /** Why the work stopped, when status is "blocked". */
   blocked?: string;
+  /** The actions a person may legally start from this task, stated by the
+   * engine — run, test_first, review, remove. */
+  next?: string[];
 }
 
 /** One role and the duckling that will play it. Mirrors service.RosterEntry. */
@@ -557,6 +564,11 @@ export class EngineClient {
       "GET",
       `/v1/runs/${id}/llm`,
     ).then((r) => r.items ?? []);
+  }
+  /** Resume a run the engine's own restart or shutdown paused. A human gate is
+   * not a resume point — it is answered, not continued. */
+  runResume(id: string) {
+    return this.request<Run>("POST", `/v1/runs/${id}/resume`);
   }
   runDiff(id: string) {
     return this.request<{ diff: string; tests?: string }>("GET", `/v1/runs/${id}/diff`).then((r) => ({

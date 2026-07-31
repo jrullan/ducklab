@@ -14,7 +14,7 @@ import type { Artifact, EngineClient, RosterEntry, Section, TraceError } from ".
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
-import { StageGate } from "../components/StageGate";
+import { DecisionCard } from "../components/DecisionCard";
 
 const STAGES = [
   { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ" },
@@ -100,6 +100,26 @@ export function Cycle({
   // comes from whichever version is on screen: the proposal while one is
   // pending, the accepted document afterwards.
   const briefRun = artifact?.proposal?.run_id ?? artifact?.run_id;
+  // The proposing run's legal actions, from the engine. A hardcoded
+  // ["accept","request_changes","reject"] here would re-encode the rules this
+  // exists to stop encoding; while they load, no button is better than a wrong
+  // one.
+  const [proposalNext, setProposalNext] = useState<string[]>([]);
+  const proposalRunId = artifact?.proposal?.run_id ?? "";
+  useEffect(() => {
+    if (!proposalRunId) {
+      setProposalNext([]);
+      return;
+    }
+    let cancelled = false;
+    client
+      .run(proposalRunId)
+      .then((d) => !cancelled && setProposalNext(d.run.next ?? []))
+      .catch(() => !cancelled && setProposalNext([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [client, proposalRunId]);
   useEffect(() => {
     if (!briefRun) {
       setAskedFor("");
@@ -252,13 +272,15 @@ export function Cycle({
 
         {artifact?.proposal && (
           <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
-            <StageGate
+            <DecisionCard
+              next={proposalNext}
               title="Proposal awaiting your decision"
               subtitle={
                 artifact.proposal.ducklings
                   ? `from ${artifact.proposal.ducklings.join(", ")}`
                   : undefined
               }
+              consequence={`replaces the approved ${active.kind} and closes the run`}
               accepting={promoting}
               onAccept={() => void accept()}
               onReject={() => void reject()}

@@ -8,6 +8,7 @@ const base: Run = {
   id: "r-1", project_id: "p", stage: "build", mode: "pair", task_id: "T-026",
   status: "paused", verdict: "PASSED", pending_kind: "gate",
   pending_since: "2026-07-31T09:00:00Z", started_at: "2026-07-31T08:57:00Z",
+  next: ["accept", "reject"],
   budget: { usd: 0.31, tokens: 412000, turns: 4, wallclock_s: 192 },
 };
 
@@ -55,7 +56,7 @@ describe("Now — the inbox", () => {
   });
 
   it("routes a question to the answer, not to Accept/Reject", async () => {
-    seed([{ ...base, pending_kind: "question", verdict: "" }]);
+    seed([{ ...base, pending_kind: "question", verdict: "", next: ["answer", "abort"] }]);
     render(<Now client={clientWith()} projectId="p" />);
     const card = await screen.findByTestId("now-waiting-card");
     expect(screen.queryByTestId("now-accept")).toBeNull();

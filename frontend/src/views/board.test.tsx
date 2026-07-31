@@ -198,7 +198,12 @@ describe("Board, the bugs half", () => {
 });
 
 describe("Board — starting the work", () => {
-  const task = { id: "T-001", title: "A thing", milestone: "M-001", status: "todo" };
+  // next comes from the engine; fixtures carry what it would state for a
+  // fresh task under a tests gate.
+  const task = {
+    id: "T-001", title: "A thing", milestone: "M-001", status: "todo",
+    next: ["run", "test_first", "remove"],
+  };
 
   const runClient = (over: Record<string, unknown> = {}) =>
     ({
@@ -303,7 +308,7 @@ describe("Board — starting the work", () => {
 
   it("offers Review on an accepted task", async () => {
     const client = runClient({
-      tasks: vi.fn(() => Promise.resolve([{ ...task, status: "accepted" }])),
+      tasks: vi.fn(() => Promise.resolve([{ ...task, status: "accepted", next: ["review", "run"] }])),
     });
     render(<Board client={client} projectId="p" />);
     await openRail();
@@ -326,36 +331,40 @@ describe("Board — starting the work", () => {
 // script gives a new test nothing to hook into — proved on a real project,
 // where the model reasoned its way to patching the gate script itself because
 // that was the only place an assertion could live.
-describe("Board — test first only where it can work", () => {
-  const withGate = (mode: string) =>
+describe("Board — test first renders only when the engine offers it", () => {
+  // The gate-mode rule — a test is only worth writing where the gate can see
+  // it — moved into the engine, which now states each task's legal actions.
+  // The client's whole job is to draw that list faithfully; the rule itself is
+  // covered engine-side by TestWhatATaskOffersMatchesTheGuards.
+  const withNext = (next: string[]) =>
     ({
-      tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-001", status: "todo" }])),
+      tasks: vi.fn(() =>
+        Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-001", status: "todo", next }]),
+      ),
       bugs: vi.fn(() => Promise.resolve([])),
       ducklings: vi.fn(() => Promise.resolve([])),
-      projectGate: vi.fn(() => Promise.resolve({ mode, command: "sh check.sh" })),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "sh check.sh" })),
       taskNext: vi.fn(() => Promise.resolve(null)),
-      gateRun: vi.fn(() => Promise.resolve({ green: true, exit_code: 0, output: "", command: "sh check.sh", gate: mode, duration_s: 0.1 })),
+      gateRun: vi.fn(() => Promise.resolve({ green: true, exit_code: 0, output: "", command: "sh check.sh", gate: "tests", duration_s: 0.1 })),
       runStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
       testStart: vi.fn(() => Promise.resolve({ id: "r-2" })),
       modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
     }) as unknown as EngineClient;
 
-  it("offers it under a tests gate", async () => {
-    render(<Board client={withGate("tests")} projectId="p" />);
+  it("offers it when stated", async () => {
+    render(<Board client={withNext(["run", "test_first"])} projectId="p" />);
     fireEvent.click(await screen.findByText("A thing"));
     expect(await screen.findByTestId("test-first-start")).toBeTruthy();
   });
 
-  for (const mode of ["custom", "build", "lint", "none"]) {
-    it(`offers nothing under a ${mode} gate`, async () => {
-      render(<Board client={withGate(mode)} projectId="p" />);
-      fireEvent.click(await screen.findByText("A thing"));
-      await screen.findByTestId("task-runner");
-      expect(screen.queryByTestId("test-first-start")).toBeNull();
-      // Building still works; it is only the test that has nowhere to land.
-      expect(screen.getByTestId("run-start")).toBeTruthy();
-    });
-  }
+  it("offers nothing when the engine did not state it", async () => {
+    render(<Board client={withNext(["run"])} projectId="p" />);
+    fireEvent.click(await screen.findByText("A thing"));
+    await screen.findByTestId("task-runner");
+    expect(screen.queryByTestId("test-first-start")).toBeNull();
+    // Building still works; it is only the test that has nowhere to land.
+    expect(screen.getByTestId("run-start")).toBeTruthy();
+  });
 });
 
 // Knowing the gate is red before starting is what makes a green afterwards
@@ -429,7 +438,21 @@ describe("Board — the gate before the run", () => {
 describe("Board — an accepted task", () => {
   const client = (status: string) =>
     ({
-      tasks: vi.fn(() => Promise.resolve([{ id: "T-006", title: "A thing", milestone: "M-003", status }])),
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: "T-006", title: "A thing", milestone: "M-003", status,
+            next: (
+              {
+                accepted: ["review", "run"],
+                todo: ["run", "test_first", "remove"],
+                in_progress: [],
+                review: [],
+              } as Record<string, string[]>
+            )[status],
+          },
+        ]),
+      ),
       bugs: vi.fn(() => Promise.resolve([])),
       ducklings: vi.fn(() =>
         Promise.resolve([

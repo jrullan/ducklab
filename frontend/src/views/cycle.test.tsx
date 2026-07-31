@@ -24,8 +24,19 @@ function clientWith(handler: (path: string, init?: RequestInit) => Response) {
   return new EngineClient({
     baseUrl: "http://engine",
     token: "t",
-    fetchFn: (async (url: string, init?: RequestInit) =>
-      handler(String(url).replace("http://engine", ""), init)) as unknown as typeof fetch,
+    fetchFn: (async (url: string, init?: RequestInit) => {
+      const path = String(url).replace("http://engine", "");
+      // The proposal card asks the engine for the proposing run's legal
+      // actions. Answered here once so every test's gate renders its buttons;
+      // a test about something else should not have to know the contract.
+      if (/^\/v1\/runs\/[^/]+$/.test(path.split("?")[0] ?? "")) {
+        return json({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        });
+      }
+      return handler(path, init);
+    }) as unknown as typeof fetch,
   });
 }
 
@@ -73,7 +84,7 @@ describe("Cycle", () => {
         return json(
           promoted
             ? REQUIREMENTS
-            : { ...REQUIREMENTS, proposal: { diff: "--- a\n+++ b\n@@ -1 +1 @@\n+new", ducklings: ["pato-atom"] } },
+            : { ...REQUIREMENTS, proposal: { diff: "--- a\n+++ b\n@@ -1 +1 @@\n+new", ducklings: ["pato-atom"], run_id: "r-1" } },
         );
       }
       if (p.includes("/trace/check")) return json({ errors: null });
@@ -81,8 +92,10 @@ describe("Cycle", () => {
     });
     render(<Cycle client={client} projectId="p" />);
 
-    await waitFor(() => expect(screen.getByTestId("cycle-proposal")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("cycle-accept"));
+    // The card's buttons render only once the engine has stated the run's
+    // legal actions, which is its own fetch: wait for the button, not just the
+    // section around it.
+    fireEvent.click(await screen.findByTestId("cycle-accept"));
     await waitFor(() => expect(screen.queryByTestId("cycle-proposal")).toBeNull());
 
     // Accepting must never start a run — that was a real CLI bug, where the
@@ -170,6 +183,12 @@ describe("Cycle — starting a stage", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", body: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-42" })),
       promote: vi.fn(() => Promise.resolve({})),
@@ -266,6 +285,12 @@ describe("Cycle — reading a proposal", () => {
         Promise.resolve({ kind: "requirements", markdown: "", sections: [], proposal }),
       ),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       promote: vi.fn(() => Promise.resolve({})),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
@@ -324,6 +349,12 @@ describe("Cycle — what was asked for", () => {
     ({
       artifact: vi.fn(() => Promise.resolve(artifact)),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       runBrief: vi.fn(() => Promise.resolve(brief)),
       promote: vi.fn(() => Promise.resolve({})),
@@ -401,6 +432,12 @@ describe("Cycle — asking for a change", () => {
     ({
       artifact: vi.fn(() => Promise.resolve(pending)),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       runBrief: vi.fn(() => Promise.resolve("")),
       promote: vi.fn(() => Promise.resolve({})),
@@ -473,6 +510,12 @@ describe("Cycle — what the run will actually do", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       runBrief: vi.fn(() => Promise.resolve("")),
       roster: vi.fn(() => Promise.resolve({ entries: roster })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
@@ -545,6 +588,12 @@ describe("Cycle — how many rounds", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      run: vi.fn(() =>
+        Promise.resolve({
+          run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
+          events: [],
+        }),
+      ),
       runBrief: vi.fn(() => Promise.resolve("")),
       roster: vi.fn(() => Promise.resolve({ entries: twoDucks })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),

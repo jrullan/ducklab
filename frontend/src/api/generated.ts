@@ -266,6 +266,7 @@ export interface RunlogRun {
   gate?: string;
   id?: string;
   mode?: string;
+  next?: string[];
   no_changes?: boolean;
   pending_data?: Record<string, unknown>;
   pending_kind?: string;
@@ -473,6 +474,7 @@ export interface ServiceTaskView {
   id?: string;
   implements?: string[];
   milestone?: string;
+  next?: string[];
   status?: string;
   title?: string;
 }

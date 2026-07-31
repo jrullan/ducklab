@@ -1,0 +1,87 @@
+package service
+
+import (
+	"github.com/jrullan/ducklab/internal/runlog"
+)
+
+// The next-actions contract: the engine states what is legal, clients render
+// buttons from lists.
+//
+// This generalizes what bug.NextFrom already proved. Before it, every client
+// surface encoded the loop's rules by hand — "paused at a gate means Accept",
+// "todo means Build it", "failed means relaunch" — and every one of those
+// rules was wrong at least once in the first real project: Accept offered on a
+// triage it could not apply, a remove button that the engine refused after the
+// click, a bug state with no button at all. An action the engine did not offer
+// cannot render; one it offers cannot be missing. (docs/ux-evaluation.md §5.4)
+
+// runNext lists what a person may legally do to a run, in the order a client
+// should offer them.
+//
+// Derived on read, never persisted: the stored copy in state.json is ignored
+// and overwritten, so it can never go stale against these rules.
+func runNext(r *runlog.Run) []string {
+	if r == nil {
+		return nil
+	}
+	switch r.Status {
+	case "running", "queued":
+		return []string{"abort"}
+	case "paused":
+		switch r.PendingKind {
+		case "question":
+			return []string{"answer", "abort"}
+		case "engine_restart", "engine_shutdown":
+			// The states RunResume accepts, and nothing else: a human gate is
+			// answered, not continued.
+			return []string{"resume", "abort"}
+		case "gate":
+			var out []string
+			// A FAILED verdict has nothing to accept; offering the button and
+			// disabling it is the client's courtesy, offering the action is not
+			// the engine's.
+			if r.Verdict != "FAILED" {
+				out = append(out, "accept")
+			}
+			// Only a document can be sent back with a note; code runs are
+			// accepted or rejected, and "almost" for code is a new run.
+			switch r.Stage {
+			case "intake", "spec", "plan":
+				out = append(out, "request_changes")
+			}
+			return append(out, "reject")
+		}
+		return []string{"abort"}
+	default:
+		// done and failed are endings. Relaunching is an action on the TASK —
+		// a new run — and travels on the task's own list.
+		return nil
+	}
+}
+
+// taskNextActions lists what a person may legally start from a task.
+//
+// gateMode is the project's verify mode: writing a test first is only offered
+// where a test changes something the gate can see. removable reflects
+// TaskRemove's own guard — no accepted run, none still open — so the button
+// and the refusal can never disagree.
+func taskNextActions(status, gateMode string, removable bool) []string {
+	var out []string
+	switch status {
+	case "todo", "blocked":
+		out = append(out, "run")
+		if gateMode == "tests" {
+			out = append(out, "test_first")
+		}
+		if removable {
+			out = append(out, "remove")
+		}
+	case "accepted":
+		// A decision can be regretted: reviewing reads the commit, building
+		// again starts a new run against work that is already done.
+		out = append(out, "review", "run")
+	case "in_progress", "review":
+		// The action lives on the run: watch it, abort it, or decide its gate.
+	}
+	return out
+}
