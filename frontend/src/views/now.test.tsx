@@ -129,3 +129,33 @@ describe("Now — the inbox", () => {
     expect(screen.getByTestId("now-all-done").textContent).toContain("done, running, or waiting");
   });
 });
+
+// Overview's job, absorbed when it retired. Spend used to be a prop there, and
+// the one caller passed `spentToday={0}` — the screen whose job was to say what
+// the work cost reported zero while runs spent real money.
+describe("the inbox's footer", () => {
+  beforeEach(() => seed([]));
+
+  it("adds up what the runs actually cost, today apart from all time", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    seed([
+      { ...base, id: "r-a", status: "done", verdict: "PASSED", accepted: true, pending_kind: undefined,
+        started_at: `${today}T09:00:00Z`,
+        budget: { usd: 1.5, tokens: 0, turns: 0, wallclock_s: 0 } },
+      { ...base, id: "r-old", status: "done", verdict: "FAILED", pending_kind: undefined,
+        started_at: "2026-01-01T09:00:00Z",
+        budget: { usd: 9, tokens: 0, turns: 0, wallclock_s: 0 } },
+    ]);
+    render(<Now client={clientWith()} projectId="p" />);
+    const footer = await screen.findByTestId("now-footer");
+    expect(footer.textContent).toContain("today $1.50");
+    expect(footer.textContent).toContain("all time $10.50");
+    expect(footer.textContent).toContain("1/2 passed");
+  });
+
+  it("shows nothing before any run exists", async () => {
+    render(<Now client={clientWith()} projectId="p" />);
+    await screen.findByTestId("now-view");
+    expect(screen.queryByTestId("now-footer")).toBeNull();
+  });
+});

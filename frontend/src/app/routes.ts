@@ -3,7 +3,7 @@
 
 export type Route =
   | { name: "now" }
-  | { name: "overview" }
+  | { name: "bench" }
   | { name: "runs" }
   | { name: "cycle"; stage?: string }
   | { name: "board"; tab?: string }
@@ -21,8 +21,12 @@ export function parseRoute(hash: string): Route {
   switch (head) {
     case "now":
       return { name: "now" };
+    // Overview was absorbed by the inbox (docs/ux-evaluation.md phase 3); the
+    // old links keep working by landing where its job went.
     case "overview":
-      return { name: "overview" };
+      return { name: "now" };
+    case "bench":
+      return { name: "bench" };
     case "runs":
       return arg ? { name: "run", id: arg } : { name: "runs" };
     case "cycle":
@@ -72,7 +76,9 @@ export function routeHref(route: Route): string {
       return "#/settings";
     case "now":
       return "#/now";
+    case "bench":
+      return "#/bench";
     default:
-      return "#/overview";
+      return "#/now";
   }
 }

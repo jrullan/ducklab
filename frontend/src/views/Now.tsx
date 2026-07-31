@@ -134,6 +134,12 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         </section>
       )}
 
+      {/* Overview's job, absorbed when it retired (docs/ux-evaluation.md
+          phase 3): cost as ambient information rather than a report consulted
+          after the money is gone. Spend used to be a prop there, and the one
+          caller passed zero. */}
+      <NowFooter runs={list} />
+
       {quiet && (
         <section className="mt-4" data-testid="now-quiet">
           {active.length === 0 && list.length === 0 && (
@@ -302,5 +308,29 @@ function RunningRow({ run, live }: { run: Run; live?: LiveSpend }) {
         </span>
       )}
     </li>
+  );
+}
+
+function NowFooter({ runs }: { runs: Run[] }) {
+  if (runs.length === 0) return null;
+  // Today by the run's own start: one that began yesterday and finished this
+  // morning was paid for yesterday.
+  const today = new Date().toISOString().slice(0, 10);
+  const spentToday = runs
+    .filter((r) => (r.started_at ?? "").slice(0, 10) === today)
+    .reduce((sum, r) => sum + (r.budget?.usd ?? 0), 0);
+  const spentAll = runs.reduce((sum, r) => sum + (r.budget?.usd ?? 0), 0);
+  const finished = runs.filter((r) => r.verdict !== "").length;
+  const passed = runs.filter((r) => r.verdict === "PASSED").length;
+  return (
+    <p className="mt-4 border-t border-hairline pt-2 text-xs text-ink-muted" data-testid="now-footer">
+      today {money(spentToday)} · all time {money(spentAll)}
+      {finished > 0 && (
+        <>
+          {" "}
+          · {passed}/{finished} passed
+        </>
+      )}
+    </p>
   );
 }

@@ -4,7 +4,9 @@ import { parseRoute, routeHref } from "./routes";
 describe("routing", () => {
   it("parses each view", () => {
     expect(parseRoute("#/now")).toEqual({ name: "now" });
-    expect(parseRoute("#/overview")).toEqual({ name: "overview" });
+    // Overview was absorbed by the inbox; old links land where its job went.
+    expect(parseRoute("#/overview")).toEqual({ name: "now" });
+    expect(parseRoute("#/bench")).toEqual({ name: "bench" });
     expect(parseRoute("#/runs")).toEqual({ name: "runs" });
     expect(parseRoute("#/ducklings")).toEqual({ name: "ducklings" });
     expect(parseRoute("#/settings")).toEqual({ name: "settings" });
@@ -26,7 +28,7 @@ describe("routing", () => {
 
   it("round-trips through href", () => {
     for (const r of [
-      { name: "overview" as const }, { name: "runs" as const },
+      { name: "now" as const }, { name: "runs" as const }, { name: "bench" as const },
       { name: "run" as const, id: "r-1" }, { name: "ducklings" as const },
       { name: "settings" as const },
     ]) {

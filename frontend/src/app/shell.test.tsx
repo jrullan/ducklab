@@ -44,3 +44,35 @@ describe("the scrollable region", () => {
     expect(list.style.overflow).toBe("auto");
   });
 });
+
+// Three destinations instead of ten (docs/ux-evaluation.md §5.1): the old nav
+// had one tab per engine resource while the person has one workflow, smeared
+// across them. These pin the zones' membership so a view cannot silently lose
+// its home the way Bench did — built, tested, and mounted nowhere.
+import { parseRoute, routeHref } from "./routes";
+
+describe("the three-zone shell", () => {
+  it("gives every routable view a zone or the gear", () => {
+    const zones: Record<string, string[]> = {
+      now: ["now"],
+      work: ["board", "cycle"],
+      records: ["runs", "run", "reports", "review", "release", "bench"],
+      config: ["settings", "ducklings", "projects"],
+    };
+    const housed = new Set(Object.values(zones).flat());
+    // Every route the app can parse, from the parser itself.
+    for (const hash of [
+      "#/now", "#/overview", "#/runs", "#/runs/r-1", "#/cycle", "#/board",
+      "#/review", "#/release", "#/reports", "#/bench", "#/ducklings",
+      "#/projects", "#/settings",
+    ]) {
+      const r = parseRoute(hash);
+      expect(housed.has(r.name), `${r.name} has no home in any zone`).toBe(true);
+    }
+  });
+
+  it("keeps overview's old links working by landing on the inbox", () => {
+    expect(parseRoute("#/overview")).toEqual({ name: "now" });
+    expect(parseRoute(routeHref(parseRoute("#/overview")))).toEqual({ name: "now" });
+  });
+});

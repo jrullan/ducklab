@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { Overview } from "./Overview";
 import { Settings } from "./Settings";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
@@ -33,57 +32,6 @@ const json = (body: unknown, status = 200) =>
 
 beforeEach(() => {
   useRuns.setState({ runs: {}, events: {}, deltas: {}, acceptState: {}, needsResync: false, connection: "open" });
-});
-
-describe("Overview", () => {
-  it("shows an empty state before any run exists", () => {
-    render(<Overview />);
-    expect(screen.getByTestId("empty-state").textContent).toContain("No runs yet");
-  });
-
-  it("lists runs and surfaces what is waiting for a human", () => {
-    useRuns.getState().setRuns([run]);
-    render(<Overview />);
-    expect(screen.getByTestId("human-gate-inbox")).toBeTruthy();
-    expect(screen.getAllByTestId("run-row")).toHaveLength(1);
-  });
-
-  // Spend used to be a prop, and the one caller passed zero — so the screen
-  // whose job is to say what the work has cost reported nothing while runs had
-  // spent real money. A component that cannot be handed a number cannot be
-  // handed a wrong one.
-  it("adds up what the runs actually cost", () => {
-    const today = new Date().toISOString().slice(0, 10);
-    useRuns.getState().setRuns([
-      { ...run, id: "r-a", started_at: `${today}T09:00:00Z`, budget: { usd: 1.5048, tokens: 0, turns: 0, wallclock_s: 0 } },
-      { ...run, id: "r-b", started_at: `${today}T10:00:00Z`, budget: { usd: 0.2852, tokens: 0, turns: 0, wallclock_s: 0 } },
-    ]);
-    render(<Overview />);
-    // money() switches to two decimals at a dollar.
-    expect(screen.getByTestId("overview").textContent).toContain("$1.79");
-  });
-
-  // A run that began yesterday and finished this morning was paid for
-  // yesterday, so "today" is the run's own start.
-  it("counts only today against today", () => {
-    const today = new Date().toISOString().slice(0, 10);
-    useRuns.getState().setRuns([
-      { ...run, id: "r-a", started_at: `${today}T09:00:00Z`, budget: { usd: 0.5, tokens: 0, turns: 0, wallclock_s: 0 } },
-      { ...run, id: "r-old", started_at: "2026-01-01T09:00:00Z", budget: { usd: 9, tokens: 0, turns: 0, wallclock_s: 0 } },
-    ]);
-    render(<Overview />);
-    const text = screen.getByTestId("overview").textContent!;
-    expect(text).toContain("$0.5000");
-    // …but the all-time figure still knows about it.
-    expect(text).toContain("$9.50");
-  });
-
-  // With nothing finished, a pass ratio would be a lie dressed as a number.
-  it("shows a dash rather than 0/0 when nothing has finished", () => {
-    useRuns.getState().setRuns([{ ...run, verdict: "" }]);
-    render(<Overview />);
-    expect(screen.getByTestId("overview").textContent).toContain("—");
-  });
 });
 
 describe("Settings", () => {

@@ -6,8 +6,8 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import { interruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
-import { Overview } from "../views/Overview";
 import { Now } from "../views/Now";
+import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
@@ -41,21 +41,48 @@ declare global {
   }
 }
 
-const NAV: { route: Route; label: string }[] = [
-  // The inbox first and default: the one question a solo dev arrives with is
-  // "what needs me". Overview survives until phase 3 of docs/ux-evaluation.md.
-  { route: { name: "now" }, label: "Now" },
-  { route: { name: "overview" }, label: "Overview" },
-  { route: { name: "runs" }, label: "Runs" },
-  { route: { name: "cycle" }, label: "Cycle" },
-  { route: { name: "board" }, label: "Board" },
-  { route: { name: "review" }, label: "Review" },
-  { route: { name: "release" }, label: "Release" },
-  { route: { name: "reports" }, label: "Reports" },
-  { route: { name: "ducklings" }, label: "Ducklings" },
-  { route: { name: "projects" }, label: "Projects" },
-  { route: { name: "settings" }, label: "Settings" },
+// Three destinations instead of ten (docs/ux-evaluation.md §5.1). The old nav
+// had one tab per engine resource — which is how a client grows when every new
+// endpoint gets its own page — while the person has one workflow smeared
+// across them. Now is the inbox; Work is the project's substance; Records is
+// history and analysis, where nothing ever needs a decision. Configuration
+// lives behind the gear: not a destination a solo dev visits daily.
+type Zone = { label: string; testid: string; home: Route; members: Route["name"][] };
+const ZONES: Zone[] = [
+  { label: "Now", testid: "nav-now", home: { name: "now" }, members: ["now"] },
+  {
+    label: "Work", testid: "nav-work", home: { name: "board" },
+    members: ["board", "cycle"],
+  },
+  {
+    label: "Records", testid: "nav-records", home: { name: "runs" },
+    members: ["runs", "run", "reports", "review", "release", "bench"],
+  },
 ];
+const CONFIG_MEMBERS: Route["name"][] = ["settings", "ducklings", "projects"];
+
+// Within a zone, its rooms. Documents is the old Cycle: for a solo dev the
+// lifecycle documents are work items, not a separate ceremony.
+const SUBNAV: Record<string, { label: string; route: Route }[]> = {
+  Work: [
+    { label: "Documents", route: { name: "cycle" } },
+    { label: "Tasks", route: { name: "board" } },
+    { label: "Bugs", route: { name: "board", tab: "bugs" } },
+  ],
+  Records: [
+    { label: "Runs", route: { name: "runs" } },
+    { label: "Reports", route: { name: "reports" } },
+    { label: "Reviews", route: { name: "review" } },
+    { label: "Releases", route: { name: "release" } },
+    { label: "Bench", route: { name: "bench" } },
+  ],
+  Config: [
+    { label: "Settings", route: { name: "settings" } },
+    { label: "Ducklings", route: { name: "ducklings" } },
+    { label: "Projects", route: { name: "projects" } },
+  ],
+};
+
 
 /** Every view that needs a project says the same thing and points at the one
  * place that fixes it. Before this it said "No project registered yet." and
@@ -229,19 +256,30 @@ export function App() {
       <header className="flex items-center gap-4 border-b border-hairline px-4 py-2">
         <span className="text-md">🦆 ducklab</span>
         <nav className="flex gap-3">
-          {NAV.map((n) => (
+          {ZONES.map((z) => (
             <a
-              key={n.label}
-              href={routeHref(n.route)}
-              data-testid={`nav-${n.route.name}`}
-              className={route.name === n.route.name ? "text-ink" : "text-ink-muted"}
+              key={z.label}
+              href={routeHref(z.home)}
+              data-testid={z.testid}
+              className={z.members.includes(route.name) ? "text-ink" : "text-ink-muted"}
             >
-              {n.label}
-              {n.route.name === "runs" && waitingCount > 0 && (
-                <span className="ml-1 text-serious" data-testid="nav-badge">{waitingCount}</span>
+              {z.label}
+              {/* The waiting count on the inbox, which is where the waiting is. */}
+              {z.label === "Now" && waitingCount > 0 && (
+                <span className="ml-1 text-serious" data-testid="nav-badge">
+                  ● {waitingCount}
+                </span>
               )}
             </a>
           ))}
+          <a
+            href={routeHref({ name: "settings" })}
+            data-testid="nav-config"
+            title="Settings, ducklings and projects"
+            className={CONFIG_MEMBERS.includes(route.name) ? "text-ink" : "text-ink-muted"}
+          >
+            ⚙
+          </a>
         </nav>
         {projects.length > 0 && (
           <select
@@ -262,6 +300,37 @@ export function App() {
         )}
       </header>
 
+      {/* The zone's rooms, when it has more than one. A person inside Work or
+          Records should see where they are and step sideways without a map. */}
+      {(() => {
+        const zone =
+          ZONES.find((z) => z.members.includes(route.name) && z.members.length > 1)?.label ??
+          (CONFIG_MEMBERS.includes(route.name) ? "Config" : "");
+        const rooms = SUBNAV[zone];
+        if (!rooms) return null;
+        const activeRoom = (r: Route) =>
+          r.name === route.name &&
+          (r.name !== "board" ||
+            ("tab" in r ? r.tab : undefined) === ("tab" in route ? route.tab : undefined));
+        return (
+          <div
+            className="flex gap-3 border-b border-hairline px-4 py-1 text-sm"
+            data-testid="subnav"
+          >
+            {rooms.map((r) => (
+              <a
+                key={r.label}
+                href={routeHref(r.route)}
+                data-testid={`subnav-${r.label.toLowerCase()}`}
+                className={activeRoom(r.route) ? "text-ink" : "text-ink-muted"}
+              >
+                {r.label}
+              </a>
+            ))}
+          </div>
+        );
+      })()}
+
       <main
         className={
           "min-h-0 flex-1 overflow-y-auto" + (degraded ? " opacity-60 transition-opacity" : "")
@@ -273,7 +342,6 @@ export function App() {
         {route.name === "now" && client && projectId && (
           <Now client={client} projectId={projectId} />
         )}
-        {route.name === "overview" && <Overview />}
         {route.name === "runs" && (
           <div className="p-4">
             <Runs runs={Object.values(runs)} />
@@ -308,6 +376,14 @@ export function App() {
           (client && projectId ? (
             <div className="p-4">
               <Release client={client} projectId={projectId} />
+            </div>
+          ) : (
+            <NoProject />
+          ))}
+        {route.name === "bench" &&
+          (client && projectId ? (
+            <div className="p-4">
+              <Bench client={client} />
             </div>
           ) : (
             <NoProject />
