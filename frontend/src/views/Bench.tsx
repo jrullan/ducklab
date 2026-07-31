@@ -1,14 +1,18 @@
 /**
- * The Bench tab of Reports (08 §4.7).
+ * Bench: the controlled answer (08 §4.7).
  *
  * A bench answers the same question as a report, from the same tasks every
- * time. This shows past results; starting one is `ducklab bench`, because a
- * bench is minutes to hours and a desktop button that blocks for an afternoon
- * would be a worse thing than a command.
+ * time — which is how "I have a new model, how do I best use it?" actually
+ * gets answered. For a long time this view only showed past results, on the
+ * reasoning that a bench is minutes to hours and a blocking desktop button
+ * would be worse than a command. The conclusion drawn from that true premise
+ * was wrong: the fix was to start one WITHOUT blocking, not to have no way to
+ * start one. Its own empty state pointed at the CLI — the anti-pattern this
+ * codebase keeps paying to remove.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import type { BenchCell, BenchResult, BenchSummary, EngineClient } from "../api/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { BenchCell, BenchResult, BenchSummary, Duckling, EngineClient } from "../api/client";
 import { BarChart, ChartFrame } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
 
@@ -18,6 +22,12 @@ export function Bench({ client }: { client: EngineClient }) {
   const [result, setResult] = useState<BenchResult | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fleet, setFleet] = useState<Duckling[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [modes, setModes] = useState<string[]>(["solo"]);
+  const [inFlight, setInFlight] = useState<{ cells: number } | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const knownStamps = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -34,7 +44,114 @@ export function Bench({ client }: { client: EngineClient }) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    client.ducklings().then(setFleet).catch(() => setFleet([]));
+  }, [load, client]);
+
+  // While a bench is in flight its cells are visible as ordinary runs; the
+  // finished result appears in the list. Polling the list is the plainest
+  // honest signal of completion — a bench belongs to no project, so the
+  // project-scoped event stream never mentions it.
+  useEffect(() => {
+    if (!inFlight) return;
+    knownStamps.current = new Set(runs.map((r) => r.stamp));
+    const timer = setInterval(() => {
+      void client
+        .benchList()
+        .then((list) => {
+          const fresh = list.find((r) => !knownStamps.current.has(r.stamp));
+          if (fresh) {
+            setInFlight(null);
+            setRuns(list);
+            setSelected(fresh.stamp);
+          }
+        })
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inFlight, client]);
+
+  const start = async () => {
+    setStartError(null);
+    try {
+      const out = await client.benchStart({ ducklings: picked, modes });
+      setInFlight({ cells: out.cells });
+    } catch (e) {
+      // The engine validates before anything runs: a misspelled duckling is
+      // refused here, not discovered in a log twenty minutes later.
+      setStartError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const launcher = (
+    <section className="mb-4 rounded-card border border-hairline p-3" data-testid="bench-launcher">
+      <h2 className="text-sm font-medium text-ink">Test models against the standard tasks</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        Nine fixed tasks, each proved to start red and be solvable. The same tasks every
+        time is what makes two models comparable — project runs never are.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+        {fleet.map((d) => (
+          <label key={d.id} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              data-testid={`bench-duckling-${d.id}`}
+              checked={picked.includes(d.id)}
+              onChange={(e) =>
+                setPicked((cur) => (e.target.checked ? [...cur, d.id] : cur.filter((x) => x !== d.id)))
+              }
+            />
+            {d.id}
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
+        {["solo", "pair", "tournament", "split"].map((m) => (
+          <label key={m} className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              data-testid={`bench-mode-${m}`}
+              checked={modes.includes(m)}
+              onChange={(e) =>
+                setModes((cur) => (e.target.checked ? [...cur, m] : cur.filter((x) => x !== m)))
+              }
+            />
+            {m}
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="bench-start"
+          disabled={picked.length === 0 || modes.length === 0 || inFlight !== null}
+          onClick={() => void start()}
+          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+        >
+          Run bench
+        </button>
+        {/* The size of what is about to be bought, before the click. */}
+        {picked.length > 0 && modes.length > 0 && !inFlight && (
+          <span className="text-xs text-ink-muted" data-testid="bench-cells">
+            {picked.length * modes.length * 9} cells ({picked.length} duckling
+            {picked.length === 1 ? "" : "s"} × {modes.length} mode{modes.length === 1 ? "" : "s"} × 9
+            tasks)
+          </span>
+        )}
+        {inFlight && (
+          <span className="text-xs text-ink-secondary" data-testid="bench-running">
+            running {inFlight.cells} cells — each is an ordinary run, watchable in Records ▸ Runs;
+            this list updates when it finishes
+          </span>
+        )}
+        {startError && (
+          <span className="text-xs text-critical" data-testid="bench-start-error">
+            {startError}
+          </span>
+        )}
+      </div>
+    </section>
+  );
 
   useEffect(() => {
     if (selected === null) return;
@@ -52,13 +169,20 @@ export function Bench({ client }: { client: EngineClient }) {
 
   if (loading) return <p className="text-ink-muted">Loading…</p>;
   if (runs.length === 0) {
+    // The empty state IS the launcher: a person with no bench yet is exactly
+    // the person trying to start their first.
     return (
-      <EmptyState message="No bench has run yet — `ducklab bench --ducklings a,b --modes solo,pair`." />
+      <div data-testid="bench-view">
+        {launcher}
+        <EmptyState message="No bench has run yet. Pick ducklings and modes above." />
+      </div>
     );
   }
 
   return (
-    <div data-testid="bench-view" className="flex gap-6">
+    <div data-testid="bench-view">
+      {launcher}
+      <div className="flex gap-6">
       <nav className="w-56 shrink-0 space-y-1">
         {runs.map((r) => (
           <button
@@ -86,6 +210,7 @@ export function Bench({ client }: { client: EngineClient }) {
       <div className="min-w-0 flex-1 space-y-4">
         {failure && <p className="text-critical">{failure}</p>}
         {result && <BenchDetail result={result} />}
+      </div>
       </div>
     </div>
   );

@@ -115,6 +115,8 @@ describe("Reports — Bench tab", () => {
   const benchClient = (cells: unknown[]) =>
     ({
       report: vi.fn(() => Promise.resolve({ by: "mode", baseline: "solo", rows: [], deltas: [], rendered: "" })),
+      ducklings: vi.fn(() => Promise.resolve([{ id: "luna", provider: "openrouter", model: "l" }])),
+      benchStart: vi.fn(() => Promise.resolve({ started: true, suite: "std", cells: 9 })),
       benchList: vi.fn(() =>
         Promise.resolve([
           { suite: "std", suite_version: 2, started_at: "", stamp: "20260729-130000", cells: cells.length, passed: cells.length, errors: 0 },
@@ -179,4 +181,52 @@ describe("Reports — Bench tab", () => {
     expect(link.getAttribute("href")).toBe("#/bench");
     expect(screen.queryByTestId("reports-tab-bench")).toBeNull();
   });
+
+// "I have a new model and want to see how best to use it" had no facility at
+// all: the view only showed past results and its empty state pointed at the
+// CLI. The premise — a bench blocks for an afternoon — was true; the
+// conclusion — therefore no button — was not. It starts without blocking.
+describe("starting a bench from the desktop", () => {
+  it("offers the fleet, the modes, and says how big the matrix is", async () => {
+    render(<Bench client={benchClient([cell({ task: "B-001" })])} />);
+    fireEvent.click(await screen.findByTestId("bench-duckling-luna"));
+    fireEvent.click(screen.getByTestId("bench-mode-pair"));
+    expect(screen.getByTestId("bench-cells").textContent).toContain("18 cells");
+  });
+
+  it("starts it and says the cells are watchable as runs", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    render(<Bench client={client} />);
+    fireEvent.click(await screen.findByTestId("bench-duckling-luna"));
+    fireEvent.click(screen.getByTestId("bench-start"));
+    await waitFor(() =>
+      expect(client.benchStart).toHaveBeenCalledWith({ ducklings: ["luna"], modes: ["solo"] }),
+    );
+    expect(screen.getByTestId("bench-running").textContent).toContain("ordinary run");
+  });
+
+  it("shows the engine's refusal before anything has run", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    (client as unknown as { benchStart: unknown }).benchStart = vi.fn(() =>
+      Promise.reject(new Error('duckling "lunna": not found')),
+    );
+    render(<Bench client={client} />);
+    fireEvent.click(await screen.findByTestId("bench-duckling-luna"));
+    fireEvent.click(screen.getByTestId("bench-start"));
+    await waitFor(() =>
+      expect(screen.getByTestId("bench-start-error").textContent).toContain("lunna"),
+    );
+  });
+
+  // The empty state IS the launcher: a person with no bench yet is exactly the
+  // person trying to start their first. And it no longer names a CLI command.
+  it("greets an empty history with the launcher, not a command", async () => {
+    const client = benchClient([]);
+    (client as unknown as { benchList: unknown }).benchList = vi.fn(() => Promise.resolve([]));
+    render(<Bench client={client} />);
+    expect(await screen.findByTestId("bench-launcher")).toBeTruthy();
+    expect(screen.getByTestId("bench-view").textContent).not.toContain("ducklab bench");
+  });
 });
+});
+

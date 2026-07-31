@@ -204,6 +204,24 @@ func (s *Server) handleSkillRun(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"output": out, "failed": failed})
 }
 
+func (s *Server) handleBenchStart(w http.ResponseWriter, r *http.Request) {
+	var req benchRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	out, err := s.svc.BenchStart(service.BenchOptions{
+		Suite: req.Suite, Ducklings: req.Ducklings, Modes: req.Modes, Keep: req.Keep,
+	})
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, out)
+}
+
 func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 	var req benchRequest
 	if r.ContentLength > 0 {

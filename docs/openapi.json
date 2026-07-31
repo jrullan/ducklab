@@ -1788,6 +1788,35 @@
         "summary": "Run a benchmark suite. No project; every cell is a throwaway."
       }
     },
+    "/v1/bench/start": {
+      "post": {
+        "operationId": "BenchStart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapibenchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a bench without holding the request open: cells run as ordinary runs and the result appears in the list when done."
+      }
+    },
     "/v1/bench/{suite}/{stamp}": {
       "get": {
         "operationId": "BenchGet",

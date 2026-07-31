@@ -29,18 +29,22 @@ import (
 //
 // Removing a line here is the definition of done for closing one.
 var knownGaps = map[string]string{
+	"GET /v1/projects/{id}":                         "one project's record; the desktop lists all and filters, which works until projects number dozens",
+	"PATCH /v1/projects/{id}":                       "editing a project's gate and autonomy — the desktop shows the gate but changing it still means the CLI",
 	"GET /v1/projects/{id}/skills":                  "the skills loop has no desktop surface at all",
 	"GET /v1/projects/{id}/skills/{name}":           "same",
 	"POST /v1/projects/{id}/skills":                 "same",
 	"POST /v1/projects/{id}/skills/{name}/run":      "same",
 	"GET /v1/projects/{id}/roster/suggest":          "roster is editable but the engine's suggestion is not offered",
 	"POST /v1/projects/{id}/roster/suggest":         "same",
-	"POST /v1/projects/{id}/releases/{version}/cut": "a release can be drafted from the desktop but not cut",
+	"POST /v1/projects/{id}/releases":               "drafting a release — believed reachable until the guard learned methods; the path-only match let the GET list excuse it",
+	"POST /v1/projects/{id}/releases/{version}/cut": "cutting a release",
 	"GET /v1/runs/{id}/transcript":                  "the conversation is rebuilt from events; the engine's own rendering is unreachable",
 	"GET /v1/engine":                                "engine version and paths; Settings shows a version it gets from the event stream",
 }
 
 var notInTheDesktop = map[string]string{
+	"POST /v1/bench":       "the blocking form, which answers when the whole matrix is done — the CLI's shape; the desktop starts one with /v1/bench/start and watches the cells as runs",
 	"GET /v1/health":       "liveness for the CLI and the daemon supervisor; the desktop uses the event stream's connection state",
 	"GET /v1/events":       "consumed by api/events.ts, which builds the URL itself rather than going through the client",
 	"GET /v1/openapi.json": "the document itself, for tooling",
@@ -52,15 +56,15 @@ func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {
 	if err != nil {
 		t.Skipf("no desktop client to check: %v", err)
 	}
-	// Every /v1 path the client mentions, with its parameters flattened so a
-	// template matches the route it was written for.
+	// Every method+path the client can send, with parameters flattened so a
+	// template matches the route it was written for. Method-AWARE, because the
+	// path alone let POST /v1/bench hide behind the GET of the same path: a
+	// list the desktop could read excused a launch it could not perform.
 	mentioned := map[string]bool{}
-	for _, m := range regexp.MustCompile("[`\"](/v1[^`\"?]*)").FindAllStringSubmatch(string(client), -1) {
-		p := regexp.MustCompile(`\$\{[^}]+\}`).ReplaceAllString(m[1], "{}")
-		mentioned[strings.TrimRight(p, "/")] = true
-		// A trailing interpolation is often the query string, not a path
-		// segment: `/v1/runs${q}` is the same route as /v1/runs.
-		mentioned[strings.TrimRight(strings.TrimSuffix(p, "{}"), "/")] = true
+	for _, m := range regexp.MustCompile("\"(GET|POST|PUT|DELETE)\",\\s*\\n?\\s*[`\"](/v1[^`\"?]*)").FindAllStringSubmatch(string(client), -1) {
+		p := regexp.MustCompile(`\$\{[^}]+\}`).ReplaceAllString(m[2], "{}")
+		mentioned[m[1]+" "+strings.TrimRight(p, "/")] = true
+		mentioned[m[1]+" "+strings.TrimRight(strings.TrimSuffix(p, "{}"), "/")] = true
 	}
 
 	var gaps []string
@@ -75,7 +79,7 @@ func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {
 		if _, ok := notInTheDesktop[key]; ok {
 			continue
 		}
-		reachable := mentioned[strings.TrimRight(path, "/")]
+		reachable := mentioned[r.Method+" "+strings.TrimRight(path, "/")]
 		if _, known := knownGaps[key]; known {
 			// Closed without being crossed off. Left alone this list rots into
 			// a set of claims nobody checks.

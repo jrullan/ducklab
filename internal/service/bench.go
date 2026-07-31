@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -373,4 +374,54 @@ func readBenchResult(path string) (*bench.Result, error) {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// BenchStart launches a bench without holding the caller's request open.
+//
+// BenchRun answers when the whole matrix has finished, which is right for the
+// CLI — `ducklab bench` waits and prints — and useless for a screen: a bench is
+// minutes to hours, and that fact had been "solved" by giving the desktop no
+// way to start one at all. Its own Bench view's empty state pointed at the CLI,
+// the anti-pattern this codebase keeps paying to remove.
+//
+// Validation happens HERE, synchronously, so a misspelled duckling is refused
+// in the reply rather than discovered in a log twenty minutes later. Every
+// cell then runs as an ordinary run — visible in the runs list and the inbox
+// while it happens — and the finished result appears where BenchList reads.
+func (s *Service) BenchStart(opts BenchOptions) (map[string]interface{}, error) {
+	suite, err := bench.Get(opts.Suite)
+	if err != nil {
+		return nil, err
+	}
+	if len(opts.Ducklings) == 0 {
+		return nil, fmt.Errorf("bench needs at least one duckling")
+	}
+	if len(opts.Modes) == 0 {
+		opts.Modes = []string{"solo"}
+	}
+	for _, m := range opts.Modes {
+		switch m {
+		case "solo", "pair", "tournament", "split":
+		default:
+			return nil, fmt.Errorf("mode %q cannot build a task; want solo, pair, tournament or split", m)
+		}
+	}
+	for _, d := range opts.Ducklings {
+		if _, err := s.ducklings.Get(config.DucklingID(d)); err != nil {
+			return nil, fmt.Errorf("duckling %q: %w", d, err)
+		}
+	}
+
+	cells := len(suite.Tasks) * len(opts.Ducklings) * len(opts.Modes)
+	go func() {
+		// The caller's request is long gone; the bench belongs to the engine.
+		if _, _, err := s.BenchRun(context.Background(), opts); err != nil {
+			log.Printf("bench: %v", err)
+		}
+	}()
+	return map[string]interface{}{
+		"started": true,
+		"suite":   suite.Name,
+		"cells":   cells,
+	}, nil
 }

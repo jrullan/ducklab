@@ -732,6 +732,17 @@ export class EngineClient {
 
   /** Past bench results, newest first. Not project-scoped: a bench measures
    * the models, not a repo. */
+  /** Start a bench without holding the request open: the engine validates the
+   * picks synchronously — a misspelled duckling is refused here, not found in a
+   * log twenty minutes later — then runs every cell as an ordinary run. The
+   * result appears in benchList when it finishes. */
+  benchStart(body: { ducklings: string[]; modes: string[]; suite?: string }) {
+    return this.request<{ started: boolean; suite: string; cells: number }>(
+      "POST",
+      "/v1/bench/start",
+      body,
+    );
+  }
   benchList() {
     return this.request<{ items: BenchSummary[] | null }>("GET", "/v1/bench").then(
       (r) => r.items ?? [],

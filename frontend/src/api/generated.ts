@@ -495,6 +495,7 @@ export interface SkillArg {
 export const OPERATIONS = [
   { id: "BenchList", method: "GET", path: "/v1/bench" },
   { id: "Bench", method: "POST", path: "/v1/bench" },
+  { id: "BenchStart", method: "POST", path: "/v1/bench/start" },
   { id: "BenchGet", method: "GET", path: "/v1/bench/{suite}/{stamp}" },
   { id: "BudgetDefaults", method: "GET", path: "/v1/defaults/budget" },
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
