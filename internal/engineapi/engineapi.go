@@ -769,6 +769,14 @@ func (s *Server) handleTaskRemove(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, out)
 }
 
+func (s *Server) handleArtifactDiscard(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.ArtifactDiscard(r.Context(), r.PathValue("id"), r.PathValue("kind")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"discarded": r.PathValue("kind")})
+}
+
 func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"))
 	if err != nil {

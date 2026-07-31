@@ -692,3 +692,60 @@ describe("adding a feature to a grown project", () => {
     expect(start.textContent).toContain("full traceability");
   });
 });
+
+// The lifecycle keeps a rejected proposal on disk — a failed attempt is a
+// record (05 §1.1) — and this view read "file exists" as "decision pending":
+// a person who had just rejected a draft came back to a screen still awaiting
+// their decision, with the run right there showing it was made.
+describe("a proposal whose run was already decided", () => {
+  const decidedClient = () =>
+    clientWith((p) => {
+      if (p.includes("/artifacts/requirements"))
+        return json({
+          ...REQUIREMENTS,
+          proposal: { diff: "--- a\n+++ b\n@@ -1 +1 @@\n+new", run_id: "r-rejected" },
+        });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+
+  // The shared stub answers /v1/runs/{id} with a paused gate; this suite needs
+  // a decided one, so it overrides the method directly.
+  const withDecidedRun = () => {
+    const c = decidedClient();
+    (c as unknown as { run: unknown }).run = vi.fn(() =>
+      Promise.resolve({ run: { id: "r-rejected", status: "done", verdict: "FAILED", next: [] }, events: [] }),
+    );
+    return c;
+  };
+
+  it("says the decision was made instead of asking again", async () => {
+    render(<Cycle client={withDecidedRun()} projectId="p" />);
+    const note = await screen.findByTestId("cycle-rejected-draft");
+    expect(note.textContent).toContain("You already decided this one");
+    expect(screen.queryByTestId("cycle-proposal")).toBeNull();
+    // And the way forward is open: the start controls are back.
+    expect(screen.getByTestId("cycle-start")).toBeTruthy();
+  });
+
+  it("lets the person discard it as their own act", async () => {
+    const c = withDecidedRun();
+    (c as unknown as { artifactDiscard: unknown }).artifactDiscard = vi.fn(() =>
+      Promise.resolve({ discarded: "requirements" }),
+    );
+    render(<Cycle client={c} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("discard-draft"));
+    await waitFor(() =>
+      expect(
+        (c as unknown as { artifactDiscard: { mock: { calls: unknown[][] } } }).artifactDiscard.mock
+          .calls[0],
+      ).toEqual(["p", "requirements"]),
+    );
+  });
+
+  it("still asks when the gate is genuinely open", async () => {
+    render(<Cycle client={decidedClient()} projectId="p" />);
+    await waitFor(() => expect(screen.getByTestId("cycle-proposal")).toBeTruthy());
+    expect(screen.queryByTestId("cycle-rejected-draft")).toBeNull();
+  });
+});

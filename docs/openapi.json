@@ -2467,6 +2467,43 @@
         "summary": "Accept a pending proposal"
       }
     },
+    "/v1/projects/{id}/artifacts/{kind}/proposal": {
+      "delete": {
+        "operationId": "ArtifactDiscard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discard a pending proposal. A rejected one stays on disk by design (05 §1.1); this is the person's explicit act of letting it go."
+      }
+    },
     "/v1/projects/{id}/bugs": {
       "get": {
         "operationId": "BugList",

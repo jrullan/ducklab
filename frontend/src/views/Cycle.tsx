@@ -105,6 +105,11 @@ export function Cycle({
   // exists to stop encoding; while they load, no button is better than a wrong
   // one.
   const [proposalNext, setProposalNext] = useState<string[]>([]);
+  // Whether the proposing run was already decided. The lifecycle keeps a
+  // rejected proposal on disk (05 §1.1: a failed attempt is a record) — and
+  // this view read "file exists" as "decision pending", so a person who had
+  // just rejected a draft came back to a screen still awaiting their decision.
+  const [proposalDecided, setProposalDecided] = useState(false);
   const proposalRunId = artifact?.proposal?.run_id ?? "";
   useEffect(() => {
     if (!proposalRunId) {
@@ -114,7 +119,11 @@ export function Cycle({
     let cancelled = false;
     client
       .run(proposalRunId)
-      .then((d) => !cancelled && setProposalNext(d.run.next ?? []))
+      .then((d) => {
+        if (cancelled) return;
+        setProposalNext(d.run.next ?? []);
+        setProposalDecided(d.run.status === "done" || d.run.status === "failed");
+      })
       .catch(() => !cancelled && setProposalNext([]));
     return () => {
       cancelled = true;
@@ -270,7 +279,31 @@ export function Cycle({
           </section>
         )}
 
-        {artifact?.proposal && (
+        {artifact?.proposal && proposalDecided && (
+          <section data-testid="cycle-rejected-draft" className="mb-6 rounded-card border border-hairline p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium text-ink">A rejected draft is on disk</div>
+                <div className="text-xs text-ink-muted">
+                  You already decided this one. It stays as the record of a failed attempt;
+                  a new draft will replace it, or let it go now.
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="discard-draft"
+                onClick={() =>
+                  void client.artifactDiscard(projectId, active.kind).then(() => load()).catch(() => {})
+                }
+                className="rounded border border-hairline px-2 py-1 text-xs"
+              >
+                Discard draft
+              </button>
+            </div>
+          </section>
+        )}
+
+        {artifact?.proposal && !proposalDecided && (
           <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
             <DecisionCard
               next={proposalNext}
@@ -320,7 +353,7 @@ export function Cycle({
 
         {loading && <div className="text-sm text-ink-muted">Loading…</div>}
 
-        {!loading && !artifact?.proposal && (
+        {!loading && (!artifact?.proposal || proposalDecided) && (
           <section data-testid="cycle-start" className="mb-6 rounded-card border border-hairline p-3">
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the

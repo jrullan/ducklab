@@ -516,6 +516,7 @@ export const OPERATIONS = [
   { id: "ProjectUpdate", method: "PATCH", path: "/v1/projects/{id}" },
   { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
   { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
+  { id: "ArtifactDiscard", method: "DELETE", path: "/v1/projects/{id}/artifacts/{kind}/proposal" },
   { id: "BugList", method: "GET", path: "/v1/projects/{id}/bugs" },
   { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
   { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },

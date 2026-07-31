@@ -659,6 +659,15 @@ export class EngineClient {
   /** `proposed` names the stages whose pending proposal was checked instead of
    * the approved artifact — the findings are about what you are deciding on,
    * not what you already accepted. */
+  /** Discard a pending proposal. A rejected one stays on disk by design
+   * (05 §1.1) — a failed attempt is a record — so letting it go is a person's
+   * explicit act, never a side effect of the reject. */
+  artifactDiscard(projectId: string, kind: string) {
+    return this.request<{ discarded: string }>(
+      "DELETE",
+      `/v1/projects/${projectId}/artifacts/${kind}/proposal`,
+    );
+  }
   traceCheck(projectId: string) {
     return this.request<{ errors: TraceError[] | null; proposed?: string[] | null }>(
       "GET",

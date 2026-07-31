@@ -783,3 +783,19 @@ func artifactKindForStage(stage string) string {
 	}
 	return ""
 }
+
+// ArtifactDiscard drops a pending proposal by explicit request.
+//
+// The lifecycle keeps a rejected proposal on disk (05 §1.1 step 8) — a failed
+// attempt is a record, not clutter — so discarding is a person's own act, never
+// a side effect of the reject. This is that act.
+func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) error {
+	if !artifact.ValidKind(kind) {
+		return fmt.Errorf("unknown artifact %q", kind)
+	}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return err
+	}
+	return artifact.DiscardProposal(entry.Path, artifact.Kind(kind))
+}
