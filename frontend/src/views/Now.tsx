@@ -36,7 +36,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   // system never ASKED for it either: a bug reached fixed and sat there unless
   // the person remembered the bugs board existed. The question belongs in the
   // queue of questions.
-  const [toVerify, setToVerify] = useState<Bug[]>([]);
+  const [bugs, setBugs] = useState<Bug[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,8 +44,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
     client
       .bugs(projectId)
-      .then((all) => setToVerify(all.filter((b) => b.status === "fixed")))
-      .catch(() => setToVerify([]));
+      .then((all) => setBugs(all))
+      .catch(() => setBugs([]));
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
       .modeDefaults()
@@ -72,7 +72,27 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const active = list.filter((r) => r.status === "running" || r.status === "queued");
   const failures = actionableFailures(list);
 
-  const quiet = waiting.length === 0 && failures.length === 0 && toVerify.length === 0;
+  const toVerify = bugs.filter((b) => b.status === "fixed");
+  // A report sent back after its fix landed, with nothing running for it. The
+  // person said "still broken", and then the system said nothing at all: the
+  // verify card only exists at fixed, in_progress reads as "being worked on",
+  // and nobody was working on it. The reopened state is a queue item — the
+  // next act is a new run — or it is a silence shaped like progress.
+  const inFlight = new Set(
+    list
+      .filter((r) => r.status === "running" || r.status === "queued" || r.status === "paused")
+      .map((r) => r.task_id),
+  );
+  const reopened = bugs.filter(
+    (b) => b.status === "in_progress" && !!b.task_id && !inFlight.has(b.task_id),
+  );
+  const lastModeFor = (taskID: string) =>
+    list
+      .filter((r) => r.task_id === taskID)
+      .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]?.mode ?? "solo";
+
+  const quiet =
+    waiting.length === 0 && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -139,7 +159,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                       onClick={() =>
                         void client
                           .moveBug(projectId, b.id, "verified")
-                          .then(() => setToVerify((cur) => cur.filter((x) => x.id !== b.id)))
+                          .then(() => setBugs((cur) => cur.filter((x) => x.id !== b.id)))
                           .catch(() => {})
                       }
                       className="rounded border border-hairline px-2 py-1 text-xs"
@@ -154,7 +174,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                       onClick={() =>
                         void client
                           .moveBug(projectId, b.id, "in_progress")
-                          .then(() => setToVerify((cur) => cur.filter((x) => x.id !== b.id)))
+                          .then(() =>
+                            setBugs((cur) =>
+                              cur.map((x) => (x.id === b.id ? { ...x, status: "in_progress" } : x)),
+                            ),
+                          )
                           .catch(() => {})
                       }
                       className="rounded border border-hairline px-2 py-1 text-xs"
@@ -164,6 +188,23 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                   )}
                 </div>
               </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {reopened.length > 0 && (
+        <section className="mt-4" data-testid="now-reopened">
+          <h2 className="text-sm text-ink-muted">still broken — nothing is running for these</h2>
+          <ul className="mt-2 space-y-2">
+            {reopened.map((b) => (
+              <ReopenedCard
+                key={b.id}
+                bug={b}
+                mode={lastModeFor(b.task_id!)}
+                client={client}
+                projectId={projectId}
+              />
             ))}
           </ul>
         </section>
@@ -408,5 +449,55 @@ function NowFooter({ runs }: { runs: Run[] }) {
         </>
       )}
     </p>
+  );
+}
+
+/** A reopened report, and the one act that moves it: new work. Launched with
+ * the task's own last mode; the engine fills the mode's saved line-up, the
+ * same as any launch that names no ducklings. */
+function ReopenedCard({
+  bug,
+  mode,
+  client,
+  projectId,
+}: {
+  bug: Bug;
+  mode: string;
+  client: EngineClient;
+  projectId: string;
+}) {
+  const [started, setStarted] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  return (
+    <li data-testid="now-reopened-card" className="rounded-card border border-serious p-3">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="font-mono text-ink">{bug.id}</span>
+        <span className="text-sm text-ink-secondary">{bug.title}</span>
+        <span className="text-xs text-ink-muted">
+          {bug.task_id}&apos;s fix was accepted, and you sent the report back
+        </span>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="now-reopened-run"
+          onClick={() =>
+            void client
+              .runStart(projectId, bug.task_id!, { mode })
+              .then((r) => setStarted(r.id))
+              .catch((e) => setFailure(e instanceof Error ? e.message : String(e)))
+          }
+          className="rounded border border-hairline px-2 py-1 text-xs"
+        >
+          Run {bug.task_id} again ({mode})
+        </button>
+        {started && (
+          <a href={`#/runs/${started}`} data-testid="now-reopened-watch" className="text-xs text-ink underline">
+            watch {started}
+          </a>
+        )}
+        {failure && <span className="text-xs text-critical">{failure}</span>}
+      </div>
+    </li>
   );
 }

@@ -202,3 +202,48 @@ describe("verification in the inbox", () => {
     expect(screen.queryByTestId("now-verify-yes")).toBeNull();
   });
 });
+
+// The person said "still broken", and then the system said nothing at all:
+// the verify card only exists at fixed, in_progress reads as "being worked
+// on", and nobody was working on it. Measured on B-003, which vanished from
+// every queue the moment its reporter sent it back.
+describe("reopened reports in the inbox", () => {
+  beforeEach(() => seed([]));
+
+  const reopened = {
+    id: "B-003", title: "Angle in red vertex does not allow changing", severity: "high",
+    status: "in_progress", task_id: "T-026", source: "desktop",
+    created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:21Z",
+    next: ["fixed", "triaged"],
+  };
+
+  it("surfaces one, offering new work in the task's own last mode", async () => {
+    seed([
+      { ...base, id: "r-old", task_id: "T-026", mode: "pair", status: "done",
+        verdict: "PASSED", accepted: true, pending_kind: undefined,
+        started_at: "2026-07-31T01:20:20Z" },
+    ]);
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-reopened-card");
+    expect(card.textContent).toContain("B-003");
+    expect(card.textContent).toContain("sent the report back");
+    fireEvent.click(screen.getByTestId("now-reopened-run"));
+    await waitFor(() =>
+      expect(client.runStart).toHaveBeenCalledWith("p", "T-026", { mode: "pair" }),
+    );
+  });
+
+  // While new work IS running, the report is genuinely in progress and the
+  // card would be a nag to start a second run against the same tree.
+  it("stays quiet while a run for its task is in flight", async () => {
+    seed([
+      { ...base, id: "r-live", task_id: "T-026", status: "running", verdict: "",
+        pending_kind: undefined },
+    ]);
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-view");
+    expect(screen.queryByTestId("now-reopened-card")).toBeNull();
+  });
+});
