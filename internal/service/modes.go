@@ -175,7 +175,8 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 		return agent.RunTurn(ctx, loop, &agent.Turn{
 			Role: t.Role, Duckling: d, Prompt: prompt, Toolbelt: belt,
 			Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
-			Round: tc.Round, Index: tc.Index,
+			Persona: t.Persona,
+			Round:   tc.Round, Index: tc.Index,
 		}, &turnCtx)
 	}
 }

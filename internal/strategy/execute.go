@@ -319,6 +319,18 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString(rendered)
 		}
 	case config.RoleReviewer:
+		// A document critic gets the draft under its own heading, with the
+		// mechanism spelled out. Presented only as "Conversation so far", the
+		// draft read as chat history and the reviewer went looking for the
+		// real thing with tools — which truthfully reported a world without
+		// it, since a proposal touches nothing until a person accepts it.
+		if turn.Persona == PersonaCritic {
+			b.WriteString("\n\n## The draft under review\n\n" +
+				"The proposal you are critiquing is in the conversation below. " +
+				"It exists only there — not in the tree, not in the artifact " +
+				"store — until a person accepts it, so do not go looking for " +
+				"it with tools.\n")
+		}
 		// The reviewer gets the diff and the conversation with the author's
 		// own turns removed (I7).
 		if params.Diff != nil {

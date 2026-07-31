@@ -464,3 +464,35 @@ func TestNativeDialectGetsNoTextCatalogue(t *testing.T) {
 		}
 	}
 }
+
+// A document council's critic must not get the code-review framing: told to
+// examine "this code" and "the tests", a real critic spent three of its six
+// turns calling git_diff, artifact_read and fs_read in search of a draft that
+// exists only in its conversation.
+func TestTheCriticPersonaSwapsTheReviewerFraming(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Persona: "critic", Prompt: "x"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	var system string
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system += m.Content
+		}
+	}
+	if strings.Contains(system, "did not write this code") {
+		t.Error("a document critic was framed as a code reviewer")
+	}
+	if !strings.Contains(system, "has not been written to the tree or the artifact store") {
+		t.Error("the critic is not told where the draft lives")
+	}
+	// The e2e fake provider recognises reviewer turns by these words; a critic
+	// that drops them breaks every council e2e.
+	if !strings.Contains(system, "You are the reviewer") {
+		t.Error("the critic prompt lost the opening the fake provider matches on")
+	}
+	// And the persona is a narrowing of REVIEWER only.
+	plain := BuildMessages(&Turn{Role: config.RoleReviewer, Prompt: "x"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	if !strings.Contains(plain[0].Content, "did not write this code") {
+		t.Error("a plain reviewer lost the code framing")
+	}
+}

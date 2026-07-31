@@ -78,6 +78,12 @@ type Turn struct {
 	// of one critique read N times. The draft itself always shows: the
 	// architect's draft IS the artifact under review.
 	OmitRole config.Role
+	// Persona narrows the role's system prompt to the situation. "critic"
+	// tells a reviewer it is reading a proposed DOCUMENT that lives only in
+	// the conversation — the code-review framing sent one hunting for a diff
+	// that by design does not exist, and its tools truthfully told it the
+	// wrong story: git_diff empty, artifact_read serving the old document.
+	Persona string
 }
 
 // ResolveToolbelt resolves the turn's toolbelt against its ROLE's ceiling.

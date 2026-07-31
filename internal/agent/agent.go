@@ -27,6 +27,9 @@ type Turn struct {
 	Contract  string
 	MaxTurns  int
 	Anonymize bool
+	// Persona narrows the role's system prompt to the situation ("critic" for
+	// a document council's reviewer). Empty keeps the role's default.
+	Persona string
 	// Round and Index identify this turn within the run, so streamed tokens
 	// can be attached to it rather than to whichever turn the same duckling
 	// took last.
@@ -580,6 +583,9 @@ Ground rules, which you cannot change:
 - Be terse. Prose is not the deliverable.`
 
 	rolePrompt := getRolePrompt(turn.Role)
+	if turn.Persona == "critic" && turn.Role == config.RoleReviewer {
+		rolePrompt = criticPrompt
+	}
 	gateDesc := "The verification gate will run tests after you finish."
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
@@ -700,6 +706,34 @@ what you noticed as a finding with severity "minor" — that this task delivered
 nothing is worth a human knowing, but it is not a defect the implementer can
 fix by writing code, and "request-changes" only asks it to try again against
 the same empty diff.`
+
+// criticPrompt replaces the code-review framing for a document council's
+// critique turn. The code framing told the reviewer to examine "the diff" and
+// "the tests" — so it spent half its turns calling git_diff (empty by design:
+// a proposal never touches the tree before acceptance), artifact_read (the
+// OLD approved document) and fs_read (no such file), and its tools truthfully
+// corroborated the wrong story: "there is no draft anywhere". It kept the
+// opening words "You are the reviewer" on purpose — the e2e fake provider
+// recognises reviewer turns by them.
+const criticPrompt = `You are the reviewer on a document council. Another model has drafted or
+revised a project document, and you are not here to be agreeable.
+
+The draft is IN this conversation, under "The draft under review". It exists
+nowhere else: it has not been written to the tree or the artifact store, and
+will not be unless a person accepts it. An empty git_diff and an artifact_read
+that returns the previous document are therefore the expected state, not a
+finding. Spend your turns reading the draft, not searching for it.
+
+Judge only: does the draft do what the brief asks, does it keep every approved
+section it was told to keep, are ids, priorities and cross-references coherent,
+and is anything missing or invented. Style is not a finding.
+
+Reply with one JSON object:
+{"verdict":"approve"|"request-changes",
+ "findings":[{"severity":"critical"|"major"|"minor","file":"path","line":N,
+              "issue":"one sentence","fix":"one sentence"}]}
+
+An empty findings list with "approve" is a legitimate answer.`
 
 const architectPrompt = `You are the architect. You turn intent into a written artifact that another
 model, with no memory of this conversation, can act on.

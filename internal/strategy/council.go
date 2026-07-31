@@ -16,6 +16,11 @@ import (
 //
 // prefix is the section id prefix the artifact expects (REQ, SPEC, M), which
 // fixes the architect's output contract.
+// PersonaCritic marks a reviewer turn as a document critic: what it reviews
+// is a draft that exists only in the conversation, and its system prompt must
+// say so or the model spends its turns hunting for a diff.
+const PersonaCritic = "critic"
+
 // SoloArtifactScript is one architect, drafting alone.
 //
 // A deviation from 05 §4.4, which names council as the artifact mode. It is
@@ -85,6 +90,7 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 			Toolbelt: "full", // narrowed to the reviewer's read-only ceiling
 			Contract: "verdict",
 			MaxTurns: 6,
+			Persona:  PersonaCritic,
 			// Each critic reads the DRAFT, not the other critics. A critic
 			// shown a fellow critic's findings anchors on them, and N critics
 			// become one critique read N times — the decorrelation the extra

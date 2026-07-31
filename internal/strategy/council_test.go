@@ -257,3 +257,48 @@ func TestCouncilWithNoCriticsKeepsTheOriginalShape(t *testing.T) {
 		t.Errorf("%d reviewer turns, want 1", reviewers)
 	}
 }
+
+// The code-review framing sent a real critic hunting for a diff that by design
+// does not exist: it called git_diff (empty — a proposal never touches the
+// tree), artifact_read (the OLD approved document) and fs_read (no such file),
+// and its tools truthfully corroborated "there is no draft anywhere". Three of
+// its six turns went to archaeology. The critique turn now presents the draft
+// under its own heading with the mechanism spelled out.
+func TestACriticIsToldTheDraftLivesInTheConversation(t *testing.T) {
+	rec := &recorder{}
+	script := CouncilScript("REQ", []config.DucklingID{"pato-local"})
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-016 — Zoom\n\nScroll to zoom."},
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: "## REQ-016 — Zoom\n"},
+	)
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+	critique := rec.prompts[1]
+	if !strings.Contains(critique, "The draft under review") {
+		t.Errorf("the critique prompt never names the draft as the thing under review:\n%s", critique)
+	}
+	if !strings.Contains(critique, "do not go looking for it with tools") {
+		t.Errorf("the critique prompt does not warn off the tool hunt:\n%s", critique)
+	}
+	if !strings.Contains(critique, "Scroll to zoom.") {
+		t.Errorf("the draft itself is missing:\n%s", critique)
+	}
+}
+
+// Every critique turn of a council carries the critic persona; a task-mode
+// reviewer (pair) keeps the code framing, because there a diff IS the thing
+// under review.
+func TestOnlyCouncilCritiquesCarryTheCriticPersona(t *testing.T) {
+	for _, turn := range CouncilScript("REQ", []config.DucklingID{"a", "b"}).Turns {
+		if turn.Role == config.RoleReviewer && turn.Persona != PersonaCritic {
+			t.Errorf("council critique turn without the critic persona: %+v", turn)
+		}
+	}
+	for _, turn := range PairScript().Turns {
+		if turn.Persona != "" {
+			t.Errorf("pair turn carries persona %q", turn.Persona)
+		}
+	}
+}
