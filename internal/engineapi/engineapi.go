@@ -477,7 +477,7 @@ func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRosterGet(w http.ResponseWriter, r *http.Request) {
-	view, err := s.svc.RosterGet(r.Context(), r.PathValue("id"))
+	view, err := s.svc.RosterGet(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"))
 	if err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return

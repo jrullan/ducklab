@@ -1786,11 +1786,17 @@ func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapte
 // and council only ever runs as a stage. The person ticked k3 and luna, saved,
 // launched intake — and watched one model draft AND critique itself, which is
 // the exact decorrelation failure line-ups exist to prevent.
-func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string) {
+// It reports which seats the line-up filled, because provenance is "the
+// line-up named this seat", not "the value changed" — a line-up that happens
+// to agree with the alphabetical default still spoke.
+func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string) []config.Role {
+	var filled []config.Role
 	for i, role := range []config.Role{config.RoleArchitect, config.RoleReviewer} {
 		if i >= len(lineup) || lineup[i] == "" {
-			return
+			break
 		}
 		roster[role] = config.DucklingID(lineup[i])
+		filled = append(filled, role)
 	}
+	return filled
 }

@@ -28,14 +28,31 @@ type RosterView struct {
 // RosterGet returns the roster as it will actually be used, not just what the
 // file declares — an undeclared role still gets a duckling, and hiding that
 // would make the roster look emptier than the runs behave.
-func (s *Service) RosterGet(ctx context.Context, projectID string) (*RosterView, error) {
+// RosterGet answers who would play each role — for the given mode, when one is
+// named.
+//
+// The mode matters because a saved line-up overrides the roster at run time,
+// and this answer is what the desktop shows beside the start button. Without
+// the mode it described a different run than the one about to start: a person
+// saved k3-then-sonnet for council, and the preview went on warning that
+// sonnet would critique its own draft — reading the roster while the run
+// would read the line-up. A preview that lies about who will run is worse
+// than none: it tells the person their setting did not take.
+func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*RosterView, error) {
 	projCfg, err := s.projectConfig(projectID)
 	if err != nil {
 		return nil, err
 	}
-	resolved, warning := s.resolveRoster(projCfg)
+	resolved, _ := s.resolveRoster(projCfg)
 
-	view := &RosterView{Warning: warning}
+	lineup := map[config.Role]bool{}
+	if mode != "" {
+		for _, role := range applyStageLineup(resolved, s.ducklingsFor(mode, nil)) {
+			lineup[role] = true
+		}
+	}
+	view := &RosterView{Warning: bothSidesWarning(resolved)}
+
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
@@ -43,6 +60,9 @@ func (s *Service) RosterGet(ctx context.Context, projectID string) (*RosterView,
 		source := "default"
 		if id, ok := projCfg.Roster[role]; ok && id != "" {
 			source = "project"
+		}
+		if lineup[role] {
+			source = mode + " line-up"
 		}
 		view.Entries = append(view.Entries, RosterEntry{
 			Role: string(role), Duckling: string(resolved[role]), Source: source,
@@ -78,7 +98,7 @@ func (s *Service) RosterSet(ctx context.Context, projectID, role, ducklingID str
 	if err := writeProjectTOML(path, projCfg); err != nil {
 		return nil, fmt.Errorf("write project.toml: %w", err)
 	}
-	return s.RosterGet(ctx, projectID)
+	return s.RosterGet(ctx, projectID, "")
 }
 
 // Suggestion is one ranked candidate for a role.
@@ -179,7 +199,7 @@ func (s *Service) RosterApply(ctx context.Context, projectID string, sugg []Sugg
 			return nil, err
 		}
 	}
-	return s.RosterGet(ctx, projectID)
+	return s.RosterGet(ctx, projectID, "")
 }
 
 // DucklingProbeForce re-probes a duckling, ignoring the cache.

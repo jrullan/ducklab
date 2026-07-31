@@ -58,7 +58,7 @@ func TestRosterGetShowsResolvedAssignmentsAndSource(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
 	projectID, _ := projectWithConfig(t, s, "proj")
 
-	view, err := s.RosterGet(context.Background(), projectID)
+	view, err := s.RosterGet(context.Background(), projectID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestRosterWarnsWhenOneDucklingPlaysBothSides(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-solo")
 	projectID, _ := projectWithConfig(t, s, "proj")
 
-	view, err := s.RosterGet(context.Background(), projectID)
+	view, err := s.RosterGet(context.Background(), projectID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestRosterNoWarningWithTwoDucklings(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
 	projectID, _ := projectWithConfig(t, s, "proj")
 
-	view, _ := s.RosterGet(context.Background(), projectID)
+	view, _ := s.RosterGet(context.Background(), projectID, "")
 	if view.Warning != "" {
 		t.Errorf("unexpected warning with two ducklings: %s", view.Warning)
 	}

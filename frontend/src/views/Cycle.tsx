@@ -89,12 +89,16 @@ export function Cycle({
   // Who will actually do it. A button that says only "Draft it" hides the two
   // things worth knowing before spending minutes and tokens: which models, and
   // whether one of them is going to critique the other.
+  // Asked FOR THE CHOSEN MODE, and refetched when it changes: a council
+  // line-up overrides the roster at run time, and a preview reading the bare
+  // roster warned that one model would critique its own draft while the run
+  // was going to use the two the person had saved.
   useEffect(() => {
     client
-      .roster(projectId)
+      .roster(projectId, mode)
       .then((r) => setRoster(r.entries))
       .catch(() => setRoster([]));
-  }, [client, projectId]);
+  }, [client, projectId, mode]);
 
   // What was asked for, so the document can be read against it. The run id
   // comes from whichever version is on screen: the proposal while one is
