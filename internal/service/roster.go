@@ -53,6 +53,12 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 	}
 	view := &RosterView{Warning: bothSidesWarning(resolved)}
 
+	// A council seats every line-up duckling after the first as a critic, so
+	// the preview lists one reviewer entry per critic — the run will pin each
+	// critique turn to its own model, and a preview naming only one of three
+	// critics is the preview lying about who will run, again.
+	critics := s.stageCritics(mode)
+
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
@@ -64,11 +70,19 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 		if lineup[role] {
 			source = mode + " line-up"
 		}
+		if role == config.RoleReviewer && len(critics) > 1 {
+			for _, c := range critics {
+				view.Entries = append(view.Entries, RosterEntry{
+					Role: string(role), Duckling: string(c), Source: mode + " line-up",
+				})
+			}
+			continue
+		}
 		view.Entries = append(view.Entries, RosterEntry{
 			Role: string(role), Duckling: string(resolved[role]), Source: source,
 		})
 	}
-	sort.Slice(view.Entries, func(i, j int) bool { return view.Entries[i].Role < view.Entries[j].Role })
+	sort.SliceStable(view.Entries, func(i, j int) bool { return view.Entries[i].Role < view.Entries[j].Role })
 	return view, nil
 }
 

@@ -259,15 +259,15 @@ func TestTheTestFirstScriptStopsOnRed(t *testing.T) {
 // is a second model critiquing the draft and that is not always worth its
 // cost.
 func TestAnArtifactStageCanRunSolo(t *testing.T) {
-	council := ArtifactScript("REQ", "")
+	council := ArtifactScript("REQ", "", nil)
 	if council.Name != "council" || len(council.Turns) < 3 {
 		t.Errorf("the default is not a council: %+v", council)
 	}
-	if got := ArtifactScript("REQ", "council"); got.Name != "council" {
+	if got := ArtifactScript("REQ", "council", nil); got.Name != "council" {
 		t.Errorf("explicit council = %q", got.Name)
 	}
 
-	solo := ArtifactScript("REQ", "solo")
+	solo := ArtifactScript("REQ", "solo", nil)
 	if solo.Name != "solo" {
 		t.Fatalf("solo = %q", solo.Name)
 	}
@@ -291,7 +291,7 @@ func TestAnArtifactStageCanRunSolo(t *testing.T) {
 
 // A typo should not stop someone drafting.
 func TestAnUnknownArtifactModeFallsBackToCouncil(t *testing.T) {
-	if got := ArtifactScript("REQ", "tournament"); got.Name != "council" {
+	if got := ArtifactScript("REQ", "tournament", nil); got.Name != "council" {
 		t.Errorf("got %q, want the default", got.Name)
 	}
 }

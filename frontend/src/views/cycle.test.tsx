@@ -545,6 +545,20 @@ describe("Cycle — what the run will actually do", () => {
     );
   });
 
+  // The engine lists one reviewer entry per critic; the preview must name them
+  // all — a preview naming one of three critics says the setting did not take.
+  it("names every critic when the council seats several", async () => {
+    const three = [
+      { role: "architect", duckling: "pato-k3", source: "council line-up" },
+      { role: "reviewer", duckling: "pato-sonnet", source: "council line-up" },
+      { role: "reviewer", duckling: "pato-luna", source: "council line-up" },
+    ];
+    render(<Cycle client={client(three)} projectId="p" />);
+    const who = (await screen.findByTestId("stage-who")).textContent;
+    expect(who).toContain("pato-k3 drafts, pato-sonnet and pato-luna each critique");
+    expect(who).toContain("unless every critic approves");
+  });
+
   // One duckling on both sides measures self-consistency, not review.
   it("warns when the same duckling would critique its own draft", async () => {
     const same = [
@@ -618,7 +632,7 @@ describe("Cycle — how many rounds", () => {
   // number is what it will do at most.
   it("says the extra rounds only happen without approval", async () => {
     render(<Cycle client={client()} projectId="p" />);
-    expect((await screen.findByTestId("stage-who")).textContent).toContain("does not approve");
+    expect((await screen.findByTestId("stage-who")).textContent).toContain("unless pato-local approves");
   });
 
   it("says nothing about going round again at one round", async () => {

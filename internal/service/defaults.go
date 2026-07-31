@@ -126,6 +126,10 @@ type ModeDefaultsView struct {
 	RoleTurns map[string]int `json:"role_turns"`
 	// ScriptRoleTurns is what each role gets when nothing overrides it.
 	ScriptRoleTurns map[string]int `json:"script_role_turns"`
+	// Seats is how many ducklings each mode can seat, zero meaning as many as
+	// are ticked. Reported so a client can stop a third box being ticked for a
+	// two-chair mode instead of accepting a preference that will not run.
+	Seats map[string]int `json:"seats"`
 }
 
 // ScriptRoleTurns are the caps the scripts themselves carry, so a client can
@@ -145,6 +149,17 @@ var ModeRounds = map[string]int{
 	"solo": 3, "pair": 3, "tournament": 1, "council": 2, "split": 1,
 }
 
+// ModeSeats is how many ducklings each mode can seat. Zero means as many as
+// are ticked: council seats one drafter and a critic per remaining duckling,
+// tournament fields every candidate it is given, split spreads over the fleet.
+// Solo is one model by definition, and pair is exactly an implementer and a
+// reviewer. A line-up longer than the mode's chairs used to save fine and
+// silently seat nobody past the limit, which reads as "my setting did not
+// take".
+var ModeSeats = map[string]int{
+	"solo": 1, "pair": 2, "tournament": 0, "council": 0, "split": 0,
+}
+
 // ModeDefaults returns the per-mode round counts and the per-turn call cap.
 func (s *Service) ModeDefaults() ModeDefaultsView {
 	s.cfgMu.RLock()
@@ -156,6 +171,7 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 		Ducklings:       map[string][]string{},
 		RoleTurns:       map[string]int{},
 		ScriptRoleTurns: ScriptRoleTurns,
+		Seats:           ModeSeats,
 	}
 	for mode, n := range s.cfg.Defaults.Rounds {
 		out.Rounds[mode] = n
@@ -205,6 +221,11 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	for mode, ids := range v.Ducklings {
 		if _, ok := ModeRounds[mode]; !ok {
 			return fmt.Errorf("unknown mode %q", mode)
+		}
+		if cap := ModeSeats[mode]; cap > 0 && len(ids) > cap {
+			// Accepting the extra names would save a preference the run can
+			// only ignore, which reads later as "my setting did not take".
+			return fmt.Errorf("mode %q seats %d, and the line-up names %d", mode, cap, len(ids))
 		}
 		for _, id := range ids {
 			if _, ok := s.cfg.Ducklings[config.DucklingID(id)]; !ok {

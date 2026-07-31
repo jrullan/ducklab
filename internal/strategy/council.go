@@ -48,46 +48,74 @@ func SoloArtifactScript(prefix string) *Script {
 //
 // Unknown modes fall back to council rather than failing: the default is the
 // spec's, and a typo should not stop someone drafting.
-func ArtifactScript(prefix, mode string) *Script {
+func ArtifactScript(prefix, mode string, critics []config.DucklingID) *Script {
 	if mode == "solo" {
 		return SoloArtifactScript(prefix)
 	}
-	return CouncilScript(prefix)
+	return CouncilScript(prefix, critics)
 }
 
-func CouncilScript(prefix string) *Script {
+// CouncilScript builds a council: one drafts, the others critique, the first
+// revises.
+//
+// critics pins each critique turn to its own duckling, in line-up order. For a
+// long time the council seated exactly two — which made it a council in name
+// only, and made the third model a person ticked in Settings silently a
+// spectator. The product's whole thesis is decorrelation between cheap models;
+// a draft read by N different models with N different blind spots is that
+// thesis applied to documents. Empty critics seats one unpinned reviewer, the
+// roster's own, which is the original shape.
+func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 	contract := fmt.Sprintf("markdown_sections:%s", prefix)
-	return &Script{
-		Name: "council",
-		Turns: []Turn{
-			{
-				Role:     config.RoleArchitect,
-				Toolbelt: "full",
-				Contract: contract,
-				MaxTurns: 12,
-			},
-			{
-				Role:     config.RoleReviewer,
-				Toolbelt: "full", // narrowed to the reviewer's read-only ceiling
-				Contract: "verdict",
-				MaxTurns: 6,
-			},
-			{
-				// Conditional: the scheduler skips it unless a human is
-				// available and the stage asked for one (05 §4.4).
-				Role:     config.RoleHuman,
-				Contract: "freeform",
-				MaxTurns: 1,
-			},
-			{
-				Role:     config.RoleArchitect,
-				Toolbelt: "full",
-				Contract: contract,
-				MaxTurns: 12,
-			},
+	turns := []Turn{
+		{
+			Role:     config.RoleArchitect,
+			Toolbelt: "full",
+			Contract: contract,
+			MaxTurns: 12,
 		},
+	}
+	if len(critics) == 0 {
+		critics = []config.DucklingID{""}
+	}
+	for _, c := range critics {
+		turns = append(turns, Turn{
+			Role:     config.RoleReviewer,
+			Duckling: c,
+			Toolbelt: "full", // narrowed to the reviewer's read-only ceiling
+			Contract: "verdict",
+			MaxTurns: 6,
+			// Each critic reads the DRAFT, not the other critics. A critic
+			// shown a fellow critic's findings anchors on them, and N critics
+			// become one critique read N times — the decorrelation the extra
+			// seats exist for, undone by the transcript (I7). The architect's
+			// revision turn still sees every critique.
+			Anonymize: true,
+			OmitRole:  config.RoleReviewer,
+		})
+	}
+	turns = append(turns,
+		Turn{
+			// Conditional: the scheduler skips it unless a human is
+			// available and the stage asked for one (05 §4.4).
+			Role:     config.RoleHuman,
+			Contract: "freeform",
+			MaxTurns: 1,
+		},
+		Turn{
+			Role:     config.RoleArchitect,
+			Toolbelt: "full",
+			Contract: contract,
+			MaxTurns: 12,
+		},
+	)
+	return &Script{
+		Name:  "council",
+		Turns: turns,
 		// Two rounds at most: an artifact that has not converged after a draft,
-		// a critique and a revision needs a person, not another lap.
+		// the critiques and a revision needs a person, not another lap. The
+		// round's verdict is the WORST across critics — one request-changes
+		// among approvals is a request for changes.
 		Until:     `verdict == "approve"`,
 		MaxRounds: 2,
 	}

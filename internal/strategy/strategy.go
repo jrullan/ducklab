@@ -74,8 +74,9 @@ type Turn struct {
 	Anonymize bool
 	// OmitRole drops a role's turns from what this turn sees. pair omits the
 	// implementer so the reviewer cannot adopt the author's rationalisation;
-	// council omits nothing, because the architect's draft IS the artifact
-	// under review.
+	// council's critics omit each other, so N critics stay N opinions instead
+	// of one critique read N times. The draft itself always shows: the
+	// architect's draft IS the artifact under review.
 	OmitRole config.Role
 }
 

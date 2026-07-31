@@ -368,6 +368,7 @@ export interface ServiceModeDefaultsView {
   rounds?: Record<string, number>;
   script_role_turns?: Record<string, number>;
   script_rounds?: Record<string, number>;
+  seats?: Record<string, number>;
 }
 
 export interface ServiceProject {

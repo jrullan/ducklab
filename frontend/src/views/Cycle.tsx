@@ -433,7 +433,7 @@ export function Cycle({
                 onChange={(e) => setMode(e.target.value)}
                 className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
               >
-                <option value="council">council — one drafts, another critiques</option>
+                <option value="council">council — one drafts, the others critique</option>
                 <option value="solo">solo — one model, one draft</option>
               </select>
               {mode === "council" && (
@@ -591,18 +591,21 @@ function stripFront(md: string): string {
  * worse than naming nobody.
  */
 function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): string {
-  const who = (role: string) => roster.find((r) => r.role === role)?.duckling;
-  const architect = who("architect");
+  const architect = roster.find((r) => r.role === "architect")?.duckling;
   if (!architect) return "roster not loaded";
   if (mode === "solo") return `${architect} drafts, and nothing reviews it`;
-  const reviewer = who("reviewer");
-  if (!reviewer || reviewer === architect) {
+  // One reviewer entry per critic: the engine lists them all, and each critique
+  // turn runs pinned to its own model.
+  const critics = roster.filter((r) => r.role === "reviewer").map((r) => r.duckling);
+  if (critics.length === 0 || (critics.length === 1 && critics[0] === architect)) {
     // Both sides on one duckling measures self-consistency, not review
     // (05 §3.2). Said here, where the choice is still open.
     return `${architect} drafts and critiques its own draft — set a second duckling in Ducklings`;
   }
-  // The stop condition is the reviewer approving, so the limit is a ceiling
+  const listed =
+    critics.length === 1 ? critics[0] : `${critics.slice(0, -1).join(", ")} and ${critics[critics.length - 1]}`;
+  // The stop condition is EVERY critic approving, so the limit is a ceiling
   // and not a plan: raising it costs nothing on a draft that converges.
-  return `${architect} drafts, ${reviewer} critiques` +
-    (rounds > 1 ? `, and they go round again if ${reviewer} does not approve` : "");
+  return `${architect} drafts, ${listed} ${critics.length === 1 ? "critiques" : "each critique"}` +
+    (rounds > 1 ? `, and they go round again unless ${critics.length === 1 ? critics[0] : "every critic"} approves` : "");
 }

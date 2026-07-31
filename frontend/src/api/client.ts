@@ -124,6 +124,10 @@ export interface ModeDefaultsView {
    * not iterating. */
   role_turns?: Record<string, number>;
   script_role_turns?: Record<string, number>;
+  /** How many ducklings each mode can seat — zero or absent means as many as
+   * are ticked. Rendered as disabled checkboxes, so a full mode says "no more
+   * chairs" at the box instead of failing at Save. */
+  seats?: Record<string, number>;
 }
 
 export interface Duckling {

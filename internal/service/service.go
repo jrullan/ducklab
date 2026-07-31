@@ -1789,6 +1789,33 @@ func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapte
 // It reports which seats the line-up filled, because provenance is "the
 // line-up named this seat", not "the value changed" — a line-up that happens
 // to agree with the alphabetical default still spoke.
+// stageCritics returns the ducklings a council seats as critics: every
+// duckling in the mode's line-up after the first, which drafts. Two ticked
+// boxes give the old shape — one drafter, one critic — and a third box seats
+// a third pair of eyes instead of silently doing nothing, which is what it
+// did for as long as the council had exactly two chairs.
+//
+// A line-up entry that no longer names a real duckling is skipped rather than
+// failing the run: the line-up is a preference, and a deleted model should
+// degrade the council, not close it.
+func (s *Service) stageCritics(mode string) []config.DucklingID {
+	lineup := s.ducklingsFor(mode, nil)
+	if len(lineup) < 2 {
+		return nil
+	}
+	var critics []config.DucklingID
+	for _, id := range lineup[1:] {
+		if id == "" {
+			continue
+		}
+		if _, err := s.ducklings.Get(config.DucklingID(id)); err != nil {
+			continue
+		}
+		critics = append(critics, config.DucklingID(id))
+	}
+	return critics
+}
+
 func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string) []config.Role {
 	var filled []config.Role
 	for i, role := range []config.Role{config.RoleArchitect, config.RoleReviewer} {

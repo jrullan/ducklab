@@ -141,6 +141,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
 		state := conv.State{Round: round}
+		verdictsThisRound := 0
 
 		for i := range script.Turns {
 			turn := script.Turns[i]
@@ -211,9 +212,23 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// Fold the turn's parsed contract value into the round state.
 			switch v := outcome.Parsed.(type) {
 			case *agent.Verdict:
-				state.Verdict = v.Verdict
-				state.NoFindings = len(v.Findings) == 0
-				findings = toConvFindings(v.Findings)
+				// The WORST verdict of the round, not the last: a council seats
+				// several critics now, and one request-changes among approvals
+				// is a request for changes. Overwriting meant the last critic
+				// to speak decided for everyone.
+				if verdictsThisRound == 0 || state.Verdict == "approve" {
+					state.Verdict = v.Verdict
+				}
+				verdictsThisRound++
+				// Findings accumulate across the round's critics — each saw a
+				// different blind spot, which is the reason to seat more than
+				// one — and reset with the next round's fresh draft.
+				if verdictsThisRound == 1 {
+					findings = toConvFindings(v.Findings)
+				} else {
+					findings = append(findings, toConvFindings(v.Findings)...)
+				}
+				state.NoFindings = len(findings) == 0
 			case *agent.Choice:
 				state.Choice = v.Choice
 			}

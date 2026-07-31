@@ -21,7 +21,7 @@ func councilParams(rec *recorder, outcomes ...*agent.Outcome) *ExecuteParams {
 }
 
 func TestCouncilScriptValidates(t *testing.T) {
-	if err := CouncilScript("REQ").Validate(testRegistry(t)); err != nil {
+	if err := CouncilScript("REQ", nil).Validate(testRegistry(t)); err != nil {
 		t.Fatalf("council does not validate: %v", err)
 	}
 }
@@ -37,7 +37,7 @@ func TestCouncilReviewerSeesTheDraft(t *testing.T) {
 		verdictOutcome("approve"),
 		&agent.Outcome{Text: draft},
 	)
-	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ"), params); err != nil {
+	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.prompts) < 2 {
@@ -60,7 +60,7 @@ func TestCouncilArchitectSeesTheCritique(t *testing.T) {
 		}),
 		&agent.Outcome{Text: "## REQ-001 — Revised\n"},
 	)
-	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ"), params); err != nil {
+	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.prompts) < 3 {
@@ -95,7 +95,7 @@ func TestCouncilSkipsTheHumanTurnWhenUnattended(t *testing.T) {
 		verdictOutcome("approve"),
 		&agent.Outcome{Text: "## REQ-001 — Draft\n"},
 	)
-	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ"), params); err != nil {
+	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
 	for _, role := range rec.roles {
@@ -110,7 +110,7 @@ func TestCouncilSkipsTheHumanTurnWhenUnattended(t *testing.T) {
 func TestCouncilStopsAtTwoRounds(t *testing.T) {
 	rec := &recorder{}
 	params := councilParams(rec)
-	res, err := ExecuteScript(context.Background(), CouncilScript("REQ"), params)
+	res, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,139 @@ func TestCouncilStopsAtTwoRounds(t *testing.T) {
 
 func TestCouncilContractFollowsThePrefix(t *testing.T) {
 	for prefix, want := range map[string]string{"REQ": "markdown_sections:REQ", "SPEC": "markdown_sections:SPEC", "M": "markdown_sections:M"} {
-		if got := CouncilScript(prefix).Turns[0].Contract; got != want {
+		if got := CouncilScript(prefix, nil).Turns[0].Contract; got != want {
 			t.Errorf("prefix %q: contract = %q, want %q", prefix, got, want)
 		}
+	}
+}
+
+// A council with three ticked boxes seats three ducklings. For as long as the
+// council had exactly two chairs, the third box saved fine and did nothing —
+// a person ticked k3, sonnet and luna, and luna watched from the gallery.
+func TestCouncilSeatsOneCritiqueTurnPerCritic(t *testing.T) {
+	script := CouncilScript("REQ", []config.DucklingID{"pato-local", "pato-luna"})
+	var critics []config.DucklingID
+	for _, turn := range script.Turns {
+		if turn.Role == config.RoleReviewer {
+			critics = append(critics, turn.Duckling)
+		}
+	}
+	if len(critics) != 2 || critics[0] != "pato-local" || critics[1] != "pato-luna" {
+		t.Fatalf("critique turns pinned to %v, want [pato-local pato-luna]", critics)
+	}
+	if err := script.Validate(testRegistry(t)); err != nil {
+		t.Fatalf("multi-critic council does not validate: %v", err)
+	}
+	// The line-up order runs in order: drafter first, then each critic, then
+	// the revision.
+	rec := &recorder{}
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-001 — Draft\n"},
+		verdictOutcome("approve"),
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: "## REQ-001 — Final\n"},
+	)
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+	want := []config.DucklingID{"pato-atom", "pato-local", "pato-luna", "pato-atom"}
+	if len(rec.ducklings) != len(want) {
+		t.Fatalf("%d turns ran with %v, want %v", len(rec.ducklings), rec.ducklings, want)
+	}
+	for i, d := range want {
+		if rec.ducklings[i] != d {
+			t.Errorf("turn %d ran on %s, want %s", i, rec.ducklings[i], d)
+		}
+	}
+}
+
+// Each critic reads the draft, not the other critics. A critic shown a fellow
+// critic's findings anchors on them, and N critics become one critique read N
+// times — which is the decorrelation the extra seats exist for, undone.
+func TestCouncilCriticsDoNotSeeEachOther(t *testing.T) {
+	rec := &recorder{}
+	script := CouncilScript("REQ", []config.DucklingID{"pato-local", "pato-luna"})
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-001 — Draft\n\nBody of the draft."},
+		verdictOutcome("request-changes", agent.Finding{
+			Severity: "major", File: "requirements.md",
+			Issue: "the scope line is missing", Fix: "add one",
+		}),
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: "## REQ-001 — Revised\n"},
+	)
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+	second := rec.prompts[2]
+	if strings.Contains(second, "the scope line is missing") {
+		t.Error("the second critic was shown the first critic's findings")
+	}
+	if !strings.Contains(second, "Body of the draft.") {
+		t.Errorf("the second critic was not shown the draft:\n%s", second)
+	}
+	// The revision, by contrast, must see every critique — that is its input.
+	revision := rec.prompts[3]
+	if !strings.Contains(revision, "the scope line is missing") {
+		t.Errorf("the revision could not see the first critic's findings:\n%s", revision)
+	}
+}
+
+// The round's verdict is the WORST across its critics. Folding by overwrite
+// meant the last critic to speak decided for everyone: request-changes then
+// approve settled the round as approved, and the objection evaporated.
+func TestCouncilOneRequestChangesOutvotesTheApprovals(t *testing.T) {
+	rec := &recorder{}
+	script := CouncilScript("REQ", []config.DucklingID{"pato-local", "pato-luna"})
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-001 — Draft\n"},
+		verdictOutcome("request-changes", agent.Finding{
+			Severity: "major", File: "requirements.md", Issue: "no scope", Fix: "add one",
+		}),
+		verdictOutcome("approve"), // the LAST critic approves
+		&agent.Outcome{Text: "## REQ-001 — Revised\n"},
+	)
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 2 {
+		t.Errorf("ran %d rounds — an unresolved request-changes must force the second round", res.Rounds)
+	}
+}
+
+// And the converse: unanimous approval settles the round.
+func TestCouncilUnanimousApprovalSettlesTheRound(t *testing.T) {
+	rec := &recorder{}
+	script := CouncilScript("REQ", []config.DucklingID{"pato-local", "pato-luna"})
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-001 — Draft\n"},
+		verdictOutcome("approve"),
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: "## REQ-001 — Final\n"},
+	)
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 1 {
+		t.Errorf("ran %d rounds on a unanimous approval", res.Rounds)
+	}
+}
+
+// No critics is the original council: one unpinned reviewer, the roster's own.
+func TestCouncilWithNoCriticsKeepsTheOriginalShape(t *testing.T) {
+	script := CouncilScript("REQ", nil)
+	var reviewers int
+	for _, turn := range script.Turns {
+		if turn.Role == config.RoleReviewer {
+			reviewers++
+			if turn.Duckling != "" {
+				t.Errorf("the fallback reviewer is pinned to %q; it must come from the roster", turn.Duckling)
+			}
+		}
+	}
+	if reviewers != 1 {
+		t.Errorf("%d reviewer turns, want 1", reviewers)
 	}
 }

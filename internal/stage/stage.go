@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -62,6 +63,9 @@ type Params struct {
 	Revision string
 	// Ducklings that took part, recorded in the artifact's frontmatter.
 	Ducklings []string
+	// Critics pins each of a council's critique turns to its own duckling, in
+	// line-up order. Empty seats the roster's single reviewer.
+	Critics []config.DucklingID
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)
@@ -111,7 +115,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		return nil, err
 	}
 
-	script := strategy.ArtifactScript(kind.Prefix(), p.Mode)
+	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}

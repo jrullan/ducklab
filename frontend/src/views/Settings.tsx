@@ -257,12 +257,19 @@ function ConfigSection({ client }: { client: EngineClient }) {
                   {fleet.map((id) => {
                     const picked = lineups[mode] ?? [];
                     const at = picked.indexOf(id);
+                    // A mode with every chair taken disables its remaining
+                    // boxes: solo seats one, pair exactly two. Ticking a third
+                    // used to save fine and silently seat nobody — the worst
+                    // kind of setting, one that looks taken and is not.
+                    const seats = modes.seats?.[mode] ?? 0;
+                    const full = at < 0 && seats > 0 && picked.length >= seats;
                     return (
-                      <label key={id} className="flex items-center gap-1">
+                      <label key={id} className={"flex items-center gap-1" + (full ? " opacity-40" : "")}>
                         <input
                           type="checkbox"
                           data-testid={`lineup-${mode}-${id}`}
                           checked={at >= 0}
+                          disabled={full}
                           onChange={(e) => {
                             const next = e.target.checked
                               ? [...picked, id]
@@ -273,7 +280,7 @@ function ConfigSection({ client }: { client: EngineClient }) {
                         />
                         {id}
                         {/* The position, because it decides the role: first
-                            implements, second reviews. */}
+                            implements (or drafts), the rest review. */}
                         {at >= 0 && <span className="text-ink-muted">#{at + 1}</span>}
                       </label>
                     );
@@ -288,7 +295,10 @@ function ConfigSection({ client }: { client: EngineClient }) {
         A round is one pass over every participant, so pair spends two turns on
         each. "Model calls per turn" is the separate limit on one participant
         chaining tool calls — a model working in circles is stopped by that, not
-        by the round count. Empty uses the built-in value shown in the box.
+        by the round count. Empty uses the built-in value shown in the box. The
+        order of a line-up decides the roles: solo seats one model, pair seats
+        an implementer and its reviewer, and council seats a drafter and a
+        critic for every further duckling you tick.
       </p>
 
       {/* One button, at the end, after everything it carries. The page used to

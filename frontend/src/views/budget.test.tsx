@@ -242,3 +242,61 @@ describe("saving the settings", () => {
     expect(screen.getAllByText(/^Save/).length).toBe(1);
   });
 });
+
+// Ticking a third duckling for a two-chair mode used to save fine and silently
+// seat nobody — the worst kind of setting, one that looks taken and is not. The
+// engine now reports each mode's capacity and the extra boxes go dark.
+describe("mode seat capacity in Settings", () => {
+  const threeDucks = (over: Partial<EngineClient> = {}) =>
+    clientWith({
+      modeDefaults: vi.fn(() =>
+        Promise.resolve({
+          rounds: {},
+          agent_max_turns: 24,
+          script_rounds: { solo: 3, pair: 3, council: 2 },
+          role_turns: {},
+          script_role_turns: { implementer: 24, reviewer: 8 },
+          seats: { solo: 1, pair: 2, council: 0 },
+        }),
+      ),
+      ducklings: vi.fn(() =>
+        Promise.resolve([
+          { id: "pato-atom", provider: "aitopatom", model: "q" },
+          { id: "pato-sonnet", provider: "openrouter", model: "s" },
+          { id: "pato-luna", provider: "local", model: "l" },
+        ]),
+      ),
+      ...over,
+    } as Partial<EngineClient>);
+
+  it("disables the remaining boxes once a mode's chairs are full", async () => {
+    render(settings(threeDucks()));
+    await waitFor(() => screen.getByTestId("mode-lineups"));
+    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
+    expect((screen.getByTestId("lineup-solo-pato-sonnet") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("lineup-pair-pato-atom"));
+    fireEvent.click(screen.getByTestId("lineup-pair-pato-sonnet"));
+    expect((screen.getByTestId("lineup-pair-pato-luna") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  // Unticking must free the chair again, or a mistake locks the row.
+  it("frees a chair when a duckling is unticked", async () => {
+    render(settings(threeDucks()));
+    await waitFor(() => screen.getByTestId("mode-lineups"));
+    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
+    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
+    expect((screen.getByTestId("lineup-solo-pato-sonnet") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  // Council seats a critic for every further duckling: no box ever goes dark.
+  it("lets council seat the whole fleet", async () => {
+    render(settings(threeDucks()));
+    await waitFor(() => screen.getByTestId("mode-lineups"));
+    fireEvent.click(screen.getByTestId("lineup-council-pato-atom"));
+    fireEvent.click(screen.getByTestId("lineup-council-pato-sonnet"));
+    fireEvent.click(screen.getByTestId("lineup-council-pato-luna"));
+    for (const id of ["pato-atom", "pato-sonnet", "pato-luna"]) {
+      expect((screen.getByTestId(`lineup-council-${id}`) as HTMLInputElement).checked).toBe(true);
+    }
+  });
+});

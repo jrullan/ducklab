@@ -1267,6 +1267,12 @@
               "type": "integer"
             },
             "type": "object"
+          },
+          "seats": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
           }
         },
         "required": [
@@ -1275,7 +1281,8 @@
           "role_turns",
           "rounds",
           "script_role_turns",
-          "script_rounds"
+          "script_rounds",
+          "seats"
         ],
         "type": "object"
       },

@@ -61,3 +61,33 @@ func TestTheLineUpIsCopiedOut(t *testing.T) {
 		t.Errorf("the stored line-up was mutated through a returned slice: %v", again)
 	}
 }
+
+// A line-up longer than the mode's chairs used to save fine and silently seat
+// nobody past the limit — which reads later as "my setting did not take". The
+// engine refuses it at save, and reports each mode's capacity so a client can
+// stop the extra box being ticked at all.
+func TestALineupCannotOutnumberTheModesSeats(t *testing.T) {
+	s := writableService(t, "pato-uno", "pato-dos", "pato-tres")
+	for mode, over := range map[string][]string{
+		"solo": {"pato-uno", "pato-dos"},
+		"pair": {"pato-uno", "pato-dos", "pato-tres"},
+	} {
+		err := s.ModeDefaultsSet(ModeDefaultsView{
+			AgentMaxTurns: 24,
+			Ducklings:     map[string][]string{mode: over},
+		})
+		if err == nil {
+			t.Errorf("%s accepted %d ducklings", mode, len(over))
+		}
+	}
+	// Council has no ceiling any more: one drafts, the rest critique.
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24,
+		Ducklings:     map[string][]string{"council": {"pato-uno", "pato-dos", "pato-tres"}},
+	}); err != nil {
+		t.Errorf("council refused three ducklings: %v", err)
+	}
+	if got := s.ModeDefaults().Seats; got["solo"] != 1 || got["pair"] != 2 || got["council"] != 0 {
+		t.Errorf("seats reported as %v", got)
+	}
+}
