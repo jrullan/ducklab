@@ -116,6 +116,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 
 	roster, warning := s.resolveRoster(projCfg)
+	// The mode's saved line-up, which for council is the ONLY place it can
+	// apply — council never runs as a task. First drafts, second critiques.
+	applyStageLineup(roster, s.ducklingsFor(rs.run.Mode, nil))
 	rs.run.Roster = rosterStrings(roster)
 	if warning != "" {
 		rs.run.Warning = warning
@@ -140,7 +143,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: &runLogAdapter{w: rs.writer},
+		writer: s.llmWriter(rs, tracker),
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)

@@ -1017,10 +1017,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: &runLogAdapter{
-			w: rs.writer, run: rs.run,
-			onSpend: func() { s.publishSpend(rs, tracker) },
-		},
+		writer: s.llmWriter(rs, tracker),
 		loops: map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
@@ -1763,5 +1760,37 @@ func restoreAfterUnaccepted(rs *runState) {
 		rs.writer.AppendEvent("tree_restored", map[string]interface{}{
 			"snapshot": rs.run.TreeSnapshot,
 		})
+	}
+}
+
+// llmWriter builds the adapter every run kind must use.
+//
+// The adapter carries two things beyond the log itself: the run record, so
+// each call is attributed to its duckling, and the spend hook, so the budget
+// meter moves while the money moves. They were wired at ONE of the six places
+// an adapter is built — the same one-of-six disease as the streaming callbacks
+// and the budget ceilings before it — so a council's intake showed a meter at
+// zero for the whole run, and a triage's calls were attributed to nobody.
+func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapter {
+	return &runLogAdapter{
+		w: rs.writer, run: rs.run,
+		onSpend: func() { s.publishSpend(rs, tracker) },
+	}
+}
+
+// applyStageLineup maps a mode's saved line-up onto a stage's roles: the first
+// duckling drafts, the second critiques.
+//
+// Settings has let a person save a council line-up since mode line-ups
+// existed, and nothing ever read it: ducklingsFor was wired into task runs,
+// and council only ever runs as a stage. The person ticked k3 and luna, saved,
+// launched intake — and watched one model draft AND critique itself, which is
+// the exact decorrelation failure line-ups exist to prevent.
+func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string) {
+	for i, role := range []config.Role{config.RoleArchitect, config.RoleReviewer} {
+		if i >= len(lineup) || lineup[i] == "" {
+			return
+		}
+		roster[role] = config.DucklingID(lineup[i])
 	}
 }

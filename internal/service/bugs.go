@@ -237,7 +237,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: &runLogAdapter{w: rs.writer},
+		writer: s.llmWriter(rs, tracker),
 		loops:  map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
