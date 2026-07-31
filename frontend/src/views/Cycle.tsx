@@ -286,19 +286,42 @@ export function Cycle({
                 <div className="text-sm font-medium text-ink">A rejected draft is on disk</div>
                 <div className="text-xs text-ink-muted">
                   You already decided this one. It stays as the record of a failed attempt;
-                  a new draft will replace it, or let it go now.
+                  a new draft will replace it, or let it go now. Your original brief is in
+                  the run&apos;s record either way — reuse it below and edit before starting.
                 </div>
               </div>
-              <button
-                type="button"
-                data-testid="discard-draft"
-                onClick={() =>
-                  void client.artifactDiscard(projectId, active.kind).then(() => load()).catch(() => {})
-                }
-                className="rounded border border-hairline px-2 py-1 text-xs"
-              >
-                Discard draft
-              </button>
+              <div className="flex items-center gap-2">
+                {/* The brief lives in the run's own record, not in the draft —
+                    discarding one never touches the other. But the only path
+                    back to it was retyping: a person who rejected a draft and
+                    wanted another try had to reconstruct their own words from
+                    memory while the originals sat on disk. */}
+                <button
+                  type="button"
+                  data-testid="reuse-brief"
+                  onClick={() =>
+                    void client
+                      .runBrief(proposalRunId)
+                      .then((b) => {
+                        if (b) setBrief(b);
+                      })
+                      .catch(() => {})
+                  }
+                  className="rounded border border-hairline px-2 py-1 text-xs"
+                >
+                  Reuse its brief
+                </button>
+                <button
+                  type="button"
+                  data-testid="discard-draft"
+                  onClick={() =>
+                    void client.artifactDiscard(projectId, active.kind).then(() => load()).catch(() => {})
+                  }
+                  className="rounded border border-hairline px-2 py-1 text-xs"
+                >
+                  Discard draft
+                </button>
+              </div>
             </div>
           </section>
         )}

@@ -743,6 +743,22 @@ describe("a proposal whose run was already decided", () => {
     );
   });
 
+  // The brief lives in the run's record, not in the draft — but the only path
+  // back to it was retyping from memory while the originals sat on disk.
+  it("hands the original brief back into the textarea", async () => {
+    const c = withDecidedRun();
+    (c as unknown as { runBrief: unknown }).runBrief = vi.fn(() =>
+      Promise.resolve("Add undo: ctrl-z reverts the last drag."),
+    );
+    render(<Cycle client={c} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("reuse-brief"));
+    await waitFor(() =>
+      expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain(
+        "ctrl-z reverts the last drag",
+      ),
+    );
+  });
+
   it("still asks when the gate is genuinely open", async () => {
     render(<Cycle client={decidedClient()} projectId="p" />);
     await waitFor(() => expect(screen.getByTestId("cycle-proposal")).toBeTruthy());
