@@ -141,10 +141,7 @@ const bothClient = () =>
 
 describe("Board, the bugs half", () => {
   it("puts each bug in its loop's column", async () => {
-    render(<Board client={bothClient()} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("board-toggle-bugs"));
-
+    render(<Board client={bothClient()} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(BUGS.length));
     expect(screen.getByTestId("board-col-open").textContent).toContain("B-001");
     expect(screen.getByTestId("board-col-triaged").textContent).toContain("B-002");
@@ -152,9 +149,7 @@ describe("Board, the bugs half", () => {
   });
 
   it("filters by severity", async () => {
-    render(<Board client={bothClient()} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("board-toggle-bugs"));
+    render(<Board client={bothClient()} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(BUGS.length));
 
     fireEvent.change(screen.getByTestId("board-severity"), { target: { value: "critical" } });
@@ -165,13 +160,18 @@ describe("Board, the bugs half", () => {
   // The selection belongs to the board that made it: keeping it would leave
   // the rail describing a task while the bugs are on screen.
   it("drops the selection when the board changes", async () => {
-    render(<Board client={bothClient()} projectId="p" />);
+    // The switch arrives as a new route prop — the toggle navigates and the
+    // router hands the board back — so the test switches the way App does.
+    const client = bothClient();
+    const view = render(<Board client={client} projectId="p" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));
     fireEvent.click(screen.getByText("Schema and migrations"));
     expect(screen.getByTestId("board-rail").textContent).toContain("T-001");
 
-    fireEvent.click(screen.getByTestId("board-toggle-bugs"));
-    expect(screen.getByTestId("board-rail").textContent).toContain("Select a bug");
+    view.rerender(<Board client={client} projectId="p" tab="bugs" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("board-rail").textContent).toContain("Select a bug"),
+    );
   });
 
   // The loop's rules live in the engine, so the rail shows the command that
@@ -179,9 +179,7 @@ describe("Board, the bugs half", () => {
   // These used to print the CLI command that fits — honest, but it made the
   // operate loop the one loop a desktop-only user could not run.
   it("offers the next step the bug's status allows, as something to click", async () => {
-    render(<Board client={bothClient()} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("board-toggle-bugs"));
+    render(<Board client={bothClient()} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(BUGS.length));
 
     fireEvent.click(screen.getByText("Login loops")); // open
@@ -545,9 +543,8 @@ describe("filing a bug from the desktop", () => {
     }) as unknown as EngineClient;
 
   const openBugs = async (c: EngineClient) => {
-    render(<Board client={c} projectId="p" />);
+    render(<Board client={c} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getByTestId("board-toggle-bugs")).toBeTruthy());
-    fireEvent.click(screen.getByTestId("board-toggle-bugs"));
   };
 
   it("files a report with the severity as given", async () => {
@@ -616,8 +613,7 @@ describe("moving a bug by hand", () => {
 
   it("offers every move the engine says is legal", async () => {
     const c = client();
-    render(<Board client={c} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("board-toggle-bugs"));
+    render(<Board client={c} projectId="p" tab="bugs" />);
     fireEvent.click(await screen.findByText("vertex drag never starts"));
 
     expect(screen.getByTestId("bug-move-fixed")).toBeTruthy();
@@ -628,8 +624,7 @@ describe("moving a bug by hand", () => {
 
   it("moves it", async () => {
     const c = client();
-    render(<Board client={c} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("board-toggle-bugs"));
+    render(<Board client={c} projectId="p" tab="bugs" />);
     fireEvent.click(await screen.findByText("vertex drag never starts"));
     fireEvent.click(screen.getByTestId("bug-move-fixed"));
 

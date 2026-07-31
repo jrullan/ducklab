@@ -11,7 +11,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { EngineClient, ReportDelta, ReportRow } from "../api/client";
 import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
-import { Bench } from "./Bench";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -21,7 +20,6 @@ const RANGES = [
 ] as const;
 
 export function Reports({ client, projectId }: { client: EngineClient; projectId: string }) {
-  const [tab, setTab] = useState<"runs" | "bench">("runs");
   const [since, setSince] = useState("");
   const [byMode, setByMode] = useState<{ rows: ReportRow[]; deltas: ReportDelta[] } | null>(null);
   const [byDuckling, setByDuckling] = useState<ReportRow[]>([]);
@@ -51,33 +49,19 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
     void load();
   }, [load]);
 
-  // The tabs live above everything, including the loading and empty states: a
-  // project with no runs still has benches worth looking at, and hiding the
-  // tab behind "nothing to measure" would make them unreachable.
+  // Bench used to be a tab here, which left it living in two places once the
+  // Records zone gave it a room of its own — the same data reachable two ways
+  // is a question ("are these different?") nobody should have to ask. One
+  // home, one pointer.
   const tabs = (
-    <div className="mb-3 flex gap-2 border-b border-hairline">
-      {(["runs", "bench"] as const).map((t) => (
-        <button
-          key={t}
-          type="button"
-          onClick={() => setTab(t)}
-          data-testid={`reports-tab-${t}`}
-          className={`px-2 py-1 text-sm ${tab === t ? "text-ink" : "text-ink-muted"}`}
-        >
-          {t === "runs" ? "This project" : "Bench"}
-        </button>
-      ))}
-    </div>
+    <p className="mb-3 text-xs text-ink-muted">
+      Cross-model comparisons live in{" "}
+      <a href="#/bench" data-testid="reports-bench-link" className="text-ink underline">
+        Bench
+      </a>
+      .
+    </p>
   );
-
-  if (tab === "bench") {
-    return (
-      <div data-testid="reports-view">
-        {tabs}
-        <Bench client={client} />
-      </div>
-    );
-  }
 
   if (loading && !byMode) return <p className="text-ink-muted">Loading…</p>;
   if (failure) {

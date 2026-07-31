@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { Bench } from "./Bench";
 import { Reports } from "./Reports";
 import type { EngineClient } from "../api/client";
 
@@ -135,8 +136,7 @@ describe("Reports — Bench tab", () => {
       cell({ task: "B-001", duckling: "pato-atom" }),
       cell({ task: "B-001", duckling: "pato-local" }),
     ]);
-    render(<Reports client={client} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    render(<Bench client={client} />);
     const warning = await screen.findByTestId("no-discrimination");
     expect(warning.textContent).toContain("does not tell these ducklings apart");
     // And it points at what still differs rather than stopping at the bad news.
@@ -149,8 +149,7 @@ describe("Reports — Bench tab", () => {
       cell({ task: "B-001", duckling: "pato-atom" }),
       cell({ task: "B-001", duckling: "pato-local", verdict: "FAILED" }),
     ]);
-    render(<Reports client={client} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    render(<Bench client={client} />);
     await screen.findByTestId("cell-table");
     expect(screen.queryByTestId("no-discrimination")).toBeNull();
   });
@@ -158,24 +157,26 @@ describe("Reports — Bench tab", () => {
   // A harness failure and a model failure are different findings.
   it("shows a cell that could not run as its own outcome", async () => {
     const client = benchClient([cell({ task: "B-001", verdict: "", error: "engine died" })]);
-    render(<Reports client={client} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    render(<Bench client={client} />);
     const rows = await screen.findAllByTestId("cell-row");
     expect(rows[0]!.textContent).toContain("could not run");
   });
 
   it("marks an estimated token count", async () => {
     const client = benchClient([cell({ task: "B-001", estimated: true })]);
-    render(<Reports client={client} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("reports-tab-bench"));
+    render(<Bench client={client} />);
     const rows = await screen.findAllByTestId("cell-row");
     expect(rows[0]!.textContent).toContain("~");
   });
 
-  // A project with no runs still has benches worth looking at.
-  it("reaches the bench tab from a project with nothing to measure", async () => {
+  // One home: the tab became a room under Records, and Reports points at it
+  // rather than duplicating it — the same data reachable two ways is a
+  // question nobody should have to ask.
+  it("points at Bench instead of embedding a second copy", async () => {
     const client = benchClient([cell({ task: "B-001" })]);
     render(<Reports client={client} projectId="p" />);
-    expect(await screen.findByTestId("reports-tab-bench")).toBeTruthy();
+    const link = await screen.findByTestId("reports-bench-link");
+    expect(link.getAttribute("href")).toBe("#/bench");
+    expect(screen.queryByTestId("reports-tab-bench")).toBeNull();
   });
 });

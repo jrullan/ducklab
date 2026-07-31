@@ -56,7 +56,15 @@ export function Board({
   projectId: string;
   tab?: string;
 }) {
-  const [board, setBoard] = useState<"tasks" | "bugs">(tab === "bugs" ? "bugs" : "tasks");
+  // Derived from the route, never held beside it. This was useState seeded
+  // from the prop, which reads it exactly once — so the Work subnav's Tasks
+  // and Bugs links changed the hash, the prop arrived, and the mounted board
+  // ignored it: two links, one unchanging screen. The toggle below navigates,
+  // and the route is the only opinion about which board is showing.
+  const board: "tasks" | "bugs" = tab === "bugs" ? "bugs" : "tasks";
+  const setBoard = (b: "tasks" | "bugs") => {
+    location.hash = b === "bugs" ? "#/board/bugs" : "#/board";
+  };
   const [tasks, setTasks] = useState<Task[]>([]);
   // Needed to offer a choice of ducklings when starting a run. Failing to load
   // them is not worth blocking the board over: with none, the roster decides.
@@ -87,6 +95,12 @@ export function Board({
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // The selection belongs to the board that made it: keeping it across a
+  // switch would leave the rail describing a task while the bugs are on
+  // screen. On board change — from the toggle or the Work subnav alike.
+  useEffect(() => {
+    setSelected(null);
+  }, [board]);
   const [milestone, setMilestone] = useState("");
   const [severity, setSeverity] = useState("");
   const [query, setQuery] = useState("");
@@ -217,13 +231,7 @@ export function Board({
               key={b}
               data-testid={`board-toggle-${b}`}
               aria-pressed={board === b}
-              onClick={() => {
-                setBoard(b);
-                // The selection belongs to the board that made it: keeping it
-                // would leave the rail describing a task while the bugs are
-                // on screen.
-                setSelected(null);
-              }}
+              onClick={() => setBoard(b)}
               className={
                 "rounded border px-2 py-1 text-sm " +
                 (board === b ? "border-ink text-ink" : "border-hairline text-ink-muted")
