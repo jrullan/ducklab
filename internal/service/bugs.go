@@ -611,18 +611,24 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		if files, ok := p["suspected_files"].([]string); ok {
 			rec.SuspectedFiles = strings.Join(files, "\n")
 		}
-		// A duplicate is closed by being one; it does not need its own fix.
-		to := bug.Triaged
-		if rec.DuplicateOf != "" {
-			to = bug.Duplicate
+		// A classification must never undo a promotion. Move(InProgress,
+		// Triaged) is a LEGAL transition — it exists so a person can send
+		// half-started work back — so relying on Move to refuse was wrong:
+		// accepting a stale triage run after the bug had become a task quietly
+		// regressed it, and the accept of that task then found nothing in
+		// in_progress to close. Measured: a bug double-triaged, promoted, and
+		// knocked back by the second gate twelve minutes later, to the second.
+		// Its words still update; its place in the loop is not triage's to take.
+		if rec.TaskID == "" && bug.Status(rec.Status) == bug.Open {
+			to := bug.Triaged
+			// A duplicate is closed by being one; it does not need its own fix.
+			if rec.DuplicateOf != "" {
+				to = bug.Duplicate
+			}
+			if next, err := bug.Move(bug.Status(rec.Status), to); err == nil {
+				rec.Status = string(next)
+			}
 		}
-		next, err := bug.Move(bug.Status(rec.Status), to)
-		if err != nil {
-			// Already past triage. Its classification still updates; forcing
-			// the status backwards would undo work someone did after it.
-			next = bug.Status(rec.Status)
-		}
-		rec.Status = string(next)
 		if err := db.UpdateBug(rec); err != nil {
 			return applied, err
 		}
@@ -656,14 +662,28 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		return "", err
 	}
 	for _, rec := range recs {
-		if rec.TaskID != taskID || rec.Status != string(bug.InProgress) {
+		if rec.TaskID != taskID {
 			continue
 		}
-		next, err := bug.Move(bug.Status(rec.Status), bug.Fixed)
-		if err != nil {
-			return "", err
+		// Walk the legal chain to fixed from wherever the report stands. It
+		// used to demand in_progress exactly and skip in silence — so a bug a
+		// stale triage had knocked back to triaged watched its own task get
+		// accepted and moved nowhere, with no event saying why.
+		st := bug.Status(rec.Status)
+		switch st {
+		case bug.Fixed, bug.Verified, bug.Closed:
+			// Already at or past the point this would move it to.
+			return "", nil
 		}
-		rec.Status = string(next)
+		for _, step := range []bug.Status{bug.InProgress, bug.Fixed} {
+			if next, err := bug.Move(st, step); err == nil {
+				st = next
+			}
+		}
+		if st != bug.Fixed {
+			return "", fmt.Errorf("%s is %s and cannot reach fixed from there", rec.ID, rec.Status)
+		}
+		rec.Status = string(st)
 		if err := db.UpdateBug(rec); err != nil {
 			return "", err
 		}

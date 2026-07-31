@@ -15,6 +15,8 @@ const base: Run = {
 const clientWith = (over: Partial<EngineClient> = {}) =>
   ({
     taskNext: vi.fn(() => Promise.resolve(null)),
+    bugs: vi.fn(() => Promise.resolve([])),
+    moveBug: vi.fn(() => Promise.resolve({})),
     ducklings: vi.fn(() => Promise.resolve([])),
     modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
     accept: vi.fn(() => Promise.resolve({ commit_sha: "abc1234" })),
@@ -157,5 +159,46 @@ describe("the inbox's footer", () => {
     render(<Now client={clientWith()} projectId="p" />);
     await screen.findByTestId("now-view");
     expect(screen.queryByTestId("now-footer")).toBeNull();
+  });
+});
+
+// "Verified" is the one judgement a run must not make for a person — but the
+// system never ASKED for it either. A bug reached fixed and sat there unless
+// the person remembered the bugs board existed; the question belongs in the
+// queue of questions.
+describe("verification in the inbox", () => {
+  beforeEach(() => seed([]));
+
+  const fixedBug = {
+    id: "B-003", title: "Angle in red vertex does not allow changing", severity: "high",
+    status: "fixed", task_id: "T-026", source: "desktop",
+    created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:35:00Z",
+    next: ["verified", "in_progress"],
+  };
+
+  it("asks whether the fix actually answered the report", async () => {
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-verify-card");
+    expect(card.textContent).toContain("B-003");
+    expect(card.textContent).toContain("fixed by T-026");
+    // The honest caveat, from the project that taught it: 21 accepted tasks
+    // against a syntax gate and the feature never worked.
+    expect(card.textContent).toContain("may prove much less");
+  });
+
+  it("moves it with the person's verdict, either way", async () => {
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-verify-yes"));
+    await waitFor(() => expect(client.moveBug).toHaveBeenCalledWith("p", "B-003", "verified"));
+  });
+
+  it("offers only what the engine states", async () => {
+    const stuck = { ...fixedBug, next: [] as string[] };
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([stuck])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-verify-card");
+    expect(screen.queryByTestId("now-verify-yes")).toBeNull();
   });
 });

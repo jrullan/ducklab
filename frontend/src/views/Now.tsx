@@ -10,7 +10,7 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useState } from "react";
-import type { Duckling, EngineClient, Run, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, Run, Task } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
@@ -31,11 +31,21 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
   const [estimates, setEstimates] = useState<ModeEstimates>({});
   const [started, setStarted] = useState<string | null>(null);
+  // Reports whose fix landed. "Verified" is the one judgement a run must not
+  // make for a person — the gate that passed may be a syntax check — but the
+  // system never ASKED for it either: a bug reached fixed and sat there unless
+  // the person remembered the bugs board existed. The question belongs in the
+  // queue of questions.
+  const [toVerify, setToVerify] = useState<Bug[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
+    client
+      .bugs(projectId)
+      .then((all) => setToVerify(all.filter((b) => b.status === "fixed")))
+      .catch(() => setToVerify([]));
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
       .modeDefaults()
@@ -62,7 +72,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const active = list.filter((r) => r.status === "running" || r.status === "queued");
   const failures = actionableFailures(list);
 
-  const quiet = waiting.length === 0 && failures.length === 0;
+  const quiet = waiting.length === 0 && failures.length === 0 && toVerify.length === 0;
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -102,6 +112,58 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                   return st?.kind === "error" ? st.message : undefined;
                 })()}
               />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {toVerify.length > 0 && (
+        <section className="mt-4" data-testid="now-verify">
+          <h2 className="text-sm text-ink-muted">fixed — did it actually answer the report?</h2>
+          <ul className="mt-2 space-y-2">
+            {toVerify.map((b) => (
+              <li key={b.id} data-testid="now-verify-card" className="rounded-card border border-hairline p-3">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-mono text-ink">{b.id}</span>
+                  <span className="text-sm text-ink-secondary">{b.title}</span>
+                  {b.task_id && <span className="text-xs text-ink-muted">fixed by {b.task_id}</span>}
+                </div>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Try what the report describes. The gate that passed may prove much less.
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  {(b.next ?? []).includes("verified") && (
+                    <button
+                      type="button"
+                      data-testid="now-verify-yes"
+                      onClick={() =>
+                        void client
+                          .moveBug(projectId, b.id, "verified")
+                          .then(() => setToVerify((cur) => cur.filter((x) => x.id !== b.id)))
+                          .catch(() => {})
+                      }
+                      className="rounded border border-hairline px-2 py-1 text-xs"
+                    >
+                      Verified — it works
+                    </button>
+                  )}
+                  {(b.next ?? []).includes("in_progress") && (
+                    <button
+                      type="button"
+                      data-testid="now-verify-no"
+                      onClick={() =>
+                        void client
+                          .moveBug(projectId, b.id, "in_progress")
+                          .then(() => setToVerify((cur) => cur.filter((x) => x.id !== b.id)))
+                          .catch(() => {})
+                      }
+                      className="rounded border border-hairline px-2 py-1 text-xs"
+                    >
+                      Still broken
+                    </button>
+                  )}
+                </div>
+              </li>
             ))}
           </ul>
         </section>
