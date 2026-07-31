@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BenchCell, BenchResult, BenchSummary, Duckling, EngineClient } from "../api/client";
+import type { BenchCell, BenchResult, BenchSummary, Duckling, EngineClient, Run } from "../api/client";
 import { BarChart, ChartFrame } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
 
@@ -26,6 +26,7 @@ export function Bench({ client }: { client: EngineClient }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [modes, setModes] = useState<string[]>(["solo"]);
   const [inFlight, setInFlight] = useState<{ cells: number } | null>(null);
+  const [cellRuns, setCellRuns] = useState<Run[]>([]);
   const [startError, setStartError] = useState<string | null>(null);
   const knownStamps = useRef<Set<string>>(new Set());
 
@@ -47,26 +48,35 @@ export function Bench({ client }: { client: EngineClient }) {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [load, client]);
 
-  // While a bench is in flight its cells are visible as ordinary runs; the
-  // finished result appears in the list. Polling the list is the plainest
-  // honest signal of completion — a bench belongs to no project, so the
-  // project-scoped event stream never mentions it.
+  // While a bench is in flight, its progress lives HERE. Each cell runs in a
+  // throwaway project (ducklab-bench-*), so the desktop's project-scoped runs
+  // list never shows one — a lesson bought by writing "watchable in Records ▸
+  // Runs" on this very screen and being wrong. The unfiltered runs list is
+  // polled for the cells, and the bench list for the finished result; a bench
+  // belongs to no project, so the event stream never mentions either.
   useEffect(() => {
     if (!inFlight) return;
     knownStamps.current = new Set(runs.map((r) => r.stamp));
-    const timer = setInterval(() => {
+    const poll = () => {
+      void client
+        .runs()
+        .then((all) => setCellRuns(all.filter((r) => r.project_id.startsWith("ducklab-bench-"))))
+        .catch(() => {});
       void client
         .benchList()
         .then((list) => {
           const fresh = list.find((r) => !knownStamps.current.has(r.stamp));
           if (fresh) {
             setInFlight(null);
+            setCellRuns([]);
             setRuns(list);
             setSelected(fresh.stamp);
           }
         })
         .catch(() => {});
-    }, 10000);
+    };
+    poll();
+    const timer = setInterval(poll, 5000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inFlight, client]);
@@ -140,8 +150,8 @@ export function Bench({ client }: { client: EngineClient }) {
         )}
         {inFlight && (
           <span className="text-xs text-ink-secondary" data-testid="bench-running">
-            running {inFlight.cells} cells — each is an ordinary run, watchable in Records ▸ Runs;
-            this list updates when it finishes
+            running {inFlight.cells} cells — progress below; the result appears here when it
+            finishes
           </span>
         )}
         {startError && (
@@ -150,6 +160,33 @@ export function Bench({ client }: { client: EngineClient }) {
           </span>
         )}
       </div>
+      {inFlight && cellRuns.length > 0 && (
+        <div className="mt-2 border-t border-hairline pt-2" data-testid="bench-progress">
+          <span className="text-xs text-ink-muted" data-testid="bench-progress-count">
+            {cellRuns.filter((r) => r.status === "done" || r.status === "failed").length} of{" "}
+            {inFlight.cells} cells done
+          </span>
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {cellRuns.map((r) => (
+              <li key={r.id} data-testid="bench-cell-run" className="flex gap-2 tabular-nums">
+                <span className="font-mono text-ink">{r.task_id}</span>
+                <span className="text-ink-secondary">{r.mode}</span>
+                <span
+                  className={
+                    r.status === "failed" || r.verdict === "FAILED"
+                      ? "text-critical"
+                      : r.status === "done"
+                        ? "text-good"
+                        : "text-ink-muted"
+                  }
+                >
+                  {r.status === "done" || r.status === "failed" ? r.verdict.toLowerCase() : r.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 

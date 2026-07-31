@@ -117,6 +117,7 @@ describe("Reports — Bench tab", () => {
       report: vi.fn(() => Promise.resolve({ by: "mode", baseline: "solo", rows: [], deltas: [], rendered: "" })),
       ducklings: vi.fn(() => Promise.resolve([{ id: "luna", provider: "openrouter", model: "l" }])),
       benchStart: vi.fn(() => Promise.resolve({ started: true, suite: "std", cells: 9 })),
+      runs: vi.fn(() => Promise.resolve([])),
       benchList: vi.fn(() =>
         Promise.resolve([
           { suite: "std", suite_version: 2, started_at: "", stamp: "20260729-130000", cells: cells.length, passed: cells.length, errors: 0 },
@@ -202,7 +203,7 @@ describe("starting a bench from the desktop", () => {
     await waitFor(() =>
       expect(client.benchStart).toHaveBeenCalledWith({ ducklings: ["luna"], modes: ["solo"] }),
     );
-    expect(screen.getByTestId("bench-running").textContent).toContain("ordinary run");
+    expect(screen.getByTestId("bench-running").textContent).toContain("progress below");
   });
 
   it("shows the engine's refusal before anything has run", async () => {
@@ -216,6 +217,32 @@ describe("starting a bench from the desktop", () => {
     await waitFor(() =>
       expect(screen.getByTestId("bench-start-error").textContent).toContain("lunna"),
     );
+  });
+
+  // Each cell runs in a throwaway project, so the desktop's project-scoped
+  // runs list never shows one. This screen said "watchable in Records ▸ Runs"
+  // and was wrong; the progress lives where the person already is.
+  it("shows the cells' own progress while it runs", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    (client as unknown as { runs: unknown }).runs = vi.fn(() =>
+      Promise.resolve([
+        { id: "r-c1", project_id: "ducklab-bench-x1", task_id: "B-001", mode: "solo",
+          status: "done", verdict: "PASSED", started_at: "" },
+        { id: "r-c2", project_id: "ducklab-bench-x2", task_id: "B-002", mode: "solo",
+          status: "running", verdict: "", started_at: "" },
+        { id: "r-p", project_id: "calculator", task_id: "T-001", mode: "solo",
+          status: "running", verdict: "", started_at: "" },
+      ]),
+    );
+    render(<Bench client={client} />);
+    fireEvent.click(await screen.findByTestId("bench-duckling-luna"));
+    fireEvent.click(screen.getByTestId("bench-start"));
+
+    const progress = await screen.findByTestId("bench-progress");
+    expect(screen.getByTestId("bench-progress-count").textContent).toContain("1 of 9 cells done");
+    // The project's own runs are not bench cells and do not belong here.
+    expect(progress.textContent).not.toContain("T-001");
+    expect(progress.textContent).toContain("B-002");
   });
 
   // The empty state IS the launcher: a person with no bench yet is exactly the
