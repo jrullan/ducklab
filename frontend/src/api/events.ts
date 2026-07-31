@@ -165,7 +165,8 @@ export class EventSubscriber {
       return;
     }
 
-    // Only persisted events advance the resume point. token_delta and
+    // Only persisted events advance the resume point. token_delta,
+    // reasoning_delta and
     // heartbeat carry no seq and must not move it, or a reconnect would skip
     // real events.
     if (typeof parsed.seq === "number" && parsed.seq > this.lastSeq) {
@@ -205,6 +206,17 @@ export const KNOWN_EVENT_TYPES = [
   "candidate",
   "triage_failed",
   "triage",
+  "triage_applied",
+  "bug_fixed",
+  "tree_restored",
+  // Emitted by modes and the gate. Registered even where nothing renders them
+  // yet: an event the desktop does not know cannot be stored or replayed, and
+  // the run log a client rebuilds would be missing what actually happened.
+  "settled",
+  "contestant_failed",
+  "no_changes",
+  "tests_modified",
+  "skill_problems",
   "release_drafted",
   "review_written",
   "split_result",
@@ -220,6 +232,8 @@ export const KNOWN_EVENT_TYPES = [
   "error",
   "budget",
   "token_delta",
+  "reasoning_delta",
+  "budget",
   "heartbeat",
   "overflow",
   "engine_recovered",

@@ -2,6 +2,21 @@ import { create } from "zustand";
 import type { Run } from "../api/client";
 import type { DucklabEvent, ConnectionState } from "../api/events";
 
+/** One run's spend so far, as the engine reports it while the run is going. */
+export type LiveSpend = {
+  usd: number;
+  tokens: number;
+  turns: number;
+  wallclock_s: number;
+  limit: { usd: number; tokens: number; turns: number; wallclock_s: number };
+  /** Keyed by duckling, because "the run has spent 300k" does not say which
+   * model to change. */
+  ducklings: Record<
+    string,
+    { calls: number; tokens: number; cost_usd: number; estimated?: boolean }
+  >;
+};
+
 /**
  * Run state for the UI.
  *
@@ -22,6 +37,15 @@ export interface RunsState {
   events: Record<string, DucklabEvent[]>;
   /** Streamed text per run, keyed by duckling. Display only, never persisted. */
   deltas: Record<string, Record<string, string>>;
+  /** Streamed thinking, keyed exactly like deltas. Kept apart from the answer
+   * all the way to the screen: a model that reasons pays for those tokens
+   * whether or not anyone sees them, but folding them into the reply would show
+   * its false starts as what it said. */
+  reasoning: Record<string, Record<string, string>>;
+  /** What each run has spent so far, and which duckling spent it. The totals
+   * only reached the run record when the run ended, so the meter read zero for
+   * however long the work took and then jumped to the final number. */
+  spend: Record<string, LiveSpend>;
   connection: ConnectionState;
   acceptState: Record<string, AcceptState>;
   /** True after an overflow, until the caller refetches. */
@@ -49,6 +73,8 @@ export const useRuns = create<RunsState>((set) => ({
   runs: {},
   events: {},
   deltas: {},
+  reasoning: {},
+  spend: {},
   connection: "connecting",
   acceptState: {},
   needsResync: false,
@@ -69,6 +95,20 @@ export const useRuns = create<RunsState>((set) => ({
         const forRun = { ...(state.deltas[runId] ?? {}) };
         forRun[key] = (forRun[key] ?? "") + text;
         return { ...state, deltas: { ...state.deltas, [runId]: forRun } };
+      }
+      if (e.type === "reasoning_delta") {
+        const key = deltaKey(e.data);
+        const text = String(e.data?.text ?? "");
+        const forRun = { ...(state.reasoning[runId] ?? {}) };
+        forRun[key] = (forRun[key] ?? "") + text;
+        return { ...state, reasoning: { ...state.reasoning, [runId]: forRun } };
+      }
+      if (e.type === "budget") {
+        const d = e.data ?? {};
+        return {
+          ...state,
+          spend: { ...state.spend, [runId]: d as unknown as LiveSpend },
+        };
       }
       if (e.type === "heartbeat") return state;
 
@@ -148,7 +188,12 @@ export const useRuns = create<RunsState>((set) => ({
     set((state) => ({
       ...state,
       runs: { ...state.runs, [run.id]: run },
-      events: { ...state.events, [run.id]: events.filter((e) => e && e.type !== "token_delta") },
+      events: {
+        ...state.events,
+        [run.id]: events.filter(
+          (e) => e && e.type !== "token_delta" && e.type !== "reasoning_delta",
+        ),
+      },
     })),
 
   setConnection: (connection) => set((state) => ({ ...state, connection })),

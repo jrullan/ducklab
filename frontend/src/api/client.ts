@@ -60,7 +60,66 @@ export interface Run {
   pending_data?: Record<string, unknown>;
   resolution?: string;
   warning?: string;
-  budget?: { usd: number; tokens: number; turns: number; wallclock_s: number };
+  /** Why the run failed, in the engine's words. Some of these are written to be
+   * acted on — split names the file two subtasks both claimed. */
+  failure?: string;
+  budget?: {
+    usd: number;
+    tokens: number;
+    turns: number;
+    wallclock_s: number;
+    /** What this run was actually given. The meter used to hardcode 400000, so a
+     * run started with a raised ceiling was drawn against a limit it did not
+     * have. */
+    limit?: { usd: number; tokens: number; turns: number; wallclock_s: number };
+  };
+}
+
+/** How the model is asked to generate. The engine has always accepted these;
+ * the desktop form sent none of them, so max_tokens and disable_thinking were
+ * reachable only by hand-editing config.toml — and because the form posted an
+ * empty `params`, editing a duckling in the UI wiped whatever was there. */
+export interface SamplingParams {
+  temperature?: number | null;
+  top_p?: number | null;
+  max_tokens?: number | null;
+  disable_thinking?: boolean;
+  stop?: string[] | null;
+}
+
+/** The default run budget. Mirrors service.BudgetView.
+ *
+ * max_tokens counts prompt AND completion, every round. Each model call
+ * re-sends the whole conversation, so the same context is counted again on each
+ * one — a run can spend most of its budget on input without writing much. */
+export interface BudgetView {
+  max_usd: number;
+  max_tokens: number;
+  max_turns: number;
+  max_wallclock_s: number;
+}
+
+/** Mirrors service.ModeDefaultsView.
+ *
+ * Two different limits. `rounds` bounds the conversation — how many times a
+ * reviewer gets to push back. `agent_max_turns` bounds ONE participant's turn:
+ * the model calling tools, reading results, calling again. A run whose
+ * implementer works in circles is stopped by the second, not the first. */
+export interface ModeDefaultsView {
+  rounds: Record<string, number>;
+  agent_max_turns: number;
+  /** What each mode does when nothing overrides it, so a client can show the
+   * real number instead of an empty box. */
+  script_rounds?: Record<string, number>;
+  /** The duckling line-up to use for each mode when a run names none, in order.
+   * A combination that works is a finding, and re-ticking the same boxes on
+   * every run is how a finding gets lost. */
+  ducklings?: Record<string, string[]>;
+  /** How many model calls one turn of a role may chain. A reviewer gets fewer
+   * than an implementer on purpose: reviewing is reading and giving a verdict,
+   * not iterating. */
+  role_turns?: Record<string, number>;
+  script_role_turns?: Record<string, number>;
 }
 
 export interface Duckling {
@@ -68,6 +127,12 @@ export interface Duckling {
   provider: string;
   model: string;
   roles?: string[];
+  notes?: string;
+  params?: SamplingParams;
+  /** Which of the eight series slots to draw this duckling in, or absent to let
+   * the fleet order decide. A slot number and never a hex, so the palette keeps
+   * its light and dark variants. */
+  color?: number;
   caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number };
   cost?: { input_per_mtok: number; output_per_mtok: number };
 }
@@ -123,6 +188,8 @@ export interface Task {
   complexity?: string;
   depends_on?: string[];
   body?: string;
+  /** Why the work stopped, when status is "blocked". */
+  blocked?: string;
 }
 
 /** One role and the duckling that will play it. Mirrors service.RosterEntry. */
@@ -222,6 +289,11 @@ export interface Bug {
   reporter?: string;
   created_at: string;
   updated_at: string;
+  /** The statuses this bug may legally move to, as the engine computes them.
+   * Not worked out here: the loop's rules live in the engine, and a UI that
+   * hardcoded them would drift the first time one changed — or leave a bug in a
+   * state it happens not to handle with nothing to click on it. */
+  next?: string[];
 }
 
 /** One filed review, enough to list without reading the body. */
@@ -244,6 +316,23 @@ export interface ReleaseSummary {
    * shipped. */
   drafted: boolean;
   tagged: boolean;
+}
+
+/** One model call, as recorded in llm.jsonl. */
+export interface LLMCall {
+  seq: number;
+  ts: string;
+  duckling: string;
+  provider: string;
+  model: string;
+  role: string;
+  request?: Record<string, unknown>;
+  response?: Record<string, unknown>;
+  usage?: Record<string, number>;
+  cost_usd: number;
+  latency_ms: number;
+  estimated?: boolean;
+  finish_reason?: string;
 }
 
 /** A tournament candidate. There is no author field, by design (I7). */
@@ -331,7 +420,15 @@ export class EngineClient {
   runStart(
     projectId: string,
     taskId: string,
-    opts: { mode?: string; ducklings?: string[]; rounds?: number; yes?: boolean } = {},
+    opts: {
+      mode?: string;
+      ducklings?: string[];
+      rounds?: number;
+      yes?: boolean;
+      /** Raise this one run's token ceiling above the configured default,
+       * without changing the default for everything else. */
+      maxTokens?: number;
+    } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
       task_id: taskId,
@@ -339,6 +436,9 @@ export class EngineClient {
       ducklings: opts.ducklings ?? [],
       rounds: opts.rounds ?? 0,
       autonomy: opts.yes ? "yolo" : "",
+      // Omitted rather than zeroed: the engine fills every unset limit from the
+      // defaults, and a zero would be a ceiling of zero.
+      ...(opts.maxTokens ? { budget: { max_tokens: opts.maxTokens } } : {}),
     });
   }
 
@@ -411,6 +511,23 @@ export class EngineClient {
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
   }
+  /** The budget every run starts with. It was invisible and immutable: a run
+   * that hit the ceiling failed with a number nobody had chosen. */
+  budgetDefaults() {
+    return this.request<BudgetView>("GET", "/v1/defaults/budget");
+  }
+  budgetDefaultsSet(body: BudgetView) {
+    return this.request<BudgetView>("PUT", "/v1/defaults/budget", body);
+  }
+  /** Rounds per mode and the per-turn model-call cap. Both lived only in the
+   * scripts and the engine config, so changing how many times a reviewer got to
+   * push back meant editing Go and rebuilding. */
+  modeDefaults() {
+    return this.request<ModeDefaultsView>("GET", "/v1/defaults/modes");
+  }
+  modeDefaultsSet(body: ModeDefaultsView) {
+    return this.request<ModeDefaultsView>("PUT", "/v1/defaults/modes", body);
+  }
   ducklingRemove(id: string) {
     return this.request<unknown>("DELETE", `/v1/ducklings/${id}`);
   }
@@ -430,6 +547,16 @@ export class EngineClient {
   }
   run(id: string) {
     return this.request<{ run: Run; events: unknown[] }>("GET", `/v1/runs/${id}`);
+  }
+  /** Every model call this run made: what was sent, what came back, what it
+   * cost. The one place that shows what a model was actually given — a prompt
+   * is assembled from a task, a spec, a transcript and a toolbelt, and when the
+   * answer is wrong the question is usually where to look. */
+  runLLM(id: string) {
+    return this.request<{ items: LLMCall[] | null; total: number }>(
+      "GET",
+      `/v1/runs/${id}/llm`,
+    ).then((r) => r.items ?? []);
   }
   runDiff(id: string) {
     return this.request<{ diff: string; tests?: string }>("GET", `/v1/runs/${id}/diff`).then((r) => ({
@@ -502,14 +629,26 @@ export class EngineClient {
       approved_by: approvedBy,
     });
   }
+  /** `proposed` names the stages whose pending proposal was checked instead of
+   * the approved artifact — the findings are about what you are deciding on,
+   * not what you already accepted. */
   traceCheck(projectId: string) {
-    return this.request<{ errors: TraceError[] | null }>(
+    return this.request<{ errors: TraceError[] | null; proposed?: string[] | null }>(
       "GET",
       `/v1/projects/${projectId}/trace/check`,
-    ).then((r) => r.errors ?? []);
+    ).then((r) => ({ errors: r.errors ?? [], proposed: r.proposed ?? [] }));
   }
   traceShow(projectId: string, id: string) {
     return this.request<Record<string, unknown>>("GET", `/v1/projects/${projectId}/trace/${id}`);
+  }
+  /** The first task ready to be started: dependencies accepted, not blocked,
+   * not already being run. The board shows every task's state and never
+   * answered the question a person actually arrives with. */
+  taskNext(projectId: string) {
+    return this.request<Task | Record<string, never>>(
+      "GET",
+      `/v1/projects/${projectId}/tasks/next`,
+    ).then((t) => ("id" in t && t.id ? (t as Task) : null));
   }
   bugs(projectId: string, openOnly = false) {
     const q = openOnly ? "?open=true" : "";
@@ -517,6 +656,36 @@ export class EngineClient {
       "GET",
       `/v1/projects/${projectId}/bugs${q}`,
     ).then((r) => r.items ?? []);
+  }
+  /** File a report. Severity is taken as given: a reporter saying "critical"
+   * may be wrong, but a tool that quietly downgrades what it was told is a tool
+   * nobody reports to twice — triage is where that judgement belongs. */
+  bugAdd(projectId: string, body: { title: string; body?: string; severity?: string }) {
+    return this.request<Bug>("POST", `/v1/projects/${projectId}/bugs`, {
+      severity: "normal",
+      reporter: "human",
+      source: "desktop",
+      ...body,
+    });
+  }
+  /** Triage every open report: severity, suspected files, duplicates. Returns
+   * the run doing it, which is watchable like any other. */
+  triageBugs(projectId: string) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/bugs/triage`);
+  }
+  /** Correct what a report says. A bug could be moved, triaged and promoted but
+   * never edited, so a typo or a missing detail lived as long as the bug did —
+   * and the triager, and then the implementer, worked from it. */
+  bugEdit(projectId: string, bugId: string, body: { title?: string; body?: string; severity?: string }) {
+    return this.request<Bug>("PUT", `/v1/projects/${projectId}/bugs/${bugId}`, body);
+  }
+  /** Remove a task from the plan. The engine refuses once a run has named it,
+   * because the runs, the reports and the spine all point at it. */
+  taskRemove(projectId: string, taskId: string) {
+    return this.request<{ removed: string; bug?: string; bug_status?: string }>(
+      "DELETE",
+      `/v1/projects/${projectId}/tasks/${taskId}`,
+    );
   }
   /** Move a bug. The engine refuses transitions the loop does not allow, so
    * the error it returns is the one worth showing. */

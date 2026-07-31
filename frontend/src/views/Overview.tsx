@@ -7,10 +7,24 @@ import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
 import { runLabel } from "../lib/runview";
 
-/** The cockpit: what is running, what is waiting, what it has cost. */
-export function Overview({ spentToday, budget }: { spentToday: number; budget: number }) {
+/**
+ * The cockpit: what is running, what is waiting, what it has cost.
+ *
+ * Spend is computed here rather than passed in. It used to be a prop, and the
+ * one caller passed `spentToday={0} budget={2}` — so the screen whose job is to
+ * say what the work has cost reported zero while runs had spent real money, one
+ * of them $1.50 on its own. A component that cannot be handed a number cannot
+ * be handed a wrong one.
+ */
+export function Overview() {
   const runs = useRuns((s) => s.runs);
   const list = Object.values(runs);
+  // Today's, by the run's own start. A run that began yesterday and finished
+  // this morning was paid for yesterday.
+  const today = new Date().toISOString().slice(0, 10);
+  const startedToday = list.filter((r) => (r.started_at ?? "").slice(0, 10) === today);
+  const spentToday = startedToday.reduce((sum, r) => sum + (r.budget?.usd ?? 0), 0);
+  const spentAll = list.reduce((sum, r) => sum + (r.budget?.usd ?? 0), 0);
   const active = list.filter((r) => r.status === "running" || r.status === "queued");
   const waiting = pendingForHuman(runs);
   const passed = list.filter((r) => r.verdict === "PASSED").length;
@@ -25,7 +39,14 @@ export function Overview({ spentToday, budget }: { spentToday: number; budget: n
           value={finished === 0 ? "—" : `${passed} / ${finished}`}
           sub={finished === 0 ? "no finished runs yet" : "of finished runs"}
         />
-        <StatTile label="Spend today" value={money(spentToday)} sub={`budget ${money(budget)}`} />
+        {/* No budget to compare against: there is no daily ceiling in the
+            engine, and the $2 this used to show was a per-run limit dressed up
+            as a daily one. */}
+        <StatTile
+          label="Spend today"
+          value={money(spentToday)}
+          sub={`${money(spentAll)} all time · ${startedToday.length} run${startedToday.length === 1 ? "" : "s"}`}
+        />
         <StatTile
           label="Waiting for you"
           value={String(waiting.length)}

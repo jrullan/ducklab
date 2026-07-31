@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { EngineClient, Candidate, Run } from "../api/client";
+import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, parseDiff } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -12,16 +12,23 @@ import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { StatusChip } from "../components/StatusChip";
 import { StageGate } from "../components/StageGate";
+import { RunLauncher, type LaunchOpts } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
-import { verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
+import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
+import { runLabel } from "../lib/runview";
 
-type Tab = "diff" | "verify" | "candidates";
+type Tab = "diff" | "verify" | "candidates" | "calls";
 
 /** The Run view: conversation lanes, gate and budget, tool timeline, tabs. */
 export function RunView({ runId, client }: { runId: string; client: EngineClient }) {
   const run = useRuns((s) => s.runs[runId]);
   const events = useRuns((s) => s.events[runId] ?? []);
   const deltas = useRuns((s) => s.deltas[runId] ?? {});
+  const reasoning = useRuns((s) => s.reasoning[runId] ?? {});
+  // What the run has spent so far. The run record only carries the totals once
+  // the run has ended, so without this the meter read zero for the whole run
+  // and jumped to the final number at exactly the moment it stopped mattering.
+  const live = useRuns((s) => s.spend[runId]);
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
 
   // Fetch the run's history on open.
@@ -55,8 +62,39 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [testHunks, setTestHunks] = useState("");
   const [verify, setVerify] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  // What the models were actually sent. A prompt is assembled from a task, a
+  // spec, a transcript and a toolbelt, and when an answer is wrong the question
+  // is almost always where to look — which was reachable only by opening
+  // llm.jsonl by hand.
+  const [calls, setCalls] = useState<LLMCall[]>([]);
   const [answer, setAnswer] = useState("");
   const [revisionRun, setRevisionRun] = useState<string | null>(null);
+  // The fleet, for colours. A duckling's colour is a property of the duckling,
+  // not of its position in this run's roster — otherwise the same model is blue
+  // in one transcript and orange in the next.
+  const [fleet, setFleet] = useState<Duckling[]>([]);
+  const [relaunched, setRelaunched] = useState<string | null>(null);
+  // The task's own status, which is not the same question as this run's. A run
+  // that failed and whose task was finished by a later run still reported
+  // `accepted: false` — it was never accepted — so the relaunch panel sat on
+  // every old failure in the project's history offering to redo finished work.
+  const [task, setTask] = useState<Task | null>(null);
+  const [anyway, setAnyway] = useState(false);
+  const [relaunchBusy, setRelaunchBusy] = useState(false);
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
+  useEffect(() => {
+    client.ducklings().then(setFleet).catch(() => setFleet([]));
+  }, [client]);
+
+  const projectId = run?.project_id ?? "";
+  const taskId = run?.task_id ?? "";
+  useEffect(() => {
+    if (!projectId || !taskId) return;
+    client
+      .tasks(projectId)
+      .then((all) => setTask(all.find((t) => t.id === taskId) ?? null))
+      .catch(() => setTask(null));
+  }, [client, projectId, taskId]);
 
   useEffect(() => {
     client
@@ -71,18 +109,34 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       });
     client.runVerify(runId).then(setVerify).catch(() => setVerify(""));
     client.runCandidates(runId).then(setCandidates).catch(() => setCandidates([]));
+    client.runLLM(runId).then(setCalls).catch(() => setCalls([]));
   }, [runId, client, run?.status]);
 
   if (!run) return <p className="p-4 text-ink-muted">Loading run…</p>;
 
   const roster = Object.values(run.roster ?? {});
+  const ducklingColors = assignDucklingColors(fleet);
+  // Only ducklings that actually spent something: the roster names one for every
+  // role whether or not that role ran, and listing six models for a solo run
+  // credits five with work they never did.
+  const perDuckling = Object.entries(live?.ducklings ?? {})
+    .filter(([, d]) => d.calls > 0)
+    .sort((a, b) => b[1].tokens - a[1].tokens);
   // A judge's turns are anonymised; the mapping is dropped, not hidden.
   const anonymise = run.mode === "tournament";
   const turns = anonymiseTurns(buildTurns(events), anonymise);
   const gate = buildGate(events);
   const pending = buildPending(events);
   const timeline = buildTimeline(events);
-  const budget = run.budget;
+  const triage = buildTriage(events);
+  const triageFailed = buildTriageFailures(events);
+  // The live figures while the run is going, the recorded ones once it is not.
+  const budget = live ?? run.budget;
+  // Drawn against the ceiling this run actually got. These were hardcoded, so a
+  // run started with a raised limit showed a bar that looked full when it had
+  // used a quarter of its budget.
+  const limit = live?.limit ??
+    run.budget?.limit ?? { tokens: 400000, usd: 2, turns: 24, wallclock_s: 3600 };
 
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
@@ -105,6 +159,43 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     return "finished";
   })();
 
+  // Offered when a task run has ended without being accepted. Not for a run
+  // still going — there is nothing to learn from yet — and not for a stage,
+  // whose gate already has "request changes".
+  const canRelaunch =
+    !!run.task_id && !isWorking && !run.accepted && !stageToRevise;
+  // Why this is not the obvious next step, if it is not. Both are about the
+  // TASK, which is a different question from this run: a run that failed is
+  // never accepted, so asking about the run offered a relaunch on every old
+  // failure in the project's history.
+  //
+  // Re-running stays possible in both cases — a result can be regretted, and a
+  // stuck run may be worth racing — but neither should be one click away.
+  const relaunchCaveat =
+    task?.status === "accepted"
+      ? `${run.task_id} was finished by a later run and accepted. Running it again starts fresh work against something already committed.`
+      : task?.status === "in_progress"
+        ? `Another run is working on ${run.task_id} right now. A second one would edit the same tree at the same time.`
+        : "";
+  // The ducklings that actually took a turn, in roster order, so the pickers
+  // come back set to what just ran rather than to nothing.
+  const relaunchDucklings = Object.values(run.roster ?? {}).filter(
+    (id, i, all) => all.indexOf(id) === i,
+  );
+
+  const relaunch = async (opts: LaunchOpts) => {
+    setRelaunchBusy(true);
+    setRelaunchError(null);
+    try {
+      const started = await client.runStart(run.project_id, run.task_id, opts);
+      setRelaunched(started.id);
+    } catch (e) {
+      setRelaunchError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRelaunchBusy(false);
+    }
+  };
+
   const requestChanges = async (text: string) => {
     try {
       const started = await client.stageStart(run.project_id, stageToRevise, { revise: text });
@@ -126,10 +217,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   };
 
+  // Not a fixed-height layout. The run view stacks four regions of unbounded
+  // content — gate, conversation, tool timeline, diff — and forcing them into
+  // one viewport made flex shrink the ones below their content while their
+  // children kept painting, so a finished run drew its diff on top of its own
+  // conversation. The page scrolls; only the conversation is bounded, and the
+  // nav stays visible because the app shell holds the scroll, not this view.
   return (
     <div data-testid="run-view">
       <header className="flex flex-wrap items-center gap-3 border-b border-hairline px-4 py-3">
-        <span className="text-md">{run.task_id}</span>
+        {/* A run with no task showed nothing at all: the header of a triage or
+            a stage opened with an empty space where its name should be. The
+            same fallback the runs list uses — task, else stage, else id. */}
+        <span className="text-md">{runLabel(run)}</span>
         <span className="text-ink-secondary">{run.mode}</span>
         <StatusChip role={verdictStatus(run.verdict as Verdict)} label={verdictLabel(run.verdict as Verdict)} />
         <div className="ml-auto flex items-center gap-2">
@@ -179,6 +279,138 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
         </div>
       </header>
+
+      {/* The moment you most want to change a setting and go again is while
+          looking at the run that just failed. Doing it meant leaving for the
+          board and finding the task by hand, which is enough friction that a
+          re-run tends to carry the settings that just failed. */}
+      {canRelaunch && (
+        <section
+          data-testid="relaunch"
+          className="m-2 rounded-card border border-hairline p-3"
+        >
+          <h2 className="text-sm font-medium text-ink mb-2">Run {run.task_id} again</h2>
+          {relaunchCaveat && !anyway ? (
+            <p className="text-sm text-ink-muted" data-testid="relaunch-done">
+              {relaunchCaveat}{" "}
+              <button
+                type="button"
+                onClick={() => setAnyway(true)}
+                data-testid="relaunch-anyway"
+                className="text-ink underline"
+              >
+                run it anyway
+              </button>
+            </p>
+          ) : (
+          <RunLauncher
+            ducklings={fleet}
+            initialMode={run.mode}
+            initialDucklings={relaunchDucklings}
+            label="Run again"
+            busy={relaunchBusy}
+            onLaunch={relaunch}
+          />
+          )}
+          {relaunched && (
+            <p className="mt-2 text-sm">
+              <a href={`#/runs/${relaunched}`} data-testid="relaunch-link" className="text-ink underline">
+                started {relaunched}
+              </a>
+            </p>
+          )}
+          {relaunchError && (
+            <p className="mt-2 text-sm text-critical" data-testid="relaunch-error">
+              {relaunchError}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* A failed run used to show FAILED and nothing else — the reason went to
+          an `error` event that no view rendered, so the only way to learn why
+          was to open events.jsonl. Some of these messages exist to be acted on:
+          split refuses a decomposition with the exact file two subtasks both
+          claimed. */}
+      {run.failure && (
+        <section
+          data-testid="run-failure"
+          className="m-2 rounded-card border border-critical p-3"
+        >
+          <h2 className="text-sm font-medium text-critical mb-1">Why it failed</h2>
+          <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
+        </section>
+      )}
+
+      {/* What the gate is actually asking about. The proposals were written to
+          the event stream in full and nothing rendered them, so a triage run
+          paused offering Accept and Reject with the thing being decided nowhere
+          on screen. */}
+      {/* One bad report does not poison the others: the batch carries on and
+          the failure is written down. Nothing rendered it, so a run that
+          triaged two of three looked exactly like one that triaged two, and the
+          third stayed open with no explanation anywhere a person would look. */}
+      {triageFailed.length > 0 && (
+        <section
+          data-testid="triage-failures"
+          className="m-2 rounded-card border border-critical p-3"
+        >
+          <h2 className="text-sm font-medium text-critical mb-2">
+            Could not classify · {triageFailed.length} report
+            {triageFailed.length === 1 ? "" : "s"}
+          </h2>
+          <ul className="space-y-1 text-sm">
+            {triageFailed.map((f) => (
+              <li key={f.bug} data-testid="triage-failure">
+                <span className="font-mono text-ink">{f.bug}</span>{" "}
+                <span className="text-ink-secondary">{f.error}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-ink-muted">
+            These stay open. Accepting this run applies only the ones above.
+          </p>
+        </section>
+      )}
+
+      {triage.length > 0 && (
+        <section
+          data-testid="triage-proposals"
+          className="m-2 rounded-card border border-hairline p-3"
+        >
+          <h2 className="text-sm font-medium text-ink mb-2">
+            Proposed classification · {triage.length} report
+            {triage.length === 1 ? "" : "s"}
+          </h2>
+          <ul className="space-y-3">
+            {triage.map((t) => (
+              <li key={t.bug} data-testid="triage-proposal" className="text-sm">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-mono text-ink">{t.bug}</span>
+                  {t.severity && <StatusChip role="warning" label={t.severity} />}
+                  {t.component && <span className="text-ink-secondary">{t.component}</span>}
+                  {t.duplicate_of && (
+                    <span className="text-ink-muted">duplicate of {t.duplicate_of}</span>
+                  )}
+                </div>
+                {t.task_title && (
+                  <div className="mt-1 text-ink">
+                    would become a task: <span className="text-ink-secondary">{t.task_title}</span>
+                  </div>
+                )}
+                {t.reason && (
+                  <p className="mt-1 whitespace-pre-wrap text-ink-secondary">{t.reason}</p>
+                )}
+                {t.suspected_files && t.suspected_files.length > 0 && (
+                  <p className="mt-1 font-mono text-xs text-ink-muted">
+                    {t.suspected_files.join(" · ")}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {atHumanGate && stageToRevise && (
         <section className="m-2 rounded-card border border-serious p-3">
@@ -234,12 +466,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
       <div className="grid gap-4 p-4 md:grid-cols-[1fr_260px]">
         <section data-testid="conversation">
-          <VirtualList items={turns}>
+          {/* Viewport-relative, so it adapts to the window without depending on
+              a chain of parent heights resolving — which is what broke. */}
+          <VirtualList items={turns} height="60vh">
             {(t) => (
               <ConversationTurn
                 block={t}
                 roster={roster}
+                color={ducklingColors[t.duckling]}
                 streamed={deltas[`${t.round}:${t.turn}`]}
+                reasoning={reasoning[`${t.round}:${t.turn}`]}
               />
             )}
           </VirtualList>
@@ -251,10 +487,31 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
               <div className="mt-2 flex flex-col gap-2">
-                <BudgetMeter label="tokens" used={budget.tokens} limit={400000} format={tokens} />
-                <BudgetMeter label="cost" used={budget.usd} limit={2} format={money} />
-                <BudgetMeter label="turns" used={budget.turns} limit={24} format={(n) => String(Math.round(n))} />
+                <BudgetMeter label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens} />
+                <BudgetMeter label="cost" used={budget.usd} limit={limit.usd} format={money} />
+                <BudgetMeter
+                  label="turns"
+                  used={budget.turns}
+                  limit={limit.turns}
+                  format={(n) => String(Math.round(n))}
+                />
               </div>
+              {/* One tracker serves every duckling and every turn, so the run's
+                  total cannot say which model is burning it. In a mode with two
+                  models that is usually the only question worth asking. */}
+              {perDuckling.length > 1 && (
+                <dl className="mt-3 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling">
+                  {perDuckling.map(([id, d]) => (
+                    <div key={id} className="flex justify-between gap-2">
+                      <dt style={{ color: ducklingColors[id] }}>{id}</dt>
+                      <dd className="tabular-nums text-ink-secondary">
+                        {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
+                        {d.calls === 1 ? "" : "s"}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
           )}
         </aside>
@@ -273,6 +530,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
           ["verify", verify ? undefined : "no output"],
           ["candidates", candidates.length ? String(candidates.length) : "none"],
+          ["calls", calls.length ? String(calls.length) : "none"],
         ] as [Tab, string | undefined][]).map(([t, note]) => (
           <button
             key={t}
@@ -335,6 +593,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               ))}
             </div>
           ))}
+
+        {tab === "calls" &&
+          (calls.length === 0 ? (
+            <p className="text-sm text-ink-muted" data-testid="calls-empty">
+              No model calls recorded for this run.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2" data-testid="calls">
+              {calls.map((c) => (
+                <LLMCallRow key={c.seq} call={c} color={ducklingColors[c.duckling]} />
+              ))}
+            </ul>
+          ))}
       </div>
     </div>
   );
@@ -345,4 +616,51 @@ export function runElapsed(run: Run, now: Date = new Date()): string {
   if (Number.isNaN(started)) return "0s";
   const end = run.ended_at ? Date.parse(run.ended_at) : now.getTime();
   return duration(Math.max(0, end - started));
+}
+
+/** One model call, folded. What was sent is usually thousands of lines, and the
+ * reason to open a call is almost always a specific one. */
+function LLMCallRow({ call, color }: { call: LLMCall; color?: string }) {
+  const usage = call.usage ?? {};
+  const inTok = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+  const outTok = usage.completion_tokens ?? usage.output_tokens ?? 0;
+  const reasoning = usage.reasoning_tokens ?? 0;
+  return (
+    <li data-testid="call-row" className="rounded border border-hairline">
+      <details>
+        <summary className="flex cursor-pointer flex-wrap items-baseline gap-2 px-2 py-1 text-xs">
+          <span className="font-mono text-ink-muted">#{call.seq}</span>
+          <span style={{ color }}>{call.duckling}</span>
+          <span className="text-ink-muted">{call.role}</span>
+          <span className="tabular-nums text-ink-secondary">
+            {tokens(inTok)} in · {tokens(outTok)} out
+            {/* Part of the output, not on top of it. Shown apart because a
+                budget spent on thinking and one spent on an answer call for
+                different actions. */}
+            {reasoning > 0 && <> · {tokens(reasoning)} thinking</>}
+          </span>
+          <span className="tabular-nums text-ink-secondary">{money(call.cost_usd)}</span>
+          {call.estimated && <StatusChip role="warning" label="estimated" />}
+          {call.finish_reason && call.finish_reason !== "stop" && (
+            <StatusChip role="serious" label={call.finish_reason} />
+          )}
+          <span className="ml-auto tabular-nums text-ink-muted">{duration(call.latency_ms / 1000)}</span>
+        </summary>
+        <div className="grid gap-2 border-t border-hairline p-2 md:grid-cols-2">
+          <div>
+            <div className="mb-1 text-xs text-ink-muted">sent</div>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-ink-secondary">
+              {JSON.stringify(call.request ?? {}, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <div className="mb-1 text-xs text-ink-muted">came back</div>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-ink-secondary">
+              {JSON.stringify(call.response ?? {}, null, 2)}
+            </pre>
+          </div>
+        </div>
+      </details>
+    </li>
+  );
 }

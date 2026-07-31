@@ -31,6 +31,10 @@ export interface TurnBlock {
   toolCalls: ToolCall[];
   text: string;
   done: boolean;
+  /** The turn ended without finishing — its budget ran out, its provider failed.
+   * What it said and did is real but partial, and a reader must not take it for
+   * a complete record. */
+  incomplete?: boolean;
   /** What this turn was working on: a split's subtask, a tournament's
    * contestant slot. Two lanes with the same role and the same duckling are
    * otherwise indistinguishable, which is exactly what a split produces. */
@@ -141,7 +145,10 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
       }
       case "turn_end": {
         const b = blockFor(d);
-        if (b) b.done = true;
+        if (b) {
+          b.done = true;
+          if (d.incomplete === true) b.incomplete = true;
+        }
         open.delete(b ?? ({} as TurnBlock));
         break;
       }
@@ -390,4 +397,61 @@ export function touchesTests(files: readonly DiffFile[]): boolean {
  * human gate. */
 export function runLabel(run: { task_id?: string; stage?: string; id: string }): string {
   return run.task_id || run.stage || run.id;
+}
+
+/** A report the triager could not classify, and why. */
+export type TriageFailure = { bug: string; error: string };
+
+/**
+ * Reports the triage could not classify.
+ *
+ * One bad bug does not poison the others — the batch carries on and the failure
+ * is written down. But nothing rendered it, so a run that triaged two of three
+ * looked exactly like one that triaged two, and the third stayed open with no
+ * explanation anywhere a person would look.
+ */
+export function buildTriageFailures(events: readonly DucklabEvent[]): TriageFailure[] {
+  const byBug = new Map<string, TriageFailure>();
+  for (const e of events) {
+    if (!e || e.type !== "triage_failed") continue;
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    const bug = String(d.bug ?? "");
+    if (!bug) continue;
+    byBug.set(bug, { bug, error: String(d.error ?? "no reason recorded") });
+  }
+  return [...byBug.values()];
+}
+
+/** One bug's proposed classification, as the triager returned it. */
+export type TriageProposal = {
+  bug: string;
+  severity?: string;
+  component?: string;
+  reason?: string;
+  task_title?: string;
+  suspected_files?: string[];
+  duplicate_of?: string;
+  reproducible?: boolean;
+};
+
+/**
+ * What a triage run is asking to be accepted.
+ *
+ * The proposals were written to the event stream in full — severity, reason,
+ * suspected files — and nothing rendered them. The run paused at its human gate
+ * offering Accept and Reject with the thing being decided nowhere on screen.
+ *
+ * The last proposal for a bug wins: a re-run triages the same bug again, and
+ * the newer answer is the one on the table.
+ */
+export function buildTriage(events: readonly DucklabEvent[]): TriageProposal[] {
+  const byBug = new Map<string, TriageProposal>();
+  for (const e of events) {
+    if (!e || e.type !== "triage") continue;
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    const bug = String(d.bug ?? "");
+    if (!bug) continue;
+    byBug.set(bug, { ...(d as unknown as TriageProposal), bug });
+  }
+  return [...byBug.values()];
 }

@@ -24,6 +24,95 @@ describe("ConversationTurn", () => {
     expect(screen.getAllByTestId("tool-call")).toHaveLength(2);
   });
 
+  // Thinking is usually far longer than the reply, so a lane that opens with a
+  // wall of deliberation buries what was actually decided.
+  it("folds thinking away once the answer has arrived", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno", content: "Done." }),
+    ]);
+    render(<ConversationTurn block={block!} roster={roster} reasoning={"a\nb\nc"} />);
+    const details = screen.getByTestId("turn-reasoning") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain("3 lines");
+  });
+
+  // Open while it is the only thing arriving: that is exactly when a person is
+  // deciding whether to abort a model that is going in circles.
+  it("opens thinking while it is still the only thing on screen", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+    ]);
+    render(
+      <ConversationTurn block={block!} roster={roster} reasoning="Let me check" streamed="Do" />,
+    );
+    expect((screen.getByTestId("turn-reasoning") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  // "3,914 lines" behind a disclosure triangle says it is busy but not what it
+  // is busy with, and expanding to find out means scrolling to the bottom of a
+  // wall of deliberation.
+  it("shows the newest thinking line while folded", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno", content: "Done." }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer" }),
+    ]);
+    render(
+      <ConversationTurn
+        block={block!}
+        roster={roster}
+        reasoning={"first thought\nsecond thought\n\n"}
+      />,
+    );
+    // Trailing blank lines are not the newest thing it said.
+    expect(screen.getByTestId("turn-reasoning-tail").textContent).toBe("second thought");
+  });
+
+  // When it is open the whole text is on screen, so repeating its last line on
+  // the summary would be noise.
+  it("drops the tail once the thinking is open", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+    ]);
+    render(
+      <ConversationTurn block={block!} roster={roster} reasoning="only thought" streamed="Do" />,
+    );
+    expect(screen.queryByTestId("turn-reasoning-tail")).toBeNull();
+  });
+
+  it("shows no thinking block when the model reported none", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno", content: "Done." }),
+    ]);
+    render(<ConversationTurn block={block!} roster={roster} />);
+    expect(screen.queryByTestId("turn-reasoning")).toBeNull();
+  });
+
+  // A turn that ran out of budget still did real work, and its record is now
+  // kept — but a partial record read as a complete one is worse than none.
+  it("marks a turn that did not finish", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("tool_call", 2, { tool: "fs_patch", ok: true, ms: 9 }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer", incomplete: true }),
+    ]);
+    render(<ConversationTurn block={block!} roster={roster} />);
+    expect(screen.getByTestId("turn-incomplete").textContent).toContain("did not finish");
+    // And what it managed to do is still on screen.
+    expect(screen.getAllByTestId("tool-call")).toHaveLength(1);
+  });
+
+  it("says nothing about finishing when the turn finished", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("turn_end", 2, { round: 1, turn: 0, role: "implementer" }),
+    ]);
+    render(<ConversationTurn block={block!} roster={roster} />);
+    expect(screen.queryByTestId("turn-incomplete")).toBeNull();
+  });
+
   // AC-32 in the UI: an anonymised turn must not contain the id anywhere in
   // the rendered DOM, not merely be styled to hide it.
   it("never renders a duckling id for an anonymised turn", () => {

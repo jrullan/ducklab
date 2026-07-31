@@ -3,8 +3,11 @@ import { EngineClient, type Project } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
+import { interruptions, deliver, setBadge } from "../lib/attention";
+import type { Run } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { Overview } from "../views/Overview";
+import { Now } from "../views/Now";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
@@ -30,11 +33,18 @@ declare global {
       /** Wails binding name for the native folder chooser. Absent outside the
        * desktop. */
       chooseDirectory?: string;
+      /** Wails binding names for the attention surface: OS notifications and
+       * the window-title badge. Absent outside the desktop. */
+      notify?: string;
+      setBadge?: string;
     };
   }
 }
 
 const NAV: { route: Route; label: string }[] = [
+  // The inbox first and default: the one question a solo dev arrives with is
+  // "what needs me". Overview survives until phase 3 of docs/ux-evaluation.md.
+  { route: { name: "now" }, label: "Now" },
   { route: { name: "overview" }, label: "Overview" },
   { route: { name: "runs" }, label: "Runs" },
   { route: { name: "cycle" }, label: "Cycle" },
@@ -194,8 +204,28 @@ export function App() {
   const degraded = connection === "reconnecting" || connection === "closed";
   const waitingCount = pendingForHuman(runs).length;
 
+  // The attention surface. The store sees every state change; this is the one
+  // place that turns transitions into interruptions — an OS notification when
+  // a run pauses for a human or fails, and the waiting count in the window
+  // title so it survives the app sitting in another workspace. Deliberately
+  // NOT per-view: attention is app state, and a person on any screen (or none)
+  // is owed the same call.
+  const prevRuns = useRef<Record<string, Run> | null>(null);
+  useEffect(() => {
+    for (const i of interruptions(prevRuns.current, runs)) {
+      deliver(i);
+    }
+    prevRuns.current = runs;
+  }, [runs]);
+  useEffect(() => {
+    setBadge(waitingCount);
+  }, [waitingCount]);
+
+  // h-screen with the scroll moved inside: the whole page used to scroll, so a
+  // long run pushed the nav off the top of the window, and getting back to it
+  // meant scrolling past everything the run had said.
   return (
-    <div className="flex min-h-full flex-col bg-page text-ink">
+    <div className="flex h-screen flex-col overflow-hidden bg-page text-ink">
       <header className="flex items-center gap-4 border-b border-hairline px-4 py-2">
         <span className="text-md">🦆 ducklab</span>
         <nav className="flex gap-3">
@@ -232,10 +262,18 @@ export function App() {
         )}
       </header>
 
-      <main className={degraded ? "flex-1 opacity-60 transition-opacity" : "flex-1"} data-degraded={String(degraded)}>
+      <main
+        className={
+          "min-h-0 flex-1 overflow-y-auto" + (degraded ? " opacity-60 transition-opacity" : "")
+        }
+        data-degraded={String(degraded)}
+      >
         {error && <p className="m-4 text-critical" data-testid="app-error">{error}</p>}
 
-        {route.name === "overview" && <Overview spentToday={0} budget={2} />}
+        {route.name === "now" && client && projectId && (
+          <Now client={client} projectId={projectId} />
+        )}
+        {route.name === "overview" && <Overview />}
         {route.name === "runs" && (
           <div className="p-4">
             <Runs runs={Object.values(runs)} />
@@ -299,7 +337,7 @@ export function App() {
         )}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
         {route.name === "settings" && (
-          <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} />
+          <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} client={client ?? undefined} />
         )}
       </main>
 

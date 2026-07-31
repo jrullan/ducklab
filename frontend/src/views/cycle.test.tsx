@@ -169,7 +169,7 @@ describe("Cycle — starting a stage", () => {
   const client = (over: Record<string, unknown> = {}) =>
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", body: "", sections: [] })),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-42" })),
       promote: vi.fn(() => Promise.resolve({})),
@@ -265,7 +265,7 @@ describe("Cycle — reading a proposal", () => {
       artifact: vi.fn(() =>
         Promise.resolve({ kind: "requirements", markdown: "", sections: [], proposal }),
       ),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       promote: vi.fn(() => Promise.resolve({})),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
@@ -323,7 +323,7 @@ describe("Cycle — what was asked for", () => {
   const withBrief = (artifact: Record<string, unknown>, brief = "Build a triangle tool.") =>
     ({
       artifact: vi.fn(() => Promise.resolve(artifact)),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       runBrief: vi.fn(() => Promise.resolve(brief)),
       promote: vi.fn(() => Promise.resolve({})),
@@ -400,7 +400,7 @@ describe("Cycle — asking for a change", () => {
   const client = (over: Record<string, unknown> = {}) =>
     ({
       artifact: vi.fn(() => Promise.resolve(pending)),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       roster: vi.fn(() => Promise.resolve({ entries: [] })),
       runBrief: vi.fn(() => Promise.resolve("")),
       promote: vi.fn(() => Promise.resolve({})),
@@ -472,7 +472,7 @@ describe("Cycle — what the run will actually do", () => {
   const client = (roster: unknown[], over: Record<string, unknown> = {}) =>
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       runBrief: vi.fn(() => Promise.resolve("")),
       roster: vi.fn(() => Promise.resolve({ entries: roster })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
@@ -544,7 +544,7 @@ describe("Cycle — how many rounds", () => {
   const client = () =>
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
-      traceCheck: vi.fn(() => Promise.resolve([])),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
       runBrief: vi.fn(() => Promise.resolve("")),
       roster: vi.fn(() => Promise.resolve({ entries: twoDucks })),
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
@@ -590,5 +590,34 @@ describe("Cycle — how many rounds", () => {
     const input = await screen.findByTestId("stage-rounds");
     fireEvent.change(input, { target: { value: "0" } });
     expect((input as HTMLInputElement).value).toBe("1");
+  });
+});
+
+// The trace rail sits beside the Accept button, and it was reporting on the
+// document the human had already accepted — LoadSpine read approved artifacts
+// only, so a proposal at its gate was invisible to the one check that could
+// have changed the decision.
+describe("the trace rail's scope", () => {
+  it("says when it is checking what you are about to accept", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/trace/check")) return json({ errors: null, proposed: ["plan"] });
+      if (p.includes("/artifacts/")) return json({ kind: "plan", sections: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("trace-scope").textContent).toContain("proposed plan"),
+    );
+  });
+
+  it("stays quiet when the approved spine is what was checked", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/trace/check")) return json({ errors: null });
+      if (p.includes("/artifacts/")) return json({ kind: "plan", sections: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+    await waitFor(() => expect(screen.getByTestId("trace-clean")).toBeTruthy());
+    expect(screen.queryByTestId("trace-scope")).toBeNull();
   });
 });

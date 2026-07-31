@@ -16,6 +16,7 @@ import type { Duckling, EngineClient, ProviderView, RosterEntry } from "../api/c
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
+import { assignDucklingColors } from "../lib/colors";
 
 const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
 
@@ -41,6 +42,9 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // One colour per duckling, decided from the fleet rather than from whatever
+  // list a view had to hand. Computed once per render, not once per card.
+  const colors = assignDucklingColors(ducklings);
 
   const load = useCallback(() => {
     Promise.all([client.ducklings(), client.providers()])
@@ -113,6 +117,7 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
                 key={d.id}
                 duckling={d}
                 roster={ducklings.map((x) => x.id)}
+                color={colors[d.id]}
                 provider={providers.find((p) => p.id === d.provider)}
                 onEdit={() => setEditing(d.id)}
                 onRemove={() => void client.ducklingRemove(d.id).then(() => done()).catch(done)}
@@ -218,6 +223,7 @@ function RosterSection({
 function DucklingCard({
   duckling: d,
   roster,
+  color,
   provider,
   onEdit,
   onRemove,
@@ -225,6 +231,7 @@ function DucklingCard({
 }: {
   duckling: Duckling;
   roster: string[];
+  color?: string;
   provider?: ProviderView;
   onEdit: () => void;
   onRemove: () => void;
@@ -253,7 +260,7 @@ function DucklingCard({
   return (
     <div className="rounded-card border border-hairline p-3" data-testid={`duckling-card-${d.id}`}>
       <header className="flex items-center gap-2">
-        <DuckAvatar id={d.id} roster={roster} />
+        <DuckAvatar id={d.id} roster={roster} color={color} />
         <span className="text-md">{d.id}</span>
         <span className="ml-auto flex gap-1">
           <button
@@ -298,6 +305,22 @@ function DucklingCard({
         <div className="flex justify-between">
           <dt>cost / Mtok out</dt>
           <dd className="tabular-nums">{money(d.cost?.output_per_mtok ?? 0)}</dd>
+        </div>
+        {/* Shown on the card, not only in the edit form: whether a duckling
+            spends its reply budget on thinking is the first thing to check when
+            a run burns tokens and writes nothing, and 8192 is a cap someone set
+            by not setting it. */}
+        <div className="flex justify-between">
+          <dt>max tokens / reply</dt>
+          <dd className="tabular-nums">
+            {d.params?.max_tokens
+              ? d.params.max_tokens.toLocaleString()
+              : "8,192 (default)"}
+          </dd>
+        </div>
+        <div className="flex justify-between">
+          <dt>thinking</dt>
+          <dd>{d.params?.disable_thinking ? "suppressed" : "as the model sends it"}</dd>
         </div>
       </dl>
       {/* A duckling whose provider has no key will fail on its first call.
@@ -463,6 +486,23 @@ function DucklingForm({
   const [nativeTools, setNativeTools] = useState(existing?.caps?.native_tools !== false);
   const [costIn, setCostIn] = useState(String(existing?.cost?.input_per_mtok ?? 0));
   const [costOut, setCostOut] = useState(String(existing?.cost?.output_per_mtok ?? 0));
+  // How the model is asked to generate. The engine has accepted these all
+  // along; the form sent no `params` at all, so they were reachable only by
+  // hand-editing config.toml — and posting an empty params wiped whatever a
+  // hand-edit had put there.
+  const [maxTokens, setMaxTokens] = useState(
+    existing?.params?.max_tokens != null ? String(existing.params.max_tokens) : "",
+  );
+  const [temperature, setTemperature] = useState(
+    existing?.params?.temperature != null ? String(existing.params.temperature) : "",
+  );
+  const [disableThinking, setDisableThinking] = useState(
+    existing?.params?.disable_thinking ?? false,
+  );
+  // 0 means "decide from the fleet". A duckling that picks a slot keeps it
+  // wherever it appears, which is the whole point: a colour that changes
+  // between runs cannot be learned.
+  const [color, setColor] = useState(existing?.color ?? 0);
 
   const save = () => {
     void client
@@ -470,6 +510,17 @@ function DucklingForm({
         provider,
         model: model.trim(),
         roles,
+        // Empty means "do not send it": a temperature of 0 is a real choice and
+        // an unset temperature is the endpoint's default, and collapsing the
+        // two would silently change how every existing duckling generates.
+        params: {
+          max_tokens: maxTokens.trim() === "" ? null : Number(maxTokens) || null,
+          temperature: temperature.trim() === "" ? null : Number(temperature),
+          top_p: existing?.params?.top_p ?? null,
+          disable_thinking: disableThinking,
+          stop: existing?.params?.stop ?? null,
+        },
+        color,
         caps: { native_tools: nativeTools, context_tokens: Number(contextTokens) || 0 },
         cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
       })
@@ -572,6 +623,81 @@ function DucklingForm({
           </label>
         ))}
         <span className="text-xs text-ink-muted">empty means any role — the roster decides</span>
+      </div>
+
+      {/* How the model generates. max_tokens is the cap on one reply, and a
+          reasoning model without one spends its whole output budget thinking
+          and returns nothing — which reads as a transport fault rather than a
+          setting. */}
+      <div className="flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        <label className="flex items-center gap-1">
+          max tokens
+          <input
+            aria-label="max tokens"
+            data-testid="duckling-max-tokens"
+            placeholder="endpoint default"
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(e.target.value)}
+            className="w-32 rounded border border-hairline bg-surface2 px-2 py-1"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          temperature
+          <input
+            aria-label="temperature"
+            data-testid="duckling-temperature"
+            placeholder="endpoint default"
+            value={temperature}
+            onChange={(e) => setTemperature(e.target.value)}
+            className="w-32 rounded border border-hairline bg-surface2 px-2 py-1"
+          />
+        </label>
+        <label
+          className="flex items-center gap-1"
+          title="Ask the endpoint not to spend the output budget on hidden reasoning. Only ever a request: what makes it safe is that an inline think block is stripped afterwards."
+        >
+          <input
+            type="checkbox"
+            checked={disableThinking}
+            data-testid="duckling-disable-thinking"
+            onChange={(e) => setDisableThinking(e.target.checked)}
+          />
+          suppress thinking
+        </label>
+      </div>
+
+      {/* Eight slots is what the palette has. Past that it stops clearing the
+          colour-vision floor, so a ninth would only look distinct. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+        colour
+        <button
+          type="button"
+          aria-label="colour from the fleet"
+          data-testid="duckling-color-0"
+          aria-pressed={color === 0}
+          onClick={() => setColor(0)}
+          className={
+            "rounded border px-2 py-1 text-xs " +
+            (color === 0 ? "border-serious" : "border-hairline")
+          }
+        >
+          auto
+        </button>
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((slot) => (
+          <button
+            key={slot}
+            type="button"
+            aria-label={`colour ${slot}`}
+            data-testid={`duckling-color-${slot}`}
+            aria-pressed={color === slot}
+            onClick={() => setColor(slot)}
+            className={
+              "h-6 w-6 rounded-full border-2 " +
+              (color === slot ? "border-ink" : "border-transparent")
+            }
+            style={{ backgroundColor: `var(--series-${slot})` }}
+          />
+        ))}
       </div>
 
       <div className="flex gap-2">

@@ -117,10 +117,74 @@ describe("Ducklings", () => {
         provider: "openrouter",
         model: "anthropic/claude-sonnet-4.5",
         roles: ["reviewer"],
+        params: {
+          max_tokens: null,
+          temperature: null,
+          top_p: null,
+          disable_thinking: false,
+          stop: null,
+        },
+        color: 0,
         caps: { native_tools: true, context_tokens: 200000 },
         cost: { input_per_mtok: 0, output_per_mtok: 15 },
       }),
     );
+  });
+
+  // The engine has accepted sampling params all along. The form sent no
+  // `params` at all, so max_tokens and disable_thinking were reachable only by
+  // hand-editing config.toml — which is not a thing a desktop-only user does.
+  it("sends max tokens and thinking suppression", async () => {
+    const client = clientWith([], [provider({ id: "openrouter" })]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "pato-deepseek" } });
+    fireEvent.change(screen.getByTestId("duckling-model"), { target: { value: "deepseek-v4-pro" } });
+    fireEvent.change(screen.getByTestId("duckling-max-tokens"), { target: { value: "32000" } });
+    fireEvent.click(screen.getByTestId("duckling-disable-thinking"));
+    fireEvent.click(screen.getByTestId("duckling-save"));
+
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalled());
+    const [, body] = (client.ducklingSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect((body as { params: Record<string, unknown> }).params).toMatchObject({
+      max_tokens: 32000,
+      disable_thinking: true,
+    });
+  });
+
+  // And posting an empty params wiped whatever a hand-edit had put there, so
+  // editing a duckling to change its cost silently changed how it generates.
+  it("keeps the params it was not asked to change", async () => {
+    const existing = duckling({
+      id: "pato-deepseek",
+      params: { max_tokens: 32000, disable_thinking: true, top_p: 0.95 },
+    });
+    const client = clientWith([existing], [provider({ id: "local" })]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-edit-pato-deepseek"));
+    fireEvent.change(screen.getByTestId("duckling-cost-out"), { target: { value: "3" } });
+    fireEvent.click(screen.getByTestId("duckling-save"));
+
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalled());
+    const [, body] = (client.ducklingSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect((body as { params: Record<string, unknown> }).params).toMatchObject({
+      max_tokens: 32000,
+      disable_thinking: true,
+      top_p: 0.95,
+    });
+  });
+
+  // The first thing to check when a run burns tokens and writes nothing, so it
+  // belongs on the card and not only behind an edit click.
+  it("shows on the card whether thinking is suppressed", async () => {
+    const client = clientWith(
+      [duckling({ id: "pato-deepseek", params: { disable_thinking: true } })],
+      [provider({ id: "local" })],
+    );
+    render(<Ducklings client={client} projectId="" />);
+    const card = await screen.findByTestId("duckling-card-pato-deepseek");
+    expect(card.textContent).toContain("suppressed");
+    expect(card.textContent).toContain("8,192 (default)");
   });
 
   // Runs and reports are recorded under the id, so changing it would orphan
@@ -210,5 +274,31 @@ describe("Ducklings — the roster", () => {
     } as unknown as EngineClient;
     render(<Ducklings client={client} projectId="p" />);
     expect((await screen.findByTestId("roster-warning")).textContent).toContain("same duckling");
+  });
+
+  // The colour was a duckling's index in whatever list a view had to hand: the
+  // run's roster in a transcript, the fleet listing here. So one model came out
+  // blue as an architect and orange as an implementer, and the fleet page —
+  // ordered by a Go map — reshuffled every colour on reload.
+  it("sends the chosen colour slot", async () => {
+    const client = clientWith([], [provider({ id: "local" })]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "pato-x" } });
+    fireEvent.change(screen.getByTestId("duckling-model"), { target: { value: "m" } });
+    fireEvent.click(screen.getByTestId("duckling-color-5"));
+    fireEvent.click(screen.getByTestId("duckling-save"));
+
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalled());
+    const [, body] = (client.ducklingSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect((body as { color: number }).color).toBe(5);
+  });
+
+  it("offers auto as well as the eight slots", async () => {
+    const client = clientWith([], [provider({ id: "local" })]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    expect(screen.getByTestId("duckling-color-0").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByTestId("duckling-color-9")).toBeNull();
   });
 });

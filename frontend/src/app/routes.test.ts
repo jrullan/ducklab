@@ -3,6 +3,7 @@ import { parseRoute, routeHref } from "./routes";
 
 describe("routing", () => {
   it("parses each view", () => {
+    expect(parseRoute("#/now")).toEqual({ name: "now" });
     expect(parseRoute("#/overview")).toEqual({ name: "overview" });
     expect(parseRoute("#/runs")).toEqual({ name: "runs" });
     expect(parseRoute("#/ducklings")).toEqual({ name: "ducklings" });
@@ -16,9 +17,11 @@ describe("routing", () => {
     });
   });
 
-  it("falls back to overview for anything unknown or empty", () => {
-    expect(parseRoute("")).toEqual({ name: "overview" });
-    expect(parseRoute("#/nonsense")).toEqual({ name: "overview" });
+  // The inbox is the default screen: for one person, "what needs me" is the
+  // question the app opens on (docs/ux-evaluation.md P1).
+  it("falls back to the inbox for anything unknown or empty", () => {
+    expect(parseRoute("")).toEqual({ name: "now" });
+    expect(parseRoute("#/nonsense")).toEqual({ name: "now" });
   });
 
   it("round-trips through href", () => {

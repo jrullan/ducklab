@@ -38,6 +38,10 @@ export function Cycle({
   );
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [errors, setErrors] = useState<TraceError[]>([]);
+  // Which stages the check read from a pending proposal rather than the
+  // approved artifact. Without this the rail cannot say whether a break is in
+  // what you are deciding on or in what you accepted last week.
+  const [checkedProposed, setCheckedProposed] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
@@ -65,7 +69,8 @@ export function Cycle({
         client.traceCheck(projectId),
       ]);
       setArtifact(a);
-      setErrors(e);
+      setErrors(e.errors);
+      setCheckedProposed(e.proposed);
     } catch (err) {
       // A project with no artifact yet is not an error worth a red banner, but
       // a real failure must not be shown as "empty" — that reads as "nothing
@@ -393,6 +398,12 @@ export function Cycle({
 
       <aside data-testid="trace-rail" className="w-72 shrink-0">
         <h2 className="text-sm font-medium text-ink mb-2">Traceability</h2>
+        {checkedProposed.length > 0 && (
+          <p data-testid="trace-scope" className="text-xs text-ink-muted mb-2">
+            Checking the proposed {checkedProposed.join(", ")} — this is what you are
+            about to accept.
+          </p>
+        )}
         {errors.length === 0 ? (
           <p data-testid="trace-clean" className="text-sm text-good">
             The cycle is linked end to end.

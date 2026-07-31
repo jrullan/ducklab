@@ -8,10 +8,15 @@ import { ducklingColor } from "../lib/colors";
 export function DuckAvatar({
   id,
   roster,
+  color,
   bobbing = false,
 }: {
   id: string;
   roster: readonly string[];
+  /** The duckling's fleet colour. Passed in rather than derived from `roster`,
+   * which is only ever the list a particular view had to hand: the same model
+   * came out blue in one run and orange in the next. */
+  color?: string;
   bobbing?: boolean;
 }) {
   return (
@@ -20,7 +25,7 @@ export function DuckAvatar({
       data-bobbing={bobbing ? "true" : "false"}
       title={id}
       className={bobbing ? "inline-block duck-bob" : "inline-block"}
-      style={{ color: ducklingColor(id, roster) }}
+      style={{ color: color ?? ducklingColor(id, roster) }}
       aria-hidden="true"
     >
       🦆

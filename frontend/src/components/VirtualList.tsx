@@ -23,7 +23,9 @@ export function VirtualList<T>({
   estimateSize?: number;
   overscan?: number;
   threshold?: number;
-  height?: number;
+  /** Number of pixels, or a CSS length. "100%" lets the list fill a flex parent
+   * instead of a magic number that ignores the window. */
+  height?: number | string;
   children: (item: T, index: number) => ReactNode;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -37,8 +39,15 @@ export function VirtualList<T>({
   });
 
   if (items.length < threshold) {
+    // The same box as the virtualised path. Without it the list simply grew,
+    // so a run scrolled its own container at fifty turns and the whole page at
+    // forty-nine — the layout changed under you as the run went on.
     return (
-      <div data-testid="virtual-list" data-virtualised="false">
+      <div
+        data-testid="virtual-list"
+        data-virtualised="false"
+        style={{ height, overflow: "auto" }}
+      >
         {items.map((item, i) => (
           <div key={i}>{children(item, i)}</div>
         ))}

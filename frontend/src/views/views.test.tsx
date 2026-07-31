@@ -34,22 +34,51 @@ beforeEach(() => {
 
 describe("Overview", () => {
   it("shows an empty state before any run exists", () => {
-    render(<Overview spentToday={0} budget={2} />);
+    render(<Overview />);
     expect(screen.getByTestId("empty-state").textContent).toContain("No runs yet");
   });
 
   it("lists runs and surfaces what is waiting for a human", () => {
     useRuns.getState().setRuns([run]);
-    render(<Overview spentToday={0.31} budget={5} />);
+    render(<Overview />);
     expect(screen.getByTestId("human-gate-inbox")).toBeTruthy();
     expect(screen.getAllByTestId("run-row")).toHaveLength(1);
-    expect(screen.getByTestId("overview").textContent).toContain("$0.3100");
+  });
+
+  // Spend used to be a prop, and the one caller passed zero — so the screen
+  // whose job is to say what the work has cost reported nothing while runs had
+  // spent real money. A component that cannot be handed a number cannot be
+  // handed a wrong one.
+  it("adds up what the runs actually cost", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    useRuns.getState().setRuns([
+      { ...run, id: "r-a", started_at: `${today}T09:00:00Z`, budget: { usd: 1.5048, tokens: 0, turns: 0, wallclock_s: 0 } },
+      { ...run, id: "r-b", started_at: `${today}T10:00:00Z`, budget: { usd: 0.2852, tokens: 0, turns: 0, wallclock_s: 0 } },
+    ]);
+    render(<Overview />);
+    // money() switches to two decimals at a dollar.
+    expect(screen.getByTestId("overview").textContent).toContain("$1.79");
+  });
+
+  // A run that began yesterday and finished this morning was paid for
+  // yesterday, so "today" is the run's own start.
+  it("counts only today against today", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    useRuns.getState().setRuns([
+      { ...run, id: "r-a", started_at: `${today}T09:00:00Z`, budget: { usd: 0.5, tokens: 0, turns: 0, wallclock_s: 0 } },
+      { ...run, id: "r-old", started_at: "2026-01-01T09:00:00Z", budget: { usd: 9, tokens: 0, turns: 0, wallclock_s: 0 } },
+    ]);
+    render(<Overview />);
+    const text = screen.getByTestId("overview").textContent!;
+    expect(text).toContain("$0.5000");
+    // …but the all-time figure still knows about it.
+    expect(text).toContain("$9.50");
   });
 
   // With nothing finished, a pass ratio would be a lie dressed as a number.
   it("shows a dash rather than 0/0 when nothing has finished", () => {
     useRuns.getState().setRuns([{ ...run, verdict: "" }]);
-    render(<Overview spentToday={0} budget={2} />);
+    render(<Overview />);
     expect(screen.getByTestId("overview").textContent).toContain("—");
   });
 });
@@ -78,6 +107,29 @@ describe("RunView", () => {
       if (path.endsWith("/accept")) return json({ commit_sha: "e60dc7fe1234" });
       return json({});
     });
+
+  // A failed run showed FAILED and nothing else: the reason went to an `error`
+  // event, and the timeline renders only tool calls and policy violations. The
+  // only way to learn why a run died was to open events.jsonl. Some of these
+  // messages are written to be acted on — split names the file two subtasks
+  // both claimed, which is useless in a log nobody reads.
+  it("says why a failed run failed", () => {
+    useRuns.getState().setRun({
+      ...run,
+      status: "failed",
+      verdict: "FAILED",
+      pending_kind: undefined,
+      failure: '"index.html" is claimed by both "Solver" and "Renderer"',
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.getByTestId("run-failure").textContent).toContain("claimed by both");
+  });
+
+  it("shows no failure banner on a run that did not fail", () => {
+    useRuns.getState().setRun(run);
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.queryByTestId("run-failure")).toBeNull();
+  });
 
   it("renders the conversation, gate and budget", async () => {
     useRuns.getState().setRun(run);

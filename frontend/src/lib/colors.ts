@@ -150,3 +150,45 @@ export function meterRole(used: number, limit: number): StatusRole {
   if (pct >= 80) return "warning";
   return "good";
 }
+
+/**
+ * Resolves every duckling in the fleet to a colour, once.
+ *
+ * The colour used to be a duckling's position in whatever list the view had to
+ * hand — the run's roster in a transcript, the fleet listing on the Ducklings
+ * page. So one model was blue as the architect of one run and orange as the
+ * implementer of the next, and a reader could never learn which colour meant
+ * which model. The fleet listing was worse: it came from a Go map, so the
+ * colours were reshuffled on every reload.
+ *
+ * A duckling with a declared slot gets it. The rest fill the slots nobody
+ * claimed, in id order, so adding a duckling cannot recolour the ones that were
+ * there before it alphabetically.
+ */
+export function assignDucklingColors(
+  fleet: readonly { id: string; color?: number }[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const taken = new Set<number>();
+
+  const declared = fleet.filter((d) => d.color && d.color >= 1 && d.color <= SERIES_SLOTS);
+  for (const d of declared) {
+    out[d.id] = `var(--series-${d.color})`;
+    taken.add(d.color!);
+  }
+
+  const rest = fleet
+    .filter((d) => !(d.id in out))
+    .map((d) => d.id)
+    .sort();
+  let slot = 1;
+  for (const id of rest) {
+    while (slot <= SERIES_SLOTS && taken.has(slot)) slot++;
+    // Past eight the palette stops clearing the colour-vision floor, so a ninth
+    // is muted rather than a colour that only looks distinct.
+    out[id] = slot <= SERIES_SLOTS ? `var(--series-${slot})` : "var(--text-muted)";
+    taken.add(slot);
+    slot++;
+  }
+  return out;
+}

@@ -20,14 +20,24 @@ export function ConversationTurn({
   block,
   roster,
   streamed,
+  reasoning,
+  color,
 }: {
   block: TurnBlock;
   roster: readonly string[];
+  /** The duckling's fleet colour, stable across runs. Without it the tint came
+   * from the duckling's index in this run's roster, so a model was blue as an
+   * architect and orange as an implementer. */
+  color?: string;
   streamed?: string;
+  /** The model's thinking, when its endpoint separates it from the answer.
+   * Collapsed by default: it is usually far longer than the reply, and a lane
+   * that opens with a wall of deliberation buries what was actually decided. */
+  reasoning?: string;
 }) {
   const anonymous = !!block.label;
   const who = anonymous ? block.label! : block.duckling;
-  const tint = anonymous ? "var(--text-secondary)" : ducklingColor(block.duckling, roster);
+  const tint = anonymous ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
 
   return (
     <article
@@ -46,7 +56,7 @@ export function ConversationTurn({
             🔒
           </span>
         ) : (
-          <DuckAvatar id={block.duckling} roster={roster} bobbing={!block.done} />
+          <DuckAvatar id={block.duckling} roster={roster} color={color} bobbing={!block.done} />
         )}
         <span style={{ color: tint }}>{who}</span>
         <span className="text-ink-muted">{block.role}</span>
@@ -82,6 +92,21 @@ export function ConversationTurn({
           `{"verdict":"approve", "findings":[]}` on screen — the one turn whose
           content the engine has already parsed, shown as a blob. */}
       {!streamed && block.verdict && <VerdictBlock block={block} />}
+
+      {/* Thinking arrives before the answer and is billed either way. The
+          stream parser used to read only delta.content, so a reasoning model
+          spent tokens no one could see and a run that looked idle for two
+          minutes had nothing on screen to explain itself. */}
+      {/* A turn that ran out of budget or lost its provider still did real
+          work, and the record of it is now kept — but a partial record read as a
+          complete one is worse than none. */}
+      {block.incomplete && (
+        <div className="mt-1" data-testid="turn-incomplete">
+          <StatusChip role="warning" label="turn did not finish" />
+        </div>
+      )}
+
+      {reasoning && <ReasoningBlock text={reasoning} live={!!streamed} />}
 
       {/* Live tokens while a turn is in flight, the recorded message once it
           is not. Only `streamed` was rendered, and it comes from token_delta
@@ -162,5 +187,48 @@ function ToolCallLine({ call }: { call: ToolCall }) {
         <pre className="ml-4 whitespace-pre-wrap font-mono text-xs text-critical">{call.detail}</pre>
       )}
     </li>
+  );
+}
+
+/** Thinking, folded away.
+ *
+ * Open while it is the only thing arriving: that is exactly when a person is
+ * deciding whether to abort a model going in circles.
+ *
+ * Its own state after that. `open` used to be derived on every render, so a
+ * re-render on the next token would have reopened what the reader had just
+ * closed — and a reader closes it precisely because it has grown to thousands
+ * of lines.
+ */
+function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  const lines = text.split("\n");
+  // The newest thing it said, shown on the summary while folded. 3,914 lines
+  // behind a disclosure triangle tells you it is busy but not what it is busy
+  // with, and expanding to find out means scrolling to the bottom of a wall.
+  const tail = lines.filter((l) => l.trim() !== "").at(-1) ?? "";
+  return (
+    <details
+      data-testid="turn-reasoning"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      className="mt-1 rounded border border-hairline bg-surface2 px-2 py-1"
+    >
+      <summary className="flex cursor-pointer items-baseline gap-2 text-xs text-ink-muted">
+        <span className="shrink-0">
+          thinking · {lines.length} line{lines.length === 1 ? "" : "s"}
+        </span>
+        {!open && tail && (
+          <span
+            data-testid="turn-reasoning-tail"
+            className="min-w-0 truncate font-mono text-ink-secondary"
+            title={tail}
+          >
+            {tail.length > 120 ? tail.slice(0, 120) + "…" : tail}
+          </span>
+        )}
+      </summary>
+      <pre className="mt-1 whitespace-pre-wrap font-mono text-xs text-ink-muted">{text}</pre>
+    </details>
   );
 }

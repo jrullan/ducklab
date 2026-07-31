@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/daemon"
@@ -42,6 +43,8 @@ func main() {
 		info = &daemon.EngineInfo{}
 	}
 
+	notifier := notifications.New()
+	shell := &Shell{notifier: notifier}
 	app := application.New(application.Options{
 		Name:        "ducklab",
 		Description: "a multi-model software development harness",
@@ -51,6 +54,8 @@ func main() {
 		// One binding, and only because the engine has no screen. See picker.go.
 		Services: []application.Service{
 			application.NewService(&Picker{}),
+			application.NewService(notifier),
+			application.NewService(shell),
 		},
 	})
 
@@ -68,20 +73,21 @@ func main() {
 		route = os.Args[1]
 	}
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:     "ducklab",
 		Width:     1440,
 		Height:    900,
 		MinWidth:  1024,
 		MinHeight: 700,
 		JS: fmt.Sprintf(
-			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q };`+
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q };`+
 				`if (%q) location.hash = %q;`,
 			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Version,
-			ChooseDirectoryFQN(),
+			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(),
 			route, route,
 		),
 	})
+	shell.win = win
 
 	if err := app.Run(); err != nil {
 		log.Fatalf("error: %v", err)

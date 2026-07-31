@@ -2,6 +2,7 @@
  * must be addressable without a router that owns history. */
 
 export type Route =
+  | { name: "now" }
   | { name: "overview" }
   | { name: "runs" }
   | { name: "cycle"; stage?: string }
@@ -18,6 +19,10 @@ export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\//, "");
   const [head, arg] = path.split("/");
   switch (head) {
+    case "now":
+      return { name: "now" };
+    case "overview":
+      return { name: "overview" };
     case "runs":
       return arg ? { name: "run", id: arg } : { name: "runs" };
     case "cycle":
@@ -39,7 +44,7 @@ export function parseRoute(hash: string): Route {
     case "settings":
       return { name: "settings" };
     default:
-      return { name: "overview" };
+      return { name: "now" };
   }
 }
 
@@ -65,6 +70,8 @@ export function routeHref(route: Route): string {
       return "#/ducklings";
     case "settings":
       return "#/settings";
+    case "now":
+      return "#/now";
     default:
       return "#/overview";
   }

@@ -103,6 +103,7 @@ export interface DucklingCapabilities {
 
 export interface DucklingDuckling {
   caps?: DucklingCapabilities;
+  color?: number;
   cost?: ConfigCost;
   id?: string;
   model?: string;
@@ -186,6 +187,7 @@ export interface EngineapiverifyResponse {
 export interface ReportDelta {
   key?: string;
   n?: number;
+  one_run?: boolean;
   pass_rate?: number;
   points_vs_baseline?: number;
 }
@@ -205,10 +207,13 @@ export interface ReportResolution {
 }
 
 export interface ReportRow {
+  builds?: number;
   cost_usd?: number;
   estimated?: boolean;
   failed?: number;
   key?: string;
+  no_change_passes?: number;
+  no_changes?: number;
   passed?: number;
   runs?: number;
   tokens?: number;
@@ -216,11 +221,26 @@ export interface ReportRow {
   wallclock_ms?: number;
 }
 
-export interface RunlogBudgetState {
+export interface RunlogBudgetLimits {
   tokens?: number;
   turns?: number;
   usd?: number;
   wallclock_s?: number;
+}
+
+export interface RunlogBudgetState {
+  limit?: RunlogBudgetLimits;
+  tokens?: number;
+  turns?: number;
+  usd?: number;
+  wallclock_s?: number;
+}
+
+export interface RunlogDucklingSpend {
+  calls?: number;
+  cost_usd?: number;
+  estimated?: boolean;
+  tokens?: number;
 }
 
 export interface RunlogEvent {
@@ -242,15 +262,18 @@ export interface RunlogRun {
   commit_sha?: string;
   dry_run?: boolean;
   ended_at?: string;
+  failure?: string;
   gate?: string;
   id?: string;
   mode?: string;
+  no_changes?: boolean;
   pending_data?: Record<string, unknown>;
   pending_kind?: string;
   pending_since?: string;
   project_id?: string;
   resolution?: string;
   roster?: Record<string, string>;
+  spend?: Record<string, RunlogDucklingSpend>;
   stage?: string;
   started_at?: string;
   status?: string;
@@ -258,6 +281,7 @@ export interface RunlogRun {
   task_id?: string;
   tests_modified?: boolean;
   tokens_estimated?: boolean;
+  tree_snapshot?: string;
   unsafe_writes?: boolean;
   verdict?: string;
   wallclock_ms?: number;
@@ -278,6 +302,13 @@ export interface ServiceBenchSummary {
   suite_version?: number;
 }
 
+export interface ServiceBudgetView {
+  max_tokens?: number;
+  max_turns?: number;
+  max_usd?: number;
+  max_wallclock_s?: number;
+}
+
 export interface ServiceBugRequest {
   body?: string;
   reporter?: string;
@@ -294,6 +325,7 @@ export interface ServiceCandidateView {
 
 export interface ServiceDucklingView {
   caps?: ConfigCaps;
+  color?: number;
   cost?: ConfigCost;
   id?: string;
   model?: string;
@@ -326,6 +358,15 @@ export interface ServiceInitRequest {
   git_init?: boolean;
   name?: string;
   path?: string;
+}
+
+export interface ServiceModeDefaultsView {
+  agent_max_turns?: number;
+  ducklings?: Record<string, string[]>;
+  role_turns?: Record<string, number>;
+  rounds?: Record<string, number>;
+  script_role_turns?: Record<string, number>;
+  script_rounds?: Record<string, number>;
 }
 
 export interface ServiceProject {
@@ -425,6 +466,7 @@ export interface ServiceSuggestion {
 }
 
 export interface ServiceTaskView {
+  blocked?: string;
   body?: string;
   complexity?: string;
   depends_on?: string[];
@@ -452,6 +494,10 @@ export const OPERATIONS = [
   { id: "BenchList", method: "GET", path: "/v1/bench" },
   { id: "Bench", method: "POST", path: "/v1/bench" },
   { id: "BenchGet", method: "GET", path: "/v1/bench/{suite}/{stamp}" },
+  { id: "BudgetDefaults", method: "GET", path: "/v1/defaults/budget" },
+  { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
+  { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
+  { id: "ModeDefaultsSet", method: "PUT", path: "/v1/defaults/modes" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
   { id: "DucklingRemove", method: "DELETE", path: "/v1/ducklings/{id}" },
   { id: "DucklingSet", method: "PUT", path: "/v1/ducklings/{id}" },
@@ -470,6 +516,7 @@ export const OPERATIONS = [
   { id: "BugList", method: "GET", path: "/v1/projects/{id}/bugs" },
   { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
   { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },
+  { id: "BugEdit", method: "PUT", path: "/v1/projects/{id}/bugs/{bug}" },
   { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
@@ -496,6 +543,7 @@ export const OPERATIONS = [
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
+  { id: "TaskRemove", method: "DELETE", path: "/v1/projects/{id}/tasks/{task}" },
   { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
   { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
