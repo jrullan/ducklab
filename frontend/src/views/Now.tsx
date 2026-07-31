@@ -14,7 +14,7 @@ import type { Duckling, EngineClient, Run, Task } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
-import { RunLauncher, type LaunchOpts } from "../components/RunLauncher";
+import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { EmptyState } from "../components/EmptyState";
 import { money, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
@@ -29,6 +29,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [next, setNext] = useState<Task | null>(null);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  const [estimates, setEstimates] = useState<ModeEstimates>({});
   const [started, setStarted] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -40,6 +41,18 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       .modeDefaults()
       .then((d) => setPreferred(d.ducklings ?? {}))
       .catch(() => setPreferred({}));
+    void (async () => {
+      try {
+        const rep = await client.report(projectId, "mode");
+        const est: ModeEstimates = {};
+        for (const row of rep.rows) {
+          est[row.key] = { usd: row.cost_usd, runs: row.runs };
+        }
+        setEstimates(est);
+      } catch {
+        setEstimates({});
+      }
+    })();
   }, [client, projectId, runs]);
 
   const list = Object.values(runs);
@@ -155,6 +168,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 <RunLauncher
                   ducklings={fleet}
                   preferred={preferred}
+                  estimates={estimates}
                   label={`Run ${next.id}`}
                   onLaunch={(opts) => void launch(opts)}
                 />

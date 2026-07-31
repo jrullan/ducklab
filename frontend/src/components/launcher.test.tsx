@@ -60,3 +60,31 @@ describe("the run launcher's saved line-ups", () => {
     expect(onDucklingsChange).toHaveBeenCalledWith(["pato-atom"]);
   });
 });
+
+// The person deciding how to run something is deciding what to spend, and that
+// number used to live in Reports, consulted after the money was gone.
+describe("the launcher's cost estimates", () => {
+  it("shows each mode's measured average beside it", () => {
+    render(
+      <RunLauncher
+        ducklings={fleet}
+        estimates={{ pair: { usd: 0.87, runs: 3 }, solo: { usd: 0.1, runs: 2 } }}
+        onLaunch={() => {}}
+      />,
+    );
+    const options = [...screen.getByTestId("run-mode").querySelectorAll("option")].map(
+      (o) => o.textContent,
+    );
+    expect(options.find((o) => o?.startsWith("pair"))).toContain("~$0.29");
+    expect(options.find((o) => o?.startsWith("solo"))).toContain("~$0.05");
+  });
+
+  // A mode never run here has no number, and inventing one would be worse.
+  it("stays quiet about modes with no history", () => {
+    render(<RunLauncher ducklings={fleet} estimates={{}} onLaunch={() => {}} />);
+    const options = [...screen.getByTestId("run-mode").querySelectorAll("option")].map(
+      (o) => o.textContent,
+    );
+    for (const o of options) expect(o).not.toContain("$");
+  });
+});

@@ -1,5 +1,10 @@
 import { useState } from "react";
 import type { Duckling } from "../api/client";
+import { money } from "../lib/format";
+
+/** What a mode has cost here before: total dollars over how many runs, from
+ * the project's own history. */
+export type ModeEstimates = Record<string, { usd: number; runs: number }>;
 
 /** What a launch asks for. Anything unset falls back to the engine's defaults. */
 export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number };
@@ -20,6 +25,7 @@ export function RunLauncher({
   initialMode = "solo",
   initialDucklings = [],
   preferred,
+  estimates,
   label = "Build it",
   busy = false,
   onLaunch,
@@ -32,6 +38,11 @@ export function RunLauncher({
    * combination that works is a finding, and re-ticking the same boxes on every
    * run is how a finding gets lost. */
   preferred?: Record<string, string[]>;
+  /** Average cost per mode from this project's runs. Shown beside each mode:
+   * the person deciding how to run something is deciding what to spend, and
+   * that number used to live in Reports, consulted after the money was gone
+   * (docs/ux-evaluation.md F8). */
+  estimates?: ModeEstimates;
   label?: string;
   busy?: boolean;
   onLaunch: (opts: LaunchOpts) => void;
@@ -63,11 +74,16 @@ export function RunLauncher({
           }}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
         >
-          {MODES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
+          {MODES.map((m) => {
+            const e = estimates?.[m];
+            const avg = e && e.runs > 0 ? e.usd / e.runs : undefined;
+            return (
+              <option key={m} value={m}>
+                {m}
+                {avg !== undefined ? ` · ~${money(avg)}` : ""}
+              </option>
+            );
+          })}
         </select>
         {/* A run that hits the token ceiling fails with a number the person
             starting it could not see or change. Raised for this run only; the

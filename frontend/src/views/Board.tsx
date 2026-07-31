@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
-import { RunLauncher, type LaunchOpts } from "../components/RunLauncher";
+import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -64,6 +64,8 @@ export function Board({
   // The saved line-up per mode, so picking a mode fills the boxes with the
   // combination that was found to work.
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  // What each mode has cost in THIS project, for the launcher's mode picker.
+  const [estimates, setEstimates] = useState<ModeEstimates>({});
   // Filing a report was reachable only from the CLI: the engine has had
   // POST /bugs since the operate loop was built, and the board's own empty
   // state told you to go and run `ducklab bug add`. On a desktop-only setup the
@@ -104,6 +106,18 @@ export function Board({
       .modeDefaults()
       .then((d) => setPreferred(d.ducklings ?? {}))
       .catch(() => setPreferred({}));
+    void (async () => {
+      try {
+        const rep = await client.report(projectId, "mode");
+        const est: ModeEstimates = {};
+        for (const row of rep.rows) {
+          est[row.key] = { usd: row.cost_usd, runs: row.runs };
+        }
+        setEstimates(est);
+      } catch {
+        setEstimates({});
+      }
+    })();
     client
       .projectGate(projectId)
       .then((g) => {
@@ -442,6 +456,7 @@ export function Board({
             projectId={projectId}
             ducklings={ducklings}
             preferred={preferred}
+            estimates={estimates}
             gate={gate}
             gateCommand={gateCommand}
             onDone={() => void load()}
@@ -458,6 +473,7 @@ function TaskRail({
   projectId,
   ducklings,
   preferred,
+  estimates,
   gate,
   gateCommand,
   onDone,
@@ -467,6 +483,7 @@ function TaskRail({
   projectId: string;
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
+  estimates: ModeEstimates;
   gate: string;
   gateCommand: string;
   onDone: () => void;
@@ -488,6 +505,7 @@ function TaskRail({
         projectId={projectId}
         ducklings={ducklings}
         preferred={preferred}
+        estimates={estimates}
         gate={gate}
         gateCommand={gateCommand}
         onDone={onDone}
@@ -509,6 +527,7 @@ function TaskRunner({
   projectId,
   ducklings,
   preferred,
+  estimates,
   gate,
   gateCommand,
   onDone,
@@ -518,6 +537,7 @@ function TaskRunner({
   projectId: string;
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
+  estimates: ModeEstimates;
   gate: string;
   gateCommand: string;
   onDone: () => void;
@@ -570,6 +590,7 @@ function TaskRunner({
           <RunLauncher
             ducklings={ducklings}
             preferred={preferred}
+            estimates={estimates}
             busy={busy}
             onDucklingsChange={setChosen}
             onLaunch={(opts) => void go("run", opts)}
