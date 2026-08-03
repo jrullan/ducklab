@@ -48,6 +48,32 @@ export function Bench({ client }: { client: EngineClient }) {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [load, client]);
 
+  // A bench someone started earlier is rediscovered on mount. The in-flight
+  // state lived only in this component, so leaving for another view and
+  // coming back showed a launcher at rest while nine cells burned tokens in
+  // the background — the run was fine, the view had amnesia. The planned cell
+  // count went with it, so a rediscovered bench reports progress without a
+  // total (cells: 0 means "unknown").
+  useEffect(() => {
+    if (inFlight) return;
+    let cancelled = false;
+    void client
+      .runs()
+      .then((all) => {
+        const cells = all.filter((r) => r.project_id.startsWith("ducklab-bench-"));
+        const alive = cells.some((r) => r.status === "running" || r.status === "queued" || r.status === "paused");
+        if (!cancelled && alive) {
+          setCellRuns(cells);
+          setInFlight({ cells: 0 });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client]);
+
   // While a bench is in flight, its progress lives HERE. Each cell runs in a
   // throwaway project (ducklab-bench-*), so the desktop's project-scoped runs
   // list never shows one — a lesson bought by writing "watchable in Records ▸
@@ -150,8 +176,8 @@ export function Bench({ client }: { client: EngineClient }) {
         )}
         {inFlight && (
           <span className="text-xs text-ink-secondary" data-testid="bench-running">
-            running {inFlight.cells} cells — progress below; the result appears here when it
-            finishes
+            {inFlight.cells > 0 ? `running ${inFlight.cells} cells` : "a bench is running"} — progress
+            below; the result appears here when it finishes
           </span>
         )}
         {startError && (
@@ -163,8 +189,8 @@ export function Bench({ client }: { client: EngineClient }) {
       {inFlight && cellRuns.length > 0 && (
         <div className="mt-2 border-t border-hairline pt-2" data-testid="bench-progress">
           <span className="text-xs text-ink-muted" data-testid="bench-progress-count">
-            {cellRuns.filter((r) => r.status === "done" || r.status === "failed").length} of{" "}
-            {inFlight.cells} cells done
+            {cellRuns.filter((r) => r.status === "done" || r.status === "failed").length}
+            {inFlight.cells > 0 ? ` of ${inFlight.cells}` : ""} cells done
           </span>
           <ul className="mt-1 space-y-0.5 text-xs">
             {cellRuns.map((r) => (

@@ -347,6 +347,39 @@ describe("starting a bench from the desktop", () => {
     expect(screen.getByTestId("bench-running").textContent).toContain("progress below");
   });
 
+  // The in-flight state lived only in the component: leaving for another view
+  // and coming back showed a launcher at rest while nine cells burned tokens
+  // in the background. The run was fine; the view had amnesia.
+  it("rediscovers a bench already in flight when the view mounts", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    (client as unknown as { runs: unknown }).runs = vi.fn(() =>
+      Promise.resolve([
+        { id: "r-1", project_id: "ducklab-bench-abc", task_id: "B-001", mode: "solo", status: "done", verdict: "PASSED" },
+        { id: "r-2", project_id: "ducklab-bench-abc", task_id: "B-002", mode: "solo", status: "running", verdict: "" },
+        { id: "r-3", project_id: "calculator", task_id: "T-001", mode: "solo", status: "running", verdict: "" },
+      ]),
+    );
+    render(<Bench client={client} />);
+    const banner = await screen.findByTestId("bench-running");
+    expect(banner.textContent).toContain("a bench is running");
+    // Progress without a total: the planned count left with the old mount.
+    expect(screen.getByTestId("bench-progress-count").textContent).toContain("1 cells done");
+    // Only bench cells listed — the project run is not part of the matrix.
+    expect(screen.getAllByTestId("bench-cell-run")).toHaveLength(2);
+  });
+
+  it("stays at rest when nothing bench-shaped is running", async () => {
+    const client = benchClient([cell({ task: "B-001" })]);
+    (client as unknown as { runs: unknown }).runs = vi.fn(() =>
+      Promise.resolve([
+        { id: "r-9", project_id: "ducklab-bench-old", task_id: "B-009", mode: "solo", status: "done", verdict: "PASSED" },
+      ]),
+    );
+    render(<Bench client={client} />);
+    await screen.findByTestId("bench-launcher");
+    expect(screen.queryByTestId("bench-running")).toBeNull();
+  });
+
   it("shows the engine's refusal before anything has run", async () => {
     const client = benchClient([cell({ task: "B-001" })]);
     (client as unknown as { benchStart: unknown }).benchStart = vi.fn(() =>
@@ -365,16 +398,19 @@ describe("starting a bench from the desktop", () => {
   // and was wrong; the progress lives where the person already is.
   it("shows the cells' own progress while it runs", async () => {
     const client = benchClient([cell({ task: "B-001" })]);
-    (client as unknown as { runs: unknown }).runs = vi.fn(() =>
-      Promise.resolve([
-        { id: "r-c1", project_id: "ducklab-bench-x1", task_id: "B-001", mode: "solo",
-          status: "done", verdict: "PASSED", started_at: "" },
-        { id: "r-c2", project_id: "ducklab-bench-x2", task_id: "B-002", mode: "solo",
-          status: "running", verdict: "", started_at: "" },
-        { id: "r-p", project_id: "calculator", task_id: "T-001", mode: "solo",
-          status: "running", verdict: "", started_at: "" },
-      ]),
-    );
+    // Nothing bench-shaped at mount — the rediscovery pass sees an idle
+    // engine — and the cells appear once this launch starts them.
+    const cells = [
+      { id: "r-c1", project_id: "ducklab-bench-x1", task_id: "B-001", mode: "solo",
+        status: "done", verdict: "PASSED", started_at: "" },
+      { id: "r-c2", project_id: "ducklab-bench-x2", task_id: "B-002", mode: "solo",
+        status: "running", verdict: "", started_at: "" },
+      { id: "r-p", project_id: "calculator", task_id: "T-001", mode: "solo",
+        status: "running", verdict: "", started_at: "" },
+    ];
+    const runsFn = vi.fn(() => Promise.resolve(cells));
+    runsFn.mockResolvedValueOnce([]);
+    (client as unknown as { runs: unknown }).runs = runsFn;
     render(<Bench client={client} />);
     fireEvent.click(await screen.findByTestId("bench-duckling-luna"));
     fireEvent.click(screen.getByTestId("bench-start"));
