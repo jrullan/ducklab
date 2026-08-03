@@ -56,6 +56,13 @@ type Frontmatter struct {
 	RunID      string
 	Ducklings  []string
 	ApprovedBy string
+	// BasedOn is the hash of the approved document this proposal was drafted
+	// against. A proposal is a frozen photograph: if the approved document
+	// moves while it waits — a task removed, a bug promotion appending one —
+	// accepting it would overwrite those edits wholesale and in silence.
+	// Promote compares this against the document as it stands and refuses on
+	// drift, naming what would be erased.
+	BasedOn string
 }
 
 // Approved reports whether a human has signed off on this version.
@@ -374,6 +381,8 @@ func parseFrontmatter(fm string) Frontmatter {
 			f.ApprovedBy = val
 		case "ducklings":
 			f.Ducklings = parseList(val)
+		case "based_on":
+			f.BasedOn = val
 		}
 	}
 	return f
@@ -410,6 +419,9 @@ func Render(doc *Document) string {
 	}
 	if len(doc.Front.Ducklings) > 0 {
 		fmt.Fprintf(&b, "ducklings: [%s]\n", strings.Join(doc.Front.Ducklings, ", "))
+	}
+	if doc.Front.BasedOn != "" {
+		fmt.Fprintf(&b, "based_on: %s\n", doc.Front.BasedOn)
 	}
 	fmt.Fprintf(&b, "approved_by: %s\n", doc.Front.ApprovedBy)
 	b.WriteString("---\n\n")

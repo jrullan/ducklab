@@ -1,9 +1,12 @@
 package artifact
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,6 +70,9 @@ func WriteProposal(projectRoot string, kind Kind, doc *Document, runID string, d
 	doc.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	doc.Front.RunID = runID
 	doc.Front.Ducklings = ducklings
+	// The photograph is stamped with what it is a photograph OF, so promotion
+	// can tell whether the approved document moved while the proposal waited.
+	doc.Front.BasedOn = ContentHash(current.Raw)
 	// A proposal is never pre-approved. Approval is the human's act.
 	doc.Front.ApprovedBy = ""
 
@@ -76,7 +82,21 @@ func WriteProposal(projectRoot string, kind Kind, doc *Document, runID string, d
 	return xplat.AtomicWrite(ProposedPath(projectRoot, kind), []byte(Render(doc)), 0o644)
 }
 
+// ErrProposalStale marks a promotion refused because the approved document
+// changed after the proposal was drafted. Callers that treat other promotion
+// errors as warnings must NOT downgrade this one: accepting through it would
+// silently erase the interleaved edits.
+var ErrProposalStale = errors.New("the approved document changed after this proposal was drafted")
+
 // Promote replaces the artifact with its proposal and records who approved it.
+//
+// Refused when the approved document is not the one the proposal was drafted
+// against. A proposal is a frozen photograph, and promotion writes it over the
+// document WHOLESALE — so a task removed, or a bug promotion appending one,
+// while the proposal sat at the gate would be erased without anyone being
+// told. The two bug-promoted tasks of one real morning were added 52 minutes
+// after a plan proposal was accepted; with the order reversed they would
+// simply have vanished.
 func Promote(projectRoot string, kind Kind, approvedBy string) (*Document, error) {
 	doc, err := LoadProposed(projectRoot, kind)
 	if err != nil {
@@ -84,6 +104,19 @@ func Promote(projectRoot string, kind Kind, approvedBy string) (*Document, error
 	}
 	if doc == nil {
 		return nil, fmt.Errorf("no proposal pending for %s", kind)
+	}
+	if doc.Front.BasedOn != "" {
+		current, cErr := Load(projectRoot, kind)
+		if cErr != nil {
+			return nil, cErr
+		}
+		if got := ContentHash(current.Raw); got != doc.Front.BasedOn {
+			detail := "its edits would be overwritten"
+			if lost := sectionIDs(current).minus(sectionIDs(doc)); len(lost) > 0 {
+				detail = fmt.Sprintf("accepting would erase %s", strings.Join(lost, ", "))
+			}
+			return nil, fmt.Errorf("%w: %s. Reject this proposal and redraft, so the new draft starts from today's document", ErrProposalStale, detail)
+		}
 	}
 	if approvedBy == "" {
 		approvedBy = "human"
@@ -162,4 +195,39 @@ func LineDiff(before, after string) string {
 		fmt.Fprintf(&out, "+%s\n", line)
 	}
 	return out.String()
+}
+
+// ContentHash fingerprints a document's raw content, for based_on stamps.
+func ContentHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+type idSet map[string]bool
+
+func sectionIDs(doc *Document) idSet {
+	ids := idSet{}
+	if doc == nil {
+		return ids
+	}
+	for _, sec := range doc.Sections {
+		ids[sec.ID] = true
+		for _, c := range sec.Children {
+			ids[c.ID] = true
+		}
+	}
+	return ids
+}
+
+// minus returns the ids present here and absent there, sorted — the sections
+// a stale promotion would erase.
+func (a idSet) minus(b idSet) []string {
+	var out []string
+	for id := range a {
+		if id != "" && !b[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

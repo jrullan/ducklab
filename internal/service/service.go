@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -707,9 +708,21 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// bug report, which it spent twenty turns trying to divine from the tree.
 	// The relaunch panel on an old run offers exactly this trap: its task can
 	// have been removed since.
-	if req.TaskID != "" && s.findTask(ctx, projectID, req.TaskID) == nil {
-		return nil, fmt.Errorf("no task %s in this project — it may have been removed; "+
-			"pick one from the board", req.TaskID)
+	if req.TaskID != "" {
+		tv := s.findTask(ctx, projectID, req.TaskID)
+		if tv == nil {
+			return nil, fmt.Errorf("no task %s in this project — it may have been removed; "+
+				"pick one from the board", req.TaskID)
+		}
+		// The engine holds its own door. The board hides the Run button on a
+		// dependency-blocked task, but the CLI, an old client, or a relaunch
+		// panel pointing at yesterday's state can still ask — and for a long
+		// time asking worked: T-023 ran and got ACCEPTED while T-022, which
+		// it depended on, had never passed. The dependency check the plan
+		// declared was display only.
+		if tv.Status == "blocked" && !slices.Contains(tv.Next, "run") {
+			return nil, fmt.Errorf("%s is not startable: %s", req.TaskID, tv.Blocked)
+		}
 	}
 
 	// Create run
@@ -1031,7 +1044,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer: s.llmWriter(rs, tracker),
-		loops: map[config.DucklingID]*agent.Loop{},
+		loops:  map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
 
@@ -1229,6 +1242,14 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 
 	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
 		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, "human"); err != nil {
+			// A stale proposal is the one promotion error that must STOP the
+			// accept: the approved document moved while this proposal waited,
+			// and writing the photograph over it would erase those edits in
+			// silence. The run stays at its gate; the person decides with the
+			// drift named.
+			if errors.Is(err, artifact.ErrProposalStale) {
+				return err
+			}
 			// Not fatal: a run whose proposal was already promoted by hand is
 			// still a run worth accepting, and the promote says so itself.
 			rs.writer.AppendEvent("warning", map[string]interface{}{
