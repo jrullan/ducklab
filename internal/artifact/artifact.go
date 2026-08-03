@@ -185,13 +185,23 @@ func Parse(content string, kind Kind) (*Document, error) {
 			current = &Section{ID: id, Title: title}
 			continue
 		}
-		// A plan's tasks are H3 under a milestone. Any T- heading nests under
-		// the milestone it appears in.
-		if id, title, ok := parseHeading(line, "### ", "T"); ok && current != nil {
-			flush()
-			commitChild()
-			currentChild = &Section{ID: id, Title: title}
-			continue
+		// A plan's tasks are H3 under a milestone. The prefix is open on
+		// purpose: a person's plan numbers tasks T-, but the bench suite
+		// numbers its fixtures B- — and reading only T- made every bench
+		// project a plan with zero tasks, which nothing noticed until
+		// RunStart learned to refuse a task it could not find and refused
+		// all nine.
+		if current != nil {
+			id, title, ok := parseHeading(line, "### ", "T")
+			if !ok && kind == KindPlan {
+				id, title, ok = parseAnyIDHeading(line, "### ")
+			}
+			if ok {
+				flush()
+				commitChild()
+				currentChild = &Section{ID: id, Title: title}
+				continue
+			}
 		}
 		buf = append(buf, line)
 	}
@@ -234,6 +244,27 @@ func parseHeading(line, marker, prefix string) (id, title string, ok bool) {
 	title = strings.TrimPrefix(title, "–")
 	title = strings.TrimPrefix(title, "-")
 	return id, strings.TrimSpace(title), true
+}
+
+// parseAnyIDHeading recognises `<marker><LETTERS>-NNN — Title` with any
+// uppercase prefix.
+func parseAnyIDHeading(line, marker string) (id, title string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, marker) {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, marker))
+	dash := strings.Index(rest, "-")
+	if dash <= 0 {
+		return "", "", false
+	}
+	prefix := rest[:dash]
+	for _, r := range prefix {
+		if r < 'A' || r > 'Z' {
+			return "", "", false
+		}
+	}
+	return parseHeading(line, marker, prefix)
 }
 
 // validID requires PREFIX-<digits>, so a heading like "REQ-uirements" is prose
