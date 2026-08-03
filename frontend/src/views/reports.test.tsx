@@ -107,6 +107,40 @@ describe("Reports", () => {
     expect(screen.getByTestId("duckling-row-pato-sonnet").textContent).toContain("$0.2371");
   });
 
+  // "Sort by total cost" is the question the column exists for: who is the
+  // project's biggest spender. Numbers open descending, the name ascending,
+  // and a second click flips the order.
+  it("sorts the duckling table by a clicked column, and flips on a second click", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 2, passed: 2 })],
+      [],
+      [
+        row({ key: "pato-atom", runs: 10, passed: 9, failed: 1, cost_usd: 0.9 }),
+        row({ key: "pato-luna", runs: 2, passed: 2, cost_usd: 0.01 }),
+        row({ key: "pato-sonnet", runs: 3, passed: 3, cost_usd: 0.5 }),
+      ],
+    );
+    render(<Reports client={client} projectId="p" />);
+    await screen.findByTestId("duckling-table");
+
+    const order = () =>
+      Array.from(document.querySelectorAll("[data-testid^='duckling-row-']")).map((el) =>
+        el.getAttribute("data-testid")!.replace("duckling-row-", ""),
+      );
+    // Engine order (alphabetical) until a column is chosen.
+    expect(order()).toEqual(["pato-atom", "pato-luna", "pato-sonnet"]);
+
+    fireEvent.click(screen.getByTestId("duckling-sort-total-cost"));
+    expect(order()).toEqual(["pato-atom", "pato-sonnet", "pato-luna"]);
+
+    fireEvent.click(screen.getByTestId("duckling-sort-total-cost"));
+    expect(order()).toEqual(["pato-luna", "pato-sonnet", "pato-atom"]);
+
+    // The name column opens ascending instead.
+    fireEvent.click(screen.getByTestId("duckling-sort-duckling"));
+    expect(order()).toEqual(["pato-atom", "pato-luna", "pato-sonnet"]);
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

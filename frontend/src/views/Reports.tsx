@@ -223,25 +223,70 @@ function PassRateTable({ rows }: { rows: readonly ReportRow[] }) {
  * Estimated token counts carry a `~` and are never presented as measured
  * (04 §7). The marker is on the row that is estimated, not on a total, because
  * a total of measured and estimated numbers is not a number anyone can use. */
+
+/** One sortable value per column, so the header and the sort cannot disagree
+ * about what a column means. */
+const DUCKLING_COLUMNS = [
+  { key: "duckling", label: "duckling", value: (r: ReportRow) => r.key },
+  { key: "runs", label: "runs", value: (r: ReportRow) => r.runs },
+  { key: "pass-rate", label: "pass rate", value: (r: ReportRow) => (r.runs ? r.passed / r.runs : 0) },
+  { key: "avg-tokens", label: "avg tokens", value: (r: ReportRow) => (r.runs ? r.tokens / r.runs : 0) },
+  { key: "avg-wall", label: "avg wall", value: (r: ReportRow) => (r.runs ? r.wallclock_ms / r.runs : 0) },
+  { key: "avg-cost", label: "avg cost", value: (r: ReportRow) => (r.runs ? r.cost_usd / r.runs : 0) },
+  { key: "total-cost", label: "total cost", value: (r: ReportRow) => r.cost_usd },
+] as const;
+
 function DucklingTable({ rows }: { rows: readonly ReportRow[] }) {
+  // Numbers open descending — "sort by total cost" means "biggest spender
+  // first" — and the name opens ascending, because Z-to-A is nobody's first
+  // ask. A second click flips it.
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   if (rows.length === 0) {
     return <p className="text-sm text-ink-muted">No runs recorded a duckling.</p>;
+  }
+  const sorted = [...rows];
+  const col = DUCKLING_COLUMNS.find((c) => c.key === sort?.key);
+  if (sort && col) {
+    sorted.sort((a, b) => {
+      const va = col.value(a);
+      const vb = col.value(b);
+      const cmp = typeof va === "string" ? va.localeCompare(String(vb)) : Number(va) - Number(vb);
+      return cmp * sort.dir;
+    });
   }
   return (
     <table className="w-full text-sm tabular-nums" data-testid="duckling-table">
       <thead className="text-ink-muted">
         <tr>
-          <th className="text-left font-normal">duckling</th>
-          <th className="text-right font-normal">runs</th>
-          <th className="text-right font-normal">pass rate</th>
-          <th className="text-right font-normal">avg tokens</th>
-          <th className="text-right font-normal">avg wall</th>
-          <th className="text-right font-normal">avg cost</th>
-          <th className="text-right font-normal">total cost</th>
+          {DUCKLING_COLUMNS.map((c) => (
+            <th
+              key={c.key}
+              className={`font-normal ${c.key === "duckling" ? "text-left" : "text-right"}`}
+              aria-sort={
+                sort?.key !== c.key ? undefined : sort.dir === 1 ? "ascending" : "descending"
+              }
+            >
+              <button
+                type="button"
+                data-testid={`duckling-sort-${c.key}`}
+                className="cursor-pointer hover:text-ink"
+                onClick={() =>
+                  setSort((cur) =>
+                    cur?.key === c.key
+                      ? { key: c.key, dir: cur.dir === 1 ? -1 : 1 }
+                      : { key: c.key, dir: c.key === "duckling" ? 1 : -1 },
+                  )
+                }
+              >
+                {c.label}
+                {sort?.key === c.key && (sort.dir === 1 ? " ↑" : " ↓")}
+              </button>
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
+        {sorted.map((r) => (
           <tr key={r.key} data-testid={`duckling-row-${r.key}`}>
             <td>{r.key}</td>
             <td className="text-right">{r.runs}</td>
