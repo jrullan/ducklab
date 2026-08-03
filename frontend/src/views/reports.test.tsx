@@ -141,6 +141,24 @@ describe("Reports", () => {
     expect(order()).toEqual(["pato-atom", "pato-luna", "pato-sonnet"]);
   });
 
+  // Every other number on the page is relative — points, rates, averages.
+  // The one absolute a person budgeting needs is what the project has cost.
+  it("says what the project has cost in the selected window", async () => {
+    const client = clientWith(
+      [
+        row({ key: "solo", runs: 3, passed: 3, cost_usd: 1.25 }),
+        row({ key: "pair", runs: 2, passed: 2, cost_usd: 0.5 }),
+      ],
+      [],
+    );
+    render(<Reports client={client} projectId="p" />);
+    const cost = await screen.findByTestId("project-cost");
+    expect(cost.textContent).toContain("$1.75");
+    expect(cost.textContent).toContain("5 finished runs");
+    // An estimated row marks the total as an estimate, never as measured.
+    expect(cost.textContent).not.toContain("~");
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

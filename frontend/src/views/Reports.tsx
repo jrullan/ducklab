@@ -75,6 +75,12 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
   const rows = byMode?.rows ?? [];
   const solo = rows.find((r) => r.key === "solo");
   const best = (byMode?.deltas ?? []).slice().sort((a, b) => b.points_vs_baseline - a.points_vs_baseline)[0];
+  // Summed over the mode rows, where each run is counted once — the duckling
+  // rows split a run between its models. Follows the range filter, so "last
+  // 30d" answers what the last month cost.
+  const totalCost = rows.reduce((sum, r) => sum + r.cost_usd, 0);
+  const totalRuns = rows.reduce((sum, r) => sum + r.runs, 0);
+  const anyEstimated = rows.some((r) => r.estimated);
 
   if (rows.length === 0) {
     return (
@@ -105,6 +111,18 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
           </button>
         ))}
       </div>
+
+      {/* What the project has cost, in the selected window. Every other number
+          on this page is relative — points against a baseline, rates, averages
+          — and the one absolute a person budgeting needs was on none of it. */}
+      <p className="text-sm text-ink-secondary" data-testid="project-cost">
+        This project has cost{" "}
+        <span className="text-ink" title={anyEstimated ? "includes estimated token counts" : undefined}>
+          {anyEstimated ? "~" : ""}${totalCost.toFixed(2)}
+        </span>{" "}
+        across {totalRuns} finished {totalRuns === 1 ? "run" : "runs"}
+        {since ? ` in the last ${since}` : ""}.
+      </p>
 
       {/* The hero. Without a solo baseline there is no comparison to make, and
           saying so is more useful than a number with nothing behind it. */}
