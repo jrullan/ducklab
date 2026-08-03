@@ -189,6 +189,48 @@ describe("Reports", () => {
     expect(screen.queryByTestId("leaderboard")).toBeNull();
   });
 
+  // Pick two models, get the verdict — and the metric rows to check it
+  // against, because a summary nobody can audit is an opinion.
+  it("compares two chosen models head to head", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 5, passed: 5 })],
+      [],
+      [
+        row({ key: "luna", runs: 10, passed: 9, failed: 1, tokens: 900000, cost_usd: 0.05, wallclock_ms: 3600000 }),
+        row({ key: "pato-sonnet", runs: 5, passed: 4, failed: 1, tokens: 300000, cost_usd: 2.0, wallclock_ms: 600000 }),
+      ],
+    );
+    render(<Reports client={client} projectId="p" />);
+    await screen.findByTestId("head-to-head");
+    fireEvent.change(screen.getByTestId("compare-a"), { target: { value: "luna" } });
+    fireEvent.change(screen.getByTestId("compare-b"), { target: { value: "pato-sonnet" } });
+
+    expect(screen.getByTestId("compare-summary").textContent).toBe(
+      "luna is both more effective and more efficient on this history.",
+    );
+    // The winner of each row is marked where the reader can check the claim.
+    expect(screen.getByTestId("compare-pass-rate").textContent).toContain("✓");
+    expect(screen.getByTestId("compare-table").textContent).toContain("90%");
+    // Enough runs on both sides: no thin-evidence warning.
+    expect(screen.queryByTestId("compare-thin")).toBeNull();
+  });
+
+  it("warns when one side's history is an anecdote", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 5, passed: 5 })],
+      [],
+      [
+        row({ key: "luna", runs: 10, passed: 9, tokens: 900000 }),
+        row({ key: "fresh", runs: 2, passed: 2, tokens: 100000 }),
+      ],
+    );
+    render(<Reports client={client} projectId="p" />);
+    await screen.findByTestId("head-to-head");
+    fireEvent.change(screen.getByTestId("compare-a"), { target: { value: "luna" } });
+    fireEvent.change(screen.getByTestId("compare-b"), { target: { value: "fresh" } });
+    expect(screen.getByTestId("compare-thin").textContent).toContain("anecdote");
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

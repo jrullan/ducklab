@@ -12,6 +12,7 @@ import type { EngineClient, ReportDelta, ReportRow } from "../api/client";
 import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
 import { awards } from "../lib/leaderboard";
+import { headToHead } from "../lib/compare";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -186,6 +187,8 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
         <Leaderboard rows={byDuckling} />
         <DucklingTable rows={byDuckling} />
       </section>
+
+      {byDuckling.length >= 2 && <HeadToHeadSection rows={byDuckling} />}
     </div>
   );
 }
@@ -214,6 +217,93 @@ function Leaderboard({ rows }: { rows: readonly ReportRow[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Pick two models, get the verdict: who is more effective, who is more
+ * efficient, and the metric rows to check the claim against. Compared on each
+ * model's own recorded history — for identical tasks, that is what Bench is
+ * for, and the card says so. */
+function HeadToHeadSection({ rows }: { rows: readonly ReportRow[] }) {
+  const [aKey, setAKey] = useState("");
+  const [bKey, setBKey] = useState("");
+  const a = rows.find((r) => r.key === aKey);
+  const b = rows.find((r) => r.key === bKey);
+  const result = a && b && a.key !== b.key ? headToHead(a, b) : null;
+
+  const picker = (value: string, set: (v: string) => void, testid: string, exclude: string) => (
+    <select
+      value={value}
+      onChange={(e) => set(e.target.value)}
+      data-testid={testid}
+      className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+    >
+      <option value="">pick a model…</option>
+      {rows
+        .filter((r) => r.key !== exclude)
+        .map((r) => (
+          <option key={r.key} value={r.key}>
+            {r.key}
+          </option>
+        ))}
+    </select>
+  );
+
+  return (
+    <section className="rounded-card border border-hairline p-3" data-testid="head-to-head">
+      <h3 className="mb-2 text-ink">Head to head</h3>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+        {picker(aKey, setAKey, "compare-a", bKey)}
+        <span className="text-ink-muted">vs</span>
+        {picker(bKey, setBKey, "compare-b", aKey)}
+      </div>
+
+      {result && a && b && (
+        <div className="mt-3">
+          <p className="text-sm text-ink" data-testid="compare-summary">
+            {result.summary}
+          </p>
+          {result.thin && (
+            <p className="mt-1 text-xs text-serious" data-testid="compare-thin">
+              Thin evidence — one side has fewer than 3 finished runs. Read this as an
+              anecdote, not a measurement.
+            </p>
+          )}
+          <table className="mt-2 w-full text-sm tabular-nums" data-testid="compare-table">
+            <thead className="text-ink-muted">
+              <tr>
+                <th className="text-left font-normal">metric</th>
+                <th className="text-right font-normal">{a.key}</th>
+                <th className="text-right font-normal">{b.key}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.metrics.map((m) => (
+                <tr key={m.key} data-testid={`compare-${m.key}`}>
+                  <td className="text-ink-secondary">{m.label}</td>
+                  <td className={"text-right " + (m.winner === "a" ? "text-good" : "text-ink-secondary")}>
+                    {m.a}
+                    {m.winner === "a" && " ✓"}
+                  </td>
+                  <td className={"text-right " + (m.winner === "b" ? "text-good" : "text-ink-secondary")}>
+                    {m.b}
+                    {m.winner === "b" && " ✓"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-xs text-ink-muted">
+            Compared on each model's own recorded history, which may be different tasks in
+            different modes. For the same tasks under the same conditions, run a{" "}
+            <a href="#/bench" className="text-ink underline">
+              bench
+            </a>
+            .
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
