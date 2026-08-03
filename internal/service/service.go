@@ -402,21 +402,6 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	if err := os.MkdirAll(ducklabDir, 0o755); err != nil {
 		return nil, err
 	}
-	// The documents are the record and belong in the project's history; the
-	// operational state must NEVER be tracked. A project that committed its
-	// live SQLite database learned why: the engine branches and checks out on
-	// every accept, and a checkout rewrites tracked files — including the
-	// database's write-ahead log, under an open connection. The run log and
-	// lock churn on every run and belong to the machine, not the history.
-	gitignore := filepath.Join(ducklabDir, ".gitignore")
-	if _, err := os.Stat(gitignore); os.IsNotExist(err) {
-		ignore := "# ducklab operational state — never track: a git checkout rewriting\n" +
-			"# a live SQLite WAL corrupts the database under the running engine.\n" +
-			"ducklab.db\nducklab.db-wal\nducklab.db-shm\nlock\nruns/\nbench/\n"
-		if err := os.WriteFile(gitignore, []byte(ignore), 0o644); err != nil {
-			return nil, err
-		}
-	}
 	// Git init if needed
 	git := vcs.New(absPath)
 	if !git.HasGit() {

@@ -103,20 +103,22 @@ func TestTaskRemoveRefusesWhenTheDatabaseIsUnreachable(t *testing.T) {
 	t.Error("the plan lost the task even though the removal was refused")
 }
 
-// New projects never track the operational state: a git checkout rewriting a
-// live SQLite WAL corrupts the database under the running engine, and the
-// engine checks out branches on every accept.
+// The operational state — the live SQLite database, its WAL, the run logs —
+// must never be tracked: the engine branches and checks out on every accept,
+// and a checkout that rewrote a write-ahead log under the engine's open
+// connection would corrupt the database. ProjectInit has always written this
+// exclusion; pinned here because nothing else fails if it quietly stops.
 func TestProjectInitIgnoresTheOperationalState(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	dir := t.TempDir()
 	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true}); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".ducklab", ".gitignore"))
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	if err != nil {
-		t.Fatalf("no .ducklab/.gitignore written: %v", err)
+		t.Fatalf("no .gitignore written: %v", err)
 	}
-	for _, must := range []string{"ducklab.db", "ducklab.db-wal", "runs/"} {
+	for _, must := range []string{".ducklab/ducklab.db", ".ducklab/ducklab.db-wal", ".ducklab/runs/"} {
 		if !strings.Contains(string(data), must) {
 			t.Errorf(".gitignore does not exclude %s", must)
 		}
