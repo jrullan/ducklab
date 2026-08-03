@@ -237,6 +237,7 @@ function DucklingTable({ rows }: { rows: readonly ReportRow[] }) {
           <th className="text-right font-normal">avg tokens</th>
           <th className="text-right font-normal">avg wall</th>
           <th className="text-right font-normal">avg cost</th>
+          <th className="text-right font-normal">total cost</th>
         </tr>
       </thead>
       <tbody>
@@ -251,6 +252,13 @@ function DucklingTable({ rows }: { rows: readonly ReportRow[] }) {
             </td>
             <td className="text-right">{formatMs(r.runs ? r.wallclock_ms / r.runs : 0)}</td>
             <td className="text-right">${(r.runs ? r.cost_usd / r.runs : 0).toFixed(4)}</td>
+            {/* The average says which model is expensive to run once; the
+                total says where the project's money went. A cheap model
+                called constantly can out-spend an expensive one used
+                sparingly, and neither column reveals that alone. */}
+            <td className="text-right" data-testid={`duckling-total-${r.key}`}>
+              ${r.cost_usd.toFixed(4)}
+            </td>
           </tr>
         ))}
       </tbody>

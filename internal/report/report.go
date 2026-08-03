@@ -328,16 +328,20 @@ func startedAfter(r *runlog.Run, since time.Time) bool {
 // Render formats the report as the table of 03-CLI.md §3.10.
 func Render(rep *Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-12s %5s %7s %11s %7s %11s %8s %9s\n",
-		rep.By, "runs", "passed", "unverified", "failed", "avg_tokens", "avg_usd", "avg_wall")
+	// total_usd beside avg_usd: the average says which model is expensive to
+	// run once, the total says where the project's money actually went — a
+	// cheap model called constantly can out-spend an expensive one used
+	// sparingly, and neither number reveals that alone.
+	fmt.Fprintf(&b, "%-12s %5s %7s %11s %7s %11s %8s %10s %9s\n",
+		rep.By, "runs", "passed", "unverified", "failed", "avg_tokens", "avg_usd", "total_usd", "avg_wall")
 	for _, r := range rep.Rows {
 		marker := ""
 		if r.Estimated {
 			marker = "~"
 		}
-		fmt.Fprintf(&b, "%-12s %5d %7d %11d %7d %10s%s %8.4f %9s\n",
+		fmt.Fprintf(&b, "%-12s %5d %7d %11d %7d %10s%s %8.4f %10.4f %9s\n",
 			r.Key, r.Runs, r.Passed, r.Unverified, r.Failed,
-			formatTokens(r.AvgTokens()), marker, r.AvgCost(), formatDuration(r.AvgWall()))
+			formatTokens(r.AvgTokens()), marker, r.AvgCost(), r.CostUSD, formatDuration(r.AvgWall()))
 	}
 
 	if rep.By == "mode" {

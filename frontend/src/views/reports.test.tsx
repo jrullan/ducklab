@@ -90,6 +90,23 @@ describe("Reports", () => {
     expect(screen.getByTestId("duckling-row-pato-local").textContent).not.toContain("~");
   });
 
+  // The average says which model is expensive to run once; the total says
+  // where the project's money went. A cheap model called constantly can
+  // out-spend an expensive one used sparingly, and neither column shows that
+  // alone.
+  it("shows each duckling's total cost beside its average", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 2, passed: 2 })],
+      [],
+      [row({ key: "pato-sonnet", runs: 4, passed: 4, cost_usd: 0.9483 })],
+    );
+    render(<Reports client={client} projectId="p" />);
+    const total = await screen.findByTestId("duckling-total-pato-sonnet");
+    expect(total.textContent).toBe("$0.9483");
+    // And the same row's average is the total over its runs.
+    expect(screen.getByTestId("duckling-row-pato-sonnet").textContent).toContain("$0.2371");
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);
