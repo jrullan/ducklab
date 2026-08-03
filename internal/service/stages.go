@@ -462,14 +462,15 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				st = "todo"
 			}
 			deps := splitList(t.Field("depends on"))
-			// A task whose dependencies are not accepted cannot be started, and
-			// the plan has said so all along — TaskNext has been reading this
-			// since it was written. The board just never showed it, so the only
-			// way to learn a task was not ready was to run it and watch a model
-			// invent the thing it depended on.
+			// A task whose dependencies are not accepted cannot be started.
+			// For a long time that was display only: the board showed
+			// "waiting on T-022" and offered Run anyway, and RunStart never
+			// looked at dependencies at all.
+			depsWaiting := false
 			if st == "todo" {
 				if waiting := unmetDeps(deps, status); len(waiting) > 0 {
 					st = "blocked"
+					depsWaiting = true
 					blocked[t.ID] = "waiting on " + strings.Join(waiting, ", ")
 				}
 			}
@@ -481,7 +482,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Status:     st,
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
-				Next:       taskNextActions(st, gateMode, !pinned[t.ID]),
+				Next:       taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting),
 			})
 		}
 	}
@@ -703,7 +704,11 @@ func (s *Service) findTask(ctx context.Context, projectID, taskID string) *TaskV
 	if db, dbErr := s.openProjectDB(projectID); dbErr == nil {
 		defer db.Close()
 		if rec, gErr := db.GetTask(taskID); gErr == nil && rec != nil {
-			return &TaskView{ID: rec.ID, Title: rec.Title, Body: rec.Body, Status: rec.Status}
+			// Next carries run: the fallback exists so a plan/database
+			// divergence stays runnable, and a database row records no
+			// dependency edges to wait on.
+			return &TaskView{ID: rec.ID, Title: rec.Title, Body: rec.Body,
+				Status: rec.Status, Next: []string{"run"}}
 		}
 	}
 	return nil

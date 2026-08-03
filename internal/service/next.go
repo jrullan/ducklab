@@ -65,13 +65,21 @@ func runNext(r *runlog.Run) []string {
 // where a test changes something the gate can see. removable reflects
 // TaskRemove's own guard — no accepted run, none still open — so the button
 // and the refusal can never disagree.
-func taskNextActions(status, gateMode string, removable bool) []string {
+func taskNextActions(status, gateMode string, removable, depsWaiting bool) []string {
 	var out []string
 	switch status {
 	case "todo", "blocked":
-		out = append(out, "run")
-		if gateMode == "tests" {
-			out = append(out, "test_first")
+		// Two different "blocked" live under one status, and they earn
+		// different actions. A task whose last run failed is retryable — run
+		// is the point. A task waiting on unaccepted dependencies is not:
+		// offering run there let T-023 start and get ACCEPTED while T-022,
+		// which it depended on, had never passed — the model invented the
+		// thing it depended on, and the plan's ordering meant nothing.
+		if !depsWaiting {
+			out = append(out, "run")
+			if gateMode == "tests" {
+				out = append(out, "test_first")
+			}
 		}
 		if removable {
 			out = append(out, "remove")

@@ -106,7 +106,7 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 		{"done", "accepted", "tests", false, []string{"review", "run"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := taskNextActions(tc.status, tc.gateMode, tc.removable)
+			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("next = %v, want %v", got, tc.want)
 			}

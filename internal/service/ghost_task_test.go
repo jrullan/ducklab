@@ -124,3 +124,62 @@ func TestProjectInitIgnoresTheOperationalState(t *testing.T) {
 		}
 	}
 }
+
+// T-023 depended on T-022, T-022 had never been accepted — and T-023 ran
+// three times and got ACCEPTED. The plan's dependency was display only: the
+// board said "waiting on T-022" and offered Run anyway, and RunStart never
+// looked. The person reading the board reasonably concluded T-022 must have
+// been removed, because how else could T-023 have started?
+func TestADependencyBlockedTaskCannotStart(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — First\n\n" +
+		"### T-022 — Browser compatibility\n\nTest it.\n\n" +
+		"### T-023 — Ship it\n\n**Depends on:** T-022\n\nAfterwards.\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The engine's stated actions already withhold run.
+	tv := s.findTask(context.Background(), p.ID, "T-023")
+	if tv == nil {
+		t.Fatal("T-023 not found")
+	}
+	if tv.Status != "blocked" {
+		t.Fatalf("status = %q, want blocked", tv.Status)
+	}
+	for _, action := range tv.Next {
+		if action == "run" || action == "test_first" {
+			t.Errorf("a dependency-blocked task offers %q", action)
+		}
+	}
+
+	// And the engine holds its own door when asked anyway.
+	_, err = s.RunStart(context.Background(), p.ID, RunRequest{TaskID: "T-023", Mode: "solo"})
+	if err == nil {
+		t.Fatal("a run started against unmet dependencies")
+	}
+	if !strings.Contains(err.Error(), "T-022") {
+		t.Errorf("the refusal does not name what it waits on: %v", err)
+	}
+
+	// A retry after a failure is a different blocked: run stays offered. The
+	// unblocked dependency itself proves it — T-022 is plain todo.
+	dep := s.findTask(context.Background(), p.ID, "T-022")
+	found := false
+	for _, action := range dep.Next {
+		if action == "run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("T-022, with nothing to wait on, is not offered run")
+	}
+}
