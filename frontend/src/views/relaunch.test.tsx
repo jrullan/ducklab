@@ -181,3 +181,35 @@ describe("a run that pauses while being watched", () => {
     await waitFor(() => expect(screen.getByTestId("decision-card")).toBeTruthy());
   });
 });
+
+// Judging a run means reading what was done against what was asked, and the
+// task's own words lived only on the board — a different screen from the
+// decision. The rail now carries them next to the gate and the budget.
+describe("the task's description in the run view", () => {
+  beforeEach(() => {
+    useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+  });
+
+  it("shows the task body beside the run", async () => {
+    const client = clientWith({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: "T-015", title: "Handle angle input", milestone: "M-07", status: "blocked",
+            body: "Process angle input:\n- Parse numeric value in degrees\n- Validate angle sum compatibility",
+          },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    const card = await screen.findByTestId("run-task-card");
+    expect(card.textContent).toContain("T-015 — Handle angle input");
+    expect(card.textContent).toContain("Parse numeric value in degrees");
+  });
+
+  it("shows nothing when the task has no body to show", async () => {
+    render(<RunView runId="r-1" client={clientWith()} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("run-task-card")).toBeNull();
+  });
+});

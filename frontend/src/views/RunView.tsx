@@ -10,6 +10,7 @@ import { GateCard } from "../components/GateCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
+import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
@@ -526,6 +527,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
 
         <aside className="flex flex-col gap-3">
+          {/* What was asked for, next to what was done. Judging a run means
+              reading the diff against the task's own words, and those lived
+              only on the board — a different screen from the decision. */}
+          {task && (task.body ?? "").trim() !== "" && (
+            <div className="rounded-card border border-hairline p-3" data-testid="run-task-card">
+              <div className="text-sm text-ink-muted">the task</div>
+              <div className="mt-1 text-sm text-ink">
+                {task.id} — {task.title}
+              </div>
+              <div className="mt-2 max-h-64 overflow-y-auto text-sm">
+                <Prose body={task.body ?? ""} />
+              </div>
+            </div>
+          )}
           <GateCard gate={gate} />
           {budget && (
             <div className="rounded-card border border-hairline p-3">
