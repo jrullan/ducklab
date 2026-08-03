@@ -159,6 +159,36 @@ describe("Reports", () => {
     expect(cost.textContent).not.toContain("~");
   });
 
+  // Badges over the table: who wins each question it can answer. And they
+  // stay away entirely until two models have enough runs to compete.
+  it("crowns the leaderboard from the duckling rows", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 5, passed: 5 })],
+      [],
+      [
+        row({ key: "luna", runs: 10, passed: 9, failed: 1, tokens: 900000, cost_usd: 0.05, wallclock_ms: 3600000 }),
+        row({ key: "pato-sonnet", runs: 5, passed: 4, failed: 1, tokens: 300000, cost_usd: 2.0, wallclock_ms: 600000 }),
+      ],
+    );
+    render(<Reports client={client} projectId="p" />);
+    const board = await screen.findByTestId("leaderboard");
+    expect(screen.getByTestId("award-performant").textContent).toContain("luna");
+    expect(screen.getByTestId("award-performant").textContent).toContain("90% passed");
+    expect(screen.getByTestId("award-fastest").textContent).toContain("pato-sonnet");
+    expect(board.textContent).toContain("n=");
+  });
+
+  it("shows no leaderboard while only one model has real history", async () => {
+    const client = clientWith(
+      [row({ key: "solo", runs: 5, passed: 5 })],
+      [],
+      [row({ key: "luna", runs: 10, passed: 9 })],
+    );
+    render(<Reports client={client} projectId="p" />);
+    await screen.findByTestId("duckling-table");
+    expect(screen.queryByTestId("leaderboard")).toBeNull();
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

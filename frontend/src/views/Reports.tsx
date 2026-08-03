@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { EngineClient, ReportDelta, ReportRow } from "../api/client";
 import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
+import { awards } from "../lib/leaderboard";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -182,8 +183,36 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
 
       <section className="rounded-card border border-hairline p-3" data-testid="per-duckling">
         <h3 className="mb-2 text-ink">Per duckling</h3>
+        <Leaderboard rows={byDuckling} />
         <DucklingTable rows={byDuckling} />
       </section>
+    </div>
+  );
+}
+
+/** Badges over the duckling table: who wins each question the table can
+ * answer. Every claim carries its evidence — the value, and n — and the board
+ * stays empty until two ducklings have enough runs to actually compete, since
+ * a leaderboard with one contender is a mirror, not a measurement. */
+function Leaderboard({ rows }: { rows: readonly ReportRow[] }) {
+  const board = awards(rows);
+  if (board.length === 0) return null;
+  return (
+    <div className="mb-3 flex flex-wrap gap-2" data-testid="leaderboard">
+      {board.map((a) => (
+        <div
+          key={a.key}
+          data-testid={`award-${a.key}`}
+          className="rounded-card border border-hairline px-3 py-2"
+        >
+          <div className="text-xs text-ink-muted">{a.title}</div>
+          <div className="text-sm text-ink">{a.winners.join(" and ")}</div>
+          <div className="text-xs text-ink-secondary">
+            {a.estimated && <span title="includes estimated token counts">~</span>}
+            {a.value} · n={a.n}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
