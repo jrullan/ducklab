@@ -786,6 +786,20 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 		}
 	}
 
+	// The database opens BEFORE the plan is touched. This removal edits two
+	// records that must move together — the plan section and the task row with
+	// its bug pointer — and the database half used to be best-effort: an open
+	// failure returned success after editing only the plan. T-048 lived that
+	// exact split for a morning: gone from the plan, alive in the database,
+	// its bug stuck in_progress pointing at it — unpromotable, unrunnable, and
+	// still offered by every view that reads the database.
+	db, err := s.openProjectDB(projectID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot remove %s: its database record is unreachable (%v); "+
+			"removing only the plan entry would strand the task half-deleted", taskID, err)
+	}
+	defer db.Close()
+
 	removed, err := removePlanTask(entry.Path, taskID)
 	if err != nil {
 		return nil, err
@@ -795,17 +809,17 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	}
 
 	out := map[string]interface{}{"removed": taskID}
-	db, err := s.openProjectDB(projectID)
-	if err != nil {
-		return out, nil
+	if err := db.DeleteTask(taskID); err != nil {
+		// The plan edit is already on disk; said out loud rather than
+		// swallowed, so the person knows the halves disagree and which one.
+		out["warning"] = fmt.Sprintf("plan entry removed, but the database row remains: %v", err)
 	}
-	defer db.Close()
-	_ = db.DeleteTask(taskID)
 
 	// The report goes back to where it was, or it would sit in in_progress
 	// forever pointing at a task nobody can find.
 	bugs, err := db.ListBugs()
 	if err != nil {
+		out["warning"] = fmt.Sprintf("plan entry removed, but its bug could not be reset: %v", err)
 		return out, nil
 	}
 	for _, rec := range bugs {
@@ -819,6 +833,8 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 		if err := db.UpdateBug(rec); err == nil {
 			out["bug"] = rec.ID
 			out["bug_status"] = rec.Status
+		} else {
+			out["warning"] = fmt.Sprintf("plan entry removed, but %s could not be reset: %v", rec.ID, err)
 		}
 		break
 	}

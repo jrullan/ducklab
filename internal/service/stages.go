@@ -690,12 +690,20 @@ func (s *Service) siblingTasks(ctx context.Context, projectID, taskID string, im
 
 func (s *Service) findTask(ctx context.Context, projectID, taskID string) *TaskView {
 	tasks, err := s.TaskList(ctx, projectID)
-	if err != nil {
-		return nil
+	if err == nil {
+		for i := range tasks {
+			if strings.EqualFold(tasks[i].ID, taskID) {
+				return &tasks[i]
+			}
+		}
 	}
-	for i := range tasks {
-		if strings.EqualFold(tasks[i].ID, taskID) {
-			return &tasks[i]
+	// The database keeps its own row for a promoted task, so a plan and a
+	// database that disagree — the exact wreckage a half-done removal leaves —
+	// still yield the title and body rather than a one-line prompt.
+	if db, dbErr := s.openProjectDB(projectID); dbErr == nil {
+		defer db.Close()
+		if rec, gErr := db.GetTask(taskID); gErr == nil && rec != nil {
+			return &TaskView{ID: rec.ID, Title: rec.Title, Body: rec.Body, Status: rec.Status}
 		}
 	}
 	return nil

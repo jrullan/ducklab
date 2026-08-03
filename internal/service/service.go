@@ -402,6 +402,21 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	if err := os.MkdirAll(ducklabDir, 0o755); err != nil {
 		return nil, err
 	}
+	// The documents are the record and belong in the project's history; the
+	// operational state must NEVER be tracked. A project that committed its
+	// live SQLite database learned why: the engine branches and checks out on
+	// every accept, and a checkout rewrites tracked files — including the
+	// database's write-ahead log, under an open connection. The run log and
+	// lock churn on every run and belong to the machine, not the history.
+	gitignore := filepath.Join(ducklabDir, ".gitignore")
+	if _, err := os.Stat(gitignore); os.IsNotExist(err) {
+		ignore := "# ducklab operational state — never track: a git checkout rewriting\n" +
+			"# a live SQLite WAL corrupts the database under the running engine.\n" +
+			"ducklab.db\nducklab.db-wal\nducklab.db-shm\nlock\nruns/\nbench/\n"
+		if err := os.WriteFile(gitignore, []byte(ignore), 0o644); err != nil {
+			return nil, err
+		}
+	}
 	// Git init if needed
 	git := vcs.New(absPath)
 	if !git.HasGit() {
@@ -700,6 +715,16 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// finding that out first costs nothing.
 	if err := checkRunnable(entry.Path); err != nil {
 		return nil, err
+	}
+	// The task must exist somewhere the prompt can be built from. A run
+	// against a ghost id used to start fine and hand the implementer a prompt
+	// of one line — "Implement task T-048" — with no title, no body and no
+	// bug report, which it spent twenty turns trying to divine from the tree.
+	// The relaunch panel on an old run offers exactly this trap: its task can
+	// have been removed since.
+	if req.TaskID != "" && s.findTask(ctx, projectID, req.TaskID) == nil {
+		return nil, fmt.Errorf("no task %s in this project — it may have been removed; "+
+			"pick one from the board", req.TaskID)
 	}
 
 	// Create run
