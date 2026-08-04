@@ -1196,7 +1196,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 
 	// Auto-accept or finish
 	if verdict == "PASSED" && (rs.run.Autonomy == "auto" || rs.run.Autonomy == "yolo") {
-		s.acceptRun(ctx, rs, entry, "")
+		s.acceptRun(ctx, rs, entry, "", "")
 		return
 	}
 	// UNVERIFIED never auto-accepts; yolo still reaches human gate
@@ -1244,7 +1244,10 @@ func (s *Service) failRun(rs *runState, err error) {
 }
 
 // acceptRun accepts a run and commits.
-func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message string) error {
+func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string) error {
+	if actor == "" {
+		actor = "human"
+	}
 	// A stage run's human gate is the decision to promote its document. There
 	// is one decision, so there is one action: accepting the run accepts the
 	// artifact.
@@ -1266,14 +1269,14 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		clearPending(rs.run)
 		rs.run.Accepted = true
 		rs.run.Status = "done"
-		rs.run.Resolution = "accepted by human"
+		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		rs.writer.WriteState()
 		return nil
 	}
 
 	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
-		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, "human"); err != nil {
+		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, actor); err != nil {
 			// A stale proposal is the one promotion error that must STOP the
 			// accept: the approved document moved while this proposal waited,
 			// and writing the photograph over it would erase those edits in
@@ -1601,7 +1604,22 @@ func (s *Service) RunList(ctx context.Context, f RunFilter) ([]*runlog.Run, erro
 }
 
 // RunAccept accepts a run.
+// RunAcceptAs is RunAccept with the decider named. The record must never say
+// a human decided what an operator decided: actor lands in approved_by and in
+// the run's resolution. Empty means human — the desktop and CLI, where a
+// person is pressing the button.
+func (s *Service) RunAcceptAs(ctx context.Context, id, msg, actor string) (*AcceptResult, error) {
+	if actor == "" {
+		actor = "human"
+	}
+	return s.runAccept(ctx, id, msg, actor)
+}
+
 func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*AcceptResult, error) {
+	return s.runAccept(ctx, id, msg, "human")
+}
+
+func (s *Service) runAccept(ctx context.Context, id string, msg string, actor string) (*AcceptResult, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -1615,7 +1633,7 @@ func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*Accept
 	if _, err := s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
-	if err := s.acceptRun(ctx, rs, entry, msg); err != nil {
+	if err := s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
 		return nil, err
 	}
 	return &AcceptResult{CommitSHA: rs.run.CommitSHA}, nil

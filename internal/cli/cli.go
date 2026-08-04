@@ -130,6 +130,8 @@ func Run(args []string) int {
 	switch noun {
 	case "engine":
 		return engineCmd(verb, cmdArgs)
+	case "mcp":
+		return mcpCmd(verb)
 	case "project":
 		return projectCmd(verb, cmdArgs, repo)
 	case "duckling":

@@ -37,6 +37,10 @@ func TestCLIImportsOnlyClientPackages(t *testing.T) {
 		"internal/engineclt": true,
 		"internal/daemon":    true,
 		"internal/xplat":     true,
+		// The MCP operator surface is the third client: it speaks stdio to a
+		// model and engineclt to the engine, and touches the domain no more
+		// than the desktop does.
+		"internal/mcp": true,
 	}
 	for pkg := range deps(t, modulePath+"/internal/cli") {
 		if !allowed[pkg] {

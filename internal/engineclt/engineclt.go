@@ -466,6 +466,13 @@ func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]in
 }
 
 // RunAccept accepts a run.
+// RunAcceptAs accepts with the decider named — an operator, not a person.
+func (c *Client) RunAcceptAs(id, message, actor string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/runs/"+id+"/accept", map[string]string{"message": message, "actor": actor}, &out)
+	return out, err
+}
+
 func (c *Client) RunAccept(id, message string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/runs/"+id+"/accept", map[string]string{"message": message}, &result)

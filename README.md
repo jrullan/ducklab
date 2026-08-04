@@ -187,6 +187,15 @@ ducklab skill run changelog-entry --arg summary="..."
 A duckling can write one during a run, with the ordinary `fs_write` tool,
 through the ordinary write guard — so reviewing a new skill is reading a diff.
 
+## Operating ducklab from another model
+
+`ducklab mcp serve` exposes the whole loop over stdio as an MCP server: an
+external model reads each result, decides gates (with a required, recorded
+reason — decisions land as `approved_by: mcp:<client>`, never as "human"),
+answers questions, and starts work. The engine's `next` lists are the law:
+an operator cannot take an action a person could not. Configure it in any
+MCP client as command `ducklab`, args `mcp serve`.
+
 ## Development
 
 ```bash
