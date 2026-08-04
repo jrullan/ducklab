@@ -212,9 +212,15 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 		// A cap of one lets a turn make a single call, which is right for a
 		// judge and wrong for everyone else — but that is the caller's business.
-		// Above forty a turn stops being bounded in any useful sense.
-		if n < 0 || n > 40 {
-			return fmt.Errorf("turns for %q must be 0 (use the script default) to 40; got %d", role, n)
+		// The ceiling was 40 when a turn meant reviewing a diff, and above
+		// forty THAT is a model in circles. Adoption changed the workload
+		// class: a critic verifying a survey against a real codebase looks a
+		// lot, legitimately — one spent all 40 on honest reads and searches.
+		// The real resources are bounded by the run budget (tokens, money,
+		// wallclock); this cap only guards against circling, so it is a wide
+		// net, not a leash.
+		if n < 0 || n > 200 {
+			return fmt.Errorf("turns for %q must be 0 (use the script default) to 200; got %d", role, n)
 		}
 	}
 
@@ -236,17 +242,6 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 	}
 
-	for role, n := range v.RoleTurns {
-		if _, ok := ScriptRoleTurns[role]; !ok {
-			return fmt.Errorf("unknown role %q", role)
-		}
-		// A cap of one lets a turn make a single call, which is right for a
-		// judge and wrong for everyone else — but that is the caller's business.
-		// Above forty a turn stops being bounded in any useful sense.
-		if n < 0 || n > 40 {
-			return fmt.Errorf("turns for %q must be 0 (use the script default) to 40; got %d", role, n)
-		}
-	}
 
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()

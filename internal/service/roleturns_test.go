@@ -81,3 +81,23 @@ func TestTheCapIsBounded(t *testing.T) {
 		t.Error("500 calls in one turn was accepted")
 	}
 }
+
+// The ceiling was 40 when a turn meant reviewing a diff. A critic verifying
+// an adoption survey against a real codebase spent all 40 on honest reads and
+// searches, twice — the person raising the cap found a wall where a setting
+// should be. The real resources are bounded by the run budget; this cap only
+// guards against circling.
+func TestTheTurnCeilingFitsASurveyingCritic(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 120},
+	}); err != nil {
+		t.Fatalf("120 reviewer turns refused: %v", err)
+	}
+	// Still a ceiling, not an absence of one (I3).
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 500},
+	}); err == nil {
+		t.Error("an effectively unbounded cap was accepted")
+	}
+}
