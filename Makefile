@@ -8,7 +8,7 @@
 GO      ?= go
 TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 
-.PHONY: all build test test-race vet api api-check e2e frontend desktop cross clean
+.PHONY: all build test test-race vet api api-check e2e frontend desktop cross clean dev-install
 
 all: vet test frontend
 
@@ -121,3 +121,10 @@ install: build
 	@echo "ducklab $$($(PREFIX)/bin/ducklab --version 2>/dev/null | head -1)"
 
 .PHONY: install
+
+# dev-install is the loop we live daily: rebuild everything, install it, and
+# make the installed engine the one that answers. The restart refuses while
+# runs are going — finish or abort them first — and the desktop picks up the
+# fresh engine via its own Restart button, or on next launch.
+dev-install: desktop install
+	@$(PREFIX)/bin/ducklab engine restart || true

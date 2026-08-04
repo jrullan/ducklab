@@ -1,0 +1,165 @@
+---
+kind: requirements
+version: 1
+updated_at: 2026-08-04T16:38:21Z
+run_id: r-20260804-163609-jp52
+ducklings: [pato-sonnet, dsv4flash, deepseekv4pro, luna]
+based_on: e3b0c44298fc1c14
+origin: adopted
+approved_by: 
+---
+
+## REQ-001 — Project registration and lifecycle
+
+**Priority:** must
+
+The product shall initialize or adopt a project directory, optionally initialize Git, persist project configuration and state under `.ducklab/`, register the project with the engine, list and inspect registered projects, update project configuration, and forget a project without deleting its files.
+
+## REQ-002 — Loopback engine service
+
+**Priority:** must
+
+The product shall provide an engine daemon that binds to loopback only, persists engine connection information in a protected `engine.json`, exposes an unauthenticated health endpoint, requires bearer authentication for other API endpoints, and supports graceful shutdown.
+
+## REQ-003 — CLI client
+
+**Priority:** must
+
+The product shall provide a `ducklab` CLI that acts as an engine client and supports project, engine, provider, duckling, roster, run, stage, test-first, review, release, skill, bug, task, trace, budget, benchmark, and report commands.
+
+The CLI shall return non-zero errors for invalid commands and shall avoid treating an unrecognized run subcommand as a task execution.
+
+## REQ-004 — Desktop client
+
+**Priority:** must
+
+The product shall provide a desktop client that communicates with the engine rather than owning project or run state, and shall expose views for current work, benchmarks, runs, lifecycle stages, boards, reviews, releases, reports, projects, ducklings, settings, and individual run details.
+
+The desktop shall support addressable hash routes for these views and direct run, stage, and board navigation.
+
+## REQ-005 — Provider and duckling configuration
+
+**Priority:** must
+
+The product shall allow providers and ducklings to be added, replaced, listed, tested, probed, and removed.
+
+Duckling configuration shall include provider, model, roles, context capability, native-tool capability, and pricing information. Provider configuration shall store the name of an environment variable for credentials rather than the credential value itself.
+
+## REQ-006 — Model-backed lifecycle stages
+
+**Priority:** must
+
+The product shall support `intake`, `spec`, and `plan` stages. A stage shall run asynchronously, record its run and conversation, and produce a proposal rather than directly replacing the approved artifact.
+
+Intake shall accept brief text or a readable brief file. Existing projects may use an adoption variant that surveys the existing codebase into requirements; adoption shall be limited to intake and shall not overwrite an existing requirements artifact.
+
+## REQ-007 — Human-controlled artifact promotion
+
+**Priority:** must
+
+The product shall write lifecycle artifacts through pending `.proposed` documents, allow a human to accept or reject proposals, leave the approved document unchanged on rejection, and promote accepted proposals into the approved artifact.
+
+Promotion shall synchronize traceability information and provide deterministic trace checking for orphaned or invalid references.
+
+## REQ-008 — Run execution and human checkpoints
+
+**Priority:** must
+
+The product shall start runs for planned tasks and lifecycle operations, persist run state and events, expose run details, diffs, briefs, transcripts, model-call logs, candidates, verification output, and live events, and support accepting, rejecting, aborting, resuming, and answering pending human questions.
+
+Runs shall be recoverable after engine restart. In-flight runs interrupted by shutdown or restart shall be checkpointed as paused rather than silently discarded.
+
+## REQ-009 — Bounded execution and verification
+
+**Priority:** must
+
+The product shall enforce configured limits on turns, tokens, cost, wall-clock time, tool output, and shell execution.
+
+The product shall execute the project’s configured gate and derive the run verdict from the gate result rather than from a model’s opinion. Projects with no executable gate shall produce `UNVERIFIED`, not `PASSED`.
+
+## REQ-010 — Execution modes and role rosters
+
+**Priority:** must
+
+The product shall support these run modes:
+
+- `solo`, using one duckling;
+- `pair`, using an implementer and reviewer;
+- `tournament`, running contestants concurrently in isolated worktrees and selecting among anonymized candidates;
+- `split`, decomposing work into parallel subtasks and integrating by file copies;
+- `council`, using multiple model turns over a shared lifecycle document.
+
+The product shall support project rosters and per-mode defaults for roles, lineups, rounds, and model-call limits. Reviewer and judge assignments shall be decorrelated from the implementer when another configured duckling is available.
+
+## REQ-011 — Candidate application and authorship isolation
+
+**Priority:** must
+
+The product shall apply a single passing candidate byte-for-byte without regenerating it.
+
+Candidate and reviewer payloads shall omit authorship identity so reviewers do not learn which duckling produced a candidate. If competing candidates cannot be safely selected after the configured repair attempts, the run shall fail rather than guess.
+
+## REQ-012 — Budget defaults and spend reporting
+
+**Priority:** must
+
+The product shall expose and update default budgets and per-mode defaults, apply budgets to runs, record token and cost usage, and expose live spend and budget information through run events and client views.
+
+## REQ-013 — Skills
+
+**Priority:** must
+
+The product shall support project and global skills represented by directories containing `SKILL.md`, with project skills shadowing global skills.
+
+It shall create, list, read, validate, and run skills. Documentation-only skills shall be supported by default; runnable skills may include a script. Skill execution shall receive `DUCKLAB_ARG_*` environment variables and run under the configured shell policy and timeout.
+
+Skills written or changed during an unaccepted run shall remain pending acceptance and shall not be readable or runnable as approved skills.
+
+## REQ-014 — Bugs, reviews, and releases
+
+**Priority:** must
+
+The product shall support reporting, editing, listing, triaging, moving, promoting, and verifying bugs. Bug triage shall create proposals without mutating guarded bug status; accepted promotion shall create a corresponding task and trace edge.
+
+The product shall review accepted tasks, record file-and-line findings and gate constraints, list and read reviews, plan releases with version bumps, list and read releases, and cut planned releases.
+
+## REQ-015 — Benchmarks and reports
+
+**Priority:** must
+
+The product shall run versioned benchmark suites across selected ducklings and modes, execute each cell as a throwaway run, persist results in deterministic grid order, and list or retrieve previous benchmark results.
+
+Reports shall compare outcomes against a solo baseline and provide outcome mixes, pass-rate comparisons, token and cost totals, date-range filtering, chart and table representations, and benchmark results.
+
+## REQ-016 — Streaming and run history
+
+**Priority:** must
+
+The product shall publish persisted run events through an SSE stream, including token deltas and progress events. Clients shall be able to reconnect and replay historical events, and a slow subscriber shall not block or fail the underlying run.
+
+## REQ-017 — Secret and network boundaries
+
+**Priority:** must
+
+The product shall keep provider credentials outside project state, obtain them from environment variables or supported secure storage, redact recorded model-call information as required, and never return credential values through the API.
+
+The engine shall support loopback access only; remote operation shall not be provided.
+
+## REQ-018 — Unsupported automatic engine startup
+
+**Priority:** wont
+
+The product shall not be required to automatically start the engine. Current CLI behavior reports that the engine must be started separately with `ducklab-engine`.
+
+## REQ-019 — Unsupported external integrations
+
+**Priority:** wont
+
+The product shall not provide GitHub commands, MCP client operations, deploy recipe execution, user-defined mode loading, or escalation flags. These are documented as absent from the current product.
+
+## REQ-020 — Unsupported operating-system notification
+
+**Priority:** wont
+
+The product shall not be required to issue operating-system notifications or tray badges. The current product provides in-application waiting indicators only.
+

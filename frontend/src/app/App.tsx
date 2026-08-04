@@ -37,6 +37,9 @@ declare global {
        * the window-title badge. Absent outside the desktop. */
       notify?: string;
       setBadge?: string;
+      /** Wails binding name for engine supervision: stop the old engine,
+       * start the installed one, hand back the new connection. */
+      restartEngine?: string;
     };
   }
 }
@@ -111,6 +114,16 @@ export function App() {
   const [engineVersion, setEngineVersion] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<EngineClient | null>(null);
+  // The engine this page talks to. State, not a constant: a restart hands
+  // back fresh connection details and everything below rebuilds against them.
+  const [conn, setConn] = useState(() =>
+    window.ducklab ? { baseUrl: window.ducklab.baseUrl, token: window.ducklab.token } : null,
+  );
+  // A response revealed the engine predates this app. The one action that
+  // fixes it gets a button, not a sentence telling someone to open a terminal.
+  const [stale, setStale] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   // The stream and its handlers outlive any one project, so they read the
   // choice through a ref rather than capturing whichever was current when the
@@ -130,12 +143,17 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const cfg = window.ducklab;
+    const cfg = conn;
     if (!cfg) {
       setError("no engine connection details were provided by the host");
       return;
     }
-    const c = new EngineClient({ baseUrl: cfg.baseUrl, token: cfg.token, version: VERSION });
+    const c = new EngineClient({
+      baseUrl: cfg.baseUrl,
+      token: cfg.token,
+      version: VERSION,
+      onStale: () => setStale(true),
+    });
     setClient(c);
 
     const refresh = () => {
@@ -210,7 +228,35 @@ export function App() {
       sub.stop();
       batcher.drain();
     };
-  }, []);
+    // Rebuilt whenever the connection changes — which is exactly once per
+    // engine restart, when the shell hands back a fresh port and token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn]);
+
+  // Stop the old engine, start the installed one, reconnect in place.
+  async function restartEngine() {
+    const fqn = window.ducklab?.restartEngine;
+    const call = window.wails?.Call?.ByName;
+    if (!fqn || !call) {
+      setRestartError("engine supervision is only available in the desktop app");
+      return;
+    }
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      const fresh = (await call(fqn)) as { baseUrl: string; token: string };
+      if (window.ducklab) {
+        window.ducklab.baseUrl = fresh.baseUrl;
+        window.ducklab.token = fresh.token;
+      }
+      setStale(false);
+      setConn({ baseUrl: fresh.baseUrl, token: fresh.token });
+    } catch (e) {
+      setRestartError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestarting(false);
+    }
+  }
 
   // Changing project reloads what the project-blind store holds. Without
   // this the switch changed four views and left two showing the old one's
@@ -330,6 +376,34 @@ export function App() {
           </div>
         );
       })()}
+
+      {/* The plumbing banner. A stale engine used to be a sentence buried in
+          whichever view hit it first, telling the person to open a terminal;
+          now the one action that fixes it is the button next to the words. */}
+      {stale && (
+        <div
+          className="flex items-center gap-3 border-b border-hairline bg-surface2 px-4 py-2 text-sm"
+          data-testid="stale-banner"
+        >
+          <span className="text-serious">
+            The engine is older than this app — some features will fail until it restarts.
+          </span>
+          <button
+            type="button"
+            onClick={() => void restartEngine()}
+            disabled={restarting}
+            data-testid="restart-engine"
+            className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+          >
+            {restarting ? "Restarting…" : "Restart engine"}
+          </button>
+          {restartError && (
+            <span className="text-xs text-critical" data-testid="restart-error">
+              {restartError}
+            </span>
+          )}
+        </div>
+      )}
 
       <main
         className={

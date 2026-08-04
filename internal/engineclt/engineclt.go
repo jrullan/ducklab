@@ -693,3 +693,31 @@ func (c *Client) TraceShow(projectID, id string) (map[string]interface{}, error)
 	err := c.get(fmt.Sprintf("/v1/projects/%s/trace/%s", projectID, id), &result)
 	return result, err
 }
+
+// Shutdown asks the engine to stop gracefully. The daemon's own stop path:
+// used by supervision (restart) and by `ducklab engine stop`.
+func (c *Client) Shutdown() error {
+	return c.post("/v1/shutdown", nil, nil)
+}
+
+// ActiveRuns returns the ids of runs that are running or queued — the work a
+// restart would cut off mid-call. Paused runs do not count: a run waiting at
+// a gate survives a restart by design (I9) and resumes from where it stood.
+func (c *Client) ActiveRuns() ([]string, error) {
+	var out struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := c.get("/v1/runs", &out); err != nil {
+		return nil, err
+	}
+	var active []string
+	for _, r := range out.Items {
+		if r.Status == "running" || r.Status == "queued" {
+			active = append(active, r.ID)
+		}
+	}
+	return active, nil
+}

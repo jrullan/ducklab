@@ -3,9 +3,13 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+
+	"github.com/jrullan/ducklab/internal/desktop"
+	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 // Shell is the desktop's attention surface: OS notifications and the window
@@ -21,6 +25,11 @@ import (
 type Shell struct {
 	win      application.Window
 	notifier *notifications.NotificationService
+	// enginePath and conn feed RestartEngine: the binary to start and the
+	// engine to stop. conn is updated on every successful restart so a second
+	// restart talks to the current engine, not the first one.
+	enginePath string
+	conn       *engineclt.Client
 }
 
 // NotifyFQN is the name the frontend calls Notify by.
@@ -31,6 +40,32 @@ func NotifyFQN() string {
 // SetBadgeFQN is the name the frontend calls SetBadge by.
 func SetBadgeFQN() string {
 	return reflect.TypeOf(Shell{}).PkgPath() + ".Shell.SetBadge"
+}
+
+// RestartEngineFQN is the name the frontend calls RestartEngine by.
+func RestartEngineFQN() string {
+	return reflect.TypeOf(Shell{}).PkgPath() + ".Shell.RestartEngine"
+}
+
+// RestartEngine swaps the running engine for the installed binary and returns
+// the new connection details, which the frontend uses to rebuild its client
+// and event stream in place — no relaunch, no terminal.
+//
+// Refused while runs are running or queued (see desktop.Restart). This is the
+// dev loop's missing half: make dev-install updates the binaries, this
+// button makes the update the engine that answers.
+func (s *Shell) RestartEngine() (map[string]string, error) {
+	var ctl desktop.EngineControl = s.conn
+	info, err := desktop.Restart(ctl, s.enginePath, 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	s.conn = engineclt.New(info)
+	return map[string]string{
+		"baseUrl": fmt.Sprintf("http://127.0.0.1:%d", info.Port),
+		"token":   info.Token,
+		"version": info.Version,
+	}, nil
 }
 
 // Notify shows one OS notification. The frontend decides WHEN — it is the

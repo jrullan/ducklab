@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/engineclt"
@@ -210,8 +212,55 @@ func engineCmd(verb string, args []string) int {
 		}
 		return 0
 	case "start":
-		fmt.Println("engine auto-start not yet implemented; run ducklab-engine directly")
+		if info, err := daemon.ReadEngineJSON(); err == nil && daemon.IsEngineRunning(info) {
+			fmt.Printf("engine already running: pid %d, port %d\n", info.PID, info.Port)
+			return 0
+		}
+		path, err := exec.LookPath("ducklab-engine")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: ducklab-engine not on PATH")
+			return 1
+		}
+		if err := daemon.StartEngine(path); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		info, err := daemon.WaitReady(15 * time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("engine started: pid %d, port %d, version %s\n", info.PID, info.Port, info.Version)
 		return 0
+	case "stop", "restart":
+		force := len(args) > 0 && args[0] == "--force"
+		info, err := daemon.ReadEngineJSON()
+		running := err == nil && daemon.IsEngineRunning(info)
+		if running {
+			client := engineclt.New(info)
+			// Running or queued work dies mid-call on a restart; paused runs
+			// survive by design (I9) and do not block.
+			if !force {
+				if active, aErr := client.ActiveRuns(); aErr == nil && len(active) > 0 {
+					fmt.Fprintf(os.Stderr, "error: %d run(s) still going (%s) — wait, abort them, or --force\n",
+						len(active), strings.Join(active, ", "))
+					return 1
+				}
+			}
+			if sErr := client.Shutdown(); sErr == nil {
+				if wErr := daemon.WaitGone(15 * time.Second); wErr != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", wErr)
+					return 1
+				}
+			}
+			fmt.Println("engine stopped")
+		} else if verb == "stop" {
+			fmt.Println("engine not running")
+		}
+		if verb == "stop" {
+			return 0
+		}
+		return engineCmd("start", nil)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown engine command: %s\n", verb)
 		return 2

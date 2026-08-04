@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -128,4 +129,43 @@ func GenerateToken() (string, error) {
 	// Use crypto/rand via xplat or a simple approach
 	// For now, use a timestamp-based token; in production use crypto/rand
 	return fmt.Sprintf("%x", time.Now().UnixNano()), nil
+}
+
+// StartEngine spawns the engine binary detached: the engine outlives whoever
+// started it by design, so nothing waits on the process.
+func StartEngine(path string) error {
+	cmd := exec.Command(path)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start engine: %w", err)
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// WaitReady polls until a healthy engine has written its connection details,
+// or the deadline passes.
+func WaitReady(wait time.Duration) (*EngineInfo, error) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		if info, err := ReadEngineJSON(); err == nil && IsEngineRunning(info) {
+			return info, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("engine did not become ready within %s", wait)
+}
+
+// WaitGone polls until the recorded engine process has exited, or the
+// deadline passes. A restart that spawns before the old process released its
+// port and state file races both.
+func WaitGone(wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		info, err := ReadEngineJSON()
+		if err != nil || !IsEngineRunning(info) {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("engine still running after %s", wait)
 }

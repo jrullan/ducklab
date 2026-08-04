@@ -24,6 +24,7 @@ import (
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/desktop"
+	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 //go:embed all:frontend/dist
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	notifier := notifications.New()
-	shell := &Shell{notifier: notifier}
+	shell := &Shell{notifier: notifier, enginePath: enginePath, conn: engineclt.New(info)}
 	app := application.New(application.Options{
 		Name:        "ducklab",
 		Description: "a multi-model software development harness",
@@ -80,10 +81,10 @@ func main() {
 		MinWidth:  1024,
 		MinHeight: 700,
 		JS: fmt.Sprintf(
-			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q };`+
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q, restartEngine: %q };`+
 				`if (%q) location.hash = %q;`,
 			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Version,
-			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(),
+			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(), RestartEngineFQN(),
 			route, route,
 		),
 	})

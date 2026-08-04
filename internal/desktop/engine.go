@@ -9,7 +9,6 @@ package desktop
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -87,19 +86,8 @@ func EnsureEngine(enginePath string, wait time.Duration) (*daemon.EngineInfo, er
 		return nil, fmt.Errorf("no engine binary found and none is running")
 	}
 
-	cmd := exec.Command(enginePath)
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start engine: %w", err)
+	if err := daemon.StartEngine(enginePath); err != nil {
+		return nil, err
 	}
-	// The engine outlives this process by design; do not wait on it.
-	go func() { _ = cmd.Wait() }()
-
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		if info, err := daemon.ReadEngineJSON(); err == nil && daemon.IsEngineRunning(info) {
-			return info, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return nil, fmt.Errorf("engine did not become ready within %s", wait)
+	return daemon.WaitReady(wait)
 }

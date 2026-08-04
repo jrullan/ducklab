@@ -376,6 +376,10 @@ export interface ClientOptions {
   token: string;
   version?: string;
   fetchFn?: typeof fetch;
+  /** Called when a response reveals the engine predates this client — the
+   * signal the restart banner listens for. The error still throws; this is
+   * how the shell learns without every call site reporting upward. */
+  onStale?: () => void;
 }
 
 export class EngineClient {
@@ -414,6 +418,7 @@ export class EngineClient {
       // ("POST /v1/bench/start failed") reported that state without naming it,
       // and the one action that fixes it — restart the engine — went unsaid.
       if (err?.message === undefined && (res.status === 404 || res.status === 405)) {
+        this.opts.onStale?.();
         throw new ApiError(
           `the engine does not know ${method} ${path} — it is older than this app. Restart the engine.`,
           res.status,

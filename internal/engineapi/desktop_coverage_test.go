@@ -48,7 +48,7 @@ var notInTheDesktop = map[string]string{
 	"GET /v1/health":       "liveness for the CLI and the daemon supervisor; the desktop uses the event stream's connection state",
 	"GET /v1/events":       "consumed by api/events.ts, which builds the URL itself rather than going through the client",
 	"GET /v1/openapi.json": "the document itself, for tooling",
-	"POST /v1/shutdown":    "the daemon's own stop path; a desktop that could stop the engine it talks to would be closing the door it is standing in",
+	"POST /v1/shutdown":    "the Go shell reaches it through engineclt during a supervised restart; the webview itself still cannot stop the engine it is standing in",
 }
 
 func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {
