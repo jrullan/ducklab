@@ -34,6 +34,11 @@ type StageRequest struct {
 	// this one", which is the answer to a proposal that is almost right.
 	Revise   string `json:"revise"`
 	Autonomy string `json:"autonomy"`
+	// Adopt turns intake into a survey: the architect reads the tree and
+	// writes the requirements the code ALREADY satisfies, instead of
+	// interviewing a person about a product that is still an idea. For a
+	// codebase that exists, this is the front door.
+	Adopt bool `json:"adopt,omitempty"`
 	Stream   bool   `json:"stream"`
 }
 
@@ -48,6 +53,18 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
+	}
+	if req.Adopt {
+		if req.Stage != "intake" {
+			return nil, fmt.Errorf("adopt is an intake variant; %s reads the documents intake produces", req.Stage)
+		}
+		// Adoption surveys a tree into first requirements. A project that
+		// already has approved ones grows through the extension flow, where
+		// the approved document is the ground truth — a second survey would
+		// put two ground truths in one prompt.
+		if reqs, lErr := artifact.Load(entry.Path, artifact.KindRequirements); lErr == nil && len(reqs.Sections) > 0 {
+			return nil, fmt.Errorf("this project already has requirements; add to them with a brief instead")
+		}
 	}
 
 	// Recorded as what will actually run, not as a constant. A report that
@@ -157,6 +174,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Mode:        req.Mode,
 		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
+		Adopt:       req.Adopt,
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {

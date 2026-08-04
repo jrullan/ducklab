@@ -183,6 +183,7 @@ describe("Cycle — starting a stage", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", body: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -212,6 +213,7 @@ describe("Cycle — starting a stage", () => {
         from: "A tool that tracks bird sightings.",
         mode: "council",
         rounds: 2,
+        adopt: false,
       }),
     );
     // The run is where the work is visible, so it is offered — not jumped to,
@@ -223,7 +225,52 @@ describe("Cycle — starting a stage", () => {
     const c = client();
     render(<Cycle client={c} projectId="p" />);
     fireEvent.click(await screen.findByTestId("cycle-run"));
-    await waitFor(() => expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "council", rounds: 2 }));
+    await waitFor(() => expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "council", rounds: 2, adopt: false }));
+  });
+
+  // A project initialised on an existing repo went mute here: the brief asked
+  // what to build as if the product were an idea, while the code already ran.
+  // The empty state now offers the second door.
+  it("offers adoption when the project already has code", async () => {
+    const c = client({
+      projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    const door = await screen.findByTestId("cycle-adopt-door");
+    expect(door.textContent).toContain("already has code");
+    fireEvent.click(screen.getByTestId("cycle-adopt"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
+        from: "",
+        mode: "council",
+        rounds: 2,
+        adopt: true,
+      }),
+    );
+  });
+
+  it("offers no adoption door to a greenfield", async () => {
+    const c = client({
+      projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X" }])),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    expect(screen.queryByTestId("cycle-adopt-door")).toBeNull();
+  });
+
+  it("offers no adoption door once requirements exist", async () => {
+    const c = client({
+      artifact: vi.fn(() =>
+        Promise.resolve({
+          kind: "requirements", body: "",
+          sections: [{ id: "REQ-001", title: "A", body: "" }],
+        }),
+      ),
+      projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    expect(screen.queryByTestId("cycle-adopt-door")).toBeNull();
   });
 
   // Spec and plan read what came before; there is nothing to paste.
@@ -285,6 +332,7 @@ describe("Cycle — reading a proposal", () => {
         Promise.resolve({ kind: "requirements", markdown: "", sections: [], proposal }),
       ),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -349,6 +397,7 @@ describe("Cycle — what was asked for", () => {
     ({
       artifact: vi.fn(() => Promise.resolve(artifact)),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -432,6 +481,7 @@ describe("Cycle — asking for a change", () => {
     ({
       artifact: vi.fn(() => Promise.resolve(pending)),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -510,6 +560,7 @@ describe("Cycle — what the run will actually do", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -575,7 +626,7 @@ describe("Cycle — what the run will actually do", () => {
     fireEvent.change(await screen.findByTestId("stage-mode"), { target: { value: "solo" } });
     fireEvent.click(screen.getByTestId("cycle-run"));
     await waitFor(() =>
-      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "solo", rounds: 2 }),
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", { from: "", mode: "solo", rounds: 2, adopt: false }),
     );
   });
 
@@ -588,6 +639,7 @@ describe("Cycle — what the run will actually do", () => {
         from: "",
         mode: "council",
         rounds: 2,
+        adopt: false,
       }),
     );
   });
@@ -602,6 +654,7 @@ describe("Cycle — how many rounds", () => {
     ({
       artifact: vi.fn(() => Promise.resolve({ kind: "requirements", markdown: "", sections: [] })),
       traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+      projects: vi.fn(() => Promise.resolve([])),
       run: vi.fn(() =>
         Promise.resolve({
           run: { id: "r-1", status: "paused", pending_kind: "gate", next: ["accept", "request_changes", "reject"] },
@@ -624,6 +677,7 @@ describe("Cycle — how many rounds", () => {
         from: "",
         mode: "council",
         rounds: 4,
+        adopt: false,
       }),
     );
   });

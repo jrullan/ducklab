@@ -18,3 +18,8 @@ fake-engine-bin
 frontend/test-results/
 frontend/playwright-report/
 
+.ducklab/runs/
+.ducklab/ducklab.db
+.ducklab/ducklab.db-wal
+.ducklab/ducklab.db-shm
+.ducklab/lock

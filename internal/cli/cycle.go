@@ -17,6 +17,7 @@ func stageCmd(stage string, args []string, repo string) int {
 	from, yes := "", false
 	mode := ""
 	rounds := 0
+	adopt := false
 	sub := ""
 	var revArgs []string
 	for i := 0; i < len(args); i++ {
@@ -36,6 +37,10 @@ func stageCmd(stage string, args []string, repo string) int {
 			i++
 		case "--yes":
 			yes = true
+		case "--adopt":
+			// Intake only, and the engine enforces it: a survey of the tree
+			// instead of an interview about an idea.
+			adopt = true
 		case "--mode":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "error: --mode needs council or solo")
@@ -63,7 +68,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--mode council|solo] [--rounds N] [--yes]\n"+
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--adopt] [--mode council|solo] [--rounds N] [--yes]\n"+
 				"       ducklab %s accept|reject|diff\n"+
 				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
@@ -91,6 +96,9 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 	if rounds > 0 {
 		req["rounds"] = rounds
+	}
+	if adopt {
+		req["adopt"] = true
 	}
 
 	run, err := client.StageStart(projectID, stage, req)

@@ -1297,6 +1297,9 @@
           "gate": {
             "type": "string"
           },
+          "has_code": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -1535,6 +1538,9 @@
       },
       "ServiceStageRequest": {
         "properties": {
+          "adopt": {
+            "type": "boolean"
+          },
           "autonomy": {
             "type": "string"
           },

@@ -16,6 +16,9 @@ export interface Project {
   /** The directory is gone. Selecting one of these silently produced an empty
    * board that read as "no tasks" rather than "this project is not there". */
   missing?: boolean;
+  /** The tree holds committed files beyond .ducklab: a codebase to adopt,
+   * not an idea to interview. Decides the Cycle empty state's doors. */
+  has_code?: boolean;
 }
 
 /** A gate that was actually run. Mirrors service.GateResult. */
@@ -647,7 +650,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -656,6 +659,9 @@ export class EngineClient {
       // into "edit this one", which is the answer to a draft that is almost
       // right.
       revise: opts.revise ?? "",
+      // Intake only: survey the tree into the requirements the code already
+      // satisfies, instead of interviewing about an idea.
+      adopt: opts.adopt ?? false,
       mode: opts.mode ?? "",
       rounds: opts.rounds ?? 0,
       stream: true,

@@ -1,0 +1,44 @@
+# Written by ducklab. Hand edits are preserved on the next write
+# only for keys ducklab knows about.
+
+schema = 1
+id = "ducklab"
+name = "ducklab"
+describe = ""
+created = "2026-08-03T13:35:24Z"
+autonomy = "guarded"
+
+[verify]
+  mode = "tests"
+  tests = "go test ./..."
+  build = ""
+  lint = ""
+  custom = ""
+  timeout_s = 900
+
+[roster]
+
+[modes]
+
+[budget]
+  max_usd = 5.0
+  max_tokens = 0
+  max_wallclock_s = 0
+  max_turns = 0
+
+[git]
+  branch_prefix = "ducklab/"
+  base_branch = "main"
+  commit_trailer = true
+
+[github]
+  enabled = false
+  repo = ""
+  mirror_bugs = false
+
+[shell]
+  mode = "guarded"
+  deny = ["rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="]
+  allow_prefixes = ["go ", "npm ", "pnpm ", "yarn ", "pytest", "python ", "cargo ", "make ", "ls", "cat", "grep", "rg", "sed -n", "find", "git status", "git diff", "git log", "node ", "tsc", "docker compose config"]
+  timeout_s = 120
+  network = "deny"

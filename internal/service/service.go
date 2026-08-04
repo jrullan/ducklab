@@ -174,6 +174,18 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 				if m.Role != "system" {
 					continue
 				}
+				// Architect turns satisfy the markdown_sections contract, so
+				// stage runs can produce a real proposal under test instead of
+				// failing after the spend is recorded.
+				if strings.Contains(m.Content, "You are the architect") {
+					return &provider.ChatResponse{
+						Choices: []provider.Choice{{
+							Message:      provider.Message{Role: "assistant", Content: "## REQ-001 — Records a sighting\n\n**Priority:** must\n\nThe tool records one sighting per call.\n"},
+							FinishReason: provider.FinishStop,
+						}},
+						Usage: provider.Usage{PromptTokens: 90, CompletionTokens: 30},
+					}
+				}
 				if strings.Contains(m.Content, "You are the reviewer") {
 					return &provider.ChatResponse{
 						Choices: []provider.Choice{{
@@ -301,6 +313,11 @@ type Project struct {
 	// and ProjectList then dropped it on the floor, so every client saw a
 	// deleted project as a perfectly healthy one.
 	Missing bool `json:"missing,omitempty"`
+	// HasCode is true when the tree holds committed files beyond .ducklab.
+	// It decides which doors the Cycle's empty state offers: a codebase that
+	// already exists is adopted — its requirements surveyed from the tree —
+	// not interviewed into existence as if the product were an idea.
+	HasCode bool `json:"has_code,omitempty"`
 }
 
 // Status is the project status.
@@ -488,9 +505,24 @@ func (s *Service) ProjectList(ctx context.Context) ([]*Project, error) {
 			Name:    e.Name,
 			Missing: e.Missing,
 		}
+		if !e.Missing {
+			p.HasCode = projectHasCode(e.Path)
+		}
 		projects = append(projects, p)
 	}
 	return projects, nil
+}
+
+// projectHasCode reports whether the tree holds committed files beyond the
+// harness's own. Committed, not present: an empty repo with a stray editor
+// file is still a greenfield, and git already knows the difference.
+func projectHasCode(path string) bool {
+	for _, f := range vcs.New(path).LsFiles() {
+		if f != "" && !strings.HasPrefix(f, ".ducklab/") && f != ".gitignore" {
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectGet returns a registered project by id.

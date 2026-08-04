@@ -66,6 +66,9 @@ type Params struct {
 	// Critics pins each of a council's critique turns to its own duckling, in
 	// line-up order. Empty seats the roster's single reviewer.
 	Critics []config.DucklingID
+	// Adopt turns intake into a survey of the existing tree: requirements for
+	// what the code ALREADY satisfies, not an interview about an idea.
+	Adopt bool
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)
@@ -110,7 +113,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			base = proposed
 		}
 	}
-	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision)
+	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision, p.Adopt)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +152,13 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	produced.Front.Kind = kind
 	produced.Front.Project = current.Front.Project
 
+	// A surveyed document says so on its face: these sections were DERIVED
+	// from the tree by a model, not decided by a person — the approval gate
+	// is the same, but a reader auditing a requirement's origin deserves the
+	// distinction.
+	if p.Adopt {
+		produced.Front.Origin = "adopted"
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
@@ -160,7 +170,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 // Each stage sees only what it needs: intake sees the brief, spec sees approved
 // requirements, plan sees the spec. Feeding a stage the whole cycle would bury
 // the thing it is meant to work on.
-func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document, revision string) (string, error) {
+func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document, revision string, adopt bool) (string, error) {
 	var b strings.Builder
 
 	memory, err := artifact.LoadMemory(projectRoot)
@@ -204,6 +214,28 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 
 	switch name {
 	case Intake:
+		if adopt {
+			b.WriteString("## Your task\n\nSurvey this project's codebase and write the " +
+				"requirements it ALREADY satisfies.\n\n" +
+				"This product exists. The code in this tree is the source of truth — " +
+				"read it before writing: the file layout, the entry points, the tests. " +
+				"Then write the requirements as they stand:\n\n" +
+				"- One REQ section per capability the code genuinely provides, with " +
+				"**Priority:** must.\n" +
+				"- Intent you infer but cannot verify in the code carries " +
+				"**Assumption:** naming what you inferred it from.\n" +
+				"- An exclusion the code clearly commits to — a rejected input, a " +
+				"documented \"not supported\" — may carry **Priority:** wont.\n" +
+				"- Invent nothing aspirational. A requirement the code does not " +
+				"satisfy today does not belong in a survey; new work arrives later " +
+				"as briefs.\n\n")
+			if seed != "" {
+				b.WriteString("## Context from the person\n\n")
+				b.WriteString(strings.TrimSpace(seed))
+				b.WriteString("\n\n")
+			}
+			break
+		}
 		if len(current.Sections) > 0 {
 			// The brief here is an ADDITION — a feature, a change — not a
 			// restatement of the product. Said explicitly, because "write the

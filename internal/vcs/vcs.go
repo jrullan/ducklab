@@ -463,3 +463,19 @@ func (g *Git) RestoreTree(snapshot string) error {
 	}
 	return nil
 }
+
+// LsFiles lists the committed (tracked) paths, one per entry. Empty on any
+// error: a tree git cannot read holds nothing git would vouch for.
+func (g *Git) LsFiles() []string {
+	out, err := g.run("ls-files")
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			files = append(files, l)
+		}
+	}
+	return files
+}

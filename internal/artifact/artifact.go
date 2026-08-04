@@ -56,6 +56,11 @@ type Frontmatter struct {
 	RunID      string
 	Ducklings  []string
 	ApprovedBy string
+	// Origin records how the document came to be when that is not the normal
+	// way. "adopted" marks a survey: sections DERIVED from the tree by a
+	// model rather than decided by a person. The approval gate is the same;
+	// a reader auditing a requirement's origin deserves the distinction.
+	Origin string
 	// BasedOn is the hash of the approved document this proposal was drafted
 	// against. A proposal is a frozen photograph: if the approved document
 	// moves while it waits — a task removed, a bug promotion appending one —
@@ -414,6 +419,8 @@ func parseFrontmatter(fm string) Frontmatter {
 			f.Ducklings = parseList(val)
 		case "based_on":
 			f.BasedOn = val
+		case "origin":
+			f.Origin = val
 		}
 	}
 	return f
@@ -453,6 +460,9 @@ func Render(doc *Document) string {
 	}
 	if doc.Front.BasedOn != "" {
 		fmt.Fprintf(&b, "based_on: %s\n", doc.Front.BasedOn)
+	}
+	if doc.Front.Origin != "" {
+		fmt.Fprintf(&b, "origin: %s\n", doc.Front.Origin)
 	}
 	fmt.Fprintf(&b, "approved_by: %s\n", doc.Front.ApprovedBy)
 	b.WriteString("---\n\n")

@@ -375,6 +375,7 @@ export interface ServiceProject {
   autonomy?: string;
   config?: ConfigProject;
   gate?: string;
+  has_code?: boolean;
   id?: string;
   missing?: boolean;
   name?: string;
@@ -442,6 +443,7 @@ export interface ServiceSkillSummary {
 }
 
 export interface ServiceStageRequest {
+  adopt?: boolean;
   autonomy?: string;
   from?: string;
   mode?: string;

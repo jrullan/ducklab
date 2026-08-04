@@ -141,7 +141,7 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 		artifact.KindPlan:         "## M-01 — Should not appear\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	prompt, err := BuildPrompt(root, Spec, "", current, "")
+	prompt, err := BuildPrompt(root, Spec, "", current, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	_, err := BuildPrompt(root, Spec, "", current, "")
+	_, err := BuildPrompt(root, Spec, "", current, "", false)
 	if err == nil {
 		t.Fatal("spec ran with no requirements")
 	}
@@ -173,7 +173,7 @@ func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 func TestPlanWithoutSpecFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindPlan)
-	_, err := BuildPrompt(root, Plan, "", current, "")
+	_, err := BuildPrompt(root, Plan, "", current, "", false)
 	if err == nil || !strings.Contains(err.Error(), "spec") {
 		t.Errorf("err = %v", err)
 	}
@@ -185,7 +185,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 		artifact.KindRequirements: "## REQ-007 — Existing\n\n**Priority:** must\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current, "")
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false)
 	if !strings.Contains(prompt, "REQ-008") {
 		t.Errorf("prompt does not state the next free id:\n%s", prompt)
 	}
@@ -198,7 +198,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 func TestIntakeWithoutASeedAsksTheHuman(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "", current, "")
+	prompt, _ := BuildPrompt(root, Intake, "", current, "", false)
 	if !strings.Contains(prompt, "Ask the human") {
 		t.Errorf("prompt does not ask for an interview:\n%s", prompt)
 	}
@@ -211,7 +211,7 @@ func TestPromptCarriesProjectMemory(t *testing.T) {
 	artifact.SaveMemory(root, m)
 
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current, "")
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false)
 	if !strings.Contains(prompt, "billing product") {
 		t.Errorf("project memory not injected:\n%s", prompt)
 	}
@@ -272,7 +272,7 @@ func TestARevisionAsksForAnEditNotANewDocument(t *testing.T) {
 		},
 	}
 	got, err := BuildPrompt(root, Spec, "", current,
-		"SPEC-004 should stop the opposite vertex from being dragged")
+		"SPEC-004 should stop the opposite vertex from being dragged", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
 		[]byte("---\nkind: requirements\napproved_by: human\n---\n\n## REQ-001 — A thing\n\nBody.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "")
+	got, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

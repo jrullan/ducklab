@@ -51,6 +51,9 @@ export function Cycle({
   const [rounds, setRounds] = useState(2);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [startedRun, setStartedRun] = useState<string | null>(null);
+  // Whether the tree already holds code, which decides the doors the empty
+  // state offers: a codebase that exists is adopted, not interviewed.
+  const [hasCode, setHasCode] = useState(false);
   // What a proposal is shown as. Reading comes first: a person accepting a
   // draft is deciding whether the content is right, and a diff answers a
   // different question — what changed.
@@ -190,7 +193,14 @@ export function Cycle({
     }
   }
 
-  async function start() {
+  useEffect(() => {
+    client
+      .projects()
+      .then((ps) => setHasCode(!!ps.find((p) => p.id === projectId)?.has_code))
+      .catch(() => setHasCode(false));
+  }, [client, projectId]);
+
+  async function start(adopt = false) {
     setStarting(true);
     setFailure(null);
     try {
@@ -198,6 +208,7 @@ export function Cycle({
         from: brief.trim(),
         mode,
         rounds,
+        adopt,
       });
       setStartedRun(run.id);
       setBrief("");
@@ -396,6 +407,34 @@ export function Cycle({
                   ? "Add to the requirements — a feature, a change of scope"
                   : `Extend the ${active.label.toLowerCase()}`}
             </div>
+            {/* The other door. A project initialised on an existing repo went
+                mute here: the brief asked what to build as if the product were
+                an idea, while forty thousand lines already ran. Adoption
+                surveys the tree into the requirements the code ALREADY
+                satisfies; the extension flow is then the development model. */}
+            {active.stage === "intake" && sections.length === 0 && hasCode && (
+              <div
+                className="mb-3 rounded-card border border-hairline bg-surface2 p-2"
+                data-testid="cycle-adopt-door"
+              >
+                <p className="text-sm text-ink">This project already has code.</p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Adopt it: the council reads the tree and drafts the requirements the code
+                  already satisfies — marked as derived, gated by you like everything else.
+                  Anything you type below travels along as context. Or ignore this and start
+                  from the brief alone, as if greenfield.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void start(true)}
+                  disabled={starting}
+                  data-testid="cycle-adopt"
+                  className="mt-2 rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+                >
+                  {starting ? "Starting…" : "Survey the code"}
+                </button>
+              </div>
+            )}
             {active.stage === "intake" && (
               <>
                 <textarea

@@ -46,7 +46,7 @@ func TestExtendingADocumentHandsTheModelTheWholeDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prompt, err := BuildPrompt(root, Intake, "Add undo: ctrl-z reverts the last drag.", current, "")
+	prompt, err := BuildPrompt(root, Intake, "Add undo: ctrl-z reverts the last drag.", current, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestAFreshProjectStillGetsABlankPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindRequirements}}
-	prompt, err := BuildPrompt(root, Intake, "A triangle calculator.", empty, "")
+	prompt, err := BuildPrompt(root, Intake, "A triangle calculator.", empty, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
