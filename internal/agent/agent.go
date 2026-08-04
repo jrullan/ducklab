@@ -430,15 +430,49 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 	// The loop ended by running out of turns, not by the model answering.
 	//
-	// Every iteration came back with tool calls and no text, so there is nothing
-	// to parse and the contract failure that follows would say "empty response"
-	// — true, and no help at all. Measured: a triager made six calls, every one
-	// a tool call, and reported that it had answered with nothing.
+	// This used to fail the whole run — which threw away every OTHER turn's
+	// work with it. A critic surveying a real codebase spent all 40 of its
+	// calls reading and searching, legitimately, ran out mid-verification,
+	// and the architect's perfectly good draft died with the run. Twice.
+	// A model out of looking is not a model with nothing to say: it gets ONE
+	// final call, tools withheld, to answer from what it has seen — a
+	// reviewer's honest verdict at that point is request-changes naming what
+	// it could not verify, which the loop can act on, unlike a corpse.
+	if len(outcome.ToolCalls) > 0 && strings.TrimSpace(outcome.Text) == "" {
+		final := provider.ChatRequest{
+			Model: loop.Duckling.Model,
+			Messages: append(append([]provider.Message{}, conversation...), provider.Message{
+				Role: "user",
+				Content: "You are out of tool calls. Answer the original task NOW from " +
+					"what you have already gathered — no more tools will be executed. " +
+					"If your answer follows a contract (a verdict, a choice), emit it " +
+					"now. Anything you could not verify, state as such inside the " +
+					"answer rather than refusing to answer.",
+			}),
+		}
+		final.MaxTokens = outputCap(loop.Duckling.Params.MaxTokens)
+		if loop.Duckling.Params.DisableThinking {
+			applyThinkingSuppression(&final, loop.Duckling.Caps)
+		}
+		if resp, err := loop.Provider.Chat(ctx, final); err == nil && len(resp.Choices) > 0 {
+			calc := provider.CostCalculator{
+				InputPerMTok:  loop.Duckling.Cost.InputPerMTok,
+				OutputPerMTok: loop.Duckling.Cost.OutputPerMTok,
+			}
+			cost := calc.Cost(resp.Usage)
+			loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+			outcome.TokensIn += resp.Usage.PromptTokens
+			outcome.TokensOut += resp.Usage.CompletionTokens
+			outcome.CostUSD += cost
+			answer, _ := splitThinking(resp.Choices[0].Message.Content)
+			outcome.Text = answer
+		}
+	}
 	if len(outcome.ToolCalls) > 0 && strings.TrimSpace(outcome.Text) == "" {
 		return outcome, fmt.Errorf(
 			"%w: %s used all %d of its turns calling tools and never answered "+
-				"(%d tool calls, no text). Raise the turn cap for this role, or the "+
-				"task needs narrowing",
+				"(%d tool calls, no text), even when asked to conclude without them. "+
+				"Raise the turn cap for this role, or the task needs narrowing",
 			ErrNoAnswer, turn.Role, maxTurns, len(outcome.ToolCalls))
 	}
 

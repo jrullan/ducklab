@@ -249,6 +249,20 @@ func engineCmd(verb string, args []string) int {
 					return 1
 				}
 			}
+			// The replacement engine inherits THIS shell's environment, and
+			// the keys live nowhere else (I10). A restart from a shell without
+			// them silently produces an engine whose hosted models all fail —
+			// measured, by exactly that mistake.
+			if verb == "restart" && !force {
+				if envs, kErr := client.ProviderKeyEnvs(); kErr == nil {
+					if missing := missingEnvs(envs); len(missing) > 0 {
+						fmt.Fprintf(os.Stderr, "error: %s not set in this shell — the restarted engine "+
+							"would lose the key(s). Export them first, or --force to proceed without\n",
+							strings.Join(missing, ", "))
+						return 1
+					}
+				}
+			}
 			if sErr := client.Shutdown(); sErr == nil {
 				if wErr := daemon.WaitGone(15 * time.Second); wErr != nil {
 					fmt.Fprintf(os.Stderr, "error: %v\n", wErr)
@@ -1051,4 +1065,15 @@ func num(v interface{}) float64 {
 func str(v interface{}) string {
 	s, _ := v.(string)
 	return s
+}
+
+// missingEnvs returns the names not present in this process's environment.
+func missingEnvs(names []string) []string {
+	var missing []string
+	for _, n := range names {
+		if os.Getenv(n) == "" {
+			missing = append(missing, n)
+		}
+	}
+	return missing
 }

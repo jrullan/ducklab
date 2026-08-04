@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 // interface so the decision logic is testable without a process to kill.
 type EngineControl interface {
 	ActiveRuns() ([]string, error)
+	ProviderKeyEnvs() ([]string, error)
 	Shutdown() error
 }
 
@@ -28,6 +30,24 @@ func Restart(ctl EngineControl, enginePath string, wait time.Duration) (*daemon.
 	if err == nil && len(active) > 0 {
 		return nil, fmt.Errorf("%d run(s) still going (%s) — wait for them or abort them first",
 			len(active), strings.Join(active, ", "))
+	}
+	// The replacement inherits THIS process's environment, and the provider
+	// keys live nowhere else (I10). A desktop launched from an icon has no
+	// shell exports: restarting from it would silently produce an engine
+	// whose hosted models all fail — measured, by exactly that mistake. The
+	// old engine keeps running; nothing is lost by refusing.
+	if envs, kErr := ctl.ProviderKeyEnvs(); kErr == nil {
+		var missing []string
+		for _, n := range envs {
+			if os.Getenv(n) == "" {
+				missing = append(missing, n)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("%s is not set in this app's environment — the restarted "+
+				"engine would lose the key(s). Restart from a terminal that exports them: "+
+				"ducklab engine restart", strings.Join(missing, ", "))
+		}
 	}
 	// An unreachable engine is not a reason to refuse: restarting past a hung
 	// process is half the point of having the button.

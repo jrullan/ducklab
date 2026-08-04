@@ -728,3 +728,26 @@ func (c *Client) ActiveRuns() ([]string, error) {
 	}
 	return active, nil
 }
+
+// ProviderKeyEnvs returns the environment variable names the engine's
+// providers read keys from. A restart guard checks them against the
+// environment about to spawn the replacement: an engine restarted from a
+// shell without the key silently loses every hosted model (I10 — the key
+// lives only in the engine's environment).
+func (c *Client) ProviderKeyEnvs() ([]string, error) {
+	var out struct {
+		Items []struct {
+			KeyEnv string `json:"api_key_env"`
+		} `json:"items"`
+	}
+	if err := c.get("/v1/providers", &out); err != nil {
+		return nil, err
+	}
+	var envs []string
+	for _, p := range out.Items {
+		if p.KeyEnv != "" {
+			envs = append(envs, p.KeyEnv)
+		}
+	}
+	return envs, nil
+}

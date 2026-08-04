@@ -496,3 +496,54 @@ func TestTheCriticPersonaSwapsTheReviewerFraming(t *testing.T) {
 		t.Error("a plain reviewer lost the code framing")
 	}
 }
+
+// A critic surveying a real codebase spent all its calls reading and
+// searching, legitimately, and ran out mid-verification — and the whole run
+// died with it, architect's draft included. Twice. A model out of looking is
+// not a model with nothing to say: it gets one final call, tools withheld, to
+// answer from what it has seen.
+func TestTurnExhaustionForcesAConclusionInsteadOfFailing(t *testing.T) {
+	reg := tools.NewRegistry()
+	toolCall := "Let me look.\n```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.go\"}}\n```"
+	p := &countingProvider{
+		replies: []string{toolCall, toolCall,
+			`{"verdict":"request-changes","findings":[{"severity":"major","file":"requirements.md","issue":"could not verify REQ-009 against the tree","fix":"narrow it"}]}`},
+	}
+	loop := testLoop(p, 0)
+	loop.Registry = reg
+
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "critique the draft", Contract: "verdict",
+		MaxTurns: 2, Toolbelt: []string{"fs_read"}}
+	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
+	if err != nil {
+		t.Fatalf("an exhausted turn still failed: %v", err)
+	}
+	v, ok := out.Parsed.(*Verdict)
+	if !ok || v.Verdict != "request-changes" {
+		t.Fatalf("no verdict came out of the forced conclusion: %+v", out.Parsed)
+	}
+	// The final call must offer no tools and say why.
+	last := p.requests[len(p.requests)-1]
+	lastMsg := last.Messages[len(last.Messages)-1]
+	if !strings.Contains(lastMsg.Content, "out of tool calls") {
+		t.Errorf("the conclusion request does not say what is happening:\n%s", lastMsg.Content)
+	}
+	if len(last.Tools) != 0 {
+		t.Error("the conclusion call still offered tools")
+	}
+}
+
+// And a model with genuinely nothing to say still fails, with the same words.
+func TestTurnExhaustionStillFailsWhenTheConclusionIsEmpty(t *testing.T) {
+	reg := tools.NewRegistry()
+	toolCall := "```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.go\"}}\n```"
+	p := &countingProvider{replies: []string{toolCall, toolCall}, fallback: ""}
+	loop := testLoop(p, 0)
+	loop.Registry = reg
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "critique", Contract: "verdict",
+		MaxTurns: 2, Toolbelt: []string{"fs_read"}}
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
+	if err == nil || !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("err = %v, want ErrNoAnswer", err)
+	}
+}
