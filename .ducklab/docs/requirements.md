@@ -221,7 +221,7 @@ Desktop embeds React frontend built with Vite. Frontend communicates with engine
 
 **Priority:** must
 
-`make cross` produces binaries for linux/amd64, linux/arm64, darwin/arm64, windows/amd64. CLI and engine build with CGO_ENABLED=0. Desktop requires cgo for Wails.
+`make cross` verifies that the CLI and engine compile for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64 with CGO_ENABLED=0; it produces no binaries. The desktop requires cgo for Wails and builds natively via `make desktop` only. Producing distributable binaries per platform is future packaging work, not a present capability.
 
 **Assumption:** From README.md §34-77 and status.md AC-15.
 

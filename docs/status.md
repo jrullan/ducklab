@@ -38,7 +38,7 @@ criterion, as written, is met.
 | AC-12 | partial | The budget stops the run, but every duckling here is local and priced 0, so the **priced** path in the criterion has never actually run. Token and wallclock enforcement were both broken until this cycle. |
 | AC-13 | done | `gate: none` yields `UNVERIFIED`, never `PASSED`. |
 | AC-14 | done | Closed in commit `0f3ed48`. |
-| AC-15 | done | `make cross` builds linux/amd64, linux/arm64, darwin/arm64, windows/amd64. |
+| AC-15 | done | `make cross` compile-checks CLI and engine for linux/amd64, linux/arm64, darwin/arm64, windows/amd64; no binaries are produced. |
 | AC-16 | done | `TestCLIImportsOnlyClientPackages`. It caught a real violation this cycle when the CLI reached for `verify`. |
 
 ## v0.2 — Ducklings that talk

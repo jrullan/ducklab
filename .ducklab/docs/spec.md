@@ -418,15 +418,14 @@ Desktop binary embeds React frontend:
 
 Structure: `cmd/ducklab-desktop/main.go` with Wails initialization.
 
-## SPEC-027 — CLI and engine cross-platform builds
+## SPEC-027 — CLI and engine cross-platform compile check
 
 **Implements:** REQ-027
+**As-built:** yes
 
-`make cross` target builds CLI and engine for linux/amd64, linux/arm64, darwin/arm64, windows/amd64 with `CGO_ENABLED=0` for static binaries.
+The `make cross` target verifies that the CLI and engine compile for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64 with `CGO_ENABLED=0`. It compiles to the null device and produces no binaries: it is a regression guard for portability, not a packaging step.
 
-Desktop (`ducklab-desktop`) requires separate build with `make desktop` (cgo for Wails). The `cross` target validates that CLI and engine compile for all platforms but does not produce desktop binaries.
-
-**Assumption:** Desktop cross-compilation is out of scope for the `make cross` target. Requirements document specifies all three binaries across the matrix; code implements only CLI and engine in cross target.
+The desktop (`ducklab-desktop`) requires cgo for Wails and builds natively via `make desktop` only. Producing distributable binaries per platform is future packaging work (docs/operability-plan.md §1c) and out of this section's scope.
 
 ## SPEC-028 — SQLite state database
 

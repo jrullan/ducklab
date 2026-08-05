@@ -63,8 +63,8 @@ make desktop && make install
 ```
 
 Honesty note: ducklab is developed and exercised daily on Linux. The CLI and
-engine cross-compile for `darwin/arm64` on every `make cross`, but no desktop
-build has been **verified on a Mac yet** — Wails v3 supports macOS, so it is
+engine are compile-checked for `darwin/arm64` on every `make cross`, but no
+desktop build has been **verified on a Mac yet** — Wails v3 supports macOS, so it is
 expected to work, and the first person to try it is the test. If `make
 desktop` fails, `make install` still gives you the CLI and engine, and every
 capability is reachable from the CLI. Please report whatever breaks.
@@ -202,7 +202,8 @@ MCP client as command `ducklab`, args `mcp serve`.
 make            # vet, test, build the frontend
 go test ./...   # 30 packages
 cd frontend && npx vitest run
-make cross      # linux/amd64, linux/arm64, darwin/arm64, windows/amd64
+make cross      # compile CHECK for linux/amd64, linux/arm64, darwin/arm64,
+                # windows/amd64 — produces no binaries; packaging is future work
 ```
 
 `docs/openapi.json` and `frontend/src/api/generated.ts` are generated from the
