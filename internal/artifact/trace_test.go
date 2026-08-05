@@ -367,3 +367,34 @@ func TestABackwardDependencyIsNotAFinding(t *testing.T) {
 		t.Errorf("a well-ordered plan reported %+v", errs)
 	}
 }
+
+// A promoted bug task is justified by the report it fixes, not by a spec
+// section. Flagging every "Fixes B-007" as unjustified taught people to
+// ignore the spine — the one thing a check must never teach.
+func TestABugFixTaskIsNotUnjustified(t *testing.T) {
+	spine := &Spine{
+		Requirements: &Document{Sections: []Section{{ID: "REQ-001", Fields: map[string]string{"priority": "must"}}}},
+		Spec: &Document{Sections: []Section{{ID: "SPEC-001", Implements: []string{"REQ-001"},
+			Fields: map[string]string{}}}},
+		Plan: &Document{Sections: []Section{{ID: "M-001", Children: []Section{
+			{ID: "T-001", Implements: []string{"SPEC-001"}},
+			{ID: "T-048", Body: "Fixes B-007.\n\n## Reported\n\nIt broke."},
+			{ID: "T-099", Body: "No justification at all."},
+		}}}},
+	}
+	errs := spine.Check()
+	for _, e := range errs {
+		if e.ID == "T-048" && e.Kind == UnjustifiedTask {
+			t.Error("a bug-fix task was flagged as unjustified")
+		}
+	}
+	found := false
+	for _, e := range errs {
+		if e.ID == "T-099" && e.Kind == UnjustifiedTask {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a genuinely unjustified task escaped the check")
+	}
+}

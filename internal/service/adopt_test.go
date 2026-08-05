@@ -64,3 +64,39 @@ func TestHasCodeSeesCommittedFilesBeyondTheHarness(t *testing.T) {
 		t.Error("a fresh init counts as a codebase")
 	}
 }
+
+// T-022 was removed cleanly and T-023 kept depending on it — "depends on a
+// task that does not exist, so it can never start", a dead end no button
+// could fix, because tasks have no dependency editor. The removal now cleans
+// up the references it dangles.
+func TestRemovingATaskCleansTheReferencesToIt(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-001 — First\n\n" +
+			"### T-022 — Browser tests\n\nTest it.\n\n" +
+			"### T-023 — Only dep\n\n**Depends on:** T-022\n\nAfter.\n\n" +
+			"### T-024 — Multi dep\n\n**Depends on:** T-022, T-023\n\nLater.\n",
+	})
+	out, err := s.TaskRemove(context.Background(), id, "T-022")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaned, _ := out["dependencies_cleaned"].([]string)
+	if len(cleaned) != 2 {
+		t.Errorf("dependencies_cleaned = %v, want T-023 and T-024", out["dependencies_cleaned"])
+	}
+	plan, _ := artifact.Load(dir, artifact.KindPlan)
+	for _, m := range plan.Sections {
+		for _, c := range m.Children {
+			if strings.Contains(c.Body, "T-022") {
+				t.Errorf("%s still references the removed task:\n%s", c.ID, c.Body)
+			}
+			if c.ID == "T-024" && !strings.Contains(c.Body, "**Depends on:** T-023") {
+				t.Errorf("T-024 lost its OTHER dependency:\n%s", c.Body)
+			}
+			if c.ID == "T-023" && strings.Contains(strings.ToLower(c.Body), "depends on") {
+				t.Errorf("T-023's emptied depends line survived:\n%s", c.Body)
+			}
+		}
+	}
+}

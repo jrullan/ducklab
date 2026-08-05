@@ -800,7 +800,7 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	}
 	defer db.Close()
 
-	removed, err := removePlanTask(entry.Path, taskID)
+	removed, unreferenced, err := removePlanTask(entry.Path, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -809,6 +809,10 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 	}
 
 	out := map[string]interface{}{"removed": taskID}
+	if len(unreferenced) > 0 {
+		// Said, so the person knows which tasks just changed under them.
+		out["dependencies_cleaned"] = unreferenced
+	}
 	if err := db.DeleteTask(taskID); err != nil {
 		// The plan edit is already on disk; said out loud rather than
 		// swallowed, so the person knows the halves disagree and which one.
@@ -847,13 +851,13 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 // The document is what allocates ids and what every reader parses, so a removal
 // that only touched the database would leave the task visible everywhere anyone
 // actually looks.
-func removePlanTask(projectRoot, taskID string) (bool, error) {
+func removePlanTask(projectRoot, taskID string) (removed bool, unreferenced []string, err error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if plan == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	found := false
 	var milestones []artifact.Section
@@ -875,13 +879,58 @@ func removePlanTask(projectRoot, taskID string) (bool, error) {
 		milestones = append(milestones, m)
 	}
 	if !found {
-		return false, nil
+		return false, nil, nil
+	}
+	// The removed task's id must not survive in anyone's Depends line. It
+	// did once: T-022 was removed cleanly and T-023 kept depending on it —
+	// "depends on a task that does not exist, so it can never start" — a
+	// dead end no button could fix, because tasks have no dependency editor.
+	// The removal made the reference dangling; the removal cleans it up.
+	for mi := range milestones {
+		for ci := range milestones[mi].Children {
+			c := &milestones[mi].Children[ci]
+			body, changed := stripDependency(c.Body, taskID)
+			if changed {
+				c.Body = body
+				unreferenced = append(unreferenced, c.ID)
+			}
+		}
 	}
 	plan.Sections = milestones
 	plan.Front.Kind = artifact.KindPlan
 	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
 		[]byte(artifact.Render(plan)), 0o644); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return true, nil
+	return true, unreferenced, nil
+}
+
+// stripDependency removes one id from a body's **Depends on:** line, dropping
+// the line entirely when it was the only dependency.
+func stripDependency(body, taskID string) (string, bool) {
+	lines := strings.Split(body, "\n")
+	changed := false
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "**depends on:**") {
+			out = append(out, line)
+			continue
+		}
+		rest := trimmed[len("**Depends on:**"):]
+		var kept []string
+		for _, dep := range strings.Split(rest, ",") {
+			if d := strings.TrimSpace(dep); d != "" && !strings.EqualFold(d, taskID) {
+				kept = append(kept, d)
+			} else if strings.EqualFold(strings.TrimSpace(dep), taskID) {
+				changed = true
+			}
+		}
+		if len(kept) > 0 {
+			out = append(out, "**Depends on:** "+strings.Join(kept, ", "))
+		}
+		// A depends line with nobody left is dropped, not kept empty.
+	}
+	return strings.Join(out, "\n"), changed
 }

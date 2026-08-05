@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -174,6 +175,14 @@ func (s *Spine) Check() []TraceError {
 	for _, m := range s.Plan.Sections {
 		for _, task := range m.Children {
 			if len(task.Implements) == 0 {
+				// A promoted bug task is justified by the report it fixes,
+				// not by a spec section — that is its whole nature: the spec
+				// described the intent, the bug describes the miss. Flagging
+				// every "Fixes B-007" as unjustified taught people to ignore
+				// the spine, which is the one thing a check must never teach.
+				if fixesBug(task.Body) {
+					continue
+				}
 				errs = append(errs, TraceError{
 					Kind: UnjustifiedTask, ID: task.ID,
 					Detail: "task implements no spec section",
@@ -420,3 +429,8 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+// fixesBug reports whether a task's body names the report that justifies it.
+var fixesBugRe = regexp.MustCompile(`\bFixes B-\d+`)
+
+func fixesBug(body string) bool { return fixesBugRe.MatchString(body) }
