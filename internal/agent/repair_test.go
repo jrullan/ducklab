@@ -547,3 +547,67 @@ func TestTurnExhaustionStillFailsWhenTheConclusionIsEmpty(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoAnswer", err)
 	}
 }
+
+// A spec regeneration hit pato-sonnet's 8192 output cap, and the truncation
+// retry — "stop deliberating, be brief" — cannot shrink a whole document into
+// the same budget: it burned a duplicate call and died on the same wall,
+// twice. A document turn that hits the cap fails at once, naming the lever.
+func TestADocumentThatDoesNotFitFailsAtOnceWithTheLever(t *testing.T) {
+	p := &lengthProvider{}
+	loop := testLoop(p, 0)
+	turn := &Turn{Role: config.RoleArchitect, Prompt: "write the spec",
+		Contract: "markdown_sections:SPEC", MaxTurns: 2}
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err == nil {
+		t.Fatal("a truncated document turn did not fail")
+	}
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("err = %v, want ErrTruncated", err)
+	}
+	for _, must := range []string{"did not fit", "max_tokens", "pato-test", "8192"} {
+		if !strings.Contains(err.Error(), must) {
+			t.Errorf("the failure does not carry %q: %v", must, err)
+		}
+	}
+	// One call: the retry that cannot help was not bought.
+	if p.calls != 1 {
+		t.Errorf("provider called %d times, want 1", p.calls)
+	}
+}
+
+// A non-document turn keeps the retry — a model deliberating in circles is
+// exactly what the nudge exists for — and the second wall names the lever too.
+func TestARepeatTruncationNamesTheCap(t *testing.T) {
+	p := &lengthProvider{}
+	loop := testLoop(p, 0)
+	turn := &Turn{Role: config.RoleImplementer, Prompt: "fix it", Contract: "edits", MaxTurns: 2}
+	_, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err == nil || !errors.Is(err, ErrTruncated) {
+		t.Fatalf("err = %v, want ErrTruncated", err)
+	}
+	if !strings.Contains(err.Error(), "max_tokens") {
+		t.Errorf("the failure does not name the lever: %v", err)
+	}
+	if p.calls != 2 {
+		t.Errorf("provider called %d times, want 2 (original + one nudge)", p.calls)
+	}
+}
+
+// lengthProvider always answers truncated.
+type lengthProvider struct{ calls int }
+
+func (p *lengthProvider) ID() string { return "length" }
+func (p *lengthProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	p.calls++
+	return provider.ChatResponse{
+		Choices: []provider.Choice{{
+			Message:      provider.Message{Role: "assistant", Content: "## SPEC-001 — Half a doc"},
+			FinishReason: provider.FinishLength,
+		}},
+		Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 8192},
+	}, nil
+}
+func (p *lengthProvider) ChatStream(ctx context.Context, req provider.ChatRequest, ch chan<- provider.Delta) (provider.ChatResponse, error) {
+	return p.Chat(ctx, req)
+}
+func (p *lengthProvider) Models(ctx context.Context) ([]string, error) { return nil, nil }

@@ -321,6 +321,20 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// filled its output budget, got a retry that said nothing, filled it
 		// again, and the run was marked FAILED.
 		if provider.IsLength(finishReason) {
+			// A document turn that hit the cap is not deliberating — the
+			// document does not fit. "Be brief" cannot shrink a 36-section
+			// spec into the same budget; the retry burned a full duplicate
+			// call and died on the same wall, twice, for one real user. Fail
+			// now, naming the wall and where the lever is.
+			if strings.HasPrefix(turn.Contract, "markdown_sections") {
+				cap := 0
+				if req.MaxTokens != nil {
+					cap = *req.MaxTokens
+				}
+				return outcome, fmt.Errorf("%w: the whole document did not fit in %s's output cap "+
+					"(%d tokens). Raise max_tokens on this duckling (Ducklings → sampling params), "+
+					"or draft with a duckling that has a higher cap", ErrTruncated, loop.Duckling.ID, cap)
+			}
 			retry := req
 			// A fresh slice, so the nudge is actually in the request and the
 			// original conversation is not mutated by an aliased append.
@@ -338,7 +352,13 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			choice = resp2.Choices[0]
 			finishReason = choice.FinishReason
 			if provider.IsLength(finishReason) {
-				return outcome, ErrTruncated
+				cap := 0
+				if req.MaxTokens != nil {
+					cap = *req.MaxTokens
+				}
+				return outcome, fmt.Errorf("%w: %s filled its output cap (%d tokens) twice. "+
+					"Raise max_tokens on this duckling (Ducklings → sampling params)",
+					ErrTruncated, loop.Duckling.ID, cap)
 			}
 			// The retried answer is what the turn continues from, so the
 			// conversation must carry the nudge that produced it.
