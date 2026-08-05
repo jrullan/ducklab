@@ -215,6 +215,13 @@ func (s *Spine) Check() []TraceError {
 		if nonNormative(sp) {
 			continue
 		}
+		// A section the existing tree already satisfies needs no task: an
+		// adopted project's spec describes code that was built before ducklab
+		// arrived, and demanding tasks to build it again would invent work.
+		// Keyed on the marker the spec stage teaches and a person approved.
+		if asBuilt(sp) {
+			continue
+		}
 		errs = append(errs, TraceError{
 			Kind: UnimplementedSpec, ID: sp.ID,
 			Detail: "no task implements this spec section",
@@ -434,3 +441,10 @@ func contains(list []string, want string) bool {
 var fixesBugRe = regexp.MustCompile(`\bFixes B-\d+`)
 
 func fixesBug(body string) bool { return fixesBugRe.MatchString(body) }
+
+// asBuilt reports whether a section records behaviour the existing code
+// already implements (adopted projects; `**As-built:** yes`).
+func asBuilt(s Section) bool {
+	v := strings.ToLower(strings.TrimSpace(s.Field("as-built")))
+	return v == "yes" || v == "true"
+}

@@ -159,6 +159,14 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	if p.Adopt {
 		produced.Front.Origin = "adopted"
 	}
+	// A first spec drafted from adopted requirements is a survey too: it
+	// describes the same built system, and its reader deserves the same
+	// provenance note the requirements carry.
+	if p.Stage == Spec && len(current.Sections) == 0 {
+		if reqs, rErr := artifact.Load(p.ProjectRoot, artifact.KindRequirements); rErr == nil && reqs.Front.Origin == "adopted" {
+			produced.Front.Origin = "adopted"
+		}
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
@@ -272,6 +280,19 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			"A section that records what will NOT be built must also carry " +
 			"**Priority:** wont, so the traceability check knows not to ask for " +
 			"a task that implements it.\n\n")
+		if reqs.Front.Origin == "adopted" && len(current.Sections) == 0 {
+			// The requirements were surveyed from the tree; the first spec is
+			// a survey too, and its sections must SAY they describe built
+			// behaviour — the marker is what keeps the plan from re-planning
+			// the product and the spine from demanding tasks for it.
+			b.WriteString("This project was ADOPTED: the requirements describe a codebase " +
+				"that already exists, and so does your specification. Ground every " +
+				"section in the code — read the tree before writing. Mark every " +
+				"section that the code already implements with a line:\n\n" +
+				"**As-built:** yes\n\n" +
+				"Only a section describing a genuine gap — behaviour the requirements " +
+				"promise and the code does not deliver — goes without the marker.\n\n")
+		}
 		b.WriteString("## Requirements\n\n")
 		for _, r := range approved {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", r.ID, r.Title, strings.TrimSpace(r.Body))
@@ -286,6 +307,11 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			return "", fmt.Errorf("plan needs a spec: run `ducklab spec` first")
 		}
 		b.WriteString(planInstruction)
+		if hasAsBuilt(spec) {
+			b.WriteString("Sections marked **As-built:** yes are already delivered by the " +
+				"existing code. Plan NO tasks for them — a task to build what is built " +
+				"is invented work. Tasks come only from sections without the marker.\n\n")
+		}
 		b.WriteString("## Specification\n\n")
 		for _, s := range spec.Sections {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", s.ID, s.Title, strings.TrimSpace(s.Body))
@@ -351,3 +377,14 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"naming those task ids. Write it only where it is true: a plan where every task " +
 	"depends on the one before it is a plan that can only ever run one task at a " +
 	"time, and a task with no real prerequisite should have no line at all.\n\n"
+
+// hasAsBuilt reports whether any section carries the as-built marker.
+func hasAsBuilt(doc *artifact.Document) bool {
+	for _, sec := range doc.Sections {
+		v := strings.ToLower(strings.TrimSpace(sec.Field("as-built")))
+		if v == "yes" || v == "true" {
+			return true
+		}
+	}
+	return false
+}

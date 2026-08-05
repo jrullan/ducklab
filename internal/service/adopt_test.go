@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -98,5 +99,33 @@ func TestRemovingATaskCleansTheReferencesToIt(t *testing.T) {
 				t.Errorf("T-023's emptied depends line survived:\n%s", c.Body)
 			}
 		}
+	}
+}
+
+// A first plan over a fully as-built spec has nothing to plan; a model would
+// invent tasks to build what is built. The plan grows from briefs and bugs.
+func TestPlanRefusesAFullyAsBuiltSpec(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Engine\n\n**Priority:** must\n\nRuns.\n",
+		artifact.KindSpec: "## SPEC-001 — Engine\n\n**Implements:** REQ-001\n**As-built:** yes\n\nRuns.\n\n" +
+			"## SPEC-002 — Excluded\n\n**Implements:** REQ-001\n**Priority:** wont\n\nNo.\n",
+	})
+	_, err := s.StageStart(context.Background(), id, StageRequest{Stage: "plan"})
+	if err == nil {
+		t.Fatal("a plan run started over a fully as-built spec")
+	}
+	if !strings.Contains(err.Error(), "nothing to plan") {
+		t.Errorf("the refusal does not explain itself: %v", err)
+	}
+
+	// One genuine gap unlocks planning.
+	spec := "## SPEC-001 — Engine\n\n**Implements:** REQ-001\n**As-built:** yes\n\nRuns.\n\n" +
+		"## SPEC-003 — Missing piece\n\n**Implements:** REQ-001\n\nNot built.\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindSpec), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StageStart(context.Background(), id, StageRequest{Stage: "plan", Mode: "solo"}); err != nil {
+		t.Errorf("a spec with a real gap was refused: %v", err)
 	}
 }

@@ -168,6 +168,10 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 				if strings.EqualFold(sp.Field("priority"), "wont") {
 					taskCell = "excluded"
 				}
+				if v := strings.ToLower(strings.TrimSpace(sp.Field("as-built"))); v == "yes" || v == "true" {
+					// Delivered by the tree the project adopted, not by a task.
+					taskCell = "as-built"
+				}
 				if len(cells) > 0 {
 					taskCell = strings.Join(cells, ", ")
 				}
@@ -204,7 +208,9 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 			fmt.Fprintf(&b, "- **%s — %s**\n", sp.ID, sp.Title)
 			ts := tasksBySpec[sp.ID]
 			if len(ts) == 0 {
-				if !strings.EqualFold(sp.Field("priority"), "wont") {
+				if v := strings.ToLower(strings.TrimSpace(sp.Field("as-built"))); v == "yes" || v == "true" {
+					b.WriteString("  - as-built: delivered by the existing code\n")
+				} else if !strings.EqualFold(sp.Field("priority"), "wont") {
 					b.WriteString("  - ⚠ no task delivers this section\n")
 				}
 				continue

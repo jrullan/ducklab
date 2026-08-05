@@ -398,3 +398,30 @@ func TestABugFixTaskIsNotUnjustified(t *testing.T) {
 		t.Error("a genuinely unjustified task escaped the check")
 	}
 }
+
+// An adopted spec's sections are delivered by the tree, not by tasks.
+func TestAnAsBuiltSectionNeedsNoTask(t *testing.T) {
+	spine := &Spine{
+		Requirements: &Document{Sections: []Section{{ID: "REQ-001", Fields: map[string]string{"priority": "must"}}}},
+		Spec: &Document{Sections: []Section{
+			{ID: "SPEC-001", Implements: []string{"REQ-001"}, Fields: map[string]string{"as-built": "yes"}},
+			{ID: "SPEC-002", Implements: []string{"REQ-001"}, Fields: map[string]string{}},
+		}},
+		Plan: &Document{},
+	}
+	errs := spine.Check()
+	for _, e := range errs {
+		if e.ID == "SPEC-001" && e.Kind == UnimplementedSpec {
+			t.Error("an as-built section was asked for a task")
+		}
+	}
+	found := false
+	for _, e := range errs {
+		if e.ID == "SPEC-002" && e.Kind == UnimplementedSpec {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an unmarked section without a task escaped the check")
+	}
+}

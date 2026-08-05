@@ -54,6 +54,33 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// A first plan over a fully as-built spec has nothing to plan: every
+	// section is already delivered by the tree the project adopted. Refusing
+	// beats letting a model invent tasks to build what is built — the plan
+	// will grow from feature briefs and bug promotions, which create it on
+	// their own.
+	if req.Stage == "plan" && req.Revise == "" {
+		plan, _ := artifact.Load(entry.Path, artifact.KindPlan)
+		if plan == nil || len(plan.Sections) == 0 {
+			if spec, sErr := artifact.Load(entry.Path, artifact.KindSpec); sErr == nil && len(spec.Sections) > 0 {
+				open := 0
+				for _, sp := range spec.Sections {
+					if strings.EqualFold(sp.Field("priority"), "wont") {
+						continue
+					}
+					if v := strings.ToLower(strings.TrimSpace(sp.Field("as-built"))); v == "yes" || v == "true" {
+						continue
+					}
+					open++
+				}
+				if open == 0 {
+					return nil, fmt.Errorf("nothing to plan: every spec section is as-built or excluded. " +
+						"The plan grows from feature briefs and bug reports — extend the requirements, " +
+						"or file a bug, and the tasks will follow")
+				}
+			}
+		}
+	}
 	if req.Adopt {
 		if req.Stage != "intake" {
 			return nil, fmt.Errorf("adopt is an intake variant; %s reads the documents intake produces", req.Stage)
