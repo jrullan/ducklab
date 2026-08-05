@@ -231,6 +231,20 @@ describe("Reports", () => {
     expect(screen.getByTestId("compare-thin").textContent).toContain("anecdote");
   });
 
+  // The report's destination is an email or a wiki page, not this window:
+  // built on demand, rendered readable, copyable as Markdown.
+  it("builds and shows the development report on demand", async () => {
+    const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
+    (client as unknown as { traceReport: unknown }).traceReport = vi.fn(() =>
+      Promise.resolve({ rendered: "# calc — development report\n\n## The software\n\nProse here." }),
+    );
+    render(<Reports client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("dev-report-generate"));
+    await waitFor(() => expect(screen.getByTestId("dev-report-body")).toBeTruthy());
+    expect(screen.getByTestId("dev-report-body").textContent).toContain("Prose here.");
+    expect(screen.getByTestId("dev-report-copy")).toBeTruthy();
+  });
+
   it("asks the engine for a narrower window when a range is picked", async () => {
     const client = clientWith([row({ key: "solo", runs: 1, passed: 1 })], []);
     render(<Reports client={client} projectId="p" />);

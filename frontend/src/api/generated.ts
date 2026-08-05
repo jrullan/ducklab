@@ -158,6 +158,10 @@ export interface EngineapirejectRequest {
   reason?: string;
 }
 
+export interface EngineapirenderedResponse {
+  rendered?: string;
+}
+
 export interface EngineapirosterSetRequest {
   duckling?: string;
   role?: string;
@@ -553,6 +557,7 @@ export const OPERATIONS = [
   { id: "TaskRemove", method: "DELETE", path: "/v1/projects/{id}/tasks/{task}" },
   { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
+  { id: "TraceReport", method: "GET", path: "/v1/projects/{id}/trace/report" },
   { id: "TraceShow", method: "GET", path: "/v1/projects/{id}/trace/{anyID}" },
   { id: "ProviderList", method: "GET", path: "/v1/providers" },
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },

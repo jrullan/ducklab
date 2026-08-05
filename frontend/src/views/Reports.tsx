@@ -13,6 +13,7 @@ import { BarChart, ChartFrame, OutcomeMix } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
 import { awards } from "../lib/leaderboard";
 import { headToHead } from "../lib/compare";
+import { Prose } from "../components/Prose";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -189,6 +190,8 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
       </section>
 
       {byDuckling.length >= 2 && <HeadToHeadSection rows={byDuckling} />}
+
+      <DevReportSection client={client} projectId={projectId} />
     </div>
   );
 }
@@ -301,6 +304,77 @@ function HeadToHeadSection({ rows }: { rows: readonly ReportRow[] }) {
             </a>
             .
           </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The development report, on demand: what the software is and the evidence
+ * — requirement→spec→task with statuses, bug fixes, releases, spine health.
+ * Deterministic and copyable as Markdown, because its natural destination is
+ * an email, a wiki page, or a client's hands — not this window. */
+function DevReportSection({ client, projectId }: { client: EngineClient; projectId: string }) {
+  const [rendered, setRendered] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  async function generate() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const r = await client.traceReport(projectId);
+      setRendered(r.rendered);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-card border border-hairline p-3" data-testid="dev-report">
+      <h3 className="text-ink">Development report</h3>
+      <p className="mt-1 text-xs text-ink-muted">
+        The software in the approved requirements&apos; own words, the requirement → spec → task
+        matrix with statuses, bug fixes, releases, and the spine&apos;s breaks. Built from the
+        record — no model writes it.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void generate()}
+          disabled={busy}
+          data-testid="dev-report-generate"
+          className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+        >
+          {busy ? "Building…" : rendered ? "Rebuild" : "Build the report"}
+        </button>
+        {rendered && (
+          <button
+            type="button"
+            data-testid="dev-report-copy"
+            onClick={() => {
+              void navigator.clipboard?.writeText(rendered).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              });
+            }}
+            className="rounded border border-hairline px-3 py-1 text-sm"
+          >
+            {copied ? "Copied" : "Copy as Markdown"}
+          </button>
+        )}
+        {failure && (
+          <span className="text-xs text-critical" data-testid="dev-report-error">
+            {failure}
+          </span>
+        )}
+      </div>
+      {rendered && (
+        <div className="mt-3 max-h-[32rem] overflow-y-auto border-t border-hairline pt-3" data-testid="dev-report-body">
+          <Prose body={rendered} />
         </div>
       )}
     </section>

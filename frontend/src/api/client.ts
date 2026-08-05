@@ -690,6 +690,13 @@ export class EngineClient {
       `/v1/projects/${projectId}/artifacts/${kind}/proposal`,
     );
   }
+  /** The development report: narrative from the approved requirements, the
+   * requirement→spec→task matrix with statuses, bug fixes, releases, spine
+   * health. Deterministic — no model writes the record. */
+  traceReport(projectId: string) {
+    return this.request<{ rendered: string }>("GET", `/v1/projects/${projectId}/trace/report`);
+  }
+
   traceCheck(projectId: string) {
     return this.request<{ errors: TraceError[] | null; proposed?: string[] | null }>(
       "GET",

@@ -701,6 +701,17 @@ func (c *Client) TraceShow(projectID, id string) (map[string]interface{}, error)
 	return result, err
 }
 
+// TraceReport fetches the rendered development report.
+func (c *Client) TraceReport(projectID string) (string, error) {
+	var out struct {
+		Rendered string `json:"rendered"`
+	}
+	if err := c.get("/v1/projects/"+projectID+"/trace/report", &out); err != nil {
+		return "", err
+	}
+	return out.Rendered, nil
+}
+
 // Shutdown asks the engine to stop gracefully. The daemon's own stop path:
 // used by supervision (restart) and by `ducklab engine stop`.
 func (c *Client) Shutdown() error {

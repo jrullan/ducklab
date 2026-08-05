@@ -402,6 +402,11 @@ func routeTable() []Route {
 			Response: traceCheckResponse{}, Summary: "Traceability check (deterministic, model-free)",
 			ClientMethod: "TraceCheck",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleTraceCheck }},
+		{Method: "GET", Path: "/v1/projects/{id}/trace/report", Auth: true,
+			Response: renderedResponse{},
+			Summary:  "The development report: narrative from the approved requirements, the requirement→spec→task matrix with statuses, bug fixes, releases, spine health. Deterministic — no model writes the record.",
+			ClientMethod: "TraceReport",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleTraceReport }},
 
 		// Stream
 		{Method: "GET", Path: "/v1/events", Auth: true,

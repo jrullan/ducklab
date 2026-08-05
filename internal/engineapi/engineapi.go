@@ -1160,6 +1160,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type renderedResponse struct {
+	Rendered string `json:"rendered"`
+}
+
+func (s *Server) handleTraceReport(w http.ResponseWriter, r *http.Request) {
+	rendered, err := s.svc.TraceReport(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, renderedResponse{Rendered: rendered})
+}
+
 func (s *Server) handleTraceCheck(w http.ResponseWriter, r *http.Request) {
 	res, err := s.svc.TraceCheck(r.Context(), r.PathValue("id"))
 	if err != nil {

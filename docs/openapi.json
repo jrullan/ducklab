@@ -532,6 +532,17 @@
         ],
         "type": "object"
       },
+      "EngineapirenderedResponse": {
+        "properties": {
+          "rendered": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rendered"
+        ],
+        "type": "object"
+      },
       "EngineapirosterSetRequest": {
         "properties": {
           "duckling": {
@@ -3816,6 +3827,42 @@
           }
         ],
         "summary": "Traceability check (deterministic, model-free)"
+      }
+    },
+    "/v1/projects/{id}/trace/report": {
+      "get": {
+        "operationId": "TraceReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapirenderedResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The development report: narrative from the approved requirements, the requirement→spec→task matrix with statuses, bug fixes, releases, spine health. Deterministic — no model writes the record."
       }
     },
     "/v1/projects/{id}/trace/{anyID}": {

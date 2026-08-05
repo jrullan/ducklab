@@ -351,6 +351,17 @@ func traceCmd(verb string, args []string, repo string) int {
 		// Non-zero so a script or CI can act on it.
 		return 1
 
+	case "report":
+		rendered, err := client.TraceReport(projectID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		// Markdown to stdout: `ducklab trace report > report.md` is the whole
+		// export story.
+		fmt.Print(rendered)
+		return 0
+
 	case "show":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab trace show <id>")
