@@ -29,6 +29,10 @@ func TestTheDevelopmentReportTracesTheSpine(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, must := range []string{
+		"## Traceability matrix",
+		"| Requirement | Priority | Spec section | Tasks (status) |",
+		"| REQ-001 Interactive triangle | must | SPEC-001 Canvas rendering | T-001 (todo) |",
+		"| REQ-002 Nothing mobile | wont | excluded | — |",
 		"development report",
 		"requirements v2 (approved by human)",
 		"A single-file triangle calculator.",          // the narrative preamble
@@ -75,6 +79,10 @@ func TestTheReportNamesTheGaps(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "no spec section implements this requirement") {
 		t.Error("an unimplemented must requirement was not named as a gap")
+	}
+	// And the table names the same gap, so neither form hides it.
+	if !strings.Contains(rendered, "| REQ-001 Orphan | must | ⚠ none | — |") {
+		t.Errorf("the table row for the orphan requirement is wrong:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Spine health") {
 		t.Error("the breaks section is missing")

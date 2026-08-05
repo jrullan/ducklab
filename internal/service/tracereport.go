@@ -87,9 +87,52 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 		}
 	}
 
-	// The matrix: requirement → spec → tasks → status. One requirement per
-	// block, because a table wide enough for four hops is a table nobody
-	// reads; the shape here is the spine itself.
+	// The matrix twice, on purpose: first as a table — the at-a-glance form
+	// an auditor scans and a wiki embeds — then as blocks that carry the
+	// prose. One row per requirement→spec edge, tasks aggregated with their
+	// statuses inline, so the table stays scannable at four hops deep.
+	if len(reqs.Sections) > 0 {
+		b.WriteString("## Traceability matrix\n\n")
+		b.WriteString("| Requirement | Priority | Spec section | Tasks (status) |\n")
+		b.WriteString("|---|---|---|---|\n")
+		for _, r := range reqs.Sections {
+			prio := r.Field("priority")
+			specs := specsByReq[r.ID]
+			if len(specs) == 0 {
+				cell := "⚠ none"
+				if strings.EqualFold(prio, "wont") {
+					cell = "excluded"
+				}
+				fmt.Fprintf(&b, "| %s %s | %s | %s | — |\n", r.ID, tableEscape(r.Title), prio, cell)
+				continue
+			}
+			for i, sp := range specs {
+				name := ""
+				if i == 0 {
+					name = fmt.Sprintf("%s %s", r.ID, tableEscape(r.Title))
+				}
+				var cells []string
+				for _, t := range tasksBySpec[sp.ID] {
+					cells = append(cells, fmt.Sprintf("%s (%s)", t.ID, t.Status))
+				}
+				taskCell := "⚠ none"
+				if strings.EqualFold(sp.Field("priority"), "wont") {
+					taskCell = "excluded"
+				}
+				if len(cells) > 0 {
+					taskCell = strings.Join(cells, ", ")
+				}
+				pcell := prio
+				if i > 0 {
+					pcell = ""
+				}
+				fmt.Fprintf(&b, "| %s | %s | %s %s | %s |\n", name, pcell, sp.ID, tableEscape(sp.Title), taskCell)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// And the same spine as blocks, because the table cannot carry the prose.
 	b.WriteString("## Traceability — requirement → spec → tasks\n\n")
 	for _, r := range reqs.Sections {
 		fmt.Fprintf(&b, "### %s — %s", r.ID, r.Title)
@@ -189,3 +232,6 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 	}
 	return b.String(), nil
 }
+
+// tableEscape keeps a title from breaking its own row.
+func tableEscape(v string) string { return strings.ReplaceAll(v, "|", "\\|") }
