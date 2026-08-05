@@ -168,3 +168,39 @@ describe("a run that starts while we are watching", () => {
     expect(useRuns.getState().runs["r-ghost"]).toBeUndefined();
   });
 });
+
+// A run watched LIVE failed with "response truncated" — and the person
+// watched a frozen lane, found "running" in Now, and learned the truth
+// minutes later from a refetch. The engine had said everything the moment it
+// happened: an `error` event with the reason, then run_end. The store dropped
+// the first and mapped the second to "done".
+describe("a failure arriving on the stream", () => {
+  it("flips the run to failed with the reason, the moment error arrives", () => {
+    useRuns.setState({
+      runs: { "r-1": { id: "r-1", project_id: "p", stage: "spec", mode: "council", status: "running", verdict: "" } as never },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    useRuns.getState().applyEvent({ type: "error", run_id: "r-1", seq: 8, data: { error: "response truncated" } } as never);
+    let r = useRuns.getState().runs["r-1"]!;
+    expect(r.status).toBe("failed");
+    expect(r.failure).toBe("response truncated");
+
+    // And run_end keeps it failed instead of relabeling it done.
+    useRuns.getState().applyEvent({ type: "run_end", run_id: "r-1", seq: 9, data: { verdict: "FAILED" } } as never);
+    r = useRuns.getState().runs["r-1"]!;
+    expect(r.status).toBe("failed");
+    expect(r.verdict).toBe("FAILED");
+  });
+
+  // done and failed are different ends: a tournament with no winner ends done
+  // with verdict FAILED, and no error event precedes it.
+  it("keeps a completed negative verdict as done", () => {
+    useRuns.setState({
+      runs: { "r-2": { id: "r-2", project_id: "p", stage: "build", mode: "tournament", status: "running", verdict: "" } as never },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    useRuns.getState().applyEvent({ type: "run_end", run_id: "r-2", seq: 5, data: { verdict: "FAILED" } } as never);
+    const r = useRuns.getState().runs["r-2"]!;
+    expect(r.status).toBe("done");
+  });
+});

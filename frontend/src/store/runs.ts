@@ -150,8 +150,22 @@ export const useRuns = create<RunsState>((set) => ({
       } else if (run) {
         if (e.type === "human_needed") {
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
+        } else if (e.type === "error") {
+          // The engine emits `error` only on the fatal paths, with the reason.
+          // The store used to drop it — so a run watched LIVE failed with
+          // "response truncated" and the person watched a frozen lane, found
+          // "running" in Now, and learned the truth minutes later from a
+          // refetch. The failure notification keys on this transition too.
+          runs = {
+            ...runs,
+            [runId]: { ...run, status: "failed", failure: String(e.data?.error ?? run.failure ?? "") },
+          };
         } else if (e.type === "run_end") {
-          runs = { ...runs, [runId]: { ...run, status: "done", verdict: String(e.data?.verdict ?? run.verdict) } };
+          // done and failed are different ends: a tournament with no winner
+          // ends done with verdict FAILED. The error event above is what
+          // marks a harness failure, so run_end preserves it.
+          const status = run.status === "failed" ? "failed" : "done";
+          runs = { ...runs, [runId]: { ...run, status, verdict: String(e.data?.verdict ?? run.verdict) } };
         }
       }
 
