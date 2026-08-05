@@ -57,18 +57,67 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 	}
 	b.WriteString("\n\n")
 
-	// The software, in the words a person approved.
-	b.WriteString("## The software\n\n")
+	// The summary. Everything in it is assembled from content a person
+	// approved — the project's own description, the requirements preamble,
+	// each must requirement's first sentence — never composed by a model: an
+	// executive summary a model wrote would be the report editorialising
+	// about itself.
+	b.WriteString("## Summary\n\n")
 	if reqs.Front.Origin == "adopted" {
 		b.WriteString("_These requirements were surveyed from the existing codebase " +
 			"(origin: adopted) and approved by a person._\n\n")
 	}
+	described := false
+	if cfg, cErr := s.projectConfig(projectID); cErr == nil && strings.TrimSpace(cfg.Describe) != "" {
+		b.WriteString(strings.TrimSpace(cfg.Describe))
+		b.WriteString("\n\n")
+		described = true
+	}
 	if p := strings.TrimSpace(reqs.Preamble); p != "" {
 		b.WriteString(p)
 		b.WriteString("\n\n")
+		described = true
 	}
-	if len(reqs.Sections) == 0 {
+	if !described && len(reqs.Sections) == 0 {
 		b.WriteString("No requirements yet: the narrative starts at intake.\n\n")
+	}
+	var mains, outs []string
+	for _, r := range reqs.Sections {
+		if strings.EqualFold(r.Field("priority"), "wont") {
+			outs = append(outs, r.Title)
+			continue
+		}
+		if strings.EqualFold(r.Field("priority"), "must") {
+			line := "**" + r.Title + "**"
+			if fs := firstSentence(r.Body); fs != "" {
+				line += " — " + fs
+			}
+			mains = append(mains, line)
+		}
+	}
+	if len(mains) > 0 {
+		b.WriteString("**Main features**\n\n")
+		for _, m := range mains {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+		b.WriteString("\n")
+	}
+	if len(outs) > 0 {
+		fmt.Fprintf(&b, "**Explicitly out of scope:** %s.\n\n", strings.Join(outs, "; "))
+	}
+	if len(reqs.Sections) > 0 {
+		accepted := 0
+		for _, t := range tasks {
+			if t.Status == "accepted" {
+				accepted++
+			}
+		}
+		specCount := 0
+		if spec != nil {
+			specCount = len(spec.Sections)
+		}
+		fmt.Fprintf(&b, "**Scale:** %d requirements · %d spec sections · %d tasks, %d accepted.\n\n",
+			len(reqs.Sections), specCount, len(tasks), accepted)
 	}
 
 	// Index: SPEC → its tasks; REQ → its specs.
@@ -235,3 +284,23 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 
 // tableEscape keeps a title from breaking its own row.
 func tableEscape(v string) string { return strings.ReplaceAll(v, "|", "\\|") }
+
+// firstSentence extracts a body's opening claim: the text up to the first
+// period-and-space, skipping field lines, capped so a run-on body cannot
+// swallow the summary.
+func firstSentence(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "**") || strings.HasPrefix(t, "-") {
+			continue
+		}
+		if i := strings.Index(t, ". "); i > 0 {
+			t = t[:i+1]
+		}
+		if len(t) > 220 {
+			t = t[:220] + "…"
+		}
+		return t
+	}
+	return ""
+}

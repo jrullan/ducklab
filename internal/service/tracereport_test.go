@@ -29,6 +29,11 @@ func TestTheDevelopmentReportTracesTheSpine(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, must := range []string{
+		"## Summary",
+		"**Main features**",
+		"- **Interactive triangle** — The app shall draw a draggable triangle.",
+		"**Explicitly out of scope:** Nothing mobile.",
+		"**Scale:** 2 requirements · 1 spec sections · 2 tasks, 0 accepted.",
 		"## Traceability matrix",
 		"| Requirement | Priority | Spec section | Tasks (status) |",
 		"| REQ-001 Interactive triangle | must | SPEC-001 Canvas rendering | T-001 (todo) |",
