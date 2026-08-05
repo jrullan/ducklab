@@ -249,6 +249,18 @@ export function Projects({
                           .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
                           .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
                       }
+                      onSet={async (mode, command) => {
+                        try {
+                          await client.projectUpdate(p.id, {
+                            "verify.mode": mode,
+                            ["verify." + (mode === "custom" ? "custom" : mode)]: command,
+                          });
+                          const g = await client.projectGate(p.id);
+                          setGates((cur) => ({ ...cur, [p.id]: g }));
+                        } catch (err) {
+                          setFailure(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
                     />
                     <span className="font-mono text-xs text-ink-muted">{p.path}</span>
                     <span className="ml-auto flex gap-1">
@@ -288,19 +300,88 @@ export function Projects({
  * A gate with nothing runnable behind it means every run ends UNVERIFIED — the
  * failure mode is that nobody notices, so this says the consequence rather
  * than the setting. */
-function GateChip({ status, onAdopt }: { status?: GateStatus; onAdopt: () => void }) {
+function GateChip({
+  status,
+  onAdopt,
+  onSet,
+}: {
+  status?: GateStatus;
+  onAdopt: () => void;
+  onSet: (mode: string, command: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [mode, setMode] = useState("tests");
+  const [command, setCommand] = useState("");
   if (!status) return null;
+
+  // The manual door. Detection finds go.mod and package.json; it cannot find
+  // "this project verifies with a script I have not written yet" — and until
+  // this, that case dead-ended at a warning telling nobody what to do next.
+  // The gate stays human-set by design (a gate decides what a verdict means),
+  // which is exactly why the human needs a place to set it.
+  const editor = editing && (
+    <span className="flex items-center gap-1" data-testid="gate-editor">
+      <select
+        value={mode}
+        onChange={(e) => setMode(e.target.value)}
+        data-testid="gate-mode"
+        className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
+      >
+        <option value="tests">tests</option>
+        <option value="build">build</option>
+        <option value="custom">custom</option>
+      </select>
+      <input
+        value={command}
+        onChange={(e) => setCommand(e.target.value)}
+        placeholder="pytest -q"
+        data-testid="gate-command"
+        className="w-40 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+      />
+      <button
+        type="button"
+        disabled={command.trim() === ""}
+        onClick={() => {
+          void onSet(mode, command.trim()).then(() => setEditing(false));
+        }}
+        data-testid="gate-save"
+        className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+      >
+        Set
+      </button>
+      <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
+        cancel
+      </button>
+    </span>
+  );
+
   if (status.mode !== "none") {
     return (
-      <span className="text-xs text-ink-muted" data-testid="gate-ok">
+      <span className="flex items-center gap-1 text-xs text-ink-muted" data-testid="gate-ok">
         gate {status.mode}
+        {status.command && <span className="font-mono">({status.command})</span>}
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setMode(status.mode === "custom" ? "custom" : status.mode);
+              setCommand(status.command ?? "");
+              setEditing(true);
+            }}
+            data-testid="gate-edit"
+            className="underline"
+          >
+            edit
+          </button>
+        )}
+        {editor}
       </span>
     );
   }
   return (
     <span className="flex items-center gap-1" data-testid="gate-none">
       <StatusChip role="serious" label="no gate — runs end UNVERIFIED" />
-      {status.adoptable && (
+      {status.adoptable && !editing && (
         <button
           type="button"
           onClick={onAdopt}
@@ -311,6 +392,17 @@ function GateChip({ status, onAdopt }: { status?: GateStatus; onAdopt: () => voi
           use {status.detected_command}
         </button>
       )}
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          data-testid="gate-set-manual"
+          className="rounded border border-hairline px-2 py-0.5 text-xs"
+        >
+          set by hand
+        </button>
+      )}
+      {editor}
     </span>
   );
 }

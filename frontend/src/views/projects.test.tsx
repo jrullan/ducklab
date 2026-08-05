@@ -158,13 +158,48 @@ describe("Projects — the gate", () => {
     await waitFor(() => expect(screen.queryByTestId("gate-none")).toBeNull());
   });
 
-  // Nothing to detect: offering a button that cannot help is worse than none.
-  it("offers nothing when there is nothing runnable", async () => {
+  // Nothing to detect: no adopt button that cannot help — but the manual
+  // door stays, because detection cannot find a script nobody has written.
+  it("offers the manual door when there is nothing runnable", async () => {
     render(
       <Projects client={clientWithGate(gate())} selected="" onSelect={noop} onChanged={noop} />,
     );
     await screen.findByTestId("gate-none");
     expect(screen.queryByTestId("gate-adopt")).toBeNull();
+    expect(screen.getByTestId("gate-set-manual")).toBeTruthy();
+  });
+
+  // The exercise-tracker case: detection found nothing, the person knows the
+  // command. Setting it by hand writes verify.mode and the matching command
+  // key, and the chip re-reads the gate the engine now reports.
+  it("sets a gate by hand and the warning goes away", async () => {
+    const client = clientWithGate(gate());
+    const cr = client as unknown as Record<string, unknown>;
+    cr.projectUpdate = vi.fn(() => Promise.resolve({}));
+    // First read: no gate. After the update: configured.
+    const gateFn = cr.projectGate as ReturnType<typeof vi.fn>;
+    gateFn.mockImplementation(() =>
+      Promise.resolve(gate({ mode: "tests", command: "pytest -q", best_verdict: "PASSED" })),
+    );
+    gateFn.mockResolvedValueOnce(gate());
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("gate-set-manual"));
+    fireEvent.change(screen.getByTestId("gate-command"), { target: { value: "pytest -q" } });
+    fireEvent.click(screen.getByTestId("gate-save"));
+    await waitFor(() =>
+      expect(cr.projectUpdate).toHaveBeenCalledWith("alpha", {
+        "verify.mode": "tests",
+        "verify.tests": "pytest -q",
+      }),
+    );
+  });
+
+  // An empty command cannot be saved: a gate of "" is mode tests with nothing
+  // to run, which is worse than none because it looks configured.
+  it("refuses to set an empty command", async () => {
+    render(<Projects client={clientWithGate(gate())} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("gate-set-manual"));
+    expect(screen.getByTestId("gate-save").hasAttribute("disabled")).toBe(true);
   });
 
   it("says nothing at all about a project that has a gate", async () => {
@@ -172,7 +207,7 @@ describe("Projects — the gate", () => {
       gate({ mode: "tests", command: "go test ./...", best_verdict: "PASSED" }),
     );
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
-    expect((await screen.findByTestId("gate-ok")).textContent).toBe("gate tests");
+    expect((await screen.findByTestId("gate-ok")).textContent).toContain("gate tests");
     expect(screen.queryByTestId("gate-none")).toBeNull();
   });
 });

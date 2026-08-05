@@ -30,7 +30,6 @@ import (
 // Removing a line here is the definition of done for closing one.
 var knownGaps = map[string]string{
 	"GET /v1/projects/{id}":                         "one project's record; the desktop lists all and filters, which works until projects number dozens",
-	"PATCH /v1/projects/{id}":                       "editing a project's gate and autonomy — the desktop shows the gate but changing it still means the CLI",
 	"GET /v1/projects/{id}/skills":                  "the skills loop has no desktop surface at all",
 	"GET /v1/projects/{id}/skills/{name}":           "same",
 	"POST /v1/projects/{id}/skills":                 "same",
@@ -61,7 +60,7 @@ func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {
 	// path alone let POST /v1/bench hide behind the GET of the same path: a
 	// list the desktop could read excused a launch it could not perform.
 	mentioned := map[string]bool{}
-	for _, m := range regexp.MustCompile("\"(GET|POST|PUT|DELETE)\",\\s*\\n?\\s*[`\"](/v1[^`\"?]*)").FindAllStringSubmatch(string(client), -1) {
+	for _, m := range regexp.MustCompile("\"(GET|POST|PUT|DELETE|PATCH)\",\\s*\\n?\\s*[`\"](/v1[^`\"?]*)").FindAllStringSubmatch(string(client), -1) {
 		p := regexp.MustCompile(`\$\{[^}]+\}`).ReplaceAllString(m[2], "{}")
 		mentioned[m[1]+" "+strings.TrimRight(p, "/")] = true
 		mentioned[m[1]+" "+strings.TrimRight(strings.TrimSuffix(p, "{}"), "/")] = true
