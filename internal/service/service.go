@@ -178,9 +178,23 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 				// stage runs can produce a real proposal under test instead of
 				// failing after the spend is recorded.
 				if strings.Contains(m.Content, "You are the architect") {
+					// The stage decides the prefix; the fake reads which
+					// document was asked for so every stage can produce a
+					// parseable proposal under test.
+					doc := "## REQ-001 — Records a sighting\n\n**Priority:** must\n\nThe tool records one sighting per call.\n"
+					for _, um := range req.Messages {
+						if um.Role != "user" {
+							continue
+						}
+						if strings.Contains(um.Content, "Write the specification") {
+							doc = "## SPEC-001 — Sighting store\n\n**Implements:** REQ-001\n\nOne row per sighting.\n"
+						} else if strings.Contains(um.Content, "milestones") {
+							doc = "## M-001 — Core\n\n### T-001 — Store sightings\n\n**Implements:** SPEC-001\n\nBuild it.\n"
+						}
+					}
 					return &provider.ChatResponse{
 						Choices: []provider.Choice{{
-							Message:      provider.Message{Role: "assistant", Content: "## REQ-001 — Records a sighting\n\n**Priority:** must\n\nThe tool records one sighting per call.\n"},
+							Message:      provider.Message{Role: "assistant", Content: doc},
 							FinishReason: provider.FinishStop,
 						}},
 						Usage: provider.Usage{PromptTokens: 90, CompletionTokens: 30},
@@ -1276,6 +1290,24 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	}
 
 	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
+		// Accepting THIS proposal answers every sibling still waiting: an
+		// older run of the same stage whose draft was superseded holds a gate
+		// nobody can decide — its proposal file is already gone.
+		defer func() {
+			s.runsMu.RLock()
+			var moot []string
+			for id, other := range s.runs {
+				if id != rs.run.ID && other.run.ProjectID == rs.run.ProjectID &&
+					other.run.Stage == rs.run.Stage &&
+					other.run.Status == "paused" && other.run.PendingKind == "gate" {
+					moot = append(moot, id)
+				}
+			}
+			s.runsMu.RUnlock()
+			for _, id := range moot {
+				s.resolveSuperseded(id, "superseded: "+rs.run.ID+"'s proposal was accepted")
+			}
+		}()
 		if _, err := s.ArtifactPromote(ctx, rs.run.ProjectID, kind, actor); err != nil {
 			// A stale proposal is the one promotion error that must STOP the
 			// accept: the approved document moved while this proposal waited,
@@ -1640,6 +1672,29 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 }
 
 // RunReject rejects a run.
+// resolveSuperseded closes a run whose gate was answered by another act — a
+// revision requested on its draft, or a sibling's proposal accepted over it.
+// Quietly a no-op when the run is not waiting: only a paused gate is moot.
+func (s *Service) resolveSuperseded(id, resolution string) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
+	if !ok || rs.run.Status != "paused" || rs.run.PendingKind != "gate" {
+		return
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	rs.run.Status = "done"
+	rs.run.Resolution = resolution
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
+	w.AppendEvent("human", map[string]interface{}{"action": "superseded", "detail": resolution})
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
+	_ = w.WriteState()
+}
+
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]

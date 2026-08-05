@@ -94,6 +94,19 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		}
 	}
 
+	// A revision IS the decision on the draft it revises: "keep it, change
+	// this". The run that produced that draft used to wait at its gate
+	// forever — the person had answered, in another form, and the inbox
+	// never learned. Resolved here, at the moment the person asks, not when
+	// the revision lands: the decision happened now, whatever the revision's
+	// fate.
+	if req.Revise != "" {
+		kind := stage.Name(req.Stage).Kind()
+		if prop, pErr := artifact.LoadProposed(entry.Path, kind); pErr == nil && prop != nil && prop.Front.RunID != "" {
+			s.resolveSuperseded(prop.Front.RunID, "changes requested: "+req.Revise)
+		}
+	}
+
 	// Recorded as what will actually run, not as a constant. A report that
 	// says every stage was a council when half were solo is a report that
 	// cannot answer the question it exists for.
