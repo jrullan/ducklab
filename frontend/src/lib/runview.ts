@@ -310,8 +310,10 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
   let latest: DucklabEvent | null = null;
   for (const e of events) {
     if (e.type === "human_needed") latest = e;
-    // A human action clears the wait.
-    if (e.type === "human" || e.type === "run_end") latest = null;
+    // A human action clears the wait — and so does a checkpoint: resume
+    // appends one, and a budget pause that was lifted and resumed went on
+    // saying "waiting for you" over a run that was already working again.
+    if (e.type === "human" || e.type === "run_end" || e.type === "checkpoint") latest = null;
   }
   if (!latest) return null;
   const d = latest.data ?? {};

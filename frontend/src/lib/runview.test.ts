@@ -158,6 +158,16 @@ describe("buildPending", () => {
       ev("run_end", 2, { verdict: "PASSED" }),
     ])).toBeNull();
   });
+
+  // Resume appends a checkpoint, not a human event — a lifted-and-resumed
+  // budget pause went on saying "waiting for you" over a run that was
+  // already working again.
+  it("clears when the run resumes", () => {
+    expect(buildPending([
+      ev("human_needed", 1, { kind: "budget", detail: "token budget exceeded" }),
+      ev("checkpoint", 2, { reason: "resume", status: "running" }),
+    ])).toBeNull();
+  });
 });
 
 describe("diff parsing", () => {

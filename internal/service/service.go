@@ -1601,6 +1601,9 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs.run.Status = "running"
 		rs.run.PendingKind = ""
 		rs.run.PendingSince = ""
+		// The failure text was the pause's reason; resuming answers it. Left
+		// in place, a resumed, working run went on wearing "Why it failed".
+		rs.run.Failure = ""
 		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
 		w.WriteState()
 		s.queue.submit(s, &queued{
@@ -1629,6 +1632,10 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	rs.run.Status = "running"
 	rs.run.PendingKind = ""
 	rs.run.PendingSince = ""
+	// The failure text was the pause's reason (a budget pause records it);
+	// resuming answers it. Left in place, a resumed, working run went on
+	// wearing "Why it failed" over a live conversation.
+	rs.run.Failure = ""
 	w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
 	w.WriteState()
 

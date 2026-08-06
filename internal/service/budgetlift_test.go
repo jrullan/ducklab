@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/vcs"
@@ -116,5 +118,54 @@ func TestLiftingACapIsRecordedAndGuarded(t *testing.T) {
 	_, err = s.RunBudgetLift(context.Background(), run.ID, "usd")
 	if err == nil || !strings.Contains(err.Error(), "not lifted") {
 		t.Errorf("a finished run's budget was lifted: %v", err)
+	}
+}
+
+// Resuming answers the pause's reason. The failure text stayed on the record,
+// and a resumed, working run went on wearing "Why it failed" over a live
+// conversation — beside a "waiting for you" banner the resume had already
+// made false.
+func TestResumeClearsThePausesReason(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan),
+		[]byte("## M-001 — Core\n\n### T-001 — Do it\n\nDo.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-bres", ProjectID: p.ID, TaskID: "T-001", Stage: "build", Mode: "solo",
+		Status: "paused", PendingKind: "budget",
+		Failure:   "budget exceeded: $5.0085 >= $5.0000",
+		StartedAt: "2026-08-06T19:00:00Z",
+	}
+	run.Budget.Limit = runlog.BudgetLimits{USD: 5, Tokens: 100000, Turns: 24}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	got, err := s.RunResume(context.Background(), "r-bres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Failure != "" {
+		t.Errorf("the resumed run still wears its pause reason: %q", got.Failure)
+	}
+	s.runsMu.RLock()
+	rs := s.runs["r-bres"]
+	s.runsMu.RUnlock()
+	select {
+	case <-rs.done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the resumed run never finished")
 	}
 }

@@ -377,7 +377,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           data-testid="run-failure"
           className="m-2 rounded-card border border-critical p-3"
         >
-          <h2 className="text-sm font-medium text-critical mb-1">Why it failed</h2>
+          {/* A budget pause records its reason here while it waits; calling
+              that "failed" on a paused (or resumed) run announced a death
+              that had not happened. */}
+          <h2 className="text-sm font-medium text-critical mb-1">
+            {run.status === "failed" ? "Why it failed" : "Why it stopped"}
+          </h2>
           <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
         </section>
       )}
