@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -276,5 +277,57 @@ func TestAManualAcceptContinuesThePausedChain(t *testing.T) {
 	got, _ := s.RunGet(context.Background(), "r-unv")
 	if got.Run.ChainBuild != nil {
 		t.Error("the chain was not consumed — a second accept would double-build")
+	}
+}
+
+// The prompt licenses the test writer to ask; the harness must catch the
+// question. It did not: executeTestFirst failed the run with "human input
+// needed" and no question recorded — twice on one task — and even a correct
+// pause would then have re-entered the BUILD strategy on answer, because
+// RunResume knew only one way back in. This pins the way back.
+func TestAnAnsweredTestRunResumesItsOwnStrategy(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.mode": "tests", "verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-q", ProjectID: p.ID, TaskID: "T-001", Stage: "test",
+		Status: "paused", PendingKind: "question",
+		Mode: "solo", Roster: map[string]string{"implementer": "pato-uno"},
+		PendingData: map[string]interface{}{"question_id": "q-1", "question": "Monday or Sunday?"},
+		StartedAt:   "2026-08-06T18:53:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	if err := s.RunAnswer(context.Background(), "r-q", "q-1", "ISO weeks, Monday"); err != nil {
+		t.Fatalf("answering the test run's question was refused: %v", err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs["r-q"]
+	s.runsMu.RUnlock()
+	// The answer reached the record, and the run re-entered SOME strategy —
+	// the refusal ("a test run cannot be resumed") was the bug.
+	if rs.run.PendingKind == "question" {
+		t.Error("the run is still waiting on the question it was answered")
+	}
+	select {
+	case <-rs.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the resumed test run never finished")
+	}
+	if rs.run.Stage != "test" {
+		t.Errorf("stage = %q — the resume changed what kind of run this is", rs.run.Stage)
 	}
 }

@@ -1556,15 +1556,54 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if rs.run.PendingKind == "gate" {
 		return rs.run, nil
 	}
-	// Resume re-enters the BUILD strategy; on any other kind of run it would
-	// run the wrong one. Abort and relaunch is the honest path there.
-	if rs.run.Stage != "build" {
+	// Resume re-enters the strategy the run was BORN with. Build and test
+	// each know how; on anything else the honest path is abort and relaunch.
+	if rs.run.Stage != "build" && rs.run.Stage != "test" {
 		return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", rs.run.Stage)
 	}
 
 	entry, err := s.entryFor(rs)
 	if err != nil {
 		return nil, err
+	}
+
+	// A test-first re-enters executeTestFirst with its request rebuilt from
+	// the record — RunAnswer lands here, and answering a test run's question
+	// used to re-enter the BUILD strategy on a run whose whole point was to
+	// not build anything.
+	if rs.run.Stage == "test" {
+		projCfg, cfgErr := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+		if cfgErr != nil {
+			return nil, cfgErr
+		}
+		treq := TestFirstRequest{TaskID: rs.run.TaskID, Mode: rs.run.Mode}
+		if imp := rs.run.Roster["implementer"]; imp != "" {
+			treq.Ducklings = []string{imp}
+			if rev := rs.run.Roster["reviewer"]; rev != "" && rs.run.Mode == "pair" {
+				treq.Ducklings = append(treq.Ducklings, rev)
+			}
+		}
+		// The chain promise stays ON the record (consumed at acceptance);
+		// the request only needs to know it is there.
+		if rs.run.ChainBuild != nil {
+			treq.ThenBuild = true
+			if raw, mErr := json.Marshal(rs.run.ChainBuild); mErr == nil {
+				_ = json.Unmarshal(raw, &treq.Build)
+			}
+		}
+		runCtx, cancel := context.WithCancel(context.Background())
+		rs.cancel = cancel
+		rs.done = make(chan struct{})
+		rs.run.Status = "running"
+		rs.run.PendingKind = ""
+		rs.run.PendingSince = ""
+		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+		w.WriteState()
+		s.queue.submit(s, &queued{
+			rs: rs, ctx: runCtx, chained: true,
+			exec: func(c context.Context) { s.executeTestFirst(c, rs, entry.Path, projCfg, treq) },
+		})
+		return rs.run, nil
 	}
 
 	req := RunRequest{

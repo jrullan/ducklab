@@ -38,9 +38,9 @@ func runNext(r *runlog.Run) []string {
 		case "budget":
 			// Stopped by its own ceiling, work intact in the tree. Lift the
 			// binding cap on the run's meter and resume — or abort, which
-			// restores. Only a build re-enters its strategy; anything else
-			// relaunches instead.
-			if r.Stage == "build" {
+			// restores. Build and test know how to re-enter their strategy;
+			// anything else relaunches instead.
+			if r.Stage == "build" || r.Stage == "test" {
 				return []string{"resume", "abort"}
 			}
 			return []string{"abort"}

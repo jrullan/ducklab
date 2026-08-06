@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -296,6 +297,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// The rule, not a request.
 		TestPathsOnly:   true,
 		GlobalSkillsDir: globalSkillsDir(),
+		// Answers a person already gave. Without this a resumed test run
+		// asked its question again, was answered again, and asked again —
+		// the answer existed and never reached the tool.
+		Answers: rs.answers(),
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
@@ -324,12 +329,22 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
-	if _, err := strategy.ExecuteTestFirstMode(ctx, testMode(req.Mode), params); err != nil {
-		recordSpend(rs, tracker)
+	res, err := strategy.ExecuteTestFirstMode(ctx, testMode(req.Mode), params)
+	recordSpend(rs, tracker)
+	if err != nil {
+		// A pause is not a failure. The prompt licenses the test writer to
+		// ask about a decision the task left open — the test IS where such a
+		// decision gets baked in — and this path dropped the question on the
+		// floor: the run died saying "human input needed" with no question
+		// recorded and nothing for a person to answer. Twice, on one task.
+		var pending *pendingErr
+		if errors.As(pendingOrErr(res, err), &pending) {
+			s.pauseForQuestion(rs, pending.q)
+			return
+		}
 		s.failRun(rs, err)
 		return
 	}
-	recordSpend(rs, tracker)
 
 	after, err := verify.Run(projectRoot, projCfg.Verify)
 	if err != nil {
