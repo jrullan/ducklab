@@ -65,7 +65,7 @@ func runNext(r *runlog.Run) []string {
 // where a test changes something the gate can see. removable reflects
 // TaskRemove's own guard — no accepted run, none still open — so the button
 // and the refusal can never disagree.
-func taskNextActions(status, gateMode string, removable, depsWaiting bool) []string {
+func taskNextActions(status, gateMode string, removable, depsWaiting, testReady bool) []string {
 	var out []string
 	switch status {
 	case "todo", "blocked":
@@ -76,9 +76,18 @@ func taskNextActions(status, gateMode string, removable, depsWaiting bool) []str
 		// which it depended on, had never passed — the model invented the
 		// thing it depended on, and the plan's ordering meant nothing.
 		if !depsWaiting {
-			out = append(out, "run")
-			if gateMode == "tests" {
-				out = append(out, "test_first")
+			// The order IS the workflow, and clients render it as given. On a
+			// tests-gated task with no committed test, TDD is the front door:
+			// write the failing definition of done first, then build against
+			// it. The board used to show Test first at the bottom of the rail
+			// — an afterthought placement for the step meant to come first.
+			if gateMode == "tests" && !testReady && status == "todo" {
+				out = append(out, "test_first", "run")
+			} else {
+				out = append(out, "run")
+				if gateMode == "tests" {
+					out = append(out, "test_first")
+				}
 			}
 		}
 		if removable {

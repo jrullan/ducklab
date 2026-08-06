@@ -254,9 +254,10 @@ describe("Board — starting the work", () => {
     render(<Board client={client} projectId="p" />);
     await openRail();
 
-    fireEvent.click(screen.getByTestId("run-duckling-pato-sonnet"));
-    fireEvent.click(screen.getByTestId("run-duckling-pato-local"));
+    // Mode first: solo shows one seat, tournament opens two.
     fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
+    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
+    fireEvent.change(screen.getByTestId("run-seat-1"), { target: { value: "pato-local" } });
     fireEvent.click(screen.getByTestId("run-start"));
 
     await waitFor(() =>
@@ -293,7 +294,7 @@ describe("Board — starting the work", () => {
     const client = runClient();
     render(<Board client={client} projectId="p" />);
     await openRail();
-    fireEvent.click(screen.getByTestId("run-duckling-pato-sonnet"));
+    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
     fireEvent.click(screen.getByTestId("test-first-start"));
     await waitFor(() => expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "pato-sonnet"));
   });
@@ -477,7 +478,7 @@ describe("Board — an accepted task", () => {
   it("offers Review, and not the build apparatus", async () => {
     await open("accepted");
     expect(screen.getByTestId("review-start")).toBeTruthy();
-    for (const id of ["run-start", "run-mode", "run-duckling-pato-atom", "test-first-start"]) {
+    for (const id of ["run-start", "run-mode", "run-seat-0", "test-first-start"]) {
       expect(screen.queryByTestId(id)).toBeNull();
     }
   });
@@ -703,5 +704,65 @@ describe("Board — decided bugs", () => {
     render(<Board client={client()} projectId="p" tab="bugs" />);
     fireEvent.click(await screen.findByTestId("decided-bug"));
     expect(screen.getByTestId("bug-rail").textContent).toContain("Old crash on save");
+  });
+});
+
+// The rail renders the engine's actions in the order stated — the order IS
+// the workflow. A fresh tests-gated task puts Test first at the top as the
+// step to take; the fixed layout used to show it at the bottom, reading as an
+// afterthought — the exact inversion of the TDD flow the person wanted.
+describe("the rail follows the contract's order", () => {
+  const railClient = (over: Record<string, unknown> = {}) =>
+    ({
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() =>
+        Promise.resolve([
+          { id: "pato-local", provider: "beelink", model: "qwen" },
+          { id: "pato-sonnet", provider: "openrouter", model: "claude" },
+        ]),
+      ),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      runStart: vi.fn(() => Promise.resolve({ id: "r-9" })),
+      testStart: vi.fn(() => Promise.resolve({ id: "r-10" })),
+      reviewStart: vi.fn(() => Promise.resolve({ id: "r-11" })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      ...over,
+    }) as unknown as EngineClient;
+  const openRail = async () => {
+    fireEvent.click(await screen.findByText("A task"));
+    return screen.findByTestId("task-runner");
+  };
+
+  it("puts test_first on top when the engine states it first", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "A task", milestone: "M-01", status: "todo",
+            next: ["test_first", "run", "remove"] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    const actions = screen.getByTestId("task-actions");
+    const first = actions.firstElementChild as HTMLElement;
+    expect(first.getAttribute("data-testid")).toBe("test-first-start");
+    expect(first.textContent).toContain("write the failing test");
+  });
+
+  it("puts the launcher on top when run is stated first", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "A task", milestone: "M-01", status: "todo",
+            test_ready: true, next: ["run", "test_first", "remove"] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    const actions = screen.getByTestId("task-actions");
+    expect(actions.firstElementChild!.querySelector("[data-testid=run-launcher]")).toBeTruthy();
   });
 });

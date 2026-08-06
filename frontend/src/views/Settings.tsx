@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
+import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
 import type { BudgetView, EngineClient, ModeDefaultsView } from "../api/client";
 
@@ -351,19 +352,3 @@ function ConfigSection({ client }: { client: EngineClient }) {
   );
 }
 
-/** What the seat's position means in this mode — the position IS the role. */
-function seatLabel(mode: string, i: number): string {
-  switch (mode) {
-    case "solo":
-      return "implementer";
-    case "pair":
-      return i === 0 ? "implementer" : "reviewer";
-    case "council":
-      return i === 0 ? "drafts" : `critic ${i}`;
-    case "tournament":
-      return `contestant ${i + 1}`;
-    case "split":
-      return `worker ${i + 1}`;
-  }
-  return `#${i + 1}`;
-}

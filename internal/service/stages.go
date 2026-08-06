@@ -559,7 +559,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				// the build once, and an accepted task went on saying
 				// "build it to make it pass" about a test already green.
 				TestReady: testReady[t.ID] && st != "accepted",
-				Next:      taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting),
+				Next:      taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID]),
 			})
 		}
 	}

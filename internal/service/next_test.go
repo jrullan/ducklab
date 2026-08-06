@@ -94,23 +94,34 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 		removable bool
 		want      []string
 	}{
-		{"fresh under a tests gate", "todo", "tests", true, []string{"run", "test_first", "remove"}},
+		// TDD is the front door: with no committed test, the definition of
+		// done comes first, and the order IS the workflow clients render.
+		{"fresh under a tests gate", "todo", "tests", true, []string{"test_first", "run", "remove"}},
 		// Test-first is only offered where a test changes something the gate
 		// can see.
 		{"fresh under a build gate", "todo", "build", true, []string{"run", "remove"}},
 		{"blocked but runnable", "blocked", "build", true, []string{"run", "remove"}},
 		// TaskRemove's own guard, reflected: a pinned task never offers remove.
-		{"pinned by an accepted run", "todo", "tests", false, []string{"run", "test_first"}},
+		{"pinned by an accepted run", "todo", "tests", false, []string{"test_first", "run"}},
 		{"being worked on", "in_progress", "tests", true, nil},
 		{"awaiting a decision", "review", "tests", true, nil},
 		{"done", "accepted", "tests", false, []string{"review", "run"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false)
+			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false, false)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("next = %v, want %v", got, tc.want)
 			}
 		})
+	}
+
+	// Once the failing test is committed, building it is the front door.
+	if got := taskNextActions("todo", "tests", true, false, true); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+		t.Errorf("test-ready next = %v, want run first", got)
+	}
+	// A failed run retries by building, not by writing another test.
+	if got := taskNextActions("blocked", "tests", true, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+		t.Errorf("retry next = %v, want run first", got)
 	}
 }
 

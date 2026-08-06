@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Duckling } from "../api/client";
 import { money } from "../lib/format";
+import { fixedSeats, seatLabel } from "../lib/seats";
 
 /** What a mode has cost here before: total dollars over how many runs, from
  * the project's own history. */
@@ -53,6 +54,18 @@ export function RunLauncher({
   const [mode, setMode] = useState(initialMode);
   const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
   const [maxTokens, setMaxTokens] = useState("");
+  const [extraSeats, setExtraSeats] = useState(0);
+  const seats = fixedSeats(mode);
+  const cols = seats > 0 ? seats : Math.max(2, chosen.length, extraSeats);
+  const setSeat = (i: number, id: string) => {
+    setChosen((cur) => {
+      const next = [...cur];
+      while (next.length <= i) next.push("");
+      next[i] = id;
+      onDucklingsChange?.(next.filter(Boolean));
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-2" data-testid="run-launcher">
@@ -99,7 +112,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen, maxTokens: Number(maxTokens) || undefined })
+            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined })
           }
           disabled={busy}
           data-testid="run-start"
@@ -109,29 +122,43 @@ export function RunLauncher({
         </button>
       </div>
 
-      {/* Order matters: tournament and split assign them positionally, so the
-          order the boxes were ticked is the order they are sent. */}
+      {/* One dropdown per seat, labelled with the role its position carries —
+          the same picker Settings uses, because two pickers that disagree
+          about what a seat means would be worse than the checkbox wall this
+          replaced. Ten ducklings configured never widens the row. */}
       {ducklings.length > 1 && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
-          {ducklings.map((d) => (
-            <label key={d.id} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                data-testid={`run-duckling-${d.id}`}
-                checked={chosen.includes(d.id)}
-                onChange={(e) =>
-                  setChosen((cur) => {
-                    const next = e.target.checked
-                      ? [...cur, d.id]
-                      : cur.filter((x) => x !== d.id);
-                    onDucklingsChange?.(next);
-                    return next;
-                  })
-                }
-              />
-              {d.id}
+        <div className="flex flex-wrap items-end gap-2 text-xs text-ink-secondary">
+          {Array.from({ length: cols }, (_, i) => (
+            <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+              {seatLabel(mode, i)}
+              <select
+                value={chosen[i] ?? ""}
+                onChange={(e) => setSeat(i, e.target.value)}
+                data-testid={`run-seat-${i}`}
+                className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs text-ink-secondary"
+              >
+                <option value="">default</option>
+                {ducklings
+                  .filter((d) => d.id === chosen[i] || !chosen.includes(d.id))
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.id}
+                    </option>
+                  ))}
+              </select>
             </label>
           ))}
+          {seats === 0 && (
+            <button
+              type="button"
+              data-testid="run-seat-add"
+              onClick={() => setExtraSeats(cols + 1)}
+              className="rounded border border-hairline px-2 py-0.5 text-xs"
+              title="add a seat"
+            >
+              +
+            </button>
+          )}
         </div>
       )}
     </div>

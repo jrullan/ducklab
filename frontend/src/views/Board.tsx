@@ -610,46 +610,66 @@ function TaskRunner({
     }
   };
 
-  return (
-    <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
-      <GateState client={client} projectId={projectId} gate={gate} command={gateCommand} />
-      <div className="flex flex-wrap items-center gap-2">
-        {/* A task that is already accepted is not waiting to be built, and its
-            mode and duckling pickers are apparatus for a decision nobody is
-            making. Building again is still possible — a result can be
-            regretted — but it says what it is rather than sitting there as the
-            obvious next step. */}
-        {next.includes("run") && !accepted && (
-          <RunLauncher
-            ducklings={ducklings}
-            preferred={preferred}
-            estimates={estimates}
-            busy={busy}
-            onDucklingsChange={setChosen}
-            onLaunch={(opts) => void go("run", opts)}
-          />
-        )}
-        {/* Only where a test would change something the gate can see. A
-            compiler, a linter or a bespoke script gives a new test nothing to
-            hook into, and the engine refuses — so the button is absent rather
-            than present and failing. */}
-        {next.includes("test_first") && (
+  // The rail renders the engine's actions IN THE ORDER STATED — the order IS
+  // the workflow. On a fresh tests-gated task the engine puts test_first
+  // before run: the definition of done comes before the work. The first
+  // action reads as the step to take; the rest follow. Before this, the
+  // controls sat in a fixed layout — gate first, launcher, then Test first at
+  // the bottom — which read as "build now, test-first is an afterthought",
+  // the exact inversion of the flow the person wanted.
+  const ordered = next.filter((a) => a !== "remove");
+  const renderAction = (action: string, primary: boolean) => {
+    switch (action) {
+      case "run":
+        if (accepted) {
+          return (
+            <button
+              key={action}
+              type="button"
+              onClick={() => void go("run")}
+              disabled={busy}
+              data-testid="run-again"
+              title="Starts another run against a task that is already done"
+              className="text-xs text-ink-muted underline"
+            >
+              build again
+            </button>
+          );
+        }
+        return (
+          <div key={action} className={primary ? "" : "opacity-80"}>
+            <RunLauncher
+              ducklings={ducklings}
+              preferred={preferred}
+              estimates={estimates}
+              busy={busy}
+              onDucklingsChange={setChosen}
+              onLaunch={(opts) => void go("run", opts)}
+            />
+          </div>
+        );
+      case "test_first":
+        return (
           <button
+            key={action}
             type="button"
             onClick={() => void go("test")}
             disabled={busy}
             data-testid="test-first-start"
             title="Write the failing test first, by a model that will not implement it"
-            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+            className={
+              primary
+                ? "rounded border border-good px-3 py-1 text-sm text-good disabled:opacity-40"
+                : "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+            }
           >
-            Test first
+            Test first{primary ? " — write the failing test" : ""}
           </button>
-        )}
-        {/* Only on work that has been accepted: a review reads the commit, and
-            there is no commit until then. The engine refuses with exactly
-            that, and a button that only ever errors is worse than none. */}
-        {next.includes("review") && (
+        );
+      case "review":
+        return (
           <button
+            key={action}
             type="button"
             onClick={() => void go("review")}
             disabled={busy}
@@ -658,19 +678,16 @@ function TaskRunner({
           >
             Review
           </button>
-        )}
-        {accepted && (
-          <button
-            type="button"
-            onClick={() => void go("run")}
-            disabled={busy}
-            data-testid="run-again"
-            title="Starts another run against a task that is already done"
-            className="text-xs text-ink-muted underline"
-          >
-            build again
-          </button>
-        )}
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
+      <div className="space-y-2" data-testid="task-actions">
+        {ordered.map((a, i) => renderAction(a, i === 0))}
       </div>
 
       {running && (
@@ -679,6 +696,11 @@ function TaskRunner({
           starting another.
         </p>
       )}
+
+      {/* The gate is context, not an action: what will judge the work, and a
+          button to run it now. It opened the rail once, which made "check
+          now" read as the first step of the workflow. */}
+      <GateState client={client} projectId={projectId} gate={gate} command={gateCommand} />
 
       {/* Only while nothing has run it. The engine refuses afterwards — the
           runs, the reports and the spine all name the task — and a button that
