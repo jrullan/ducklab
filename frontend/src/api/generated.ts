@@ -488,8 +488,10 @@ export interface ServiceTaskView {
 }
 
 export interface ServiceTestFirstRequest {
+  build?: ServiceRunRequest;
   duckling?: string;
   task_id?: string;
+  then_build?: boolean;
 }
 
 export interface SkillArg {

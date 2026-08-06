@@ -1700,11 +1700,17 @@
       },
       "ServiceTestFirstRequest": {
         "properties": {
+          "build": {
+            "$ref": "#/components/schemas/ServiceRunRequest"
+          },
           "duckling": {
             "type": "string"
           },
           "task_id": {
             "type": "string"
+          },
+          "then_build": {
+            "type": "boolean"
           }
         },
         "required": [
