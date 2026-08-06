@@ -345,3 +345,27 @@ describe("the in-flight duck", () => {
     expect(screen.queryByTestId("in-flight")).toBeNull();
   });
 });
+
+
+// test-first inverts the gate's reading, and the card says so: red is the
+// goal reached — a person saw "tests failed" beside a PASSED verdict and
+// reasonably read a contradiction. Green is the actual bad news there.
+describe("the gate card on a test-first run", () => {
+  const red = { gate: "red", cmd: "pytest -q", role: "critical", label: "tests failed", unverified: false } as never;
+  const green = { gate: "green", cmd: "pytest -q", role: "good", label: "tests passed", unverified: false } as never;
+
+  it("presents red as the intended outcome", () => {
+    render(<GateCard gate={red} stage="test" />);
+    expect(screen.getByTestId("gate-card").textContent).toContain("as intended");
+  });
+
+  it("presents green as the warning", () => {
+    render(<GateCard gate={green} stage="test" />);
+    expect(screen.getByTestId("gate-card").textContent).toContain("asserts nothing");
+  });
+
+  it("keeps the plain reading for a build run", () => {
+    render(<GateCard gate={red} stage="build" />);
+    expect(screen.getByTestId("gate-card").textContent).toContain("tests failed");
+  });
+});

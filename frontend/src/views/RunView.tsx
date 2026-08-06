@@ -541,7 +541,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </div>
             </div>
           )}
-          <GateCard gate={gate} />
+          <GateCard gate={gate} stage={run.stage} />
           {budget && (
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
