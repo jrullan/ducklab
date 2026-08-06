@@ -70,6 +70,10 @@ export interface Run {
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
   next?: string[];
+  /** True when any call's token count was estimated rather than reported by
+   * the provider: the run's cost is then an estimate too, and every view
+   * marks it ~ (04 §7). */
+  tokens_estimated?: boolean;
   /** Per-duckling spend, attributed as each call lands. Served live for an
    * active run, so a view opened mid-run starts from the truth instead of
    * zeros. */

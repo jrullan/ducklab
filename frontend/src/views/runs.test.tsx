@@ -45,3 +45,26 @@ describe("Runs", () => {
     expect(screen.getByText(/No runs yet/)).toBeTruthy();
   });
 });
+
+
+// What each run spent, in the list where runs are compared — live for a
+// running one, ~ when built on estimated counts, and silence over a zero.
+describe("the cost column", () => {
+  const base = { project_id: "p", stage: "build", mode: "solo", task_id: "T-001",
+    status: "done" as const, verdict: "PASSED", started_at: "2026-08-06T10:00:00Z" };
+  it("shows the spend, marks estimates, and stays quiet at zero", () => {
+    render(
+      <Runs
+        runs={[
+          mk({ ...base, id: "r-1", budget: { usd: 0.4419, tokens: 1, turns: 1, wallclock_s: 1 } }),
+          mk({ ...base, id: "r-2", tokens_estimated: true, budget: { usd: 0.1, tokens: 1, turns: 1, wallclock_s: 1 } }),
+          mk({ ...base, id: "r-3", budget: { usd: 0, tokens: 0, turns: 0, wallclock_s: 0 } }),
+        ]}
+      />,
+    );
+    const cells = screen.getAllByTestId("run-cost").map((c) => c.textContent);
+    expect(cells).toContain("$0.4419");
+    expect(cells).toContain("~$0.1000");
+    expect(cells).toContain("—");
+  });
+});

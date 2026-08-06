@@ -13,6 +13,7 @@ import { routeHref } from "../app/routes";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 import { runLabel } from "../lib/runview";
+import { money } from "../lib/format";
 import { runStatusRole } from "../lib/colors";
 import { waitingFor } from "../lib/format";
 
@@ -79,6 +80,7 @@ export function Runs({ runs }: { runs: Run[] }) {
             <th className="border-b border-hairline py-1 pr-3 font-normal">what</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">mode</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">verdict</th>
+            <th className="border-b border-hairline py-1 pr-3 font-normal">cost</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">started</th>
             <th className="border-b border-hairline py-1 font-normal">run</th>
           </tr>
@@ -99,6 +101,14 @@ export function Runs({ runs }: { runs: Run[] }) {
               <td className="border-b border-hairline py-1 pr-3 text-ink-secondary">{r.mode}</td>
               <td className="border-b border-hairline py-1 pr-3 text-ink-secondary">
                 {r.verdict || "—"}
+              </td>
+              {/* What the run spent — live for a running one, since the
+                  record serves the tracker's numbers. ~ marks a cost built on
+                  estimated token counts, never presented as measured. */}
+              <td className="border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary" data-testid="run-cost">
+                {r.budget && r.budget.usd > 0
+                  ? `${r.tokens_estimated ? "~" : ""}${money(r.budget.usd)}`
+                  : "—"}
               </td>
               <td className="border-b border-hairline py-1 pr-3 text-ink-muted">
                 {r.started_at ? waitingFor(r.started_at) + " ago" : "—"}
