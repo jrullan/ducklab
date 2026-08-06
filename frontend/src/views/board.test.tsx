@@ -766,3 +766,31 @@ describe("the rail follows the contract's order", () => {
     expect(actions.firstElementChild!.querySelector("[data-testid=run-launcher]")).toBeTruthy();
   });
 });
+
+// The person clicked the card to DO something: a promoted bug's body carries
+// its whole report and triage, and it pushed the controls below the fold.
+// Actions render before the prose, and the prose scrolls in its own pane.
+describe("the rail puts actions before the prose", () => {
+  it("renders the runner above the body", async () => {
+    const longBody = "Fixes B-007.\n" + "line of report\n".repeat(80);
+    const client = (({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-050", title: "Long one", milestone: "M-01", status: "todo",
+            body: longBody, next: ["test_first", "run", "remove"] },
+        ]),
+      ),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    fireEvent.click(await screen.findByText("Long one"));
+    const runner = await screen.findByTestId("task-runner");
+    const body = screen.getByTestId("task-body");
+    // Document order: the runner precedes the body.
+    expect(runner.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

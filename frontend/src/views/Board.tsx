@@ -525,13 +525,13 @@ function TaskRail({
     <div className="space-y-2">
       <div className="font-mono text-xs text-ink-muted">{task.id}</div>
       <div className="text-sm font-medium text-ink">{task.title}</div>
-      <dl className="space-y-1 text-xs text-ink-muted">
-        <Row label="status" value={task.status.replace("_", " ")} />
-        <Row label="milestone" value={task.milestone} />
-        <Row label="implements" value={task.implements?.join(", ")} />
-        <Row label="depends on" value={task.depends_on?.join(", ")} />
-      </dl>
-      {task.body && <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>}
+      {/* Actions before prose. The person clicked this card to DO something,
+          and a long task body — a promoted bug carries its whole report and
+          triage — pushed the controls below the fold, where reaching them
+          meant scrolling past text already read. Not a modal on purpose: an
+          overlay would hide the description and the gate exactly when
+          deciding how to run needs them; instead the actions sit at the top
+          and the body scrolls in its own pane beneath. */}
       <TaskRunner
         task={task}
         client={client}
@@ -543,6 +543,17 @@ function TaskRail({
         gateCommand={gateCommand}
         onDone={onDone}
       />
+      <dl className="space-y-1 text-xs text-ink-muted">
+        <Row label="status" value={task.status.replace("_", " ")} />
+        <Row label="milestone" value={task.milestone} />
+        <Row label="implements" value={task.implements?.join(", ")} />
+        <Row label="depends on" value={task.depends_on?.join(", ")} />
+      </dl>
+      {task.body && (
+        <div className="max-h-72 overflow-y-auto border-t border-hairline pt-2" data-testid="task-body">
+          <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>
+        </div>
+      )}
     </div>
   );
 }
