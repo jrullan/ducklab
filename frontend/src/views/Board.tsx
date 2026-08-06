@@ -633,16 +633,23 @@ function TaskRunner({
     return active?.id ?? null;
   });
 
-  const go = async (what: "run" | "test" | "review", opts?: LaunchOpts) => {
+  const go = async (what: "run" | "test" | "tdd" | "review", opts?: LaunchOpts) => {
     setBusy(true);
     setFailure(null);
     try {
       const run =
         what === "run"
           ? await client.runStart(projectId, task.id, opts ?? { mode: "solo", ducklings: chosen })
-          : what === "test"
-            ? await client.testStart(projectId, task.id, chosen[0] ?? "")
-            : await client.reviewStart(projectId, task.id);
+          : what === "tdd"
+            ? await client.testStart(projectId, task.id, opts?.ducklings?.[0] ?? chosen[0] ?? "", {
+                thenBuild: true,
+                mode: opts?.mode,
+                ducklings: opts?.ducklings ?? chosen,
+                maxTokens: opts?.maxTokens,
+              })
+            : what === "test"
+              ? await client.testStart(projectId, task.id, chosen[0] ?? "")
+              : await client.reviewStart(projectId, task.id);
       setStarted(run.id);
       // The card moves NOW: starting a run puts the task in_progress on the
       // engine, and a board that waits for a view change to notice is a board
@@ -663,9 +670,27 @@ function TaskRunner({
   // the bottom — which read as "build now, test-first is an afterthought",
   // the exact inversion of the flow the person wanted.
   const ordered = next.filter((a) => a !== "remove");
+  const tddPrimary = ordered[0] === "test_first";
   const renderAction = (action: string, primary: boolean) => {
     switch (action) {
       case "run":
+        // Under a primary TDD block the full launcher already sits on top;
+        // a second one for the plain build would be the same controls twice.
+        if (tddPrimary && !accepted) {
+          return (
+            <button
+              key={action}
+              type="button"
+              onClick={() => void go("run")}
+              disabled={busy}
+              data-testid="build-only"
+              title="Build without a new test — the gate still judges the whole suite"
+              className="text-xs text-ink-muted underline disabled:opacity-40"
+            >
+              build only — no new test
+            </button>
+          );
+        }
         if (accepted) {
           return (
             <button
@@ -694,6 +719,37 @@ function TaskRunner({
           </div>
         );
       case "test_first":
+        // As the primary act, TDD is ONE click for the whole intent: the
+        // failing test, its commit when it lands red — pre-authorized here —
+        // and the build against it. Four interactions per task became one
+        // decision, at the build's gate, with the test in the diff. The
+        // unchained single step stays, one line below, for when reading the
+        // test first matters more than the trip count.
+        if (primary) {
+          return (
+            <div key={action} className="space-y-1">
+              <RunLauncher
+                ducklings={ducklings}
+                preferred={preferred}
+                estimates={estimates}
+                busy={busy}
+                label="Test first → Build"
+                onDucklingsChange={setChosen}
+                onLaunch={(opts) => void go("tdd", opts)}
+              />
+              <button
+                type="button"
+                onClick={() => void go("test")}
+                disabled={busy}
+                data-testid="test-first-start"
+                title="Write the failing test only; you accept it before any build"
+                className="text-xs text-ink-muted underline disabled:opacity-40"
+              >
+                test first only — I want to read the test before building
+              </button>
+            </div>
+          );
+        }
         return (
           <button
             key={action}
@@ -702,13 +758,9 @@ function TaskRunner({
             disabled={busy}
             data-testid="test-first-start"
             title="Write the failing test first, by a model that will not implement it"
-            className={
-              primary
-                ? "rounded border border-good px-3 py-1 text-sm text-good disabled:opacity-40"
-                : "rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-            }
+            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
-            Test first{primary ? " — write the failing test" : ""}
+            Test first
           </button>
         );
       case "review":

@@ -208,6 +208,7 @@ export const KNOWN_EVENT_TYPES = [
   "triage",
   "triage_applied",
   "bug_fixed",
+  "tdd_build_started",
   "tree_restored",
   // Emitted by modes and the gate. Registered even where nothing renders them
   // yet: an event the desktop does not know cannot be stored or replayed, and

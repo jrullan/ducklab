@@ -749,7 +749,7 @@ describe("the rail follows the contract's order", () => {
     return screen.findByTestId("task-runner");
   };
 
-  it("puts test_first on top when the engine states it first", async () => {
+  it("puts the one-click TDD chain on top when the engine states test_first first", async () => {
     const client = railClient({
       tasks: vi.fn(() =>
         Promise.resolve([
@@ -762,8 +762,39 @@ describe("the rail follows the contract's order", () => {
     await openRail();
     const actions = screen.getByTestId("task-actions");
     const first = actions.firstElementChild as HTMLElement;
-    expect(first.getAttribute("data-testid")).toBe("test-first-start");
-    expect(first.textContent).toContain("write the failing test");
+    // The primary block is the chained launcher; the single-step and the
+    // plain build follow as modest links.
+    expect(first.querySelector("[data-testid=run-launcher]")).toBeTruthy();
+    expect(first.textContent).toContain("Test first → Build");
+    expect(screen.getByTestId("test-first-start").textContent).toContain("read the test before");
+    expect(screen.getByTestId("build-only")).toBeTruthy();
+  });
+
+  // The chain sends the whole intent in one request: test author, then_build,
+  // and the build's own configuration.
+  it("launches the chain with the seats and mode chosen", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "A task", milestone: "M-01", status: "todo",
+            next: ["test_first", "run", "remove"] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "pair" } });
+    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
+    fireEvent.change(screen.getByTestId("run-seat-1"), { target: { value: "pato-local" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() =>
+      expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "pato-sonnet", {
+        thenBuild: true,
+        mode: "pair",
+        ducklings: ["pato-sonnet", "pato-local"],
+        maxTokens: undefined,
+      }),
+    );
   });
 
   it("puts the launcher on top when run is stated first", async () => {

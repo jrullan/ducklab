@@ -1350,7 +1350,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Accepted = true
 		rs.run.CommitSHA = head
 		rs.run.Status = "done"
-		rs.run.Resolution = "accepted; the tree already carried this change"
+		rs.run.Resolution = "accepted by " + actor + "; the tree already carried this change"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
 		// The report this task came from, if any: promoting a bug set its task
@@ -1381,6 +1381,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	rs.run.Accepted = true
 	rs.run.CommitSHA = sha
 	rs.run.Status = "done"
+	// Named even on the ordinary path: the record must say WHO decided —
+	// a person, or a chain the person pre-authorized.
+	rs.run.Resolution = "accepted by " + actor
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	// The report this task came from, if any: promoting a bug set its task

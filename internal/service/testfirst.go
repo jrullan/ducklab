@@ -44,6 +44,15 @@ type TestFirstRequest struct {
 	// Duckling overrides the roster. Naming a different model here from the one
 	// that will implement is the point of the exercise.
 	Duckling string `json:"duckling"`
+	// ThenBuild chains the flow the person already decided on: when the test
+	// lands red, it is committed — pre-authorized by this very request — and
+	// the build starts against it at once. Four interactions per task became
+	// one decision per task, at the build's gate, with the committed test in
+	// the diff. A test that does NOT land red stops the chain and waits for a
+	// person, exactly as an unchained run would.
+	ThenBuild bool `json:"then_build,omitempty"`
+	// Build configures the chained run: mode, ducklings, token ceiling.
+	Build RunRequest `json:"build,omitempty"`
 }
 
 // TestStart writes the failing test for a task.
@@ -209,6 +218,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = map[string]interface{}{"kind": "test_first", "detail": detail}
+	if req.ThenBuild && verdict == "PASSED" {
+		// The chain: commit the red test, start the build. No pause — the
+		// person authorized this path when they clicked it.
+		rs.writer.WriteState()
+		s.chainBuild(ctx, rs, req)
+		return
+	}
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{
 		"kind": "gate", "verdict": verdict, "detail": detail,
 	})
@@ -291,4 +307,33 @@ func checkTestGate(mode string) error {
 			"If your gate does run tests, say so:\n"+
 			"  ducklab project set verify.mode tests\n"+
 			"  ducklab project set verify.tests \"<command>\"", what)
+}
+
+// chainBuild commits a red test-first result and starts the build against it.
+//
+// Failures here must not lose the test run's own result: the accept or the
+// build refusing leaves the run at its gate with the reason recorded, and the
+// person decides as they would have unchained.
+func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstRequest) {
+	if _, err := s.RunAcceptAs(ctx, rs.run.ID, "chained: the test landed red", "auto:tdd"); err != nil {
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "gate"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": fmt.Sprintf("tdd chain: accept failed (%v); decide this run by hand", err),
+		})
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "verdict": rs.run.Verdict})
+		rs.writer.WriteState()
+		return
+	}
+	build := req.Build
+	build.TaskID = req.TaskID
+	run, err := s.RunStart(context.Background(), rs.run.ProjectID, build)
+	if err != nil {
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": fmt.Sprintf("tdd chain: the build refused to start (%v); start it from the board", err),
+		})
+		return
+	}
+	rs.writer.AppendEvent("tdd_build_started", map[string]interface{}{"run": run.ID})
 }

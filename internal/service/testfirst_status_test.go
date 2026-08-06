@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -82,5 +85,68 @@ func TestAnAcceptedTestFirstIsNotAFinishedTask(t *testing.T) {
 	}
 	if tv.TestReady {
 		t.Error("a satisfied test still claims to await its build")
+	}
+}
+
+// The chain: a red test-first commits itself — pre-authorized by the click —
+// and the build starts at once. Four interactions per task became one
+// decision, at the build's gate.
+func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan),
+		[]byte("## M-001 — Core\n\n### T-003 — Do a thing\n\nDo it.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The test-first run, landed red (PASSED) and paused at its gate.
+	run := &runlog.Run{
+		ID: "r-tf", ProjectID: p.ID, TaskID: "T-003", Stage: "test",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		StartedAt: "2026-08-06T12:00:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+	s.runsMu.RLock()
+	rs := s.runs["r-tf"]
+	s.runsMu.RUnlock()
+	if _, err := s.ensureWriter(rs); err != nil {
+		t.Fatal(err)
+	}
+
+	s.chainBuild(context.Background(), rs, TestFirstRequest{
+		TaskID: "T-003", ThenBuild: true,
+		Build: RunRequest{Mode: "solo"},
+	})
+
+	got, _ := s.RunGet(context.Background(), "r-tf")
+	if !got.Run.Accepted {
+		t.Fatalf("the red test was not committed: %s %s", got.Run.Status, got.Run.Resolution)
+	}
+	if !strings.Contains(got.Run.Resolution, "auto:tdd") {
+		t.Errorf("resolution = %q — the record must say the chain decided, not a person", got.Run.Resolution)
+	}
+
+	// And a build run exists for the task.
+	runs, _ := s.RunList(context.Background(), RunFilter{ProjectID: p.ID})
+	foundBuild := false
+	for _, r := range runs {
+		if r.TaskID == "T-003" && r.Stage == "build" {
+			foundBuild = true
+		}
+	}
+	if !foundBuild {
+		t.Error("no build run was started after the commit")
 	}
 }

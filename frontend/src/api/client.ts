@@ -483,11 +483,30 @@ export class EngineClient {
     });
   }
 
-  /** Write the failing test for a task, before the code exists. */
-  testStart(projectId: string, taskId: string, duckling = "") {
+  /** Write the failing test for a task, before the code exists.
+   *
+   * thenBuild chains the person's whole intent into one click: when the test
+   * lands red it is committed — pre-authorized by this request — and the
+   * build starts against it with the given options. One decision per task,
+   * at the build's gate, with the committed test in the diff. */
+  testStart(
+    projectId: string,
+    taskId: string,
+    duckling = "",
+    chain?: { thenBuild: boolean; mode?: string; ducklings?: string[]; maxTokens?: number },
+  ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/tests`, {
       task_id: taskId,
       duckling,
+      then_build: chain?.thenBuild ?? false,
+      build: chain?.thenBuild
+        ? {
+            task_id: taskId,
+            mode: chain.mode || "solo",
+            ducklings: chain.ducklings ?? [],
+            ...(chain.maxTokens ? { budget: { max_tokens: chain.maxTokens } } : {}),
+          }
+        : undefined,
     });
   }
 
