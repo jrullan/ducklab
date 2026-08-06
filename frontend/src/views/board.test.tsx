@@ -909,6 +909,40 @@ describe("the running task links its run", () => {
   });
 });
 
+// The person launched from this rail; the decision comes back to it. The
+// trip to the run view is for reading the diff, not for pressing Accept.
+describe("deciding a gate from the task rail", () => {
+  it("offers Accept and Reject on the task whose run waits", async () => {
+    useRuns.setState({
+      runs: {
+        "r-88": { id: "r-88", project_id: "p", task_id: "T-001", stage: "build",
+          mode: "pair", status: "paused", pending_kind: "gate", verdict: "PASSED",
+          next: ["accept", "reject"] } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {},
+    });
+    const accept = vi.fn(() => Promise.resolve({ commit_sha: "abc" }));
+    const client = (({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "Waiting one", milestone: "M-01", status: "review", next: [] },
+        ]),
+      ),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      accept,
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    fireEvent.click(await screen.findByText("Waiting one"));
+    await screen.findByTestId("now-waiting-card");
+    fireEvent.click(screen.getByTestId("now-accept"));
+    await waitFor(() => expect(accept).toHaveBeenCalledWith("r-88"));
+  });
+});
+
 describe("the rail puts actions before the prose", () => {
   it("renders the runner above the body", async () => {
     const longBody = "Fixes B-007.\n" + "line of report\n".repeat(80);

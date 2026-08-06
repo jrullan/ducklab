@@ -13,6 +13,7 @@ import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
+import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, LaunchConfig, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 
 const COLUMNS = [
@@ -657,6 +658,21 @@ function TaskRunner({
   // there whether this window started the run or an operator did, and
   // survives leaving the view and coming back. `started` only remembered a
   // launch made in this mount.
+  // The run waiting at its gate for THIS task, decidable here: the person
+  // launched from this rail and the decision should come back to it — the
+  // trip to the run view is for reading the diff, not for pressing Accept.
+  const pausedRun = useRuns((s) => {
+    return (
+      Object.values(s.runs).find(
+        (r) =>
+          r.project_id === projectId &&
+          r.task_id === task.id &&
+          r.status === "paused" &&
+          r.pending_kind === "gate",
+      ) ?? null
+    );
+  });
+  const acceptSt = useRuns((s) => (pausedRun ? s.acceptState[pausedRun.id] : undefined));
   const activeRunId = useRuns((s) => {
     const active = Object.values(s.runs).find(
       (r) =>
@@ -846,6 +862,34 @@ function TaskRunner({
 
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="task-runner">
+      {pausedRun && (
+        <ul className="list-none">
+          <WaitingCard
+            run={pausedRun}
+            accepting={acceptSt?.kind === "pending"}
+            onAccept={() => {
+              const store = useRuns.getState();
+              store.beginAccept(pausedRun.id);
+              client
+                .accept(pausedRun.id)
+                .then((res) => {
+                  store.confirmAccept(pausedRun.id, res.commit_sha);
+                  onDone();
+                })
+                .catch((e) =>
+                  store.failAccept(pausedRun.id, e instanceof Error ? e.message : String(e)),
+                );
+            }}
+            onReject={() =>
+              void client
+                .reject(pausedRun.id)
+                .then(() => onDone())
+                .catch(() => {})
+            }
+            acceptError={acceptSt?.kind === "error" ? acceptSt.message : undefined}
+          />
+        </ul>
+      )}
       <div className="space-y-2" data-testid="task-actions">
         {ordered.map((a, i) => renderAction(a, i === 0))}
       </div>
@@ -854,17 +898,33 @@ function TaskRunner({
         <p className="text-xs text-ink-muted" data-testid="running-note">
           A run is working on this task right now.{" "}
           {activeRunId ? (
-            <a
-              href={`#/runs/${activeRunId}`}
-              data-testid="running-link"
-              className="text-ink underline"
-            >
-              Watch {activeRunId}
-            </a>
+            <>
+              <a
+                href={`#/runs/${activeRunId}`}
+                data-testid="running-link"
+                className="text-ink underline"
+              >
+                Watch {activeRunId}
+              </a>
+              {" · "}
+              <button
+                type="button"
+                data-testid="abort-run"
+                onClick={() =>
+                  void client
+                    .abort(activeRunId)
+                    .then(() => onDone())
+                    .catch(() => {})
+                }
+                className="underline"
+              >
+                abort
+              </button>
+            </>
           ) : (
             "Watch it"
-          )}
-          , or abort it from there, before starting another.
+          )}{" "}
+          before starting another.
         </p>
       )}
 

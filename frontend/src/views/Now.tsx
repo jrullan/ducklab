@@ -14,6 +14,7 @@ import type { Bug, Duckling, EngineClient, Run, Task } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
+import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { EmptyState } from "../components/EmptyState";
 import { money, tokens, waitingFor } from "../lib/format";
@@ -330,90 +331,6 @@ function actionableFailures(list: Run[]): Run[] {
     .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
 }
 
-function WaitingCard({
-  run,
-  accepting,
-  onAccept,
-  onReject,
-  acceptError,
-}: {
-  run: Run;
-  accepting: boolean;
-  onAccept: () => void;
-  onReject: () => void;
-  acceptError?: string;
-}) {
-  // From the engine's list, never this card's opinion of the state
-  // (docs/ux-evaluation.md §5.4).
-  const next = run.next ?? [];
-  return (
-    <li data-testid="now-waiting-card" className="rounded-card border border-serious p-3">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <a href={routeHref({ name: "run", id: run.id })} className="text-ink underline">
-          {runLabel(run)}
-        </a>
-        <span className="text-xs text-ink-secondary">{run.mode}</span>
-        {run.verdict && <StatusChip role="warning" label={run.verdict.toLowerCase()} />}
-        <span className="text-xs text-ink-muted">
-          waiting {run.pending_since ? waitingFor(run.pending_since) : ""}
-        </span>
-        {run.budget && run.budget.usd > 0 && (
-          <span className="ml-auto text-xs tabular-nums text-ink-secondary">
-            {money(run.budget.usd)}
-          </span>
-        )}
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        {/* The evidence — diff, transcript, gate output — is one click away on
-            the label. AC-34 holds: nothing optimistic, the commit shows only
-            when the engine confirms, which the run view handles. */}
-        {next.includes("accept") && (
-          <button
-            type="button"
-            data-testid="now-accept"
-            onClick={onAccept}
-            disabled={accepting}
-            className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
-          >
-            {accepting ? "Accepting…" : "Accept"}
-          </button>
-        )}
-        {next.includes("reject") && (
-          <button
-            type="button"
-            data-testid="now-reject"
-            onClick={onReject}
-            className="rounded border border-hairline px-2 py-1 text-xs"
-          >
-            Reject
-          </button>
-        )}
-        {next.includes("answer") && (
-          <a
-            href={routeHref({ name: "run", id: run.id })}
-            data-testid="now-answer"
-            className="text-xs text-ink underline"
-          >
-            a duckling asked a question — answer it
-          </a>
-        )}
-        {(next.includes("accept") || next.includes("resume")) && (
-          <a
-            href={routeHref({ name: "run", id: run.id })}
-            className="text-xs text-ink-muted underline"
-          >
-            see the evidence
-          </a>
-        )}
-      </div>
-      {acceptError && (
-        <p className="mt-1 text-xs text-critical" data-testid="now-accept-error">
-          accept failed: {acceptError}
-        </p>
-      )}
-    </li>
-  );
-}
 
 /** A live run with its live spend: cost as ambient information, not a report
  * consulted after the money is gone. */
