@@ -53,6 +53,41 @@ func TestFirstScript() *Script {
 	}
 }
 
+// TestFirstScriptFor picks the test-writing conversation by mode.
+//
+// pair adds a decorrelated reviewer over the TEST: the failing test is the
+// specification of the build to come, and a second model reading it is worth
+// paying for exactly when a person will not read it themselves — the chained
+// flow commits it unread. Red stays the goal; the reviewer's approval is of
+// the test's quality, not of the code it condemns. Two rounds, because a
+// critique of a test the implementer cannot revise is a critique wasted.
+func TestFirstScriptFor(mode string) *Script {
+	if mode != "pair" {
+		return TestFirstScript()
+	}
+	return &Script{
+		Name: "test-first-pair",
+		Turns: []Turn{
+			{
+				Role:     config.RoleImplementer,
+				Toolbelt: "full",
+				Contract: "edits",
+				MaxTurns: 24,
+			},
+			{
+				Role:      config.RoleReviewer,
+				Toolbelt:  "full", // narrowed to the reviewer's read-only ceiling
+				Contract:  "verdict",
+				MaxTurns:  8,
+				Anonymize: true,
+				OmitRole:  config.RoleImplementer,
+			},
+		},
+		Until:     `gate == "red" and verdict == "approve"`,
+		MaxRounds: 2,
+	}
+}
+
 // Script is a conversation script.
 type Script struct {
 	Name      string

@@ -493,11 +493,22 @@ export class EngineClient {
     projectId: string,
     taskId: string,
     duckling = "",
-    chain?: { thenBuild: boolean; mode?: string; ducklings?: string[]; maxTokens?: number },
+    chain?: {
+      thenBuild: boolean;
+      /** The TEST phase's own mode and seats — independent of the build's,
+       * because a person who pairs the build does not owe the test a pair. */
+      testMode?: string;
+      testDucklings?: string[];
+      mode?: string;
+      ducklings?: string[];
+      maxTokens?: number;
+    },
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/tests`, {
       task_id: taskId,
       duckling,
+      mode: chain?.testMode ?? "",
+      ducklings: chain?.testDucklings ?? [],
       then_build: chain?.thenBuild ?? false,
       build: chain?.thenBuild
         ? {

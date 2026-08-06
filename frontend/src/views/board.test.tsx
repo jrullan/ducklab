@@ -749,7 +749,7 @@ describe("the rail follows the contract's order", () => {
     return screen.findByTestId("task-runner");
   };
 
-  it("puts the one-click TDD chain on top when the engine states test_first first", async () => {
+  it("puts the two-phase TDD block on top when the engine states test_first first", async () => {
     const client = railClient({
       tasks: vi.fn(() =>
         Promise.resolve([
@@ -760,19 +760,20 @@ describe("the rail follows the contract's order", () => {
     } as Partial<EngineClient>);
     render(<Board client={client} projectId="p" />);
     await openRail();
-    const actions = screen.getByTestId("task-actions");
-    const first = actions.firstElementChild as HTMLElement;
-    // The primary block is the chained launcher; the single-step and the
-    // plain build follow as modest links.
-    expect(first.querySelector("[data-testid=run-launcher]")).toBeTruthy();
-    expect(first.textContent).toContain("Test first → Build");
-    expect(screen.getByTestId("test-first-start").textContent).toContain("read the test before");
-    expect(screen.getByTestId("build-only")).toBeTruthy();
+    const block = screen.getByTestId("tdd-block");
+    // Each phase carries its own mode and seats; the secondary steps sit in
+    // one aligned row.
+    expect(block.textContent).toContain("1 · write the failing test");
+    expect(block.textContent).toContain("2 · build until it passes");
+    expect(screen.getAllByTestId("launch-config")).toHaveLength(2);
+    expect(screen.getByTestId("tdd-start").textContent).toContain("Test first → Build");
+    expect(screen.getByTestId("test-first-start").textContent).toBe("test only");
+    expect(screen.getByTestId("build-only").textContent).toBe("build only");
   });
 
-  // The chain sends the whole intent in one request: test author, then_build,
-  // and the build's own configuration.
-  it("launches the chain with the seats and mode chosen", async () => {
+  // The chain sends BOTH phases' configuration: a cheap solo test and a paid
+  // pair build, each with its own seats.
+  it("launches the chain with each phase's own mode and seats", async () => {
     const client = railClient({
       tasks: vi.fn(() =>
         Promise.resolve([
@@ -783,13 +784,19 @@ describe("the rail follows the contract's order", () => {
     } as Partial<EngineClient>);
     render(<Board client={client} projectId="p" />);
     await openRail();
-    fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "pair" } });
-    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
-    fireEvent.change(screen.getByTestId("run-seat-1"), { target: { value: "pato-local" } });
-    fireEvent.click(screen.getByTestId("run-start"));
+    const [testCfg, buildCfg] = screen.getAllByTestId("launch-config");
+    // Test phase: solo, written by pato-local (cheap).
+    fireEvent.change(testCfg!.querySelector("[data-testid=cfg-seat-0]")!, { target: { value: "pato-local" } });
+    // Build phase: pair with its own seats.
+    fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-mode]")!, { target: { value: "pair" } });
+    fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-seat-0]")!, { target: { value: "pato-sonnet" } });
+    fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-seat-1]")!, { target: { value: "pato-local" } });
+    fireEvent.click(screen.getByTestId("tdd-start"));
     await waitFor(() =>
-      expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "pato-sonnet", {
+      expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "", {
         thenBuild: true,
+        testMode: "solo",
+        testDucklings: ["pato-local"],
         mode: "pair",
         ducklings: ["pato-sonnet", "pato-local"],
         maxTokens: undefined,

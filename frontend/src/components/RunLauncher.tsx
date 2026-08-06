@@ -12,6 +12,111 @@ export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
+/** One phase's launch configuration: mode, seats, optional token ceiling. */
+export type PhaseConfig = { mode: string; ducklings: string[]; maxTokens?: number };
+
+/**
+ * A controlled mode-and-seats configurator: one dropdown per seat, labelled
+ * with the role its position carries. Owned state lives in the caller, so two
+ * phases (a test and its build) can each carry their own without duplicating
+ * the picker.
+ */
+export function LaunchConfig({
+  ducklings,
+  value,
+  onChange,
+  modes = [...MODES],
+  estimates,
+  showTokens = false,
+}: {
+  ducklings: readonly Duckling[];
+  value: PhaseConfig;
+  onChange: (next: PhaseConfig) => void;
+  modes?: string[];
+  estimates?: ModeEstimates;
+  showTokens?: boolean;
+}) {
+  const [extraSeats, setExtraSeats] = useState(0);
+  const seats = fixedSeats(value.mode);
+  const cols = seats > 0 ? seats : Math.max(2, value.ducklings.length, extraSeats);
+  const setSeat = (i: number, id: string) => {
+    const next = [...value.ducklings];
+    while (next.length <= i) next.push("");
+    next[i] = id;
+    onChange({ ...value, ducklings: next });
+  };
+  return (
+    <div className="flex flex-wrap items-end gap-2" data-testid="launch-config">
+      <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+        mode
+        <select
+          aria-label="mode"
+          data-testid="cfg-mode"
+          value={value.mode}
+          onChange={(e) => onChange({ ...value, mode: e.target.value, ducklings: value.ducklings })}
+          className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs text-ink-secondary"
+        >
+          {modes.map((m) => {
+            const e = estimates?.[m];
+            const avg = e && e.runs > 0 ? e.usd / e.runs : undefined;
+            return (
+              <option key={m} value={m}>
+                {m}
+                {avg !== undefined ? ` · ~${money(avg)}` : ""}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      {ducklings.length > 0 &&
+        Array.from({ length: cols }, (_, i) => (
+          <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+            {seatLabel(value.mode, i)}
+            <select
+              value={value.ducklings[i] ?? ""}
+              onChange={(e) => setSeat(i, e.target.value)}
+              data-testid={`cfg-seat-${i}`}
+              className="rounded border border-hairline bg-surface2 px-1 py-1 text-xs text-ink-secondary"
+            >
+              <option value="">default</option>
+              {ducklings
+                .filter((d) => d.id === value.ducklings[i] || !value.ducklings.includes(d.id))
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id}
+                  </option>
+                ))}
+            </select>
+          </label>
+        ))}
+      {seats === 0 && (
+        <button
+          type="button"
+          data-testid="cfg-seat-add"
+          onClick={() => setExtraSeats(cols + 1)}
+          className="rounded border border-hairline px-2 py-1 text-xs"
+          title="add a seat"
+        >
+          +
+        </button>
+      )}
+      {showTokens && (
+        <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+          token ceiling
+          <input
+            aria-label="token budget"
+            data-testid="cfg-max-tokens"
+            placeholder="default"
+            value={value.maxTokens ? String(value.maxTokens) : ""}
+            onChange={(e) => onChange({ ...value, maxTokens: Number(e.target.value) || undefined })}
+            className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+        </label>
+      )}
+    </div>
+  );
+}
+
 /**
  * The controls for starting a run: which mode, which ducklings, how many tokens.
  *

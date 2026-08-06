@@ -97,6 +97,11 @@ func ExecuteTestFirst(ctx context.Context, params *ExecuteParams) (*ExecuteResul
 	return ExecuteScript(ctx, TestFirstScript(), params)
 }
 
+// ExecuteTestFirstMode executes the test-writing script for a mode.
+func ExecuteTestFirstMode(ctx context.Context, mode string, params *ExecuteParams) (*ExecuteResult, error) {
+	return ExecuteScript(ctx, TestFirstScriptFor(mode), params)
+}
+
 // ExecutePair executes the pair mode.
 func ExecutePair(ctx context.Context, params *ExecuteParams) (*ExecuteResult, error) {
 	return ExecuteScript(ctx, PairScript(), params)

@@ -490,6 +490,8 @@ export interface ServiceTaskView {
 export interface ServiceTestFirstRequest {
   build?: ServiceRunRequest;
   duckling?: string;
+  ducklings?: string[];
+  mode?: string;
   task_id?: string;
   then_build?: boolean;
 }

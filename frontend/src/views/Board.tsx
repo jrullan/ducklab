@@ -13,7 +13,7 @@ import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
-import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
+import { RunLauncher, LaunchConfig, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -604,6 +604,9 @@ function TaskRunner({
   onDone: () => void;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
+  // The two phases of the chain, each with its own mode and seats.
+  const [testCfg, setTestCfg] = useState<PhaseConfig>({ mode: "solo", ducklings: [] });
+  const [buildCfg, setBuildCfg] = useState<PhaseConfig>({ mode: "solo", ducklings: [] });
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
   // Accepted work is not waiting to be built. The controls follow the task's
@@ -641,11 +644,13 @@ function TaskRunner({
         what === "run"
           ? await client.runStart(projectId, task.id, opts ?? { mode: "solo", ducklings: chosen })
           : what === "tdd"
-            ? await client.testStart(projectId, task.id, opts?.ducklings?.[0] ?? chosen[0] ?? "", {
+            ? await client.testStart(projectId, task.id, "", {
                 thenBuild: true,
-                mode: opts?.mode,
-                ducklings: opts?.ducklings ?? chosen,
-                maxTokens: opts?.maxTokens,
+                testMode: testCfg.mode,
+                testDucklings: testCfg.ducklings.filter(Boolean),
+                mode: buildCfg.mode,
+                ducklings: buildCfg.ducklings.filter(Boolean),
+                maxTokens: buildCfg.maxTokens,
               })
             : what === "test"
               ? await client.testStart(projectId, task.id, chosen[0] ?? "")
@@ -674,22 +679,11 @@ function TaskRunner({
   const renderAction = (action: string, primary: boolean) => {
     switch (action) {
       case "run":
-        // Under a primary TDD block the full launcher already sits on top;
-        // a second one for the plain build would be the same controls twice.
+        // Under a primary TDD block the build's controls and the build-only
+        // link already live inside it; rendering them again would be the
+        // same decision twice.
         if (tddPrimary && !accepted) {
-          return (
-            <button
-              key={action}
-              type="button"
-              onClick={() => void go("run")}
-              disabled={busy}
-              data-testid="build-only"
-              title="Build without a new test — the gate still judges the whole suite"
-              className="text-xs text-ink-muted underline disabled:opacity-40"
-            >
-              build only — no new test
-            </button>
-          );
+          return null;
         }
         if (accepted) {
           return (
@@ -719,34 +713,64 @@ function TaskRunner({
           </div>
         );
       case "test_first":
-        // As the primary act, TDD is ONE click for the whole intent: the
-        // failing test, its commit when it lands red — pre-authorized here —
-        // and the build against it. Four interactions per task became one
-        // decision, at the build's gate, with the test in the diff. The
-        // unchained single step stays, one line below, for when reading the
-        // test first matters more than the trip count.
+        // As the primary act, TDD is ONE click for the whole intent — and
+        // each phase carries its OWN mode and seats, because a person who
+        // pairs the build does not owe the test a pair too: the test phase
+        // defaults to solo (cheap), the build to whatever is worth its cost.
         if (primary) {
           return (
-            <div key={action} className="space-y-1">
-              <RunLauncher
-                ducklings={ducklings}
-                preferred={preferred}
-                estimates={estimates}
-                busy={busy}
-                label="Test first → Build"
-                onDucklingsChange={setChosen}
-                onLaunch={(opts) => void go("tdd", opts)}
-              />
+            <div key={action} className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
+              <div>
+                <div className="text-xs font-medium text-ink-muted">1 · write the failing test</div>
+                <LaunchConfig
+                  ducklings={ducklings}
+                  value={testCfg}
+                  onChange={setTestCfg}
+                  modes={["solo", "pair"]}
+                />
+              </div>
+              <div>
+                <div className="text-xs font-medium text-ink-muted">2 · build until it passes</div>
+                <LaunchConfig
+                  ducklings={ducklings}
+                  value={buildCfg}
+                  onChange={setBuildCfg}
+                  estimates={estimates}
+                  showTokens
+                />
+              </div>
               <button
                 type="button"
-                onClick={() => void go("test")}
+                onClick={() => void go("tdd")}
                 disabled={busy}
-                data-testid="test-first-start"
-                title="Write the failing test only; you accept it before any build"
-                className="text-xs text-ink-muted underline disabled:opacity-40"
+                data-testid="tdd-start"
+                className="w-full rounded border border-good px-3 py-1.5 text-sm text-good disabled:opacity-40"
               >
-                test first only — I want to read the test before building
+                {busy ? "Starting…" : "Test first → Build"}
               </button>
+              <div className="flex items-center gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => void go("test")}
+                  disabled={busy}
+                  data-testid="test-first-start"
+                  title="Write the failing test only; you accept it before any build"
+                  className="text-ink-muted underline disabled:opacity-40"
+                >
+                  test only
+                </button>
+                <span className="text-ink-muted">·</span>
+                <button
+                  type="button"
+                  onClick={() => void go("run", { mode: buildCfg.mode, ducklings: buildCfg.ducklings.filter(Boolean), maxTokens: buildCfg.maxTokens })}
+                  disabled={busy}
+                  data-testid="build-only"
+                  title="Build without a new test — the gate still judges the whole suite"
+                  className="text-ink-muted underline disabled:opacity-40"
+                >
+                  build only
+                </button>
+              </div>
             </div>
           );
         }
@@ -925,7 +949,7 @@ function GateState({
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="gate-state">
       <span className="text-ink-muted">gate</span>
-      <span className="font-mono text-ink-secondary">{command || gate}</span>
+      <span className="min-w-0 break-all font-mono text-ink-secondary">{command || gate}</span>
       {result ? (
         <StatusChip
           role={result.green ? "good" : "critical"}

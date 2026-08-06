@@ -44,6 +44,13 @@ type TestFirstRequest struct {
 	// Duckling overrides the roster. Naming a different model here from the one
 	// that will implement is the point of the exercise.
 	Duckling string `json:"duckling"`
+	// Mode picks the test-writing conversation: solo (the default, one model
+	// writes the failing test) or pair (a decorrelated reviewer critiques the
+	// TEST — worth paying for exactly when the chain will commit it unread).
+	Mode string `json:"mode,omitempty"`
+	// Ducklings seats the test phase positionally: writer, then reviewer.
+	// Overrides Duckling when present.
+	Ducklings []string `json:"ducklings,omitempty"`
 	// ThenBuild chains the flow the person already decided on: when the test
 	// lands red, it is committed — pre-authorized by this very request — and
 	// the build starts against it at once. Four interactions per task became
@@ -83,7 +90,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		// read an accepted test-first as a finished task and offered
 		// "build again" for work that had never been built once.
 		Stage:     "test",
-		Mode:      "solo",
+		Mode:      testMode(req.Mode),
 		TaskID:    req.TaskID,
 		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
@@ -105,7 +112,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	s.runsMu.Unlock()
 
 	writer.AppendEvent("run_start", map[string]interface{}{
-		"stage": "test", "mode": "solo", "task_id": req.TaskID,
+		"stage": "test", "mode": run.Mode, "task_id": req.TaskID,
 	})
 
 	go s.executeTestFirst(runCtx, rs, entry.Path, projCfg, req)
@@ -133,6 +140,15 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	roster, warning := s.resolveRoster(projCfg)
 	if req.Duckling != "" {
 		roster[config.RoleImplementer] = config.DucklingID(req.Duckling)
+	}
+	// The test phase's own seats: writer first, reviewer second. Independent
+	// of the build's — a person who pairs the build does not owe the test a
+	// pair too, and vice versa.
+	if len(req.Ducklings) > 0 && req.Ducklings[0] != "" {
+		roster[config.RoleImplementer] = config.DucklingID(req.Ducklings[0])
+	}
+	if len(req.Ducklings) > 1 && req.Ducklings[1] != "" {
+		roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
 	}
 	rs.run.Roster = rosterStrings(roster)
 	if warning != "" {
@@ -186,7 +202,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
-	if _, err := strategy.ExecuteTestFirst(ctx, params); err != nil {
+	if _, err := strategy.ExecuteTestFirstMode(ctx, testMode(req.Mode), params); err != nil {
 		recordSpend(rs, tracker)
 		s.failRun(rs, err)
 		return
@@ -336,4 +352,12 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 		return
 	}
 	rs.writer.AppendEvent("tdd_build_started", map[string]interface{}{"run": run.ID})
+}
+
+// testMode normalises the test phase's mode: pair is the one alternative.
+func testMode(m string) string {
+	if m == "pair" {
+		return "pair"
+	}
+	return "solo"
 }
