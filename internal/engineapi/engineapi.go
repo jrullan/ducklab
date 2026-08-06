@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -949,7 +950,27 @@ func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusAccepted, run)
 }
 
+// unknownRunListParam names the first query key the run list does not filter
+// by, or "".
+func unknownRunListParam(q url.Values) string {
+	for k := range q {
+		if k != "project" && k != "status" {
+			return k
+		}
+	}
+	return ""
+}
+
 func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
+	// A mistyped filter must refuse, not silently widen. ?project_id= (the
+	// wrong name) used to be ignored and the answer was every project's runs
+	// — which a reader then took for one project's history. An answer to a
+	// different question than the one asked is worse than an error.
+	if bad := unknownRunListParam(r.URL.Query()); bad != "" {
+		s.error(w, http.StatusBadRequest, "bad_request",
+			fmt.Sprintf("unknown query parameter %q; this endpoint filters by project= and status=", bad))
+		return
+	}
 	projectID := r.URL.Query().Get("project")
 	status := r.URL.Query().Get("status")
 	runs, err := s.svc.RunList(r.Context(), service.RunFilter{

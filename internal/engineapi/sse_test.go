@@ -430,3 +430,16 @@ func TestWailsOriginsAreAllowed(t *testing.T) {
 		}
 	}
 }
+
+// ?project_id= — the wrong name — used to be silently ignored, and the answer
+// was every project's runs, which a reader then took for one project's
+// history. An answer to a different question than the one asked is worse
+// than an error.
+func TestRunListRefusesAMistypedFilter(t *testing.T) {
+	if got := unknownRunListParam(map[string][]string{"project_id": {"calculator"}}); got != "project_id" {
+		t.Errorf("mistyped key not named: %q", got)
+	}
+	if got := unknownRunListParam(map[string][]string{"project": {"calc"}, "status": {"paused"}}); got != "" {
+		t.Errorf("a legal filter was refused: %q", got)
+	}
+}
