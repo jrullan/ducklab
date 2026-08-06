@@ -154,6 +154,10 @@ export interface EngineapihealthResponse {
   version?: string;
 }
 
+export interface EngineapiliftRequest {
+  kind?: string;
+}
+
 export interface EngineapirejectRequest {
   reason?: string;
 }
@@ -578,6 +582,7 @@ export const OPERATIONS = [
   { id: "RunAccept", method: "POST", path: "/v1/runs/{id}/accept" },
   { id: "RunAnswer", method: "POST", path: "/v1/runs/{id}/answer" },
   { id: "RunBrief", method: "GET", path: "/v1/runs/{id}/brief" },
+  { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },

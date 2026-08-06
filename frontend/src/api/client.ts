@@ -541,6 +541,12 @@ export class EngineClient {
     );
   }
 
+  /** Remove one budget cap from a live run — one-way, recorded on the run.
+   * Per-cap on purpose: lifting tokens leaves the dollar ceiling standing. */
+  runBudgetLift(id: string, kind: "tokens" | "usd" | "turns" | "wallclock") {
+    return this.request<Run>("POST", `/v1/runs/${id}/budget/lift`, { kind });
+  }
+
   /** Review an accepted task. */
   reviewStart(projectId: string, taskId: string) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/reviews`, { task_id: taskId });

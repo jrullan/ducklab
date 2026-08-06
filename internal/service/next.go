@@ -35,6 +35,15 @@ func runNext(r *runlog.Run) []string {
 			// The states RunResume accepts, and nothing else: a human gate is
 			// answered, not continued.
 			return []string{"resume", "abort"}
+		case "budget":
+			// Stopped by its own ceiling, work intact in the tree. Lift the
+			// binding cap on the run's meter and resume — or abort, which
+			// restores. Only a build re-enters its strategy; anything else
+			// relaunches instead.
+			if r.Stage == "build" {
+				return []string{"resume", "abort"}
+			}
+			return []string{"abort"}
 		case "gate":
 			var out []string
 			// A FAILED verdict has nothing to accept; offering the button and

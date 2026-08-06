@@ -177,6 +177,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
   const isWorking = run.status === "running" || run.status === "queued" || run.status === "paused";
+  // Caps can be lifted only once the budget exists: a queued run's budget is
+  // created when it starts, and the engine refuses until then.
+  const canLift = run.status === "running" || run.status === "paused";
   // The human gate is the one state where accepting or rejecting means
   // anything. A run paused on a question needs an answer instead: accepting
   // work that has not finished would commit a half-done change.
@@ -194,7 +197,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     : run.stage === "triage"
       ? `applies ${triage.length || "the"} classification${triage.length === 1 ? "" : "s"} to the report${triage.length === 1 ? "" : "s"}`
       : next.includes("resume")
-        ? "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
+        ? run.pending_kind === "budget"
+          ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
+          : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
         : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";
@@ -546,13 +551,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
               <div className="mt-2 flex flex-col gap-2">
-                <BudgetMeter label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens} />
-                <BudgetMeter label="cost" used={budget.usd} limit={limit.usd} format={money} />
+                {/* While the run lives, each cap carries its own "no cap"
+                    checkbox: a run near a ceiling gets headroom in place —
+                    per-cap, one-way, recorded — instead of dying at the limit
+                    and losing the work. The engine's budget event refreshes
+                    the meter the moment the lift lands. */}
+                <BudgetMeter
+                  label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").catch(() => {}) } : undefined}
+                />
+                <BudgetMeter
+                  label="cost" used={budget.usd} limit={limit.usd} format={money}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "usd").catch(() => {}) } : undefined}
+                />
                 <BudgetMeter
                   label="turns"
                   used={budget.turns}
                   limit={limit.turns}
                   format={(n) => String(Math.round(n))}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").catch(() => {}) } : undefined}
                 />
               </div>
               {/* One tracker serves every duckling and every turn, so the run's

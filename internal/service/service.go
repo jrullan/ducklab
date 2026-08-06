@@ -705,6 +705,9 @@ type RunRequest struct {
 	// the second half of a TDD chain and jumps the project's waiting line, so
 	// the chain runs as the one unit the person authorized.
 	chained bool
+	// resumed is set only by RunResume: the run keeps its recorded ceilings
+	// (including lifted ones) and its ledger continues from what it spent.
+	resumed bool
 }
 
 // RunDetail is a run detail.
@@ -1080,7 +1083,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// The tree as it stands, before the run touches it. What "reject" and
 	// "failed" restore; without it they were words on a record while the
 	// half-made edits stayed in the tree for the next attempt to trip over.
-	if git := vcs.New(entry.Path); git.HasGit() {
+	// Only ever taken ONCE: a resumed run re-enters here, and re-snapshotting
+	// would move the restore point to mid-run — reject would then keep the
+	// half-made edits it exists to remove.
+	if git := vcs.New(entry.Path); rs.run.TreeSnapshot == "" && git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
 			rs.run.TreeSnapshot = snap
 			rs.writer.WriteState()
@@ -1105,6 +1111,23 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
 	}, req.Budget)
 	tracker := budget.NewTracker(&b)
+	if req.resumed {
+		// A resumed run continues its own life, not a fresh one. Its ceilings
+		// are the ones recorded on it — including any a person lifted while it
+		// was paused — and its ledger continues from what it already spent: a
+		// tracker reborn at zero would have made "resume" a way to double
+		// every budget, and the record would undercount the run's true cost.
+		b = budget.Budget{
+			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
+			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
+		}
+		tracker = budget.NewTracker(&b)
+		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
+		tracker.Spend.AddUSD(rs.run.Budget.USD)
+		for i := 0; i < rs.run.Budget.Turns; i++ {
+			tracker.Spend.AddTurn()
+		}
+	}
 	rs.setTracker(tracker)
 	recordLimits(rs, &b)
 
@@ -1292,6 +1315,31 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 }
 
 func (s *Service) failRun(rs *runState, err error) {
+	// A budget running out is a decision point, not a defect. The run did
+	// nothing wrong — the person's own ceiling stopped it — and failing it
+	// RESTORED THE TREE, so two million tokens of work were rolled back when
+	// one click of headroom would have finished the task. It now pauses with
+	// the work in place: lift the binding cap on the run's meter and resume,
+	// or abort and get the restore.
+	if errors.Is(err, agent.ErrBudgetExceeded) && !s.shuttingDown.Load() {
+		recordSpend(rs, rs.tracker)
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "budget"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.Failure = err.Error()
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{
+			"kind": "budget", "detail": err.Error(),
+		})
+		rs.writer.WriteState()
+		if s.bus != nil {
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "budget", "detail": err.Error()},
+			})
+		}
+		return
+	}
 	// A cancellation during graceful shutdown is a pause, not a failure.
 	// Without this check, stopping the engine marks every in-flight run
 	// FAILED and the work is lost.
@@ -1508,6 +1556,11 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if rs.run.PendingKind == "gate" {
 		return rs.run, nil
 	}
+	// Resume re-enters the BUILD strategy; on any other kind of run it would
+	// run the wrong one. Abort and relaunch is the honest path there.
+	if rs.run.Stage != "build" {
+		return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", rs.run.Stage)
+	}
 
 	entry, err := s.entryFor(rs)
 	if err != nil {
@@ -1521,19 +1574,86 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		// A resumed run keeps whatever it was started with.
 		NoStream:     !rs.run.Stream,
 		UnsafeWrites: rs.run.UnsafeWrites,
+		resumed:      true,
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs.cancel = cancel
 	rs.done = make(chan struct{})
+	// Cleared BEFORE the queue looks: projectHeld counts paused build runs,
+	// and a run still wearing "paused" would hold the project against its own
+	// resume — queued forever behind itself.
 	rs.run.Status = "running"
 	rs.run.PendingKind = ""
 	rs.run.PendingSince = ""
 	w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
 	w.WriteState()
 
-	go s.executeRun(runCtx, rs, entry, req)
+	// Through the queue like everything else, at the FRONT: it was mid-flight
+	// already. Resuming used to spawn its goroutine directly, so a resumed run
+	// executed uncounted — the queue could start a second run in the same
+	// project's tree right beside it.
+	s.queue.submit(s, &queued{
+		rs: rs, ctx: runCtx, chained: true,
+		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
+	})
 	return rs.run, nil
+}
+
+// RunBudgetLift removes one cap — tokens, usd, turns, wallclock — from a LIVE
+// run's budget. One-way for the run's remaining life, and per-cap on purpose:
+// lifting tokens leaves the dollar ceiling standing guard. Recorded on the
+// run (who, what, what it was), because a ceiling that moves silently is a
+// ceiling that never existed.
+func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.Run, error) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", id)
+	}
+	switch rs.run.Status {
+	case "running", "paused":
+	case "queued":
+		return nil, fmt.Errorf("not lifted — %s has not started; its budget begins with it", id)
+	default:
+		return nil, fmt.Errorf("not lifted — %s has ended (%s); a finished run spends nothing", id, rs.run.Status)
+	}
+	rs.wmu.Lock()
+	tracker := rs.tracker
+	rs.wmu.Unlock()
+	if tracker == nil {
+		return nil, fmt.Errorf("not lifted — %s has no live budget yet", id)
+	}
+	was, err := tracker.Lift(kind)
+	if err != nil {
+		return nil, err
+	}
+	w, werr := s.ensureWriter(rs)
+	if werr != nil {
+		return nil, werr
+	}
+	rs.wmu.Lock()
+	switch kind {
+	case "tokens":
+		rs.run.Budget.Limit.Tokens = 0
+	case "usd":
+		rs.run.Budget.Limit.USD = 0
+	case "turns":
+		rs.run.Budget.Limit.Turns = 0
+	case "wallclock":
+		rs.run.Budget.Limit.WallclockS = 0
+	}
+	rs.wmu.Unlock()
+	w.AppendEvent("budget_lifted", map[string]interface{}{
+		"kind": kind, "was": was, "by": "human",
+	})
+	if err := w.WriteState(); err != nil {
+		return nil, err
+	}
+	// The meters everywhere update now, not at the next model call.
+	s.publishSpend(rs, tracker)
+	return rs.snapshotRun(), nil
 }
 
 // RunAbort aborts a run.

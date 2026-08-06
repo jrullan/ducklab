@@ -136,3 +136,29 @@ func TestWallclockIsMeasuredNotAssumed(t *testing.T) {
 		t.Errorf("wallclock = %.1fs, want about 5: it is not being measured", got)
 	}
 }
+
+// Lifting is per-cap on purpose: the person removes the ceiling that is
+// binding, and the others keep guarding — lifting tokens leaves the dollar
+// cap standing. Zero already means "no cap" to Exceeded, so a lifted cap is
+// a zero cap, recorded by the caller.
+func TestLiftRemovesOneCapAndKeepsTheRest(t *testing.T) {
+	tr := NewTracker(&Budget{MaxUSD: 5, MaxTokens: 100, MaxTurns: 10})
+	tr.Spend.AddTokens(150)
+	if _, exceeded := tr.Check(); !exceeded {
+		t.Fatal("150 of 100 tokens did not exceed")
+	}
+	was, err := tr.Lift("tokens")
+	if err != nil || was != 100 {
+		t.Fatalf("Lift = %v, %v; want 100, nil", was, err)
+	}
+	if msg, exceeded := tr.Check(); exceeded {
+		t.Fatalf("the lifted cap still binds: %s", msg)
+	}
+	tr.Spend.AddUSD(9)
+	if _, exceeded := tr.Check(); !exceeded {
+		t.Fatal("lifting tokens disarmed the dollar cap too")
+	}
+	if _, err := tr.Lift("vibes"); err == nil {
+		t.Fatal("an unknown cap name was accepted")
+	}
+}

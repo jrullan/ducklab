@@ -521,6 +521,17 @@
         ],
         "type": "object"
       },
+      "EngineapiliftRequest": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "EngineapirejectRequest": {
         "properties": {
           "reason": {
@@ -4309,6 +4320,52 @@
           }
         ],
         "summary": "What a person asked this run for, verbatim"
+      }
+    },
+    "/v1/runs/{id}/budget/lift": {
+      "post": {
+        "operationId": "RunBudgetLift",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiliftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove one budget cap (tokens, usd, turns, wallclock) from a live run — one-way, recorded"
       }
     },
     "/v1/runs/{id}/candidates": {

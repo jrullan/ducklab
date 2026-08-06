@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { StatusChip } from "./StatusChip";
 import { BudgetMeter } from "./BudgetMeter";
 import { DuckAvatar } from "./DuckAvatar";
@@ -58,5 +58,34 @@ describe("EmptyState", () => {
   it("says what would fill the view", () => {
     render(<EmptyState message="No runs yet. Pick a task and press Run." />);
     expect(screen.getByTestId("empty-state").textContent).toContain("No runs yet");
+  });
+});
+
+describe("BudgetMeter lift", () => {
+  // A run close to a ceiling gets headroom IN PLACE: the checkbox removes
+  // that one cap — one-way, recorded by the engine — instead of the run dying
+  // at the limit and its work being rolled back.
+  it("offers lifting a live cap", () => {
+    const onLift = vi.fn();
+    render(<BudgetMeter label="tokens" used={90} limit={100} format={String} lift={{ onLift }} />);
+    fireEvent.click(screen.getByTestId("lift-tokens"));
+    expect(onLift).toHaveBeenCalledOnce();
+  });
+
+  // There is no un-lifting: a lifted cap renders checked and frozen, and the
+  // numbers say "no cap" rather than a zero that reads as an empty budget.
+  it("freezes a lifted cap and says no cap", () => {
+    const onLift = vi.fn();
+    render(<BudgetMeter label="cost" used={3} limit={0} format={money} lift={{ onLift }} />);
+    const box = screen.getByTestId("lift-cost") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.disabled).toBe(true);
+    expect(screen.getAllByTestId("budget-meter")[0]!.textContent).toContain("no cap");
+  });
+
+  // Without the prop — a finished run's record — the meter stays read-only.
+  it("offers nothing on a finished run", () => {
+    render(<BudgetMeter label="turns" used={3} limit={24} format={String} />);
+    expect(screen.queryByTestId("lift-turns")).toBeNull();
   });
 });

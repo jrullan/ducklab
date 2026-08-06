@@ -605,6 +605,25 @@ func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusAccepted, run)
 }
 
+// liftRequest names the one cap to remove.
+type liftRequest struct {
+	Kind string `json:"kind"`
+}
+
+func (s *Server) handleRunBudgetLift(w http.ResponseWriter, r *http.Request) {
+	var req liftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.RunBudgetLift(r.Context(), r.PathValue("id"), req.Kind)
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
 // auth middleware checks the bearer token.
 // bearerToken extracts the caller's token.
 //

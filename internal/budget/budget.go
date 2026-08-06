@@ -161,6 +161,10 @@ func maxFloat(a, b float64) float64 {
 type Tracker struct {
 	Budget *Budget
 	Spend  *Spend
+	// mu guards Budget: the agent loop reads the caps before every model
+	// call, and a human may lift one WHILE the run is going — the whole
+	// point of lifting is that the run is alive to save.
+	mu sync.Mutex
 }
 
 // NewTracker creates a new budget tracker.
@@ -183,12 +187,42 @@ func (t *Tracker) Check() (string, bool) {
 	// Check runs before every model call, which is the only place a run can be
 	// stopped anyway.
 	t.Spend.UpdateWallclock()
-	return t.Budget.Exceeded(t.Spend)
+	t.mu.Lock()
+	b := *t.Budget
+	t.mu.Unlock()
+	return b.Exceeded(t.Spend)
 }
 
 // WouldExceed checks if a proposed call would exceed the budget.
 func (t *Tracker) WouldExceed(estimatedPromptTokens, maxOutputTokens int, inputPerMTok, outputPerMTok float64) (string, bool) {
-	return t.Budget.WouldExceed(t.Spend, estimatedPromptTokens, maxOutputTokens, inputPerMTok, outputPerMTok)
+	t.mu.Lock()
+	b := *t.Budget
+	t.mu.Unlock()
+	return b.WouldExceed(t.Spend, estimatedPromptTokens, maxOutputTokens, inputPerMTok, outputPerMTok)
+}
+
+// Lift removes ONE cap from a live run's budget, returning what it was.
+// Zero already means "no cap" to Exceeded and WouldExceed, so lifting is
+// setting the cap to zero — one-way for the run's remaining life, and the
+// caller records who did it and when. The other caps keep guarding: lifting
+// tokens leaves the dollar ceiling standing, which is the reason lifting is
+// per-cap instead of a single kill switch.
+func (t *Tracker) Lift(kind string) (was float64, err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch kind {
+	case "tokens":
+		was, t.Budget.MaxTokens = float64(t.Budget.MaxTokens), 0
+	case "usd":
+		was, t.Budget.MaxUSD = t.Budget.MaxUSD, 0
+	case "turns":
+		was, t.Budget.MaxTurns = float64(t.Budget.MaxTurns), 0
+	case "wallclock":
+		was, t.Budget.MaxWallclockS = float64(t.Budget.MaxWallclockS), 0
+	default:
+		return 0, fmt.Errorf("no budget cap named %q — one of tokens, usd, turns, wallclock", kind)
+	}
+	return was, nil
 }
 
 // Record records a completed model call.
