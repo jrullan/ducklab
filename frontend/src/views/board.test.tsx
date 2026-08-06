@@ -290,6 +290,20 @@ describe("Board — starting the work", () => {
     );
   });
 
+  // The card moves NOW: a person started test-first, watched the board not
+  // move, changed views, and came back to find it had been in progress all
+  // along. A board that needs a view change to notice is reporting the past.
+  it("reloads the board the moment a run is started", async () => {
+    const client = runClient();
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    const callsBefore = (client.tasks as ReturnType<typeof vi.fn>).mock.calls.length;
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() =>
+      expect((client.tasks as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+  });
+
   it("writes the test first, by the chosen duckling", async () => {
     const client = runClient();
     render(<Board client={client} projectId="p" />);

@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
@@ -151,6 +152,22 @@ export function Board({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Runs started or finished ANYWHERE — the CLI, an MCP operator, another
+  // window — move tasks between columns. The store already hears run_start
+  // and run_end on the stream; the board refetches when this project's set
+  // of active runs changes, instead of waiting for someone to change views.
+  const activeRunKey = useRuns((s) =>
+    Object.values(s.runs)
+      .filter((r) => r.project_id === projectId && (r.status === "running" || r.status === "queued"))
+      .map((r) => r.id)
+      .sort()
+      .join(","),
+  );
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRunKey]);
 
   const milestones = useMemo(
     () => [...new Set(tasks.map((t) => t.milestone).filter(Boolean))].sort(),
@@ -614,6 +631,10 @@ function TaskRunner({
             ? await client.testStart(projectId, task.id, chosen[0] ?? "")
             : await client.reviewStart(projectId, task.id);
       setStarted(run.id);
+      // The card moves NOW: starting a run puts the task in_progress on the
+      // engine, and a board that waits for a view change to notice is a board
+      // reporting the past. onDone reloads tasks and bugs.
+      onDone();
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
     } finally {
