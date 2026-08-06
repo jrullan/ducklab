@@ -197,7 +197,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	base := strategy.ExecuteParams{
 		ProjectRoot: mc.entry.Path,
 		TaskID:      mc.req.TaskID,
-		Prompt:      s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID),
+		// Answers the person already gave ride ON the prompt: a resumed run
+		// replays from scratch, and a model that cannot see the decisions
+		// re-asks them in new words forever.
+		Prompt: s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID) +
+			mc.rs.answeredDecisions(),
 		ExecContext: mc.ectx,
 		// The request, then the configured default for this mode, then the
 		// script's own count. The counts lived only in the scripts, so changing

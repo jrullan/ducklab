@@ -76,6 +76,10 @@ type runState struct {
 	// givenAnswers holds human answers keyed by question id, so a resumed run
 	// replays its turn without asking the same question again.
 	givenAnswers map[string]string
+	// qa keeps the same answers WITH their question text, in the order given,
+	// for the replayed prompt — the id match above only survives an exactly
+	// reworded question, and models reword.
+	qa []qaPair
 	// tracker is what the run has spent. Kept here so a panic can still record
 	// it: recordSpend runs before the error branch on an ordinary failure, but a
 	// panic skips straight to the deferred recover, and the run was written out
@@ -2017,7 +2021,10 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 	if questionID == "" {
 		return fmt.Errorf("run %q has no recorded question id", id)
 	}
-	rs.recordAnswer(questionID, answer)
+	// The question's text travels with the answer: the id survives only an
+	// exact re-ask, and the replayed prompt needs the words.
+	questionText, _ := rs.run.PendingData["question"].(string)
+	rs.recordAnswer(questionID, questionText, answer)
 
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -2026,6 +2033,8 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 	w.AppendEvent("human", map[string]interface{}{
 		"action":      "answer",
 		"question_id": questionID,
+		"question":    questionText,
+		"answer":      answer,
 	})
 
 	_, err = s.RunResume(ctx, id)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bus"
@@ -234,6 +235,33 @@ func closedChan() chan struct{} {
 	return ch
 }
 
+// qaPair keeps a human's answer WITH the question that earned it, for the
+// replayed prompt. The id-keyed map below matches only the exact question
+// text — a replayed model that rewords its question hashes to a new id and
+// asks the person the same thing again, in new words, forever.
+type qaPair struct {
+	q, a string
+}
+
+// answeredDecisions renders every answer this run has received, for
+// prepending to a replayed prompt. A resumed run replays its turn from
+// scratch: the model does not remember asking, so the decisions must be in
+// front of it before it works, not filed under a hash it can no longer guess.
+func (rs *runState) answeredDecisions() string {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	if len(rs.qa) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Decisions the human already made for this run\n\n")
+	b.WriteString("A prior attempt asked; the person answered. These are binding — do not ask about them again, in any wording:\n\n")
+	for _, p := range rs.qa {
+		fmt.Fprintf(&b, "Q: %s\nA: %s\n\n", p.q, p.a)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
 // answers returns the answers already given for this run, keyed by question id.
 func (rs *runState) answers() map[string]string {
 	rs.wmu.Lock()
@@ -245,14 +273,19 @@ func (rs *runState) answers() map[string]string {
 	return out
 }
 
-// recordAnswer stores a human's answer so a resumed run can use it.
-func (rs *runState) recordAnswer(id, answer string) {
+// recordAnswer stores a human's answer so a resumed run can use it — both
+// under the question's id (exact-match resolution in the ask_human tool) and
+// beside its text (the replayed prompt, which is what survives rewording).
+func (rs *runState) recordAnswer(id, question, answer string) {
 	rs.wmu.Lock()
 	defer rs.wmu.Unlock()
 	if rs.givenAnswers == nil {
 		rs.givenAnswers = map[string]string{}
 	}
 	rs.givenAnswers[id] = answer
+	if question != "" {
+		rs.qa = append(rs.qa, qaPair{q: question, a: answer})
+	}
 }
 
 // pauseForQuestion checkpoints a run that stopped for human input.

@@ -165,7 +165,7 @@ func TestPauseForQuestionCheckpointsAndAnswerResumes(t *testing.T) {
 	}
 
 	// Answering records the answer for the replay.
-	rs.recordAnswer(q.ID, "postgres")
+	rs.recordAnswer(q.ID, q.Question, "postgres")
 	if got := rs.answers()[q.ID]; got != "postgres" {
 		t.Errorf("stored answer = %q, want postgres", got)
 	}

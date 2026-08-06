@@ -312,9 +312,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	params := &strategy.ExecuteParams{
 		ProjectRoot: projectRoot,
 		TaskID:      req.TaskID,
+		// The decisions the person already made ride on the prompt itself —
+		// the exact wound: a resumed test run reworded its answered question
+		// and asked it again, because the answer was filed under a hash of
+		// words the model no longer used.
 		Prompt: testFirstPrompt(
 			s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, req.TaskID),
-			before.Command),
+			before.Command) + rs.answeredDecisions(),
 		ExecContext: ectx,
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
