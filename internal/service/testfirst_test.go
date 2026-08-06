@@ -77,6 +77,11 @@ func TestThePromptSaysWhatIsEnforced(t *testing.T) {
 		"must **fail**",
 		"go test ./...",
 		"refuse any path that is not a test file",
+		// A decision the task leaves open gets baked into the assertions and
+		// becomes the de-facto spec — the prompt must send it to the person
+		// instead. A model burned 2M tokens deliberating where a "week"
+		// starts, with ask_human sitting unused in its toolbelt.
+		"ask_human",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the prompt does not say %q:\n%s", want, got)

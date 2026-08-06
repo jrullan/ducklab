@@ -734,6 +734,12 @@ Method:
 5. When you finish, reply with a 3-line summary: what changed, why, and what you
    did not do.
 
+If the task underdetermines a decision a user would notice — a boundary (where
+does a "week" start?), a format, an external contract — do not guess and do not
+spend turns deliberating: call ask_human once, with concrete options. Decisions
+the task does determine, and internals nobody outside would notice, are yours —
+never ask about those.
+
 Do not: reformat untouched code, rename things not named in the task, add
 dependencies without saying so in your summary, or claim tests pass without
 having run verify_run.`

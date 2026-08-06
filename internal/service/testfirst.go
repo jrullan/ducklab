@@ -413,6 +413,15 @@ func testFirstPrompt(task, gateCommand string) string {
 		"implementation that does not exist yet.\n")
 	b.WriteString("- Cover the boundaries the task implies, not only the obvious case.\n")
 	fmt.Fprintf(&b, "- The gate is `%s`. Run it with verify_run to see your test fail.\n", gateCommand)
+	// The test is where an underdetermined decision gets baked in first: a
+	// test that assumes "week = Sunday start" makes the build assume it too,
+	// and the person learns which was chosen only when the dashboard looks
+	// wrong. Asking belongs HERE, before the assumption becomes the spec.
+	b.WriteString("\nThe test you write becomes the task's definition of done, so a decision " +
+		"the task leaves open — a boundary (where does a \"week\" start?), a format, an " +
+		"external contract — gets decided by your assertions. Do not guess one and do not " +
+		"spend turns deliberating: call ask_human once, with concrete options. Internals " +
+		"the task does not constrain are yours to choose; never ask about those.\n")
 	b.WriteString("\nThe filesystem tools will refuse any path that is not a test file. " +
 		"That is deliberate, not a mistake to work around.\n")
 	return b.String()

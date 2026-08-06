@@ -248,3 +248,17 @@ func TestTriageRejectsAnUnknownSeverity(t *testing.T) {
 		t.Error("an unknown severity was accepted")
 	}
 }
+
+// The implementer's licence to ask. Sonnet burned two million tokens
+// deliberating where a "week" starts, with ask_human sitting unused in its
+// toolbelt — because nothing in its instructions said asking was ever the
+// right move, and models treat unsanctioned asking as failure. The rule cuts
+// both ways: user-observable decisions the task left open get asked; internals
+// never do, or every task would pause on trivia.
+func TestTheImplementerIsToldWhenToAsk(t *testing.T) {
+	for _, want := range []string{"ask_human", "do not guess", "never ask about those"} {
+		if !strings.Contains(implementerPrompt, want) {
+			t.Errorf("the implementer prompt does not say %q", want)
+		}
+	}
+}

@@ -51,3 +51,17 @@ func TestVerifyRunReportsAFailingGateAsAnError(t *testing.T) {
 		t.Errorf("a gate that exited 3 was reported as success: %q", res.Content)
 	}
 }
+
+// The description is where a model decides whether a tool is for it. The old
+// one-liner — "this pauses the run until answered" — read as a deterrent, and
+// the tool went unused while a model deliberated a question only the person
+// could answer. The description must state when asking WINS, and where the
+// line is.
+func TestAskHumanSaysWhenAskingWins(t *testing.T) {
+	d := (&AskHuman{}).Description()
+	for _, want := range []string{"ONE precise question", "wrong guess costs the whole run", "never ask about those"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("ask_human's description does not say %q", want)
+		}
+	}
+}

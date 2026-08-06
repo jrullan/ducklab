@@ -232,8 +232,17 @@ func (t *AskHuman) Name() string   { return "ask_human" }
 func (t *AskHuman) Mutating() bool { return false }
 
 // Description returns the tool description.
+//
+// The economics are stated because the old one-liner ("this pauses the run")
+// read as a deterrent: a model burned two million tokens deliberating where a
+// "week" starts rather than ask the person who knew. The description is where
+// a model decides whether a tool is for it — it must say when asking WINS.
 func (t *AskHuman) Description() string {
-	return "Ask the human a question. This pauses the run until answered."
+	return "Ask the human ONE precise question when the task leaves a decision you cannot " +
+		"infer from the repo or its docs — a boundary (where does a week start?), a format, " +
+		"an external contract. Offer 2-4 concrete options when you can. One question costs " +
+		"a pause; a wrong guess costs the whole run. Decisions the task does determine, and " +
+		"internals nobody outside would notice, are yours — never ask about those."
 }
 
 // Schema returns the argument schema.
