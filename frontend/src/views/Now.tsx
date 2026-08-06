@@ -29,6 +29,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [next, setNext] = useState<Task | null>(null);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  const [buildMode, setBuildMode] = useState("solo");
   const [estimates, setEstimates] = useState<ModeEstimates>({});
   const [started, setStarted] = useState<string | null>(null);
   // Reports whose fix landed. "Verified" is the one judgement a run must not
@@ -49,7 +50,10 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
       .modeDefaults()
-      .then((d) => setPreferred(d.ducklings ?? {}))
+      .then((d) => {
+        setPreferred(d.ducklings ?? {});
+        setBuildMode(d.build_mode || "solo");
+      })
       .catch(() => setPreferred({}));
     void (async () => {
       try {
@@ -269,7 +273,10 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
               </p>
               <div className="mt-2">
                 <RunLauncher
+                  key={buildMode}
                   ducklings={fleet}
+                  initialMode={buildMode}
+                  initialDucklings={preferred[buildMode] ?? []}
                   preferred={preferred}
                   estimates={estimates}
                   label={`Run ${next.id}`}

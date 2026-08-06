@@ -800,6 +800,32 @@ describe("the rail follows the contract's order", () => {
     expect((buildCfg!.querySelector("[data-testid=cfg-seat-1]") as HTMLSelectElement).value).toBe("pato-local");
   });
 
+  // The plain launcher — a test-ready task where run is primary — opens on
+  // the same Settings default as the TDD block: a habit that held in one
+  // rendering of the rail and not the other was half a setting.
+  it("opens the plain launcher on the Settings build default too", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-012", title: "A task", milestone: "M-01", status: "todo",
+            test_ready: true, next: ["run", "test_first", "remove"] },
+        ]),
+      ),
+      modeDefaults: vi.fn(() =>
+        Promise.resolve({
+          rounds: {}, agent_max_turns: 24,
+          build_mode: "pair",
+          ducklings: { pair: ["pato-sonnet", "pato-local"] },
+        }),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    expect((screen.getByTestId("run-mode") as HTMLSelectElement).value).toBe("pair");
+    expect((screen.getByTestId("run-seat-0") as HTMLSelectElement).value).toBe("pato-sonnet");
+    expect((screen.getByTestId("run-seat-1") as HTMLSelectElement).value).toBe("pato-local");
+  });
+
   // The chain sends BOTH phases' configuration: a cheap solo test and a paid
   // pair build, each with its own seats.
   it("launches the chain with each phase's own mode and seats", async () => {

@@ -733,8 +733,16 @@ function TaskRunner({
         }
         return (
           <div key={action} className={primary ? "" : "opacity-80"}>
+            {/* Opens on the Settings build default with its saved seats — the
+                TDD block learned this and the plain launcher was left on
+                solo, so a person's pair habit held in one rendering of the
+                rail and not the other. Keyed so a default arriving after
+                mount still lands (read-a-prop-once, again). */}
             <RunLauncher
+              key={phaseDefaults.build}
               ducklings={ducklings}
+              initialMode={phaseDefaults.build}
+              initialDucklings={preferred[phaseDefaults.build] ?? []}
               preferred={preferred}
               estimates={estimates}
               busy={busy}
