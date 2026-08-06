@@ -619,6 +619,19 @@ function TaskRunner({
   // first one's changes — which is not a result anybody can judge.
   const running = task.status === "in_progress";
   const [failure, setFailure] = useState<string | null>(null);
+  // The run doing the work, from the store the stream feeds — so the link is
+  // there whether this window started the run or an operator did, and
+  // survives leaving the view and coming back. `started` only remembered a
+  // launch made in this mount.
+  const activeRunId = useRuns((s) => {
+    const active = Object.values(s.runs).find(
+      (r) =>
+        r.project_id === projectId &&
+        r.task_id === task.id &&
+        (r.status === "running" || r.status === "queued"),
+    );
+    return active?.id ?? null;
+  });
 
   const go = async (what: "run" | "test" | "review", opts?: LaunchOpts) => {
     setBusy(true);
@@ -724,8 +737,19 @@ function TaskRunner({
 
       {running && (
         <p className="text-xs text-ink-muted" data-testid="running-note">
-          A run is working on this task right now. Watch it, or abort it, before
-          starting another.
+          A run is working on this task right now.{" "}
+          {activeRunId ? (
+            <a
+              href={`#/runs/${activeRunId}`}
+              data-testid="running-link"
+              className="text-ink underline"
+            >
+              Watch {activeRunId}
+            </a>
+          ) : (
+            "Watch it"
+          )}
+          , or abort it from there, before starting another.
         </p>
       )}
 

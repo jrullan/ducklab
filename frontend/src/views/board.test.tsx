@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Board } from "./Board";
+import { useRuns } from "../store/runs";
 import { EngineClient, type Bug, type Task } from "../api/client";
 
 const TASKS: Task[] = [
@@ -784,6 +785,37 @@ describe("the rail follows the contract's order", () => {
 // The person clicked the card to DO something: a promoted bug's body carries
 // its whole report and triage, and it pushed the controls below the fold.
 // Actions render before the prose, and the prose scrolls in its own pane.
+// The rail's running note said "watch it" and offered no way to. The store
+// already knows which run holds the task — fed by the stream, so the link is
+// there whether this window started the run or an MCP operator did.
+describe("the running task links its run", () => {
+  it("offers the run the task is in progress on", async () => {
+    useRuns.setState({
+      runs: {
+        "r-77": { id: "r-77", project_id: "p", task_id: "T-001", stage: "build",
+          mode: "solo", status: "running", verdict: "" } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    const client = (({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "Busy one", milestone: "M-01", status: "in_progress", next: [] },
+        ]),
+      ),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    fireEvent.click(await screen.findByText("Busy one"));
+    const link = await screen.findByTestId("running-link");
+    expect(link.getAttribute("href")).toBe("#/runs/r-77");
+  });
+});
+
 describe("the rail puts actions before the prose", () => {
   it("renders the runner above the body", async () => {
     const longBody = "Fixes B-007.\n" + "line of report\n".repeat(80);
