@@ -65,6 +65,30 @@ describe("event application", () => {
     expect(useRuns.getState().events["r-1"] ?? []).toHaveLength(0);
   });
 
+  // Batch-launched TDD tasks all said "running" in Now while only one was:
+  // the engine's run_queued and run_started frames arrived and were ignored,
+  // so a queued run wore its provisional "running" until some view happened
+  // to refetch it.
+  it("follows a run through queued and back to running", () => {
+    const s = useRuns.getState();
+    s.setRun(baseRun);
+    s.applyEvent({ type: "run_queued", run_id: "r-1", seq: 1, data: { reason: "another run holds this project's working tree" } });
+    expect(useRuns.getState().runs["r-1"]!.status).toBe("queued");
+    // The promotion frame comes from the queue, without a seq.
+    s.applyEvent({ type: "run_started", run_id: "r-1" });
+    expect(useRuns.getState().runs["r-1"]!.status).toBe("running");
+  });
+
+  // Only a queued run can be promoted: a replayed run_started frame landing
+  // on a paused or finished run would invent a transition the engine never
+  // made.
+  it("ignores run_started on a run that is not queued", () => {
+    const s = useRuns.getState();
+    s.setRun({ ...baseRun, status: "paused", pending_kind: "gate" });
+    s.applyEvent({ type: "run_started", run_id: "r-1" });
+    expect(useRuns.getState().runs["r-1"]!.status).toBe("paused");
+  });
+
   it("reflects a human gate on the run", () => {
     const s = useRuns.getState();
     s.setRun(baseRun);

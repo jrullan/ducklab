@@ -148,7 +148,17 @@ export const useRuns = create<RunsState>((set) => ({
           },
         };
       } else if (run) {
-        if (e.type === "human_needed") {
+        if (e.type === "run_queued") {
+          // The engine parked it — another run holds the project's tree, or
+          // every slot is taken. The store ignored this, so a batch of TDD
+          // launches all read "running" in Now while only one of them was.
+          runs = { ...runs, [runId]: { ...run, status: "queued" } };
+        } else if (e.type === "run_started" && run.status === "queued") {
+          // The queue promoted it. Only a queued run can be promoted; on any
+          // other status this is a stale or replayed frame and changing
+          // state on it would invent a transition the engine never made.
+          runs = { ...runs, [runId]: { ...run, status: "running" } };
+        } else if (e.type === "human_needed") {
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
         } else if (e.type === "error") {
           // The engine emits `error` only on the fatal paths, with the reason.
