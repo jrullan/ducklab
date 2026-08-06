@@ -349,7 +349,8 @@ type modelInformer interface {
 func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	needsContext := view.Caps.ContextTokens == nil || *view.Caps.ContextTokens <= 0
 	needsCost := view.Cost.InputPerMTok == 0 && view.Cost.OutputPerMTok == 0
-	if !needsContext && !needsCost {
+	needsOutput := view.Params.MaxTokens == nil || *view.Params.MaxTokens <= 0
+	if !needsContext && !needsCost && !needsOutput {
 		return view
 	}
 	prov, ok := s.providers[config.ProviderID(view.Provider)]
@@ -373,6 +374,13 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	if needsCost && (info.PromptPerMTok > 0 || info.CompletionPerMTok > 0) {
 		view.Cost.InputPerMTok = info.PromptPerMTok
 		view.Cost.OutputPerMTok = info.CompletionPerMTok
+	}
+	// The model's own reply ceiling, not ducklab's conservative default: the
+	// default truncated a whole-document draft for a model that could have
+	// emitted eight times as much.
+	if needsOutput && info.MaxOutputTokens > 0 {
+		n := info.MaxOutputTokens
+		view.Params.MaxTokens = &n
 	}
 	return view
 }

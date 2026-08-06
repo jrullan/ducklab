@@ -87,7 +87,12 @@ func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<
 // its name. OpenRouter reports context_length and per-token pricing; plainer
 // OpenAI-compatible servers report neither, and absence is not an error.
 type ModelInfo struct {
-	ContextTokens     int
+	ContextTokens int
+	// MaxOutputTokens is the model's own reply ceiling. Left unset, a
+	// duckling runs on ducklab's conservative default — which truncated a
+	// whole-document draft twice for a model that could have emitted eight
+	// times as much.
+	MaxOutputTokens   int
 	PromptPerMTok     float64
 	CompletionPerMTok float64
 }
@@ -115,7 +120,10 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 		Data []struct {
 			ID            string `json:"id"`
 			ContextLength int    `json:"context_length"`
-			Pricing       struct {
+			TopProvider   struct {
+				MaxCompletionTokens int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
+			Pricing struct {
 				// OpenRouter sends USD per TOKEN as strings ("0.000003").
 				Prompt     json.Number `json:"prompt"`
 				Completion json.Number `json:"completion"`
@@ -129,7 +137,10 @@ func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo,
 		if m.ID != model {
 			continue
 		}
-		info := &ModelInfo{ContextTokens: m.ContextLength}
+		info := &ModelInfo{
+			ContextTokens:   m.ContextLength,
+			MaxOutputTokens: m.TopProvider.MaxCompletionTokens,
+		}
 		if v, err := m.Pricing.Prompt.Float64(); err == nil {
 			info.PromptPerMTok = v * 1e6
 		}

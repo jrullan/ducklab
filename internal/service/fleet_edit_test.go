@@ -112,7 +112,7 @@ func TestSavingADucklingFillsBlanksFromTheProvider(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	fake, _ := s.providers["fake"].(*provider.Fake)
 	fake.ModelInfoFn = func(model string) *provider.ModelInfo {
-		return &provider.ModelInfo{ContextTokens: 200000, PromptPerMTok: 3, CompletionPerMTok: 15}
+		return &provider.ModelInfo{ContextTokens: 200000, MaxOutputTokens: 64000, PromptPerMTok: 3, CompletionPerMTok: 15}
 	}
 
 	if err := s.DucklingSet("pato-nube", DucklingView{Provider: "fake", Model: "big-model"}); err != nil {
@@ -124,6 +124,9 @@ func TestSavingADucklingFillsBlanksFromTheProvider(t *testing.T) {
 	}
 	if d.Cost.InputPerMTok != 3 || d.Cost.OutputPerMTok != 15 {
 		t.Errorf("costs not filled: %+v", d.Cost)
+	}
+	if d.Params.MaxTokens == nil || *d.Params.MaxTokens != 64000 {
+		t.Errorf("reply ceiling not filled: %v", d.Params.MaxTokens)
 	}
 
 	// What the person DID write is never overwritten.

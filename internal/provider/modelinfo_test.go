@@ -13,7 +13,7 @@ func TestModelInfoReadsOpenRouterShape(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"data":[
 			{"id":"other/model","context_length":8192,"pricing":{"prompt":"0.000001","completion":"0.000002"}},
-			{"id":"anthropic/claude-sonnet-4.5","context_length":200000,"pricing":{"prompt":"0.000003","completion":"0.000015"}}
+			{"id":"anthropic/claude-sonnet-4.5","context_length":200000,"top_provider":{"max_completion_tokens":64000},"pricing":{"prompt":"0.000003","completion":"0.000015"}}
 		]}`))
 	}))
 	defer srv.Close()
@@ -28,6 +28,9 @@ func TestModelInfoReadsOpenRouterShape(t *testing.T) {
 	}
 	if info.PromptPerMTok != 3.0 || info.CompletionPerMTok != 15.0 {
 		t.Errorf("pricing = %v/%v per MTok, want 3/15", info.PromptPerMTok, info.CompletionPerMTok)
+	}
+	if info.MaxOutputTokens != 64000 {
+		t.Errorf("reply ceiling = %d, want 64000", info.MaxOutputTokens)
 	}
 }
 
