@@ -84,6 +84,9 @@ function ConfigSection({ client }: { client: EngineClient }) {
   const [roleTurns, setRoleTurns] = useState<Record<string, string>>({});
   const [agentTurns, setAgentTurns] = useState("");
   const [lineups, setLineups] = useState<Record<string, string[]>>({});
+  // Extra columns a person opened on an open-seated mode, beyond what the
+  // saved line-up needs. UI state only; empty seats are dropped on save.
+  const [extraCols, setExtraCols] = useState<Record<string, number>>({});
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: string }>({
     kind: "idle",
   });
@@ -161,7 +164,10 @@ function ConfigSection({ client }: { client: EngineClient }) {
       client.modeDefaultsSet({
         rounds: numbersOnly(rounds),
         agent_max_turns: Number(agentTurns) || 0,
-        ducklings: lineups,
+        // Empty seats are UI scaffolding, not preferences.
+        ducklings: Object.fromEntries(
+          Object.entries(lineups).map(([m, ids]) => [m, ids.filter(Boolean)]),
+        ),
         role_turns: numbersOnly(roleTurns),
       }),
     ])
@@ -248,45 +254,66 @@ function ConfigSection({ client }: { client: EngineClient }) {
       {fleet.length > 1 && (
         <>
           <h2 className="mt-4 text-sm text-ink-muted">ducklings per mode</h2>
+          {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
+              ten models made the old row a wall of boxes, and the row grew
+              with every duckling added. Seats are the stable dimension — solo
+              has one, pair exactly two, the open modes start at two and grow
+              one seat at a time. Each seat names the role its position
+              carries, because the position IS the assignment. */}
           <div className="mt-1 space-y-1" data-testid="mode-lineups">
             {Object.keys(modes.script_rounds ?? {})
               .sort()
-              .map((mode) => (
-                <div key={mode} className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-                  <span className="w-24 shrink-0">{mode}</span>
-                  {fleet.map((id) => {
-                    const picked = lineups[mode] ?? [];
-                    const at = picked.indexOf(id);
-                    // A mode with every chair taken disables its remaining
-                    // boxes: solo seats one, pair exactly two. Ticking a third
-                    // used to save fine and silently seat nobody — the worst
-                    // kind of setting, one that looks taken and is not.
-                    const seats = modes.seats?.[mode] ?? 0;
-                    const full = at < 0 && seats > 0 && picked.length >= seats;
-                    return (
-                      <label key={id} className={"flex items-center gap-1" + (full ? " opacity-40" : "")}>
-                        <input
-                          type="checkbox"
-                          data-testid={`lineup-${mode}-${id}`}
-                          checked={at >= 0}
-                          disabled={full}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...picked, id]
-                              : picked.filter((x) => x !== id);
-                            setLineups({ ...lineups, [mode]: next });
-                            touched();
-                          }}
-                        />
-                        {id}
-                        {/* The position, because it decides the role: first
-                            implements (or drafts), the rest review. */}
-                        {at >= 0 && <span className="text-ink-muted">#{at + 1}</span>}
+              .map((mode) => {
+                const seats = modes.seats?.[mode] ?? 0;
+                const picked = lineups[mode] ?? [];
+                const cols =
+                  seats > 0
+                    ? seats
+                    : Math.max(2, picked.length, extraCols[mode] ?? 0);
+                const setSeat = (i: number, id: string) => {
+                  const next = [...picked];
+                  while (next.length <= i) next.push("");
+                  next[i] = id;
+                  setLineups({ ...lineups, [mode]: next });
+                  touched();
+                };
+                return (
+                  <div key={mode} className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+                    <span className="w-24 shrink-0">{mode}</span>
+                    {Array.from({ length: cols }, (_, i) => (
+                      <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                        {seatLabel(mode, i)}
+                        <select
+                          value={picked[i] ?? ""}
+                          onChange={(e) => setSeat(i, e.target.value)}
+                          data-testid={`seat-${mode}-${i}`}
+                          className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+                        >
+                          <option value="">—</option>
+                          {fleet
+                            .filter((id) => id === picked[i] || !picked.includes(id))
+                            .map((id) => (
+                              <option key={id} value={id}>
+                                {id}
+                              </option>
+                            ))}
+                        </select>
                       </label>
-                    );
-                  })}
-                </div>
-              ))}
+                    ))}
+                    {seats === 0 && (
+                      <button
+                        type="button"
+                        data-testid={`seat-add-${mode}`}
+                        onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
+                        className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
+                        title="add a seat"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         </>
       )}
@@ -295,10 +322,10 @@ function ConfigSection({ client }: { client: EngineClient }) {
         A round is one pass over every participant, so pair spends two turns on
         each. "Model calls per turn" is the separate limit on one participant
         chaining tool calls — a model working in circles is stopped by that, not
-        by the round count. Empty uses the built-in value shown in the box. The
-        order of a line-up decides the roles: solo seats one model, pair seats
-        an implementer and its reviewer, and council seats a drafter and a
-        critic for every further duckling you tick.
+        by the round count. Empty uses the built-in value shown in the box. Each
+        seat names the role its position carries: solo seats one model, pair an
+        implementer and its reviewer, council a drafter and a critic per
+        further seat you fill.
       </p>
 
       {/* One button, at the end, after everything it carries. The page used to
@@ -322,4 +349,21 @@ function ConfigSection({ client }: { client: EngineClient }) {
       </div>
     </section>
   );
+}
+
+/** What the seat's position means in this mode — the position IS the role. */
+function seatLabel(mode: string, i: number): string {
+  switch (mode) {
+    case "solo":
+      return "implementer";
+    case "pair":
+      return i === 0 ? "implementer" : "reviewer";
+    case "council":
+      return i === 0 ? "drafts" : `critic ${i}`;
+    case "tournament":
+      return `contestant ${i + 1}`;
+    case "split":
+      return `worker ${i + 1}`;
+  }
+  return `#${i + 1}`;
 }

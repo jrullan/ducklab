@@ -144,28 +144,46 @@ describe("rounds and turns in Settings", () => {
 
 // Saving the combination is the point; applying it is what the launcher does.
 describe("mode line-ups in Settings", () => {
-  it("saves the ticked line-up in the order it was ticked", async () => {
+  it("saves the seats in column order, dropping the empty ones", async () => {
     const client = clientWith();
     render(settings(client));
     await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-sonnet"));
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-atom"));
+    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
+    fireEvent.change(screen.getByTestId("seat-pair-1"), { target: { value: "pato-atom" } });
+    // Council: only the second seat picked — the empty first must not save
+    // as a ghost entry.
+    fireEvent.change(screen.getByTestId("seat-council-1"), { target: { value: "pato-atom" } });
     fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
     const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    expect((body as { ducklings: Record<string, string[]> }).ducklings.pair).toEqual([
-      "pato-sonnet",
-      "pato-atom",
-    ]);
+    const ducklings = (body as { ducklings: Record<string, string[]> }).ducklings;
+    expect(ducklings.pair).toEqual(["pato-sonnet", "pato-atom"]);
+    expect(ducklings.council).toEqual(["pato-atom"]);
   });
 
-  // The order decides the roles, so it has to be visible while ticking.
-  it("shows each duckling's position in the line-up", async () => {
+  // The position IS the role, and the seat says so instead of a #2 badge the
+  // reader has to decode.
+  it("labels each seat with the role its position carries", async () => {
     render(settings(clientWith()));
     await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-sonnet"));
-    expect(screen.getByTestId("mode-lineups").textContent).toContain("#1");
+    const text = screen.getByTestId("mode-lineups").textContent!;
+    expect(text).toContain("implementer");
+    expect(text).toContain("reviewer");
+    expect(text).toContain("drafts");
+    expect(text).toContain("critic 1");
+  });
+
+  // A duckling already seated leaves the other dropdowns' menus: one model
+  // cannot hold two seats in the same mode.
+  it("removes a seated duckling from the other seats' options", async () => {
+    render(settings(clientWith()));
+    await waitFor(() => screen.getByTestId("mode-lineups"));
+    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
+    const second = screen.getByTestId("seat-pair-1") as HTMLSelectElement;
+    const options = Array.from(second.options).map((o) => o.value);
+    expect(options).not.toContain("pato-sonnet");
+    expect(options).toContain("pato-atom");
   });
 });
 
@@ -217,7 +235,7 @@ describe("saving the settings", () => {
     fireEvent.change(screen.getByTestId("budget-max_tokens"), { target: { value: "2000000" } });
     fireEvent.change(screen.getByTestId("rounds-pair"), { target: { value: "2" } });
     fireEvent.change(screen.getByTestId("role-turns-triager"), { target: { value: "20" } });
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-sonnet"));
+    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
     fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
@@ -269,34 +287,29 @@ describe("mode seat capacity in Settings", () => {
       ...over,
     } as Partial<EngineClient>);
 
-  it("disables the remaining boxes once a mode's chairs are full", async () => {
+  // Capacity is structural now: solo HAS one dropdown, pair exactly two.
+  // Over-seating stopped being a validation problem and became impossible.
+  it("renders exactly the mode's seats, with no way to add more", async () => {
     render(settings(threeDucks()));
     await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
-    expect((screen.getByTestId("lineup-solo-pato-sonnet") as HTMLInputElement).disabled).toBe(true);
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-atom"));
-    fireEvent.click(screen.getByTestId("lineup-pair-pato-sonnet"));
-    expect((screen.getByTestId("lineup-pair-pato-luna") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByTestId("seat-solo-0")).toBeTruthy();
+    expect(screen.queryByTestId("seat-solo-1")).toBeNull();
+    expect(screen.queryByTestId("seat-add-solo")).toBeNull();
+    expect(screen.getByTestId("seat-pair-1")).toBeTruthy();
+    expect(screen.queryByTestId("seat-pair-2")).toBeNull();
+    expect(screen.queryByTestId("seat-add-pair")).toBeNull();
   });
 
-  // Unticking must free the chair again, or a mistake locks the row.
-  it("frees a chair when a duckling is unticked", async () => {
+  // The open modes start at two seats and grow one at a time — ten ducklings
+  // configured never widens the row until a seat is actually added.
+  it("adds a seat to an open mode on demand", async () => {
     render(settings(threeDucks()));
     await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
-    fireEvent.click(screen.getByTestId("lineup-solo-pato-atom"));
-    expect((screen.getByTestId("lineup-solo-pato-sonnet") as HTMLInputElement).disabled).toBe(false);
-  });
-
-  // Council seats a critic for every further duckling: no box ever goes dark.
-  it("lets council seat the whole fleet", async () => {
-    render(settings(threeDucks()));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.click(screen.getByTestId("lineup-council-pato-atom"));
-    fireEvent.click(screen.getByTestId("lineup-council-pato-sonnet"));
-    fireEvent.click(screen.getByTestId("lineup-council-pato-luna"));
-    for (const id of ["pato-atom", "pato-sonnet", "pato-luna"]) {
-      expect((screen.getByTestId(`lineup-council-${id}`) as HTMLInputElement).checked).toBe(true);
-    }
+    expect(screen.getByTestId("seat-council-1")).toBeTruthy();
+    expect(screen.queryByTestId("seat-council-2")).toBeNull();
+    fireEvent.click(screen.getByTestId("seat-add-council"));
+    expect(screen.getByTestId("seat-council-2")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("seat-council-2"), { target: { value: "pato-luna" } });
+    expect((screen.getByTestId("seat-council-2") as HTMLSelectElement).value).toBe("pato-luna");
   });
 });
