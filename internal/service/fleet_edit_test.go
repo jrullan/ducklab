@@ -7,6 +7,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 )
 
 // A service that can write its config back, which is what editing a duckling
@@ -101,5 +102,41 @@ func TestAnUnknownProviderIsStillRejected(t *testing.T) {
 	}
 	if _, err := s.ducklings.Get("pato-dos"); err == nil {
 		t.Error("the rejected duckling was registered anyway")
+	}
+}
+
+// A duckling saved without a context size or costs used to run on a 32k
+// default and report $0: a 200k model starved and a paid one looked free.
+// What the person leaves blank, the provider's own listing may declare.
+func TestSavingADucklingFillsBlanksFromTheProvider(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	fake, _ := s.providers["fake"].(*provider.Fake)
+	fake.ModelInfoFn = func(model string) *provider.ModelInfo {
+		return &provider.ModelInfo{ContextTokens: 200000, PromptPerMTok: 3, CompletionPerMTok: 15}
+	}
+
+	if err := s.DucklingSet("pato-nube", DucklingView{Provider: "fake", Model: "big-model"}); err != nil {
+		t.Fatal(err)
+	}
+	d := s.cfg.Ducklings["pato-nube"]
+	if d.Caps.ContextTokens == nil || *d.Caps.ContextTokens != 200000 {
+		t.Errorf("context not filled: %v", d.Caps.ContextTokens)
+	}
+	if d.Cost.InputPerMTok != 3 || d.Cost.OutputPerMTok != 15 {
+		t.Errorf("costs not filled: %+v", d.Cost)
+	}
+
+	// What the person DID write is never overwritten.
+	ctx := 64000
+	if err := s.DucklingSet("pato-fijo", DucklingView{
+		Provider: "fake", Model: "big-model",
+		Caps: config.Caps{ContextTokens: &ctx},
+		Cost: config.Cost{InputPerMTok: 1, OutputPerMTok: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d = s.cfg.Ducklings["pato-fijo"]
+	if *d.Caps.ContextTokens != 64000 || d.Cost.InputPerMTok != 1 {
+		t.Errorf("explicit values were overwritten: ctx=%v cost=%+v", *d.Caps.ContextTokens, d.Cost)
 	}
 }

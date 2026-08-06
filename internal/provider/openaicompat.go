@@ -83,6 +83,64 @@ func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<
 }
 
 // Models returns available models.
+// ModelInfo is what a provider's model listing knows about one model beyond
+// its name. OpenRouter reports context_length and per-token pricing; plainer
+// OpenAI-compatible servers report neither, and absence is not an error.
+type ModelInfo struct {
+	ContextTokens     int
+	PromptPerMTok     float64
+	CompletionPerMTok float64
+}
+
+// ModelInfo looks one model up in the provider's listing.
+//
+// Best-effort by design: it exists so a duckling saved without a context size
+// or costs can be filled from what the provider itself declares, instead of
+// silently running on a 32k default that starves a 200k model.
+func (p *OpenAICompat) ModelInfo(ctx context.Context, model string) (*ModelInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	p.setHeaders(req)
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("models: %s", resp.Status)
+	}
+	var result struct {
+		Data []struct {
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			Pricing       struct {
+				// OpenRouter sends USD per TOKEN as strings ("0.000003").
+				Prompt     json.Number `json:"prompt"`
+				Completion json.Number `json:"completion"`
+			} `json:"pricing"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode models: %w", err)
+	}
+	for _, m := range result.Data {
+		if m.ID != model {
+			continue
+		}
+		info := &ModelInfo{ContextTokens: m.ContextLength}
+		if v, err := m.Pricing.Prompt.Float64(); err == nil {
+			info.PromptPerMTok = v * 1e6
+		}
+		if v, err := m.Pricing.Completion.Float64(); err == nil {
+			info.CompletionPerMTok = v * 1e6
+		}
+		return info, nil
+	}
+	return nil, fmt.Errorf("model %q not in the provider's listing", model)
+}
+
 func (p *OpenAICompat) Models(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/models", nil)
 	if err != nil {
@@ -663,6 +721,7 @@ func (p *Anthropic) Models(ctx context.Context) ([]string, error) {
 
 // Fake is a fake provider for testing.
 type Fake struct {
+	ModelInfoFn func(model string) *ModelInfo
 	id        string
 	responses []ChatResponse
 	requests  []ChatRequest
@@ -679,6 +738,19 @@ func NewFake(id string) *Fake {
 }
 
 // ID returns the provider ID.
+// ModelInfoFn, when set, makes the fake answer model lookups — the hook
+// enrichment tests use.
+func (p *Fake) ModelInfo(ctx context.Context, model string) (*ModelInfo, error) {
+	if p.ModelInfoFn == nil {
+		return nil, fmt.Errorf("no model info scripted")
+	}
+	info := p.ModelInfoFn(model)
+	if info == nil {
+		return nil, fmt.Errorf("model %q not in the provider's listing", model)
+	}
+	return info, nil
+}
+
 func (p *Fake) ID() string {
 	return p.id
 }

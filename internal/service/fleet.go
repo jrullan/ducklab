@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
@@ -171,6 +172,14 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 		return fmt.Errorf("duckling %q needs a model", id)
 	}
 
+	// What the person left blank, the provider may know. OpenRouter's model
+	// listing declares context_length and per-token pricing; a duckling saved
+	// without them used to run on a 32k default and $0 costs — a 200k model
+	// starved and a paid one reported free. Filled BEFORE the lock (it is a
+	// network call), only for the missing fields, and best-effort: a provider
+	// that answers nothing changes nothing.
+	view = s.enrichFromProvider(view)
+
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 
@@ -331,3 +340,39 @@ func ProviderKinds() []string {
 }
 
 var _ = provider.Provider(nil)
+
+// modelInformer is the optional provider capability enrichment needs.
+type modelInformer interface {
+	ModelInfo(ctx context.Context, model string) (*provider.ModelInfo, error)
+}
+
+func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
+	needsContext := view.Caps.ContextTokens == nil || *view.Caps.ContextTokens <= 0
+	needsCost := view.Cost.InputPerMTok == 0 && view.Cost.OutputPerMTok == 0
+	if !needsContext && !needsCost {
+		return view
+	}
+	prov, ok := s.providers[config.ProviderID(view.Provider)]
+	if !ok {
+		return view
+	}
+	informer, ok := prov.(modelInformer)
+	if !ok {
+		return view
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	info, err := informer.ModelInfo(ctx, view.Model)
+	if err != nil || info == nil {
+		return view
+	}
+	if needsContext && info.ContextTokens > 0 {
+		n := info.ContextTokens
+		view.Caps.ContextTokens = &n
+	}
+	if needsCost && (info.PromptPerMTok > 0 || info.CompletionPerMTok > 0) {
+		view.Cost.InputPerMTok = info.PromptPerMTok
+		view.Cost.OutputPerMTok = info.CompletionPerMTok
+	}
+	return view
+}
