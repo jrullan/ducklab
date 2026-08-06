@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -111,6 +112,20 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
+	// The chain rides ON THE RECORD, not in this goroutine: acceptance is
+	// what triggers the build, and acceptance can come from the automatic
+	// red-landing path or from a person deciding a paused UNVERIFIED — the
+	// promise must survive both.
+	if req.ThenBuild {
+		build := req.Build
+		build.TaskID = req.TaskID
+		if b, mErr := json.Marshal(build); mErr == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(b, &m) == nil {
+				run.ChainBuild = m
+			}
+		}
+	}
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"stage": "test", "mode": run.Mode, "task_id": req.TaskID,
 	})
@@ -325,11 +340,13 @@ func checkTestGate(mode string) error {
 			"  ducklab project set verify.tests \"<command>\"", what)
 }
 
-// chainBuild commits a red test-first result and starts the build against it.
+// chainBuild commits a red test-first result; the accept path sees the
+// recorded chain and starts the build.
 //
-// Failures here must not lose the test run's own result: the accept or the
-// build refusing leaves the run at its gate with the reason recorded, and the
-// person decides as they would have unchained.
+// A failed accept must not lose the test run's own result: it leaves the run
+// at its gate with the reason recorded, and the person decides as they would
+// have unchained — their accept then continues the chain, because the chain
+// lives on the record.
 func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstRequest) {
 	if _, err := s.RunAcceptAs(ctx, rs.run.ID, "chained: the test landed red", "auto:tdd"); err != nil {
 		rs.run.Status = "paused"
@@ -340,18 +357,7 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 		})
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "verdict": rs.run.Verdict})
 		rs.writer.WriteState()
-		return
 	}
-	build := req.Build
-	build.TaskID = req.TaskID
-	run, err := s.RunStart(context.Background(), rs.run.ProjectID, build)
-	if err != nil {
-		rs.writer.AppendEvent("warning", map[string]interface{}{
-			"detail": fmt.Sprintf("tdd chain: the build refused to start (%v); start it from the board", err),
-		})
-		return
-	}
-	rs.writer.AppendEvent("tdd_build_started", map[string]interface{}{"run": run.ID})
 }
 
 // testMode normalises the test phase's mode: pair is the one alternative.

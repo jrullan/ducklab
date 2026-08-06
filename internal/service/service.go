@@ -1346,6 +1346,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// and whose reviewer approved was marked FAILED. The person did nothing
 	// wrong and the run did nothing wrong.
 	if clean, cerr := git.IsClean(); cerr == nil && clean {
+		defer s.continueChain(ctx, rs)
 		head, _ := git.HeadSHA()
 		rs.run.Accepted = true
 		rs.run.CommitSHA = head
@@ -1378,6 +1379,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
+	defer s.continueChain(ctx, rs)
 	rs.run.Accepted = true
 	rs.run.CommitSHA = sha
 	rs.run.Status = "done"
@@ -1675,6 +1677,44 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 }
 
 // RunReject rejects a run.
+// continueChain starts the build a chained test-first pre-authorized, once
+// the test is accepted — by the red-landing automation or by a person
+// deciding a paused UNVERIFIED. The chain lives on the run record precisely
+// so a pause cannot break the promise: before this, the person accepted by
+// hand, the task fell back to Todo, and they re-selected it to click the
+// Build the chain had already been asked for.
+func (s *Service) continueChain(ctx context.Context, rs *runState) {
+	if rs.run.Stage != "test" || rs.run.ChainBuild == nil {
+		return
+	}
+	raw, err := json.Marshal(rs.run.ChainBuild)
+	if err != nil {
+		return
+	}
+	var build RunRequest
+	if err := json.Unmarshal(raw, &build); err != nil {
+		return
+	}
+	rs.run.ChainBuild = nil
+	if build.TaskID == "" {
+		build.TaskID = rs.run.TaskID
+	}
+	run, err := s.RunStart(context.Background(), rs.run.ProjectID, build)
+	if err != nil {
+		if w, wErr := s.ensureWriter(rs); wErr == nil {
+			w.AppendEvent("warning", map[string]interface{}{
+				"detail": fmt.Sprintf("tdd chain: the build refused to start (%v); start it from the board", err),
+			})
+			_ = w.WriteState()
+		}
+		return
+	}
+	if w, wErr := s.ensureWriter(rs); wErr == nil {
+		w.AppendEvent("tdd_build_started", map[string]interface{}{"run": run.ID})
+		_ = w.WriteState()
+	}
+}
+
 // resolveSuperseded closes a run whose gate was answered by another act — a
 // revision requested on its draft, or a sibling's proposal accepted over it.
 // Quietly a no-op when the run is not waiting: only a paused gate is moot.

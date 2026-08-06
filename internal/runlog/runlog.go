@@ -60,6 +60,12 @@ type Run struct {
 	// attributing the run to its roster credited five models with work they
 	// never did — and reported the run's whole cost against each of them.
 	Spend map[string]DucklingSpend `json:"spend,omitempty"`
+	// ChainBuild carries a pre-authorized build to start when this test-first
+	// run is accepted — however it comes to be accepted. The chain used to
+	// live only in the request's goroutine: a test that paused for a person
+	// (an already-red suite makes the verdict UNVERIFIED) was accepted by
+	// hand and the promised build silently never came.
+	ChainBuild map[string]interface{} `json:"chain_build,omitempty"`
 	// TokensEstimated is true when any model call in this run reported no
 	// usage and its tokens were counted by estimate.
 	//
