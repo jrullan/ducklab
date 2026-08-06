@@ -263,6 +263,7 @@ export interface RunlogRun {
   accepted?: boolean;
   autonomy?: string;
   budget?: RunlogBudgetState;
+  chain_build?: Record<string, unknown>;
   commit_sha?: string;
   dry_run?: boolean;
   ended_at?: string;

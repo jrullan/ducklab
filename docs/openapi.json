@@ -881,6 +881,10 @@
           "budget": {
             "$ref": "#/components/schemas/RunlogBudgetState"
           },
+          "chain_build": {
+            "additionalProperties": {},
+            "type": "object"
+          },
           "commit_sha": {
             "type": "string"
           },
