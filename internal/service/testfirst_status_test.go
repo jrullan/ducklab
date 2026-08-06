@@ -61,6 +61,37 @@ func TestAnAcceptedTestFirstIsNotAFinishedTask(t *testing.T) {
 		t.Errorf("the buildable task offers no run: %v", tv.Next)
 	}
 
+	// The build reaches its gate and pauses: the task sits in Review with
+	// the build DONE and waiting for a person. "Build it to make it pass"
+	// would be false there — the flag speaks only while building is the
+	// next move.
+	paused := &runlog.Run{
+		ID: "r-paused", ProjectID: id, TaskID: "T-047", Stage: "build",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		StartedAt: "2026-08-06T03:30:00Z",
+	}
+	pw, err := runlog.NewWriter(dir, paused)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw.Close()
+	s.RecoverRuns(context.Background())
+	tasks, _ = s.TaskList(context.Background(), id)
+	for i := range tasks {
+		if tasks[i].ID == "T-047" {
+			tv = &tasks[i]
+		}
+	}
+	if tv.Status != "review" {
+		t.Fatalf("with the build paused at its gate, status = %q, want review", tv.Status)
+	}
+	if tv.TestReady {
+		t.Error("a task in review still says build it to make it pass")
+	}
+	if err := s.RunReject(context.Background(), "r-paused", "not this one"); err != nil {
+		t.Fatal(err)
+	}
+
 	// The build lands and is accepted: the test no longer awaits anything,
 	// and the card must stop saying it does.
 	build := &runlog.Run{

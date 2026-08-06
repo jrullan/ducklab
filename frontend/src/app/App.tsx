@@ -294,6 +294,24 @@ export function App() {
     setBadge(waitingCount);
   }, [waitingCount]);
 
+  // A run that pauses while we watch arrives by stream, and the stream
+  // carries only the transition — not the engine's next list, the verdict,
+  // or the spend. The decision card renders its buttons from `next` alone,
+  // so the person got a card with nothing to click until some other view
+  // happened to fetch the full run. Hydrate it the moment it pauses.
+  const hydrated = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!client) return;
+    for (const r of pendingForHuman(runs)) {
+      if (r.next || hydrated.current.has(r.id)) continue;
+      hydrated.current.add(r.id);
+      client
+        .run(r.id)
+        .then((d) => useRuns.getState().setRun(d.run))
+        .catch(() => hydrated.current.delete(r.id));
+    }
+  }, [client, runs]);
+
   // h-screen with the scroll moved inside: the whole page used to scroll, so a
   // long run pushed the nav off the top of the window, and getting back to it
   // meant scrolling past everything the run had said.

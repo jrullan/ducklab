@@ -554,11 +554,12 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Status:     st,
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
-				// A committed test AWAITS its build; one that a later
-				// accepted build satisfied awaits nothing. The flag outlived
-				// the build once, and an accepted task went on saying
-				// "build it to make it pass" about a test already green.
-				TestReady: testReady[t.ID] && st != "accepted",
+				// A committed test AWAITS its build — so the flag speaks
+				// only while building is the next move (todo, blocked). It
+				// outlived the build twice: once on an accepted task, then
+				// on one in Review whose build was already done and waiting
+				// for a person, still urging "build it to make it pass".
+				TestReady: testReady[t.ID] && (st == "todo" || st == "blocked"),
 				Next:      taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID]),
 			})
 		}
