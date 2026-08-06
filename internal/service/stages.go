@@ -38,8 +38,8 @@ type StageRequest struct {
 	// writes the requirements the code ALREADY satisfies, instead of
 	// interviewing a person about a product that is still an idea. For a
 	// codebase that exists, this is the front door.
-	Adopt bool `json:"adopt,omitempty"`
-	Stream   bool   `json:"stream"`
+	Adopt  bool `json:"adopt,omitempty"`
+	Stream bool `json:"stream"`
 }
 
 // StageStart runs intake, spec or plan and leaves a proposal for the human.
@@ -554,8 +554,12 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Status:     st,
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
-				TestReady:  testReady[t.ID],
-				Next:       taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting),
+				// A committed test AWAITS its build; one that a later
+				// accepted build satisfied awaits nothing. The flag outlived
+				// the build once, and an accepted task went on saying
+				// "build it to make it pass" about a test already green.
+				TestReady: testReady[t.ID] && st != "accepted",
+				Next:      taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting),
 			})
 		}
 	}

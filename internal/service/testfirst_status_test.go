@@ -57,4 +57,30 @@ func TestAnAcceptedTestFirstIsNotAFinishedTask(t *testing.T) {
 	if !offersRun {
 		t.Errorf("the buildable task offers no run: %v", tv.Next)
 	}
+
+	// The build lands and is accepted: the test no longer awaits anything,
+	// and the card must stop saying it does.
+	build := &runlog.Run{
+		ID: "r-build", ProjectID: id, TaskID: "T-047", Stage: "build",
+		Status: "done", Verdict: "PASSED", Accepted: true,
+		StartedAt: "2026-08-06T04:00:00Z",
+	}
+	bw, err := runlog.NewWriter(dir, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bw.Close()
+	s.RecoverRuns(context.Background())
+	tasks, _ = s.TaskList(context.Background(), id)
+	for i := range tasks {
+		if tasks[i].ID == "T-047" {
+			tv = &tasks[i]
+		}
+	}
+	if tv.Status != "accepted" {
+		t.Errorf("after the accepted build, status = %q, want accepted", tv.Status)
+	}
+	if tv.TestReady {
+		t.Error("a satisfied test still claims to await its build")
+	}
 }
