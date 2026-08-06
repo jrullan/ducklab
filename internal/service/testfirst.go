@@ -130,7 +130,15 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		"stage": "test", "mode": run.Mode, "task_id": req.TaskID,
 	})
 
-	go s.executeTestFirst(runCtx, rs, entry.Path, projCfg, req)
+	// Through the queue, like every run that writes the tree. This path used
+	// to spawn its goroutine directly — test-first arrived after the queue
+	// and was never wired in — so launching several TDD tasks at once raced
+	// their test runs over one working tree, gates measuring each other's
+	// half-written files.
+	s.queue.submit(s, &queued{
+		rs: rs, ctx: runCtx,
+		exec: func(c context.Context) { s.executeTestFirst(c, rs, entry.Path, projCfg, req) },
+	})
 	return run, nil
 }
 

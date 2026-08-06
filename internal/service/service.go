@@ -112,6 +112,7 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		projects:   make(map[string]*projectState),
 		queue:      newRunQueue(cfg.Engine.MaxConcurrentRuns),
 	}
+	s.queue.held = s.projectHeld
 
 	// Register providers
 	for id, p := range cfg.Providers {
@@ -700,6 +701,10 @@ type RunRequest struct {
 	DryRun       bool `json:"dry_run"`
 	Parallel     bool `json:"parallel"`
 	UnsafeWrites bool `json:"unsafe_writes"`
+	// chained is set only by continueChain, never by a client: this build is
+	// the second half of a TDD chain and jumps the project's waiting line, so
+	// the chain runs as the one unit the person authorized.
+	chained bool
 }
 
 // RunDetail is a run detail.
@@ -843,9 +848,32 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 
 	// Submit to the queue: it starts the run now, or marks it queued and
 	// starts it when a slot frees (AC-25).
-	s.queue.submit(s, &queued{rs: rs, entry: entry, req: req, ctx: ctx})
+	s.queue.submit(s, &queued{
+		rs: rs, ctx: ctx, parallel: req.Parallel, chained: req.chained,
+		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
+	})
 
 	return run, nil
+}
+
+// projectHeld reports whether the project's working tree belongs to a run
+// the queue is no longer counting: one paused at its gate. A paused build or
+// test-first has released its slot — its goroutine returned — but its
+// uncommitted diff sits in the tree, and acceptance commits the whole tree
+// (git add -A). A run started in that window would work on top of someone
+// else's undecided change, and whichever gate resolved first would sweep the
+// other's files into its commit. Document stages keep their drafts in
+// proposal files, not the tree, so only tree-writing stages hold the project.
+func (s *Service) projectHeld(projectID string) bool {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	for _, rs := range s.runs {
+		if rs.run.ProjectID == projectID && rs.run.Status == "paused" &&
+			(rs.run.Stage == "build" || rs.run.Stage == "test") {
+			return true
+		}
+	}
+	return false
 }
 
 // executeDryRun renders prompts without calling any model. Synchronous.
@@ -1673,6 +1701,11 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	if err := s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
 		return nil, err
 	}
+	// The decision freed the working tree this run's diff was holding. Runs
+	// queued behind that hold have no released slot to promote them — the
+	// queue must be told the world changed. After continueChain (deferred
+	// inside acceptRun), so a chained build is already at the line's front.
+	s.queue.poke(s)
 	return &AcceptResult{CommitSHA: rs.run.CommitSHA}, nil
 }
 
@@ -1699,6 +1732,10 @@ func (s *Service) continueChain(ctx context.Context, rs *runState) {
 	if build.TaskID == "" {
 		build.TaskID = rs.run.TaskID
 	}
+	// The chain is one unit: if other work is waiting for this project, the
+	// build goes first, so no other test lands on the suite this chain has
+	// deliberately left red.
+	build.chained = true
 	run, err := s.RunStart(context.Background(), rs.run.ProjectID, build)
 	if err != nil {
 		if w, wErr := s.ensureWriter(rs); wErr == nil {
@@ -1760,7 +1797,10 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	// next attempt of the task found them and reasoned about work nobody had
 	// accepted as though it were the project's.
 	restoreAfterUnaccepted(rs)
-	return w.WriteState()
+	err = w.WriteState()
+	// The rejection restored the tree; whatever queued behind its hold can go.
+	s.queue.poke(s)
+	return err
 }
 
 // RunAnswer records a human's answer and resumes the run.

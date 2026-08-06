@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/jrullan/ducklab/internal/bus"
-	"github.com/jrullan/ducklab/internal/registry"
 )
 
 // runQueue bounds how many runs execute at once (01 §9, AC-25).
@@ -15,20 +14,33 @@ import (
 // and visible to clients, never rejected: the user asked for the work, and
 // silently dropping it would be worse than making them wait.
 type runQueue struct {
-	mu       sync.Mutex
-	limit    int
-	running  int
-	waiting  []*queued
-	perProj  map[string]int
-	allowPar bool
+	mu      sync.Mutex
+	limit   int
+	running int
+	waiting []*queued
+	perProj map[string]int
+	// held answers "is this project's working tree spoken for by a run the
+	// queue is not counting?" — a run paused at its gate has released its
+	// slot but its uncommitted diff still sits in the tree, and accept
+	// commits the WHOLE tree (git add -A). Injected so tests can stub it.
+	held func(projectID string) bool
 }
 
+// queued is one unit of work waiting for a slot. The queue does not know what
+// kind of run it is — build and test-first both come through here, each
+// carrying its own exec.
 type queued struct {
-	rs      *runState
-	entry   *registry.ProjectEntry
-	req     RunRequest
-	ctx     context.Context
-	release chan struct{}
+	rs   *runState
+	exec func(ctx context.Context)
+	ctx  context.Context
+	// parallel is the caller's explicit opt-out of the one-run-per-project
+	// rule; they are claiming the runs cannot collide.
+	parallel bool
+	// chained marks the second half of a TDD chain. It jumps to the FRONT of
+	// the waiting line: the person authorized test-and-build as one unit, and
+	// letting another task's test run in between would land that test on a
+	// suite the chain has deliberately left red.
+	chained bool
 }
 
 func newRunQueue(limit int) *runQueue {
@@ -47,12 +59,20 @@ func (q *runQueue) submit(s *Service, item *queued) {
 		q.start(s, item)
 		return
 	}
-	q.waiting = append(q.waiting, item)
+	reason := "engine at max_concurrent_runs"
+	if q.running < q.limit {
+		reason = "another run holds this project's working tree"
+	}
+	if item.chained {
+		q.waiting = append([]*queued{item}, q.waiting...)
+	} else {
+		q.waiting = append(q.waiting, item)
+	}
 	q.mu.Unlock()
 
 	item.rs.run.Status = "queued"
 	item.rs.writer.AppendEvent("run_queued", map[string]interface{}{
-		"reason": "engine at max_concurrent_runs",
+		"reason": reason,
 	})
 	item.rs.writer.WriteState()
 }
@@ -62,9 +82,16 @@ func (q *runQueue) canStart(item *queued) bool {
 		return false
 	}
 	// One run per project unless the caller opted in: two runs editing one
-	// working tree would interleave writes.
-	if !item.req.Parallel && q.perProj[item.rs.run.ProjectID] > 0 {
-		return false
+	// working tree would interleave writes — whether the other run is still
+	// executing (counted in perProj) or paused at a gate with its diff
+	// waiting in the tree (reported by held).
+	if !item.parallel {
+		if q.perProj[item.rs.run.ProjectID] > 0 {
+			return false
+		}
+		if q.held != nil && q.held(item.rs.run.ProjectID) {
+			return false
+		}
 	}
 	return true
 }
@@ -84,7 +111,7 @@ func (q *runQueue) start(s *Service, item *queued) {
 	}
 	go func() {
 		defer q.done(s, item)
-		s.executeRun(item.ctx, item.rs, item.entry, item.req)
+		item.exec(item.ctx)
 	}()
 }
 
@@ -95,20 +122,42 @@ func (q *runQueue) done(s *Service, item *queued) {
 	if n := q.perProj[item.rs.run.ProjectID]; n > 0 {
 		q.perProj[item.rs.run.ProjectID] = n - 1
 	}
-	var next *queued
-	for i, w := range q.waiting {
-		if q.canStart(w) {
-			next = w
-			q.waiting = append(q.waiting[:i], q.waiting[i+1:]...)
-			q.reserve(w)
-			break
-		}
-	}
+	next := q.promoteLocked()
 	q.mu.Unlock()
 
 	if next != nil {
 		q.start(s, next)
 	}
+}
+
+// poke re-examines the waiting line after something OUTSIDE the queue changed
+// the answer to canStart — a human accepted or rejected the paused run whose
+// diff was holding the project's tree. Without this, a run queued behind a
+// gate would wait forever: the gate's resolution frees the tree, but no slot
+// was released, so done() never runs.
+func (q *runQueue) poke(s *Service) {
+	for {
+		q.mu.Lock()
+		next := q.promoteLocked()
+		q.mu.Unlock()
+		if next == nil {
+			return
+		}
+		q.start(s, next)
+	}
+}
+
+// promoteLocked pops and reserves the first waiting run that can start.
+// Callers hold q.mu.
+func (q *runQueue) promoteLocked() *queued {
+	for i, w := range q.waiting {
+		if q.canStart(w) {
+			q.waiting = append(q.waiting[:i], q.waiting[i+1:]...)
+			q.reserve(w)
+			return w
+		}
+	}
+	return nil
 }
 
 // drain removes every waiting run, marking it paused. Used on shutdown so a
