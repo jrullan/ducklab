@@ -842,6 +842,28 @@ function TaskRunner({
             Test first
           </button>
         );
+      case "retire_test":
+        // The other exit from a committed failing test: withdraw the promise.
+        // A deterministic git revert on the engine — and it releases the
+        // project's queue, which the outstanding red test was holding.
+        return (
+          <button
+            key={action}
+            type="button"
+            onClick={() =>
+              void client
+                .testRetire(projectId, task.id)
+                .then(() => onDone())
+                .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+            }
+            disabled={busy}
+            data-testid="retire-test"
+            title="Reverts the committed failing test; the task returns to a clean todo"
+            className="text-xs text-ink-muted underline disabled:opacity-40"
+          >
+            retire the test
+          </button>
+        );
       case "review":
         return (
           <button

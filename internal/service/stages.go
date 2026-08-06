@@ -502,9 +502,13 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		}
 		// An accepted test-first run is not a finished task — it is the
 		// definition of done, committed. The task stays buildable, and says
-		// the test is waiting.
+		// the test is waiting. A RETIRED one says nothing at all: its commit
+		// was reverted, so it neither awaits a build nor — via the Accepted
+		// fold below — marks the task accepted.
 		if r.Stage == "test" && r.Accepted {
-			testReady[r.TaskID] = true
+			if r.RevertSHA == "" {
+				testReady[r.TaskID] = true
+			}
 			continue
 		}
 		if status[r.TaskID] != "" {

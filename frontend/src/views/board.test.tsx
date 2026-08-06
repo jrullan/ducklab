@@ -826,6 +826,44 @@ describe("the rail follows the contract's order", () => {
     expect((screen.getByTestId("run-seat-1") as HTMLSelectElement).value).toBe("pato-local");
   });
 
+  // A committed failing test is a promise with two exits, and the rail must
+  // offer both: build until green, or retire the test — the engine reverts
+  // its commit and releases the queue the red suite was holding. Without the
+  // button, a chain whose build kept failing left git surgery as the only
+  // way out.
+  it("offers retiring the test when the engine does", async () => {
+    const testRetire = vi.fn(() => Promise.resolve({ id: "r-t", revert_sha: "abc" } as never));
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-022", title: "A task", milestone: "M-01", status: "todo",
+            test_ready: true, next: ["run", "retire_test", "test_first", "remove"] },
+        ]),
+      ),
+      testRetire,
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    fireEvent.click(screen.getByTestId("retire-test"));
+    await waitFor(() => expect(testRetire).toHaveBeenCalledWith("p", "T-022"));
+  });
+
+  // And never on its own initiative: the button renders only from the
+  // engine's list (the order IS the workflow).
+  it("does not offer retiring when the engine does not", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-012", title: "A task", milestone: "M-01", status: "todo",
+            test_ready: true, next: ["run", "test_first", "remove"] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    expect(screen.queryByTestId("retire-test")).toBeNull();
+  });
+
   // The chain sends BOTH phases' configuration: a cheap solo test and a paid
   // pair build, each with its own seats.
   it("launches the chain with each phase's own mode and seats", async () => {

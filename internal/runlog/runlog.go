@@ -27,6 +27,11 @@ type Run struct {
 	Verdict       string                 `json:"verdict"`
 	Accepted      bool                   `json:"accepted"`
 	CommitSHA     string                 `json:"commit_sha"`
+	// RevertSHA records that this run's commit was later undone — set only on
+	// an accepted test-first whose test was retired before its build landed.
+	// The acceptance stays in the record (it happened); this says the promise
+	// it made was withdrawn, and by which commit.
+	RevertSHA     string                 `json:"revert_sha,omitempty"`
 	StartedAt     string                 `json:"started_at"`
 	EndedAt       string                 `json:"ended_at"`
 	WallclockMs   int64                  `json:"wallclock_ms"`

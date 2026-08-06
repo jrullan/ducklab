@@ -19,11 +19,13 @@ type runQueue struct {
 	running int
 	waiting []*queued
 	perProj map[string]int
-	// held answers "is this project's working tree spoken for by a run the
-	// queue is not counting?" — a run paused at its gate has released its
-	// slot but its uncommitted diff still sits in the tree, and accept
-	// commits the WHOLE tree (git add -A). Injected so tests can stub it.
-	held func(projectID string) bool
+	// held answers "may a run for this task start in this project?" with a
+	// reason when it may not — a run paused at its gate has released its
+	// slot but its uncommitted diff still sits in the tree (and accept
+	// commits the WHOLE tree, git add -A); a broken TDD chain keeps the
+	// suite deliberately red for every task but its own. Empty string means
+	// free. Injected so tests can stub it.
+	held func(projectID, taskID string) string
 }
 
 // queued is one unit of work waiting for a slot. The queue does not know what
@@ -62,6 +64,11 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	reason := "engine at max_concurrent_runs"
 	if q.running < q.limit {
 		reason = "another run holds this project's working tree"
+		if q.held != nil {
+			if r := q.held(item.rs.run.ProjectID, item.rs.run.TaskID); r != "" {
+				reason = r
+			}
+		}
 	}
 	if item.chained {
 		q.waiting = append([]*queued{item}, q.waiting...)
@@ -89,7 +96,7 @@ func (q *runQueue) canStart(item *queued) bool {
 		if q.perProj[item.rs.run.ProjectID] > 0 {
 			return false
 		}
-		if q.held != nil && q.held(item.rs.run.ProjectID) {
+		if q.held != nil && q.held(item.rs.run.ProjectID, item.rs.run.TaskID) != "" {
 			return false
 		}
 	}

@@ -278,6 +278,7 @@ export interface RunlogRun {
   pending_since?: string;
   project_id?: string;
   resolution?: string;
+  revert_sha?: string;
   roster?: Record<string, string>;
   spend?: Record<string, RunlogDucklingSpend>;
   stage?: string;
@@ -563,6 +564,7 @@ export const OPERATIONS = [
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
   { id: "TaskRemove", method: "DELETE", path: "/v1/projects/{id}/tasks/{task}" },
+  { id: "TestRetire", method: "POST", path: "/v1/projects/{id}/tasks/{task}/retire-test" },
   { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },
   { id: "TraceReport", method: "GET", path: "/v1/projects/{id}/trace/report" },

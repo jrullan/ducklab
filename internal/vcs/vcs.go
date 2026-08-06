@@ -319,6 +319,18 @@ func (g *Git) HasTag(name string) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
+// Revert creates a commit that undoes another. --no-edit keeps it
+// deterministic — no model, no editor, git's own inverse patch. On conflict
+// the revert is aborted so the tree is left exactly as found, and the error
+// carries git's account of which files could not be unwound.
+func (g *Git) Revert(sha string) (string, error) {
+	if _, err := g.run("revert", "--no-edit", sha); err != nil {
+		_, _ = g.run("revert", "--abort")
+		return "", err
+	}
+	return g.HeadSHA()
+}
+
 // ShowCommit returns the diff a commit introduced.
 //
 // This is what the review stage reads: a review is of the work that was

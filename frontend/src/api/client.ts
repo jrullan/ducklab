@@ -529,6 +529,16 @@ export class EngineClient {
     });
   }
 
+  /** Withdraw a committed failing test: the engine reverts its commit —
+   * deterministic, no model — freeing the task and the project's queue. The
+   * other exit from a broken chain, beside building until green. */
+  testRetire(projectId: string, taskId: string) {
+    return this.request<Run>(
+      "POST",
+      `/v1/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/retire-test`,
+    );
+  }
+
   /** Review an accepted task. */
   reviewStart(projectId: string, taskId: string) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/reviews`, { task_id: taskId });

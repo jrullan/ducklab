@@ -115,9 +115,11 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 		})
 	}
 
-	// Once the failing test is committed, building it is the front door.
-	if got := taskNextActions("todo", "tests", true, false, true); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
-		t.Errorf("test-ready next = %v, want run first", got)
+	// Once the failing test is committed, building it is the front door — and
+	// withdrawing the promise stands right beside it, because a state that
+	// can hold the project's queue owes the person both exits.
+	if got := taskNextActions("todo", "tests", true, false, true); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
+		t.Errorf("test-ready next = %v, want run first then retire_test", got)
 	}
 	// A failed run retries by building, not by writing another test.
 	if got := taskNextActions("blocked", "tests", true, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {

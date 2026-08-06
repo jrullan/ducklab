@@ -931,6 +931,9 @@
           "resolution": {
             "type": "string"
           },
+          "revert_sha": {
+            "type": "string"
+          },
           "roster": {
             "additionalProperties": {
               "type": "string"
@@ -3773,6 +3776,50 @@
           }
         ],
         "summary": "Remove a task from the plan. Refused once a run has named it."
+      }
+    },
+    "/v1/projects/{id}/tasks/{task}/retire-test": {
+      "post": {
+        "operationId": "TestRetire",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw a committed failing test: revert its commit, free the task and the queue"
       }
     },
     "/v1/projects/{id}/tests": {

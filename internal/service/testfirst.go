@@ -142,6 +142,82 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	return run, nil
 }
 
+// TestRetire withdraws a committed failing test: git reverts its commit, the
+// task returns to a clean todo, and the project's queue is released.
+//
+// A broken chain — test accepted, build failed or abandoned — leaves the
+// suite deliberately red, which holds the whole project (projectHeld). A
+// state that blocks the queue owes the person both exits: finish the promise
+// (build until green) or withdraw it. This is the second one, and it is
+// deterministic — git's own inverse patch, no model involved.
+func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*runlog.Run, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	var target *runState
+	var open, builtBy string
+	s.runsMu.RLock()
+	for _, rs := range s.runs {
+		r := rs.run
+		if r.ProjectID != projectID || r.TaskID != taskID {
+			continue
+		}
+		switch r.Status {
+		case "running", "queued", "paused":
+			open = fmt.Sprintf("%s (%s)", r.ID, r.Status)
+		}
+		if r.Accepted && r.Stage == "build" {
+			builtBy = r.ID
+		}
+		if r.Accepted && r.Stage == "test" && r.RevertSHA == "" {
+			if target == nil || r.StartedAt > target.run.StartedAt {
+				target = rs
+			}
+		}
+	}
+	s.runsMu.RUnlock()
+
+	if open != "" {
+		return nil, fmt.Errorf("a run for %s is still open — %s. Decide or abort it first", taskID, open)
+	}
+	if builtBy != "" {
+		return nil, fmt.Errorf("%s was built and accepted (%s): its test is part of the accepted work now, not an outstanding promise", taskID, builtBy)
+	}
+	if target == nil {
+		return nil, fmt.Errorf("%s has no committed test awaiting a build — nothing to retire", taskID)
+	}
+	if target.run.CommitSHA == "" {
+		return nil, fmt.Errorf("the accepted test run %s recorded no commit; retire it by hand", target.run.ID)
+	}
+
+	git := vcs.New(entry.Path)
+	if clean, cerr := git.IsClean(); cerr != nil || !clean {
+		return nil, fmt.Errorf("the working tree has uncommitted changes; retiring now would tangle them with the revert")
+	}
+	sha, err := git.Revert(target.run.CommitSHA)
+	if err != nil {
+		return nil, fmt.Errorf("git could not undo the test commit: %w", err)
+	}
+
+	w, werr := s.ensureWriter(target)
+	if werr != nil {
+		return nil, fmt.Errorf("the test was reverted (%s) but its record could not be opened: %w", sha, werr)
+	}
+	target.run.RevertSHA = sha
+	target.run.Resolution += fmt.Sprintf("; test retired by human (revert %.8s)", sha)
+	w.AppendEvent("test_retired", map[string]interface{}{
+		"task": taskID, "revert_sha": sha, "reverted": target.run.CommitSHA,
+	})
+	if err := w.WriteState(); err != nil {
+		return nil, err
+	}
+	// The suite is green again; whatever queued behind the broken chain can go.
+	s.queue.poke(s)
+	return target.run, nil
+}
+
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
 	defer recoverRun(rs)
 	defer close(rs.done)

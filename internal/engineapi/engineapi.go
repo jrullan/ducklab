@@ -373,6 +373,15 @@ func (s *Server) handleTestStart(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, run)
 }
 
+func (s *Server) handleTestRetire(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.TestRetire(r.Context(), r.PathValue("id"), r.PathValue("task"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
 func (s *Server) handleGateRun(w http.ResponseWriter, r *http.Request) {
 	res, err := s.svc.GateRun(r.Context(), r.PathValue("id"))
 	if err != nil {

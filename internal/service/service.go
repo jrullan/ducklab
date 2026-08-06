@@ -856,24 +856,55 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	return run, nil
 }
 
-// projectHeld reports whether the project's working tree belongs to a run
-// the queue is no longer counting: one paused at its gate. A paused build or
-// test-first has released its slot — its goroutine returned — but its
-// uncommitted diff sits in the tree, and acceptance commits the whole tree
-// (git add -A). A run started in that window would work on top of someone
-// else's undecided change, and whichever gate resolved first would sweep the
-// other's files into its commit. Document stages keep their drafts in
-// proposal files, not the tree, so only tree-writing stages hold the project.
-func (s *Service) projectHeld(projectID string) bool {
+// projectHeld reports whether the project belongs to work the queue is no
+// longer counting, and why — empty means free to start a run for taskID.
+//
+// Two holds exist. A run paused at its gate has released its slot — its
+// goroutine returned — but its uncommitted diff sits in the tree, and
+// acceptance commits the whole tree (git add -A): a run started in that
+// window would hand its files to whichever gate resolved first. And a broken
+// chain — a committed test whose build failed or never came — leaves the
+// suite deliberately red, so any other task's test-first lands UNVERIFIED
+// and any other build's gate fails on a test that is not its own. The task
+// with the outstanding test is exempt: building it is one cure, retiring the
+// test the other, and both must be able to run.
+//
+// Document stages keep their drafts in proposal files, not the tree, so only
+// tree-writing stages hold the project.
+func (s *Service) projectHeld(projectID, taskID string) string {
 	s.runsMu.RLock()
 	defer s.runsMu.RUnlock()
+	tested := map[string]bool{}
+	built := map[string]bool{}
 	for _, rs := range s.runs {
-		if rs.run.ProjectID == projectID && rs.run.Status == "paused" &&
-			(rs.run.Stage == "build" || rs.run.Stage == "test") {
-			return true
+		r := rs.run
+		if r.ProjectID != projectID {
+			continue
+		}
+		if r.Status == "paused" && (r.Stage == "build" || r.Stage == "test") {
+			return "another run holds this project's working tree"
+		}
+		if r.Accepted && r.TaskID != "" {
+			switch r.Stage {
+			case "test":
+				if r.RevertSHA == "" {
+					tested[r.TaskID] = true
+				}
+			case "build":
+				built[r.TaskID] = true
+			}
 		}
 	}
-	return false
+	// A run for a broken-chain task is always a cure, never a victim.
+	if tested[taskID] && !built[taskID] {
+		return ""
+	}
+	for task := range tested {
+		if !built[task] {
+			return fmt.Sprintf("%s's committed test is red until its build lands — build it or retire the test", task)
+		}
+	}
+	return ""
 }
 
 // executeDryRun renders prompts without calling any model. Synchronous.

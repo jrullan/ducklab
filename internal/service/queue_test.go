@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,9 +114,9 @@ func TestQueueSerialisesRunsWithinAProject(t *testing.T) {
 // must treat that project as busy, and must re-examine the line when the gate
 // resolves, because no slot release will ever do it.
 func TestAHeldTreeBlocksTheQueueUntilPoked(t *testing.T) {
-	held := true
+	held := "another run holds this project's working tree"
 	q := newRunQueue(2)
-	q.held = func(string) bool { return held }
+	q.held = func(string, string) string { return held }
 	s := &Service{}
 
 	started := make(chan struct{})
@@ -132,7 +133,7 @@ func TestAHeldTreeBlocksTheQueueUntilPoked(t *testing.T) {
 	}
 
 	// The human decides the gate; accept/reject poke the queue.
-	held = false
+	held = ""
 	q.poke(s)
 	select {
 	case <-started:
@@ -231,6 +232,43 @@ func TestATestFirstQueuesBehindAPausedBuild(t *testing.T) {
 	}
 	if run.Status != "queued" {
 		t.Errorf("status = %q, want queued — the paused build's diff still owns the tree", run.Status)
+	}
+}
+
+// A broken chain — test accepted, build failed — leaves the suite
+// deliberately red. Every other task's run must wait (its test-first would
+// land UNVERIFIED, its build's gate would fail on someone else's test), but
+// the broken task's own runs are the cure and always pass.
+func TestABrokenChainHoldsTheProjectForEveryTaskButItsOwn(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []*runlog.Run{
+		{ID: "r-t22", ProjectID: p.ID, TaskID: "T-022", Stage: "test",
+			Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: "abc",
+			StartedAt: "2026-08-06T15:14:00Z"},
+		{ID: "r-b22", ProjectID: p.ID, TaskID: "T-022", Stage: "build",
+			Status: "failed", Verdict: "FAILED",
+			StartedAt: "2026-08-06T15:15:00Z"},
+	} {
+		w, err := runlog.NewWriter(dir, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+	s.RecoverRuns(context.Background())
+
+	if reason := s.projectHeld(p.ID, "T-019"); reason == "" {
+		t.Error("another task was allowed onto a deliberately red suite")
+	} else if !strings.Contains(reason, "T-022") {
+		t.Errorf("the reason does not name the broken task: %q", reason)
+	}
+	if reason := s.projectHeld(p.ID, "T-022"); reason != "" {
+		t.Errorf("the cure was blocked by its own disease: %q", reason)
 	}
 }
 

@@ -85,6 +85,13 @@ func taskNextActions(status, gateMode string, removable, depsWaiting, testReady 
 				out = append(out, "test_first", "run")
 			} else {
 				out = append(out, "run")
+				// A committed test awaiting its build is a promise, and a
+				// promise has two exits: keep it (run, above) or withdraw it.
+				// Without the second, a chain whose build kept failing held
+				// the project's queue with git surgery as the only escape.
+				if testReady {
+					out = append(out, "retire_test")
+				}
 				if gateMode == "tests" {
 					out = append(out, "test_first")
 				}
