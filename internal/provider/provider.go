@@ -28,6 +28,14 @@ type ChatRequest struct {
 	StreamOptions *StreamOptions         `json:"stream_options,omitempty"`
 	JSONMode      bool                   `json:"json_mode,omitempty"`
 	Extra         map[string]interface{} `json:"extra,omitempty"`
+	// UsageDetail asks OpenRouter to include the billed cost in usage. Only
+	// sent to OpenRouter: OpenAI proper rejects unknown top-level params.
+	UsageDetail *UsageDetail `json:"usage,omitempty"`
+}
+
+// UsageDetail is OpenRouter's usage accounting request.
+type UsageDetail struct {
+	Include bool `json:"include"`
 }
 
 // Message is a chat message.
@@ -96,7 +104,14 @@ type Usage struct {
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
 	TotalTokens      int     `json:"total_tokens"`
-	CostUSD          float64 `json:"cost_usd,omitempty"` // OpenRouter extension
+	CostUSD          float64 `json:"cost_usd,omitempty"` // normalized billed cost, when known
+	// Cost is the field OpenRouter actually sends (usage.cost, when the
+	// request asked with usage.include). For a year we parsed only
+	// "cost_usd" — a name OpenRouter does not use — so the provider-reported
+	// cost NEVER landed and every recorded cost came from the configured
+	// flat rates, which ignore prompt-caching discounts. Normalize() folds
+	// this into CostUSD.
+	Cost float64 `json:"cost,omitempty"`
 	// ReasoningTokens is the share of CompletionTokens spent on thinking, when
 	// the endpoint reports it. Counted separately because "the run cost 400k
 	// tokens" and "the run cost 400k tokens, 380k of them thinking" call for
@@ -210,6 +225,14 @@ func isSensitive(name string) bool {
 		strings.Contains(lower, "authorization") ||
 		strings.Contains(lower, "token") ||
 		strings.Contains(lower, "secret")
+}
+
+// Normalize folds vendor cost fields into CostUSD, the one field everything
+// downstream reads.
+func (u *Usage) Normalize() {
+	if u.CostUSD == 0 && u.Cost > 0 {
+		u.CostUSD = u.Cost
+	}
 }
 
 // CostCalculator computes cost from token usage.

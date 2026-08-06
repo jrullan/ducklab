@@ -63,7 +63,18 @@ func (p *OpenAICompat) ID() string {
 // Chat sends a non-streaming chat request.
 func (p *OpenAICompat) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	req.Stream = false
+	p.askForBilledCost(&req)
 	return p.doChat(ctx, req)
+}
+
+// askForBilledCost requests OpenRouter's usage accounting, which carries the
+// actually-billed cost — caching discounts included — where the configured
+// flat rates can only approximate. OpenRouter only: OpenAI proper rejects
+// unknown top-level parameters, and plainer servers have nothing to report.
+func (p *OpenAICompat) askForBilledCost(req *ChatRequest) {
+	if req.UsageDetail == nil && strings.Contains(strings.ToLower(p.baseURL), "openrouter") {
+		req.UsageDetail = &UsageDetail{Include: true}
+	}
 }
 
 // ChatStream sends a streaming chat request.
@@ -79,6 +90,7 @@ func (p *OpenAICompat) ChatStream(ctx context.Context, req ChatRequest, ch chan<
 	if req.StreamOptions == nil {
 		req.StreamOptions = &StreamOptions{IncludeUsage: true}
 	}
+	p.askForBilledCost(&req)
 	return p.doChatStream(ctx, req, ch)
 }
 
@@ -244,6 +256,7 @@ func (p *OpenAICompat) doChat(ctx context.Context, req ChatRequest) (ChatRespons
 		return ChatResponse{}, fmt.Errorf("%w: %s", kind, msg)
 	}
 	chatResp.FinishReason = chatResp.Choices[0].FinishReason
+	chatResp.Usage.Normalize()
 	applyReasoning(body, &chatResp)
 	return chatResp, nil
 }
@@ -393,6 +406,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		}
 		if chunk.Usage != nil {
 			usage = *chunk.Usage
+			usage.Normalize()
 		}
 	}
 	if err := scanner.Err(); err != nil {
