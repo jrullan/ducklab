@@ -641,6 +641,10 @@ function TaskRunner({
   };
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
+  // The revert commit of a successful retire — the click's answer. The rail
+  // reloads and the "failing test committed" message disappears, but absence
+  // is not confirmation: the person is owed a sentence that says it happened.
+  const [retired, setRetired] = useState<string | null>(null);
   // Accepted work is not waiting to be built. The controls follow the task's
   // state rather than being offered whatever it is.
   const accepted = task.status === "accepted";
@@ -853,7 +857,11 @@ function TaskRunner({
             onClick={() =>
               void client
                 .testRetire(projectId, task.id)
-                .then(() => onDone())
+                .then((r) => {
+                  setRetired(r.revert_sha ?? "");
+                  setFailure(null);
+                  onDone();
+                })
                 .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
             }
             disabled={busy}
@@ -979,6 +987,11 @@ function TaskRunner({
       {failure && (
         <p className="text-xs text-critical" data-testid="run-error">
           {failure}
+        </p>
+      )}
+      {retired && (
+        <p className="text-xs text-good" data-testid="retire-note">
+          test retired — its commit was reverted{retired ? ` (${retired.slice(0, 8)})` : ""}
         </p>
       )}
       {started && (

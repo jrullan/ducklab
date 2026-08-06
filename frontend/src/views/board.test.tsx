@@ -846,6 +846,11 @@ describe("the rail follows the contract's order", () => {
     await openRail();
     fireEvent.click(screen.getByTestId("retire-test"));
     await waitFor(() => expect(testRetire).toHaveBeenCalledWith("p", "T-022"));
+    // The click gets an answer, not just a reload: the person who retires a
+    // test is owed a sentence saying it happened, with the revert commit.
+    await waitFor(() =>
+      expect(screen.getByTestId("retire-note").textContent).toContain("abc"),
+    );
   });
 
   // And never on its own initiative: the button renders only from the

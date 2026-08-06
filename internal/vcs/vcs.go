@@ -88,6 +88,23 @@ func (g *Git) IsClean() (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+// DirtyPaths lists what `git status --porcelain` reports, one path per
+// entry. For telling a person WHICH files block a clean-tree guard — "the
+// tree has uncommitted changes" sent them to a terminal to find out what.
+func (g *Git) DirtyPaths() []string {
+	out, err := g.run("status", "--porcelain")
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) > 3 {
+			paths = append(paths, strings.TrimSpace(l[3:]))
+		}
+	}
+	return paths
+}
+
 // PathIsCommitted reports whether a path matches what is committed.
 //
 // False for anything git does not know about, and for anything changed since
@@ -465,12 +482,28 @@ func (g *Git) RestoreTree(snapshot string) error {
 			inSnapshot[name] = true
 		}
 	}
+	var removed []string
 	for _, name := range strings.Split(strings.TrimSpace(nowOut), "\n") {
 		if name == "" || inSnapshot[name] {
 			continue
 		}
 		if err := os.Remove(filepath.Join(g.Root, filepath.FromSlash(name))); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", name, err)
+		}
+		removed = append(removed, name)
+	}
+	// Clear the REAL index's record of what was just deleted. Diff() marks
+	// run-created files intent-to-add (add -AN) in the real index, so deleting
+	// the file leaves a ghost entry — `git status` showed " D" forever on a
+	// file that was never committed and no longer exists, and every clean-tree
+	// guard (test retire among them) refused on a tree that was actually clean.
+	if len(removed) > 0 {
+		args := []string{"reset", "-q", "--"}
+		for _, name := range removed {
+			args = append(args, shellEscape(name))
+		}
+		if _, err := g.run(args...); err != nil {
+			return fmt.Errorf("clear index entries for removed files: %w", err)
 		}
 	}
 	return nil

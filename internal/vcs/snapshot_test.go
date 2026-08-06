@@ -124,3 +124,37 @@ func TestRestoreLeavesTheHarnessRecordAlone(t *testing.T) {
 		t.Errorf("a gitignored file was touched: %q", got)
 	}
 }
+
+// The exact residue a failed run left in a real project: the run created a
+// file, Diff() marked it intent-to-add in the REAL index, and the restore
+// deleted the file but not the index entry — `git status` showed " D" forever
+// on a file that was never committed and no longer existed, and every
+// clean-tree guard refused on a tree that was actually clean.
+func TestRestoreClearsIntentToAddGhosts(t *testing.T) {
+	g := repo(t)
+	snap, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The run creates a file and a diff is taken (add -AN on the real index).
+	write(t, g.Root, "migrations/004_seed.sql", "INSERT ...\n")
+	if _, err := g.Diff(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.RestoreTree(snap); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(g.Root, "migrations/004_seed.sql")); !os.IsNotExist(err) {
+		t.Fatal("the created file survived the restore")
+	}
+	clean, err := g.IsClean()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !clean {
+		out, _ := g.run("status", "--porcelain")
+		t.Errorf("the restore left ghost index entries:\n%s", out)
+	}
+}

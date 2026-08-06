@@ -179,26 +179,34 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 	}
 	s.runsMu.RUnlock()
 
+	// Every refusal says the verdict first: the person who clicked is owed
+	// "did it happen?" before "why not" — a bare warning left them unsure
+	// whether the retire was done, pending, or refused.
 	if open != "" {
-		return nil, fmt.Errorf("a run for %s is still open — %s. Decide or abort it first", taskID, open)
+		return nil, fmt.Errorf("not retired — a run for %s is still open (%s); decide or abort it first", taskID, open)
 	}
 	if builtBy != "" {
-		return nil, fmt.Errorf("%s was built and accepted (%s): its test is part of the accepted work now, not an outstanding promise", taskID, builtBy)
+		return nil, fmt.Errorf("not retired — %s was built and accepted (%s): its test is part of the accepted work now, not an outstanding promise", taskID, builtBy)
 	}
 	if target == nil {
-		return nil, fmt.Errorf("%s has no committed test awaiting a build — nothing to retire", taskID)
+		return nil, fmt.Errorf("not retired — %s has no committed test awaiting a build", taskID)
 	}
 	if target.run.CommitSHA == "" {
-		return nil, fmt.Errorf("the accepted test run %s recorded no commit; retire it by hand", target.run.ID)
+		return nil, fmt.Errorf("not retired — the accepted test run %s recorded no commit; unwind it by hand", target.run.ID)
 	}
 
 	git := vcs.New(entry.Path)
 	if clean, cerr := git.IsClean(); cerr != nil || !clean {
-		return nil, fmt.Errorf("the working tree has uncommitted changes; retiring now would tangle them with the revert")
+		dirty := git.DirtyPaths()
+		sample := strings.Join(dirty[:min(3, len(dirty))], ", ")
+		if len(dirty) > 3 {
+			sample += fmt.Sprintf(" and %d more", len(dirty)-3)
+		}
+		return nil, fmt.Errorf("not retired — the working tree has uncommitted changes (%s); commit or clean them, then retire", sample)
 	}
 	sha, err := git.Revert(target.run.CommitSHA)
 	if err != nil {
-		return nil, fmt.Errorf("git could not undo the test commit: %w", err)
+		return nil, fmt.Errorf("not retired — git could not undo the test commit: %w", err)
 	}
 
 	w, werr := s.ensureWriter(target)
@@ -222,6 +230,21 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
+
+	// The tree before the test is written — what abort, reject and failure
+	// restore. The build path always took this; test-first never did, so an
+	// aborted test run left its half-written test file in the tree, where
+	// every later gate measured a file nobody had accepted.
+	if git := vcs.New(projectRoot); git.HasGit() {
+		if snap, serr := git.SnapshotTree(); serr == nil {
+			rs.run.TreeSnapshot = snap
+			rs.writer.WriteState()
+		} else {
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": "could not snapshot the tree; a failure will leave its edits behind: " + serr.Error(),
+			})
+		}
+	}
 
 	// The gate before anything is written. A suite that was already red stays
 	// red for its own reasons, and reading that as "the new test fails" would

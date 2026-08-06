@@ -55,6 +55,8 @@ export interface Run {
   verdict: string;
   accepted?: boolean;
   commit_sha?: string;
+  /** Set when an accepted test-first's commit was later retired (reverted). */
+  revert_sha?: string;
   started_at: string;
   ended_at?: string;
   roster?: Record<string, string>;

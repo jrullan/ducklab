@@ -113,6 +113,44 @@ func TestRetiringATestRevertsItsCommitAndFreesTheTask(t *testing.T) {
 	}
 }
 
+// The refusal answers the click: it says the verdict first and names the
+// files in the way. "The working tree has uncommitted changes" alone left
+// the person unsure whether the retire happened, was pending, or was refused
+// — and sent them to a terminal to find out which files.
+func TestARefusedRetireSaysSoAndNamesTheDirt(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-t", ProjectID: p.ID, TaskID: "T-022", Stage: "test",
+		Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: "abc",
+		StartedAt: "2026-08-06T10:00:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	if err := os.WriteFile(filepath.Join(dir, "stray.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.TestRetire(context.Background(), p.ID, "T-022")
+	if err == nil {
+		t.Fatal("a dirty tree was reverted over")
+	}
+	if !strings.HasPrefix(err.Error(), "not retired") {
+		t.Errorf("the refusal does not lead with the verdict: %v", err)
+	}
+	if !strings.Contains(err.Error(), "stray.txt") {
+		t.Errorf("the refusal does not name the offending file: %v", err)
+	}
+}
+
 // The exits are exclusive: once the build landed, the test is accepted work.
 func TestRetiringABuiltTestIsRefused(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
