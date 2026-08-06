@@ -483,6 +483,7 @@ export interface ServiceTaskView {
   milestone?: string;
   next?: string[];
   status?: string;
+  test_ready?: boolean;
   title?: string;
 }
 

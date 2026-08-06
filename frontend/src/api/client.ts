@@ -205,6 +205,9 @@ export interface Task {
   body?: string;
   /** Why the work stopped, when status is "blocked". */
   blocked?: string;
+  /** A committed failing test already defines done: the natural next act is
+   * the build that makes it pass. */
+  test_ready?: boolean;
   /** The actions a person may legally start from this task, stated by the
    * engine — run, test_first, review, remove. */
   next?: string[];

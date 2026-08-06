@@ -441,6 +441,10 @@ type TaskView struct {
 	// that shows work stopped without saying what stopped it is a column that
 	// sends you reading run logs.
 	Blocked string `json:"blocked,omitempty"`
+	// TestReady says a committed failing test already defines done for this
+	// task: the natural next act is the build that makes it pass. Without
+	// this, an accepted test-first read as a finished task.
+	TestReady bool `json:"test_ready,omitempty"`
 	// Next are the actions a person may legally start from this task, in the
 	// order a client should offer them (docs/ux-evaluation.md §5.4).
 	Next []string `json:"next,omitempty"`
@@ -482,6 +486,9 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	// consecutive loads.
 	status := map[string]string{}
 	blocked := map[string]string{}
+	// A committed failing test: the task's definition of done exists and
+	// awaits the build that satisfies it.
+	testReady := map[string]bool{}
 	// Whether TaskRemove would refuse: an accepted run pins its task for good,
 	// an open one until it is decided. Tracked here so the offered action and
 	// the refusal can never disagree.
@@ -492,6 +499,13 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		}
 		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
 			pinned[r.TaskID] = true
+		}
+		// An accepted test-first run is not a finished task — it is the
+		// definition of done, committed. The task stays buildable, and says
+		// the test is waiting.
+		if r.Stage == "test" && r.Accepted {
+			testReady[r.TaskID] = true
+			continue
 		}
 		if status[r.TaskID] != "" {
 			continue
@@ -540,6 +554,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Status:     st,
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
+				TestReady:  testReady[t.ID],
 				Next:       taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting),
 			})
 		}

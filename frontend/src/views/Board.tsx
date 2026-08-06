@@ -418,6 +418,15 @@ export function Board({
                             </div>
                           )
                         )}
+                        {/* The committed failing test, said on the card: an
+                            accepted test-first used to land the task in
+                            Accepted, where every offered action implied the
+                            work was done — and it had never been built once. */}
+                        {!isBugs && (it as Task).test_ready && (
+                          <div data-testid="test-ready" className="mt-1 text-xs text-good">
+                            failing test committed — build it to make it pass
+                          </div>
+                        )}
                         {/* A card in Blocked without the reason on it sends you
                             reading run logs to learn what stopped it. */}
                         {!isBugs && (it as Task).blocked && (
@@ -682,6 +691,12 @@ function TaskRunner({
         <p className="text-xs text-ink-muted" data-testid="accepted-note">
           Already accepted. Reviewing reads the commit; building again starts a new run against
           work that is already done.
+        </p>
+      )}
+      {!accepted && task.test_ready && (
+        <p className="text-xs text-good" data-testid="test-ready-note">
+          The failing test is committed: it defines done for this task. Build it to make the
+          test pass.
         </p>
       )}
 

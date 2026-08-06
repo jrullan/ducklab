@@ -69,7 +69,11 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	run := &runlog.Run{
 		ID:        runlog.GenerateRunID(),
 		ProjectID: projectID,
-		Stage:     "build",
+		// Its own stage, because it is its own kind of run: accepting it
+		// commits a FAILING test, not the work. Labelled "build", the board
+		// read an accepted test-first as a finished task and offered
+		// "build again" for work that had never been built once.
+		Stage:     "test",
 		Mode:      "solo",
 		TaskID:    req.TaskID,
 		Status:    "running",

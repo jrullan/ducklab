@@ -1683,6 +1683,9 @@
           "status": {
             "type": "string"
           },
+          "test_ready": {
+            "type": "boolean"
+          },
           "title": {
             "type": "string"
           }
