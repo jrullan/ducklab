@@ -108,7 +108,7 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 		{"done", "accepted", "tests", false, []string{"review", "run"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false, false)
+			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false, false, false)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("next = %v, want %v", got, tc.want)
 			}
@@ -118,12 +118,18 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 	// Once the failing test is committed, building it is the front door — and
 	// withdrawing the promise stands right beside it, because a state that
 	// can hold the project's queue owes the person both exits.
-	if got := taskNextActions("todo", "tests", true, false, true); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
+	if got := taskNextActions("todo", "tests", true, false, true, false); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
 		t.Errorf("test-ready next = %v, want run first then retire_test", got)
 	}
-	// A failed run retries by building, not by writing another test.
-	if got := taskNextActions("blocked", "tests", true, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+	// A failed BUILD retries by building, not by writing another test.
+	if got := taskNextActions("blocked", "tests", true, false, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
 		t.Errorf("retry next = %v, want run first", got)
+	}
+	// But a failed TEST retries the chain: the definition of done never
+	// landed, so TDD is still the front door — an aborted test-first left
+	// the person with no way to restart the test+build they had asked for.
+	if got := taskNextActions("blocked", "tests", true, false, false, true); !slices.Equal(got, []string{"test_first", "run", "remove"}) {
+		t.Errorf("failed-test retry next = %v, want test_first first", got)
 	}
 }
 

@@ -489,6 +489,8 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	// A committed failing test: the task's definition of done exists and
 	// awaits the build that satisfies it.
 	testReady := map[string]bool{}
+	// The stage of the run that blocked its task, when one did.
+	failedStage := map[string]string{}
 	// Whether TaskRemove would refuse: an accepted run pins its task for good,
 	// an open one until it is decided. Tracked here so the offered action and
 	// the refusal can never disagree.
@@ -527,6 +529,9 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 			// touched. The board could not tell you the difference.
 			status[r.TaskID] = "blocked"
 			blocked[r.TaskID] = "the last run " + r.Status + " — read it, then retry or change the task"
+			// Which phase failed decides the retry the task offers: a failed
+			// build retries by building, a failed TEST retries the chain.
+			failedStage[r.TaskID] = r.Stage
 		}
 	}
 
@@ -564,7 +569,8 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				// on one in Review whose build was already done and waiting
 				// for a person, still urging "build it to make it pass".
 				TestReady: testReady[t.ID] && (st == "todo" || st == "blocked"),
-				Next:      taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID]),
+				Next: taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID],
+					failedStage[t.ID] == "test"),
 			})
 		}
 	}

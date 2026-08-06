@@ -119,6 +119,47 @@ func TestAnAcceptedTestFirstIsNotAFinishedTask(t *testing.T) {
 	}
 }
 
+// An aborted (or failed) TEST run blocks its task — but the retry it offers
+// must be the chain, not the build: the definition of done never landed, so
+// "run" first would build against nothing. The person aborted T-019's test,
+// found it in Blocked, and the rail gave them no way to restart test+build.
+func TestAFailedTestRunOffersTheChainAgain(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.mode": "tests", "verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-ab", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "failed", Verdict: "FAILED",
+		StartedAt: "2026-08-06T15:24:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tv := range tasks {
+		if tv.ID != "T-001" {
+			continue
+		}
+		if tv.Status != "blocked" {
+			t.Fatalf("status = %q, want blocked", tv.Status)
+		}
+		if len(tv.Next) == 0 || tv.Next[0] != "test_first" {
+			t.Errorf("next = %v — the failed test's retry does not lead with the chain", tv.Next)
+		}
+	}
+}
+
 // The chain: a red test-first commits itself — pre-authorized by the click —
 // and the build starts at once. Four interactions per task became one
 // decision, at the build's gate.

@@ -64,8 +64,9 @@ func runNext(r *runlog.Run) []string {
 // gateMode is the project's verify mode: writing a test first is only offered
 // where a test changes something the gate can see. removable reflects
 // TaskRemove's own guard — no accepted run, none still open — so the button
-// and the refusal can never disagree.
-func taskNextActions(status, gateMode string, removable, depsWaiting, testReady bool) []string {
+// and the refusal can never disagree. testFailed says the run that blocked
+// the task was the TEST phase itself.
+func taskNextActions(status, gateMode string, removable, depsWaiting, testReady, testFailed bool) []string {
 	var out []string
 	switch status {
 	case "todo", "blocked":
@@ -81,7 +82,13 @@ func taskNextActions(status, gateMode string, removable, depsWaiting, testReady 
 			// write the failing definition of done first, then build against
 			// it. The board used to show Test first at the bottom of the rail
 			// — an afterthought placement for the step meant to come first.
-			if gateMode == "tests" && !testReady && status == "todo" {
+			//
+			// A blocked task earns the front door back when what failed was
+			// the TEST phase: "retry by building" is right after a failed
+			// build, and wrong about a test that never landed — an aborted
+			// test-first left the person with no way to restart the chain
+			// they had asked for.
+			if gateMode == "tests" && !testReady && (status == "todo" || testFailed) {
 				out = append(out, "test_first", "run")
 			} else {
 				out = append(out, "run")
