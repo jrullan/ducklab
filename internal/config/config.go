@@ -133,6 +133,11 @@ type Defaults struct {
 	// A combination that works is a finding, and re-ticking the same boxes on
 	// every run is how a finding gets lost.
 	ModeDucklings map[string][]string `toml:"mode_ducklings" json:"mode_ducklings"`
+	// BuildMode and TestMode are the modes a launcher opens on: the person
+	// who always builds in pair and tests in solo should not re-pick both on
+	// every task.
+	BuildMode string `toml:"build_mode" json:"build_mode"`
+	TestMode  string `toml:"test_mode" json:"test_mode"`
 	HTTPTimeoutS       int      `toml:"http_timeout_s" json:"http_timeout_s"`
 	TransientRetries   int      `toml:"transient_retries" json:"transient_retries"`
 	Budget             Budget   `toml:"budget" json:"budget"`

@@ -1246,6 +1246,9 @@
           "agent_max_turns": {
             "type": "integer"
           },
+          "build_mode": {
+            "type": "string"
+          },
           "ducklings": {
             "additionalProperties": {
               "items": {
@@ -1284,6 +1287,9 @@
               "type": "integer"
             },
             "type": "object"
+          },
+          "test_mode": {
+            "type": "string"
           }
         },
         "required": [

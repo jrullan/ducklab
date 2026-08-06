@@ -367,12 +367,14 @@ export interface ServiceInitRequest {
 
 export interface ServiceModeDefaultsView {
   agent_max_turns?: number;
+  build_mode?: string;
   ducklings?: Record<string, string[]>;
   role_turns?: Record<string, number>;
   rounds?: Record<string, number>;
   script_role_turns?: Record<string, number>;
   script_rounds?: Record<string, number>;
   seats?: Record<string, number>;
+  test_mode?: string;
 }
 
 export interface ServiceProject {

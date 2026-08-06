@@ -771,6 +771,35 @@ describe("the rail follows the contract's order", () => {
     expect(screen.getByTestId("build-only").textContent).toBe("build only");
   });
 
+  // The habit, pre-seated: Settings' defaults open the block with each
+  // phase's mode AND its saved line-up already in the seats — the habitual
+  // launch is zero touches.
+  it("opens on the Settings defaults with the saved seats filled", async () => {
+    const client = railClient({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-001", title: "A task", milestone: "M-01", status: "todo",
+            next: ["test_first", "run", "remove"] },
+        ]),
+      ),
+      modeDefaults: vi.fn(() =>
+        Promise.resolve({
+          rounds: {}, agent_max_turns: 24,
+          build_mode: "pair", test_mode: "solo",
+          ducklings: { pair: ["pato-sonnet", "pato-local"], solo: ["pato-local"] },
+        }),
+      ),
+    } as Partial<EngineClient>);
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    const [testCfg, buildCfg] = screen.getAllByTestId("launch-config");
+    expect((testCfg!.querySelector("[data-testid=cfg-mode]") as HTMLSelectElement).value).toBe("solo");
+    expect((testCfg!.querySelector("[data-testid=cfg-seat-0]") as HTMLSelectElement).value).toBe("pato-local");
+    expect((buildCfg!.querySelector("[data-testid=cfg-mode]") as HTMLSelectElement).value).toBe("pair");
+    expect((buildCfg!.querySelector("[data-testid=cfg-seat-0]") as HTMLSelectElement).value).toBe("pato-sonnet");
+    expect((buildCfg!.querySelector("[data-testid=cfg-seat-1]") as HTMLSelectElement).value).toBe("pato-local");
+  });
+
   // The chain sends BOTH phases' configuration: a cheap solo test and a paid
   // pair build, each with its own seats.
   it("launches the chain with each phase's own mode and seats", async () => {

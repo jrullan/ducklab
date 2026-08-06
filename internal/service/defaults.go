@@ -130,6 +130,9 @@ type ModeDefaultsView struct {
 	// are ticked. Reported so a client can stop a third box being ticked for a
 	// two-chair mode instead of accepting a preference that will not run.
 	Seats map[string]int `json:"seats"`
+	// BuildMode and TestMode are what launchers open on. Empty means solo.
+	BuildMode string `json:"build_mode,omitempty"`
+	TestMode  string `json:"test_mode,omitempty"`
 }
 
 // ScriptRoleTurns are the caps the scripts themselves carry, so a client can
@@ -172,6 +175,8 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 		RoleTurns:       map[string]int{},
 		ScriptRoleTurns: ScriptRoleTurns,
 		Seats:           ModeSeats,
+		BuildMode:       s.cfg.Defaults.BuildMode,
+		TestMode:        s.cfg.Defaults.TestMode,
 	}
 	for mode, n := range s.cfg.Defaults.Rounds {
 		out.Rounds[mode] = n
@@ -243,10 +248,22 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 
 
+	// The default modes launchers open on. Empty clears back to solo; a mode
+	// that does not exist would open every launcher on nonsense.
+	if v.BuildMode != "" {
+		if _, ok := ModeRounds[v.BuildMode]; !ok {
+			return fmt.Errorf("unknown build mode %q", v.BuildMode)
+		}
+	}
+	if v.TestMode != "" && v.TestMode != "solo" && v.TestMode != "pair" {
+		return fmt.Errorf("test mode must be solo or pair; got %q", v.TestMode)
+	}
+
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
 	prevDucklings, prevRoleTurns := s.cfg.Defaults.ModeDucklings, s.cfg.Defaults.RoleTurns
+	prevBuildMode, prevTestMode := s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode
 	rounds := map[string]int{}
 	for mode, n := range v.Rounds {
 		if n > 0 {
@@ -269,9 +286,12 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	}
 	s.cfg.Defaults.ModeDucklings = lineups
 	s.cfg.Defaults.RoleTurns = roleTurns
+	s.cfg.Defaults.BuildMode = v.BuildMode
+	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
 		s.cfg.Defaults.ModeDucklings, s.cfg.Defaults.RoleTurns = prevDucklings, prevRoleTurns
+		s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode = prevBuildMode, prevTestMode
 		return err
 	}
 	return nil

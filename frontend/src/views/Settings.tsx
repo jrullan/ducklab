@@ -85,6 +85,8 @@ function ConfigSection({ client }: { client: EngineClient }) {
   const [roleTurns, setRoleTurns] = useState<Record<string, string>>({});
   const [agentTurns, setAgentTurns] = useState("");
   const [lineups, setLineups] = useState<Record<string, string[]>>({});
+  const [buildMode, setBuildMode] = useState("");
+  const [testMode, setTestMode] = useState("");
   // Extra columns a person opened on an open-seated mode, beyond what the
   // saved line-up needs. UI state only; empty seats are dropped on save.
   const [extraCols, setExtraCols] = useState<Record<string, number>>({});
@@ -120,6 +122,8 @@ function ConfigSection({ client }: { client: EngineClient }) {
     setRoleTurns(rt);
     setAgentTurns(String(v.agent_max_turns));
     setLineups(v.ducklings ?? {});
+    setBuildMode(v.build_mode ?? "");
+    setTestMode(v.test_mode ?? "");
   };
 
   const load = () => {
@@ -166,6 +170,8 @@ function ConfigSection({ client }: { client: EngineClient }) {
         rounds: numbersOnly(rounds),
         agent_max_turns: Number(agentTurns) || 0,
         // Empty seats are UI scaffolding, not preferences.
+        build_mode: buildMode,
+        test_mode: testMode,
         ducklings: Object.fromEntries(
           Object.entries(lineups).map(([m, ids]) => [m, ids.filter(Boolean)]),
         ),
@@ -254,6 +260,39 @@ function ConfigSection({ client }: { client: EngineClient }) {
 
       {fleet.length > 1 && (
         <>
+          <h2 className="mt-4 text-sm text-ink-muted">default modes</h2>
+          {/* The person who always builds in pair and tests in solo re-picked
+              both on every task; the launcher should open on their habit. */}
+          <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary" data-testid="default-modes">
+            <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+              build
+              <select
+                data-testid="default-build-mode"
+                value={buildMode}
+                onChange={(e) => { setBuildMode(e.target.value); touched(); }}
+                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+              >
+                <option value="">solo (unset)</option>
+                {Object.keys(modes.script_rounds ?? {}).sort().map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+              test first
+              <select
+                data-testid="default-test-mode"
+                value={testMode}
+                onChange={(e) => { setTestMode(e.target.value); touched(); }}
+                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+              >
+                <option value="">solo (unset)</option>
+                <option value="solo">solo</option>
+                <option value="pair">pair</option>
+              </select>
+            </label>
+          </div>
+
           <h2 className="mt-4 text-sm text-ink-muted">ducklings per mode</h2>
           {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
               ten models made the old row a wall of boxes, and the row grew

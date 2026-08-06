@@ -71,6 +71,12 @@ export function Board({
   // The saved line-up per mode, so picking a mode fills the boxes with the
   // combination that was found to work.
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
+  // The modes launchers open on, from Settings: the person who always builds
+  // in pair and tests in solo should not re-pick both on every task.
+  const [phaseDefaults, setPhaseDefaults] = useState<{ build: string; test: string }>({
+    build: "solo",
+    test: "solo",
+  });
   // What each mode has cost in THIS project, for the launcher's mode picker.
   const [estimates, setEstimates] = useState<ModeEstimates>({});
   // Filing a report was reachable only from the CLI: the engine has had
@@ -117,7 +123,10 @@ export function Board({
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
     client
       .modeDefaults()
-      .then((d) => setPreferred(d.ducklings ?? {}))
+      .then((d) => {
+        setPreferred(d.ducklings ?? {});
+        setPhaseDefaults({ build: d.build_mode || "solo", test: d.test_mode || "solo" });
+      })
       .catch(() => setPreferred({}));
     void (async () => {
       try {
@@ -506,6 +515,7 @@ export function Board({
             projectId={projectId}
             ducklings={ducklings}
             preferred={preferred}
+            phaseDefaults={phaseDefaults}
             estimates={estimates}
             gate={gate}
             gateCommand={gateCommand}
@@ -523,6 +533,7 @@ function TaskRail({
   projectId,
   ducklings,
   preferred,
+  phaseDefaults,
   estimates,
   gate,
   gateCommand,
@@ -533,6 +544,7 @@ function TaskRail({
   projectId: string;
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
+  phaseDefaults: { build: string; test: string };
   estimates: ModeEstimates;
   gate: string;
   gateCommand: string;
@@ -555,6 +567,7 @@ function TaskRail({
         projectId={projectId}
         ducklings={ducklings}
         preferred={preferred}
+        phaseDefaults={phaseDefaults}
         estimates={estimates}
         gate={gate}
         gateCommand={gateCommand}
@@ -588,6 +601,7 @@ function TaskRunner({
   projectId,
   ducklings,
   preferred,
+  phaseDefaults,
   estimates,
   gate,
   gateCommand,
@@ -598,15 +612,32 @@ function TaskRunner({
   projectId: string;
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
+  phaseDefaults: { build: string; test: string };
   estimates: ModeEstimates;
   gate: string;
   gateCommand: string;
   onDone: () => void;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
-  // The two phases of the chain, each with its own mode and seats.
-  const [testCfg, setTestCfg] = useState<PhaseConfig>({ mode: "solo", ducklings: [] });
-  const [buildCfg, setBuildCfg] = useState<PhaseConfig>({ mode: "solo", ducklings: [] });
+  // The two phases of the chain, opening on the Settings defaults with the
+  // saved line-up for each mode already seated — the habitual launch is zero
+  // touches. Changing a mode re-seats from that mode's saved line-up.
+  const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({
+    mode: phaseDefaults.test,
+    ducklings: [...(preferred[phaseDefaults.test] ?? [])],
+  }));
+  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({
+    mode: phaseDefaults.build,
+    ducklings: [...(preferred[phaseDefaults.build] ?? [])],
+  }));
+  const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, prevMode: string) => {
+    if (next.mode !== prevMode) {
+      const saved = preferred[next.mode];
+      set({ ...next, ducklings: saved && saved.length > 0 ? [...saved] : next.ducklings });
+      return;
+    }
+    set(next);
+  };
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
   // Accepted work is not waiting to be built. The controls follow the task's
@@ -725,7 +756,7 @@ function TaskRunner({
                 <LaunchConfig
                   ducklings={ducklings}
                   value={testCfg}
-                  onChange={setTestCfg}
+                  onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
                   modes={["solo", "pair"]}
                 />
               </div>
@@ -734,7 +765,7 @@ function TaskRunner({
                 <LaunchConfig
                   ducklings={ducklings}
                   value={buildCfg}
-                  onChange={setBuildCfg}
+                  onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
                   estimates={estimates}
                   showTokens
                 />

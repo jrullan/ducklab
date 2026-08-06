@@ -264,6 +264,22 @@ describe("saving the settings", () => {
 // Ticking a third duckling for a two-chair mode used to save fine and silently
 // seat nobody — the worst kind of setting, one that looks taken and is not. The
 // engine now reports each mode's capacity and the extra boxes go dark.
+// The person who always builds in pair and tests in solo re-picked both on
+// every task. Settings records the habit; every launcher opens on it.
+describe("default phase modes in Settings", () => {
+  it("saves the build and test defaults with the one Save", async () => {
+    const client = clientWith();
+    render(settings(client));
+    await waitFor(() => screen.getByTestId("default-modes"));
+    fireEvent.change(screen.getByTestId("default-build-mode"), { target: { value: "pair" } });
+    fireEvent.change(screen.getByTestId("default-test-mode"), { target: { value: "solo" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
+    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(body).toMatchObject({ build_mode: "pair", test_mode: "solo" });
+  });
+});
+
 describe("mode seat capacity in Settings", () => {
   const threeDucks = (over: Partial<EngineClient> = {}) =>
     clientWith({

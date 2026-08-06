@@ -135,6 +135,10 @@ export interface ModeDefaultsView {
    * are ticked. Rendered as disabled checkboxes, so a full mode says "no more
    * chairs" at the box instead of failing at Save. */
   seats?: Record<string, number>;
+  /** The modes launchers open on: the person who always builds in pair and
+   * tests in solo should not re-pick both on every task. */
+  build_mode?: string;
+  test_mode?: string;
 }
 
 export interface Duckling {
