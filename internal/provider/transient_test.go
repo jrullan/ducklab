@@ -3,10 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -82,5 +84,24 @@ func TestATransientUpstreamFailureIsRetried(t *testing.T) {
 	}
 	if resp.Choices[0].Message.Content != "ok" {
 		t.Errorf("content = %q", resp.Choices[0].Message.Content)
+	}
+}
+
+// One TCP reset from a CDN killed a forty-minute run: mid-stream resets and
+// truncated bodies never classed as transient, so the retry policy — built
+// for exactly this — never fired.
+func TestAPeerHangupIsTransient(t *testing.T) {
+	for _, err := range []error{
+		fmt.Errorf("read tcp 192.168.1.153:35402->104.18.3.115:443: %w", syscall.ECONNRESET),
+		fmt.Errorf("stream read: %w", io.ErrUnexpectedEOF),
+		fmt.Errorf("%w: stream read: connection reset by peer", ErrProviderUnavailable),
+	} {
+		if !IsTransient(err) {
+			t.Errorf("not retried: %v", err)
+		}
+	}
+	// An abort is not weather: cancellation must never spin retries.
+	if IsTransient(context.Canceled) {
+		t.Error("a canceled context was classed transient")
 	}
 }

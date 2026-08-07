@@ -410,6 +410,13 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		// The server went away mid-stream — a connection reset from a proxy on
+		// a long stream is the most ordinary transient there is, and classed
+		// as a plain error it skipped the retry policy entirely: one TCP reset
+		// from Cloudflare killed a forty-minute run.
+		if ctx.Err() == nil {
+			return ChatResponse{}, fmt.Errorf("%w: stream read: %v", ErrProviderUnavailable, err)
+		}
 		return ChatResponse{}, fmt.Errorf("stream read: %w", err)
 	}
 

@@ -1344,6 +1344,32 @@ func (s *Service) failRun(rs *runState, err error) {
 		}
 		return
 	}
+	// A provider that cannot be reached — retries exhausted — is weather, not
+	// a verdict on the work. Failing here restored the tree: a sustained
+	// OpenRouter hiccup rolled back everything a long run had built, when
+	// waiting out the weather and resuming costs nothing. The guards matter:
+	// an abort also surfaces as a dead connection, and an abort must stay
+	// aborted.
+	if errors.Is(err, provider.ErrProviderUnavailable) && !s.shuttingDown.Load() &&
+		rs.run.Verdict != "ABORTED" && !strings.Contains(err.Error(), "context canceled") {
+		recordSpend(rs, rs.tracker)
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "provider"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.Failure = err.Error()
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{
+			"kind": "provider", "detail": err.Error(),
+		})
+		rs.writer.WriteState()
+		if s.bus != nil {
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "provider", "detail": err.Error()},
+			})
+		}
+		return
+	}
 	// A cancellation during graceful shutdown is a pause, not a failure.
 	// Without this check, stopping the engine marks every in-flight run
 	// FAILED and the work is lost.

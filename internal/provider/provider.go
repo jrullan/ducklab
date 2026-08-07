@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -193,6 +195,12 @@ func IsTransient(err error) bool {
 	// Network errors
 	var netErr interface{ Timeout() bool }
 	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	// A peer that hung up mid-conversation: connection resets and truncated
+	// bodies are proxy weather, not verdicts. Timeout() alone missed both,
+	// so one TCP reset from a CDN was terminal.
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	return false

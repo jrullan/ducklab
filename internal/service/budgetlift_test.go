@@ -12,6 +12,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
@@ -167,5 +168,47 @@ func TestResumeClearsThePausesReason(t *testing.T) {
 	case <-rs.done:
 	case <-time.After(20 * time.Second):
 		t.Fatal("the resumed run never finished")
+	}
+}
+
+// A provider that went away — retries exhausted — is weather, not a verdict:
+// failing restored the tree and a sustained OpenRouter hiccup rolled back
+// everything a long run had built. It now pauses with the work in place,
+// resumable when the weather clears. An abort still aborts: it also surfaces
+// as a dead connection, and it must never be resurrected as a pause.
+func TestAProviderOutagePausesButAnAbortStaysAborted(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(id string) *runState {
+		run := &runlog.Run{
+			ID: id, ProjectID: p.ID, TaskID: "T-001", Stage: "build",
+			Status: "running", StartedAt: "2026-08-07T08:00:00Z",
+		}
+		w, err := runlog.NewWriter(dir, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	}
+
+	rs := mk("r-net")
+	s.failRun(rs, fmt.Errorf("provider chat: %w: stream read: connection reset by peer", provider.ErrProviderUnavailable))
+	if rs.run.Status != "paused" || rs.run.PendingKind != "provider" {
+		t.Errorf("status/pending = %s/%s, want paused/provider", rs.run.Status, rs.run.PendingKind)
+	}
+	if got := runNext(rs.run); len(got) == 0 || got[0] != "resume" {
+		t.Errorf("next = %v, want resume first", got)
+	}
+
+	// The same wire error during an abort keeps the abort.
+	ab := mk("r-abort")
+	ab.run.Verdict = "ABORTED"
+	s.failRun(ab, fmt.Errorf("provider chat: %w: %v", provider.ErrProviderUnavailable, context.Canceled))
+	if ab.run.Status != "failed" {
+		t.Errorf("an aborted run was resurrected as %q", ab.run.Status)
 	}
 }
