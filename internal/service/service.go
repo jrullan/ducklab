@@ -1370,6 +1370,34 @@ func (s *Service) failRun(rs *runState, err error) {
 		}
 		return
 	}
+	// The general rule the budget and provider branches above are cases of:
+	// NO error may discard work automatically. Tokens are money, but the
+	// hours a long run represents are the person's — and a glitch on call 51
+	// used to roll all of it back unasked. Any failure that would restore a
+	// dirty tree pauses instead, work in place: resume re-enters the
+	// strategy over what was built, abort is the one exit that restores. A
+	// run that touched nothing still fails plainly — there is nothing to
+	// lose, and a pause would just be a failure demanding a second click.
+	if rs.run.Verdict != "ABORTED" && !s.shuttingDown.Load() &&
+		!strings.Contains(err.Error(), "context canceled") && runHasUnsavedWork(rs) {
+		recordSpend(rs, rs.tracker)
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "error"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.Failure = err.Error()
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{
+			"kind": "error", "detail": err.Error(),
+		})
+		rs.writer.WriteState()
+		if s.bus != nil {
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "error", "detail": err.Error()},
+			})
+		}
+		return
+	}
 	// A cancellation during graceful shutdown is a pause, not a failure.
 	// Without this check, stopping the engine marks every in-flight run
 	// FAILED and the work is lost.
@@ -2220,6 +2248,24 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 	// would make the transcript show a model's false starts as its reply, and
 	// the contract parser reads that text.
 	cache.onReasoning = publish("reasoning_delta")
+}
+
+// runHasUnsavedWork reports whether failing this run would destroy something:
+// the tree has diverged from the run's own starting snapshot. Measured by
+// re-hashing the tree, not by git-clean — a project's tree is often "dirty"
+// from birth (uncommitted scaffolding), and pre-existing dirt is not this
+// run's work. Same content hashes to the same tree object, so equality means
+// the run changed nothing. Doubt counts as work — pausing over nothing costs
+// a click; discarding hours cannot be undone.
+func runHasUnsavedWork(rs *runState) bool {
+	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.projectPath == "" {
+		return false
+	}
+	now, err := vcs.New(rs.projectPath).SnapshotTree()
+	if err != nil {
+		return true
+	}
+	return now != rs.run.TreeSnapshot
 }
 
 // restoreAfterUnaccepted puts the tree back to the run's start when the run

@@ -201,7 +201,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
           : run.pending_kind === "provider"
             ? "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
-            : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
+            : run.pending_kind === "error"
+              ? "The run stopped on an error — see why above. Its work is intact: resume to continue over it, or abort to discard it."
+              : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
         : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";

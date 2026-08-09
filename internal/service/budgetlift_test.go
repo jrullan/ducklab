@@ -212,3 +212,69 @@ func TestAProviderOutagePausesButAnAbortStaysAborted(t *testing.T) {
 		t.Errorf("an aborted run was resurrected as %q", ab.run.Status)
 	}
 }
+
+// The rule the person set after losing hours twice: NO error discards work
+// automatically. Any failure that would restore a dirty tree pauses instead,
+// work in place; only a run that touched nothing still fails plainly.
+func TestNoErrorDiscardsWorkAutomatically(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := vcs.New(dir)
+	snap, err := git.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A run that built something, then hit an arbitrary error.
+	work := filepath.Join(dir, "progress.py")
+	if err := os.WriteFile(work, []byte("# hours of work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-any", ProjectID: p.ID, TaskID: "T-001", Stage: "build",
+		Status: "running", StartedAt: "2026-08-09T16:17:00Z", TreeSnapshot: snap,
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.failRun(rs, fmt.Errorf("model returned only hidden reasoning: whatever the cause"))
+
+	if run.Status != "paused" || run.PendingKind != "error" {
+		t.Fatalf("status/pending = %s/%s, want paused/error", run.Status, run.PendingKind)
+	}
+	if _, err := os.Stat(work); err != nil {
+		t.Error("the failure discarded the work the rule exists to save")
+	}
+	if got := runNext(run); len(got) == 0 || got[0] != "resume" {
+		t.Errorf("next = %v, want resume first", got)
+	}
+
+	// Abort remains the one exit that restores; here it clears the stage for
+	// the second case.
+	restoreAfterUnaccepted(rs)
+	if _, err := os.Stat(work); !os.IsNotExist(err) {
+		t.Fatal("the restore did not clear the work")
+	}
+
+	// A run that touched nothing fails plainly — a pause would just be a
+	// failure demanding a second click.
+	run2 := &runlog.Run{
+		ID: "r-clean", ProjectID: p.ID, TaskID: "T-002", Stage: "build",
+		Status: "running", StartedAt: "2026-08-09T16:20:00Z", TreeSnapshot: snap,
+	}
+	w2, err := runlog.NewWriter(dir, run2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs2 := &runState{run: run2, writer: w2, runDir: w2.RunDir(), projectPath: dir}
+	s.failRun(rs2, fmt.Errorf("load project config: boom"))
+	if run2.Status != "failed" {
+		t.Errorf("a run with nothing to lose paused anyway: %s/%s", run2.Status, run2.PendingKind)
+	}
+}
