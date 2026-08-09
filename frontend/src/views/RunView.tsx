@@ -15,6 +15,7 @@ import { StatusChip } from "../components/StatusChip";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
+import { routeHref } from "../app/routes";
 import { seatsFromRoster } from "../lib/seats";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
@@ -498,7 +499,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {filedBugs ? (
               <p className="text-sm text-good" data-testid="file-findings-done">
                 filed as {filedBugs.join(", ")} —{" "}
-                <a href="#/board?tab=bugs" className="underline">see the bugs board</a>
+                <a href={routeHref({ name: "board", tab: "bugs" })} className="underline">see the bugs board</a>
               </p>
             ) : (
               <button
