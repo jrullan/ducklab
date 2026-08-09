@@ -518,3 +518,24 @@ func TestAFreshProjectIgnoresCommonJunk(t *testing.T) {
 		}
 	}
 }
+
+// The subtler wipe: every section id survives while the bodies become
+// placeholders — invisible to the id check, caught by the council's own
+// reviewer, and landed with no warning of its own. Shrinkage is the tell.
+func TestSectionBodySizeSeesThroughPlaceholders(t *testing.T) {
+	full := []artifact.Section{
+		{ID: "SPEC-001", Title: "Domain model", Body: strings.Repeat("real content ", 100)},
+		{ID: "SPEC-002", Title: "Profiles", Body: strings.Repeat("more real content ", 100)},
+	}
+	gutted := []artifact.Section{
+		{ID: "SPEC-001", Title: "Domain model", Body: "[Content remains unchanged]"},
+		{ID: "SPEC-002", Title: "Profiles", Body: "[Content remains unchanged]"},
+	}
+	if ids := missingSectionIDs(full, gutted); len(ids) != 0 {
+		t.Fatalf("the id check sees removals where there are none: %v", ids)
+	}
+	cur, prop := sectionsBodySize(full), sectionsBodySize(gutted)
+	if !(cur > 500 && prop*100 < cur*60) {
+		t.Errorf("the shrinkage guard would not fire: %d -> %d", cur, prop)
+	}
+}

@@ -186,8 +186,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // remembering". Filing them as bugs puts them in the loop instead of in a
   // transcript a future testing phase re-discovers at full price.
   const lastVerdict = finalVerdict(turns);
-  const fileable = lastVerdict && lastVerdict.findings.length > 0 &&
+  // Only CODE runs file findings as bugs: a bug is a claim about the
+  // software, and a stage reviewer's findings are about a draft — their
+  // destiny is a revision (request changes), not the bug board.
+  const codeRun = run.stage === "build" || run.stage === "test";
+  const fileable = codeRun && lastVerdict && lastVerdict.findings.length > 0 &&
     (run.status === "paused" || run.status === "done");
+  // A stage proposal whose reviewer asked for changes, waiting at its gate:
+  // the objections belong beside the decision, pointing at the action made
+  // for them.
+  const stageDissent = !codeRun && run.status === "paused" && run.pending_kind === "gate" &&
+    lastVerdict && lastVerdict.verdict.toLowerCase().replace(/_/g, "-") !== "approve"
+    ? lastVerdict
+    : null;
   // Already filed, from the RECORD — local state only remembers this mount's
   // clicks, and a filed run re-visited offered to file again.
   const recordedFiling = findingsFiled(events);
@@ -523,6 +534,24 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {stageError && (
             <p className="mt-1 text-xs text-critical" data-testid="next-stage-error">{stageError}</p>
           )}
+        </section>
+      )}
+      {stageDissent && (
+        <section data-testid="stage-dissent" className="m-2 rounded-card border border-serious p-3">
+          <StatusChip role="serious" label={`the reviewer asked for changes — ${stageDissent.findings.length} finding${stageDissent.findings.length === 1 ? "" : "s"}`} />
+          <ul className="mt-2 space-y-1 text-sm" data-testid="stage-dissent-list">
+            {stageDissent.findings.map((f, i) => (
+              <li key={i} className="text-ink-secondary">
+                {f.severity && <span className="mr-1 text-xs uppercase text-ink-muted">[{f.severity}]</span>}
+                {f.issue}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-sm text-ink">
+            These are revision notes on the draft, not bugs. If they should be addressed,
+            send the proposal back with <strong>Request changes</strong> below — the note
+            carries them into the revision run.
+          </p>
         </section>
       )}
       {fileable && (

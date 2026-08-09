@@ -269,6 +269,24 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				"ids": removed, "of": len(current.Sections),
 			})
 		}
+		// The subtler gutting: every section id survives while the bodies are
+		// replaced with placeholders — "[Content remains unchanged]" — which
+		// the id check cannot see. A council's own reviewer caught a draft
+		// doing exactly this, flagged it critical, and the proposal landed
+		// with no warning of its own. Content shrinkage is the tell.
+		if cur, prop := sectionsBodySize(current.Sections), sectionsBodySize(result.Proposed.Sections); cur > 500 && prop*100 < cur*60 {
+			gut := fmt.Sprintf(
+				"this proposal's content is %d%% smaller than the approved document (%d → %d chars) — placeholder bodies gut a document while keeping its section ids; accept only if the shrinkage is intended",
+				100-(prop*100/cur), cur, prop)
+			if rs.run.Warning != "" {
+				rs.run.Warning += " · " + gut
+			} else {
+				rs.run.Warning = gut
+			}
+			rs.writer.AppendEvent("sections_gutted", map[string]interface{}{
+				"chars_before": cur, "chars_after": prop,
+			})
+		}
 	}
 	// No executable gate exists for a document, so the verdict is UNVERIFIED
 	// and the human gate is the only gate (P3).
@@ -286,6 +304,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"kind": "gate", "verdict": "UNVERIFIED", "artifact": string(result.Kind),
 	})
 	rs.writer.WriteState()
+}
+
+// sectionsBodySize totals the text a document actually carries.
+func sectionsBodySize(secs []artifact.Section) int {
+	total := 0
+	for _, sec := range secs {
+		total += len(sec.Body) + len(sec.Title)
+		for _, ch := range sec.Children {
+			total += len(ch.Body) + len(ch.Title)
+		}
+	}
+	return total
 }
 
 // missingSectionIDs lists the ids present in current and absent from
