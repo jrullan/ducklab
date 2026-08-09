@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTurns, anonymiseTurns, buildTimeline, toolFamily,
-  buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, orderDiffFiles, touchesTests, isTestPath,
+  buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, findingsFiled, orderDiffFiles, touchesTests, isTestPath,
 } from "./runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -465,5 +465,18 @@ describe("a pause's reason travels with it", () => {
     ])!;
     expect(p.kind).toBe("error");
     expect(p.detail).toContain("404");
+  });
+});
+
+// The record, not the mount, remembers a filing: a filed run re-visited
+// offered to file again, saved only by the engine's refusal.
+describe("findingsFiled", () => {
+  it("reads the filed bug ids from the record", () => {
+    expect(findingsFiled([
+      ev("findings_filed", 9, { bugs: ["B-003"], count: 1 }),
+    ])).toEqual(["B-003"]);
+  });
+  it("answers null when nothing was filed", () => {
+    expect(findingsFiled([ev("run_end", 1, {})])).toBeNull();
   });
 });

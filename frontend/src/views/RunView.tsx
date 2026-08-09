@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -183,6 +183,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const lastVerdict = finalVerdict(turns);
   const fileable = lastVerdict && lastVerdict.findings.length > 0 &&
     (run.status === "paused" || run.status === "done");
+  // Already filed, from the RECORD — local state only remembers this mount's
+  // clicks, and a filed run re-visited offered to file again.
+  const recordedFiling = findingsFiled(events);
+  const filed = filedBugs ?? recordedFiling;
   const timeline = buildTimeline(events);
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
@@ -496,9 +500,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             ))}
           </ul>
           <div className="mt-2">
-            {filedBugs ? (
+            {filed ? (
               <p className="text-sm text-good" data-testid="file-findings-done">
-                filed as {filedBugs.join(", ")} —{" "}
+                filed as {filed.join(", ")} —{" "}
                 <a href={routeHref({ name: "board", tab: "bugs" })} className="underline">see the bugs board</a>
               </p>
             ) : (

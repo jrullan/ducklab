@@ -387,6 +387,21 @@ export function reviewerDissent(
   return { verdict: last.verdict!, findings: notes.length, notes };
 }
 
+/** The bug ids this run's findings were already filed under, from the
+ * record. The button knew only about clicks made in this mount, so a filed
+ * run re-visited offered to file again — and the engine's refusal, not the
+ * record, was what saved the person from believing it. */
+export function findingsFiled(events: readonly DucklabEvent[]): string[] | null {
+  for (const e of events) {
+    if (e.type === "findings_filed") {
+      const bugs = e.data?.bugs;
+      if (Array.isArray(bugs)) return bugs.map((b) => String(b));
+      return [];
+    }
+  }
+  return null;
+}
+
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;
