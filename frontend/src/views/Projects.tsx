@@ -332,56 +332,47 @@ function AppChip({
   const [preflight, setPreflight] = useState("");
   const [requires, setRequires] = useState("");
   if (!status) return null;
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    placeholder: string,
+    testid: string,
+    mono = true,
+  ) => (
+    <label className="flex items-center gap-2 text-xs text-ink-muted">
+      <span className="w-16 shrink-0">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        placeholder={placeholder}
+        data-testid={testid}
+        className={`w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs ${mono ? "font-mono" : ""}`}
+      />
+    </label>
+  );
   const editor = editing && (
-    <span className="flex items-center gap-1" data-testid="app-editor">
-      <input
-        value={command}
-        onChange={(e) => setCommand(e.target.value)}
-        placeholder="python -m app  (starts the app)"
-        data-testid="app-command"
-        className="w-44 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
-      />
-      <input
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="http://localhost:8000"
-        data-testid="app-url"
-        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
-      />
-      <input
-        value={health}
-        onChange={(e) => setHealth(e.target.value)}
-        placeholder="health URL (optional)"
-        data-testid="app-health"
-        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
-      />
-      <input
-        value={preflight}
-        onChange={(e) => setPreflight(e.target.value)}
-        placeholder="preflight cmd (optional)"
-        data-testid="app-preflight"
-        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
-      />
-      <input
-        value={requires}
-        onChange={(e) => setRequires(e.target.value)}
-        placeholder="requires: a; b (optional)"
-        data-testid="app-requires-input"
-        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
-      />
-      <button
-        type="button"
-        disabled={command.trim() === ""}
-        onClick={() => void onSet(command.trim(), url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
-        data-testid="app-save"
-        className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
-      >
-        Set
-      </button>
-      <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
-        cancel
-      </button>
-    </span>
+    <div className="mt-1 w-full max-w-xl space-y-1" data-testid="app-editor">
+      {field("command", command, setCommand, "python app.py — starts the app", "app-command")}
+      {field("url", url, setUrl, "http://localhost:8000", "app-url")}
+      {field("health", health, setHealth, "http://localhost:8000/health (optional)", "app-health")}
+      {field("preflight", preflight, setPreflight, "pg_isready -p 5432 — checked before every launch (optional)", "app-preflight")}
+      {field("requires", requires, setRequires, "PostgreSQL on :5432; db created — human checklist, ; separated (optional)", "app-requires-input", false)}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={command.trim() === ""}
+          onClick={() => void onSet(command.trim(), url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
+          data-testid="app-save"
+          className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+        >
+          Set
+        </button>
+        <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
+          cancel
+        </button>
+      </div>
+    </div>
   );
   return (
     <span className="flex items-center gap-1 text-xs text-ink-muted" data-testid="app-chip">
