@@ -54,6 +54,8 @@ export interface AppStatus {
   pid?: number;
   started_at?: string;
   health?: string;
+  preflight?: string;
+  requires?: string;
   exit_error?: string;
   log_tail?: string;
 }

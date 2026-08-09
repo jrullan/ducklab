@@ -294,6 +294,12 @@
           "health": {
             "type": "string"
           },
+          "preflight": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string"
+          },
           "url": {
             "type": "string"
           }
@@ -301,6 +307,8 @@
         "required": [
           "command",
           "health",
+          "preflight",
+          "requires",
           "url"
         ],
         "type": "object"
@@ -1167,6 +1175,12 @@
           },
           "pid": {
             "type": "integer"
+          },
+          "preflight": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string"
           },
           "running": {
             "type": "boolean"

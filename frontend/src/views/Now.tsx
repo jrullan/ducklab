@@ -344,6 +344,16 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                   {app.running ? "Stop" : "Launch"}
                 </button>
               </div>
+              {!app.running && app.requires && (
+                <div className="mt-1" data-testid="app-requires">
+                  <p className="text-xs text-ink-muted">the environment must provide:</p>
+                  <ul className="ml-4 list-disc text-xs text-ink-secondary">
+                    {app.requires.split(";").map((r) => r.trim()).filter(Boolean).map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {app.exit_error && (
                 <div className="mt-1">
                   <p className="text-xs text-critical" data-testid="app-exit-error">exited: {app.exit_error}</p>

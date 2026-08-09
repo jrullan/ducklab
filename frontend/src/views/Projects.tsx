@@ -248,10 +248,11 @@ export function Projects({
                     {p.missing && <StatusChip role="critical" label="folder is gone" />}
                     <AppChip
                       status={apps[p.id]}
-                      onSet={async (command, url, health) => {
+                      onSet={async (command, url, health, preflight, requires) => {
                         try {
                           await client.projectUpdate(p.id, {
                             "run.command": command, "run.url": url, "run.health": health,
+                            "run.preflight": preflight, "run.requires": requires,
                           });
                           const a = await client.appStatus(p.id);
                           setApps((cur) => ({ ...cur, [p.id]: a }));
@@ -322,12 +323,14 @@ function AppChip({
   onSet,
 }: {
   status?: AppStatus;
-  onSet: (command: string, url: string, health: string) => Promise<void>;
+  onSet: (command: string, url: string, health: string, preflight: string, requires: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [command, setCommand] = useState("");
   const [url, setUrl] = useState("");
   const [health, setHealth] = useState("");
+  const [preflight, setPreflight] = useState("");
+  const [requires, setRequires] = useState("");
   if (!status) return null;
   const editor = editing && (
     <span className="flex items-center gap-1" data-testid="app-editor">
@@ -352,10 +355,24 @@ function AppChip({
         data-testid="app-health"
         className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
       />
+      <input
+        value={preflight}
+        onChange={(e) => setPreflight(e.target.value)}
+        placeholder="preflight cmd (optional)"
+        data-testid="app-preflight"
+        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+      />
+      <input
+        value={requires}
+        onChange={(e) => setRequires(e.target.value)}
+        placeholder="requires: a; b (optional)"
+        data-testid="app-requires-input"
+        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
+      />
       <button
         type="button"
         disabled={command.trim() === ""}
-        onClick={() => void onSet(command.trim(), url.trim(), health.trim()).then(() => setEditing(false))}
+        onClick={() => void onSet(command.trim(), url.trim(), health.trim(), preflight.trim(), requires.trim()).then(() => setEditing(false))}
         data-testid="app-save"
         className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
       >
@@ -380,6 +397,8 @@ function AppChip({
             setCommand(status.command ?? "");
             setUrl(status.url ?? "");
             setHealth("");
+            setPreflight(status.preflight ?? "");
+            setRequires(status.requires ?? "");
             setEditing(true);
           }}
           data-testid="app-edit"

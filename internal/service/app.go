@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -43,6 +44,10 @@ type AppStatus struct {
 	// configured or the app is not running. A process alive and a service
 	// answering are different claims, and only the second one is the app.
 	Health string `json:"health,omitempty"`
+	// Preflight and Requires mirror the config, so the card can say what the
+	// environment must provide before the first launch.
+	Preflight string `json:"preflight,omitempty"`
+	Requires  string `json:"requires,omitempty"`
 	// ExitError is how the last managed process ended, when it ended badly —
 	// the first thing a person needs when Launch appears to do nothing.
 	ExitError string `json:"exit_error,omitempty"`
@@ -63,6 +68,22 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	}
 	if cfg.Run.Command == "" {
 		return nil, fmt.Errorf("not started — this project has no run.command; set how the app starts in Projects (project set run.command \"…\")")
+	}
+
+	// The environment check, before the process: a failed preflight names
+	// what is missing in its own words, where a failed launch is a crash to
+	// decode from a log tail.
+	if cfg.Run.Preflight != "" {
+		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		out, perr := xplat.ShellContext(pctx, entry.Path, nil, cfg.Run.Preflight).CombinedOutput()
+		if perr != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg == "" {
+				msg = perr.Error()
+			}
+			return nil, fmt.Errorf("not started — the environment is not ready (preflight %q failed): %s", cfg.Run.Preflight, firstN(msg, 400))
+		}
 	}
 
 	s.appMu.Lock()
@@ -143,6 +164,8 @@ func (s *Service) appStatusLocked(projectID string, cfg *config.Project) *AppSta
 		Configured: cfg.Run.Command != "",
 		Command:    cfg.Run.Command,
 		URL:        cfg.Run.URL,
+		Preflight:  cfg.Run.Preflight,
+		Requires:   cfg.Run.Requires,
 	}
 	st := s.apps[projectID]
 	if st == nil {

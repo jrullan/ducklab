@@ -304,6 +304,18 @@ type RunApp struct {
 	// actually answering — a process alive and a service alive are different
 	// claims.
 	Health string `toml:"health" json:"health"`
+	// Preflight is a command that checks the ENVIRONMENT is ready — the
+	// database reachable, the port free — run before every start. Exit 0
+	// means go; anything else refuses the launch with the command's own
+	// output, so "the app won't start" arrives as "postgres is not running"
+	// instead of a crash to decode. The environment is the person's; this is
+	// how the engine makes its edge visible instead of discoverable.
+	Preflight string `toml:"preflight" json:"preflight"`
+	// Requires is the human checklist for what the engine cannot check —
+	// "PostgreSQL running on :55433; database exercise_tracker created" —
+	// shown on the app card before the first launch. Semicolons separate
+	// items.
+	Requires string `toml:"requires" json:"requires"`
 }
 
 // Error is a configuration error.

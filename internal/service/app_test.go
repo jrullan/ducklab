@@ -124,3 +124,59 @@ func TestACrashedAppReportsItsExit(t *testing.T) {
 		t.Errorf("log tail missing the app's last words: %q", st.LogTail)
 	}
 }
+
+// The environment check runs before the process: a failed preflight names
+// what is missing in its own words — "postgres is not running" — where a
+// failed launch is a crash to decode from a log tail. The environment is the
+// person's; this is the engine making its edge visible.
+func TestPreflightGuardsTheLaunch(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"run.command":   "sleep 30",
+		"run.preflight": "echo postgres is not running on :55433 && false",
+		"run.requires":  "PostgreSQL on :55433; database exercise_tracker created",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.AppStart(context.Background(), p.ID)
+	if err == nil {
+		t.Fatal("the launch proceeded over a failed preflight")
+	}
+	for _, want := range []string{"not started", "environment is not ready", "postgres is not running"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+
+	// The checklist rides the status for the card to show.
+	st, err := s.AppStatus(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(st.Requires, "PostgreSQL") {
+		t.Errorf("status does not carry the requires checklist: %+v", st)
+	}
+
+	// A passing preflight lets the launch through.
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"run.preflight": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := s.AppStart(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !started.Running {
+		t.Fatal("a green preflight did not start the app")
+	}
+	if err := s.AppStop(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+}

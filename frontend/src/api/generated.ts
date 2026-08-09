@@ -88,6 +88,8 @@ export interface ConfigProject {
 export interface ConfigRunApp {
   command?: string;
   health?: string;
+  preflight?: string;
+  requires?: string;
   url?: string;
 }
 
@@ -344,6 +346,8 @@ export interface ServiceAppStatus {
   health?: string;
   log_tail?: string;
   pid?: number;
+  preflight?: string;
+  requires?: string;
   running?: boolean;
   started_at?: string;
   url?: string;
