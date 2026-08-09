@@ -42,6 +42,14 @@ export function WaitingCard({
           </span>
         )}
       </div>
+      {/* The reason the run stopped, where the decision is offered. A card
+          saying "waiting — error" with the error a click away taught the
+          person the card could not be trusted to say why. */}
+      {run.failure && (
+        <p className="mt-1 break-words text-xs text-critical" data-testid="waiting-reason">
+          {run.failure}
+        </p>
+      )}
       <div className="mt-2 flex items-center gap-2">
         {/* The evidence — diff, transcript, gate output — is one click away on
             the label. AC-34 holds: nothing optimistic, the commit shows only

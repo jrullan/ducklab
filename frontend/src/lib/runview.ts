@@ -107,6 +107,10 @@ export interface PendingHuman {
   question?: string;
   questionId?: string;
   verdict?: string;
+  /** Why the run stopped, for pauses that carry a reason (budget, provider,
+   * error). "waiting for you — error" without the error sent the person to
+   * the record to learn what the event already said. */
+  detail?: string;
 }
 
 /**
@@ -388,6 +392,7 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
     question: d.question ? String(d.question) : undefined,
     questionId: d.question_id ? String(d.question_id) : undefined,
     verdict: d.verdict ? String(d.verdict) : undefined,
+    detail: d.detail ? String(d.detail) : undefined,
   };
 }
 

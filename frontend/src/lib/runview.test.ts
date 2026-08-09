@@ -454,3 +454,16 @@ describe("reviewerDissent", () => {
     expect(reviewerDissent(turns)).toBeNull();
   });
 });
+
+// "waiting for you — error" without the error: the reason was on the
+// human_needed event the whole time, and the person went to the record to
+// learn what the banner already knew.
+describe("a pause's reason travels with it", () => {
+  it("carries the detail of an error pause", () => {
+    const p = buildPending([
+      ev("human_needed", 1, { kind: "error", detail: "provider chat: 404: model does not exist" }),
+    ])!;
+    expect(p.kind).toBe("error");
+    expect(p.detail).toContain("404");
+  });
+});

@@ -578,6 +578,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       {pending && (
         <section className="m-2 rounded-card border border-hairline p-3" data-testid="pending-human">
           <StatusChip role="serious" label={`waiting for you — ${pending.kind}`} />
+          {pending.detail && !pending.question && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink" data-testid="pending-detail">
+              {pending.detail}
+            </p>
+          )}
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
