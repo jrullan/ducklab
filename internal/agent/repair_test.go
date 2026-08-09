@@ -250,9 +250,12 @@ func TestStripThinkingRemovesTheBlockNotTheAnswer(t *testing.T) {
 	}
 }
 
-// Tokens spent with nothing returned has a specific cause and a specific fix;
-// "empty response" names neither.
-func TestThoughtOnlyResponseIsDiagnosed(t *testing.T) {
+// Tokens spent with nothing returned has TWO causes, and they earn different
+// fixes: a handful of reasoning tokens is a stochastic glitch — retried in
+// place, because one bad sample among fifty good calls used to kill the whole
+// run — and only when it persists does the run fail, blaming the endpoint
+// rather than max_tokens, which was never the problem at 72 tokens.
+func TestThoughtOnlyResponseIsRetriedThenDiagnosed(t *testing.T) {
 	p := &countingProvider{fallback: ""}
 	p.replies = []string{""}
 	loop := testLoop(p, 2)
@@ -265,10 +268,17 @@ func TestThoughtOnlyResponseIsDiagnosed(t *testing.T) {
 	if !errors.Is(err, ErrThoughtOnly) {
 		t.Fatalf("err = %v; want it identified as a thought-only response", err)
 	}
-	for _, want := range []string{"hidden reasoning", "max_tokens"} {
+	for _, want := range []string{"hidden reasoning", "times in a row", "disable thinking"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error does not say what to do (%q): %v", want, err)
+			t.Errorf("error does not say what happened (%q): %v", want, err)
 		}
+	}
+	// The glitch was retried, not taken at its first word.
+	p.mu.Lock()
+	calls := len(p.requests)
+	p.mu.Unlock()
+	if calls != 3 {
+		t.Errorf("the model was called %d times, want 3 — one glitch must not be terminal", calls)
 	}
 }
 

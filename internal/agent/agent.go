@@ -201,18 +201,28 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			applyThinkingSuppression(&req, loop.Duckling.Caps)
 		}
 
-		// Make the call
-		start := time.Now()
-		resp, err := chatMaybeStreaming(ctx, loop, turn, req)
-		_ = time.Since(start) // latency recorded in llm.jsonl by the orchestrator
+		// Make the call. Thought-only replies are retried IN PLACE: a model
+		// that returns seventy tokens of hidden reasoning and no answer has
+		// glitched, not run out of room — and one bad sample among fifty good
+		// calls used to kill the whole run, with the killing call absent from
+		// llm.jsonl because the guard returned before the record was written.
+		const thoughtOnlyAttempts = 3
+		var resp provider.ChatResponse
+		var err error
+		var start time.Time
+		var calc provider.CostCalculator
+		var cost float64
+		for attempt := 1; ; attempt++ {
+			start = time.Now()
+			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
 
-		if err != nil {
-			if provider.IsTransient(err) {
+			if err != nil && provider.IsTransient(err) {
 				// Retry with backoff
 				retryPolicy := provider.DefaultRetryPolicy()
 				err = provider.Retry(ctx, retryPolicy, func() error {
-					resp, err = loop.Provider.Chat(ctx, req)
-					return err
+					var rerr error
+					resp, rerr = loop.Provider.Chat(ctx, req)
+					return rerr
 				})
 			}
 			if err != nil {
@@ -230,56 +240,88 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 						Request:      requestMap(req),
 						Response:     map[string]interface{}{"error": err.Error()},
 						LatencyMs:    time.Since(start).Milliseconds(),
-						Attempt:      1,
+						Attempt:      attempt,
 						FinishReason: "error",
 					})
 				}
 				return outcome, fmt.Errorf("provider chat: %w", err)
 			}
+
+			// Record usage PER ATTEMPT: a glitched reply still billed its
+			// reasoning tokens, and a budget that ignores them lies.
+			calc = provider.CostCalculator{
+				InputPerMTok:  loop.Duckling.Cost.InputPerMTok,
+				OutputPerMTok: loop.Duckling.Cost.OutputPerMTok,
+			}
+			cost = calc.Cost(resp.Usage)
+			loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+			outcome.TokensIn += resp.Usage.PromptTokens
+			outcome.TokensOut += resp.Usage.CompletionTokens
+			outcome.CostUSD += cost
+
+			if len(resp.Choices) == 0 {
+				return outcome, fmt.Errorf("no response choices")
+			}
+			c := &resp.Choices[0]
+
+			// Separate an inline reasoning block before anything reads the
+			// content. Doing it here means every downstream path — contract
+			// parsing, tool extraction, the transcript — sees the answer and
+			// not the thinking.
+			//
+			// The thinking is kept rather than deleted: it was paid for, and
+			// the run view has a place to show it. Discarding it here is why a
+			// model that inlines its reasoning had an empty thinking section
+			// while its deliberation filled the answer lane.
+			if answer, thought := splitThinking(c.Message.Content); thought != "" {
+				c.Message.Content = answer
+				c.Message.Reasoning = joinReasoning(c.Message.Reasoning, thought)
+			} else {
+				c.Message.Content = answer
+			}
+
+			// A response with tokens spent and nothing to show. Two different
+			// faults share this shape: a reply budget genuinely consumed by
+			// thinking (thousands of tokens — retrying buys nothing), and a
+			// stochastic empty reply (a handful of tokens — retrying is the
+			// whole fix). Each gets its own advice, and neither escapes the
+			// record.
+			if c.Message.Content == "" && len(c.Message.ToolCalls) == 0 &&
+				resp.Usage.CompletionTokens > 0 {
+				if loop.RunWriter != nil {
+					loop.RunWriter.AppendLLM(&LLMCallRecord{
+						Duckling:     string(loop.Duckling.ID),
+						Provider:     string(loop.Duckling.Provider),
+						Model:        loop.Duckling.Model,
+						Role:         string(turn.Role),
+						Request:      requestMap(req),
+						Response:     map[string]interface{}{"error": "thought-only reply: no content, no tool calls", "usage": resp.Usage},
+						LatencyMs:    time.Since(start).Milliseconds(),
+						Attempt:      attempt,
+						FinishReason: "thought_only",
+					})
+				}
+				exhausted := 2000
+				if req.MaxTokens != nil {
+					exhausted = *req.MaxTokens * 9 / 10
+				}
+				if resp.Usage.CompletionTokens >= exhausted {
+					return outcome, fmt.Errorf("%w: %s spent %d tokens on hidden reasoning and returned no answer; "+
+						"raise max_tokens for this duckling, or disable thinking at the endpoint",
+						ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens)
+				}
+				if attempt < thoughtOnlyAttempts {
+					continue
+				}
+				return outcome, fmt.Errorf("%w: %s returned an empty answer with only %d hidden reasoning tokens, "+
+					"%d times in a row — the endpoint is misbehaving; relaunch the run, or disable thinking for this duckling",
+					ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens, attempt)
+			}
+			break
 		}
 
-		// Record usage
-		calc := provider.CostCalculator{
-			InputPerMTok:  loop.Duckling.Cost.InputPerMTok,
-			OutputPerMTok: loop.Duckling.Cost.OutputPerMTok,
-		}
-		cost := calc.Cost(resp.Usage)
-		loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
-		outcome.TokensIn += resp.Usage.PromptTokens
-		outcome.TokensOut += resp.Usage.CompletionTokens
-		outcome.CostUSD += cost
-
-		// Check finish reason
-		if len(resp.Choices) == 0 {
-			return outcome, fmt.Errorf("no response choices")
-		}
 		choice := resp.Choices[0]
 		finishReason := choice.FinishReason
-
-		// Separate an inline reasoning block before anything reads the content.
-		// Doing it here means every downstream path — contract parsing, tool
-		// extraction, the transcript — sees the answer and not the thinking.
-		//
-		// The thinking is kept rather than deleted: it was paid for, and the run
-		// view has a place to show it. Discarding it here is why a model that
-		// inlines its reasoning had an empty thinking section while its
-		// deliberation filled the answer lane.
-		if answer, thought := splitThinking(choice.Message.Content); thought != "" {
-			choice.Message.Content = answer
-			choice.Message.Reasoning = joinReasoning(choice.Message.Reasoning, thought)
-		} else {
-			choice.Message.Content = answer
-		}
-
-		// A response with tokens spent and nothing to show is a model that
-		// thought until its budget ran out. Saying so beats "empty response",
-		// which sends the reader hunting for a transport fault.
-		if choice.Message.Content == "" && len(choice.Message.ToolCalls) == 0 &&
-			resp.Usage.CompletionTokens > 0 {
-			return outcome, fmt.Errorf("%w: %s spent %d tokens on hidden reasoning and returned no answer; "+
-				"raise max_tokens for this duckling, or disable thinking at the endpoint",
-				ErrThoughtOnly, loop.Duckling.ID, resp.Usage.CompletionTokens)
-		}
 
 		// Log the LLM call
 		if loop.RunWriter != nil {
