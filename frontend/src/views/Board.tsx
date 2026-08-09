@@ -692,18 +692,13 @@ function TaskRunner({
             : what === "test"
               // From the TDD block, the test phase's own config; from the
               // secondary button, the seat picked in the plain launcher.
-              ? await client.testStart(
-                  projectId,
-                  task.id,
-                  tdd ? "" : (chosen[0] ?? ""),
-                  tdd
-                    ? {
-                        thenBuild: false,
-                        testMode: tdd.test.mode,
-                        testDucklings: tdd.test.ducklings.filter(Boolean),
-                      }
-                    : undefined,
-                )
+              ? await (tdd
+                  ? client.testStart(projectId, task.id, "", {
+                      thenBuild: false,
+                      testMode: tdd.test.mode,
+                      testDucklings: tdd.test.ducklings.filter(Boolean),
+                    })
+                  : client.testStart(projectId, task.id, chosen[0] ?? ""))
               : await client.reviewStart(projectId, task.id);
       setStarted(run.id);
       // The card moves NOW: starting a run puts the task in_progress on the
