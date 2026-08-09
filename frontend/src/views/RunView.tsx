@@ -167,12 +167,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const timeline = buildTimeline(events);
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
-  // The live figures while the run is going, the recorded ones once it is not.
-  const budget = live ?? run.budget;
+  // The live figures while the run is GOING, the recorded ones once it is
+  // not — by status, not by which happens to exist. The last streamed budget
+  // event can predate the final turn's accounting by a moment, and a paused
+  // run kept wearing that stale frame over an exact record: the meter said 3
+  // turns while state.json said 4, and the person audited the arithmetic.
+  const runIsLive = run.status === "running" || run.status === "queued";
+  const budget = runIsLive ? (live ?? run.budget) : (run.budget ?? live);
   // Drawn against the ceiling this run actually got. These were hardcoded, so a
   // run started with a raised limit showed a bar that looked full when it had
   // used a quarter of its budget.
-  const limit = live?.limit ??
+  const limit = (runIsLive ? live?.limit : run.budget?.limit ?? live?.limit) ??
     run.budget?.limit ?? { tokens: 400000, usd: 2, turns: 24, wallclock_s: 3600 };
 
   // A run is still working while it runs or waits its turn, and while it is

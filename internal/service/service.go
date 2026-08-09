@@ -1188,6 +1188,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// zero tokens and zero cost, and "measurable, or it didn't happen" (P9)
 	// becomes a slogan.
 	recordSpend(rs, tracker)
+	// One last frame for anyone watching live: the streamed budget events can
+	// predate the final turn's accounting, and a run that pauses right after
+	// left the meter a turn behind its own record.
+	s.publishSpend(rs, tracker)
 	if dispatchErr != nil {
 		// A pause is not a failure: the run is waiting for a person, and
 		// waiting indefinitely is correct behaviour (01 §7.1).
@@ -1327,6 +1331,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	// or abort and get the restore.
 	if errors.Is(err, agent.ErrBudgetExceeded) && !s.shuttingDown.Load() {
 		recordSpend(rs, rs.tracker)
+		s.publishSpend(rs, rs.tracker)
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "budget"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -1353,6 +1358,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	if errors.Is(err, provider.ErrProviderUnavailable) && !s.shuttingDown.Load() &&
 		rs.run.Verdict != "ABORTED" && !strings.Contains(err.Error(), "context canceled") {
 		recordSpend(rs, rs.tracker)
+		s.publishSpend(rs, rs.tracker)
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "provider"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -1381,6 +1387,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	if rs.run.Verdict != "ABORTED" && !s.shuttingDown.Load() &&
 		!strings.Contains(err.Error(), "context canceled") && runHasUnsavedWork(rs) {
 		recordSpend(rs, rs.tracker)
+		s.publishSpend(rs, rs.tracker)
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "error"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)

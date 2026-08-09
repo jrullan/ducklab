@@ -158,3 +158,52 @@ describe("a run view opened mid-run", () => {
     });
   });
 });
+
+// The last streamed budget frame can predate the final turn's accounting by a
+// moment, and a paused run kept wearing that stale frame over an exact
+// record: the meter said 3 turns while state.json said 4, and the person
+// audited the arithmetic looking for the missing turn. Once a run stops
+// running, the record is the truth.
+describe("a run that stopped running", () => {
+  const pausedRun = {
+    id: "r-done", project_id: "p", stage: "build", mode: "pair",
+    status: "paused", pending_kind: "gate", verdict: "PASSED",
+    started_at: "2026-08-09T17:35:16Z",
+    roster: { implementer: "deepseekv4pro", reviewer: "luna" },
+    budget: {
+      usd: 0.1, tokens: 1400000, turns: 4, wallclock_s: 700,
+      limit: { usd: 5, tokens: 3000000, turns: 24, wallclock_s: 1800 },
+    },
+  } as unknown as Run;
+
+  const client = {
+    run: vi.fn(() => Promise.resolve({ run: pausedRun, events: [] })),
+    runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
+    runVerify: vi.fn(() => Promise.resolve("")),
+    runCandidates: vi.fn(() => Promise.resolve([])),
+    runLLM: vi.fn(() => Promise.resolve([])),
+    ducklings: vi.fn(() => Promise.resolve([])),
+    report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+    modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    tasks: vi.fn(() => Promise.resolve([])),
+  } as unknown as EngineClient;
+
+  it("prefers the record over a stale live frame", async () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    // The stale frame the stream left behind: a turn short of the record.
+    useRuns.getState().applyEvent({
+      type: "budget", run_id: "r-done", project_id: "p",
+      data: {
+        usd: 0.09, tokens: 1300000, turns: 3, wallclock_s: 650,
+        limit: { usd: 5, tokens: 3000000, turns: 24, wallclock_s: 1800 },
+        ducklings: {},
+      },
+    } as never);
+    render(<RunView runId="r-done" client={client} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    await waitFor(() => {
+      const meters = screen.getAllByTestId("budget-meter").map((m) => m.textContent).join(" ");
+      expect(meters).toContain("4 / 24");
+    });
+  });
+});
