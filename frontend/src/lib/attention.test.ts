@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { interruptions } from "./attention";
+import { interruptions, quack } from "./attention";
 import type { Run } from "../api/client";
 
 const run = (over: Partial<Run>): Run =>
@@ -66,5 +66,16 @@ describe("what merits interrupting the person", () => {
       "r-9": run({ id: "r-9", task_id: "", stage: "triage", status: "paused", pending_kind: "gate" }),
     };
     expect(interruptions(before, after)[0]!.title).toContain("triage");
+  });
+});
+
+// The quack must be silenceable and must never throw where audio does not
+// exist — jsdom has no AudioContext, which is exactly the second case.
+describe("quack", () => {
+  it("survives a world with no audio and respects the off switch", () => {
+    localStorage.setItem("ducklab.quack", "off");
+    expect(() => quack()).not.toThrow();
+    localStorage.removeItem("ducklab.quack");
+    expect(() => quack()).not.toThrow();
   });
 });

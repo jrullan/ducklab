@@ -70,9 +70,59 @@ export function interruptions(
 
 const byName = () => window.wails?.Call?.ByName;
 
+// One shared context: browsers cap how many may exist, and a quack per pause
+// would exhaust the allowance in an afternoon of work.
+let audioCtx: AudioContext | null = null;
+
+/** The quack. Synthesized — two short falling sawtooth bursts through a
+ * lowpass is recognisably a duck — so no binary asset rides the bundle.
+ *
+ * Runs take minutes and run unattended; the person goes to do something else,
+ * and an OS notification on another workspace is a card nobody saw. Sound is
+ * the one channel that crosses workspaces. Off switch in Settings
+ * (ducklab.quack = "off"), because a sound that cannot be silenced teaches
+ * the person to mute the whole machine. */
+export function quack(): void {
+  try {
+    if (localStorage.getItem("ducklab.quack") === "off") return;
+    const AC = window.AudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx ?? new AC();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+    const t0 = audioCtx.currentTime + 0.01;
+    const burst = (start: number, dur: number, f0: number, f1: number) => {
+      const ctx = audioCtx!;
+      const osc = ctx.createOscillator();
+      const filt = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(f0, start);
+      osc.frequency.exponentialRampToValueAtTime(f1, start + dur);
+      filt.type = "lowpass";
+      filt.frequency.value = 1100;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.35, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+      osc.connect(filt);
+      filt.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.05);
+    };
+    burst(t0, 0.18, 560, 280);
+    burst(t0 + 0.23, 0.15, 500, 250);
+  } catch {
+    // No audio device, no permission, no AudioContext: silence, never an
+    // error a person has to dismiss.
+  }
+}
+
 /** Deliver one OS notification. Failures degrade to silence: a missing
  * notification daemon must never become an error a person has to dismiss. */
 export function deliver(i: Interruption): void {
+  // The quack goes first and unconditionally-of-bindings: the OS notification
+  // needs the desktop shell, but the sound works anywhere the webview does.
+  quack();
   const fqn = window.ducklab?.notify;
   const call = byName();
   if (!fqn || !call) return;

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
+import { quack } from "../lib/attention";
 import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
 import type { BudgetView, EngineClient, ModeDefaultsView } from "../api/client";
@@ -43,6 +44,11 @@ export function Settings({
         </div>
       </section>
 
+      <section className="mt-4">
+        <h2 className="text-sm text-ink-muted">attention</h2>
+        <QuackToggle />
+      </section>
+
       {client && <ConfigSection client={client} />}
 
       <section className="mt-4">
@@ -58,6 +64,40 @@ export function Settings({
           API keys are read from environment variables and are never stored or displayed here.
         </p>
       </section>
+    </div>
+  );
+}
+
+/** The quack: on by default, silenced here — a sound that cannot be turned
+ * off teaches the person to mute the whole machine. The test button exists
+ * because the first real quack should not be a surprise mid-focus, and
+ * because clicking it grants the audio context its user gesture. */
+function QuackToggle() {
+  const [on, setOn] = useState(localStorage.getItem("ducklab.quack") !== "off");
+  return (
+    <div className="mt-1 flex items-center gap-3">
+      <label className="flex items-center gap-2 text-sm text-ink-secondary">
+        <input
+          type="checkbox"
+          data-testid="quack-toggle"
+          checked={on}
+          onChange={(e) => {
+            const next = e.target.checked;
+            setOn(next);
+            if (next) localStorage.removeItem("ducklab.quack");
+            else localStorage.setItem("ducklab.quack", "off");
+          }}
+        />
+        quack out loud when a run needs you or fails
+      </label>
+      <button
+        type="button"
+        data-testid="quack-test"
+        onClick={() => quack()}
+        className="rounded border border-hairline px-2 py-1 text-xs"
+      >
+        try it
+      </button>
     </div>
   );
 }
