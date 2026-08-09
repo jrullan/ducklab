@@ -181,6 +181,11 @@ function ToolCallLine({ call }: { call: ToolCall }) {
         style={{ color: failed ? "var(--status-critical)" : "var(--text-muted)" }}
       >
         {failed ? "✕" : "·"} {call.tool}
+        {call.target && (
+          <span className="ml-1 opacity-75" data-testid="tool-target">
+            {call.target}
+          </span>
+        )}
         {call.ms !== undefined && ` · ${call.ms}ms`}
       </button>
       {open && call.detail && (

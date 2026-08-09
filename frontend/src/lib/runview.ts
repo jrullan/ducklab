@@ -18,6 +18,38 @@ export interface ToolCall {
   detail?: string;
   /** Policy violations are always expanded; they are never routine. */
   violation?: boolean;
+  /** The call's salient argument — the path it read, the pattern it searched,
+   * the command it ran. A live list of bare "fs_read fs_read fs_read" says a
+   * model is busy without saying WITH WHAT. */
+  target?: string;
+}
+
+/** Distils a tool call's args to the one argument a watcher wants: what it
+ * touched. */
+export function toolTarget(d: Record<string, unknown>): string | undefined {
+  let a: Record<string, unknown> | null = null;
+  try {
+    a = JSON.parse(String(d.args ?? "")) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (!a || typeof a !== "object") return undefined;
+  let s: string;
+  if (typeof a.path === "string" && a.path) {
+    s = a.path;
+    if (typeof a.start === "number" && typeof a.end === "number") {
+      s += `:${a.start}–${a.end}`;
+    }
+  } else {
+    const pick = a.pattern ?? a.cmd ?? a.command ?? a.glob ?? a.id ?? a.kind ?? a.question ?? a.name;
+    if (pick === undefined || pick === null) return undefined;
+    s = String(pick);
+  }
+  // The tail is the identity of a path; the head is the identity of a command.
+  if (s.length > 64) {
+    s = typeof a.path === "string" ? "…" + s.slice(-63) : s.slice(0, 63) + "…";
+  }
+  return s || undefined;
 }
 
 export interface TurnBlock {
@@ -188,6 +220,11 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           tool: String(d.tool ?? "?"),
           ok: d.ok !== false,
           ms: typeof d.ms === "number" ? d.ms : undefined,
+          target: toolTarget(d),
+          // A failed call's result says WHY — "search text not found",
+          // "path is not a test file" — and it was recorded and never shown:
+          // the ✕ expanded to nothing.
+          detail: d.ok === false ? String(d.result ?? "") || undefined : undefined,
         });
         break;
       }
@@ -253,6 +290,7 @@ export function buildTimeline(events: readonly DucklabEvent[]): ToolCall[] {
         tool: String(d.tool ?? "?"),
         ok: d.ok !== false,
         ms: typeof d.ms === "number" ? d.ms : undefined,
+        target: toolTarget(d),
       });
     } else if (e.type === "policy_violation") {
       out.push({ seq: e.seq ?? 0, tool: String(d.tool ?? "?"), ok: false, violation: true });

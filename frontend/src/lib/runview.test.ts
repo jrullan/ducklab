@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTurns, anonymiseTurns, buildTimeline, toolFamily,
-  buildGate, buildPending, parseDiff, orderDiffFiles, touchesTests, isTestPath,
+  buildGate, buildPending, parseDiff, toolTarget, orderDiffFiles, touchesTests, isTestPath,
 } from "./runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -370,5 +370,51 @@ describe("a diff with no file header", () => {
 
   it("is empty for an empty diff", () => {
     expect(parseDiff("")).toHaveLength(0);
+  });
+});
+
+// "fs_read fs_read fs_read" says a model is busy without saying with what.
+// The args were on every event the whole time; the lane just never looked.
+describe("toolTarget", () => {
+  it("names the path, with the window when one was read", () => {
+    expect(toolTarget({ args: '{"path":"profile_api.py","start":760,"end":1200}' }))
+      .toBe("profile_api.py:760–1200");
+    expect(toolTarget({ args: '{"path":"app.py"}' })).toBe("app.py");
+  });
+
+  it("falls back to the pattern, command, or id", () => {
+    expect(toolTarget({ args: '{"pattern":"CREATE TABLE challenges"}' })).toBe("CREATE TABLE challenges");
+    expect(toolTarget({ args: '{"cmd":"pytest -q"}' })).toBe("pytest -q");
+    expect(toolTarget({ args: '{"id":"T-036","kind":"plan"}' })).toBe("T-036");
+  });
+
+  it("keeps a long path's tail and a long command's head", () => {
+    const path = "a/".repeat(50) + "file.py";
+    expect(toolTarget({ args: JSON.stringify({ path }) })!.startsWith("…")).toBe(true);
+    expect(toolTarget({ args: JSON.stringify({ path }) })!.endsWith("file.py")).toBe(true);
+    const cmd = "x".repeat(100);
+    expect(toolTarget({ args: JSON.stringify({ cmd }) })!.endsWith("…")).toBe(true);
+  });
+
+  it("answers nothing for unparseable or empty args", () => {
+    expect(toolTarget({ args: "not json" })).toBeUndefined();
+    expect(toolTarget({})).toBeUndefined();
+  });
+});
+
+// A failed call's result says WHY — recorded all along, shown never: the ✕
+// expanded to nothing.
+describe("a failed tool call's reason", () => {
+  it("lands in the turn block's detail", () => {
+    const turns = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("tool_call", 2, {
+        round: 1, turn: 0, tool: "fs_patch", ok: false,
+        args: '{"path":"app.py"}', result: "search text not found in app.py",
+      }),
+    ]);
+    const call = turns[0]!.toolCalls[0]!;
+    expect(call.target).toBe("app.py");
+    expect(call.detail).toBe("search text not found in app.py");
   });
 });

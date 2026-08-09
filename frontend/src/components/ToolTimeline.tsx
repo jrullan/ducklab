@@ -60,7 +60,7 @@ export function ToolTimeline({ calls }: { calls: readonly ToolCall[] }) {
           key={`${c.seq}-${c.tool}`}
           data-testid="timeline-tick"
           data-tool={c.tool}
-          title={`${c.tool}${c.ms !== undefined ? ` · ${c.ms}ms` : ""}${c.ok ? "" : " · failed"}`}
+          title={`${c.tool}${c.target ? ` ${c.target}` : ""}${c.ms !== undefined ? ` · ${c.ms}ms` : ""}${c.ok ? "" : " · failed"}`}
           className="inline-block h-3 w-1.5 rounded-sm"
           style={{
             background: c.ok ? FAMILY_COLOR[toolFamily(c.tool)] : "var(--status-critical)",
