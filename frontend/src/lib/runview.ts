@@ -353,7 +353,7 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
  * whole transcript. */
 export function reviewerDissent(
   turns: readonly TurnBlock[],
-): { verdict: string; findings: number } | null {
+): { verdict: string; findings: number; notes: string[] } | null {
   let last: TurnBlock | null = null;
   for (const t of turns) {
     if (t.verdict) last = t;
@@ -361,7 +361,14 @@ export function reviewerDissent(
   if (!last) return null;
   const v = last.verdict!.toLowerCase().replace(/_/g, "-");
   if (v === "approve" || v === "approved") return null;
-  return { verdict: last.verdict!, findings: last.findings?.length ?? 0 };
+  // The findings as sentences, ready to ride a follow-up run's note.
+  const notes = (last.findings ?? []).map((f) => {
+    let s = f.issue;
+    if (f.file) s += ` (${f.file}${f.line ? `:${f.line}` : ""})`;
+    if (f.fix) s += ` — fix: ${f.fix}`;
+    return s;
+  });
+  return { verdict: last.verdict!, findings: notes.length, notes };
 }
 
 /** The pending human interaction, if the run is waiting on one. */

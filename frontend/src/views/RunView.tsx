@@ -100,6 +100,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [anyway, setAnyway] = useState(false);
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
+  // The accept-and-fix chain: one click accepts the green work and starts a
+  // follow-up run with the reviewer's findings riding its prompt.
+  const [fixBusy, setFixBusy] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
@@ -406,6 +410,49 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {" "}and its rounds ran out. The gate decides the verdict; the reviewer only
             advises — read its findings in the transcript before accepting.
           </p>
+          {/* "Almost" for code is a new run — but the new run used to be born
+              amnesiac: nothing carried the findings into its prompt, and
+              reject would RESTORE the green work away. One click: accept
+              what passed, then a follow-up run that reads the objections. */}
+          {(run.next ?? []).includes("accept") && dissent.findings > 0 && (
+            <div className="mt-2">
+              <button
+                type="button"
+                data-testid="accept-and-fix"
+                disabled={fixBusy}
+                onClick={() => {
+                  setFixBusy(true);
+                  setFixError(null);
+                  const note =
+                    "The previous run passed its gate but its reviewer requested changes. " +
+                    "Address these outstanding findings:\n" +
+                    dissent.notes.map((n) => `- ${n}`).join("\n");
+                  void client
+                    .accept(run.id)
+                    .then(() =>
+                      client.runStart(run.project_id, run.task_id, {
+                        mode: run.mode,
+                        ducklings: seatsFromRoster(run.mode, run.roster),
+                        note,
+                      }),
+                    )
+                    .then((r) => {
+                      location.hash = `#/runs/${r.id}`;
+                    })
+                    .catch((e) => setFixError(e instanceof Error ? e.message : String(e)))
+                    .finally(() => setFixBusy(false));
+                }}
+                className="rounded border border-hairline px-2 py-1 text-sm"
+              >
+                {fixBusy ? "Starting…" : "Accept, then fix the findings"}
+              </button>
+              {fixError && (
+                <p className="mt-1 text-xs text-critical" data-testid="accept-and-fix-error">
+                  {fixError}
+                </p>
+              )}
+            </div>
+          )}
         </section>
       )}
       {run.failure && (

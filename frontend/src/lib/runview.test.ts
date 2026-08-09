@@ -429,9 +429,16 @@ describe("reviewerDissent", () => {
     ev("message", n + 1, { round: n, turn: 1, content: "…", verdict, findings }),
   ];
 
-  it("surfaces a final request-changes with its finding count", () => {
-    const turns = buildTurns([...turn(1, "request-changes", [{}]), ...turn(3, "request-changes", [{}, {}])]);
-    expect(reviewerDissent(turns)).toEqual({ verdict: "request-changes", findings: 2 });
+  it("surfaces a final request-changes with its findings, ready to ride a note", () => {
+    const turns = buildTurns([...turn(1, "request-changes", [{ issue: "old" }]), ...turn(3, "request-changes", [
+      { severity: "major", file: "app.py", line: 12, issue: "wrong week boundary", fix: "use ISO weeks" },
+      { issue: "missing null check" },
+    ])]);
+    const d = reviewerDissent(turns)!;
+    expect(d.verdict).toBe("request-changes");
+    expect(d.findings).toBe(2);
+    expect(d.notes[0]).toBe("wrong week boundary (app.py:12) — fix: use ISO weeks");
+    expect(d.notes[1]).toBe("missing null check");
   });
 
   it("stays silent when the last word was approval", () => {

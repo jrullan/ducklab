@@ -926,6 +926,9 @@
           "no_changes": {
             "type": "boolean"
           },
+          "note": {
+            "type": "string"
+          },
           "pending_data": {
             "additionalProperties": {},
             "type": "object"
@@ -1497,6 +1500,9 @@
           },
           "no_stream": {
             "type": "boolean"
+          },
+          "note": {
+            "type": "string"
           },
           "parallel": {
             "type": "boolean"

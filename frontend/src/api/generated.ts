@@ -277,6 +277,7 @@ export interface RunlogRun {
   mode?: string;
   next?: string[];
   no_changes?: boolean;
+  note?: string;
   pending_data?: Record<string, unknown>;
   pending_kind?: string;
   pending_since?: string;
@@ -436,6 +437,7 @@ export interface ServiceRunRequest {
   ducklings?: string[];
   mode?: string;
   no_stream?: boolean;
+  note?: string;
   parallel?: boolean;
   rounds?: number;
   task_id?: string;

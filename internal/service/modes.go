@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -183,6 +184,18 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 	}
 }
 
+// humanNote renders the person's run-specific instruction as a prompt
+// section. The task body was written before history happened; this is the
+// channel for what only the person knows now — "address the reviewer's
+// outstanding findings", most of all.
+func humanNote(note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return ""
+	}
+	return "\n\n## Note from the human\n\n" + note + "\n"
+}
+
 // modeContext carries everything a mode dispatch needs.
 type modeContext struct {
 	entry   *registry.ProjectEntry
@@ -204,7 +217,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.
 		Prompt: s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID) +
-			mc.rs.answeredDecisions(),
+			humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
 		ExecContext: mc.ectx,
 		// The request, then the configured default for this mode, then the
 		// script's own count. The counts lived only in the scripts, so changing

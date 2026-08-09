@@ -479,6 +479,9 @@ export class EngineClient {
       /** Raise this one run's token ceiling above the configured default,
        * without changing the default for everything else. */
       maxTokens?: number;
+      /** A run-specific instruction from the human, riding the prompt — the
+       * channel for "address the previous reviewer's findings". */
+      note?: string;
     } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
@@ -486,6 +489,7 @@ export class EngineClient {
       mode: opts.mode || "solo",
       ducklings: opts.ducklings ?? [],
       rounds: opts.rounds ?? 0,
+      note: opts.note || undefined,
       autonomy: opts.yes ? "yolo" : "",
       // Omitted rather than zeroed: the engine fills every unset limit from the
       // defaults, and a zero would be a ceiling of zero.

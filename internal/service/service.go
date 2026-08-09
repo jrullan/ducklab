@@ -706,6 +706,10 @@ type RunRequest struct {
 	DryRun       bool `json:"dry_run"`
 	Parallel     bool `json:"parallel"`
 	UnsafeWrites bool `json:"unsafe_writes"`
+	// Note rides the prompt as a section from the human — the channel for
+	// "address the reviewer's findings" and every other instruction a task
+	// body cannot carry because it was written before the history happened.
+	Note string `json:"note,omitempty"`
 	// chained is set only by continueChain, never by a client: this build is
 	// the second half of a TDD chain and jumps the project's waiting line, so
 	// the chain runs as the one unit the person authorized.
@@ -810,6 +814,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		DryRun:       req.DryRun,
 		UnsafeWrites: req.UnsafeWrites,
 		Autonomy:     req.Autonomy,
+		Note:         req.Note,
 	}
 	if run.Mode == "" {
 		run.Mode = "solo"

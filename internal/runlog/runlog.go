@@ -27,6 +27,10 @@ type Run struct {
 	Verdict       string                 `json:"verdict"`
 	Accepted      bool                   `json:"accepted"`
 	CommitSHA     string                 `json:"commit_sha"`
+	// Note is what the person told this run beyond the task body — typically
+	// the previous run's outstanding reviewer findings. On the record because
+	// what a run was ASKED is part of what it did.
+	Note string `json:"note,omitempty"`
 	// RevertSHA records that this run's commit was later undone — set only on
 	// an accepted test-first whose test was retired before its build landed.
 	// The acceptance stays in the record (it happened); this says the promise
