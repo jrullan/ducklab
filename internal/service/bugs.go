@@ -83,11 +83,15 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 	if err != nil {
 		return nil, err
 	}
+	entry, entryErr := s.registry.Get(projectID)
 	out := make([]bug.Bug, 0, len(rows))
 	for _, r := range rows {
 		b := *toBug(r)
 		if openOnly && !b.IsOpen() {
 			continue
+		}
+		if entryErr == nil {
+			b.Attachments = listAttachments(entry.Path, b.ID)
 		}
 		out = append(out, b)
 	}
@@ -253,6 +257,18 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			// The cap that told its own failure message to raise a number
 			// nobody could reach. Configurable now, with six as the default.
 			MaxTurns: s.turnsFor(string(config.RoleTriager), ScriptRoleTurns["triager"]),
+		}
+		// The report's screenshots, shown to a triager that can see. Gated on
+		// the declared vision cap: a text-only model sent an image array gets
+		// a 400 from most endpoints, and a triage that dies on evidence it
+		// cannot read helps nobody.
+		if cfg, ok := s.cfg.Ducklings[duckling]; ok && cfg.Caps.Vision != nil && *cfg.Caps.Vision {
+			turn.Images = attachmentDataURLs(rs.projectPath, b.ID, 6<<20)
+			if len(turn.Images) > 0 {
+				rs.writer.AppendEvent("warning", map[string]interface{}{
+					"detail": fmt.Sprintf("%s: %d screenshot(s) shown to the triager", b.ID, len(turn.Images)),
+				})
+			}
 		}
 		belt, err := turn.ResolveToolbelt(tools.NewRegistry())
 		if err != nil {

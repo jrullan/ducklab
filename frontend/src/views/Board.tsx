@@ -89,6 +89,10 @@ export function Board({
   const [bugTitle, setBugTitle] = useState("");
   const [bugBody, setBugBody] = useState("");
   const [bugSeverity, setBugSeverity] = useState("normal");
+  // Screenshots to ride the report: read as base64 and attached right after
+  // the bug is filed. Visual evidence for the human — and for a triager with
+  // vision, which is shown the images themselves.
+  const [bugFiles, setBugFiles] = useState<File[]>([]);
   const [bugError, setBugError] = useState<string | null>(null);
   const [triageRun, setTriageRun] = useState<string | null>(null);
   // What to start. Derived by the engine — dependencies accepted, nothing
@@ -365,6 +369,17 @@ export function Board({
                   </option>
                 ))}
               </select>
+              <label className="flex items-center gap-1 text-xs text-ink-muted">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  data-testid="bug-attachments"
+                  onChange={(e) => setBugFiles(Array.from(e.target.files ?? []))}
+                  className="text-xs"
+                />
+                {bugFiles.length > 0 && `${bugFiles.length} image${bugFiles.length === 1 ? "" : "s"}`}
+              </label>
               <button
                 type="button"
                 data-testid="bug-submit"
@@ -377,9 +392,19 @@ export function Board({
                       body: bugBody.trim(),
                       severity: bugSeverity,
                     })
-                    .then(() => {
+                    .then(async (b) => {
+                      for (const f of bugFiles) {
+                        const dataUrl = await new Promise<string>((res, rej) => {
+                          const r = new FileReader();
+                          r.onload = () => res(String(r.result));
+                          r.onerror = () => rej(new Error(`could not read ${f.name}`));
+                          r.readAsDataURL(f);
+                        });
+                        await client.bugAttach(projectId, b.id, f.name, dataUrl.split(",", 2)[1] ?? "");
+                      }
                       setBugTitle("");
                       setBugBody("");
+                      setBugFiles([]);
                       setFiling(false);
                       return load();
                     })
@@ -981,12 +1006,55 @@ function BugRail({
         <Row label="task" value={bug.task_id} />
       </dl>
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
+      <BugAttachments bug={bug} client={client} projectId={projectId} />
       {/* What to do next depends on where the bug is, and the loop's rules live
           in the engine. This used to print the CLI command that fits — honest,
           but it made the operate loop the one loop a desktop-only user could not
           run. The engine refuses a transition it does not allow, so the button
           acts and the refusal is what gets shown. */}
       <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
+    </div>
+  );
+}
+
+/** The report's screenshots, inline. The bytes come through the client (an
+ * <img src> cannot carry the auth header) and render as local blob URLs. */
+function BugAttachments({ bug, client, projectId }: { bug: Bug; client: EngineClient; projectId: string }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const names = bug.attachments ?? [];
+  useEffect(() => {
+    let cancelled = false;
+    const made: string[] = [];
+    for (const n of names) {
+      void client
+        .bugAttachmentUrl(projectId, bug.id, n)
+        .then((u) => {
+          made.push(u);
+          if (!cancelled) setUrls((cur) => ({ ...cur, [n]: u }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+      for (const u of made) URL.revokeObjectURL(u);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bug.id, names.join(","), client, projectId]);
+  if (names.length === 0) return null;
+  return (
+    <div data-testid="bug-attachments-gallery" className="space-y-1">
+      <div className="text-xs text-ink-muted">attachments</div>
+      <div className="flex flex-wrap gap-2">
+        {names.map((n) =>
+          urls[n] ? (
+            <a key={n} href={urls[n]} target="_blank" rel="noreferrer" title={n}>
+              <img src={urls[n]} alt={n} className="max-h-28 rounded border border-hairline" />
+            </a>
+          ) : (
+            <span key={n} className="text-xs text-ink-muted">{n}</span>
+          ),
+        )}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +56,37 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	Name       string     `json:"name,omitempty"`
+	// Images are data URLs attached to this message, for vision models — a
+	// bug report's screenshot, handed to the triager that can see it. Never
+	// set on messages bound for a text-only model.
+	Images []string `json:"-"`
+}
+
+// MarshalJSON emits the OpenAI wire shape: a plain string content normally,
+// a content-parts array when images ride along. Custom marshalling instead
+// of a second message type, so every consumer keeps one Message.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type plain Message
+	if len(m.Images) == 0 {
+		type wire struct {
+			plain
+		}
+		return json.Marshal(wire{plain(m)})
+	}
+	parts := []map[string]interface{}{}
+	if m.Content != "" {
+		parts = append(parts, map[string]interface{}{"type": "text", "text": m.Content})
+	}
+	for _, img := range m.Images {
+		parts = append(parts, map[string]interface{}{
+			"type": "image_url", "image_url": map[string]string{"url": img},
+		})
+	}
+	out := map[string]interface{}{"role": m.Role, "content": parts}
+	if m.Name != "" {
+		out["name"] = m.Name
+	}
+	return json.Marshal(out)
 }
 
 // ToolCall is a tool call in a message.

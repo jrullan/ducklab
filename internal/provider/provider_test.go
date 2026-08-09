@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -184,5 +186,30 @@ func TestFakeProviderStream(t *testing.T) {
 	}
 	if resp.Choices[0].Message.Content != "hi" {
 		t.Errorf("Content = %q, want %q", resp.Choices[0].Message.Content, "hi")
+	}
+}
+
+// A message with images marshals as OpenAI content parts; without them the
+// wire is byte-identical to what it always was — one Message type, two wire
+// shapes, no second struct for every consumer to forget.
+func TestMessagesWithImagesMarshalAsContentParts(t *testing.T) {
+	plain, err := json.Marshal(Message{Role: "user", Content: "triage this"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(plain) != `{"role":"user","content":"triage this"}` {
+		t.Errorf("plain wire changed: %s", plain)
+	}
+	withImg, err := json.Marshal(Message{
+		Role: "user", Content: "triage this",
+		Images: []string{"data:image/png;base64,QUJD"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"type":"text"`, `"type":"image_url"`, `data:image/png;base64,QUJD`} {
+		if !strings.Contains(string(withImg), want) {
+			t.Errorf("vision wire missing %s: %s", want, withImg)
+		}
 	}
 }

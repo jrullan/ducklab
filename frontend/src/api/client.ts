@@ -337,7 +337,8 @@ export interface Bug {
    * Not worked out here: the loop's rules live in the engine, and a UI that
    * hardcoded them would drift the first time one changed — or leave a bug in a
    * state it happens not to handle with nothing to click on it. */
-  next?: string[];
+  next?: string[];  /** Attached files, screenshots mostly, by name. */
+  attachments?: string[];
 }
 
 /** One filed review, enough to list without reading the body. */
@@ -823,6 +824,29 @@ export class EngineClient {
   /** File a report. Severity is taken as given: a reporter saying "critical"
    * may be wrong, but a tool that quietly downgrades what it was told is a tool
    * nobody reports to twice — triage is where that judgement belongs. */
+  /** Attach one file (as base64) to a bug. The screenshot that says what a
+   * paragraph cannot — and what a vision triager gets shown. */
+  bugAttach(projectId: string, bugId: string, filename: string, dataBase64: string) {
+    return this.request<{ items: string[] }>(
+      "POST",
+      `/v1/projects/${projectId}/bugs/${encodeURIComponent(bugId)}/attachments`,
+      { filename, data: dataBase64 },
+    );
+  }
+  /** Fetch one attachment as a blob URL — <img src> cannot carry the auth
+   * header, so the bytes come through the client and the URL is local. */
+  async bugAttachmentUrl(projectId: string, bugId: string, name: string): Promise<string> {
+    const f = this.opts.fetchFn ?? fetch;
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.opts.token}` };
+    if (this.opts.version) headers["X-Ducklab-Client"] = this.opts.version;
+    const resp = await f(
+      `${this.opts.baseUrl}/v1/projects/${projectId}/bugs/${encodeURIComponent(bugId)}/attachments/${encodeURIComponent(name)}`,
+      { headers },
+    );
+    if (!resp.ok) throw new Error(`attachment ${name}: ${resp.status}`);
+    return URL.createObjectURL(await resp.blob());
+  }
+
   bugAdd(projectId: string, body: { title: string; body?: string; severity?: string }) {
     return this.request<Bug>("POST", `/v1/projects/${projectId}/bugs`, {
       severity: "normal",

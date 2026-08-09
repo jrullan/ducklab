@@ -131,6 +131,9 @@ type Bug struct {
 	Reporter    string   `json:"reporter,omitempty"`
 	CreatedAt   string   `json:"created_at"`
 	UpdatedAt   string   `json:"updated_at"`
+	// Attachments are the report's files — screenshots, mostly — by name.
+	// Served per file; a triager with vision is shown the images themselves.
+	Attachments []string `json:"attachments,omitempty"`
 	// Next are the statuses this bug may legally move to.
 	//
 	// Reported by the engine rather than worked out by each client: the loop's

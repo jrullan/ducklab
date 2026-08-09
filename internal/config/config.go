@@ -188,6 +188,9 @@ type Cost struct {
 type Caps struct {
 	NativeTools   *bool `toml:"native_tools" json:"native_tools"`
 	ContextTokens *int  `toml:"context_tokens" json:"context_tokens"`
+	// Vision says the model accepts images. Declared, not probed: a probe
+	// would cost an image round-trip per duckling.
+	Vision *bool `toml:"vision" json:"vision"`
 }
 
 // Duckling is a named, configured model participant.

@@ -57,6 +57,12 @@
       },
       "BugBug": {
         "properties": {
+          "attachments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "body": {
             "type": "string"
           },
@@ -139,11 +145,15 @@
           },
           "native_tools": {
             "type": "boolean"
+          },
+          "vision": {
+            "type": "boolean"
           }
         },
         "required": [
           "context_tokens",
-          "native_tools"
+          "native_tools",
+          "vision"
         ],
         "type": "object"
       },
@@ -488,6 +498,21 @@
         "required": [
           "answer",
           "question_id"
+        ],
+        "type": "object"
+      },
+      "EngineapiattachRequest": {
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "filename"
         ],
         "type": "object"
       },
@@ -2951,6 +2976,98 @@
           }
         ],
         "summary": "Correct what a report says. A bug could be moved, triaged and promoted but never edited."
+      }
+    },
+    "/v1/projects/{id}/bugs/{bug}/attachments": {
+      "post": {
+        "operationId": "BugAttach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiattachRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach a file (base64) to a bug — the screenshot that says what a paragraph cannot"
+      }
+    },
+    "/v1/projects/{id}/bugs/{bug}/attachments/{name}": {
+      "get": {
+        "operationId": "BugAttachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Serve one bug attachment"
       }
     },
     "/v1/projects/{id}/bugs/{bug}/promote": {

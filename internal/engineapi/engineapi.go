@@ -4,8 +4,10 @@ package engineapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -644,6 +646,40 @@ func (s *Server) handleRunFileFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, bugItems{Items: bugs})
+}
+
+// attachRequest carries one bug attachment, base64-encoded.
+type attachRequest struct {
+	Filename string `json:"filename"`
+	Data     string `json:"data"`
+}
+
+func (s *Server) handleBugAttach(w http.ResponseWriter, r *http.Request) {
+	var req attachRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 12<<20)).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	data, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", "data must be base64: "+err.Error())
+		return
+	}
+	items, err := s.svc.BugAttach(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Filename, data)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (s *Server) handleBugAttachment(w http.ResponseWriter, r *http.Request) {
+	p, err := s.svc.BugAttachmentPath(r.Context(), r.PathValue("id"), r.PathValue("bug"), r.PathValue("name"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	http.ServeFile(w, r, p)
 }
 
 // liftRequest names the one cap to remove.

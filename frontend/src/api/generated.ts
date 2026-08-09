@@ -22,6 +22,7 @@ export interface BudgetBudget {
 }
 
 export interface BugBug {
+  attachments?: string[];
   body?: string;
   created_at?: string;
   duplicate_of?: string;
@@ -46,6 +47,7 @@ export interface ConfigBudget {
 export interface ConfigCaps {
   context_tokens?: number;
   native_tools?: boolean;
+  vision?: boolean;
 }
 
 export interface ConfigCost {
@@ -142,6 +144,11 @@ export interface EngineapiacceptRequest {
 export interface EngineapianswerRequest {
   answer?: string;
   question_id?: string;
+}
+
+export interface EngineapiattachRequest {
+  data?: string;
+  filename?: string;
 }
 
 export interface EngineapibenchRequest {
@@ -584,6 +591,8 @@ export const OPERATIONS = [
   { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
   { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },
   { id: "BugEdit", method: "PUT", path: "/v1/projects/{id}/bugs/{bug}" },
+  { id: "BugAttach", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/attachments" },
+  { id: "BugAttachment", method: "GET", path: "/v1/projects/{id}/bugs/{bug}/attachments/{name}" },
   { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },

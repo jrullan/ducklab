@@ -103,6 +103,9 @@ type Turn struct {
 	Toolbelt string // "full", "read-only", or a comma-separated list
 	Contract string
 	MaxTurns int
+	// Images are data URLs for a vision duckling — a bug's screenshots on a
+	// triage turn. Carried through to the agent turn untouched.
+	Images []string
 	// Anonymize hides WHO wrote each prior turn. It does not control whether
 	// the transcript appears at all — those are different questions, and
 	// conflating them meant council's reviewer was asked to review nothing.

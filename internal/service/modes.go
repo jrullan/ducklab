@@ -79,6 +79,9 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 	} else if probed, err := s.ducklings.Probe(ctx, id); err == nil {
 		caps = probed
 	}
+	if cfg, ok := s.cfg.Ducklings[id]; ok && cfg.Caps.Vision != nil {
+		caps.Vision = *cfg.Caps.Vision
+	}
 
 	loop := &agent.Loop{
 		Provider: p,

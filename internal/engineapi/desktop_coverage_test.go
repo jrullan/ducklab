@@ -48,6 +48,7 @@ var notInTheDesktop = map[string]string{
 	"GET /v1/events":       "consumed by api/events.ts, which builds the URL itself rather than going through the client",
 	"GET /v1/openapi.json": "the document itself, for tooling",
 	"POST /v1/shutdown":    "the Go shell reaches it through engineclt during a supervised restart; the webview itself still cannot stop the engine it is standing in",
+	"GET /v1/projects/{id}/bugs/{bug}/attachments/{name}": "reached by client.bugAttachmentUrl through a raw authenticated fetch: the bytes become a blob URL for <img>, which the JSON request helper cannot produce",
 }
 
 func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {

@@ -35,6 +35,9 @@ type Turn struct {
 	// took last.
 	Round int
 	Index int
+	// Images are data URLs shown to a vision model with the prompt — a bug's
+	// screenshot in a triage turn. Set only when the duckling can see.
+	Images []string
 }
 
 // Outcome is the result of a turn.
@@ -744,7 +747,7 @@ func main() {}
 	// This is filled in by the stage runner
 
 	// 4. User: the turn's rendered task prompt
-	messages = append(messages, provider.Message{Role: "user", Content: turn.Prompt})
+	messages = append(messages, provider.Message{Role: "user", Content: turn.Prompt, Images: turn.Images})
 
 	// 5. User: prior turns (rendered)
 	// This is filled in by the conversation engine
