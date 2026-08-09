@@ -318,6 +318,10 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 		"options":     q.Options,
 	})
 	w.WriteState()
+	// The advisor drafts the answer while the question waits — a fleet of
+	// models must not stall on one model's question when the human's real
+	// role is to choose, not to research.
+	s.adviseQuestion(rs, q)
 }
 
 // clearPending wipes the human-gate block when a run stops waiting.

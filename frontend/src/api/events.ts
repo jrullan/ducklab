@@ -222,6 +222,7 @@ export const KNOWN_EVENT_TYPES = [
   "findings_filed",
   "sections_removed",
   "sections_gutted",
+  "advice",
   "skill_problems",
   "release_drafted",
   "review_written",

@@ -745,6 +745,24 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
+              {pending.advice && (
+                <div className="mt-2 rounded border border-hairline p-2" data-testid="advice">
+                  <p className="text-xs text-ink-muted">
+                    {pending.advisor ?? "the advisor"} recommends:
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{pending.advice}</p>
+                  <button
+                    type="button"
+                    data-testid="advice-use"
+                    onClick={() =>
+                      client.answer(runId, pending.questionId ?? "", pending.advice!).catch(() => {})
+                    }
+                    className="mt-2 rounded border border-good px-2 py-1 text-sm text-good"
+                  >
+                    Answer with this
+                  </button>
+                </div>
+              )}
               <div className="mt-1 flex gap-2">
                 <input
                   aria-label="answer"

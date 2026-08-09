@@ -480,3 +480,27 @@ describe("findingsFiled", () => {
     expect(findingsFiled([ev("run_end", 1, {})])).toBeNull();
   });
 });
+
+// The advisor's recommendation rides the pending question — matched by id,
+// cleared with the wait, so a stale draft never dresses a new question.
+describe("advice on a pending question", () => {
+  it("attaches the advisor's draft to its question", () => {
+    const p = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1" }),
+      ev("advice", 2, { question_id: "q1", advisor: "pato-sonnet", answer: "python app.py, poll /health" }),
+    ])!;
+    expect(p.advice).toContain("app.py");
+    expect(p.advisor).toBe("pato-sonnet");
+  });
+
+  it("drops advice that belongs to an earlier question", () => {
+    const p = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "old?", question_id: "q1" }),
+      ev("advice", 2, { question_id: "q1", advisor: "a", answer: "old advice" }),
+      ev("human", 3, { action: "answer" }),
+      ev("human_needed", 4, { kind: "question", question: "new?", question_id: "q2" }),
+    ])!;
+    expect(p.questionId).toBe("q2");
+    expect(p.advice).toBeUndefined();
+  });
+});

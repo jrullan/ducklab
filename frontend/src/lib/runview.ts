@@ -107,6 +107,10 @@ export interface PendingHuman {
   question?: string;
   questionId?: string;
   verdict?: string;
+  /** The advisor's drafted answer, when one has landed — the human's role
+   * becomes choosing, not researching. */
+  advice?: string;
+  advisor?: string;
   /** Why the run stopped, for pauses that carry a reason (budget, provider,
    * error). "waiting for you — error" without the error sent the person to
    * the record to learn what the event already said. */
@@ -405,21 +409,33 @@ export function findingsFiled(events: readonly DucklabEvent[]): string[] | null 
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;
+  let advice: DucklabEvent | null = null;
   for (const e of events) {
-    if (e.type === "human_needed") latest = e;
+    if (e.type === "human_needed") {
+      latest = e;
+      advice = null;
+    }
+    if (e.type === "advice") advice = e;
     // A human action clears the wait — and so does a checkpoint: resume
     // appends one, and a budget pause that was lifted and resumed went on
     // saying "waiting for you" over a run that was already working again.
-    if (e.type === "human" || e.type === "run_end" || e.type === "checkpoint") latest = null;
+    if (e.type === "human" || e.type === "run_end" || e.type === "checkpoint") {
+      latest = null;
+      advice = null;
+    }
   }
   if (!latest) return null;
   const d = latest.data ?? {};
+  const a = advice?.data ?? {};
+  const adviceMatches = advice && String(a.question_id ?? "") === String(d.question_id ?? "");
   return {
     kind: String(d.kind ?? "gate"),
     question: d.question ? String(d.question) : undefined,
     questionId: d.question_id ? String(d.question_id) : undefined,
     verdict: d.verdict ? String(d.verdict) : undefined,
     detail: d.detail ? String(d.detail) : undefined,
+    advice: adviceMatches && a.answer ? String(a.answer) : undefined,
+    advisor: adviceMatches && a.advisor ? String(a.advisor) : undefined,
   };
 }
 

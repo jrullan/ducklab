@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,5 +205,44 @@ func TestTerminalRunsClearThePendingBlock(t *testing.T) {
 		if run.PendingKind != "" || run.PendingSince != "" || run.PendingData != nil {
 			t.Errorf("%s: pending block survived: %+v", name, run)
 		}
+	}
+}
+
+// The advisor: ask_human assumed the human knows the answer, and a fleet of
+// models idled while one model's question stalled the run on exactly the kind
+// of judgement the fleet exists for. The recommendation lands on the record
+// and the pending data; the human's role becomes choosing, not researching.
+func TestTheAdvisorDraftsAnAnswerForThePausedQuestion(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-adv", ProjectID: p.ID, TaskID: "", Stage: "build",
+		Status: "paused", PendingKind: "question", Mode: "solo",
+		Roster:    map[string]string{"architect": "pato-dos", "implementer": "pato-uno"},
+		StartedAt: "2026-08-10T09:00:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	q := &tools.PendingQuestion{ID: "q-1", Question: "Which entrypoint contract should the test use?"}
+	answer, advisor, err := s.advise(context.Background(), rs, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advisor != "pato-dos" {
+		t.Errorf("advisor = %q, want the architect (decorrelated from the asker)", advisor)
+	}
+	if strings.TrimSpace(answer) == "" {
+		t.Error("the advisor drafted nothing")
 	}
 }
