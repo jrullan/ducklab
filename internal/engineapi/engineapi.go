@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/bench"
+	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -603,6 +604,20 @@ func (s *Server) handleRunResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusAccepted, run)
+}
+
+// bugItems is the filed-findings response shape.
+type bugItems struct {
+	Items []bug.Bug `json:"items"`
+}
+
+func (s *Server) handleRunFileFindings(w http.ResponseWriter, r *http.Request) {
+	bugs, err := s.svc.RunFileFindings(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, bugItems{Items: bugs})
 }
 
 // liftRequest names the one cap to remove.

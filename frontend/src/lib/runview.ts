@@ -355,6 +355,18 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
  * must not be is silent. T-028 ended "tests passed" over three consecutive
  * request-changes verdicts, and the person learned it only by reading the
  * whole transcript. */
+/** The reviewer's last word, approval or not, with its findings. */
+export function finalVerdict(
+  turns: readonly TurnBlock[],
+): { verdict: string; findings: Finding[] } | null {
+  let last: TurnBlock | null = null;
+  for (const t of turns) {
+    if (t.verdict) last = t;
+  }
+  if (!last) return null;
+  return { verdict: last.verdict!, findings: last.findings ?? [] };
+}
+
 export function reviewerDissent(
   turns: readonly TurnBlock[],
 ): { verdict: string; findings: number; notes: string[] } | null {

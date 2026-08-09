@@ -219,6 +219,7 @@ export const KNOWN_EVENT_TYPES = [
   "tests_modified",
   "test_retired",
   "budget_lifted",
+  "findings_filed",
   "skill_problems",
   "release_drafted",
   "review_written",

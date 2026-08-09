@@ -936,3 +936,115 @@ func stripDependency(body, taskID string) (string, bool) {
 	}
 	return strings.Join(out, "\n"), changed
 }
+
+// RunFileFindings turns the run's final reviewer findings into bug reports.
+//
+// A reviewer that approves "with two minor findings" has found real work; the
+// approval means "not worth blocking THIS run", not "not worth remembering".
+// Those findings used to live only in the transcript, waiting for a future
+// testing phase to re-discover them at full price. Filed as bugs they enter
+// the existing loop — triage, promote, fix — with their provenance attached.
+//
+// Idempotent by record: a findings_filed event on the run refuses a second
+// filing, because two clicks must not mean duplicate reports.
+func (s *Service) RunFileFindings(ctx context.Context, runID string) ([]bug.Bug, error) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", runID)
+	}
+	events, err := runlog.ReadEvents(s.RunDir(runID))
+	if err != nil {
+		return nil, fmt.Errorf("read run events: %w", err)
+	}
+
+	var verdict, duckling string
+	var findings []map[string]interface{}
+	for _, e := range events {
+		if e.Type == "findings_filed" {
+			return nil, fmt.Errorf("not filed — this run's findings were already filed as bugs (%v)", e.Data["bugs"])
+		}
+		if e.Type != "message" || e.Data["verdict"] == nil {
+			continue
+		}
+		verdict = fmt.Sprintf("%v", e.Data["verdict"])
+		duckling = fmt.Sprintf("%v", e.Data["duckling"])
+		findings = nil
+		if raw, ok := e.Data["findings"].([]interface{}); ok {
+			for _, f := range raw {
+				if m, ok := f.(map[string]interface{}); ok {
+					findings = append(findings, m)
+				}
+			}
+		}
+	}
+	if len(findings) == 0 {
+		return nil, fmt.Errorf("not filed — the last reviewer verdict (%s) carries no findings", orDefault(verdict, "none"))
+	}
+
+	var out []bug.Bug
+	var ids []string
+	for _, f := range findings {
+		issue := strings.TrimSpace(fmt.Sprintf("%v", orDefault(str(f["issue"]), "unspecified finding")))
+		title := issue
+		if len(title) > 100 {
+			title = title[:97] + "…"
+		}
+		var body strings.Builder
+		body.WriteString(issue + "\n")
+		if file := str(f["file"]); file != "" {
+			body.WriteString("\nWhere: " + file)
+			if line, ok := f["line"].(float64); ok && line > 0 {
+				fmt.Fprintf(&body, ":%d", int(line))
+			}
+			body.WriteString("\n")
+		}
+		if fix := str(f["fix"]); fix != "" {
+			body.WriteString("\nSuggested fix: " + fix + "\n")
+		}
+		fmt.Fprintf(&body, "\nFound by %s reviewing %s in run %s (verdict: %s).\n",
+			orDefault(duckling, "the reviewer"), orDefault(rs.run.TaskID, "the work"), runID, verdict)
+		b, err := s.BugAdd(ctx, rs.run.ProjectID, BugRequest{
+			Title:    title,
+			Body:     body.String(),
+			Severity: findingSeverity(str(f["severity"])),
+			Reporter: duckling,
+			Source:   "review",
+		})
+		if err != nil {
+			return out, fmt.Errorf("filed %d of %d, then: %w", len(out), len(findings), err)
+		}
+		out = append(out, *b)
+		ids = append(ids, b.ID)
+	}
+
+	if w, werr := s.ensureWriter(rs); werr == nil {
+		w.AppendEvent("findings_filed", map[string]interface{}{
+			"bugs": ids, "count": len(ids), "by": "human",
+		})
+		_ = w.WriteState()
+	}
+	return out, nil
+}
+
+// findingSeverity maps a reviewer's scale onto the bug tracker's.
+func findingSeverity(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical":
+		return "critical"
+	case "major":
+		return "high"
+	case "minor":
+		return "low"
+	}
+	return "normal"
+}
+
+// str is fmt-free map plucking: absent and nil both read as empty.
+func str(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", v))
+}

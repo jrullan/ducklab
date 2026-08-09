@@ -55,6 +55,60 @@
         ],
         "type": "object"
       },
+      "BugBug": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "duplicate_of": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "next": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reporter": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body",
+          "created_at",
+          "id",
+          "severity",
+          "source",
+          "status",
+          "title",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "ConfigBudget": {
         "properties": {
           "max_tokens": {
@@ -440,6 +494,20 @@
           "keep",
           "modes",
           "suite"
+        ],
+        "type": "object"
+      },
+      "EngineapibugItems": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BugBug"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -4459,6 +4527,42 @@
           }
         ],
         "summary": "Working diff"
+      }
+    },
+    "/v1/runs/{id}/findings/file": {
+      "post": {
+        "operationId": "RunFileFindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapibugItems"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "File the run's final reviewer findings as bug reports, with provenance"
       }
     },
     "/v1/runs/{id}/llm": {

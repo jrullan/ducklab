@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -104,6 +104,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // follow-up run with the reviewer's findings riding its prompt.
   const [fixBusy, setFixBusy] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
+  // Findings filed as bugs — the click's answer, with the ids it created.
+  const [filedBugs, setFiledBugs] = useState<string[] | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
@@ -171,6 +175,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A green gate over an unconvinced reviewer must not be silent (T-028:
   // three straight request-changes verdicts under "tests passed").
   const dissent = run.verdict === "PASSED" ? reviewerDissent(turns) : null;
+  // Any final findings at all — an approval "with two minor findings" found
+  // real work too; approval means "not worth blocking", not "not worth
+  // remembering". Filing them as bugs puts them in the loop instead of in a
+  // transcript a future testing phase re-discovers at full price.
+  const lastVerdict = finalVerdict(turns);
+  const fileable = lastVerdict && lastVerdict.findings.length > 0 &&
+    (run.status === "paused" || run.status === "done");
   const timeline = buildTimeline(events);
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
@@ -453,6 +464,45 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+        </section>
+      )}
+      {fileable && (
+        <section data-testid="file-findings" className="m-2 rounded-card border border-hairline p-3">
+          <p className="text-sm text-ink">
+            The reviewer's last verdict ({lastVerdict!.verdict}) carries{" "}
+            {lastVerdict!.findings.length} finding{lastVerdict!.findings.length === 1 ? "" : "s"}.
+            {" "}Filed as bugs they enter the loop — triage, promote, fix — instead of waiting
+            in this transcript for a future testing phase to re-find them.
+          </p>
+          <div className="mt-2">
+            {filedBugs ? (
+              <p className="text-sm text-good" data-testid="file-findings-done">
+                filed as {filedBugs.join(", ")} —{" "}
+                <a href="#/board?tab=bugs" className="underline">see the bugs board</a>
+              </p>
+            ) : (
+              <button
+                type="button"
+                data-testid="file-findings-button"
+                disabled={fileBusy}
+                onClick={() => {
+                  setFileBusy(true);
+                  setFileError(null);
+                  void client
+                    .runFileFindings(run.id)
+                    .then((r) => setFiledBugs(r.items.map((b) => b.id)))
+                    .catch((e) => setFileError(e instanceof Error ? e.message : String(e)))
+                    .finally(() => setFileBusy(false));
+                }}
+                className="rounded border border-hairline px-2 py-1 text-sm"
+              >
+                {fileBusy ? "Filing…" : `File ${lastVerdict!.findings.length} finding${lastVerdict!.findings.length === 1 ? "" : "s"} as bugs`}
+              </button>
+            )}
+            {fileError && (
+              <p className="mt-1 text-xs text-critical" data-testid="file-findings-error">{fileError}</p>
+            )}
+          </div>
         </section>
       )}
       {run.failure && (

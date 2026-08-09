@@ -21,6 +21,21 @@ export interface BudgetBudget {
   max_wallclock_s?: number;
 }
 
+export interface BugBug {
+  body?: string;
+  created_at?: string;
+  duplicate_of?: string;
+  id?: string;
+  next?: string[];
+  reporter?: string;
+  severity?: string;
+  source?: string;
+  status?: string;
+  task_id?: string;
+  title?: string;
+  updated_at?: string;
+}
+
 export interface ConfigBudget {
   max_tokens?: number;
   max_turns?: number;
@@ -127,6 +142,10 @@ export interface EngineapibenchRequest {
   keep?: boolean;
   modes?: string[];
   suite?: string;
+}
+
+export interface EngineapibugItems {
+  items?: BugBug[];
 }
 
 export interface EngineapidiffResponse {
@@ -587,6 +606,7 @@ export const OPERATIONS = [
   { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
+  { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },
   { id: "RunReject", method: "POST", path: "/v1/runs/{id}/reject" },
   { id: "RunResume", method: "POST", path: "/v1/runs/{id}/resume" },

@@ -545,6 +545,15 @@ export class EngineClient {
     );
   }
 
+  /** File the run's final reviewer findings as bug reports, with provenance.
+   * Idempotent on the engine: a second filing is refused, not duplicated. */
+  runFileFindings(id: string) {
+    return this.request<{ items: { id: string; title: string }[] }>(
+      "POST",
+      `/v1/runs/${id}/findings/file`,
+    );
+  }
+
   /** Remove one budget cap from a live run — one-way, recorded on the run.
    * Per-cap on purpose: lifting tokens leaves the dollar ceiling standing. */
   runBudgetLift(id: string, kind: "tokens" | "usd" | "turns" | "wallclock") {
