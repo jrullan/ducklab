@@ -419,8 +419,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {dissent.findings > 0 &&
               ` with ${dissent.findings} finding${dissent.findings === 1 ? "" : "s"}`}
             {" "}and its rounds ran out. The gate decides the verdict; the reviewer only
-            advises — read its findings in the transcript before accepting.
+            advises — read them before accepting:
           </p>
+          <ul className="mt-2 space-y-1 text-sm" data-testid="dissent-findings-list">
+            {dissent.notes.map((n, i) => (
+              <li key={i} className="text-ink-secondary">{n}</li>
+            ))}
+          </ul>
           {/* "Almost" for code is a new run — but the new run used to be born
               amnesiac: nothing carried the findings into its prompt, and
               reject would RESTORE the green work away. One click: accept
@@ -474,6 +479,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {" "}Filed as bugs they enter the loop — triage, promote, fix — instead of waiting
             in this transcript for a future testing phase to re-find them.
           </p>
+          {/* The findings themselves, where the decision is. Announcing "1
+              finding" and making the person scroll to the transcript and back
+              up to act on it is a treasure hunt with one treasure. */}
+          <ul className="mt-2 space-y-1 text-sm" data-testid="file-findings-list">
+            {lastVerdict!.findings.map((f, i) => (
+              <li key={i} className="text-ink-secondary">
+                {f.severity && <span className="mr-1 text-xs uppercase text-ink-muted">[{f.severity}]</span>}
+                {f.issue}
+                {f.file && (
+                  <span className="text-ink-muted"> — {f.file}{f.line ? `:${f.line}` : ""}</span>
+                )}
+                {f.fix && <span className="text-ink-muted"> · fix: {f.fix}</span>}
+              </li>
+            ))}
+          </ul>
           <div className="mt-2">
             {filedBugs ? (
               <p className="text-sm text-good" data-testid="file-findings-done">
