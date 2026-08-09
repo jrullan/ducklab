@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -164,6 +164,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const turns = anonymiseTurns(buildTurns(events), anonymise);
   const gate = buildGate(events);
   const pending = buildPending(events);
+  // A green gate over an unconvinced reviewer must not be silent (T-028:
+  // three straight request-changes verdicts under "tests passed").
+  const dissent = run.verdict === "PASSED" ? reviewerDissent(turns) : null;
   const timeline = buildTimeline(events);
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
@@ -390,6 +393,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           was to open events.jsonl. Some of these messages exist to be acted on:
           split refuses a decomposition with the exact file two subtasks both
           claimed. */}
+      {dissent && (
+        <section
+          data-testid="reviewer-dissent"
+          className="m-2 rounded-card border border-serious p-3"
+        >
+          <StatusChip role="serious" label="green gate, unconvinced reviewer" />
+          <p className="mt-1 text-sm text-ink">
+            The tests pass, but the reviewer's last verdict was “{dissent.verdict}”
+            {dissent.findings > 0 &&
+              ` with ${dissent.findings} finding${dissent.findings === 1 ? "" : "s"}`}
+            {" "}and its rounds ran out. The gate decides the verdict; the reviewer only
+            advises — read its findings in the transcript before accepting.
+          </p>
+        </section>
+      )}
       {run.failure && (
         <section
           data-testid="run-failure"

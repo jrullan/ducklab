@@ -343,6 +343,27 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
   };
 }
 
+/** The reviewer's standing objection, when its LAST word was not approval.
+ *
+ * The gate decides the verdict (I2) and the reviewer advises — so a pair can
+ * end green with the reviewer still requesting changes, rounds exhausted.
+ * That is a legitimate state and exactly what the human gate is for; what it
+ * must not be is silent. T-028 ended "tests passed" over three consecutive
+ * request-changes verdicts, and the person learned it only by reading the
+ * whole transcript. */
+export function reviewerDissent(
+  turns: readonly TurnBlock[],
+): { verdict: string; findings: number } | null {
+  let last: TurnBlock | null = null;
+  for (const t of turns) {
+    if (t.verdict) last = t;
+  }
+  if (!last) return null;
+  const v = last.verdict!.toLowerCase().replace(/_/g, "-");
+  if (v === "approve" || v === "approved") return null;
+  return { verdict: last.verdict!, findings: last.findings?.length ?? 0 };
+}
+
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;

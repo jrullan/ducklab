@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTurns, anonymiseTurns, buildTimeline, toolFamily,
-  buildGate, buildPending, parseDiff, toolTarget, orderDiffFiles, touchesTests, isTestPath,
+  buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, orderDiffFiles, touchesTests, isTestPath,
 } from "./runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -416,5 +416,34 @@ describe("a failed tool call's reason", () => {
     const call = turns[0]!.toolCalls[0]!;
     expect(call.target).toBe("app.py");
     expect(call.detail).toBe("search text not found in app.py");
+  });
+});
+
+// A pair can end green with the reviewer still requesting changes — rounds
+// exhausted, gate the only voter (I2). Legitimate, and it must not be silent:
+// T-028 said "tests passed" over three straight request-changes verdicts,
+// discovered only by reading the whole transcript.
+describe("reviewerDissent", () => {
+  const turn = (n: number, verdict?: string, findings: unknown[] = []) => [
+    ev("turn_start", n, { round: n, turn: 1, role: "reviewer", duckling: "luna" }),
+    ev("message", n + 1, { round: n, turn: 1, content: "…", verdict, findings }),
+  ];
+
+  it("surfaces a final request-changes with its finding count", () => {
+    const turns = buildTurns([...turn(1, "request-changes", [{}]), ...turn(3, "request-changes", [{}, {}])]);
+    expect(reviewerDissent(turns)).toEqual({ verdict: "request-changes", findings: 2 });
+  });
+
+  it("stays silent when the last word was approval", () => {
+    const turns = buildTurns([...turn(1, "request-changes", [{}]), ...turn(3, "approve")]);
+    expect(reviewerDissent(turns)).toBeNull();
+  });
+
+  it("stays silent when nothing carried a verdict", () => {
+    const turns = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "d" }),
+      ev("message", 2, { round: 1, turn: 0, content: "done" }),
+    ]);
+    expect(reviewerDissent(turns)).toBeNull();
   });
 });
