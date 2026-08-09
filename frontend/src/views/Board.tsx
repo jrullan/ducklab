@@ -14,7 +14,8 @@ import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/clien
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
-import { RunLauncher, LaunchConfig, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { TddLaunch } from "../components/TddLaunch";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -620,25 +621,6 @@ function TaskRunner({
   onDone: () => void;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
-  // The two phases of the chain, opening on the Settings defaults with the
-  // saved line-up for each mode already seated — the habitual launch is zero
-  // touches. Changing a mode re-seats from that mode's saved line-up.
-  const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({
-    mode: phaseDefaults.test,
-    ducklings: [...(preferred[phaseDefaults.test] ?? [])],
-  }));
-  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({
-    mode: phaseDefaults.build,
-    ducklings: [...(preferred[phaseDefaults.build] ?? [])],
-  }));
-  const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, prevMode: string) => {
-    if (next.mode !== prevMode) {
-      const saved = preferred[next.mode];
-      set({ ...next, ducklings: saved && saved.length > 0 ? [...saved] : next.ducklings });
-      return;
-    }
-    set(next);
-  };
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
   // The revert commit of a successful retire — the click's answer. The rail
@@ -687,7 +669,11 @@ function TaskRunner({
     return active?.id ?? null;
   });
 
-  const go = async (what: "run" | "test" | "tdd" | "review", opts?: LaunchOpts) => {
+  const go = async (
+    what: "run" | "test" | "tdd" | "review",
+    opts?: LaunchOpts,
+    tdd?: { test: PhaseConfig; build: PhaseConfig },
+  ) => {
     setBusy(true);
     setFailure(null);
     try {
@@ -697,14 +683,27 @@ function TaskRunner({
           : what === "tdd"
             ? await client.testStart(projectId, task.id, "", {
                 thenBuild: true,
-                testMode: testCfg.mode,
-                testDucklings: testCfg.ducklings.filter(Boolean),
-                mode: buildCfg.mode,
-                ducklings: buildCfg.ducklings.filter(Boolean),
-                maxTokens: buildCfg.maxTokens,
+                testMode: tdd!.test.mode,
+                testDucklings: tdd!.test.ducklings.filter(Boolean),
+                mode: tdd!.build.mode,
+                ducklings: tdd!.build.ducklings.filter(Boolean),
+                maxTokens: tdd!.build.maxTokens,
               })
             : what === "test"
-              ? await client.testStart(projectId, task.id, chosen[0] ?? "")
+              // From the TDD block, the test phase's own config; from the
+              // secondary button, the seat picked in the plain launcher.
+              ? await client.testStart(
+                  projectId,
+                  task.id,
+                  tdd ? "" : (chosen[0] ?? ""),
+                  tdd
+                    ? {
+                        thenBuild: false,
+                        testMode: tdd.test.mode,
+                        testDucklings: tdd.test.ducklings.filter(Boolean),
+                      }
+                    : undefined,
+                )
               : await client.reviewStart(projectId, task.id);
       setStarted(run.id);
       // The card moves NOW: starting a run puts the task in_progress on the
@@ -778,59 +777,19 @@ function TaskRunner({
         // defaults to solo (cheap), the build to whatever is worth its cost.
         if (primary) {
           return (
-            <div key={action} className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
-              <div>
-                <div className="text-xs font-medium text-ink-muted">1 · write the failing test</div>
-                <LaunchConfig
-                  ducklings={ducklings}
-                  value={testCfg}
-                  onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
-                  modes={["solo", "pair"]}
-                />
-              </div>
-              <div>
-                <div className="text-xs font-medium text-ink-muted">2 · build until it passes</div>
-                <LaunchConfig
-                  ducklings={ducklings}
-                  value={buildCfg}
-                  onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
-                  estimates={estimates}
-                  showTokens
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => void go("tdd")}
-                disabled={busy}
-                data-testid="tdd-start"
-                className="w-full rounded border border-good px-3 py-1.5 text-sm text-good disabled:opacity-40"
-              >
-                {busy ? "Starting…" : "Test first → Build"}
-              </button>
-              <div className="flex items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  onClick={() => void go("test")}
-                  disabled={busy}
-                  data-testid="test-first-start"
-                  title="Write the failing test only; you accept it before any build"
-                  className="text-ink-muted underline disabled:opacity-40"
-                >
-                  test only
-                </button>
-                <span className="text-ink-muted">·</span>
-                <button
-                  type="button"
-                  onClick={() => void go("run", { mode: buildCfg.mode, ducklings: buildCfg.ducklings.filter(Boolean), maxTokens: buildCfg.maxTokens })}
-                  disabled={busy}
-                  data-testid="build-only"
-                  title="Build without a new test — the gate still judges the whole suite"
-                  className="text-ink-muted underline disabled:opacity-40"
-                >
-                  build only
-                </button>
-              </div>
-            </div>
+            <TddLaunch
+              key={`${phaseDefaults.test}:${phaseDefaults.build}`}
+              ducklings={ducklings}
+              preferred={preferred}
+              phaseDefaults={phaseDefaults}
+              estimates={estimates}
+              busy={busy}
+              onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
+              onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
+              onBuildOnly={(b) =>
+                void go("run", { mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens })
+              }
+            />
           );
         }
         return (

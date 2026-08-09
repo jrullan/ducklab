@@ -15,7 +15,8 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
-import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
+import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
 import { money, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
@@ -31,6 +32,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
   const [buildMode, setBuildMode] = useState("solo");
+  const [testMode, setTestMode] = useState("solo");
   const [estimates, setEstimates] = useState<ModeEstimates>({});
   const [started, setStarted] = useState<string | null>(null);
   // Reports whose fix landed. "Verified" is the one judgement a run must not
@@ -54,6 +56,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       .then((d) => {
         setPreferred(d.ducklings ?? {});
         setBuildMode(d.build_mode || "solo");
+        setTestMode(d.test_mode || "solo");
       })
       .catch(() => setPreferred({}));
     void (async () => {
@@ -104,6 +107,40 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     setFailure(null);
     try {
       const run = await client.runStart(projectId, next.id, opts);
+      setStarted(run.id);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // The suggested task deserves the same front door the board gives it: the
+  // chain, not a bare Run. Same component, same defaults, same one click.
+  const launchTdd = async (test: PhaseConfig, build: PhaseConfig) => {
+    if (!next) return;
+    setFailure(null);
+    try {
+      const run = await client.testStart(projectId, next.id, "", {
+        thenBuild: true,
+        testMode: test.mode,
+        testDucklings: test.ducklings.filter(Boolean),
+        mode: build.mode,
+        ducklings: build.ducklings.filter(Boolean),
+        maxTokens: build.maxTokens,
+      });
+      setStarted(run.id);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const launchTestOnly = async (test: PhaseConfig) => {
+    if (!next) return;
+    setFailure(null);
+    try {
+      const run = await client.testStart(projectId, next.id, "", {
+        thenBuild: false,
+        testMode: test.mode,
+        testDucklings: test.ducklings.filter(Boolean),
+      });
       setStarted(run.id);
     } catch (e) {
       setFailure(e instanceof Error ? e.message : String(e));
@@ -273,16 +310,32 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 Ready to start: <span className="font-mono">{next.id}</span> — {next.title}
               </p>
               <div className="mt-2">
-                <RunLauncher
-                  key={buildMode}
-                  ducklings={fleet}
-                  initialMode={buildMode}
-                  initialDucklings={preferred[buildMode] ?? []}
-                  preferred={preferred}
-                  estimates={estimates}
-                  label={`Run ${next.id}`}
-                  onLaunch={(opts) => void launch(opts)}
-                />
+                {(next.next ?? [])[0] === "test_first" ? (
+                  <TddLaunch
+                    key={`${testMode}:${buildMode}`}
+                    ducklings={fleet}
+                    preferred={preferred}
+                    phaseDefaults={{ build: buildMode, test: testMode }}
+                    estimates={estimates}
+                    busy={false}
+                    onTdd={(t, b) => void launchTdd(t, b)}
+                    onTestOnly={(t) => void launchTestOnly(t)}
+                    onBuildOnly={(b) =>
+                      void launch({ mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens })
+                    }
+                  />
+                ) : (
+                  <RunLauncher
+                    key={buildMode}
+                    ducklings={fleet}
+                    initialMode={buildMode}
+                    initialDucklings={preferred[buildMode] ?? []}
+                    preferred={preferred}
+                    estimates={estimates}
+                    label={`Run ${next.id}`}
+                    onLaunch={(opts) => void launch(opts)}
+                  />
+                )}
               </div>
               {started && (
                 <a
