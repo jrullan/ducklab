@@ -63,8 +63,21 @@ func runNext(r *runlog.Run) []string {
 		}
 		return []string{"abort"}
 	default:
-		// done and failed are endings. Relaunching is an action on the TASK —
-		// a new run — and travels on the task's own list.
+		// done and failed are endings for TASK runs — relaunching travels on
+		// the task's own list. An accepted STAGE run is different: it is the
+		// middle of one process. New requirements feed the spec, the spec
+		// feeds the plan, and the person was made to leave the run view and
+		// find the Documents screen to take a step the acceptance itself
+		// implies. The engine states the next step; the view renders it in
+		// place.
+		if r.Accepted {
+			switch r.Stage {
+			case "intake":
+				return []string{"run_spec"}
+			case "spec":
+				return []string{"run_plan"}
+			}
+		}
 		return nil
 	}
 }

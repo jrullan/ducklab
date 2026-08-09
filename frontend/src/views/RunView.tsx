@@ -109,6 +109,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [filedBugs, setFiledBugs] = useState<string[] | null>(null);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  // The document chain, continued in place: requirements → spec → plan is
+  // one process, and its next step renders where the previous one was
+  // accepted.
+  const [stageBusy, setStageBusy] = useState(false);
+  const [stageError, setStageError] = useState<string | null>(null);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
     client
@@ -473,6 +478,50 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 </p>
               )}
             </div>
+          )}
+        </section>
+      )}
+      {run.stage === "plan" && run.accepted && (
+        <section data-testid="plan-landed" className="m-2 rounded-card border border-good p-3">
+          <p className="text-sm text-ink">
+            The plan landed — its tasks are on the board, ready to launch.{" "}
+            <a href={routeHref({ name: "board" })} className="text-good underline">see the tasks</a>
+          </p>
+        </section>
+      )}
+      {(next.includes("run_spec") || next.includes("run_plan")) && (
+        <section data-testid="next-stage" className="m-2 rounded-card border border-good p-3">
+          <p className="text-sm text-ink">
+            {next.includes("run_spec")
+              ? "The requirements landed. The next step of the same process is extending the spec against them."
+              : "The spec landed. The next step of the same process is extending the plan against it."}
+          </p>
+          <button
+            type="button"
+            data-testid="run-next-stage"
+            disabled={stageBusy}
+            onClick={() => {
+              setStageBusy(true);
+              setStageError(null);
+              const stage = next.includes("run_spec") ? "spec" : "plan";
+              void client
+                .stageStart(run.project_id, stage)
+                .then((r) => {
+                  location.hash = `#/runs/${r.id}`;
+                })
+                .catch((e) => setStageError(e instanceof Error ? e.message : String(e)))
+                .finally(() => setStageBusy(false));
+            }}
+            className="mt-2 rounded border border-good px-3 py-1.5 text-sm text-good disabled:opacity-40"
+          >
+            {stageBusy
+              ? "Starting…"
+              : next.includes("run_spec")
+                ? "Extend the spec"
+                : "Extend the plan"}
+          </button>
+          {stageError && (
+            <p className="mt-1 text-xs text-critical" data-testid="next-stage-error">{stageError}</p>
           )}
         </section>
       )}

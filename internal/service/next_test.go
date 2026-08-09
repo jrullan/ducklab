@@ -153,3 +153,29 @@ func TestAPinnedTaskStopsOfferingRemove(t *testing.T) {
 		}
 	}
 }
+
+// The document chain is ONE process: an accepted requirements run offers the
+// spec, an accepted spec run offers the plan — in place, because leaving the
+// run view to find the Documents screen is navigation the acceptance itself
+// already implied.
+func TestAnAcceptedStageRunOffersTheNextStage(t *testing.T) {
+	for _, tc := range []struct {
+		stage string
+		want  []string
+	}{
+		{"intake", []string{"run_spec"}},
+		{"spec", []string{"run_plan"}},
+		{"plan", nil},  // tasks are next, and they live on the board
+		{"build", nil}, // task runs still end plainly
+	} {
+		r := &runlog.Run{Stage: tc.stage, Status: "done", Accepted: true}
+		if got := runNext(r); !slices.Equal(got, tc.want) {
+			t.Errorf("%s accepted: next = %v, want %v", tc.stage, got, tc.want)
+		}
+	}
+	// An unaccepted ending offers nothing new.
+	r := &runlog.Run{Stage: "intake", Status: "failed"}
+	if got := runNext(r); got != nil {
+		t.Errorf("a failed intake offers %v", got)
+	}
+}
