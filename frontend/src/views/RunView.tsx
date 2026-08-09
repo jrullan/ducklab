@@ -15,6 +15,7 @@ import { StatusChip } from "../components/StatusChip";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
+import { seatsFromRoster } from "../lib/seats";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
 
@@ -232,11 +233,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       : task?.status === "in_progress"
         ? `Another run is working on ${run.task_id} right now. A second one would edit the same tree at the same time.`
         : "";
-  // The ducklings that actually took a turn, in roster order, so the pickers
-  // come back set to what just ran rather than to nothing.
-  const relaunchDucklings = Object.values(run.roster ?? {}).filter(
-    (id, i, all) => all.indexOf(id) === i,
-  );
+  // The seats as THIS run filled them, positionally — the panel exists to
+  // run it again. (The board's launcher opens on the Settings line-up
+  // instead: a fresh launch and a re-run are different intents, and each
+  // panel says which one it serves.)
+  const relaunchDucklings = seatsFromRoster(run.mode, run.roster);
 
   const relaunch = async (opts: LaunchOpts) => {
     setRelaunchBusy(true);
@@ -340,6 +341,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </button>
             </p>
           ) : (
+          <>
+          {/* The provenance, said out loud: this panel and the board's rail
+              open with DIFFERENT seats by design, and unlabelled that read
+              as one of them being wrong. */}
+          <p className="mb-1 text-xs text-ink-muted" data-testid="relaunch-provenance">
+            seated as this run ran — the board launches with your Settings line-up
+          </p>
           <RunLauncher
             // Remounted when the mode arrives: the run reaches the store in two
             // steps (a run_start event, then the resync), and a launcher that
@@ -355,6 +363,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             busy={relaunchBusy}
             onLaunch={relaunch}
           />
+          </>
           )}
           {relaunched && (
             <p className="mt-2 text-sm">

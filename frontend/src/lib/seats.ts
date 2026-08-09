@@ -19,6 +19,29 @@ export function fixedSeats(mode: string): number {
   return 0;
 }
 
+/** The seats a finished run's roster fills, in seat order for its mode.
+ *
+ * A roster names EVERY role — architect, judge, scribe, triager included —
+ * and Object.values() hands them back in key order, architect first. Seeding
+ * a relaunch from that put the run's ARCHITECT in the implementer seat: the
+ * panel showed a pair this run never was. Position is meaning (seatLabel),
+ * so the extraction must be positional too; modes whose seats the roster
+ * cannot name (tournament's contestants, split's workers) fall back to the
+ * deduplicated list. */
+export function seatsFromRoster(
+  mode: string,
+  roster: Record<string, string> | undefined,
+): string[] {
+  const r = roster ?? {};
+  switch (mode) {
+    case "solo":
+      return [r.implementer].filter(Boolean) as string[];
+    case "pair":
+      return [r.implementer, r.reviewer].filter(Boolean) as string[];
+  }
+  return Object.values(r).filter((id, i, all) => !!id && all.indexOf(id) === i);
+}
+
 /** What the seat's position means in this mode — the position IS the role. */
 export function seatLabel(mode: string, i: number): string {
   switch (mode) {
