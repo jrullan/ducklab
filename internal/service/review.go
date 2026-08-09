@@ -139,12 +139,13 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
-		ProjectRoot: projectRoot,
-		TaskID:      req.TaskID,
-		Prompt:      reviewPrompt(req.TaskID, diff),
-		Runner:      s.runnerFor(cache, roster, ectx),
-		Roster:      roster,
-		Diff:        func() (string, error) { return diff, nil },
+		LiveToolEvents: true,
+		ProjectRoot:    projectRoot,
+		TaskID:         req.TaskID,
+		Prompt:         reviewPrompt(req.TaskID, diff),
+		Runner:         s.runnerFor(cache, roster, ectx),
+		Roster:         roster,
+		Diff:           func() (string, error) { return diff, nil },
 		OnEvent: func(kind string, data map[string]interface{}) {
 			rs.writer.AppendEvent(kind, data)
 		},

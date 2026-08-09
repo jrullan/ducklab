@@ -93,6 +93,11 @@ type Loop struct {
 	OnReasoning func(turn *Turn, text string)
 	// RunWriter, if set, receives LLM call records.
 	RunWriter RunLogWriter
+	// OnToolCall, if set, receives each tool call AS IT COMPLETES. The
+	// strategy layer used to emit them in a batch when the whole turn ended,
+	// so a thirty-call implementer turn showed an empty timeline for its
+	// entire length and then eighty ticks at once.
+	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
 }
 
 // RunLogWriter is the interface for writing LLM call records.
@@ -438,12 +443,16 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					ToolCallID: tc.ID,
 					Content:    result.Content,
 				})
-				outcome.ToolCalls = append(outcome.ToolCalls, ToolCallRecord{
+				rec := ToolCallRecord{
 					Name:   tc.Function.Name,
 					Args:   json.RawMessage(tc.Function.Arguments),
 					Result: result,
 					Digest: tools.Digest(json.RawMessage(tc.Function.Arguments)),
-				})
+				}
+				outcome.ToolCalls = append(outcome.ToolCalls, rec)
+				if loop.OnToolCall != nil {
+					loop.OnToolCall(turn, string(loop.Duckling.ID), &rec)
+				}
 			}
 			continue
 		}
@@ -467,12 +476,16 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					Role:    "user",
 					Content: fmt.Sprintf("Tool result for %s:\n%s", toolCall.Name, result.Content),
 				})
-				outcome.ToolCalls = append(outcome.ToolCalls, ToolCallRecord{
+				rec := ToolCallRecord{
 					Name:   toolCall.Name,
 					Args:   toolCall.Args,
 					Result: result,
 					Digest: tools.Digest(toolCall.Args),
-				})
+				}
+				outcome.ToolCalls = append(outcome.ToolCalls, rec)
+				if loop.OnToolCall != nil {
+					loop.OnToolCall(turn, string(loop.Duckling.ID), &rec)
+				}
 				continue
 			}
 			// No tool call; this is the final answer

@@ -23,8 +23,8 @@ func TestAReportCanBeCorrected(t *testing.T) {
 	}
 
 	got, err := s.BugEdit(context.Background(), id, "B-001", BugRequest{
-		Title: "dragging a vertex does not update the left edge label",
-		Body:  "In the default triangle, drag the top vertex.",
+		Title:    "dragging a vertex does not update the left edge label",
+		Body:     "In the default triangle, drag the top vertex.",
 		Severity: "critical",
 	})
 	if err != nil {

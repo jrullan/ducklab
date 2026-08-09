@@ -184,7 +184,7 @@ func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
 	run := &runlog.Run{
 		ID: "r-tf", ProjectID: p.ID, TaskID: "T-003", Stage: "test",
 		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
-		StartedAt: "2026-08-06T12:00:00Z",
+		StartedAt:  "2026-08-06T12:00:00Z",
 		ChainBuild: map[string]interface{}{"task_id": "T-003", "mode": "solo"},
 	}
 	w, err := runlog.NewWriter(dir, run)
@@ -226,7 +226,6 @@ func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
 	}
 }
 
-
 // The person's exact wound: an already-red suite makes the verdict
 // UNVERIFIED, the run pauses, the person accepts by hand — and the promised
 // build silently never came; the task fell to Todo and they re-picked it to
@@ -249,7 +248,7 @@ func TestAManualAcceptContinuesThePausedChain(t *testing.T) {
 	run := &runlog.Run{
 		ID: "r-unv", ProjectID: p.ID, TaskID: "T-012", Stage: "test",
 		Status: "paused", Verdict: "UNVERIFIED", PendingKind: "gate",
-		StartedAt: "2026-08-06T05:42:00Z",
+		StartedAt:  "2026-08-06T05:42:00Z",
 		ChainBuild: map[string]interface{}{"task_id": "T-012", "mode": "solo"},
 	}
 	w, err := runlog.NewWriter(dir, run)

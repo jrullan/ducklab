@@ -310,8 +310,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
-		ProjectRoot: projectRoot,
-		TaskID:      req.TaskID,
+		LiveToolEvents: true,
+		ProjectRoot:    projectRoot,
+		TaskID:         req.TaskID,
 		// The decisions the person already made ride on the prompt itself —
 		// the exact wound: a resumed test run reworded its answered question
 		// and asked it again, because the answer was filed under a hash of

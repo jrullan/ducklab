@@ -277,9 +277,11 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		// turn_start and a turn_end around nothing: the lane showed a
 		// participant with an empty bubble, and the reasoning — which IS the
 		// content of a triage — never left the process.
+		// true: the triager's loop wires OnToolCall like every other, so its
+		// calls are already on the record as they happened.
 		strategy.EmitTurnRecord(func(kind string, data map[string]interface{}) {
 			rs.writer.AppendEvent(kind, data)
-		}, 1, i, config.RoleTriager, duckling, out)
+		}, 1, i, config.RoleTriager, duckling, out, true)
 		rs.writer.AppendEvent("turn_end", map[string]interface{}{
 			"round": 1, "turn": i, "role": string(config.RoleTriager),
 		})

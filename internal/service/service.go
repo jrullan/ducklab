@@ -28,6 +28,7 @@ import (
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/store"
+	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
 	"github.com/jrullan/ducklab/internal/verify"
@@ -2228,6 +2229,26 @@ func recoverRun(rs *runState) {
 // Next to the cache rather than in each caller, for the same reason the budget
 // ceilings are: six call sites is six chances to forget.
 func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
+	// Tool calls are RECORD, not display: they land in events.jsonl as they
+	// complete and reach every client through the writer's bus hook. Wired
+	// before the stream guard below, which only gates the display-only
+	// deltas — a no-stream run still owes its log the calls it made.
+	cache.onToolCall = func(t *agent.Turn, duckling string, rec *agent.ToolCallRecord) {
+		data := map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": duckling,
+			"tool": rec.Name,
+			"args": string(rec.Args),
+		}
+		if rec.Result != nil {
+			data["ok"] = !rec.Result.IsError
+			data["result"] = strategy.SummariseToolResult(rec.Result.Content)
+		}
+		if rec.Digest != "" {
+			data["digest"] = rec.Digest
+		}
+		rs.writer.AppendEvent("tool_call", data)
+	}
 	if !rs.run.Stream || s.bus == nil {
 		return
 	}

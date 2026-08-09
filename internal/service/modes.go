@@ -34,6 +34,7 @@ type loopCache struct {
 	writer      agent.RunLogWriter
 	onDelta     func(*agent.Turn, string)
 	onReasoning func(*agent.Turn, string)
+	onToolCall  func(*agent.Turn, string, *agent.ToolCallRecord)
 	mu          sync.Mutex
 	loops       map[config.DucklingID]*agent.Loop
 }
@@ -50,6 +51,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	}
 	l.OnDelta = c.onDelta
 	l.OnReasoning = c.onReasoning
+	l.OnToolCall = c.onToolCall
 	c.loops[id] = l
 	return l, nil
 }
@@ -195,8 +197,9 @@ type modeContext struct {
 // dispatchMode runs the requested duck mode.
 func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	base := strategy.ExecuteParams{
-		ProjectRoot: mc.entry.Path,
-		TaskID:      mc.req.TaskID,
+		LiveToolEvents: true,
+		ProjectRoot:    mc.entry.Path,
+		TaskID:         mc.req.TaskID,
 		// Answers the person already gave ride ON the prompt: a resumed run
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.

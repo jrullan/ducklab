@@ -247,7 +247,6 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 	}
 
-
 	// The default modes launchers open on. Empty clears back to solo; a mode
 	// that does not exist would open every launcher on nonsense.
 	if v.BuildMode != "" {

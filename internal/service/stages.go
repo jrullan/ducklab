@@ -219,11 +219,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
 			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script), &strategy.ExecuteParams{
-				ProjectRoot: projectRoot,
-				Prompt:      prompt,
-				ExecContext: ectx,
-				Runner:      s.runnerFor(cache, roster, ectx),
-				Roster:      roster,
+				LiveToolEvents: true,
+				ProjectRoot:    projectRoot,
+				Prompt:         prompt,
+				ExecContext:    ectx,
+				Runner:         s.runnerFor(cache, roster, ectx),
+				Roster:         roster,
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 				},

@@ -64,6 +64,10 @@ type ExecuteParams struct {
 	// than from a script, so walking a script's turns reaches four modes out of
 	// six and a setting that applies to some modes is worse than none.
 	TurnCaps map[config.Role]int
+	// LiveToolEvents says the runner emits tool_call events itself, per call,
+	// as they complete (agent.Loop.OnToolCall) — the post-turn batch here
+	// would duplicate every one of them in the record.
+	LiveToolEvents bool
 	// OnEvent reports progress; optional.
 	OnEvent func(kind string, data map[string]interface{})
 }
@@ -432,7 +436,7 @@ func emit(params *ExecuteParams, kind string, data map[string]interface{}) {
 func emitMessage(params *ExecuteParams, round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome) {
 	EmitTurnRecord(func(kind string, data map[string]interface{}) {
 		emit(params, kind, data)
-	}, round, turn, role, duckling, outcome)
+	}, round, turn, role, duckling, outcome, params.LiveToolEvents)
 }
 
 // EmitTurnRecord writes what a turn said and did, through whatever writer the
@@ -443,9 +447,12 @@ func emitMessage(params *ExecuteParams, round, turn int, role config.Role, duckl
 // all. The run showed a participant with an empty bubble, and the model's
 // reasoning — which is the whole content of a triage — never left the process.
 // Duplicating the event shapes here would have been two places to keep in step.
-func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome) {
+// liveToolEvents says the runner already emitted each tool_call as it
+// completed (agent.Loop.OnToolCall); the batch below would duplicate them.
+func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round, turn int, role config.Role, duckling config.DucklingID, outcome *agent.Outcome, liveToolEvents bool) {
 	emit := func(_ *ExecuteParams, kind string, data map[string]interface{}) { emitFn(kind, data) }
 	var params *ExecuteParams
+	_ = params
 	if outcome == nil {
 		return
 	}
@@ -468,6 +475,13 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 		}
 		emit(params, "message", data)
 	}
+	// Live emission (agent.Loop.OnToolCall) supersedes this batch: a
+	// thirty-call turn showed an empty timeline for its whole length and
+	// then every tick at once. The batch remains for callers that wire no
+	// callback, so nothing loses its record.
+	if liveToolEvents {
+		return
+	}
 	for _, tc := range outcome.ToolCalls {
 		data := map[string]interface{}{
 			"round": round, "turn": turn,
@@ -482,7 +496,7 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 			// The result is summarised, not stored whole: a single fs_read can
 			// return an entire file, and forty of them would make the run log
 			// larger than the repository it describes.
-			data["result"] = summariseToolResult(tc.Result.Content)
+			data["result"] = SummariseToolResult(tc.Result.Content)
 		}
 		if tc.Digest != "" {
 			data["digest"] = tc.Digest
@@ -494,7 +508,7 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 // maxToolResultBytes bounds what a tool result contributes to the log (I3).
 const maxToolResultBytes = 512
 
-func summariseToolResult(s string) string {
+func SummariseToolResult(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= maxToolResultBytes {
 		return s

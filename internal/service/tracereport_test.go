@@ -40,14 +40,14 @@ func TestTheDevelopmentReportTracesTheSpine(t *testing.T) {
 		"| REQ-002 Nothing mobile | wont | excluded | — |",
 		"development report",
 		"requirements v2 (approved by human)",
-		"A single-file triangle calculator.",          // the narrative preamble
-		"REQ-001 — Interactive triangle",              // the matrix root
-		"The app shall draw a draggable triangle.",    // requirement prose kept
-		"SPEC-001 — Canvas rendering",                 // the spec hop
-		"T-001 — Render triangle · **todo**",          // the task with its status
-		"## Bug fixes",                                // promoted tasks, separately
-		"T-046 — Fix labels (Fixes B-005)",            //   justified by the report
-		"## Spine health",                             // and the honesty section
+		"A single-file triangle calculator.",       // the narrative preamble
+		"REQ-001 — Interactive triangle",           // the matrix root
+		"The app shall draw a draggable triangle.", // requirement prose kept
+		"SPEC-001 — Canvas rendering",              // the spec hop
+		"T-001 — Render triangle · **todo**",       // the task with its status
+		"## Bug fixes",                             // promoted tasks, separately
+		"T-046 — Fix labels (Fixes B-005)",         //   justified by the report
+		"## Spine health",                          // and the honesty section
 	} {
 		if !strings.Contains(rendered, must) {
 			t.Errorf("report lacks %q", must)

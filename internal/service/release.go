@@ -245,10 +245,11 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 	s.attachStreaming(rs, cache)
 
 	params := &strategy.ExecuteParams{
-		ProjectRoot: projectRoot,
-		Prompt:      scribePrompt(notes),
-		Runner:      s.runnerFor(cache, roster, ectx),
-		Roster:      roster,
+		LiveToolEvents: true,
+		ProjectRoot:    projectRoot,
+		Prompt:         scribePrompt(notes),
+		Runner:         s.runnerFor(cache, roster, ectx),
+		Roster:         roster,
 		OnEvent: func(kind string, data map[string]interface{}) {
 			rs.writer.AppendEvent(kind, data)
 		},
