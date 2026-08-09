@@ -494,6 +494,18 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 		".ducklab/ducklab.db-wal",
 		".ducklab/ducklab.db-shm",
 		".ducklab/lock",
+		// Common junk, seeded at birth. Accept commits the WHOLE tree
+		// (git add -A), so a virtualenv created before anyone thought about
+		// .gitignore was swept into a task commit — 2,010 files whose
+		// recompiled bytecode then dirtied the tree on every test run and
+		// blocked every clean-tree guard the engine has.
+		".venv/",
+		"venv/",
+		"__pycache__/",
+		"*.pyc",
+		".pytest_cache/",
+		"node_modules/",
+		".DS_Store",
 	}
 	if err := vcs.EnsureGitignore(absPath, gitignoreEntries); err != nil {
 		return nil, err

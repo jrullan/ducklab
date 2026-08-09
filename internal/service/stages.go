@@ -253,6 +253,23 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"sections": len(result.Proposed.Sections),
 		"remapped": len(result.Remapped),
 	})
+	// What this proposal would DESTROY, said before the decision. A run asked
+	// to ADD one section replaced the whole spec with only that section —
+	// sixteen approved sections gone — and the promote asked no questions:
+	// the person learned days later, from a model asking a human what a
+	// contract said, because the contract's section no longer existed. Never
+	// blocked (a wholesale rewrite can be intended), only never hidden.
+	if current, cErr := artifact.Load(projectRoot, result.Kind); cErr == nil && current != nil {
+		removed := missingSectionIDs(current.Sections, result.Proposed.Sections)
+		if len(removed) > 0 {
+			rs.run.Warning = fmt.Sprintf(
+				"this proposal REMOVES %d of %d existing sections (%s) — an addition keeps what it adds to; accept only if the removal is intended",
+				len(removed), len(current.Sections), strings.Join(removed, ", "))
+			rs.writer.AppendEvent("sections_removed", map[string]interface{}{
+				"ids": removed, "of": len(current.Sections),
+			})
+		}
+	}
 	// No executable gate exists for a document, so the verdict is UNVERIFIED
 	// and the human gate is the only gate (P3).
 	rs.run.Verdict = "UNVERIFIED"
@@ -269,6 +286,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"kind": "gate", "verdict": "UNVERIFIED", "artifact": string(result.Kind),
 	})
 	rs.writer.WriteState()
+}
+
+// missingSectionIDs lists the ids present in current and absent from
+// proposed — what accepting the proposal would erase.
+func missingSectionIDs(current, proposed []artifact.Section) []string {
+	have := map[string]bool{}
+	for _, sec := range proposed {
+		have[sec.ID] = true
+	}
+	var removed []string
+	for _, sec := range current {
+		if !have[sec.ID] {
+			removed = append(removed, sec.ID)
+		}
+	}
+	return removed
 }
 
 // ArtifactGet returns a committed artifact and any pending proposal.

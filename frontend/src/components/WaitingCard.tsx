@@ -50,6 +50,11 @@ export function WaitingCard({
           {run.failure}
         </p>
       )}
+      {run.warning && (
+        <p className="mt-1 break-words text-xs" style={{ color: "var(--status-serious)" }} data-testid="waiting-warning">
+          {run.warning}
+        </p>
+      )}
       <div className="mt-2 flex items-center gap-2">
         {/* The evidence — diff, transcript, gate output — is one click away on
             the label. AC-34 holds: nothing optimistic, the commit shows only

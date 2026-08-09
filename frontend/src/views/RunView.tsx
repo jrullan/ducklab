@@ -530,6 +530,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </div>
         </section>
       )}
+      {run.warning && (
+        <section data-testid="run-warning" className="m-2 rounded-card border border-serious p-3">
+          <h2 className="mb-1 text-sm font-medium" style={{ color: "var(--status-serious)" }}>Warning</h2>
+          <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.warning}</p>
+        </section>
+      )}
       {run.failure && (
         <section
           data-testid="run-failure"

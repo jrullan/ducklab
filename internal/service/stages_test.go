@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -478,5 +479,42 @@ func TestAnEmptyProposalIsNotASubstitute(t *testing.T) {
 	}
 	if len(res.Proposed) != 0 {
 		t.Errorf("an empty proposal was reported as the checked document: %v", res.Proposed)
+	}
+}
+
+// A run asked to ADD one section replaced the whole spec with only that
+// section — sixteen approved sections gone, promote silent, and the person
+// learned days later from a model asking about a contract whose section no
+// longer existed. The proposal's gate now states what accepting would erase.
+func TestAProposalSaysWhatItWouldErase(t *testing.T) {
+	current := []artifact.Section{{ID: "SPEC-001"}, {ID: "SPEC-002"}, {ID: "SPEC-003"}}
+	proposed := []artifact.Section{{ID: "SPEC-017"}, {ID: "SPEC-002"}}
+	got := missingSectionIDs(current, proposed)
+	if len(got) != 2 || got[0] != "SPEC-001" || got[1] != "SPEC-003" {
+		t.Errorf("removed = %v, want [SPEC-001 SPEC-003]", got)
+	}
+	// A pure addition erases nothing and warns about nothing.
+	if extra := missingSectionIDs(current, append(current, artifact.Section{ID: "SPEC-018"})); len(extra) != 0 {
+		t.Errorf("an addition reported removals: %v", extra)
+	}
+}
+
+// A fresh project's tree is born knowing about virtualenvs and node_modules:
+// accept commits the whole tree, and a .venv created before .gitignore was
+// swept into a task commit — 2,010 files of it.
+func TestAFreshProjectIgnoresCommonJunk(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".venv/", "__pycache__/", "node_modules/", ".pytest_cache/"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf(".gitignore is missing %q", want)
+		}
 	}
 }
