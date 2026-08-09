@@ -55,6 +55,8 @@ type Service struct {
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool
 	queue        *runQueue
+	appMu      sync.Mutex
+	apps       map[string]*appState
 }
 
 type projectState struct {
@@ -116,6 +118,7 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		providers:  make(map[config.ProviderID]provider.Provider),
 		projects:   make(map[string]*projectState),
 		queue:      newRunQueue(cfg.Engine.MaxConcurrentRuns),
+		apps:       make(map[string]*appState),
 	}
 	s.queue.held = s.projectHeld
 
@@ -494,6 +497,7 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 		".ducklab/ducklab.db-wal",
 		".ducklab/ducklab.db-shm",
 		".ducklab/lock",
+		".ducklab/app.log",
 		// Common junk, seeded at birth. Accept commits the WHOLE tree
 		// (git add -A), so a virtualenv created before anyone thought about
 		// .gitignore was swept into a task commit — 2,010 files whose

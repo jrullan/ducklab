@@ -283,6 +283,24 @@ type Project struct {
 	Git      Git         `toml:"git" json:"git"`
 	GitHub   GitHub      `toml:"github" json:"github"`
 	Shell    ShellPolicy `toml:"shell" json:"shell"`
+	Run      RunApp      `toml:"run" json:"run"`
+}
+
+// RunApp is how the built application actually starts — the stage the gate
+// cannot see. A project shipped 48 accepted tasks and 161 green tests with
+// no HTTP server and no built frontend: every task passed what the gate
+// measured, and nothing measured "it boots". This section is the mirror of
+// [verify] for the running system.
+type RunApp struct {
+	// Command starts the application, run through the platform shell from the
+	// project root. The engine manages the process: start, stop, logs.
+	Command string `toml:"command" json:"command"`
+	// URL is where a person opens the running app.
+	URL string `toml:"url" json:"url"`
+	// Health is a URL the engine probes to report whether the running app is
+	// actually answering — a process alive and a service alive are different
+	// claims.
+	Health string `toml:"health" json:"health"`
 }
 
 // Error is a configuration error.

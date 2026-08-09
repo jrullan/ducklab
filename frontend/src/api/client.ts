@@ -45,6 +45,19 @@ export type GateStatus = {
   best_verdict: string;
 };
 
+/** Mirrors service.AppStatus: the running system as a first-class object. */
+export interface AppStatus {
+  configured: boolean;
+  command?: string;
+  url?: string;
+  running: boolean;
+  pid?: number;
+  started_at?: string;
+  health?: string;
+  exit_error?: string;
+  log_tail?: string;
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -543,6 +556,19 @@ export class EngineClient {
       "POST",
       `/v1/projects/${projectId}/tasks/${encodeURIComponent(taskId)}/retire-test`,
     );
+  }
+
+  /** The app's run configuration and managed-process state. */
+  appStatus(projectId: string) {
+    return this.request<AppStatus>("GET", `/v1/projects/${projectId}/app`);
+  }
+  /** Start the app via run.command as an engine-managed process. */
+  appStart(projectId: string) {
+    return this.request<AppStatus>("POST", `/v1/projects/${projectId}/app/start`);
+  }
+  /** Stop the managed app — kills the whole process group. */
+  appStop(projectId: string) {
+    return this.request<void>("POST", `/v1/projects/${projectId}/app/stop`);
   }
 
   /** File the run's final reviewer findings as bug reports, with provenance.

@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/release"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
@@ -283,6 +285,17 @@ func (s *Service) TraceReport(ctx context.Context, projectID string) (string, er
 		} else {
 			b.WriteString("## Spine health\n\nNo breaks: every must requirement is specified, " +
 				"every spec section is delivered or excluded, every task is justified.\n")
+		}
+	}
+
+	// The last mile, checked like the spine: a project once reached
+	// all-tasks-accepted with 161 green tests and could not start, because
+	// nothing measured "it boots". A report that says "done" about that
+	// project is marketing.
+	if cfg, cErr := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); cErr == nil {
+		if cfg.Run.Command == "" {
+			b.WriteString("\n⚠ **No run.command is configured** — the project has no defined way to start. " +
+				"Every task can be accepted and still no application exists; set how the app runs in Projects.\n")
 		}
 	}
 	return b.String(), nil

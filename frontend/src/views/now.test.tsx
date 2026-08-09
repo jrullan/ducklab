@@ -15,6 +15,7 @@ const base: Run = {
 const clientWith = (over: Partial<EngineClient> = {}) =>
   ({
     taskNext: vi.fn(() => Promise.resolve(null)),
+    appStatus: vi.fn(() => Promise.resolve({ configured: false, running: false })),
     bugs: vi.fn(() => Promise.resolve([])),
     moveBug: vi.fn(() => Promise.resolve({})),
     ducklings: vi.fn(() => Promise.resolve([])),

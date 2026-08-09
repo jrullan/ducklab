@@ -383,6 +383,32 @@ func (s *Server) handleTestRetire(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, run)
 }
 
+func (s *Server) handleAppStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.AppStatus(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
+func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.AppStart(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
+func (s *Server) handleAppStop(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.AppStop(r.Context(), r.PathValue("id")); err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleGateRun(w http.ResponseWriter, r *http.Request) {
 	res, err := s.svc.GateRun(r.Context(), r.PathValue("id"))
 	if err != nil {

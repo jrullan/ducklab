@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { EngineClient, GateStatus, Project } from "../api/client";
+import type { AppStatus, EngineClient, GateStatus, Project } from "../api/client";
 import { canChooseDirectory, chooseDirectory } from "../lib/picker";
 import { StatusChip } from "../components/StatusChip";
 
@@ -33,6 +33,7 @@ export function Projects({
   const [name, setName] = useState("");
   const [gitInit, setGitInit] = useState(true);
   const [gates, setGates] = useState<Record<string, GateStatus>>({});
+  const [apps, setApps] = useState<Record<string, AppStatus>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
 
@@ -48,6 +49,10 @@ export function Projects({
           client
             .projectGate(p.id)
             .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
+            .catch(() => {});
+          client
+            .appStatus(p.id)
+            .then((a) => setApps((cur) => ({ ...cur, [p.id]: a })))
             .catch(() => {});
         }
       })
@@ -241,6 +246,20 @@ export function Projects({
                     {/* Not a warning chip on a missing project: it is the whole
                         reason the board looks empty, so it is stated plainly. */}
                     {p.missing && <StatusChip role="critical" label="folder is gone" />}
+                    <AppChip
+                      status={apps[p.id]}
+                      onSet={async (command, url, health) => {
+                        try {
+                          await client.projectUpdate(p.id, {
+                            "run.command": command, "run.url": url, "run.health": health,
+                          });
+                          const a = await client.appStatus(p.id);
+                          setApps((cur) => ({ ...cur, [p.id]: a }));
+                        } catch (err) {
+                          setFailure(err instanceof Error ? err.message : String(err));
+                        }
+                      }}
+                    />
                     <GateChip
                       status={gates[p.id]}
                       onAdopt={() =>
@@ -292,6 +311,85 @@ export function Projects({
         )}
       </section>
     </div>
+  );
+}
+
+/** How the app starts — the stage the gate cannot see. A project reached
+ * all-tasks-accepted with no way to run; this chip is where that fact stops
+ * being invisible. */
+function AppChip({
+  status,
+  onSet,
+}: {
+  status?: AppStatus;
+  onSet: (command: string, url: string, health: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [command, setCommand] = useState("");
+  const [url, setUrl] = useState("");
+  const [health, setHealth] = useState("");
+  if (!status) return null;
+  const editor = editing && (
+    <span className="flex items-center gap-1" data-testid="app-editor">
+      <input
+        value={command}
+        onChange={(e) => setCommand(e.target.value)}
+        placeholder="python -m app  (starts the app)"
+        data-testid="app-command"
+        className="w-44 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+      />
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="http://localhost:8000"
+        data-testid="app-url"
+        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+      />
+      <input
+        value={health}
+        onChange={(e) => setHealth(e.target.value)}
+        placeholder="health URL (optional)"
+        data-testid="app-health"
+        className="w-36 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+      />
+      <button
+        type="button"
+        disabled={command.trim() === ""}
+        onClick={() => void onSet(command.trim(), url.trim(), health.trim()).then(() => setEditing(false))}
+        data-testid="app-save"
+        className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+      >
+        Set
+      </button>
+      <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
+        cancel
+      </button>
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1 text-xs text-ink-muted" data-testid="app-chip">
+      {status.configured ? (
+        <>app <span className="font-mono">({status.command})</span></>
+      ) : (
+        <span style={{ color: "var(--status-warning)" }}>no run.command — the app cannot start</span>
+      )}
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => {
+            setCommand(status.command ?? "");
+            setUrl(status.url ?? "");
+            setHealth("");
+            setEditing(true);
+          }}
+          data-testid="app-edit"
+          className="underline"
+        >
+          {status.configured ? "edit" : "set it"}
+        </button>
+      )}
+      {editor}
+    </span>
   );
 }
 

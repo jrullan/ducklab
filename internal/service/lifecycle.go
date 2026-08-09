@@ -172,6 +172,9 @@ func (s *Service) markEngineRestart(rs *runState) error {
 // nothing FAILED.
 func (s *Service) PauseAllRuns(ctx context.Context) error {
 	s.shuttingDown.Store(true)
+	// The apps the engine manages die with it — a process nobody can see or
+	// stop from any surface is worse than a stopped app.
+	s.stopAllApps()
 
 	s.runsMu.RLock()
 	var active []*runState

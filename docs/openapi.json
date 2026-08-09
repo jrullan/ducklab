@@ -245,6 +245,9 @@
             },
             "type": "object"
           },
+          "run": {
+            "$ref": "#/components/schemas/ConfigRunApp"
+          },
           "schema": {
             "type": "integer"
           },
@@ -266,9 +269,29 @@
           "modes",
           "name",
           "roster",
+          "run",
           "schema",
           "shell",
           "verify"
+        ],
+        "type": "object"
+      },
+      "ConfigRunApp": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "health": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "health",
+          "url"
         ],
         "type": "object"
       },
@@ -1097,6 +1120,42 @@
         },
         "required": [
           "commit_sha"
+        ],
+        "type": "object"
+      },
+      "ServiceAppStatus": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "exit_error": {
+            "type": "string"
+          },
+          "health": {
+            "type": "string"
+          },
+          "log_tail": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "running"
         ],
         "type": "object"
       },
@@ -2531,6 +2590,107 @@
           }
         ],
         "summary": "Update project config keys"
+      }
+    },
+    "/v1/projects/{id}/app": {
+      "get": {
+        "operationId": "AppStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAppStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The application's run configuration and managed-process state"
+      }
+    },
+    "/v1/projects/{id}/app/start": {
+      "post": {
+        "operationId": "AppStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAppStatus"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start the app via run.command as an engine-managed process"
+      }
+    },
+    "/v1/projects/{id}/app/stop": {
+      "post": {
+        "operationId": "AppStop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stop the managed app (kills the whole process group)"
       }
     },
     "/v1/projects/{id}/artifacts/{kind}": {

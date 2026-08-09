@@ -77,9 +77,16 @@ export interface ConfigProject {
   modes?: Record<string, string>;
   name?: string;
   roster?: Record<string, string>;
+  run?: ConfigRunApp;
   schema?: number;
   shell?: ConfigShellPolicy;
   verify?: ConfigVerify;
+}
+
+export interface ConfigRunApp {
+  command?: string;
+  health?: string;
+  url?: string;
 }
 
 export interface ConfigSamplingParams {
@@ -323,6 +330,18 @@ export interface ServiceAcceptResult {
   commit_sha?: string;
 }
 
+export interface ServiceAppStatus {
+  command?: string;
+  configured?: boolean;
+  exit_error?: string;
+  health?: string;
+  log_tail?: string;
+  pid?: number;
+  running?: boolean;
+  started_at?: string;
+  url?: string;
+}
+
 export interface ServiceBenchSummary {
   cells?: number;
   errors?: number;
@@ -555,6 +574,9 @@ export const OPERATIONS = [
   { id: "ProjectForget", method: "DELETE", path: "/v1/projects/{id}" },
   { id: "ProjectGet", method: "GET", path: "/v1/projects/{id}" },
   { id: "ProjectUpdate", method: "PATCH", path: "/v1/projects/{id}" },
+  { id: "AppStatus", method: "GET", path: "/v1/projects/{id}/app" },
+  { id: "AppStart", method: "POST", path: "/v1/projects/{id}/app/start" },
+  { id: "AppStop", method: "POST", path: "/v1/projects/{id}/app/stop" },
   { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
   { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
   { id: "ArtifactDiscard", method: "DELETE", path: "/v1/projects/{id}/artifacts/{kind}/proposal" },
