@@ -40,6 +40,9 @@ declare global {
       /** Wails binding name for engine supervision: stop the old engine,
        * start the installed one, hand back the new connection. */
       restartEngine?: string;
+      /** Wails binding name for opening a URL in the system browser — the
+       * webview swallows target=_blank anchors. Absent outside the desktop. */
+      openURL?: string;
     };
   }
 }

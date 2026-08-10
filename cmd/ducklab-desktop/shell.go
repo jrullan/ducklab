@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os/exec"
 	"reflect"
+	goruntime "runtime"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -66,6 +69,28 @@ func (s *Shell) RestartEngine() (map[string]string, error) {
 		"token":   info.Token,
 		"version": info.Version,
 	}, nil
+}
+
+// OpenURLFQN is the name the frontend calls OpenURL by.
+func OpenURLFQN() string {
+	return reflect.TypeOf(Shell{}).PkgPath() + ".Shell.OpenURL"
+}
+
+// OpenURL opens a web URL in the person's browser. The webview swallows
+// target=_blank anchors, so "open http://localhost:8000" was a link that did
+// nothing — the one link whose whole job is leaving the app.
+func (s *Shell) OpenURL(url string) error {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("refusing to open non-http url %q", url)
+	}
+	switch goruntime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
 }
 
 // Notify shows one OS notification. The frontend decides WHEN — it is the

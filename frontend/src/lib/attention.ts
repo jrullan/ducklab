@@ -70,6 +70,18 @@ export function interruptions(
 
 const byName = () => window.wails?.Call?.ByName;
 
+/** Open a URL in the system browser. In the desktop the webview swallows
+ * target=_blank, so the shell does it; in a plain browser, window.open. */
+export function openExternal(url: string): void {
+  const fqn = window.ducklab?.openURL;
+  const call = byName();
+  if (fqn && call) {
+    void call(fqn, url).catch(() => {});
+    return;
+  }
+  window.open(url, "_blank", "noreferrer");
+}
+
 // One shared context: browsers cap how many may exist, and a quack per pause
 // would exhaust the allowance in an afternoon of work.
 let audioCtx: AudioContext | null = null;

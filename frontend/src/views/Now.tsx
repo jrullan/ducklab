@@ -22,6 +22,7 @@ import { money, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
+import { openExternal } from "../lib/attention";
 
 export function Now({ client, projectId }: { client: EngineClient; projectId: string }) {
   const runs = useRuns((s) => s.runs);
@@ -106,6 +107,17 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   const quiet =
     waiting.length === 0 && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
+
+  // The chip must converge to the truth: a status caught mid-boot said
+  // "unhealthy" forever, because nothing ever asked again. Poll while the
+  // card exists — the probe is sub-second and the app is the point.
+  useEffect(() => {
+    if (!projectId || !app?.configured) return;
+    const t = setInterval(() => {
+      client.appStatus(projectId).then(setApp).catch(() => {});
+    }, 7000);
+    return () => clearInterval(t);
+  }, [client, projectId, app?.configured]);
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -320,9 +332,14 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                 <StatusChip role="muted" label="stopped" />
               )}
               {app.running && app.url && (
-                <a href={app.url} target="_blank" rel="noreferrer" data-testid="app-open" className="text-ink underline">
+                <button
+                  type="button"
+                  data-testid="app-open"
+                  onClick={() => openExternal(app.url!)}
+                  className="text-ink underline"
+                >
                   open {app.url}
-                </a>
+                </button>
               )}
               <button
                 type="button"
