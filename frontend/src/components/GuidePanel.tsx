@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { EngineClient, NextStep } from "../api/client";
+import type { Duckling, EngineClient, NextStep } from "../api/client";
 import { useRuns } from "../store/runs";
 import { routeHref, type Route } from "../app/routes";
+import { ChatAbout } from "./ChatAbout";
 
 /** Where a step's button lives. The guide points, it never duplicates. */
 function hrefFor(step: NextStep): string {
@@ -42,6 +43,7 @@ const STORE = "ducklab.guide";
  */
 export function GuideRail({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [steps, setSteps] = useState<NextStep[]>([]);
+  const [fleet, setFleet] = useState<Duckling[]>([]);
   const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off");
   // Runs are the guide's pulse: an accept, a pause, a landed proposal all
   // change what is next.
@@ -51,6 +53,9 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
     if (!projectId) return;
     client.projectNext(projectId).then(setSteps).catch(() => setSteps([]));
   }, [client, projectId, runs]);
+  useEffect(() => {
+    client.ducklings().then(setFleet).catch(() => setFleet([]));
+  }, [client]);
 
   if (steps.length === 0) return null;
 
@@ -101,6 +106,20 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           </li>
         ))}
       </ol>
+      {/* The rail says WHAT; this chat explains WHY. The consultant gets the
+          embedded harness dossier plus the live state the rail itself
+          computes, so both always tell the same story. */}
+      <div className="mt-4 border-t border-hairline pt-2" data-testid="guide-ask">
+        <ChatAbout
+          client={client}
+          projectId={projectId}
+          aboutKind="ducklab"
+          aboutId=""
+          ducklings={fleet}
+          label="ask why · chat about Ducklab"
+          placeholder="e.g. why does the test come before the build?"
+        />
+      </div>
     </aside>
   );
 }

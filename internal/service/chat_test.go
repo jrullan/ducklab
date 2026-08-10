@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -155,6 +156,39 @@ func TestTheChatBeltFilesBugsButNeverWrites(t *testing.T) {
 	for _, forbidden := range []string{"fs_write", "fs_patch", "fs_delete", "shell", "skill_run", "verify_run"} {
 		if has(forbidden) {
 			t.Errorf("the chat belt carries %s; a consultant must not touch the tree", forbidden)
+		}
+	}
+}
+
+// The guide rail says WHAT is next; a chat about "ducklab" is where the
+// person asks WHY. The consultant answers from an embedded dossier — this
+// binary's own laws, not a model's memory of other tools — with the live
+// state the rail computes beside it, so the rail and the chat always tell
+// the same story.
+func TestAChatAboutDucklabCarriesTheHarnessDossier(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+
+	run := &runlog.Run{
+		ID: "r-why", ProjectID: projectID, Stage: "chat", Mode: "solo",
+		Status: "running", StartedAt: "2026-08-11T09:00:00Z",
+	}
+	w, err := runlog.NewWriter(entry.Path, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: entry.Path}
+
+	prompt := s.chatPromptFor(context.Background(), rs, entry.Path, "ducklab", "")
+	for _, want := range []string{
+		"authoritative description",      // the dossier frames itself as truth
+		"gate is deterministic",          // the laws are in it
+		"suggested next steps",           // and the live state rides beside it
+		"Describe what you want to build", // a fresh project's guide says intake
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the ducklab dossier is missing %q", want)
 		}
 	}
 }

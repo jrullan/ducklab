@@ -71,6 +71,14 @@ describe("the guide rail", () => {
     await waitFor(() => screen.getByTestId("guide-rail"));
   });
 
+  // The rail says WHAT; the chat at its foot explains WHY — same client,
+  // same engine introspection, one story.
+  it("offers the ask-why chat at its foot", async () => {
+    render(<GuideRail client={clientWith(STEPS)} projectId="p" />);
+    await waitFor(() => screen.getByTestId("guide-rail"));
+    expect(screen.getByTestId("guide-ask").textContent).toContain("ask why");
+  });
+
   it("renders nothing at all when the engine has no step to offer", async () => {
     const { container } = render(<GuideRail client={clientWith([])} projectId="p" />);
     await new Promise((r) => setTimeout(r, 20));

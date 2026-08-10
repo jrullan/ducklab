@@ -81,7 +81,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 		Roster:    map[string]string{"consultant": req.Duckling},
 		// The subject rides the record: the runs list should say what a chat
 		// was about without opening it.
-		Note: fmt.Sprintf("chat about %s %s", req.AboutKind, req.AboutID),
+		Note: strings.TrimSpace(fmt.Sprintf("chat about %s %s", req.AboutKind, req.AboutID)),
 	}
 	if req.AboutKind == "task" {
 		run.TaskID = req.AboutID
@@ -300,6 +300,29 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 
 	b.WriteString("## The subject of this conversation\n\n")
 	switch aboutKind {
+	case "ducklab":
+		// The harness itself. The guide rail answers WHAT is next; this chat
+		// is where the person asks WHY — with the concepts in the dossier
+		// and the project's live state beside them, so "what should I do
+		// now?" gets the same answer the rail computes, explained.
+		b.WriteString(harnessDossier)
+		b.WriteString("\n### This project right now\n\n")
+		if steps, err := s.ProjectNext(ctx, rs.run.ProjectID); err == nil {
+			b.WriteString("The engine's own suggested next steps, in order:\n")
+			for _, st := range steps {
+				fmt.Fprintf(&b, "- %s — %s\n", st.Action, st.Reason)
+			}
+		}
+		if tasks, err := s.TaskList(ctx, rs.run.ProjectID); err == nil {
+			byStatus := map[string]int{}
+			for _, t := range tasks {
+				byStatus[t.Status]++
+			}
+			fmt.Fprintf(&b, "\nTasks: %d total (%v)\n", len(tasks), byStatus)
+		}
+		if bugs, err := s.BugList(ctx, rs.run.ProjectID, false); err == nil && len(bugs) > 0 {
+			fmt.Fprintf(&b, "Bugs on the board: %d\n", len(bugs))
+		}
 	case "bug":
 		if list, err := s.BugList(ctx, rs.run.ProjectID, false); err == nil {
 			for _, bug := range list {
@@ -353,3 +376,50 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 	b.WriteString("Reply to the human's last message.")
 	return b.String()
 }
+
+// harnessDossier is what a consultant needs to explain Ducklab itself —
+// embedded, because the chat must work offline and the answer must describe
+// THIS binary, not whatever a model remembers about tools in general. Kept
+// deliberately conceptual: the live half of the dossier (the guide's steps,
+// the task and bug counts) is assembled beside it at chat time.
+const harnessDossier = `You are answering questions about ducklab, the harness this chat runs in.
+What follows is the authoritative description; prefer it over anything you
+believe about other tools.
+
+Ducklab is a full-cycle software development harness where multiple models
+("ducklings" — local endpoints or API providers, mixed freely) hold real
+roles under engineering discipline. Its laws:
+
+- The cycle: intake (or adopt, for existing code) -> requirements -> spec ->
+  plan -> tasks -> test-first builds -> review -> bugs -> release. Documents
+  are drafted by model councils and APPROVED BY THE HUMAN; nothing is
+  written into the approved set without a person accepting it.
+- Test-first: for a task, a model writes the failing test first; it lands
+  red and is committed; the build then runs against it. The chain is one
+  authorization.
+- Roles are enforced by construction: a reviewer's toolbelt cannot write
+  files; a tournament's judge reads anonymized candidates; the implementer's
+  reasoning is never shown to the reviewer (independent second reading).
+- The gate is deterministic: the project's verify command decides green or
+  red. No model grades its own work. A run without an executable gate says
+  UNVERIFIED and always waits for the human.
+- Modes: solo (one implementer), pair (implementer + reviewer), tournament
+  (contestants + blind judge), split (parallel subtasks). Documents use
+  councils (drafter + critics).
+- Budgets: tokens, dollars, turns and wallclock per run, attributed per
+  model, visible live. Any cap can be lifted mid-run (one-way, recorded).
+  No error discards work: budget death pauses the run resumable.
+- Everything is on the record: events, every model call, diffs, verdicts,
+  human decisions — replayable from disk.
+- The guide rail (left edge) shows the engine's computed next steps for the
+  project. It is the same introspection you are being given below.
+
+Where things live in the UI: Now (the inbox: what needs the person), Work
+(task board, bug board), Cycle (the documents and their stages), Records
+(runs, reports, reviews, releases), the header (launch/stop the app under
+development), Settings (fleet, budgets, modes).
+
+When the human asks "what should I do next", ground your answer in the
+project state below. When they ask "why does ducklab do X", answer from the
+laws above, plainly.
+`

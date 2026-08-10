@@ -1334,8 +1334,35 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 	}
 
-	// Auto-accept or finish
+	// Auto-accept or finish.
+	//
+	// Only when the reviewer agreed. The gate is deterministic but partial —
+	// it proves the command passed, not that the change is right — and this
+	// branch used to look at the gate alone. T-028's reviewer said
+	// request-changes three rounds straight under a green gate; with a human
+	// at the gate that dissent was at least visible, under auto it would
+	// have been rubber-stamped. Dissent turns auto-accept back into a human
+	// gate, wearing the reason.
 	if verdict == "PASSED" && (rs.run.Autonomy == "auto" || rs.run.Autonomy == "yolo") {
+		if dv, n, dissent := finalDissent(rs.runDir); dissent {
+			detail := fmt.Sprintf(
+				"gate green, but the reviewer's final verdict was %s (%d finding(s)) — auto-accept declined; decide it yourself",
+				dv, n)
+			rs.run.Status = "paused"
+			rs.run.PendingKind = "gate"
+			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "dissent": dv, "detail": detail}
+			rs.writer.AppendEvent("human_needed", map[string]interface{}{
+				"kind": "gate", "verdict": verdict, "detail": detail,
+			})
+			rs.writer.WriteState()
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail},
+			})
+			return
+		}
 		s.acceptRun(ctx, rs, entry, "", "")
 		return
 	}

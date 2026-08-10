@@ -11,7 +11,7 @@ import (
 // Results carry it, so a comparison across versions is visible rather than
 // silent. Changing a task's wording changes what is being measured even when
 // the code is identical.
-const stdVersion = 2
+const stdVersion = 3
 
 // goVerify is the gate for every Go task here: the tests decide, not a model.
 func goVerify() config.Verify {
@@ -246,23 +246,31 @@ func Std() Suite {
 				Verify: raceVerify(),
 				Files: map[string]string{
 					"go.mod": goMod,
-					"pool_test.go": "package bench\n\nimport \"sync/atomic\"\nimport \"testing\"\n\n" +
+					"pool_test.go": "package bench\n\nimport \"sync/atomic\"\nimport \"testing\"\nimport \"time\"\n\n" +
 						"func TestMapKeepsOrder(t *testing.T) {\n" +
 						"\tin := make([]int, 100)\n\tfor i := range in {\n\t\tin[i] = i\n\t}\n" +
 						"\tgot := Map(in, 8, func(n int) int { return n * 2 })\n" +
 						"\tif len(got) != len(in) {\n\t\tt.Fatalf(\"len = %d, want %d\", len(got), len(in))\n\t}\n" +
 						"\tfor i, v := range got {\n\t\tif v != i*2 {\n\t\t\tt.Fatalf(\"got[%d] = %d, want %d\", i, v, i*2)\n\t\t}\n\t}\n}\n\n" +
+						// A rendezvous, not a race: each worker waits briefly for a
+						// second worker to be in flight. A real pool overlaps at
+						// once; a sequential impl times out alone, element by
+						// element, and records a peak of one. The old version spun
+						// a counter and hoped the scheduler overlapped the workers
+						// — on a fast machine it often did not, and the bench's own
+						// reference answer flaked.
 						"func TestMapUsesMoreThanOneGoroutine(t *testing.T) {\n" +
 						"\tvar concurrent, peak int64\n" +
-						"\tin := make([]int, 50)\n" +
-						"\tdone := make(chan struct{})\n" +
-						"\tgo func() {\n\t\tMap(in, 4, func(n int) int {\n" +
-						"\t\t\tc := atomic.AddInt64(&concurrent, 1)\n" +
-						"\t\t\tfor {\n\t\t\t\tp := atomic.LoadInt64(&peak)\n" +
-						"\t\t\t\tif c <= p || atomic.CompareAndSwapInt64(&peak, p, c) {\n\t\t\t\t\tbreak\n\t\t\t\t}\n\t\t\t}\n" +
-						"\t\t\tfor i := 0; i < 1000; i++ {\n\t\t\t\t_ = i\n\t\t\t}\n" +
-						"\t\t\tatomic.AddInt64(&concurrent, -1)\n\t\t\treturn n\n\t\t})\n" +
-						"\t\tclose(done)\n\t}()\n\t<-done\n" +
+						"\tvar opened int32\n" +
+						"\tgate := make(chan struct{})\n" +
+						"\tin := make([]int, 8)\n" +
+						"\tMap(in, 4, func(n int) int {\n" +
+						"\t\tc := atomic.AddInt64(&concurrent, 1)\n" +
+						"\t\tfor {\n\t\t\tp := atomic.LoadInt64(&peak)\n" +
+						"\t\t\tif c <= p || atomic.CompareAndSwapInt64(&peak, p, c) {\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n" +
+						"\t\tif c >= 2 && atomic.CompareAndSwapInt32(&opened, 0, 1) {\n\t\t\tclose(gate)\n\t\t}\n" +
+						"\t\tselect {\n\t\tcase <-gate:\n\t\tcase <-time.After(100 * time.Millisecond):\n\t\t}\n" +
+						"\t\tatomic.AddInt64(&concurrent, -1)\n\t\treturn n\n\t})\n" +
 						"\tif atomic.LoadInt64(&peak) < 2 {\n" +
 						"\t\tt.Errorf(\"peak concurrency %d: the work ran sequentially\", peak)\n\t}\n}\n\n" +
 						"func TestMapHandlesMoreWorkersThanWork(t *testing.T) {\n" +

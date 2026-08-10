@@ -269,3 +269,36 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	}
 	return nextSteps(st), nil
 }
+
+// finalDissent reads a run's record for the last verdict any turn gave and
+// reports it when it is not an approval — the engine-side twin of the
+// desktop's reviewerDissent, because a check that only protects the person
+// watching protects nobody under auto.
+func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
+	events, err := runlog.ReadEvents(runDir)
+	if err != nil {
+		return "", 0, false
+	}
+	for _, e := range events {
+		if e.Type != "message" {
+			continue
+		}
+		v, ok := e.Data["verdict"].(string)
+		if !ok || v == "" {
+			continue
+		}
+		verdict = v
+		findings = 0
+		if fs, ok := e.Data["findings"].([]interface{}); ok {
+			findings = len(fs)
+		}
+	}
+	if verdict == "" {
+		return "", 0, false
+	}
+	norm := strings.ReplaceAll(strings.ToLower(verdict), "_", "-")
+	if norm == "approve" || norm == "approved" {
+		return "", 0, false
+	}
+	return verdict, findings, true
+}

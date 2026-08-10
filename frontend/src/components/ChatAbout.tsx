@@ -11,12 +11,19 @@ export function ChatAbout({
   aboutKind,
   aboutId,
   ducklings,
+  label = "chat about this",
+  placeholder,
 }: {
   client: EngineClient;
   projectId: string;
-  aboutKind: "bug" | "task";
+  /** "ducklab" is the harness itself: the consultant gets the embedded
+   * concept dossier plus the project's live state instead of one subject's
+   * history — the guide rail says WHAT, this chat explains WHY. */
+  aboutKind: "bug" | "task" | "ducklab";
   aboutId: string;
   ducklings: readonly Duckling[];
+  label?: string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [duckling, setDuckling] = useState("");
@@ -31,7 +38,7 @@ export function ChatAbout({
         onClick={() => setOpen(true)}
         className="text-xs text-ink-muted underline"
       >
-        chat about this
+        {label}
       </button>
     );
   }
@@ -51,7 +58,7 @@ export function ChatAbout({
       <textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder={`e.g. this ${aboutKind} is not actually fixed — investigate why`}
+        placeholder={placeholder ?? `e.g. this ${aboutKind} is not actually fixed — investigate why`}
         data-testid="chat-message"
         rows={2}
         className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"

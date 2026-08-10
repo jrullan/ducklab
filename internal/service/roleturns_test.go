@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -239,6 +240,15 @@ func TestAStageRunResumesThroughItsPersistedRequest(t *testing.T) {
 	req, ok := loadStageRequest(rs.runDir)
 	if !ok || req.Stage != "spec" || req.Revise != "add OAuth" {
 		t.Errorf("request did not survive the disk: %+v ok=%v", req, ok)
+	}
+
+	// The re-entered stage runs in a goroutine that must not outlive the
+	// test: wait for it (it fails fast — no fleet is configured) so the
+	// TempDir cleanup does not race its writes.
+	select {
+	case <-rs.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the resumed stage never finished")
 	}
 }
 

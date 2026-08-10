@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,5 +126,47 @@ func TestProjectNextOnAFreshProject(t *testing.T) {
 	}
 	if len(steps) == 0 || steps[0].ID != "intake" {
 		t.Errorf("fresh project guide = %v, want intake first", ids(steps))
+	}
+}
+
+// The engine-side dissent check: the desktop's reviewerDissent only protects
+// the person watching, and under auto nobody is. The LAST verdict decides —
+// an early request-changes answered by a later approve is agreement — and a
+// green gate with standing dissent must reach a human, not acceptRun.
+func TestFinalDissentReadsTheLastVerdict(t *testing.T) {
+	write := func(t *testing.T, events []string) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "events.jsonl"),
+			[]byte(strings.Join(events, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	// Dissent standing: request_changes is the final word.
+	dir := write(t, []string{
+		`{"type":"message","data":{"role":"implementer","content":"done"}}`,
+		`{"type":"message","data":{"role":"reviewer","verdict":"approve","findings":[]}}`,
+		`{"type":"message","data":{"role":"reviewer","verdict":"request_changes","findings":[{"issue":"a"},{"issue":"b"}]}}`,
+	})
+	v, n, dissent := finalDissent(dir)
+	if !dissent || v != "request_changes" || n != 2 {
+		t.Errorf("= %q %d %v, want standing request_changes with 2 findings", v, n, dissent)
+	}
+
+	// Dissent answered: a later approve settles it.
+	dir = write(t, []string{
+		`{"type":"message","data":{"role":"reviewer","verdict":"request_changes","findings":[{"issue":"a"}]}}`,
+		`{"type":"message","data":{"role":"reviewer","verdict":"approve","findings":[]}}`,
+	})
+	if _, _, dissent := finalDissent(dir); dissent {
+		t.Error("an answered objection still reads as dissent")
+	}
+
+	// No verdicts at all (solo run): nothing to dissent.
+	dir = write(t, []string{`{"type":"message","data":{"role":"implementer","content":"done"}}`})
+	if _, _, dissent := finalDissent(dir); dissent {
+		t.Error("a run with no reviewer invented a dissent")
 	}
 }
