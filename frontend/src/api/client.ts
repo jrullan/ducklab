@@ -176,7 +176,7 @@ export interface Duckling {
    * the fleet order decide. A slot number and never a hex, so the palette keeps
    * its light and dark variants. */
   color?: number;
-  caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number };
+  caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number; vision?: boolean };
   cost?: { input_per_mtok: number; output_per_mtok: number };
 }
 

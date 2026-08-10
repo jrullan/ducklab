@@ -121,6 +121,7 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
                 provider={providers.find((p) => p.id === d.provider)}
                 onEdit={() => setEditing(d.id)}
                 onRemove={() => void client.ducklingRemove(d.id).then(() => done()).catch(done)}
+                onSaved={done}
                 client={client}
               />
             ))}
@@ -227,6 +228,7 @@ function DucklingCard({
   provider,
   onEdit,
   onRemove,
+  onSaved,
   client,
 }: {
   duckling: Duckling;
@@ -235,10 +237,14 @@ function DucklingCard({
   provider?: ProviderView;
   onEdit: () => void;
   onRemove: () => void;
+  onSaved: () => void;
   client: EngineClient;
 }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesBusy, setNotesBusy] = useState(false);
 
   // The only way to find out a duckling answers at all before committing a run
   // to it. A hosted model with an unset key looks identical to a working one
@@ -323,6 +329,77 @@ function DucklingCard({
           <dd>{d.params?.disable_thinking ? "suppressed" : "as the model sends it"}</dd>
         </div>
       </dl>
+      {/* The person's own knowledge about this model — "fabricates gate
+          state as reviewer", "great at pixel-level UI" — kept where the
+          seat-picking happens. PUT replaces the whole duckling, so the save
+          rebuilds the full body from the card: a notes edit must never wipe
+          a cap or a cost. */}
+      {notesOpen ? (
+        <div className="mt-2 space-y-1" data-testid={`duckling-notes-editor-${d.id}`}>
+          <textarea
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value)}
+            rows={3}
+            placeholder="notes about this duckling — what you learned running it"
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid={`duckling-notes-save-${d.id}`}
+              disabled={notesBusy}
+              onClick={() => {
+                setNotesBusy(true);
+                void client
+                  .ducklingSet(d.id, {
+                    provider: d.provider,
+                    model: d.model,
+                    roles: d.roles ?? [],
+                    notes: notesDraft.trim(),
+                    params: d.params ?? {},
+                    color: d.color ?? 0,
+                    caps: {
+                      native_tools: d.caps?.native_tools ?? false,
+                      context_tokens: d.caps?.context_tokens ?? 0,
+                      vision: d.caps?.vision,
+                    },
+                    cost: {
+                      input_per_mtok: d.cost?.input_per_mtok ?? 0,
+                      output_per_mtok: d.cost?.output_per_mtok ?? 0,
+                    },
+                  })
+                  .then(() => {
+                    setNotesOpen(false);
+                    onSaved();
+                  })
+                  .catch(() => {})
+                  .finally(() => setNotesBusy(false));
+              }}
+              className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
+            >
+              {notesBusy ? "Saving…" : "Save notes"}
+            </button>
+            <button type="button" onClick={() => setNotesOpen(false)} className="text-xs text-ink-muted underline">
+              cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2" data-testid={`duckling-notes-${d.id}`}>
+          {d.notes && <p className="whitespace-pre-wrap text-xs text-ink-secondary">{d.notes}</p>}
+          <button
+            type="button"
+            data-testid={`duckling-notes-edit-${d.id}`}
+            onClick={() => {
+              setNotesDraft(d.notes ?? "");
+              setNotesOpen(true);
+            }}
+            className="text-xs text-ink-muted underline"
+          >
+            {d.notes ? "edit notes" : "add notes"}
+          </button>
+        </div>
+      )}
       {/* A duckling whose provider has no key will fail on its first call.
           Said here, where someone is choosing which one to run. */}
       {provider && provider.api_key_env && !provider.key_present && (
@@ -521,7 +598,14 @@ function DucklingForm({
           stop: existing?.params?.stop ?? null,
         },
         color,
-        caps: { native_tools: nativeTools, context_tokens: Number(contextTokens) || 0 },
+        // Preserved, not re-collected: PUT replaces the whole duckling, and
+        // the form used to silently wipe the fields it did not show.
+        notes: existing?.notes ?? "",
+        caps: {
+          native_tools: nativeTools,
+          context_tokens: Number(contextTokens) || 0,
+          vision: existing?.caps?.vision,
+        },
         cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
       })
       .then(() => onDone())
