@@ -1657,15 +1657,33 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	if rs.run.PendingKind == "gate" {
 		return rs.run, nil
 	}
-	// Resume re-enters the strategy the run was BORN with. Build and test
-	// each know how; on anything else the honest path is abort and relaunch.
-	if rs.run.Stage != "build" && rs.run.Stage != "test" {
-		return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", rs.run.Stage)
-	}
-
 	entry, err := s.entryFor(rs)
 	if err != nil {
 		return nil, err
+	}
+
+	// Resume re-enters the strategy the run was BORN with. Build and test
+	// rebuild their requests from the record; a stage run re-enters through
+	// the request persisted beside it — a spec whose architect asked the
+	// human used to die here as "cannot be resumed", so the question was a
+	// dead end even once the person had the answer.
+	if rs.run.Stage != "build" && rs.run.Stage != "test" {
+		sreq, ok := loadStageRequest(rs.runDir)
+		if !ok {
+			return nil, fmt.Errorf("a %s run cannot be resumed — abort it and launch it again", rs.run.Stage)
+		}
+		sreq.resumed = true
+		runCtx, cancel := context.WithCancel(context.Background())
+		rs.cancel = cancel
+		rs.done = make(chan struct{})
+		rs.run.Status = "running"
+		rs.run.PendingKind = ""
+		rs.run.PendingSince = ""
+		rs.run.Failure = ""
+		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+		w.WriteState()
+		go s.executeStage(runCtx, rs, entry.Path, sreq)
+		return rs.run, nil
 	}
 
 	// A test-first re-enters executeTestFirst with its request rebuilt from

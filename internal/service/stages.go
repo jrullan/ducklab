@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -40,6 +42,9 @@ type StageRequest struct {
 	// codebase that exists, this is the front door.
 	Adopt  bool `json:"adopt,omitempty"`
 	Stream bool `json:"stream"`
+	// resumed is set only by RunResume: the run keeps its recorded ceilings
+	// and its ledger continues from what it already spent.
+	resumed bool
 }
 
 // StageStart runs intake, spec or plan and leaves a proposal for the human.
@@ -144,8 +149,34 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 
 	writer.AppendEvent("run_start", map[string]interface{}{"stage": req.Stage, "mode": mode})
 
+	// The request outlives the goroutine: an answered question re-enters the
+	// stage with the same brief, mode and revision, and the request used to
+	// live nowhere a resume could find it.
+	writeStageRequest(rs.runDir, req)
+
 	go s.executeStage(runCtx, rs, entry.Path, req)
 	return run, nil
+}
+
+// stageRequestFile persists what a stage run was asked, beside its record.
+const stageRequestFile = "stage_request.json"
+
+func writeStageRequest(runDir string, req StageRequest) {
+	if data, err := json.Marshal(req); err == nil {
+		_ = os.WriteFile(filepath.Join(runDir, stageRequestFile), data, 0o644)
+	}
+}
+
+// loadStageRequest rebuilds a stage run's request from its record. The false
+// return keeps older runs honest: a run started before requests were
+// persisted cannot be resumed, only relaunched.
+func loadStageRequest(runDir string) (StageRequest, bool) {
+	var req StageRequest
+	data, err := os.ReadFile(filepath.Join(runDir, stageRequestFile))
+	if err != nil || json.Unmarshal(data, &req) != nil {
+		return req, false
+	}
+	return req, true
 }
 
 func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot string, req StageRequest) {
@@ -190,6 +221,21 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
 	}
 	tracker := budget.NewTracker(limits)
+	if req.resumed {
+		// A resumed stage continues its own life: recorded ceilings, ledger
+		// seeded with what it already spent — a tracker reborn at zero would
+		// make "answer the question" a way to double the budget.
+		limits = &budget.Budget{
+			MaxUSD: rs.run.Budget.Limit.USD, MaxTokens: rs.run.Budget.Limit.Tokens,
+			MaxTurns: rs.run.Budget.Limit.Turns, MaxWallclockS: rs.run.Budget.Limit.WallclockS,
+		}
+		tracker = budget.NewTracker(limits)
+		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
+		tracker.Spend.AddUSD(rs.run.Budget.USD)
+		for i := 0; i < rs.run.Budget.Turns; i++ {
+			tracker.Spend.AddTurn()
+		}
+	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
 	ectx := &tools.ExecContext{
@@ -222,16 +268,24 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, 0), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
-				Prompt:         prompt,
-				ExecContext:    ectx,
-				Runner:         s.runnerFor(cache, roster, ectx),
-				Roster:         roster,
+				// Decisions the person already made ride the prompt, like on
+				// build and test runs: a resumed stage replays from scratch,
+				// and a model that cannot see the answers re-asks them.
+				Prompt:      prompt + rs.answeredDecisions(),
+				ExecContext: ectx,
+				Runner:      s.runnerFor(cache, roster, ectx),
+				Roster:      roster,
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 				},
 			})
 			if err != nil {
-				return "", err
+				// pendingOrErr, or the question dies with the run: this
+				// closure returned the raw error, so the pendingErr branch
+				// below it never fired — a spec architect that asked the
+				// human left "human input needed" on the record with no
+				// question, no pending state, and nothing to answer.
+				return "", pendingOrErr(res, err)
 			}
 			return res.Text, nil
 		},

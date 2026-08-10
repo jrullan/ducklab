@@ -198,3 +198,71 @@ func TestResumeCarriesTheNoteAndTheLiftedCap(t *testing.T) {
 		t.Error("a resume request must say it is one")
 	}
 }
+
+// A spec architect that asked the human died as "human input needed" with no
+// question on the record and no way back in: the stage's Execute closure
+// returned the raw error (the pendingErr wrap lived only in the mode
+// dispatch), and RunResume refused every non-build stage. The request now
+// outlives the goroutine, and an answer re-enters the stage that asked.
+func TestAStageRunResumesThroughItsPersistedRequest(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+
+	run := &runlog.Run{
+		ID: "r-spec", ProjectID: projectID, Stage: "spec", Mode: "council",
+		Status: "paused", PendingKind: "question", Autonomy: "guarded",
+		PendingData: map[string]interface{}{"question_id": "q1", "question": "OAuth or sessions?"},
+		StartedAt:   "2026-08-10T21:54:18Z",
+	}
+	w, err := runlog.NewWriter(entry.Path, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: entry.Path, done: make(chan struct{})}
+	close(rs.done)
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	writeStageRequest(rs.runDir, StageRequest{Stage: "spec", Mode: "council", Revise: "add OAuth"})
+
+	got, rerr := s.RunResume(context.Background(), "r-spec")
+	if rerr != nil {
+		t.Fatalf("a stage run with a persisted request refused to resume: %v", rerr)
+	}
+	if got.Status != "running" || got.PendingKind != "" {
+		t.Errorf("status = %s pending = %q, want running with the wait cleared", got.Status, got.PendingKind)
+	}
+
+	// The round trip preserves what was asked.
+	req, ok := loadStageRequest(rs.runDir)
+	if !ok || req.Stage != "spec" || req.Revise != "add OAuth" {
+		t.Errorf("request did not survive the disk: %+v ok=%v", req, ok)
+	}
+}
+
+// A stage run from before requests were persisted has nothing to re-enter
+// with; it must refuse, not guess.
+func TestAStageRunWithoutARequestStillRefuses(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+	run := &runlog.Run{
+		ID: "r-old", ProjectID: projectID, Stage: "spec", Mode: "council",
+		Status: "paused", PendingKind: "question", StartedAt: "2026-08-10T21:00:00Z",
+	}
+	w, err := runlog.NewWriter(entry.Path, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: entry.Path, done: make(chan struct{})}
+	close(rs.done)
+	s.runsMu.Lock()
+	s.runs[run.ID] = rs
+	s.runsMu.Unlock()
+
+	if _, err := s.RunResume(context.Background(), "r-old"); err == nil {
+		t.Error("resumed a stage run that has no persisted request")
+	}
+}
