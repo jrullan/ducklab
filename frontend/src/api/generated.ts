@@ -164,6 +164,10 @@ export interface EngineapibugItems {
   items?: BugBug[];
 }
 
+export interface EngineapichatSendRequest {
+  message?: string;
+}
+
 export interface EngineapidiffResponse {
   diff?: string;
   tests?: string;
@@ -384,6 +388,13 @@ export interface ServiceCandidateView {
   label?: string;
 }
 
+export interface ServiceChatStartRequest {
+  about_id?: string;
+  about_kind?: string;
+  duckling?: string;
+  message?: string;
+}
+
 export interface ServiceDucklingView {
   caps?: ConfigCaps;
   color?: number;
@@ -599,6 +610,7 @@ export const OPERATIONS = [
   { id: "BugAttachment", method: "GET", path: "/v1/projects/{id}/bugs/{bug}/attachments/{name}" },
   { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
+  { id: "ChatStart", method: "POST", path: "/v1/projects/{id}/chats" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
@@ -640,6 +652,7 @@ export const OPERATIONS = [
   { id: "RunBrief", method: "GET", path: "/v1/runs/{id}/brief" },
   { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
+  { id: "ChatSend", method: "POST", path: "/v1/runs/{id}/chat" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },

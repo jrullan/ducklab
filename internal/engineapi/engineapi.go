@@ -682,6 +682,38 @@ func (s *Server) handleBugAttachment(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, p)
 }
 
+type chatSendRequest struct {
+	Message string `json:"message"`
+}
+
+func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
+	var req service.ChatStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.ChatStart(r.Context(), r.PathValue("id"), req)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
+func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
+	var req chatSendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.ChatSend(r.Context(), r.PathValue("id"), req.Message)
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
 // liftRequest names the one cap to remove.
 type liftRequest struct {
 	Kind string `json:"kind"`

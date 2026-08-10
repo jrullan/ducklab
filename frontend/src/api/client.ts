@@ -561,6 +561,19 @@ export class EngineClient {
     );
   }
 
+  /** Start a conversation with a chosen duckling about a bug or task — its
+   * history rides as context, its tools are read-only, the run view is the
+   * chat panel. */
+  chatStart(projectId: string, req: { duckling: string; aboutKind: string; aboutId: string; message: string }) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/chats`, {
+      duckling: req.duckling, about_kind: req.aboutKind, about_id: req.aboutId, message: req.message,
+    });
+  }
+  /** Send the next message in a paused chat. */
+  chatSend(runId: string, message: string) {
+    return this.request<Run>("POST", `/v1/runs/${runId}/chat`, { message });
+  }
+
   /** The app's run configuration and managed-process state. */
   appStatus(projectId: string) {
     return this.request<AppStatus>("GET", `/v1/projects/${projectId}/app`);

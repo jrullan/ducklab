@@ -16,6 +16,7 @@ import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
+import { ChatAbout } from "../components/ChatAbout";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -534,7 +535,7 @@ export function Board({
             Select {isBugs ? "a bug" : "a task"} to see its record.
           </p>
         ) : isBugs ? (
-          <BugRail bug={current as Bug} client={client} projectId={projectId} onDone={() => void load()} />
+          <BugRail ducklings={ducklings} bug={current as Bug} client={client} projectId={projectId} onDone={() => void load()} />
         ) : (
           <TaskRail
             task={current as Task}
@@ -948,6 +949,7 @@ function TaskRunner({
       {next.includes("remove") && (
         <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
       )}
+      <ChatAbout client={client} projectId={projectId} aboutKind="task" aboutId={task.id} ducklings={ducklings} />
 
       {accepted && (
         <p className="text-xs text-ink-muted" data-testid="accepted-note">
@@ -986,11 +988,13 @@ function BugRail({
   bug,
   client,
   projectId,
+  ducklings,
   onDone,
 }: {
   bug: Bug;
   client: EngineClient;
   projectId: string;
+  ducklings: readonly Duckling[];
   onDone: () => void;
 }) {
   return (
@@ -1013,6 +1017,7 @@ function BugRail({
           run. The engine refuses a transition it does not allow, so the button
           acts and the refusal is what gets shown. */}
       <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
+      <ChatAbout client={client} projectId={projectId} aboutKind="bug" aboutId={bug.id} ducklings={ducklings} />
     </div>
   );
 }

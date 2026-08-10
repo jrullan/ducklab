@@ -567,6 +567,17 @@
         ],
         "type": "object"
       },
+      "EngineapichatSendRequest": {
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
       "EngineapidiffResponse": {
         "properties": {
           "diff": {
@@ -1298,6 +1309,29 @@
         "required": [
           "diff",
           "label"
+        ],
+        "type": "object"
+      },
+      "ServiceChatStartRequest": {
+        "properties": {
+          "about_id": {
+            "type": "string"
+          },
+          "about_kind": {
+            "type": "string"
+          },
+          "duckling": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "about_id",
+          "about_kind",
+          "duckling",
+          "message"
         ],
         "type": "object"
       },
@@ -3158,6 +3192,52 @@
         "summary": "Move a bug"
       }
     },
+    "/v1/projects/{id}/chats": {
+      "post": {
+        "operationId": "ChatStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceChatStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a conversation with a chosen duckling about a bug or task, with its history as context"
+      }
+    },
     "/v1/projects/{id}/gate": {
       "get": {
         "operationId": "ProjectGate",
@@ -4782,6 +4862,52 @@
           }
         ],
         "summary": "Anonymised candidates. Carries no authorship, by design (I7)."
+      }
+    },
+    "/v1/runs/{id}/chat": {
+      "post": {
+        "operationId": "ChatSend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapichatSendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send the next message in a paused chat"
       }
     },
     "/v1/runs/{id}/diff": {

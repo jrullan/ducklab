@@ -81,6 +81,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // llm.jsonl by hand.
   const [calls, setCalls] = useState<LLMCall[]>([]);
   const [answer, setAnswer] = useState("");
+  const [chatMsg, setChatMsg] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [revisionRun, setRevisionRun] = useState<string | null>(null);
   // The fleet, for colours. A duckling's colour is a property of the duckling,
   // not of its position in this run's roster — otherwise the same model is blue
@@ -743,6 +745,36 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink" data-testid="pending-detail">
               {pending.detail}
             </p>
+          )}
+          {pending.kind === "chat" && (
+            <div className="mt-2" data-testid="chat-reply">
+              <div className="flex gap-2">
+                <textarea
+                  aria-label="chat message"
+                  value={chatMsg}
+                  onChange={(e) => setChatMsg(e.target.value)}
+                  rows={2}
+                  placeholder="your reply…"
+                  className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1"
+                />
+                <button
+                  type="button"
+                  data-testid="chat-send"
+                  disabled={chatBusy || !chatMsg.trim()}
+                  onClick={() => {
+                    setChatBusy(true);
+                    void client
+                      .chatSend(runId, chatMsg.trim())
+                      .then(() => setChatMsg(""))
+                      .catch(() => {})
+                      .finally(() => setChatBusy(false));
+                  }}
+                  className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+                >
+                  {chatBusy ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
           )}
           {pending.question && (
             <div className="mt-2">

@@ -698,6 +698,9 @@ Ground rules, which you cannot change:
 	if turn.Persona == "critic" && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
 	}
+	if turn.Persona == "consultant" {
+		rolePrompt = consultantPrompt
+	}
 	gateDesc := "The verification gate will run tests after you finish."
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
@@ -824,6 +827,20 @@ what you noticed as a finding with severity "minor" — that this task delivered
 nothing is worth a human knowing, but it is not a defect the implementer can
 fix by writing code, and "request-changes" only asks it to try again against
 the same empty diff.`
+
+// consultantPrompt frames a chat turn: investigate and advise, change
+// nothing. The closing duty matters most — the person acts with the buttons
+// they already have, so the advice must end in their menu's terms.
+const consultantPrompt = `You are a consultant in a conversation with the human about one subject — a
+bug, a task — whose dossier and history you have been given. Your tools are
+read-only: investigate the code and the record, then answer plainly.
+
+You change nothing. You diagnose, explain what actually happened, and advise.
+
+End every reply with a short "Suggested next step:" line choosing from the
+human's real options: reopen the bug, file a new bug (say what its title
+should be), relaunch the task with a note (say what the note should say),
+mark it verified, or keep investigating (say what you would look at next).`
 
 // criticPrompt replaces the code-review framing for a document council's
 // critique turn. The code framing told the reviewer to examine "the diff" and
