@@ -94,6 +94,9 @@ export interface Run {
    * the provider: the run's cost is then an estimate too, and every view
    * marks it ~ (04 §7). */
   tokens_estimated?: boolean;
+  /** The run's own cap on model calls per reply: absent/0 the configured
+   * defaults, positive a per-run override, -1 lifted (at launch or live). */
+  agent_turns?: number;
   /** Per-duckling spend, attributed as each call lands. Served live for an
    * active run, so a view opened mid-run starts from the truth instead of
    * zeros. */
@@ -611,8 +614,10 @@ export class EngineClient {
   }
 
   /** Remove one budget cap from a live run — one-way, recorded on the run.
-   * Per-cap on purpose: lifting tokens leaves the dollar ceiling standing. */
-  runBudgetLift(id: string, kind: "tokens" | "usd" | "turns" | "wallclock") {
+   * Per-cap on purpose: lifting tokens leaves the dollar ceiling standing.
+   * "calls" is the per-reply call cap inside the agent loop; its lift lands
+   * mid-reply, on the loop's very next call. */
+  runBudgetLift(id: string, kind: "tokens" | "usd" | "turns" | "wallclock" | "calls") {
     return this.request<Run>("POST", `/v1/runs/${id}/budget/lift`, { kind });
   }
 

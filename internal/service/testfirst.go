@@ -304,8 +304,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: s.llmWriter(rs, tracker),
-		loops:  map[config.DucklingID]*agent.Loop{},
+		writer:  s.llmWriter(rs, tracker),
+		capLift: rs.capLifted.Load,
+		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
 

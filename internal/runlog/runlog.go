@@ -31,6 +31,12 @@ type Run struct {
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
 	Note string `json:"note,omitempty"`
+	// AgentTurns is the run's own cap on model calls per reply: zero means
+	// the configured defaults, negative means lifted — at launch or, via the
+	// calls lift, while the run was in flight. On the record so a resume
+	// re-enters with the ceiling the person chose, not the one that killed
+	// the work.
+	AgentTurns int `json:"agent_turns,omitempty"`
 	// RevertSHA records that this run's commit was later undone — set only on
 	// an accepted test-first whose test was retired before its build landed.
 	// The acceptance stays in the record (it happened); this says the promise

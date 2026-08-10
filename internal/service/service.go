@@ -90,6 +90,11 @@ type runState struct {
 	// on every call — said otherwise. A run that contradicts itself is worse
 	// than one that admits it does not know.
 	tracker *budget.Tracker
+	// capLifted is the calls lift's live half: an atomic the agent loops
+	// consult before every model call, flipped by RunBudgetLift("calls") from
+	// another goroutine while a reply is in flight. The durable half lives on
+	// the record (run.AgentTurns = -1) for resume.
+	capLifted atomic.Bool
 }
 
 // Options are service options.
@@ -838,6 +843,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		UnsafeWrites: req.UnsafeWrites,
 		Autonomy:     req.Autonomy,
 		Note:         req.Note,
+		AgentTurns:   req.AgentTurns,
 	}
 	if run.Mode == "" {
 		run.Mode = "solo"
@@ -1204,8 +1210,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: s.llmWriter(rs, tracker),
-		loops:  map[config.DucklingID]*agent.Loop{},
+		writer:  s.llmWriter(rs, tracker),
+		capLift: rs.capLifted.Load,
+		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
 
@@ -1703,15 +1710,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		return rs.run, nil
 	}
 
-	req := RunRequest{
-		TaskID:   rs.run.TaskID,
-		Mode:     rs.run.Mode,
-		Autonomy: rs.run.Autonomy,
-		// A resumed run keeps whatever it was started with.
-		NoStream:     !rs.run.Stream,
-		UnsafeWrites: rs.run.UnsafeWrites,
-		resumed:      true,
-	}
+	req := resumeRequest(rs.run)
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs.cancel = cancel
@@ -1740,11 +1739,35 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	return rs.run, nil
 }
 
-// RunBudgetLift removes one cap — tokens, usd, turns, wallclock — from a LIVE
-// run's budget. One-way for the run's remaining life, and per-cap on purpose:
-// lifting tokens leaves the dollar ceiling standing guard. Recorded on the
-// run (who, what, what it was), because a ceiling that moves silently is a
-// ceiling that never existed.
+// resumeRequest rebuilds a paused run's request from its record: a resumed
+// run keeps EVERYTHING it was started with. The note and the calls cap were
+// dropped here once — so the instruction the person wrote and the ceiling
+// they lifted both quietly reverted at exactly the moment they were resuming
+// past.
+func resumeRequest(run *runlog.Run) RunRequest {
+	return RunRequest{
+		TaskID:       run.TaskID,
+		Mode:         run.Mode,
+		Autonomy:     run.Autonomy,
+		Note:         run.Note,
+		AgentTurns:   run.AgentTurns,
+		NoStream:     !run.Stream,
+		UnsafeWrites: run.UnsafeWrites,
+		resumed:      true,
+	}
+}
+
+// RunBudgetLift removes one cap — tokens, usd, turns, wallclock, or calls —
+// from a LIVE run. One-way for the run's remaining life, and per-cap on
+// purpose: lifting tokens leaves the dollar ceiling standing guard. Recorded
+// on the run (who, what, what it was), because a ceiling that moves silently
+// is a ceiling that never existed.
+//
+// "calls" is the odd one out: not a tracker limit but the per-reply call cap
+// inside the agent loop. The lift lands mid-flight — every live loop
+// consults it before its next call — because the alternative was watching a
+// reviewer die on exactly its hundredth call and resuming it into the same
+// ceiling.
 func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.Run, error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
@@ -1758,6 +1781,26 @@ func (s *Service) RunBudgetLift(ctx context.Context, id, kind string) (*runlog.R
 		return nil, fmt.Errorf("not lifted — %s has not started; its budget begins with it", id)
 	default:
 		return nil, fmt.Errorf("not lifted — %s has ended (%s); a finished run spends nothing", id, rs.run.Status)
+	}
+	if kind == "calls" {
+		w, werr := s.ensureWriter(rs)
+		if werr != nil {
+			return nil, werr
+		}
+		rs.wmu.Lock()
+		was := rs.run.AgentTurns
+		rs.run.AgentTurns = -1
+		rs.wmu.Unlock()
+		// The atomic is what a loop already in flight reads before its next
+		// call; the record is what a resume re-enters with.
+		rs.capLifted.Store(true)
+		w.AppendEvent("budget_lifted", map[string]interface{}{
+			"kind": kind, "was": was, "by": "human",
+		})
+		if err := w.WriteState(); err != nil {
+			return nil, err
+		}
+		return rs.snapshotRun(), nil
 	}
 	rs.wmu.Lock()
 	tracker := rs.tracker

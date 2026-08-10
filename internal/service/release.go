@@ -239,8 +239,9 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 	ectx := &tools.ExecContext{ProjectRoot: projectRoot, RunID: rs.run.ID}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: s.llmWriter(rs, tracker),
-		loops:  map[config.DucklingID]*agent.Loop{},
+		writer:  s.llmWriter(rs, tracker),
+		capLift: rs.capLifted.Load,
+		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
 

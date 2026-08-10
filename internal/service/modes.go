@@ -36,8 +36,11 @@ type loopCache struct {
 	onDelta     func(*agent.Turn, string)
 	onReasoning func(*agent.Turn, string)
 	onToolCall  func(*agent.Turn, string, *agent.ToolCallRecord)
-	mu          sync.Mutex
-	loops       map[config.DucklingID]*agent.Loop
+	// capLift, when set, lets the calls lift reach a reply already in
+	// flight: the loop consults it before every model call.
+	capLift func() bool
+	mu      sync.Mutex
+	loops   map[config.DucklingID]*agent.Loop
 }
 
 func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop, error) {
@@ -53,6 +56,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnDelta = c.onDelta
 	l.OnReasoning = c.onReasoning
 	l.OnToolCall = c.onToolCall
+	l.CapLift = c.capLift
 	c.loops[id] = l
 	return l, nil
 }
@@ -199,11 +203,10 @@ func humanNote(note string) string {
 	return "\n\n## Note from the human\n\n" + note + "\n"
 }
 
-// uncappedTurns stands in for "no cap" on the per-reply call loop. Finite,
-// so I3 keeps its letter — but far beyond any use, so it never binds: the
-// run's token and cost budgets, checked before every model call, are what
-// actually guard an uncapped loop.
-const uncappedTurns = 10000
+// uncappedTurns stands in for "no cap" on the per-reply call loop — the
+// agent loop's own constant, shared so a lift resolved here and a lift
+// applied mid-flight mean the same number.
+const uncappedTurns = agent.UncappedTurns
 
 // capOverride resolves a run's AgentTurns override: negative means no cap.
 func capOverride(override int) int {

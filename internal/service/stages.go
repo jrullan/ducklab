@@ -201,8 +201,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
-		writer: s.llmWriter(rs, tracker),
-		loops:  map[config.DucklingID]*agent.Loop{},
+		writer:  s.llmWriter(rs, tracker),
+		capLift: rs.capLifted.Load,
+		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
 

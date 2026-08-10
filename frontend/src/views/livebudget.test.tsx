@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 import { EngineClient, type Run } from "../api/client";
@@ -232,5 +232,51 @@ describe("a run that stopped running", () => {
       const meters = screen.getAllByTestId("budget-meter").map((m) => m.textContent).join(" ");
       expect(meters).toContain("4 / 24");
     });
+  });
+});
+
+// The per-reply call cap — the ceiling a reviewer once died on at exactly
+// call one hundred — gets the same live "no cap" the other ceilings have.
+// The row shows the run's own cap and the lift posts kind "calls"; the
+// engine applies it mid-reply, so checking it is the remedy that resuming
+// into the same ceiling never was.
+describe("the calls/reply cap on a live run", () => {
+  beforeEach(() => {
+    useRuns.setState({ runs: { "r-1": run }, spend: {}, events: {}, deltas: {}, reasoning: {} });
+  });
+
+  it("shows the cap with a lift, and posts the lift as kind calls", async () => {
+    const posted: string[] = [];
+    const liftClient = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string, init?: RequestInit) => {
+        const path = String(url).replace("http://engine", "");
+        if (init?.method === "POST" && path.includes("/budget/lift")) {
+          posted.push(String(init.body));
+          return new Response(JSON.stringify({ ...run, agent_turns: -1 }), {
+            status: 200, headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+    useRuns.getState().applyEvent(
+      budgetEvent({
+        usd: 0.1, tokens: 1000, turns: 1, wallclock_s: 5,
+        limit: { usd: 2, tokens: 400000, turns: 24, wallclock_s: 3600 },
+        ducklings: {},
+      }),
+    );
+    render(<RunView runId="r-1" client={liftClient} />);
+    const row = await screen.findByTestId("calls-cap");
+    expect(row.textContent).toContain("calls / reply");
+    expect(row.textContent).toContain("default");
+
+    fireEvent.click(screen.getByTestId("lift-calls"));
+    await waitFor(() => expect(posted.length).toBe(1));
+    expect(posted[0]).toContain("calls");
+    // The response carries the lifted record; the row wears it.
+    await waitFor(() => expect(screen.getByTestId("calls-cap").textContent).toContain("no cap"));
   });
 });

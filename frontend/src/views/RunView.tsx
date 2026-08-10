@@ -931,6 +931,40 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   format={(n) => String(Math.round(n))}
                   lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
+                {/* Not a meter — the per-reply call cap inside the agent
+                    loop, the ceiling a reviewer once died on at exactly call
+                    one hundred. The lift lands mid-reply: every live loop
+                    consults it before its next call. */}
+                <div
+                  className="flex items-baseline justify-between gap-2 text-sm text-ink-secondary"
+                  data-testid="calls-cap"
+                >
+                  <span>calls / reply</span>
+                  <span className="flex items-baseline gap-2">
+                    <span className="tabular-nums">
+                      {run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default"}
+                    </span>
+                    {canLift && (
+                      <label
+                        className="flex items-center gap-1 text-xs text-ink-muted"
+                        title={
+                          run.agent_turns === -1
+                            ? "no cap on calls per reply — the budgets still guard"
+                            : "remove the per-reply call cap now, mid-flight (cannot be undone)"
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          data-testid="lift-calls"
+                          checked={run.agent_turns === -1}
+                          disabled={run.agent_turns === -1}
+                          onChange={() => void client.runBudgetLift(run.id, "calls").then((r) => useRuns.getState().setRun(r)).catch(() => {})}
+                        />
+                        no cap
+                      </label>
+                    )}
+                  </span>
+                </div>
               </div>
               {/* One tracker serves every duckling and every turn, so the run's
                   total cannot say which model is burning it. In a mode with two

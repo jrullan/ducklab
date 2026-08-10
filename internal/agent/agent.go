@@ -74,6 +74,12 @@ var ErrContract = errors.New("contract parse failed")
 // ErrBudgetExceeded is returned when budget is exceeded.
 var ErrBudgetExceeded = errors.New("budget exceeded")
 
+// UncappedTurns stands in for "no cap" on the per-reply call loop. Finite,
+// so I3 keeps its letter — but far beyond any use, so it never binds: the
+// budget, checked before every call, is what actually guards an uncapped
+// loop.
+const UncappedTurns = 10000
+
 // Loop runs the agentic loop for a single turn.
 type Loop struct {
 	Provider       provider.Provider
@@ -101,6 +107,12 @@ type Loop struct {
 	// so a thirty-call implementer turn showed an empty timeline for its
 	// entire length and then eighty ticks at once.
 	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
+	// CapLift, if set, is consulted before every call: true removes this
+	// turn's call cap for the rest of the reply. It exists so the person
+	// watching a run circle toward its cap can lift it IN FLIGHT — a
+	// reviewer once died on exactly its hundredth call, and the only remedy
+	// was resuming into the same ceiling. The budget still guards.
+	CapLift func() bool
 }
 
 // RunLogWriter is the interface for writing LLM call records.
@@ -176,6 +188,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	conversation = append(conversation, messages...)
 
 	for turnNum := 1; turnNum <= maxTurns; turnNum++ {
+		// A live lift lands between calls: the cap disappears mid-reply
+		// instead of after the death it was about to cause.
+		if maxTurns < UncappedTurns && loop.CapLift != nil && loop.CapLift() {
+			maxTurns = UncappedTurns
+		}
+
 		// Budget check
 		// The outcome, not nil: by the time a budget runs out the turn has
 		// usually done real work — tool calls, tokens, cost — and returning nil

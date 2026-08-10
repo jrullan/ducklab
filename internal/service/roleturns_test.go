@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -146,5 +148,53 @@ func TestANegativeOverrideLiftsTheCap(t *testing.T) {
 	}
 	if _, ok := caps[config.RoleHuman]; ok {
 		t.Error("the lift reached the human role")
+	}
+}
+
+// The reviewer that died on exactly its hundredth call had no remedy: resume
+// re-entered the same ceiling. The calls lift is the remedy — durable on the
+// record for the resume, atomic for any reply still in flight.
+func TestTheCallsCapCanBeLiftedOnALiveRun(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+	writeRun(t, entry.Path, projectID, "r-cap", "running")
+	s.RecoverRuns(context.Background())
+
+	s.runsMu.RLock()
+	rs := s.runs["r-cap"]
+	s.runsMu.RUnlock()
+	rs.run.Status = "running"
+
+	run, err := s.RunBudgetLift(context.Background(), "r-cap", "calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.AgentTurns != -1 {
+		t.Errorf("agent_turns = %d, want -1 (lifted) on the record", run.AgentTurns)
+	}
+	if !rs.capLifted.Load() {
+		t.Error("the live flag never flipped; a reply in flight would die at the old cap")
+	}
+}
+
+// A resumed run keeps EVERYTHING it was started with. The note and the calls
+// cap were dropped here once: the instruction the person wrote and the
+// ceiling they lifted both quietly reverted at exactly the moment they were
+// resuming past.
+func TestResumeCarriesTheNoteAndTheLiftedCap(t *testing.T) {
+	req := resumeRequest(&runlog.Run{
+		TaskID: "T-051", Mode: "pair", Autonomy: "guarded", Stream: true,
+		Note:       "close every connection — the fix leaked",
+		AgentTurns: -1,
+	})
+	if req.Note == "" {
+		t.Error("the human's note was dropped on resume")
+	}
+	if req.AgentTurns != -1 {
+		t.Errorf("agent_turns = %d, want the lifted -1", req.AgentTurns)
+	}
+	if !req.resumed {
+		t.Error("a resume request must say it is one")
 	}
 }
