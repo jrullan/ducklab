@@ -482,3 +482,64 @@ func TestTestPathsOnlyUsesTheProjectsGlobs(t *testing.T) {
 		t.Error("the default globs still applied after the project named its own")
 	}
 }
+
+// T-068: the task was "untrack frontend/dist" and the denylist refused every
+// write to .gitignore — the one file that task has to edit — because the
+// guard tested a STRING prefix where a path boundary was meant. ".gitignore"
+// begins with ".git" and lives in no directory of that name. The implementer
+// tried four spellings (./.gitignore, frontend/../.gitignore…) and each was
+// blamed for touching a directory the write never went near.
+func TestTheDenylistGuardsTheDirectoryNotTheSpelling(t *testing.T) {
+	ectx := testExecContext(t)
+
+	for _, denied := range []string{".git", ".git/config", ".git/hooks/pre-commit"} {
+		if WriteGuard(ectx, denied, []byte("x"), true) == nil {
+			t.Errorf("a write to %s was allowed", denied)
+		}
+	}
+	for _, allowed := range []string{".gitignore", ".gitattributes", "./.gitignore", "frontend/../.gitignore"} {
+		if guard := WriteGuard(ectx, allowed, []byte("frontend/dist/\n"), true); guard != nil {
+			t.Errorf("a write to %s was refused: %s", allowed, guard.Content)
+		}
+	}
+}
+
+// The same spelling-vs-boundary disease hid .gitignore from every listing
+// and search: a model asked to edit it could not first see that it existed.
+func TestListingsShowDotGitignoreButNotDotGit(t *testing.T) {
+	ectx := testExecContext(t)
+	for path, body := range map[string]string{
+		".gitignore":  "node_modules/\n",
+		".git/config": "[core]\n",
+		"app.py":      "print()\n",
+	} {
+		full := filepath.Join(ectx.ProjectRoot, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list := &FSList{}
+	res, err := list.Execute(context.Background(), ectx, json.RawMessage(`{"path":"."}`))
+	if err != nil || res.IsError {
+		t.Fatalf("list: %v %v", err, res)
+	}
+	if !strings.Contains(res.Content, ".gitignore") {
+		t.Error("the listing hides .gitignore")
+	}
+	if strings.Contains(res.Content, ".git/config") {
+		t.Error("the listing exposes .git internals")
+	}
+
+	search := &FSSearch{}
+	res, err = search.Execute(context.Background(), ectx, json.RawMessage(`{"pattern":"node_modules"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("search: %v %v", err, res)
+	}
+	if !strings.Contains(res.Content, ".gitignore") {
+		t.Error("search cannot see inside .gitignore")
+	}
+}

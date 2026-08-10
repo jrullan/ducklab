@@ -78,8 +78,10 @@ func listDir(root string, depth int, projectRoot string) ([]string, error) {
 			}
 			return nil
 		}
-		// Check .gitignore (simplified: skip .git and common ignored dirs)
-		if strings.HasPrefix(rel, ".git") || strings.HasPrefix(rel, "node_modules") {
+		// Skip .git and common ignored dirs — as DIRECTORIES, not string
+		// prefixes: the prefix version also hid .gitignore and .gitattributes
+		// from every listing (and would hide node_modules-lock.json).
+		if underDir(rel, ".git") || underDir(rel, "node_modules") {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -259,7 +261,7 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 			return nil
 		}
 		rel, _ := filepath.Rel(ectx.ProjectRoot, path)
-		if strings.HasPrefix(rel, ".git") {
+		if underDir(rel, ".git") {
 			return nil
 		}
 		if a.Glob != "" && !GlobMatch(a.Glob, filepath.Base(path)) {
@@ -599,4 +601,11 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 		return ErrorResult("delete: %v", err), nil
 	}
 	return SuccessResult("deleted %s", a.Path), nil
+}
+
+// underDir reports whether rel is the named directory or inside it — a path
+// boundary test, where strings.HasPrefix is a spelling test. ".gitignore"
+// begins with ".git" and lives in no directory of that name.
+func underDir(rel, dir string) bool {
+	return rel == dir || strings.HasPrefix(rel, dir+string(filepath.Separator))
 }

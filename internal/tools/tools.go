@@ -342,7 +342,12 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		".ducklab/lock",
 	}
 	for _, denied := range denylist {
-		if strings.HasPrefix(absPath, filepath.Join(ectx.ProjectRoot, denied)) {
+		// At a path boundary, not a string prefix: ".git" must refuse .git
+		// and .git/config and never .gitignore — the string-prefix version
+		// walled off the one file a task about ignoring things has to edit
+		// (T-068), and the error blamed a directory the write never touched.
+		deniedAbs := filepath.Join(ectx.ProjectRoot, denied)
+		if absPath == deniedAbs || strings.HasPrefix(absPath, deniedAbs+string(filepath.Separator)) {
 			return ErrorResult("denylist: write to %s is refused", denied)
 		}
 	}
