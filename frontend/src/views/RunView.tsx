@@ -784,53 +784,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </p>
       )}
 
-      {pending && (
+      {/* The chat's composer does NOT live here: it is pinned to the bottom
+          of the view, where the conversation grows toward it — the reply box
+          at the top had the person scrolling down to read and back up to
+          answer, on every turn. */}
+      {pending && pending.kind !== "chat" && (
         <section className="m-2 rounded-card border border-hairline p-3" data-testid="pending-human">
           <StatusChip role="serious" label={`waiting for you — ${pending.kind}`} />
           {pending.detail && !pending.question && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink" data-testid="pending-detail">
               {pending.detail}
             </p>
-          )}
-          {pending.kind === "chat" && (
-            <div className="mt-2" data-testid="chat-reply">
-              <div className="flex gap-2">
-                <textarea
-                  aria-label="chat message"
-                  value={chatMsg}
-                  onChange={(e) => setChatMsg(e.target.value)}
-                  rows={2}
-                  placeholder="your reply…"
-                  className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1"
-                />
-                <button
-                  type="button"
-                  data-testid="chat-send"
-                  disabled={chatBusy || !chatMsg.trim()}
-                  onClick={() => {
-                    setChatBusy(true);
-                    void client
-                      .chatSend(runId, chatMsg.trim())
-                      .then(() => setChatMsg(""))
-                      .catch(() => {})
-                      .finally(() => setChatBusy(false));
-                  }}
-                  className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-                >
-                  {chatBusy ? "Sending…" : "Send"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="chat-end"
-                  disabled={chatBusy}
-                  onClick={() => void client.chatEnd(runId).catch(() => {})}
-                  title="Closes the conversation as finished; the transcript stays on the record"
-                  className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted disabled:opacity-40"
-                >
-                  End chat
-                </button>
-              </div>
-            </div>
           )}
           {pending.question && (
             <div className="mt-2">
@@ -884,8 +848,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 block={t}
                 roster={roster}
                 color={ducklingColors[t.duckling]}
-                streamed={deltas[`${t.round}:${t.turn}`]}
-                reasoning={reasoning[`${t.round}:${t.turn}`]}
+                streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
+                reasoning={t.messageOnly ? undefined : reasoning[`${t.round}:${t.turn}`]}
               />
             )}
           </VirtualList>
@@ -1088,6 +1052,68 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </ul>
           ))}
       </div>
+
+      {/* The chat composer, pinned to the bottom of the viewport like every
+          conversation the person already knows. It lived in the pending card
+          at the TOP: the conversation grew downward away from it, so each
+          turn meant scrolling down to read the reply and back up to answer.
+          Always present while the chat lives — disabled, saying why, while
+          the consultant is thinking — so the box never jumps around. */}
+      {run.stage === "chat" && (run.status === "running" || run.status === "paused" || run.status === "queued") && (
+        <section
+          className="sticky bottom-0 z-10 border-t border-hairline bg-surface p-3"
+          data-testid="chat-reply"
+        >
+          <div className="flex items-start gap-2">
+            <textarea
+              aria-label="chat message"
+              value={chatMsg}
+              onChange={(e) => setChatMsg(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && chatMsg.trim() && !chatBusy && pending?.kind === "chat") {
+                  e.preventDefault();
+                  setChatBusy(true);
+                  void client
+                    .chatSend(runId, chatMsg.trim())
+                    .then(() => setChatMsg(""))
+                    .catch(() => {})
+                    .finally(() => setChatBusy(false));
+                }
+              }}
+              rows={2}
+              disabled={pending?.kind !== "chat"}
+              placeholder={pending?.kind === "chat" ? "your reply… (Enter to send)" : "the consultant is thinking…"}
+              className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
+            />
+            <button
+              type="button"
+              data-testid="chat-send"
+              disabled={chatBusy || pending?.kind !== "chat" || !chatMsg.trim()}
+              onClick={() => {
+                setChatBusy(true);
+                void client
+                  .chatSend(runId, chatMsg.trim())
+                  .then(() => setChatMsg(""))
+                  .catch(() => {})
+                  .finally(() => setChatBusy(false));
+              }}
+              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+            >
+              {chatBusy ? "Sending…" : "Send"}
+            </button>
+            <button
+              type="button"
+              data-testid="chat-end"
+              disabled={chatBusy}
+              onClick={() => void client.chatEnd(runId).catch(() => {})}
+              title="Closes the conversation as finished; the transcript stays on the record"
+              className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted disabled:opacity-40"
+            >
+              End chat
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

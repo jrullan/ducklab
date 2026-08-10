@@ -58,6 +58,12 @@ export interface TurnBlock {
   turn: number;
   role: string;
   duckling: string;
+  /** A bare message with no agent turn behind it — a chat's human messages,
+   * mostly. Its key is synthetic, so it must never be looked up in the
+   * delta/reasoning stores: those are keyed round:turn, and a human bubble
+   * wearing the consultant's coordinates rendered the consultant's thinking
+   * twice. */
+  messageOnly?: boolean;
   /** Anonymous label used instead of `duckling` when the turn is hidden. */
   label?: string;
   toolCalls: ToolCall[];
@@ -200,22 +206,32 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         const verdict = d.verdict ? String(d.verdict) : undefined;
         const findings = Array.isArray(d.findings) ? (d.findings as Finding[]) : undefined;
         const b = blockFor(d);
-        if (b) {
+        // Only a block of the SAME role may absorb the message. A chat's
+        // human messages carry no coordinates, so the fallback handed them
+        // to the last open turn — and the human's next question OVERWROTE
+        // the consultant's recorded reply in the lane. A role mismatch means
+        // this message is its own bubble, in event order.
+        const role = String(d.role ?? "");
+        if (b && (role === "" || b.role === role)) {
           b.text = content;
           b.verdict = verdict;
           b.findings = findings;
         } else {
-          // A message with no turn of its own still belongs in the lane rather
-          // than being dropped on the floor.
+          // A message with no turn of its own still belongs in the lane
+          // rather than being dropped on the floor. Its key is synthetic and
+          // unique: reusing round:turn coordinates collided with a real
+          // turn's key, and the delta stores served that turn's thinking to
+          // both blocks.
           blocks.push({
-            key: keyFor(Number(d.round ?? 1), Number(d.turn ?? 0)),
+            key: `msg:${e.seq ?? blocks.length}`,
             round: Number(d.round ?? 1),
             turn: Number(d.turn ?? 0),
-            role: String(d.role ?? ""),
+            role,
             duckling: String(d.duckling ?? ""),
             toolCalls: [],
             text: content,
             done: true,
+            messageOnly: true,
             verdict,
             findings,
           });
