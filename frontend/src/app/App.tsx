@@ -12,6 +12,7 @@ import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
+import { GuideRail } from "../components/GuidePanel";
 import { Cycle } from "../views/Cycle";
 import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
@@ -429,12 +430,17 @@ export function App() {
         </div>
       )}
 
-      <main
-        className={
-          "min-h-0 flex-1 overflow-y-auto" + (degraded ? " opacity-60 transition-opacity" : "")
-        }
-        data-degraded={String(degraded)}
-      >
+      <div className="flex min-h-0 flex-1">
+        {/* The guide rail lives beside every view, not inside one: following
+            a step changes the view, and a thread you can only see from one
+            room is not a thread. */}
+        {client && projectId && <GuideRail client={client} projectId={projectId} />}
+        <main
+          className={
+            "min-h-0 flex-1 overflow-y-auto" + (degraded ? " opacity-60 transition-opacity" : "")
+          }
+          data-degraded={String(degraded)}
+        >
         {error && <p className="m-4 text-critical" data-testid="app-error">{error}</p>}
 
         {route.name === "now" && client && projectId && (
@@ -514,6 +520,7 @@ export function App() {
           <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} client={client ?? undefined} />
         )}
       </main>
+      </div>
 
       <footer className="flex items-center gap-3 border-t border-hairline px-4 py-1 text-sm">
         {/* "connecting" is the normal first second of the app's life, not a

@@ -21,24 +21,26 @@ function hrefFor(step: NextStep): string {
 const STORE = "ducklab.guide";
 
 /**
- * The guide: the engine's ProjectNext, rendered.
+ * The guide rail: the engine's ProjectNext, always in the left margin.
  *
  * Ducklab's cycle is a state machine, so "what do I do now?" always has a
  * computable answer — and for a new user that answer is the whole mental
- * load of the tool. Each step names the outcome, says why it is next, and
- * links the surface whose buttons already do it.
+ * load of the tool. It began as a panel inside Now, which meant the thread
+ * broke the moment you followed it: click a step, land on another view, and
+ * the guide is gone. A thread you can only see from one room is not a
+ * thread.
  *
- * Only the steps the inbox does not already show: paused runs are Now's
- * waiting cards and the next buildable task is Now's launcher, so the guide
- * showing them again would be a second inbox. What Now never surfaces is the
- * LIFECYCLE — which document comes next, that open bugs want triage, that a
- * finished project grows by brief — and that is exactly the part a new user
- * cannot know yet.
+ * Living beside every view, it shows the WHOLE guide in the engine's own
+ * order — paused runs first (work already paid for), then the lifecycle,
+ * then the next buildable task. Inside Now some of these repeat the inbox's
+ * cards; across the app, the rail is the only place they are visible at
+ * all, and a compact echo on one screen is cheaper than a broken thread on
+ * every other.
  *
- * Dismissible and it stays dismissed: guidance for the first weeks, a pill
- * for after.
+ * Collapsible to a thin counted strip, and the choice survives: guidance
+ * for the first weeks, a pulse for after.
  */
-export function GuidePanel({ client, projectId }: { client: EngineClient; projectId: string }) {
+export function GuideRail({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [steps, setSteps] = useState<NextStep[]>([]);
   const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off");
   // Runs are the guide's pulse: an accept, a pause, a landed proposal all
@@ -50,10 +52,7 @@ export function GuidePanel({ client, projectId }: { client: EngineClient; projec
     client.projectNext(projectId).then(setSteps).catch(() => setSteps([]));
   }, [client, projectId, runs]);
 
-  const shown = steps.filter(
-    (s) => s.kind === "stage" || s.kind === "bug" || s.kind === "project",
-  );
-  if (shown.length === 0) return null;
+  if (steps.length === 0) return null;
 
   if (!open) {
     return (
@@ -65,17 +64,20 @@ export function GuidePanel({ client, projectId }: { client: EngineClient; projec
           setOpen(true);
         }}
         title="show the next-step guide"
-        className="mb-3 rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-muted"
+        className="shrink-0 self-start rounded-r border border-l-0 border-hairline px-1.5 py-2 text-xs text-ink-muted"
       >
-        guide · {shown.length}
+        ›{steps.length}
       </button>
     );
   }
 
   return (
-    <section className="mb-4 rounded-card border border-hairline p-3" data-testid="guide-panel">
+    <aside
+      data-testid="guide-rail"
+      className="w-60 shrink-0 overflow-y-auto border-r border-hairline p-3"
+    >
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm text-ink-muted">next step</h2>
+        <h2 className="text-sm text-ink-muted">next steps</h2>
         <button
           type="button"
           data-testid="guide-hide"
@@ -83,22 +85,22 @@ export function GuidePanel({ client, projectId }: { client: EngineClient; projec
             localStorage.setItem(STORE, "off");
             setOpen(false);
           }}
-          title="hide the guide (a pill stays to bring it back)"
+          title="collapse the guide (a strip stays to bring it back)"
           className="text-xs text-ink-muted underline"
         >
           hide
         </button>
       </div>
-      <ol className="mt-2 space-y-2">
-        {shown.slice(0, 3).map((s, i) => (
+      <ol className="mt-2 space-y-3">
+        {steps.slice(0, 6).map((s, i) => (
           <li key={`${s.id}:${s.ref ?? i}`} data-testid="guide-step">
             <a href={hrefFor(s)} className="text-sm text-ink underline">
               {s.action}
             </a>
-            <p className="text-xs text-ink-muted">{s.reason}</p>
+            <p className="mt-0.5 text-xs text-ink-muted">{s.reason}</p>
           </li>
         ))}
       </ol>
-    </section>
+    </aside>
   );
 }
