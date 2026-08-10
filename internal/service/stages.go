@@ -563,6 +563,15 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		if r.TaskID == "" {
 			continue
 		}
+		// A conversation ABOUT a task is not an attempt AT it: chat runs
+		// carry the task id for their dossier, and one that ended "done,
+		// unaccepted" was read as a failed attempt — stamping "the last run
+		// done — retry" on a delivered task. And a run that changed nothing
+		// says nothing either: it wears FAILED for honest pass-rates, but
+		// "the work was already in the tree" is not a verdict on the task.
+		if r.Stage == "chat" || r.NoChanges {
+			continue
+		}
 		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
 			pinned[r.TaskID] = true
 		}
