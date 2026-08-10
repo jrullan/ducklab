@@ -256,8 +256,27 @@ describe("ConversationTurn and the recorded message", () => {
   });
 
   it("prefers live tokens while the turn is still arriving", () => {
-    render(<ConversationTurn block={block} roster={["pato-uno"]} streamed="Changed ad" />);
+    render(
+      <ConversationTurn block={{ ...block, done: false }} roster={["pato-uno"]} streamed="Changed ad" />,
+    );
     expect(screen.getByTestId("turn-text").textContent).toBe("Changed ad");
+  });
+
+  // T-064's chat: the consultant hit its call cap and answered through the
+  // tools-withheld conclude call — which does not stream — so the delta
+  // buffer held only its thinking-aloud between tool calls. The lane
+  // rendered that scratch work over the recorded reply, and the person was
+  // asked to answer a consultant who appeared to have said nothing. Once a
+  // turn is done, the record is the truth — same law as the budget meter.
+  it("prefers the record over streamed scratch once the turn is done", () => {
+    render(
+      <ConversationTurn
+        block={block}
+        roster={["pato-uno"]}
+        streamed="Let me search only the frontend source."
+      />,
+    );
+    expect(screen.getByTestId("turn-text").textContent).toContain("a - b became a + b");
   });
 });
 

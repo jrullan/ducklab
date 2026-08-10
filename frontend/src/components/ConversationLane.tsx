@@ -91,7 +91,7 @@ export function ConversationTurn({
       {/* A reviewer's turn is already structured. Rendering its raw text put
           `{"verdict":"approve", "findings":[]}` on screen — the one turn whose
           content the engine has already parsed, shown as a blob. */}
-      {!streamed && block.verdict && <VerdictBlock block={block} />}
+      {(block.done || !streamed) && block.verdict && <VerdictBlock block={block} />}
 
       {/* Thinking arrives before the answer and is billed either way. The
           stream parser used to read only delta.content, so a reasoning model
@@ -106,16 +106,24 @@ export function ConversationTurn({
         </div>
       )}
 
-      {reasoning && <ReasoningBlock text={reasoning} live={!!streamed} />}
+      {reasoning && <ReasoningBlock text={reasoning} live={!!streamed && !block.done} />}
 
-      {/* Live tokens while a turn is in flight, the recorded message once it
-          is not. Only `streamed` was rendered, and it comes from token_delta
-          events that arrive solely during a live run — so a lane showed a
-          participant, its tool calls, and no word of what was actually said. */}
+      {/* Live tokens while a turn is in flight, the RECORD once it is done.
+          The streamed buffer holds whatever happened to stream — a chat
+          consultant's thinking-aloud between its tool calls — while the
+          message event holds what was actually said. The out-of-calls
+          conclude reply (tools withheld) does not stream at all, so a capped
+          turn's real answer existed only on the record, and this lane showed
+          the scratch work over it: T-064's chat looked like it never
+          answered while a full reply sat in events.jsonl. */}
       {/* Raw while tokens are still arriving — a half-written fence or bold
           marker cannot be parsed without guessing at what comes next — and
           rendered once the turn has settled. */}
-      {streamed ? (
+      {block.done && block.text && !block.verdict ? (
+        <div data-testid="turn-text">
+          <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+        </div>
+      ) : streamed ? (
         <pre
           data-testid="turn-text"
           className="mt-1 whitespace-pre-wrap font-mono text-sm text-ink-secondary"
