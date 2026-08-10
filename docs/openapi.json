@@ -4910,6 +4910,42 @@
         "summary": "Send the next message in a paused chat"
       }
     },
+    "/v1/runs/{id}/chat/end": {
+      "post": {
+        "operationId": "ChatEnd",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "End a chat as finished — a done consultation is not an abort"
+      }
+    },
     "/v1/runs/{id}/diff": {
       "get": {
         "operationId": "RunDiff",

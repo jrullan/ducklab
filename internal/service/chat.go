@@ -155,6 +155,38 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string) (*runlog.
 	return rs.run, nil
 }
 
+// ChatEnd closes a conversation as what it was: finished, not failed. Abort
+// was the only exit, and a consultation that did its job ended ABORTED on
+// the record — a word that means the person gave up on it.
+func (s *Service) ChatEnd(ctx context.Context, runID string) (*runlog.Run, error) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[runID]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", runID)
+	}
+	if rs.run.Stage != "chat" {
+		return nil, fmt.Errorf("%s is a %s run, not a chat", runID, rs.run.Stage)
+	}
+	if rs.run.Status != "paused" || rs.run.PendingKind != "chat" {
+		return nil, fmt.Errorf("the chat is not at rest (status %s); wait for the reply or abort", rs.run.Status)
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return nil, err
+	}
+	rs.run.Status = "done"
+	rs.run.Resolution = "ended by human"
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
+	w.AppendEvent("human", map[string]interface{}{"action": "end_chat"})
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": ""})
+	if err := w.WriteState(); err != nil {
+		return nil, err
+	}
+	return rs.run, nil
+}
+
 // executeChatTurn runs ONE consultant reply: dossier + conversation so far +
 // the person's last message, with read-only tools, then pauses for the next.
 func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot, aboutKind, aboutID, ducklingID string) {

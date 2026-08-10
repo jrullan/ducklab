@@ -83,3 +83,41 @@ func TestAChatConversesAndPausesForTheNextMessage(t *testing.T) {
 		t.Error("sent to a chat that does not exist")
 	}
 }
+
+// A finished consultation ends done, not ABORTED — abort means the person
+// gave up on it, and the record must not say that about a chat that worked.
+func TestEndingAChatIsNotAnAbort(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.ChatStart(context.Background(), p.ID, ChatStartRequest{
+		Duckling: "pato-uno", AboutKind: "task", AboutID: "T-001", Message: "why?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && !(rs.run.Status == "paused" && rs.run.PendingKind == "chat") {
+		time.Sleep(50 * time.Millisecond)
+	}
+	got, err := s.ChatEnd(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "done" || got.Verdict == "ABORTED" {
+		t.Errorf("ended chat = %s/%s, want done and never ABORTED", got.Status, got.Verdict)
+	}
+	if !strings.Contains(got.Resolution, "ended by human") {
+		t.Errorf("resolution = %q", got.Resolution)
+	}
+	// Ended is ended.
+	if _, err := s.ChatEnd(context.Background(), run.ID); err == nil {
+		t.Error("ended a chat twice")
+	}
+}

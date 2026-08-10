@@ -700,6 +700,15 @@ func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, run)
 }
 
+func (s *Server) handleChatEnd(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.ChatEnd(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}
+
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	var req chatSendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

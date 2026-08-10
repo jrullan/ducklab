@@ -653,6 +653,7 @@ export const OPERATIONS = [
   { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
   { id: "ChatSend", method: "POST", path: "/v1/runs/{id}/chat" },
+  { id: "ChatEnd", method: "POST", path: "/v1/runs/{id}/chat/end" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },

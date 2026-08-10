@@ -773,6 +773,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 >
                   {chatBusy ? "Sending…" : "Send"}
                 </button>
+                <button
+                  type="button"
+                  data-testid="chat-end"
+                  disabled={chatBusy}
+                  onClick={() => void client.chatEnd(runId).catch(() => {})}
+                  title="Closes the conversation as finished; the transcript stays on the record"
+                  className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted disabled:opacity-40"
+                >
+                  End chat
+                </button>
               </div>
             </div>
           )}

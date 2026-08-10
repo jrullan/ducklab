@@ -573,6 +573,10 @@ export class EngineClient {
   chatSend(runId: string, message: string) {
     return this.request<Run>("POST", `/v1/runs/${runId}/chat`, { message });
   }
+  /** End a chat as finished — a done consultation is not an abort. */
+  chatEnd(runId: string) {
+    return this.request<Run>("POST", `/v1/runs/${runId}/chat/end`);
+  }
 
   /** The app's run configuration and managed-process state. */
   appStatus(projectId: string) {
