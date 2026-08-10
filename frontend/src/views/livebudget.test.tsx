@@ -82,8 +82,35 @@ describe("the run's budget while it is running", () => {
     );
   });
 
-  // A solo run has one model, and a breakdown of one row is noise.
-  it("shows no breakdown when only one model has spent", async () => {
+  // The line-up is known the moment the run starts — it is the roster — but
+  // rows only appeared as each model's first call landed, so a pair run
+  // opened showing nobody and the second seat materialised minutes later.
+  // Every seat shows from the first frame, wearing its role; a seat that has
+  // not spent says so instead of not existing.
+  it("seats the whole roster from the start, each with its role", async () => {
+    useRuns.getState().applyEvent(
+      budgetEvent({
+        usd: 0, tokens: 1000, turns: 1, wallclock_s: 5,
+        limit: { usd: 2, tokens: 400000, turns: 24, wallclock_s: 3600 },
+        ducklings: { "pato-local": { calls: 3, tokens: 1000, cost_usd: 0 } },
+      }),
+    );
+    render(<RunView runId="r-1" client={client} />);
+    const box = await screen.findByTestId("spend-by-duckling");
+    expect(box.textContent).toContain("pato-local");
+    expect(box.textContent).toContain("implementer");
+    expect(box.textContent).toContain("pato-atom");
+    expect(box.textContent).toContain("reviewer");
+    expect(box.textContent).toContain("no calls yet");
+  });
+
+  // A solo run seats one model, and a breakdown of one row is noise — the
+  // roster naming an architect and a scribe does not mean they ran.
+  it("shows no breakdown for a solo run", async () => {
+    useRuns.setState({
+      runs: { "r-1": { ...run, mode: "solo", roster: { implementer: "pato-local", architect: "pato-atom" } } },
+      spend: {}, events: {}, deltas: {}, reasoning: {},
+    });
     useRuns.getState().applyEvent(
       budgetEvent({
         usd: 0, tokens: 1000, turns: 1, wallclock_s: 5,

@@ -190,12 +190,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
   const roster = Object.values(run.roster ?? {});
   const ducklingColors = assignDucklingColors(fleet);
-  // Only ducklings that actually spent something: the roster names one for every
-  // role whether or not that role ran, and listing six models for a solo run
-  // credits five with work they never did.
-  const perDuckling = Object.entries(live?.ducklings ?? run.spend ?? {})
-    .filter(([, d]) => d.calls > 0)
-    .sort((a, b) => b[1].tokens - a[1].tokens);
+  // Everyone with a seat in this run, from the first frame. Rows used to
+  // appear only as each model's first call landed, so a pair run opened
+  // showing nobody and the line-up assembled itself over minutes. Spenders
+  // sort first (biggest is who you would act on); the seated-but-silent
+  // follow in seat order. seatsFromRoster keeps solo honest — the roster
+  // names every role, but a solo run seats one model, so the one-row
+  // breakdown stays hidden as before.
+  const spend = live?.ducklings ?? run.spend ?? {};
+  const rolesByDuckling: Record<string, string[]> = {};
+  for (const [role, id] of Object.entries(run.roster ?? {})) {
+    if (id) (rolesByDuckling[id] ??= []).push(role);
+  }
+  const spenders = Object.keys(spend)
+    .filter((id) => (spend[id]?.calls ?? 0) > 0)
+    .sort((a, b) => (spend[b]?.tokens ?? 0) - (spend[a]?.tokens ?? 0));
+  const perDuckling: [string, { calls: number; tokens: number; cost_usd: number } | undefined][] = [
+    ...spenders,
+    ...seatsFromRoster(run.mode, run.roster).filter((id) => !spenders.includes(id)),
+  ].map((id) => [id, spend[id]]);
   // A judge's turns are anonymised; the mapping is dropped, not hidden.
   const anonymise = run.mode === "tournament";
   const turns = anonymiseTurns(buildTurns(events), anonymise);
@@ -926,11 +939,22 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 <dl className="mt-3 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling">
                   {perDuckling.map(([id, d]) => (
                     <div key={id} className="flex justify-between gap-2">
-                      <dt style={{ color: ducklingColors[id] }}>{id}</dt>
-                      <dd className="tabular-nums text-ink-secondary">
-                        {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
-                        {d.calls === 1 ? "" : "s"}
-                      </dd>
+                      <dt className="min-w-0 truncate">
+                        <span style={{ color: ducklingColors[id] }}>{id}</span>
+                        {rolesByDuckling[id] && (
+                          <span className="ml-1.5 text-ink-muted">{rolesByDuckling[id].join(" · ")}</span>
+                        )}
+                      </dt>
+                      {d && d.calls > 0 ? (
+                        <dd className="shrink-0 tabular-nums text-ink-secondary">
+                          {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
+                          {d.calls === 1 ? "" : "s"}
+                        </dd>
+                      ) : (
+                        <dd className="shrink-0 text-ink-muted">
+                          {runIsLive ? "no calls yet" : "never called"}
+                        </dd>
+                      )}
                     </div>
                   ))}
                 </dl>
