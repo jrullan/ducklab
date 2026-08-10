@@ -150,6 +150,22 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   return (
     <div className="mx-auto max-w-3xl p-4" data-testid="now-view">
+      {/* Live work first, always at the top: one compact line per run. The
+          section used to sit below the decision cards, so a day with three
+          bugs to verify pushed "what is happening RIGHT NOW" below the fold
+          — the one section whose whole point is a glance. The decision
+          cards keep the room below; running is a pulse, not a pile. */}
+      {active.length > 0 && (
+        <section className="mb-4" data-testid="now-running">
+          <h2 className="text-sm text-ink-muted">running</h2>
+          <ul className="mt-2 space-y-1">
+            {active.map((r) => (
+              <RunningRow key={r.id} run={r} live={spend[r.id]} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {waiting.length > 0 && (
         <section data-testid="now-waiting">
           <h2 className="text-sm text-ink-muted">waiting for you</h2>
@@ -277,17 +293,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                   Open it to see what it did and run it again with changed settings.
                 </p>
               </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {active.length > 0 && (
-        <section className="mt-4" data-testid="now-running">
-          <h2 className="text-sm text-ink-muted">running</h2>
-          <ul className="mt-2 space-y-1">
-            {active.map((r) => (
-              <RunningRow key={r.id} run={r} live={spend[r.id]} />
             ))}
           </ul>
         </section>
