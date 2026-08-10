@@ -366,3 +366,40 @@ func TestNoChangeRetriesDoNotUndeliverAnAcceptedTask(t *testing.T) {
 		}
 	}
 }
+
+// A conversation about a task is not an attempt at it: the chat run carries
+// the task id for its dossier, and its "done, unaccepted" ending stamped
+// "the last run done — retry" on a delivered task.
+func TestAChatAboutATaskDoesNotFoldIntoItsStatus(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, r := range []*runlog.Run{
+		{ID: "r-acc2", ProjectID: id, TaskID: "T-001", Stage: "build",
+			Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: "abc",
+			StartedAt: "2026-08-10T01:37:00Z"},
+		{ID: "r-chat", ProjectID: id, TaskID: "T-001", Stage: "chat",
+			Status: "done", StartedAt: "2026-08-10T11:47:00Z"},
+	} {
+		w, err := runlog.NewWriter(dir, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+	s.RecoverRuns(context.Background())
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tv := range tasks {
+		if tv.ID != "T-001" {
+			continue
+		}
+		if tv.Status != "accepted" {
+			t.Errorf("status = %q, want accepted", tv.Status)
+		}
+		if tv.Blocked != "" {
+			t.Errorf("a chat left a blocked message on the task: %q", tv.Blocked)
+		}
+	}
+}
