@@ -117,6 +117,9 @@ describe("Ducklings", () => {
         provider: "openrouter",
         model: "anthropic/claude-sonnet-4.5",
         roles: ["reviewer"],
+        // Preserved fields ride every save: PUT replaces the whole duckling,
+        // and the form once wiped what it did not show.
+        notes: "",
         params: {
           max_tokens: null,
           temperature: null,
@@ -125,7 +128,7 @@ describe("Ducklings", () => {
           stop: null,
         },
         color: 0,
-        caps: { native_tools: true, context_tokens: 200000 },
+        caps: { native_tools: true, context_tokens: 200000, vision: undefined },
         cost: { input_per_mtok: 0, output_per_mtok: 15 },
       }),
     );
