@@ -88,3 +88,27 @@ describe("the launcher's cost estimates", () => {
     for (const o of options) expect(o).not.toContain("$");
   });
 });
+
+// "No cap" for the per-reply call loop, in the same words the budget lifts
+// use. The wire carries -1 — the engine reads negative as "lift this run's
+// cap", with the token and cost budgets still guarding every call. A number
+// typed and then capped away must not survive the checkbox.
+describe("the launcher's calls/reply no-cap", () => {
+  it("sends -1 when checked, whatever the box said before", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} onLaunch={onLaunch} />);
+    fireEvent.change(screen.getByTestId("run-agent-turns"), { target: { value: "12" } });
+    fireEvent.click(screen.getByTestId("run-turns-nocap"));
+    expect((screen.getByTestId("run-agent-turns") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ agentTurns: -1 }));
+  });
+
+  it("keeps a typed number when unchecked", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} onLaunch={onLaunch} />);
+    fireEvent.change(screen.getByTestId("run-agent-turns"), { target: { value: "12" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ agentTurns: 12 }));
+  });
+});

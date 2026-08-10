@@ -218,7 +218,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
-			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script), &strategy.ExecuteParams{
+			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, 0), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
 				Prompt:         prompt,

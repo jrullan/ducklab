@@ -116,14 +116,28 @@ export function LaunchConfig({
       {showTokens && (
         <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
           calls / reply
-          <input
-            aria-label="agent turns"
-            data-testid="cfg-agent-turns"
-            placeholder="default"
-            value={value.agentTurns ? String(value.agentTurns) : ""}
-            onChange={(e) => onChange({ ...value, agentTurns: Number(e.target.value) || undefined })}
-            className="w-20 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-          />
+          <span className="flex items-center gap-1.5">
+            <input
+              aria-label="agent turns"
+              data-testid="cfg-agent-turns"
+              placeholder={value.agentTurns === -1 ? "no cap" : "default"}
+              disabled={value.agentTurns === -1}
+              value={value.agentTurns && value.agentTurns > 0 ? String(value.agentTurns) : ""}
+              onChange={(e) => onChange({ ...value, agentTurns: Number(e.target.value) || undefined })}
+              className="w-20 rounded border border-hairline bg-surface2 px-2 py-1 text-xs disabled:opacity-40"
+            />
+            {/* -1 on the wire: the engine reads negative as "lift this run's
+                call cap"; the token and cost budgets still guard. */}
+            <label className="flex items-center gap-1 text-xs text-ink-muted" title="no cap on model calls per reply — the run's token and cost budgets still guard">
+              <input
+                type="checkbox"
+                data-testid="cfg-turns-nocap"
+                checked={value.agentTurns === -1}
+                onChange={(e) => onChange({ ...value, agentTurns: e.target.checked ? -1 : undefined })}
+              />
+              no cap
+            </label>
+          </span>
         </label>
       )}
     </div>
@@ -178,6 +192,10 @@ export function RunLauncher({
   const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
   const [maxTokens, setMaxTokens] = useState("");
   const [agentTurns, setAgentTurns] = useState("");
+  // "no cap" for the per-reply call loop, same word as the budget lifts:
+  // sent as -1, which the engine reads as "lift the cap for this run" — the
+  // token and cost budgets still guard every call.
+  const [turnsNoCap, setTurnsNoCap] = useState(false);
   const [extraSeats, setExtraSeats] = useState(0);
   const seats = fixedSeats(mode);
   const cols = seats > 0 ? seats : Math.max(2, chosen.length, extraSeats);
@@ -239,11 +257,24 @@ export function RunLauncher({
         <input
           aria-label="agent turns"
           data-testid="run-agent-turns"
-          placeholder="calls/reply (default)"
-          value={agentTurns}
+          placeholder={turnsNoCap ? "no cap" : "calls/reply (default)"}
+          disabled={turnsNoCap}
+          value={turnsNoCap ? "" : agentTurns}
           onChange={(e) => setAgentTurns(e.target.value)}
-          className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs disabled:opacity-40"
         />
+        <label
+          className="flex items-center gap-1 text-xs text-ink-muted"
+          title="no cap on model calls per reply — the run's token and cost budgets still guard"
+        >
+          <input
+            type="checkbox"
+            data-testid="run-turns-nocap"
+            checked={turnsNoCap}
+            onChange={(e) => setTurnsNoCap(e.target.checked)}
+          />
+          no cap
+        </label>
         {noteOpen ? (
           <textarea
             value={note}
@@ -266,7 +297,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: Number(agentTurns) || undefined })
+            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined })
           }
           disabled={busy}
           data-testid="run-start"

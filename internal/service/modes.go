@@ -199,17 +199,31 @@ func humanNote(note string) string {
 	return "\n\n## Note from the human\n\n" + note + "\n"
 }
 
+// uncappedTurns stands in for "no cap" on the per-reply call loop. Finite,
+// so I3 keeps its letter — but far beyond any use, so it never binds: the
+// run's token and cost budgets, checked before every model call, are what
+// actually guard an uncapped loop.
+const uncappedTurns = 10000
+
+// capOverride resolves a run's AgentTurns override: negative means no cap.
+func capOverride(override int) int {
+	if override < 0 {
+		return uncappedTurns
+	}
+	return override
+}
+
 // roleTurnCapsFor is the configured caps, unless the run asked for its own:
 // a per-run override applies to every role, because the person raising it is
-// unblocking THIS work, not retuning the fleet.
+// unblocking THIS work, not retuning the fleet. Negative lifts the cap.
 func (s *Service) roleTurnCapsFor(override int) map[config.Role]int {
 	caps := s.roleTurnCaps()
-	if override <= 0 {
+	if override == 0 {
 		return caps
 	}
 	for _, role := range config.ValidRoles() {
 		if role != config.RoleHuman {
-			caps[role] = override
+			caps[role] = capOverride(override)
 		}
 	}
 	return caps
@@ -264,11 +278,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 
 	switch mc.rs.run.Mode {
 	case "", "solo":
-		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.SoloScript()), &base)
+		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.SoloScript(), mc.req.AgentTurns), &base)
 		return pendingOrErr(res, err)
 
 	case "pair":
-		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.PairScript()), &base)
+		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.PairScript(), mc.req.AgentTurns), &base)
 		return pendingOrErr(res, err)
 
 	case "tournament":

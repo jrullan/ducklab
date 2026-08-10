@@ -329,17 +329,27 @@ func (s *Service) turnsFor(role string, scriptCap int) int {
 	return scriptCap
 }
 
-// applyRoleTurns rewrites a script's per-role caps from the configuration.
+// applyRoleTurns rewrites a script's per-role caps from the configuration,
+// then from the run's own override when it carries one.
 //
 // Done here rather than in the scripts because a script is a fixed shape and the
 // caps are a preference. Walking the turns is what makes a setting apply to
 // every mode at once instead of to whichever ones somebody remembered.
-func (s *Service) applyRoleTurns(script *strategy.Script) *strategy.Script {
+//
+// The override used to ride only ExecuteParams.TurnCaps — which tournament
+// and split read, and the script modes never did. So the per-run
+// "calls/reply" was accepted, recorded, and silently ignored in exactly the
+// modes most runs use. Human turns keep their cap: the override unblocks
+// models, not people.
+func (s *Service) applyRoleTurns(script *strategy.Script, override int) *strategy.Script {
 	if script == nil {
 		return script
 	}
 	for i := range script.Turns {
 		script.Turns[i].MaxTurns = s.turnsFor(string(script.Turns[i].Role), script.Turns[i].MaxTurns)
+		if override != 0 && script.Turns[i].Role != config.RoleHuman {
+			script.Turns[i].MaxTurns = capOverride(override)
+		}
 	}
 	return script
 }

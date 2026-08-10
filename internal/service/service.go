@@ -725,7 +725,9 @@ type RunRequest struct {
 	// AgentTurns overrides how many model calls ONE reply may chain, for
 	// every role in this run. The budget's turn cap bounds the CONVERSATION;
 	// this bounds the loop inside one turn — and a hard task can need more
-	// looking than the default allows. Zero keeps the configured caps.
+	// looking than the default allows. Zero keeps the configured caps;
+	// negative lifts the cap for this run, with the token and cost budgets
+	// still guarding every call.
 	AgentTurns int `json:"agent_turns,omitempty"`
 	// Note rides the prompt as a section from the human — the channel for
 	// "address the reviewer's findings" and every other instruction a task

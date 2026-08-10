@@ -44,7 +44,7 @@ func TestTheCapReachesEveryMode(t *testing.T) {
 	}
 
 	// Script-driven modes.
-	pair := s.applyRoleTurns(strategy.PairScript())
+	pair := s.applyRoleTurns(strategy.PairScript(), 0)
 	for _, turn := range pair.Turns {
 		want := map[config.Role]int{config.RoleImplementer: 30, config.RoleReviewer: 3}[turn.Role]
 		if want != 0 && turn.MaxTurns != want {
@@ -99,5 +99,52 @@ func TestTheTurnCeilingFitsASurveyingCritic(t *testing.T) {
 		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 500},
 	}); err == nil {
 		t.Error("an effectively unbounded cap was accepted")
+	}
+}
+
+// The per-run override rode only ExecuteParams.TurnCaps — which tournament
+// and split read, and the script modes never did. So the launcher's
+// "calls/reply" was accepted, recorded, and silently ignored in exactly the
+// modes most runs use.
+func TestThePerRunOverrideReachesScriptModes(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	pair := s.applyRoleTurns(strategy.PairScript(), 33)
+	for _, turn := range pair.Turns {
+		if turn.Role == config.RoleHuman {
+			continue
+		}
+		if turn.MaxTurns != 33 {
+			t.Errorf("pair %s = %d, want the run's own 33", turn.Role, turn.MaxTurns)
+		}
+	}
+}
+
+// Negative is "no cap", the same word the budget lifts speak: finite in
+// letter (I3), beyond use in practice, with the token and cost budgets still
+// guarding every call. A human turn keeps its cap — the lift unblocks
+// models, not people.
+func TestANegativeOverrideLiftsTheCap(t *testing.T) {
+	s := writableService(t, "pato-uno")
+
+	review := s.applyRoleTurns(strategy.ReviewScript(true), -1)
+	for _, turn := range review.Turns {
+		if turn.Role == config.RoleHuman {
+			if turn.MaxTurns != 1 {
+				t.Errorf("the human turn's cap moved: %d", turn.MaxTurns)
+			}
+			continue
+		}
+		if turn.MaxTurns != uncappedTurns {
+			t.Errorf("%s = %d, want uncapped (%d)", turn.Role, turn.MaxTurns, uncappedTurns)
+		}
+	}
+
+	// And the modes that build their own turns read the same lift.
+	caps := s.roleTurnCapsFor(-1)
+	if got := strategy.CapFor(caps, config.RoleImplementer, 24); got != uncappedTurns {
+		t.Errorf("tournament/split implementer = %d, want uncapped (%d)", got, uncappedTurns)
+	}
+	if _, ok := caps[config.RoleHuman]; ok {
+		t.Error("the lift reached the human role")
 	}
 }
