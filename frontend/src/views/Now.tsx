@@ -10,7 +10,7 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useState } from "react";
-import type { AppStatus, Bug, Duckling, EngineClient, Run, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, Run, Task } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
@@ -22,7 +22,6 @@ import { money, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
-import { openExternal } from "../lib/attention";
 
 export function Now({ client, projectId }: { client: EngineClient; projectId: string }) {
   const runs = useRuns((s) => s.runs);
@@ -42,16 +41,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   // the person remembered the bugs board existed. The question belongs in the
   // queue of questions.
   const [bugs, setBugs] = useState<Bug[]>([]);
-  // The running system, a first-class object: launchable and stoppable from
-  // the inbox, because "try the app" is the whole point of the work above it.
-  const [app, setApp] = useState<AppStatus | null>(null);
-  const [appError, setAppError] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
-    client.appStatus(projectId).then(setApp).catch(() => setApp(null));
     client
       .bugs(projectId)
       .then((all) => setBugs(all))
@@ -107,17 +101,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   const quiet =
     waiting.length === 0 && failures.length === 0 && toVerify.length === 0 && reopened.length === 0;
-
-  // The chip must converge to the truth: a status caught mid-boot said
-  // "unhealthy" forever, because nothing ever asked again. Poll while the
-  // card exists — the probe is sub-second and the app is the point.
-  useEffect(() => {
-    if (!projectId || !app?.configured) return;
-    const t = setInterval(() => {
-      client.appStatus(projectId).then(setApp).catch(() => {});
-    }, 7000);
-    return () => clearInterval(t);
-  }, [client, projectId, app?.configured]);
 
   const launch = async (opts: LaunchOpts) => {
     if (!next) return;
@@ -315,71 +298,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           caller passed zero. */}
       <NowFooter runs={list} />
 
-      {app?.configured && (
-        <section className="mt-4" data-testid="now-app">
-          {app?.configured && (
-          <div className="mt-2 rounded-card border border-hairline p-3" data-testid="app-card">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-ink-muted">app</span>
-              {app.running ? (
-                <StatusChip
-                  role={app.health === "unhealthy" ? "warning" : "good"}
-                  label={app.health ? `running · ${app.health}` : "running"}
-                />
-              ) : app.exit_error ? (
-                <StatusChip role="critical" label="crashed" />
-              ) : (
-                <StatusChip role="muted" label="stopped" />
-              )}
-              {app.running && app.url && (
-                <button
-                  type="button"
-                  data-testid="app-open"
-                  onClick={() => openExternal(app.url!)}
-                  className="text-ink underline"
-                >
-                  open {app.url}
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid={app.running ? "app-stop" : "app-launch"}
-                onClick={() => {
-                  setAppError(null);
-                  const action = app.running ? client.appStop(projectId) : client.appStart(projectId).then(() => {});
-                  void action
-                    .then(() => client.appStatus(projectId))
-                    .then(setApp)
-                    .catch((e) => setAppError(e instanceof Error ? e.message : String(e)));
-                }}
-                className="rounded border border-hairline px-2 py-1 text-xs"
-              >
-                {app.running ? "Stop" : "Launch"}
-              </button>
-            </div>
-            {!app.running && app.requires && (
-              <div className="mt-1" data-testid="app-requires">
-                <p className="text-xs text-ink-muted">the environment must provide:</p>
-                <ul className="ml-4 list-disc text-xs text-ink-secondary">
-                  {app.requires.split(";").map((r) => r.trim()).filter(Boolean).map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {app.exit_error && (
-              <div className="mt-1">
-                <p className="text-xs text-critical" data-testid="app-exit-error">exited: {app.exit_error}</p>
-                {app.log_tail && (
-                  <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-muted">{app.log_tail}</pre>
-                )}
-              </div>
-            )}
-            {appError && <p className="mt-1 text-xs text-critical" data-testid="app-error">{appError}</p>}
-          </div>
-        )}
-        </section>
-      )}
+
 
       {quiet && (
         <section className="mt-4" data-testid="now-quiet">

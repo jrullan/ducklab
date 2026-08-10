@@ -6,6 +6,7 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import { interruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
+import { AppControl } from "../components/AppControl";
 import { Now } from "../views/Now";
 import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
@@ -348,10 +349,12 @@ export function App() {
             ⚙
           </a>
         </nav>
+        <span className="ml-auto" />
+        {client && projectId && <AppControl client={client} projectId={projectId} />}
         {projects.length > 0 && (
           <select
             data-testid="project-select"
-            className="ml-auto bg-page text-ink border border-hairline rounded px-2 py-1 text-sm"
+            className="bg-page text-ink border border-hairline rounded px-2 py-1 text-sm"
             value={projectId}
             onChange={(e) => {
               setProjectId(e.target.value);
