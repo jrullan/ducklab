@@ -15,6 +15,7 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
+import { GuidePanel } from "../components/GuidePanel";
 import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
@@ -150,6 +151,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   return (
     <div className="mx-auto max-w-3xl p-4" data-testid="now-view">
+      {/* The lifecycle steps the inbox never surfaces — which document comes
+          next, that bugs want triage — for the user who does not know the
+          cycle yet. Paused runs and the next task are NOT repeated here:
+          those are the cards and launcher below. */}
+      <GuidePanel client={client} projectId={projectId} />
       {waiting.length > 0 && (
         <section data-testid="now-waiting">
           <h2 className="text-sm text-ink-muted">waiting for you</h2>
