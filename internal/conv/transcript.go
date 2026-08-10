@@ -117,7 +117,9 @@ func RenderCandidates(cands []Candidate) string {
 		if strings.TrimSpace(c.GateLog) != "" {
 			fmt.Fprintf(&b, "```\n%s\n```\n\n", strings.TrimSpace(c.GateLog))
 		}
-		fmt.Fprintf(&b, "```diff\n%s\n```\n\n", strings.TrimSpace(c.Diff))
+		// Compacted like the reviewer's diff: a judge comparing candidates
+		// drowns just as fast in a generated file's churn.
+		fmt.Fprintf(&b, "```diff\n%s\n```\n\n", strings.TrimSpace(CompactDiff(c.Diff)))
 	}
 	return b.String()
 }

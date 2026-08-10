@@ -341,14 +341,17 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 				"it with tools.\n")
 		}
 		// The reviewer gets the diff and the conversation with the author's
-		// own turns removed (I7).
+		// own turns removed (I7). Compacted per file: a tracked build
+		// artifact once rode this prompt at 644KB and the reviewer re-read
+		// it on all 22 calls of its loop — 4.7M tokens for one minified
+		// bundle (T-067).
 		if params.Diff != nil {
 			diff, err := params.Diff()
 			if err != nil {
 				return "", fmt.Errorf("diff for reviewer: %w", err)
 			}
 			b.WriteString("\n\n## The change under review\n\n```diff\n")
-			b.WriteString(strings.TrimSpace(diff))
+			b.WriteString(strings.TrimSpace(conv.CompactDiff(diff)))
 			b.WriteString("\n```\n")
 		}
 		if rendered := tr.Render(turn.Anonymize, turn.OmitRole); rendered != "" {

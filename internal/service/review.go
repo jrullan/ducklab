@@ -12,6 +12,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/review"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -219,7 +220,8 @@ func reviewPrompt(taskID, diff string) string {
 	fmt.Fprintf(&b, "## Review %s\n\n", taskID)
 	b.WriteString("This change has already been accepted and committed. Read it and report what you find.\n\n")
 	b.WriteString("## The diff\n\n```diff\n")
-	b.WriteString(strings.TrimRight(diff, "\n"))
+	// Compacted per file, like every diff a prompt carries (T-067).
+	b.WriteString(strings.TrimRight(conv.CompactDiff(diff), "\n"))
 	b.WriteString("\n```\n")
 	return b.String()
 }

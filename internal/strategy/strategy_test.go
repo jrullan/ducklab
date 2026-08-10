@@ -295,3 +295,33 @@ func TestAnUnknownArtifactModeFallsBackToCouncil(t *testing.T) {
 		t.Errorf("got %q, want the default", got.Name)
 	}
 }
+
+// T-067: frontend/dist's minified bundle rode the reviewer's prompt at 644KB
+// and was re-sent on all 22 calls of its loop — 4.7M of the run's 6M tokens
+// were one generated file. The prompt assembler, not the diff producer, is
+// where the bound belongs: the record and the diff tab still carry the full
+// change.
+func TestTheReviewerPromptBoundsAGiantFileDiff(t *testing.T) {
+	bundle := "diff --git a/dist/app.min.js b/dist/app.min.js\n+++ b/dist/app.min.js\n" +
+		strings.Repeat("+"+strings.Repeat("z", 200)+"\n", 500)
+	source := "diff --git a/src/units.js b/src/units.js\n+++ b/src/units.js\n+export const KG_PER_LB = 0.4536;\n"
+
+	params := &ExecuteParams{
+		Prompt: "## Your task\n\nT-067",
+		Diff:   func() (string, error) { return source + bundle, nil },
+	}
+	turn := &Turn{Role: config.RoleReviewer}
+	prompt, err := buildPrompt(turn, params, &conv.Transcript{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "KG_PER_LB") {
+		t.Error("the real change fell out of the reviewer's prompt")
+	}
+	if strings.Contains(prompt, strings.Repeat("z", 200)) {
+		t.Error("the generated file still rides the reviewer's prompt whole")
+	}
+	if !strings.Contains(prompt, "dist/app.min.js") {
+		t.Error("the omitted file is not named")
+	}
+}
