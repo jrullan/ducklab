@@ -25,13 +25,21 @@ import (
 // the live stream and the transcript for free, and the run view is the
 // conversation panel.
 //
-// The consultant reads and advises; it changes nothing. Its toolbelt has no
-// write, and its closing duty is to suggest actions from the person's own
-// menu — reopen the bug, file a new one, relaunch the task with a note —
-// which the person executes with the buttons that already exist (I2).
+// The consultant reads and advises; it does not touch the tree. Its closing
+// duty is to suggest actions from the person's own menu — reopen the bug,
+// file a new one, relaunch the task with a note — which the person executes
+// with the buttons that already exist (I2).
+//
+// One exception, and only on the person's explicit word: bug_file. A
+// consultant that had verified every page and written the complete report
+// ended with "file a new bug with the title above" — and the person carried
+// two thousand characters to the form by hand. The instruction in the chat
+// IS the click (I2 holds); the persona forbids filing uninvited, and a bug
+// is loop data — additive, closable — not a tree mutation.
 
-// chatToolbelt is read-only investigation: code, history, records.
-const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,artifact_read"
+// chatToolbelt is read-only investigation — code, history, records — plus
+// bug_file, the one loop-side act a conversation can conclude in.
+const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read"
 
 // ChatRequest starts a conversation about a subject.
 type ChatStartRequest struct {

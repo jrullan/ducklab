@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jrullan/ducklab/internal/tools"
 )
 
 // A chat is a run: the person picks a duckling, asks about a subject, the
@@ -119,5 +121,40 @@ func TestEndingAChatIsNotAnAbort(t *testing.T) {
 	// Ended is ended.
 	if _, err := s.ChatEnd(context.Background(), run.ID); err == nil {
 		t.Error("ended a chat twice")
+	}
+}
+
+// Every tool the chat belt names must resolve in the registry. bug_read was
+// named here since the chat existed — and never implemented, so the loop
+// silently dropped it: the prompt promised a tool the model could not call.
+// A named tool that does not resolve is a lie told to a prompt.
+func TestEveryChatToolExists(t *testing.T) {
+	r := tools.NewRegistry()
+	for _, name := range strings.Split(chatToolbelt, ",") {
+		if _, err := r.Get(strings.TrimSpace(name)); err != nil {
+			t.Errorf("chat belt names %q: %v", name, err)
+		}
+	}
+}
+
+// The consultant may file a bug — the one loop-side act a conversation can
+// conclude in — and still must not touch the tree.
+func TestTheChatBeltFilesBugsButNeverWrites(t *testing.T) {
+	belt := strings.Split(chatToolbelt, ",")
+	has := func(name string) bool {
+		for _, b := range belt {
+			if strings.TrimSpace(b) == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("bug_file") {
+		t.Error("the chat belt lost bug_file")
+	}
+	for _, forbidden := range []string{"fs_write", "fs_patch", "fs_delete", "shell", "skill_run", "verify_run"} {
+		if has(forbidden) {
+			t.Errorf("the chat belt carries %s; a consultant must not touch the tree", forbidden)
+		}
 	}
 }

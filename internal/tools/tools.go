@@ -162,6 +162,11 @@ func (r *Registry) registerBuiltins() {
 	r.Register(&GitStatus{})
 	r.Register(&GitDiff{})
 	r.Register(&GitLog{})
+	// The bug board. bug_read serves any belt that names it (the triager's
+	// ceiling always did); bug_file is granted only by an explicit belt —
+	// the chat's — and sits in no role's ceiling on purpose.
+	r.Register(&BugRead{})
+	r.Register(&BugFile{})
 }
 
 // Register registers a tool.
