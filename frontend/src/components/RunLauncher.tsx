@@ -8,7 +8,7 @@ import { fixedSeats, seatLabel } from "../lib/seats";
 export type ModeEstimates = Record<string, { usd: number; runs: number }>;
 
 /** What a launch asks for. Anything unset falls back to the engine's defaults. */
-export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number };
+export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string };
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
@@ -157,6 +157,11 @@ export function RunLauncher({
   onDucklingsChange?: (ids: string[]) => void;
 }) {
   const [mode, setMode] = useState(initialMode);
+  // The run-specific instruction — the consultant's "relaunch with a note"
+  // had the channel (RunRequest.note) and no general doorway. Collapsed
+  // until wanted: most launches carry nothing extra.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
   const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
   const [maxTokens, setMaxTokens] = useState("");
   const [extraSeats, setExtraSeats] = useState(0);
@@ -214,10 +219,29 @@ export function RunLauncher({
           onChange={(e) => setMaxTokens(e.target.value)}
           className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
         />
+        {noteOpen ? (
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="a note for this run — what only you know now"
+            data-testid="run-note"
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+        ) : (
+          <button
+            type="button"
+            data-testid="run-note-toggle"
+            onClick={() => setNoteOpen(true)}
+            className="text-xs text-ink-muted underline"
+          >
+            add a note
+          </button>
+        )}
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined })
+            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined })
           }
           disabled={busy}
           data-testid="run-start"
