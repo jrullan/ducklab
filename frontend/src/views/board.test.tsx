@@ -490,19 +490,20 @@ describe("Board — an accepted task", () => {
     return screen.findByTestId("task-runner");
   };
 
-  it("offers Review, and not the build apparatus", async () => {
+  it("offers Review first, and no test-first", async () => {
     await open("accepted");
     expect(screen.getByTestId("review-start")).toBeTruthy();
-    for (const id of ["run-start", "run-mode", "run-seat-0", "test-first-start"]) {
-      expect(screen.queryByTestId(id)).toBeNull();
-    }
+    expect(screen.queryByTestId("test-first-start")).toBeNull();
   });
 
-  // Still possible — a result can be regretted — but it says what it is rather
-  // than sitting there as the obvious next step.
-  it("keeps building available, and says what it means", async () => {
+  // Rebuilding an accepted task is exactly when the person has something to
+  // SAY — "the fix leaked, close every connection" — so the full launcher
+  // stands here too: seats, tokens, calls/reply, and the note.
+  it("keeps the full build apparatus available, note included", async () => {
     await open("accepted");
     expect(screen.getByTestId("run-again")).toBeTruthy();
+    expect(screen.getByTestId("run-start").textContent).toContain("Build again");
+    expect(screen.getByTestId("run-note-toggle")).toBeTruthy();
     expect(screen.getByTestId("accepted-note").textContent).toContain("already done");
   });
 

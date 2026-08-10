@@ -226,7 +226,7 @@ export function Board({
   const empty = !loading && !failure && tasks.length === 0 && bugs.length === 0;
 
   return (
-    <div data-testid="board-view" className="flex gap-4">
+    <div data-testid="board-view" className="flex items-start gap-4">
       <div className="min-w-0 flex-1">
         {failure && (
           <div data-testid="board-error" className="mb-3 text-sm text-critical">
@@ -529,7 +529,11 @@ export function Board({
         )}
       </div>
 
-      <aside data-testid="board-rail" className="w-72 shrink-0">
+      {/* Sticky, scrolling on its own: clicking a task at the bottom of a
+          long column used to mean scrolling back to the top to find the rail
+          that describes it. The kanban and the rail are different documents;
+          they scroll like it. */}
+      <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto">
         {current === null ? (
           <p className="text-sm text-ink-muted">
             Select {isBugs ? "a bug" : "a task"} to see its record.
@@ -758,18 +762,24 @@ function TaskRunner({
           return null;
         }
         if (accepted) {
+          // The full launcher, not a bare link: rebuilding an accepted task
+          // is exactly when the person has something to SAY — "the fix
+          // leaked, close every connection" — and the bare button offered no
+          // note, no tokens, no seats.
           return (
-            <button
-              key={action}
-              type="button"
-              onClick={() => void go("run")}
-              disabled={busy}
-              data-testid="run-again"
-              title="Starts another run against a task that is already done"
-              className="text-xs text-ink-muted underline"
-            >
-              build again
-            </button>
+            <div key={action} data-testid="run-again">
+              <RunLauncher
+                key={phaseDefaults.build}
+                ducklings={ducklings}
+                initialMode={phaseDefaults.build}
+                initialDucklings={preferred[phaseDefaults.build] ?? []}
+                preferred={preferred}
+                estimates={estimates}
+                label="Build again"
+                busy={busy}
+                onLaunch={(opts) => void go("run", opts)}
+              />
+            </div>
           );
         }
         return (
