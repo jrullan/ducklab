@@ -303,68 +303,74 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           caller passed zero. */}
       <NowFooter runs={list} />
 
+      {app?.configured && (
+        <section className="mt-4" data-testid="now-app">
+          {app?.configured && (
+          <div className="mt-2 rounded-card border border-hairline p-3" data-testid="app-card">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-ink-muted">app</span>
+              {app.running ? (
+                <StatusChip
+                  role={app.health === "unhealthy" ? "warning" : "good"}
+                  label={app.health ? `running · ${app.health}` : "running"}
+                />
+              ) : app.exit_error ? (
+                <StatusChip role="critical" label="crashed" />
+              ) : (
+                <StatusChip role="muted" label="stopped" />
+              )}
+              {app.running && app.url && (
+                <a href={app.url} target="_blank" rel="noreferrer" data-testid="app-open" className="text-ink underline">
+                  open {app.url}
+                </a>
+              )}
+              <button
+                type="button"
+                data-testid={app.running ? "app-stop" : "app-launch"}
+                onClick={() => {
+                  setAppError(null);
+                  const action = app.running ? client.appStop(projectId) : client.appStart(projectId).then(() => {});
+                  void action
+                    .then(() => client.appStatus(projectId))
+                    .then(setApp)
+                    .catch((e) => setAppError(e instanceof Error ? e.message : String(e)));
+                }}
+                className="rounded border border-hairline px-2 py-1 text-xs"
+              >
+                {app.running ? "Stop" : "Launch"}
+              </button>
+            </div>
+            {!app.running && app.requires && (
+              <div className="mt-1" data-testid="app-requires">
+                <p className="text-xs text-ink-muted">the environment must provide:</p>
+                <ul className="ml-4 list-disc text-xs text-ink-secondary">
+                  {app.requires.split(";").map((r) => r.trim()).filter(Boolean).map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {app.exit_error && (
+              <div className="mt-1">
+                <p className="text-xs text-critical" data-testid="app-exit-error">exited: {app.exit_error}</p>
+                {app.log_tail && (
+                  <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-muted">{app.log_tail}</pre>
+                )}
+              </div>
+            )}
+            {appError && <p className="mt-1 text-xs text-critical" data-testid="app-error">{appError}</p>}
+          </div>
+        )}
+        </section>
+      )}
+
       {quiet && (
         <section className="mt-4" data-testid="now-quiet">
           {active.length === 0 && list.length === 0 && (
             <EmptyState message="No runs yet. Start below, or plan the work from Cycle." />
           )}
           <p className="text-sm text-ink-secondary">Nothing needs you.</p>
-          {app?.configured && (
-            <div className="mt-2 rounded-card border border-hairline p-3" data-testid="app-card">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-ink-muted">app</span>
-                {app.running ? (
-                  <StatusChip
-                    role={app.health === "unhealthy" ? "warning" : "good"}
-                    label={app.health ? `running · ${app.health}` : "running"}
-                  />
-                ) : app.exit_error ? (
-                  <StatusChip role="critical" label="crashed" />
-                ) : (
-                  <StatusChip role="muted" label="stopped" />
-                )}
-                {app.running && app.url && (
-                  <a href={app.url} target="_blank" rel="noreferrer" data-testid="app-open" className="text-ink underline">
-                    open {app.url}
-                  </a>
-                )}
-                <button
-                  type="button"
-                  data-testid={app.running ? "app-stop" : "app-launch"}
-                  onClick={() => {
-                    setAppError(null);
-                    const action = app.running ? client.appStop(projectId) : client.appStart(projectId).then(() => {});
-                    void action
-                      .then(() => client.appStatus(projectId))
-                      .then(setApp)
-                      .catch((e) => setAppError(e instanceof Error ? e.message : String(e)));
-                  }}
-                  className="rounded border border-hairline px-2 py-1 text-xs"
-                >
-                  {app.running ? "Stop" : "Launch"}
-                </button>
-              </div>
-              {!app.running && app.requires && (
-                <div className="mt-1" data-testid="app-requires">
-                  <p className="text-xs text-ink-muted">the environment must provide:</p>
-                  <ul className="ml-4 list-disc text-xs text-ink-secondary">
-                    {app.requires.split(";").map((r) => r.trim()).filter(Boolean).map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {app.exit_error && (
-                <div className="mt-1">
-                  <p className="text-xs text-critical" data-testid="app-exit-error">exited: {app.exit_error}</p>
-                  {app.log_tail && (
-                    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-muted">{app.log_tail}</pre>
-                  )}
-                </div>
-              )}
-              {appError && <p className="mt-1 text-xs text-critical" data-testid="app-error">{appError}</p>}
-            </div>
-          )}
+
           {next ? (
             <div className="mt-2 rounded-card border border-hairline p-3" data-testid="now-next">
               <p className="text-sm text-ink">
