@@ -249,7 +249,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             : run.pending_kind === "error"
               ? "The run stopped on an error — see why above. Its work is intact: resume to continue over it, or abort to discard it."
               : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
-        : "commits the diff to the project";
+        : !next.includes("accept")
+          ? "nothing passed, so there is nothing to accept — reject discards this run's diff and frees the task to retry"
+          : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";
     if (run.accepted) {
