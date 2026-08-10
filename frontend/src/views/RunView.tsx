@@ -335,7 +335,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             same fallback the runs list uses — task, else stage, else id. */}
         <span className="text-md">{runLabel(run)}</span>
         <span className="text-ink-secondary">{run.mode}</span>
-        <StatusChip role={verdictStatus(run.verdict as Verdict)} label={verdictLabel(run.verdict as Verdict)} />
+        {run.no_changes ? (
+          <StatusChip role="muted" label="no changes — already in the tree" />
+        ) : (
+          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={verdictLabel(run.verdict as Verdict)} />
+        )}
         <div className="ml-auto flex items-center gap-2">
           {/* A decision that has been made is not still open. These used to be
               shown on every run whatever its state, so an accepted run went on

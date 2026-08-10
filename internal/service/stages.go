@@ -599,6 +599,14 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		}
 	}
 
+	// Acceptance is a fact with a commit behind it: once a build was accepted,
+	// later failed experiments do not un-deliver the task.
+	for _, r := range runs {
+		if r.TaskID != "" && r.Accepted && r.Stage == "build" {
+			status[r.TaskID] = "accepted"
+		}
+	}
+
 	var out []TaskView
 	for _, m := range plan.Sections {
 		for _, t := range m.Children {

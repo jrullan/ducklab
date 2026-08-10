@@ -330,3 +330,39 @@ func TestAnAnsweredTestRunResumesItsOwnStrategy(t *testing.T) {
 		t.Errorf("stage = %q — the resume changed what kind of run this is", rs.run.Stage)
 	}
 }
+
+// Acceptance is a fact with a commit behind it. Two later retries that found
+// the work already in the tree — no_changes, worn as FAILED for honest
+// pass-rates — pushed a DELIVERED task into Blocked, and the person hunted a
+// bug that lived elsewhere while the board said their task needed retrying.
+func TestNoChangeRetriesDoNotUndeliverAnAcceptedTask(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, r := range []*runlog.Run{
+		{ID: "r-acc", ProjectID: id, TaskID: "T-001", Stage: "build",
+			Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: "abc",
+			StartedAt: "2026-08-10T01:37:00Z"},
+		{ID: "r-nc1", ProjectID: id, TaskID: "T-001", Stage: "build",
+			Status: "done", Verdict: "FAILED", NoChanges: true,
+			StartedAt: "2026-08-10T11:18:00Z"},
+		{ID: "r-nc2", ProjectID: id, TaskID: "T-001", Stage: "build",
+			Status: "done", Verdict: "FAILED", NoChanges: true,
+			StartedAt: "2026-08-10T11:40:00Z"},
+	} {
+		w, err := runlog.NewWriter(dir, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+	s.RecoverRuns(context.Background())
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tv := range tasks {
+		if tv.ID == "T-001" && tv.Status != "accepted" {
+			t.Errorf("status = %q, want accepted — delivery is a fact", tv.Status)
+		}
+	}
+}

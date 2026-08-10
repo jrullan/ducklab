@@ -72,6 +72,9 @@ export interface Run {
   commit_sha?: string;
   /** Set when an accepted test-first's commit was later retired (reverted). */
   revert_sha?: string;
+  /** The run finished without touching a file: the work was already in the
+   * tree. Wears FAILED in the metrics on purpose; the UI says this instead. */
+  no_changes?: boolean;
   started_at: string;
   ended_at?: string;
   roster?: Record<string, string>;
