@@ -20,6 +20,8 @@ const SRC = path.resolve(__dirname, "..");
 const knownUnwired: Record<string, string> = {
   ducklingProbe:
     "capability probing is engine-initiated today; the card shows declared caps and re-probing has no surface yet",
+  projectNext:
+    "the guide's engine half landed first; the Next-step panel that renders it is the next slice",
   projectStatus:
     "per-stage progress and task counts — the natural feed for a richer Work header, unbuilt",
   traceShow:

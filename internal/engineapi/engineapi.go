@@ -1400,6 +1400,15 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": tasks, "total": len(tasks)})
 }
 
+func (s *Server) handleProjectNext(w http.ResponseWriter, r *http.Request) {
+	steps, err := s.svc.ProjectNext(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": steps, "total": len(steps)})
+}
+
 func (s *Server) handleTaskNext(w http.ResponseWriter, r *http.Request) {
 	task, err := s.svc.TaskNext(r.Context(), r.PathValue("id"))
 	if err != nil {

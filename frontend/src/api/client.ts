@@ -225,6 +225,17 @@ export interface TraceError {
 /** Mirrors service.TaskView. Status is derived from run records, never stored
  * on the task — a model rewriting the plan must not be able to mark its own
  * work accepted. That is why the board has no drag-to-move. */
+/** One step of the project guide: what to do, why it is next, where to act.
+ * The action names the outcome first and the harness term second — new users
+ * do not share the vocabulary yet. */
+export interface NextStep {
+  id: string;
+  action: string;
+  reason: string;
+  kind: "run" | "task" | "bug" | "stage" | "project";
+  ref?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -994,6 +1005,18 @@ export class EngineClient {
     return this.request<{ items: Task[] | null; total: number }>(
       "GET",
       `/v1/projects/${projectId}/tasks`,
+    ).then((r) => r.items ?? []);
+  }
+
+  /** The project's suggested next steps — the guide. Computed by the engine
+   * from the real state (documents, tasks, bugs, paused runs), in the order
+   * the loop itself would take them, each pointing at an action that already
+   * exists. Deterministic: guidance that reads the state cannot go stale the
+   * way a tutorial does. */
+  projectNext(projectId: string) {
+    return this.request<{ items: NextStep[] | null; total: number }>(
+      "GET",
+      `/v1/projects/${projectId}/next`,
     ).then((r) => r.items ?? []);
   }
 }

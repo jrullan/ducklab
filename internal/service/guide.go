@@ -1,0 +1,271 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/bug"
+	"github.com/jrullan/ducklab/internal/runlog"
+)
+
+// The project-level "what now?".
+//
+// Ducklab's cycle is a state machine with human gates, which means the
+// question every new user asks — what do I do next? — always has a
+// computable answer. Runs and bugs already speak their own Next (the loop's
+// rules live in the engine, 5.4); this is the same principle one level up.
+// It is guidance, not inventory: a handful of steps in the order the loop
+// itself would take them, each pointing at an action that already exists.
+//
+// Deterministic on purpose. A guide computed from the real state cannot
+// drift out of date the way a tutorial does, costs no tokens, and is the
+// same introspection an autopilot will one day drive (docs/autopilot-plan.md
+// — the novice's guide and the autopilot share this engine; one has a human
+// at the gate).
+
+// NextStep is one suggested action.
+type NextStep struct {
+	// ID is a stable slug for the KIND of step ("intake", "answer-run"…),
+	// for clients that want icons or filtering. Not unique within a list.
+	ID string `json:"id"`
+	// Action says WHAT to do, in outcome language first — new users do not
+	// share the harness's vocabulary yet, so "describe what you want to
+	// build" leads and "intake" follows in parentheses.
+	Action string `json:"action"`
+	// Reason says WHY this is next, computed from the state that made it so.
+	Reason string `json:"reason"`
+	// Kind and Ref say WHERE: the object to act on ("run", "task", "bug",
+	// "stage", "project") and its id, so a client can link the real button.
+	Kind string `json:"kind"`
+	Ref  string `json:"ref,omitempty"`
+}
+
+// projectSnapshot is everything nextSteps reads. Gathered from disk by
+// ProjectNext, synthetic in tests — the guidance rules are pinned without a
+// filesystem.
+type projectSnapshot struct {
+	HasRequirements  bool
+	HasSpec          bool
+	OpenSpecSections int
+	HasPlan          bool
+	Tasks            []TaskView
+	Bugs             []bug.Bug
+	// Paused runs, newest first.
+	Paused []*runlog.Run
+}
+
+// nextSteps is the guide's whole brain: the loop's own order, stated.
+func nextSteps(st projectSnapshot) []NextStep {
+	var out []NextStep
+
+	// 1. Work already paid for waits on one click. Nothing outranks it.
+	for _, r := range st.Paused {
+		out = append(out, pausedStep(r))
+	}
+
+	// 2. The document pipeline, until the project has a plan to build from.
+	switch {
+	case !st.HasRequirements:
+		out = append(out, NextStep{
+			ID:     "intake",
+			Action: "Describe what you want to build (intake) — or adopt the existing code",
+			Reason: "this project has no requirements yet; everything downstream grows from them",
+			Kind:   "stage", Ref: "intake",
+		})
+		return out // nothing below is actionable without requirements
+	case !st.HasSpec:
+		out = append(out, NextStep{
+			ID:     "spec",
+			Action: "Turn the requirements into a spec",
+			Reason: "requirements are approved but no spec exists to pin the contracts",
+			Kind:   "stage", Ref: "spec",
+		})
+		return out
+	case !st.HasPlan && st.OpenSpecSections > 0:
+		out = append(out, NextStep{
+			ID:     "plan",
+			Action: "Plan the work — break the spec into tasks",
+			Reason: fmt.Sprintf("%d spec section(s) are not yet built and no plan exists", st.OpenSpecSections),
+			Kind:   "stage", Ref: "plan",
+		})
+		return out
+	}
+
+	// 3. The bug inbox: classify before starting new work.
+	if n := countBugs(st.Bugs, bug.Open); n > 0 {
+		out = append(out, NextStep{
+			ID:     "triage",
+			Action: "Triage the open bugs",
+			Reason: fmt.Sprintf("%d bug(s) are open and unclassified", n),
+			Kind:   "bug",
+		})
+	}
+	if b := firstBug(st.Bugs, bug.Triaged); b != nil {
+		out = append(out, NextStep{
+			ID:     "promote",
+			Action: fmt.Sprintf("Promote %s to a task, or park it", b.ID),
+			Reason: "it is triaged and waiting for a decision",
+			Kind:   "bug", Ref: b.ID,
+		})
+	}
+
+	// 4. The next buildable task — ONE, not the backlog: a guide that lists
+	// everything startable is a board, and the board already exists.
+	if t := nextBuildable(st.Tasks); t != nil {
+		if t.TestReady {
+			out = append(out, NextStep{
+				ID:     "build",
+				Action: fmt.Sprintf("Build %s — its failing test already defines done", t.ID),
+				Reason: "a committed test is waiting for the code that makes it pass",
+				Kind:   "task", Ref: t.ID,
+			})
+		} else {
+			out = append(out, NextStep{
+				ID:     "test-first",
+				Action: fmt.Sprintf("Start %s (test first, then build)", t.ID),
+				Reason: "it is the next task whose dependencies are all accepted",
+				Kind:   "task", Ref: t.ID,
+			})
+		}
+	}
+
+	// 5. Quiet project: everything accepted, inbox empty.
+	if len(out) == 0 {
+		out = append(out, NextStep{
+			ID:     "brief",
+			Action: "Extend the spec with a feature brief — or cut a release",
+			Reason: "every task is done and the bug inbox is empty",
+			Kind:   "project",
+		})
+	}
+	return out
+}
+
+func pausedStep(r *runlog.Run) NextStep {
+	subject := strings.TrimSpace(r.Stage + " " + r.TaskID)
+	switch r.PendingKind {
+	case "question":
+		return NextStep{
+			ID:     "answer-run",
+			Action: fmt.Sprintf("Answer the question the %s run asked", subject),
+			Reason: "a model is paused waiting for your decision; the advisor has drafted an answer",
+			Kind:   "run", Ref: r.ID,
+		}
+	case "chat":
+		return NextStep{
+			ID:     "chat",
+			Action: "Reply to the consultant, or end the chat",
+			Reason: "a conversation is waiting on you",
+			Kind:   "run", Ref: r.ID,
+		}
+	case "gate":
+		return NextStep{
+			ID:     "decide-run",
+			Action: fmt.Sprintf("Decide the %s run — accept or reject its result", subject),
+			Reason: "the work is done and waiting at its gate",
+			Kind:   "run", Ref: r.ID,
+		}
+	default: // budget, provider, error
+		return NextStep{
+			ID:     "resume-run",
+			Action: fmt.Sprintf("Resume or abort the paused %s run", subject),
+			Reason: fmt.Sprintf("it stopped on %s with its work preserved", orDefault(r.PendingKind, "an interruption")),
+			Kind:   "run", Ref: r.ID,
+		}
+	}
+}
+
+// nextBuildable picks the one task to suggest: test-ready first (its
+// definition of done already exists), then the first todo whose dependencies
+// are all accepted.
+func nextBuildable(tasks []TaskView) *TaskView {
+	accepted := map[string]bool{}
+	for _, t := range tasks {
+		if t.Status == "accepted" {
+			accepted[t.ID] = true
+		}
+	}
+	startable := func(t TaskView) bool {
+		for _, dep := range t.DependsOn {
+			if !accepted[dep] {
+				return false
+			}
+		}
+		return true
+	}
+	for i := range tasks {
+		if tasks[i].TestReady && tasks[i].Status != "accepted" && startable(tasks[i]) {
+			return &tasks[i]
+		}
+	}
+	for i := range tasks {
+		if tasks[i].Status == "todo" && startable(tasks[i]) {
+			return &tasks[i]
+		}
+	}
+	return nil
+}
+
+func countBugs(bugs []bug.Bug, status bug.Status) int {
+	n := 0
+	for _, b := range bugs {
+		if b.Status == status {
+			n++
+		}
+	}
+	return n
+}
+
+func firstBug(bugs []bug.Bug, status bug.Status) *bug.Bug {
+	for i := range bugs {
+		if bugs[i].Status == status {
+			return &bugs[i]
+		}
+	}
+	return nil
+}
+
+// ProjectNext gathers the project's real state and asks nextSteps.
+func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	st := projectSnapshot{}
+
+	if doc, lerr := artifact.Load(entry.Path, artifact.KindRequirements); lerr == nil && doc != nil && len(doc.Sections) > 0 {
+		st.HasRequirements = true
+	}
+	if doc, lerr := artifact.Load(entry.Path, artifact.KindSpec); lerr == nil && doc != nil && len(doc.Sections) > 0 {
+		st.HasSpec = true
+		// Open = not excluded and not already as-built, the same reading
+		// StageStart uses to refuse an empty plan.
+		for _, sp := range doc.Sections {
+			if strings.EqualFold(sp.Field("priority"), "wont") {
+				continue
+			}
+			if v := strings.ToLower(strings.TrimSpace(sp.Field("as-built"))); v == "yes" || v == "true" {
+				continue
+			}
+			st.OpenSpecSections++
+		}
+	}
+	if doc, lerr := artifact.Load(entry.Path, artifact.KindPlan); lerr == nil && doc != nil && len(doc.Sections) > 0 {
+		st.HasPlan = true
+	}
+
+	// Tolerant gathers: a missing plan makes TaskList error, and a project
+	// with no tasks yet still deserves guidance about everything else.
+	st.Tasks, _ = s.TaskList(ctx, projectID)
+	st.Bugs, _ = s.BugList(ctx, projectID, false)
+	if runs, rerr := s.RunList(ctx, RunFilter{ProjectID: projectID}); rerr == nil {
+		for _, r := range runs {
+			if r.Status == "paused" {
+				st.Paused = append(st.Paused, r)
+			}
+		}
+	}
+	return nextSteps(st), nil
+}
