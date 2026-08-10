@@ -722,6 +722,11 @@ type RunRequest struct {
 	DryRun       bool `json:"dry_run"`
 	Parallel     bool `json:"parallel"`
 	UnsafeWrites bool `json:"unsafe_writes"`
+	// AgentTurns overrides how many model calls ONE reply may chain, for
+	// every role in this run. The budget's turn cap bounds the CONVERSATION;
+	// this bounds the loop inside one turn — and a hard task can need more
+	// looking than the default allows. Zero keeps the configured caps.
+	AgentTurns int `json:"agent_turns,omitempty"`
 	// Note rides the prompt as a section from the human — the channel for
 	// "address the reviewer's findings" and every other instruction a task
 	// body cannot carry because it was written before the history happened.

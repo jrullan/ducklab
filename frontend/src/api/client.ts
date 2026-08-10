@@ -501,6 +501,10 @@ export class EngineClient {
       /** A run-specific instruction from the human, riding the prompt — the
        * channel for "address the previous reviewer's findings". */
       note?: string;
+      /** Override how many model calls one reply may chain, for every role in
+       * this run. The default cap exists to stop circling; a hard task can
+       * need more looking. */
+      agentTurns?: number;
     } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
@@ -509,6 +513,7 @@ export class EngineClient {
       ducklings: opts.ducklings ?? [],
       rounds: opts.rounds ?? 0,
       note: opts.note || undefined,
+      agent_turns: opts.agentTurns || undefined,
       autonomy: opts.yes ? "yolo" : "",
       // Omitted rather than zeroed: the engine fills every unset limit from the
       // defaults, and a zero would be a ceiling of zero.
@@ -535,6 +540,7 @@ export class EngineClient {
       mode?: string;
       ducklings?: string[];
       maxTokens?: number;
+      agentTurns?: number;
     },
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/tests`, {
@@ -549,6 +555,7 @@ export class EngineClient {
             mode: chain.mode || "solo",
             ducklings: chain.ducklings ?? [],
             ...(chain.maxTokens ? { budget: { max_tokens: chain.maxTokens } } : {}),
+            ...(chain.agentTurns ? { agent_turns: chain.agentTurns } : {}),
           }
         : undefined,
     });

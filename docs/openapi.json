@@ -1680,6 +1680,9 @@
       },
       "ServiceRunRequest": {
         "properties": {
+          "agent_turns": {
+            "type": "integer"
+          },
           "autonomy": {
             "type": "string"
           },

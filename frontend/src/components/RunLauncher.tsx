@@ -8,12 +8,12 @@ import { fixedSeats, seatLabel } from "../lib/seats";
 export type ModeEstimates = Record<string, { usd: number; runs: number }>;
 
 /** What a launch asks for. Anything unset falls back to the engine's defaults. */
-export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string };
+export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string; agentTurns?: number };
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
-export type PhaseConfig = { mode: string; ducklings: string[]; maxTokens?: number };
+export type PhaseConfig = { mode: string; ducklings: string[]; maxTokens?: number; agentTurns?: number };
 
 /**
  * A controlled mode-and-seats configurator: one dropdown per seat, labelled
@@ -113,6 +113,19 @@ export function LaunchConfig({
           />
         </label>
       )}
+      {showTokens && (
+        <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+          calls / reply
+          <input
+            aria-label="agent turns"
+            data-testid="cfg-agent-turns"
+            placeholder="default"
+            value={value.agentTurns ? String(value.agentTurns) : ""}
+            onChange={(e) => onChange({ ...value, agentTurns: Number(e.target.value) || undefined })}
+            className="w-20 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+        </label>
+      )}
     </div>
   );
 }
@@ -164,6 +177,7 @@ export function RunLauncher({
   const [note, setNote] = useState("");
   const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
   const [maxTokens, setMaxTokens] = useState("");
+  const [agentTurns, setAgentTurns] = useState("");
   const [extraSeats, setExtraSeats] = useState(0);
   const seats = fixedSeats(mode);
   const cols = seats > 0 ? seats : Math.max(2, chosen.length, extraSeats);
@@ -219,6 +233,17 @@ export function RunLauncher({
           onChange={(e) => setMaxTokens(e.target.value)}
           className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
         />
+        {/* The loop cap inside one reply. It exists to stop circling models
+            (I3) — and a hard task can need more looking than the default
+            allows; the budget still bounds the spend either way. */}
+        <input
+          aria-label="agent turns"
+          data-testid="run-agent-turns"
+          placeholder="calls/reply (default)"
+          value={agentTurns}
+          onChange={(e) => setAgentTurns(e.target.value)}
+          className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+        />
         {noteOpen ? (
           <textarea
             value={note}
@@ -241,7 +266,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined })
+            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: Number(agentTurns) || undefined })
           }
           disabled={busy}
           data-testid="run-start"

@@ -126,6 +126,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         mode: build.mode,
         ducklings: build.ducklings.filter(Boolean),
         maxTokens: build.maxTokens,
+        agentTurns: build.agentTurns,
       });
       setStarted(run.id);
     } catch (e) {
@@ -324,7 +325,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
-                      void launch({ mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens })
+                      void launch({ mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
                     }
                   />
                 ) : (

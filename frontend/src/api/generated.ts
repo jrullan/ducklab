@@ -491,6 +491,7 @@ export interface ServiceRunDetail {
 }
 
 export interface ServiceRunRequest {
+  agent_turns?: number;
   autonomy?: string;
   budget?: BudgetBudget;
   dry_run?: boolean;

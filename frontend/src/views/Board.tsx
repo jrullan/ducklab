@@ -714,6 +714,7 @@ function TaskRunner({
                 mode: tdd!.build.mode,
                 ducklings: tdd!.build.ducklings.filter(Boolean),
                 maxTokens: tdd!.build.maxTokens,
+                agentTurns: tdd!.build.agentTurns,
               })
             : what === "test"
               // From the TDD block, the test phase's own config; from the
@@ -808,7 +809,7 @@ function TaskRunner({
               onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
               onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
               onBuildOnly={(b) =>
-                void go("run", { mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens })
+                void go("run", { mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
               }
             />
           );

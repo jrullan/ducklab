@@ -905,18 +905,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                     the meter the moment the lift lands. */}
                 <BudgetMeter
                   label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").catch(() => {}) } : undefined}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
                 <BudgetMeter
                   label="cost" used={budget.usd} limit={limit.usd} format={money}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "usd").catch(() => {}) } : undefined}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "usd").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
                 <BudgetMeter
                   label="turns"
                   used={budget.turns}
                   limit={limit.turns}
                   format={(n) => String(Math.round(n))}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").catch(() => {}) } : undefined}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
               </div>
               {/* One tracker serves every duckling and every turn, so the run's

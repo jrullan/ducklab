@@ -199,6 +199,22 @@ func humanNote(note string) string {
 	return "\n\n## Note from the human\n\n" + note + "\n"
 }
 
+// roleTurnCapsFor is the configured caps, unless the run asked for its own:
+// a per-run override applies to every role, because the person raising it is
+// unblocking THIS work, not retuning the fleet.
+func (s *Service) roleTurnCapsFor(override int) map[config.Role]int {
+	caps := s.roleTurnCaps()
+	if override <= 0 {
+		return caps
+	}
+	for _, role := range config.ValidRoles() {
+		if role != config.RoleHuman {
+			caps[role] = override
+		}
+	}
+	return caps
+}
+
 // modeContext carries everything a mode dispatch needs.
 type modeContext struct {
 	entry   *registry.ProjectEntry
@@ -230,7 +246,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		Roster: mc.roster,
 		// So tournament and split, which build their own turns, honour the same
 		// per-role caps as every other mode.
-		TurnCaps: s.roleTurnCaps(),
+		TurnCaps: s.roleTurnCapsFor(mc.req.AgentTurns),
 		Gate: func(ctx context.Context) (string, string, error) {
 			res, err := verify.Run(mc.entry.Path, mc.projCfg.Verify)
 			if err != nil {
