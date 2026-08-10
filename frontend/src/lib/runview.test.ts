@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTurns, anonymiseTurns, buildTimeline, toolFamily,
-  buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, findingsFiled, orderDiffFiles, touchesTests, isTestPath,
+  buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, findingsFiled, chainedBuildId, orderDiffFiles, touchesTests, isTestPath,
 } from "./runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -502,5 +502,19 @@ describe("advice on a pending question", () => {
     ])!;
     expect(p.questionId).toBe("q2");
     expect(p.advice).toBeUndefined();
+  });
+});
+
+// The chain's hand-off is on the record: the test run's log names the build
+// that took over, and the view follows it.
+describe("chainedBuildId", () => {
+  it("finds the build the chain started", () => {
+    expect(chainedBuildId([
+      ev("human", 1, { action: "accept" }),
+      ev("tdd_build_started", 2, { run: "r-build-9" }),
+    ])).toBe("r-build-9");
+  });
+  it("answers nothing when no chain fired", () => {
+    expect(chainedBuildId([ev("run_end", 1, {})])).toBe("");
   });
 });

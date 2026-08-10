@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
@@ -83,6 +83,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [answer, setAnswer] = useState("");
   const [chatMsg, setChatMsg] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  // Follow the chain: accepting a watched test starts its build, and the
+  // person watching should keep watching. Auto-navigate ONLY when the run
+  // was waiting under their eyes — a historical test opened later gets a
+  // link, never a hijack.
+  const wasWaitingHere = useRef(false);
+  const followedChain = useRef("");
   const [revisionRun, setRevisionRun] = useState<string | null>(null);
   // The fleet, for colours. A duckling's colour is a property of the duckling,
   // not of its position in this run's roster — otherwise the same model is blue
@@ -164,6 +170,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     client.runCandidates(runId).then(setCandidates).catch(() => setCandidates([]));
     client.runLLM(runId).then(setCalls).catch(() => setCalls([]));
   }, [runId, client, run?.status]);
+
+  const chainBuild = chainedBuildId(events);
+  useEffect(() => {
+    wasWaitingHere.current = false;
+    followedChain.current = "";
+  }, [runId]);
+  useEffect(() => {
+    if (run?.status === "paused") wasWaitingHere.current = true;
+  }, [run?.status]);
+  useEffect(() => {
+    if (chainBuild && wasWaitingHere.current && followedChain.current !== chainBuild) {
+      followedChain.current = chainBuild;
+      location.hash = `#/runs/${chainBuild}`;
+    }
+  }, [chainBuild]);
 
   if (!run) return <p className="p-4 text-ink-muted">Loading run…</p>;
 
@@ -498,6 +519,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+        </section>
+      )}
+      {run.stage === "test" && run.accepted && chainBuild && (
+        <section data-testid="chain-followed" className="m-2 rounded-card border border-good p-3">
+          <p className="text-sm text-ink">
+            The red test was committed and the chained build took over —{" "}
+            <a href={`#/runs/${chainBuild}`} className="text-good underline">watch {chainBuild}</a>
+          </p>
         </section>
       )}
       {run.stage === "plan" && run.accepted && (

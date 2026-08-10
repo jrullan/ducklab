@@ -406,6 +406,14 @@ export function findingsFiled(events: readonly DucklabEvent[]): string[] | null 
   return null;
 }
 
+/** The chained build this test run started, from the record. */
+export function chainedBuildId(events: readonly DucklabEvent[]): string {
+  for (const e of events) {
+    if (e.type === "tdd_build_started" && e.data?.run) return String(e.data.run);
+  }
+  return "";
+}
+
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;
