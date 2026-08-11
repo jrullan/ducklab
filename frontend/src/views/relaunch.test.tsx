@@ -213,3 +213,49 @@ describe("the task's description in the run view", () => {
     expect(screen.queryByTestId("run-task-card")).toBeNull();
   });
 });
+
+// T-076: a failed test+build relaunched with a different model came back as a
+// bare BUILD — the phase the person watched die was skipped, and the chain
+// they authorized vanished. A test relaunches as a test, chain included: the
+// launcher's picks drive the TEST phase, the promised build keeps its own
+// recorded settings.
+describe("relaunching a failed test-first", () => {
+  const failedTest: Run = {
+    id: "r-t", project_id: "p", stage: "test", mode: "solo", task_id: "T-076",
+    status: "failed", verdict: "FAILED", started_at: "2026-08-11T12:13:00Z",
+    roster: { implementer: "luna" },
+    chain_build: { mode: "pair", ducklings: ["glm52", "qwen38-max"], agent_turns: -1 },
+  };
+
+  beforeEach(() => {
+    useRuns.setState({ runs: { "r-t": failedTest }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+  });
+
+  it("relaunches the TEST with its chain, not a bare build", async () => {
+    const testStart = vi.fn(() => Promise.resolve({ id: "r-3" }));
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: failedTest, events: [] })),
+      testStart,
+      tasks: vi.fn(() =>
+        Promise.resolve([{ id: "T-076", title: "x", milestone: "M-08", status: "blocked" }]),
+      ),
+    } as unknown as Partial<EngineClient>);
+    render(<RunView runId="r-t" client={client} />);
+    await waitFor(() => screen.getByTestId("relaunch"));
+    // The panel says what it will actually do.
+    expect(screen.getByTestId("relaunch").textContent).toContain("Test T-076 again → then build");
+
+    // The changed model must be one the fleet actually offers.
+    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "dsv4flash" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+    await waitFor(() => expect(testStart).toHaveBeenCalled());
+    const [, taskId, , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];
+    expect(taskId).toBe("T-076");
+    expect(chain.thenBuild).toBe(true);
+    expect(chain.testDucklings).toContain("dsv4flash");
+    // The promised build keeps ITS recorded seats and settings.
+    expect(chain.mode).toBe("pair");
+    expect(chain.ducklings).toEqual(["glm52", "qwen38-max"]);
+    expect(chain.agentTurns).toBe(-1);
+  });
+});

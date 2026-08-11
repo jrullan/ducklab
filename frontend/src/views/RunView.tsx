@@ -374,7 +374,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     setRelaunchBusy(true);
     setRelaunchError(null);
     try {
-      const started = await client.runStart(run.project_id, run.task_id, opts);
+      // A failed TEST relaunches as a TEST, chain included. This called
+      // runStart unconditionally, so relaunching a failed test+build with a
+      // different model quietly launched a bare build: the phase the person
+      // watched die was skipped, and the chain they authorized vanished
+      // (T-076). The launcher's picks drive the test phase; the promised
+      // build keeps its own recorded settings.
+      const chain = run.chain_build;
+      const started =
+        run.stage === "test"
+          ? await client.testStart(run.project_id, run.task_id, "", {
+              thenBuild: !!chain,
+              testMode: opts.mode,
+              testDucklings: opts.ducklings,
+              mode: chain?.mode || "solo",
+              ducklings: chain?.ducklings ?? [],
+              maxTokens: chain?.budget?.max_tokens,
+              agentTurns: chain?.agent_turns,
+            })
+          : await client.runStart(run.project_id, run.task_id, opts);
       setRelaunched(started.id);
     } catch (e) {
       setRelaunchError(e instanceof Error ? e.message : String(e));
@@ -467,7 +485,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           data-testid="relaunch"
           className="m-2 rounded-card border border-hairline p-3"
         >
-          <h2 className="text-sm font-medium text-ink mb-2">Run {run.task_id} again</h2>
+          <h2 className="text-sm font-medium text-ink mb-2">
+            {run.stage === "test"
+              ? `Test ${run.task_id} again${run.chain_build ? " → then build" : ""}`
+              : `Run ${run.task_id} again`}
+          </h2>
           {relaunchCaveat && !anyway ? (
             <p className="text-sm text-ink-muted" data-testid="relaunch-done">
               {relaunchCaveat}{" "}
