@@ -1034,7 +1034,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   roster={roster}
                   color={ducklingColors[t.duckling]}
                   streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
-                  reasoning={t.messageOnly ? undefined : reasoning[`${t.round}:${t.turn}`]}
+                  reasoning={t.messageOnly ? undefined : (reasoning[`${t.round}:${t.turn}`] ?? t.reasoning)}
                   collapsed={isCollapsed}
                   onToggle={
                     foldable

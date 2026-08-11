@@ -55,6 +55,12 @@ type Outcome struct {
 	Pending *tools.PendingQuestion
 	// Repairs counts how many repair prompts this turn needed.
 	Repairs int
+	// Reasoning is the turn's accumulated thinking, joined across its model
+	// calls. The deltas that streamed it are display state and are never
+	// persisted (01 §5.3); this consolidated text IS the record's copy — it
+	// was billed for, and without it a relaunched desktop showed a running
+	// turn with its thinking gone and a finished one with none at all.
+	Reasoning string
 }
 
 // ToolCallRecord records a tool call.
@@ -372,6 +378,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 
 		choice := resp.Choices[0]
+		if choice.Message.Reasoning != "" {
+			outcome.Reasoning = joinReasoning(outcome.Reasoning, choice.Message.Reasoning)
+		}
 		finishReason := choice.FinishReason
 
 		// Log the LLM call

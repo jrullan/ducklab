@@ -529,3 +529,17 @@ describe("the gate as a turn in the lane", () => {
     r2.unmount();
   });
 });
+
+// The live thinking deltas die with the window; a relaunched desktop reads
+// the turn's consolidated reasoning off the record instead of showing the
+// thinking gone (T-097, watched across three desktop restarts).
+describe("recorded reasoning survives a relaunch", () => {
+  it("lands on the turn block from its message event", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", data: { round: 1, turn: 0, role: "implementer", duckling: "luna" } },
+      { seq: 2, type: "message", data: { round: 1, turn: 0, role: "implementer", content: "done", reasoning: "I considered the session cookie path first." } },
+      { seq: 3, type: "turn_end", data: { round: 1, turn: 0 } },
+    ] as never[]);
+    expect(turns[0]!.reasoning).toContain("session cookie path");
+  });
+});

@@ -480,6 +480,9 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 			data["verdict"] = v.Verdict
 			data["findings"] = v.Findings
 		}
+		if outcome.Reasoning != "" {
+			data["reasoning"] = outcome.Reasoning
+		}
 		emit(params, "message", data)
 	}
 	// Live emission (agent.Loop.OnToolCall) supersedes this batch: a

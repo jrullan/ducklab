@@ -86,6 +86,10 @@ export interface TurnBlock {
    * approve above it and the silence below it are otherwise indistinguishable
    * from a hang. */
   gate?: "running" | "green" | "red" | string;
+  /** The turn's recorded thinking, consolidated at turn end. The live deltas
+   * are display state and die with the window; this is what a relaunched
+   * desktop reads instead of showing the thinking gone. */
+  reasoning?: string;
   /** True when another turn was open at the same time.
    *
    * Lanes are stacked, so concurrency reads as sequence: a reviewer of a split
@@ -228,6 +232,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           b.text = content;
           b.verdict = verdict;
           b.findings = findings;
+          if (typeof d.reasoning === "string" && d.reasoning) b.reasoning = d.reasoning;
         } else {
           // A message with no turn of its own still belongs in the lane
           // rather than being dropped on the floor. Its key is synthetic and
