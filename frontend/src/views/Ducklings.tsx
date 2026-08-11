@@ -279,7 +279,14 @@ function DucklingCard({
   };
 
   return (
-    <div className="rounded-card border border-hairline p-3" data-testid={`duckling-card-${d.id}`}>
+    <div
+      className="rounded-card border p-3"
+      // The fleet colour, worn on the card itself: the same identity the
+      // avatar and every run lane use, so "orange is pato-atom" is learnable
+      // from the roster page too.
+      style={{ borderColor: color ?? "var(--border)" }}
+      data-testid={`duckling-card-${d.id}`}
+    >
       {/* In the settings column the cards are narrower than they were as a
           full page: a long id pushed Edit/Test/Remove out through the card
           edge. The name truncates, the buttons wrap under it if they must. */}
