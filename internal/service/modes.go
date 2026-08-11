@@ -39,6 +39,9 @@ type loopCache struct {
 	// capLift, when set, lets the calls lift reach a reply already in
 	// flight: the loop consults it before every model call.
 	capLift func() bool
+	// onRetry lands every transient provider failure on the record as it
+	// happens — the alternative was up to twenty silent minutes.
+	onRetry func(*agent.Turn, int, error)
 	mu      sync.Mutex
 	loops   map[config.DucklingID]*agent.Loop
 }
@@ -56,6 +59,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnDelta = c.onDelta
 	l.OnReasoning = c.onReasoning
 	l.OnToolCall = c.onToolCall
+	l.OnRetry = c.onRetry
 	l.CapLift = c.capLift
 	c.loops[id] = l
 	return l, nil

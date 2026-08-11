@@ -252,6 +252,19 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         });
         break;
       }
+      case "provider_retry": {
+        // Provider weather, in the lane where the silence was: "retrying
+        // (2): provider sent nothing for 2m0s" is what stops a person from
+        // aborting healthy work. Rendered as a failed tool line — it is an
+        // action the turn took, with a reason worth expanding.
+        blockFor(d)?.toolCalls.push({
+          seq: e.seq ?? 0,
+          tool: `provider retry (${Number(d.attempt ?? 1)})`,
+          ok: false,
+          detail: String(d.error ?? ""),
+        });
+        break;
+      }
       case "policy_violation": {
         blockFor(d)?.toolCalls.push({
           seq: e.seq ?? 0,

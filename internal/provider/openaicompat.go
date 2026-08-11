@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"sync/atomic"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,6 +20,9 @@ type OpenAICompat struct {
 	apiKey     string
 	headers    map[string]string
 	httpClient *http.Client
+	// stallTimeout bounds silence WITHIN a streaming call: first byte and
+	// every gap between chunks. Zero means defaultStallTimeout.
+	stallTimeout time.Duration
 }
 
 // OpenAICompatOption configures an OpenAICompat provider.
@@ -36,6 +40,17 @@ func WithHeaders(headers map[string]string) OpenAICompatOption {
 	return func(p *OpenAICompat) {
 		p.headers = headers
 	}
+}
+
+// defaultStallTimeout is how long a streaming call may be silent — no first
+// byte, no next chunk — before it is declared stalled and retried. Distinct
+// from the 300s client timeout, which bounds the WHOLE call and is what a
+// legitimately long generation needs.
+const defaultStallTimeout = 120 * time.Second
+
+// WithStallTimeout overrides the stream-silence bound (tests, mostly).
+func WithStallTimeout(d time.Duration) OpenAICompatOption {
+	return func(p *OpenAICompat) { p.stallTimeout = d }
 }
 
 // NewOpenAICompat creates a new OpenAI-compatible provider.
@@ -315,6 +330,59 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("marshal request: %w", err)
 	}
+
+	// The stall watchdog. An upstream that accepts the request and then sends
+	// NOTHING held a run for the full 300s client timeout — and the retry
+	// chain behind it re-ran the same wait three more times, so one stalled
+	// provider cost twenty silent minutes (T-075, twice, two models). A
+	// healthy stream delivers its first byte in seconds and never goes quiet
+	// for two minutes between chunks; one that does is weather, and weather
+	// is retried — fast.
+	stall := p.stallTimeout
+	if stall <= 0 {
+		stall = defaultStallTimeout
+	}
+	ctx, cancelStall := context.WithCancel(ctx)
+	defer cancelStall()
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
+	go func() {
+		t := time.NewTimer(stall)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-activity:
+				if !t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
+				t.Reset(stall)
+			case <-t.C:
+				stalled.Store(true)
+				cancelStall()
+				return
+			}
+		}
+	}()
+	touch := func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
+	}
+	// stallErr dresses a watchdog trip as what it is: the provider's
+	// silence, transient, retryable — not a mysterious context error.
+	stallErr := func(err error) error {
+		if stalled.Load() {
+			return fmt.Errorf("%w: provider sent nothing for %s (stalled stream)", ErrProviderUnavailable, stall)
+		}
+		return err
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", strings.NewReader(string(body)))
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("create request: %w", err)
@@ -323,9 +391,13 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	httpReq.Header.Set("Accept", "text/event-stream")
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
+		if stalled.Load() {
+			return ChatResponse{}, stallErr(err)
+		}
 		return ChatResponse{}, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 	defer resp.Body.Close()
+	touch()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return ChatResponse{}, fmt.Errorf("chat stream: %s: %s", resp.Status, string(body))
@@ -350,6 +422,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 
 	scanner := newSSEScanner(resp.Body)
 	for scanner.scan() {
+		touch()
 		event := scanner.event()
 		if event == "done" || event == "[DONE]" {
 			break
@@ -410,6 +483,9 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if stalled.Load() {
+			return ChatResponse{}, stallErr(err)
+		}
 		// The server went away mid-stream — a connection reset from a proxy on
 		// a long stream is the most ordinary transient there is, and classed
 		// as a plain error it skipped the retry policy entirely: one TCP reset

@@ -2383,6 +2383,16 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 		}
 		rs.writer.AppendEvent("tool_call", data)
 	}
+	// Provider weather, on the record as it happens: the person watching an
+	// idle run decides with "retrying (2): provider sent nothing for 2m0s"
+	// where before they had silence.
+	cache.onRetry = func(t *agent.Turn, attempt int, err error) {
+		rs.writer.AppendEvent("provider_retry", map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": string(t.Duckling),
+			"attempt": attempt, "error": err.Error(),
+		})
+	}
 	if !rs.run.Stream || s.bus == nil {
 		return
 	}

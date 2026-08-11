@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	netpprof "net/http/pprof"
 	"net/url"
 	"sort"
 	"strconv"
@@ -103,6 +104,12 @@ func (s *Server) routes() {
 		s.mux.HandleFunc(r.Method+" "+r.Path, h)
 	}
 	s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
+	// pprof, token-guarded, outside the route table (debug surface, not API).
+	// The one time a goroutine dump was needed — an exec that survived its
+	// abort — the engine's stderr pointed at /dev/null and the diagnosis ran
+	// blind. Loopback-only plus auth: same trust boundary as everything else.
+	s.mux.HandleFunc("GET /debug/pprof/", s.auth(netpprof.Index))
+	s.mux.HandleFunc("GET /debug/pprof/profile", s.auth(netpprof.Profile))
 }
 
 // allowedOrigins are the only origins permitted to call the engine.

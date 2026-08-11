@@ -107,6 +107,13 @@ type Loop struct {
 	// so a thirty-call implementer turn showed an empty timeline for its
 	// entire length and then eighty ticks at once.
 	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
+	// OnRetry, if set, hears every transient provider failure AS IT HAPPENS.
+	// The retry chain used to run in total silence: a stalled stream timed
+	// out at 300s, three fallback attempts re-ran the wait, and the record
+	// showed nothing until the whole chain died — up to twenty minutes in
+	// which a person watching an idle run had every reason to abort healthy
+	// work, and did, three times (T-075).
+	OnRetry func(turn *Turn, attempt int, err error)
 	// CapLift, if set, is consulted before every call: true removes this
 	// turn's call cap for the rest of the reply. It exists so the person
 	// watching a run circle toward its cap can lift it IN FLIGHT — a
@@ -243,11 +250,21 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
 
 			if err != nil && provider.IsTransient(err) {
-				// Retry with backoff
+				// Retry with backoff — VISIBLY. Each transient failure lands
+				// on the record before the next attempt starts, so a stalled
+				// provider reads as "retrying (2)" instead of as death.
+				if loop.OnRetry != nil {
+					loop.OnRetry(turn, 1, err)
+				}
 				retryPolicy := provider.DefaultRetryPolicy()
+				extra := 1
 				err = provider.Retry(ctx, retryPolicy, func() error {
 					var rerr error
 					resp, rerr = loop.Provider.Chat(ctx, req)
+					if rerr != nil && provider.IsTransient(rerr) && loop.OnRetry != nil {
+						extra++
+						loop.OnRetry(turn, extra, rerr)
+					}
 					return rerr
 				})
 			}

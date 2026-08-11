@@ -76,6 +76,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // pending proposal is THIS run's — an older proposal would be someone
   // else's question.
   const [proposal, setProposal] = useState<{ markdown?: string; diff?: string } | null>(null);
+  // Silence, measured. A stalled provider used to be indistinguishable from
+  // a thinking model: the person watched nothing happen and aborted healthy
+  // runs. Any signal — an event, a delta, a thought — resets the clock.
+  const lastSignal = useRef(Date.now());
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    lastSignal.current = Date.now();
+  }, [events, deltas, reasoning, live]);
   const [diff, setDiff] = useState("");
   const [testHunks, setTestHunks] = useState("");
   const [verify, setVerify] = useState("");
@@ -217,6 +225,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     // the run pauses at its gate.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, runId, stageKind, run?.status]);
+
+  const liveNow = run?.status === "running" || run?.status === "queued";
+  useEffect(() => {
+    if (!liveNow) return;
+    const t = setInterval(() => setNowTick(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [liveNow]);
 
   if (!run) return <p className="p-4 text-ink-muted">Loading run…</p>;
 
@@ -433,6 +448,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             // either way, never by an absence.
             <span className="text-sm text-ink-secondary" data-testid="run-outcome">
               {outcome}
+            </span>
+          )}
+          {liveNow && nowTick - lastSignal.current > 30000 && (
+            <span className="text-xs text-ink-muted" data-testid="quiet-chip" title="no events, tokens or thinking since then — a slow model is normal; provider retries land in the lane as they happen">
+              quiet {Math.round((nowTick - lastSignal.current) / 1000)}s
             </span>
           )}
         </div>
