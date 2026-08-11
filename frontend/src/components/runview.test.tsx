@@ -483,3 +483,49 @@ describe("collapsing a finished turn", () => {
     r.unmount();
   });
 });
+
+// The harness gate appears in the lane as its own turn: opened by
+// gate_started ("running the suite…"), settled by round_gate. The moment
+// between a reviewer's approve and the verdict used to read as a hang.
+describe("the gate as a turn in the lane", () => {
+  it("opens on gate_started and settles on round_gate", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "turn_start", data: { round: 1, turn: 0, role: "implementer", duckling: "luna" } },
+      { seq: 2, type: "turn_end", data: { round: 1, turn: 0 } },
+      { seq: 3, type: "gate_started", data: { round: 1 } },
+    ] as never[]);
+    const gate = turns.find((t) => t.role === "gate")!;
+    expect(gate.gate).toBe("running");
+    expect(gate.done).toBe(false);
+
+    const settled = buildTurns([
+      { seq: 3, type: "gate_started", data: { round: 1 } },
+      { seq: 4, type: "round_gate", data: { round: 1, result: "red" } },
+    ] as never[]);
+    const g2 = settled.find((t) => t.role === "gate")!;
+    expect(g2.done).toBe(true);
+    expect(g2.gate).toBe("red");
+  });
+
+  it("historical runs without gate_started still show the settled gate", () => {
+    const turns = buildTurns([
+      { seq: 1, type: "round_gate", data: { round: 2, result: "green" } },
+    ] as never[]);
+    const g = turns.find((t) => t.role === "gate")!;
+    expect(g.done).toBe(true);
+    expect(g.gate).toBe("green");
+  });
+
+  it("renders running with a pulse and settles to a chip", () => {
+    const running = { key: "g", round: 1, turn: -1, role: "gate", duckling: "gate", toolCalls: [], text: "", done: false, messageOnly: true, gate: "running" } as never;
+    const r = render(<ConversationTurn block={running} roster={[]} />);
+    expect(r.getByTestId("gate-running").textContent).toContain("running the suite");
+    r.unmount();
+
+    const settled = { ...(running as object), done: true, gate: "green" } as never;
+    const r2 = render(<ConversationTurn block={settled} roster={[]} />);
+    expect(r2.getByTestId("conversation-turn").textContent).toContain("green");
+    expect(r2.queryByTestId("gate-running")).toBeNull();
+    r2.unmount();
+  });
+});

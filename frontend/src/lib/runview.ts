@@ -81,6 +81,11 @@ export interface TurnBlock {
    * legally run for fifteen minutes, and without this the lane showed that
    * as unexplained silence. Cleared by the completion event. */
   pendingTool?: { tool: string; target?: string };
+  /** A harness gate rendered as its own turn: "running" while the suite
+   * executes, then the round's outcome. Not a model's turn — the reviewer's
+   * approve above it and the silence below it are otherwise indistinguishable
+   * from a hang. */
+  gate?: "running" | "green" | "red" | string;
   /** True when another turn was open at the same time.
    *
    * Lanes are stacked, so concurrency reads as sequence: a reviewer of a split
@@ -142,6 +147,9 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
   let last: TurnBlock | null = null;
   // Turns that have started and not yet ended.
   const open = new Set<TurnBlock>();
+  // The harness gate currently executing, opened by gate_started. Kept out of
+  // `last`: coordinate-less events must never land inside a gate turn.
+  let openGate: TurnBlock | null = null;
 
   const keyFor = (round: number, turn: number) => `${round}:${turn}`;
 
@@ -261,6 +269,48 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           // the ✕ expanded to nothing.
           detail: d.ok === false ? String(d.result ?? "") || undefined : undefined,
         });
+        break;
+      }
+      case "gate_started": {
+        const round = Number(d.round ?? 1);
+        const block: TurnBlock = {
+          key: `gate:${round}:${e.seq ?? blocks.length}`,
+          round,
+          turn: -1,
+          role: "gate",
+          duckling: "gate",
+          toolCalls: [],
+          text: "",
+          done: false,
+          messageOnly: true,
+          gate: "running",
+        };
+        blocks.push(block);
+        openGate = block;
+        break;
+      }
+      case "round_gate": {
+        // Closes the announced gate turn; runs recorded before gate_started
+        // existed still get their gate in the lane, already settled.
+        const result = String(d.result ?? "");
+        if (openGate && !openGate.done) {
+          openGate.done = true;
+          openGate.gate = result;
+        } else {
+          blocks.push({
+            key: `gate:${Number(d.round ?? 1)}:${e.seq ?? blocks.length}`,
+            round: Number(d.round ?? 1),
+            turn: -1,
+            role: "gate",
+            duckling: "gate",
+            toolCalls: [],
+            text: "",
+            done: true,
+            messageOnly: true,
+            gate: result,
+          });
+        }
+        openGate = null;
         break;
       }
       case "provider_retry": {

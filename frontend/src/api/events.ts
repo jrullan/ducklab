@@ -203,6 +203,7 @@ export const KNOWN_EVENT_TYPES = [
   "provider_retry",
   "gate",
   "round_gate",
+  "gate_started",
   "gate_resolved",
   "message",
   "proposal",

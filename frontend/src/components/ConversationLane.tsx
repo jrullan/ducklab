@@ -43,8 +43,9 @@ export function ConversationTurn({
   onToggle?: () => void;
 }) {
   const anonymous = !!block.label;
+  const isGate = block.role === "gate";
   const who = anonymous ? block.label! : block.duckling;
-  const tint = anonymous ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
+  const tint = anonymous || isGate ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
   const failedTools = block.toolCalls.filter((c) => !c.ok).length;
   const preview = (block.text ?? "").split("\n").find((l) => l.trim() !== "") ?? "";
 
@@ -67,7 +68,11 @@ export function ConversationTurn({
             {collapsed ? "›" : "⌄"}
           </span>
         )}
-        {anonymous ? (
+        {isGate ? (
+          <span aria-hidden="true" title="the harness's deterministic gate — no model decides this">
+            ⚙
+          </span>
+        ) : anonymous ? (
           <span
             aria-hidden="true"
             title="identities hidden — this reviewer must not know who wrote which candidate"
@@ -77,8 +82,22 @@ export function ConversationTurn({
         ) : (
           <DuckAvatar id={block.duckling} roster={roster} color={color} bobbing={!block.done} />
         )}
-        <span style={{ color: tint }}>{who}</span>
-        <span className="text-ink-muted">{block.role}</span>
+        <span style={{ color: tint }}>{isGate ? "gate" : who}</span>
+        <span className="text-ink-muted">{isGate ? "verify" : block.role}</span>
+        {/* The gate's own state, right in the header: running with a pulse,
+            then the round's outcome. This is the moment between "approve"
+            and the verdict that used to read as a hang. */}
+        {isGate && block.gate === "running" && (
+          <span className="text-ink-muted" data-testid="gate-running">
+            <span className="animate-pulse">▸</span> running the suite…
+          </span>
+        )}
+        {isGate && block.done && block.gate && block.gate !== "running" && (
+          <StatusChip
+            role={block.gate === "green" ? "good" : "serious"}
+            label={block.gate}
+          />
+        )}
         {block.subject && (
           <span className="text-ink-secondary" data-testid="turn-subject">
             {block.subject}
@@ -92,7 +111,7 @@ export function ConversationTurn({
             ∥ in parallel
           </span>
         )}
-        {!block.done && (
+        {!block.done && !isGate && (
           <span className="text-ink-muted" data-testid="in-flight">
             thinking…
           </span>
