@@ -431,7 +431,7 @@ function DucklingCard({
             // Field notes, visually set apart from the spec rows above: an
             // inset panel with its own label. Same tone as the notes editor,
             // so what you type and what you read look like the same thing.
-            <div className="mt-2 rounded bg-surface2 p-2" data-testid={`duckling-notes-${d.id}`}>
+            <div className="mt-2 rounded bg-surface2 p-2">
               <div className="mb-1 text-[10px] uppercase tracking-wide text-ink-muted">field notes</div>
               <p className="whitespace-pre-wrap text-xs italic text-ink-secondary">{d.notes}</p>
             </div>
