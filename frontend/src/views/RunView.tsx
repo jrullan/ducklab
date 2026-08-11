@@ -81,6 +81,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // because the virtualiser unmounts off-screen turns — state inside the turn
   // would forget the reader's choice the moment they scrolled away.
   const [turnChoice, setTurnChoice] = useState<Record<string, boolean>>({});
+  // The right rail folds away like the guide rail does: budget and gate are
+  // glanced at, and on a small window they tax every line of transcript.
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem("ducklab.runrail") !== "off");
+  const toggleRail = () => {
+    setRailOpen((v) => {
+      if (v) localStorage.setItem("ducklab.runrail", "off");
+      else localStorage.removeItem("ducklab.runrail");
+      return !v;
+    });
+  };
   // A stage run's subject: the document it proposed. Fetched from the
   // artifact store once the run pauses at its gate, shown only when the
   // pending proposal is THIS run's — an older proposal would be someone
@@ -1005,7 +1015,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
-      <div className="grid gap-4 p-4 md:grid-cols-[1fr_260px]">
+      <div className={`grid gap-4 p-4 ${railOpen ? "md:grid-cols-[1fr_260px]" : "md:grid-cols-[1fr_auto]"}`}>
         <section data-testid="conversation">
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
@@ -1037,10 +1047,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </VirtualList>
         </section>
 
+        {railOpen ? (
         <aside
           data-testid="run-rail"
           className="flex flex-col gap-3 md:sticky md:top-2 md:max-h-[calc(100vh-7rem)] md:self-start md:overflow-y-auto"
         >
+          <button
+            type="button"
+            data-testid="run-rail-hide"
+            onClick={toggleRail}
+            title="hide the rail (a strip stays to bring it back)"
+            className="self-end text-xs text-ink-muted underline"
+          >
+            hide
+          </button>
           {budget && (
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
@@ -1131,6 +1151,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
           <GateCard gate={gate} stage={run.stage} />
         </aside>
+        ) : (
+          <button
+            type="button"
+            data-testid="run-rail-pill"
+            onClick={toggleRail}
+            title="show budget and gate"
+            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-2"
+          >
+            ‹
+          </button>
+        )}
       </div>
 
 

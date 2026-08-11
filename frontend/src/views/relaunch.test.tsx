@@ -312,3 +312,26 @@ describe("folding the tab panel", () => {
     await screen.findByTestId("calls");
   });
 });
+
+// The right rail folds like the guide rail: hidden to a strip, remembered
+// across runs — budget and gate are glanced at, and on a small window they
+// tax every transcript line.
+describe("hiding the run rail", () => {
+  it("folds to a pill, comes back, and remembers", async () => {
+    localStorage.removeItem("ducklab.runrail");
+    useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const first = render(<RunView runId="r-1" client={clientWith()} />);
+    fireEvent.click(await first.findByTestId("run-rail-hide"));
+    expect(first.queryByTestId("run-rail")).toBeNull();
+    first.unmount();
+
+    // A fresh mount honours the remembered preference; the pill restores.
+    useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const second = render(<RunView runId="r-1" client={clientWith()} />);
+    expect(second.queryByTestId("run-rail")).toBeNull();
+    fireEvent.click(await second.findByTestId("run-rail-pill"));
+    expect(second.getByTestId("run-rail")).toBeTruthy();
+    second.unmount();
+    localStorage.removeItem("ducklab.runrail");
+  });
+});
