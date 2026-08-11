@@ -1016,7 +1016,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
 
       <div className={`grid gap-4 p-4 ${railOpen ? "md:grid-cols-[1fr_260px]" : "md:grid-cols-[1fr_auto]"}`}>
-        <section data-testid="conversation">
+        {/* min-w-0: a 1fr grid column will not shrink below its content
+            without it, so one long unbroken thinking line forced the column
+            wide and shoved the rail off the window's edge on resize. */}
+        <section data-testid="conversation" className="min-w-0">
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
           <VirtualList items={turns} height="60vh">
