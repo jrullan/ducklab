@@ -128,7 +128,7 @@ describe("Ducklings", () => {
           stop: null,
         },
         color: 0,
-        caps: { native_tools: true, context_tokens: 200000, vision: undefined },
+        caps: { native_tools: true, context_tokens: 200000, vision: false },
         cost: { input_per_mtok: 0, output_per_mtok: 15 },
       }),
     );
@@ -303,5 +303,26 @@ describe("Ducklings — the roster", () => {
     fireEvent.click(await screen.findByTestId("duckling-add"));
     expect(screen.getByTestId("duckling-color-0").getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByTestId("duckling-color-9")).toBeNull();
+  });
+});
+
+// Vision was preserved but invisible: the flag that decides whether a
+// triager SEES a bug's screenshots could not be set anywhere in the UI —
+// stored screenshots silently reached no model. The editor now exposes it.
+describe("the vision capability", () => {
+  it("saves the toggle into caps", async () => {
+    const client = clientWith([], [{ id: "openrouter", base_url: "u", key_env: "K", key_set: true } as never]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-add"));
+    fireEvent.change(screen.getByTestId("duckling-id"), { target: { value: "seer" } });
+    fireEvent.change(screen.getByLabelText("model"), { target: { value: "m" } });
+    fireEvent.click(screen.getByTestId("duckling-vision"));
+    fireEvent.click(screen.getByText("Save"));
+    await waitFor(() => expect(client.ducklingSet).toHaveBeenCalled());
+    const [, body] = (client.ducklingSet as ReturnType<typeof vi.fn>).mock.calls[0]! as unknown as [
+      string,
+      { caps: { vision: boolean } },
+    ];
+    expect(body.caps.vision).toBe(true);
   });
 });

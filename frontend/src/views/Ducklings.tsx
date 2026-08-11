@@ -578,6 +578,10 @@ function DucklingForm({
   const [roles, setRoles] = useState<string[]>(existing?.roles ?? []);
   const [contextTokens, setContextTokens] = useState(String(existing?.caps?.context_tokens ?? ""));
   const [nativeTools, setNativeTools] = useState(existing?.caps?.native_tools !== false);
+  // Declared, not probed: a text-only model sent an image array gets a 400,
+  // so the person states what their endpoint accepts. Off, a bug's
+  // screenshots are withheld from this duckling's triage turns.
+  const [vision, setVision] = useState(existing?.caps?.vision === true);
   const [costIn, setCostIn] = useState(String(existing?.cost?.input_per_mtok ?? 0));
   const [costOut, setCostOut] = useState(String(existing?.cost?.output_per_mtok ?? 0));
   // How the model is asked to generate. The engine has accepted these all
@@ -621,7 +625,7 @@ function DucklingForm({
         caps: {
           native_tools: nativeTools,
           context_tokens: Number(contextTokens) || 0,
-          vision: existing?.caps?.vision,
+          vision,
         },
         cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
       })
@@ -685,6 +689,18 @@ function DucklingForm({
             onChange={(e) => setNativeTools(e.target.checked)}
           />
           native tool calling
+        </label>
+        <label
+          className="flex items-center gap-1"
+          title="the model accepts images — a triager with this sees a bug's screenshots"
+        >
+          <input
+            type="checkbox"
+            checked={vision}
+            data-testid="duckling-vision"
+            onChange={(e) => setVision(e.target.checked)}
+          />
+          vision
         </label>
         <label className="flex items-center gap-1">
           $/Mtok in
