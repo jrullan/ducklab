@@ -93,6 +93,9 @@ export function Settings({
         <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
       )}
       {client && <ConfigSection client={client} section={section} />}
+      {section === "team" && client && projectId && (
+        <Ducklings client={client} projectId={projectId} only="roster" />
+      )}
       {section === "fleet" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
       )}
@@ -382,7 +385,13 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
           title="your team"
           desc="who does the work: the modes the launcher opens on, and which model sits in each seat"
         >
-          <h3 className="text-xs text-ink-muted">default modes</h3>
+          {/* Council is a FUNCTION (it writes the documents), not a way to
+              execute a task — the same script machinery underneath let it
+              leak into the task-mode pickers. The carve is the user's own:
+              task modes answer "how is a task implemented", functions answer
+              "who holds this responsibility". */}
+          <h3 className="text-xs text-ink-muted">task modes — who implements</h3>
+          <h4 className="mt-2 text-xs text-ink-muted">default modes</h4>
           {/* The person who always builds in pair and tests in solo re-picked
               both on every task; the launcher should open on their habit. */}
           <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary" data-testid="default-modes">
@@ -395,9 +404,12 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
                 className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
               >
                 <option value="">solo (unset)</option>
-                {Object.keys(modes.script_rounds ?? {}).sort().map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
+                {Object.keys(modes.script_rounds ?? {})
+                  .filter((m) => m !== "council")
+                  .sort()
+                  .map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
               </select>
             </label>
             <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
@@ -415,7 +427,7 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
             </label>
           </div>
 
-          <h3 className="mt-4 text-xs text-ink-muted">ducklings per mode</h3>
+          <h4 className="mt-4 text-xs text-ink-muted">seats per mode</h4>
           {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
               ten models made the old row a wall of boxes, and the row grew
               with every duckling added. Seats are the stable dimension — solo
@@ -424,6 +436,7 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
               carries, because the position IS the assignment. */}
           <div className="mt-1 space-y-1" data-testid="mode-lineups">
             {Object.keys(modes.script_rounds ?? {})
+              .filter((m) => m !== "council")
               .sort()
               .map((mode) => {
                 const seats = modes.seats?.[mode] ?? 0;
@@ -479,8 +492,66 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
           </div>
           <p className="mt-2 text-xs text-ink-muted">
             Each seat names the role its position carries: solo seats one model,
-            pair an implementer and its reviewer, council a drafter and a critic
-            per further seat you fill. Empty uses the built-in default.
+            pair an implementer and its reviewer. Empty uses the built-in
+            default.
+          </p>
+
+          <h3 className="mt-5 text-xs text-ink-muted">functions — who holds each responsibility</h3>
+          <div className="mt-1 space-y-1" data-testid="function-lineups">
+            {(() => {
+              const mode = "council";
+              const picked = lineups[mode] ?? [];
+              const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
+              const setSeat = (i: number, id: string) => {
+                const next = [...picked];
+                while (next.length <= i) next.push("");
+                next[i] = id;
+                setLineups({ ...lineups, [mode]: next });
+                touched();
+              };
+              return (
+                <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+                  <span className="w-24 shrink-0" title="drafts intake, spec and plan — a drafter plus a critic per further seat">
+                    council
+                  </span>
+                  <span className="text-xs text-ink-muted">all projects ·</span>
+                  {Array.from({ length: cols }, (_, i) => (
+                    <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                      {seatLabel(mode, i)}
+                      <select
+                        value={picked[i] ?? ""}
+                        onChange={(e) => setSeat(i, e.target.value)}
+                        data-testid={`seat-${mode}-${i}`}
+                        className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+                      >
+                        <option value="">—</option>
+                        {fleet
+                          .filter((id) => id === picked[i] || !picked.includes(id))
+                          .map((id) => (
+                            <option key={id} value={id}>
+                              {id}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    data-testid={`seat-add-${mode}`}
+                    onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
+                    className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
+                    title="add a critic seat"
+                  >
+                    +
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">
+            The council writes the documents (intake, spec, plan): a drafter and
+            a critic per further seat. The roster below holds this project's
+            other responsibilities.
           </p>
         </SettingsCard>
       )}

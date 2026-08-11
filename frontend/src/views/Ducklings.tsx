@@ -40,10 +40,11 @@ const ROLE_HELP: Record<string, string> = {
 export function Ducklings({ client, projectId, only }: {
   client: EngineClient;
   projectId: string;
-  /** Render one half: "ducklings" (the team members, shown inside the
-   * settings' your-team section) or "providers" (the plumbing, its own
-   * section). Absent renders both — the standalone view's shape. */
-  only?: "ducklings" | "providers";
+  /** Render one slice: "ducklings" (the member cards), "providers" (the
+   * plumbing, its own section) or "roster" (this project's responsibilities,
+   * composed into the settings' functions group). Absent renders everything
+   * — the standalone view's shape. */
+  only?: "ducklings" | "providers" | "roster";
 }) {
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [providers, setProviders] = useState<ProviderView[]>([]);
@@ -83,11 +84,11 @@ export function Ducklings({ client, projectId, only }: {
         </p>
       )}
 
-      {only !== "ducklings" && (
+      {(only === undefined || only === "providers") && (
         <ProviderSection client={client} providers={providers} onDone={done} />
       )}
 
-      {only !== "providers" && (
+      {(only === undefined || only === "ducklings") && (
       <section className="rounded-card border border-hairline p-3">
         <div className="mb-2 flex items-center gap-2">
           <h3 className="text-ink">Ducklings</h3>
@@ -141,7 +142,7 @@ export function Ducklings({ client, projectId, only }: {
       </section>
       )}
 
-      {only !== "providers" && projectId && (
+      {(only === undefined || only === "roster") && projectId && (
         <RosterSection client={client} projectId={projectId} ducklings={ducklings} />
       )}
     </div>

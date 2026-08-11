@@ -170,8 +170,13 @@ describe("mode line-ups in Settings", () => {
     const text = screen.getByTestId("mode-lineups").textContent!;
     expect(text).toContain("implementer");
     expect(text).toContain("reviewer");
-    expect(text).toContain("drafts");
-    expect(text).toContain("critic 1");
+    // Council is a FUNCTION, not a task mode: its seats moved to the
+    // functions group, and the task-mode grid must no longer offer it.
+    expect(text).not.toContain("council");
+    const fns = screen.getByTestId("function-lineups").textContent!;
+    expect(fns).toContain("drafts");
+    expect(fns).toContain("critic 1");
+    expect(fns).toContain("all projects");
   });
 
   // A duckling already seated leaves the other dropdowns' menus: one model
