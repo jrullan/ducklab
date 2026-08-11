@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -241,13 +242,16 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	// and every relaunch died with the same one-line error the person had
 	// to excavate per-run. Broken config outranks every other suggestion,
 	// and nothing else the guide would say is trustworthy while it stands.
-	if _, cfgErr := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); cfgErr != nil {
-		return []NextStep{{
-			ID:     "config",
-			Action: "Fix .ducklab/project.toml — it does not parse, and every run will fail at load",
-			Reason: cfgErr.Error(),
-			Kind:   "project",
-		}}, nil
+	tomlPath := filepath.Join(entry.Path, ".ducklab", "project.toml")
+	if _, statErr := os.Stat(tomlPath); statErr == nil {
+		if _, cfgErr := config.LoadProject(tomlPath); cfgErr != nil {
+			return []NextStep{{
+				ID:     "config",
+				Action: "Fix .ducklab/project.toml — it does not parse, and every run will fail at load",
+				Reason: cfgErr.Error(),
+				Kind:   "project",
+			}}, nil
+		}
 	}
 
 	st := projectSnapshot{}
