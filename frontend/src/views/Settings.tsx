@@ -38,10 +38,11 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
-type SettingsSection = "team" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
+type SettingsSection = "team" | "ducklings" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "team", label: "your team" },
+  { id: "ducklings", label: "my ducklings" },
   { id: "fleet", label: "providers" },
   { id: "budgets", label: "budgets & limits" },
   { id: "autopilot", label: "autopilot & autonomy" },
@@ -95,10 +96,10 @@ export function Settings({
       </nav>
 
       <div className="min-w-0 max-w-3xl flex-1">
-      {/* The team's MEMBERS live with the team: the duckling cards render
-          at the top of "your team", above the modes and seats that assign
-          them. Providers are plumbing, and keep their own section. */}
-      {section === "team" && client && (
+      {/* The member cards are their own section: inside "your team" they
+          buried the who-does-what table a full screen down, and the table is
+          what that section exists to answer. */}
+      {section === "ducklings" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
       )}
       {client && <ConfigSection client={client} section={section} projectId={projectId} />}
