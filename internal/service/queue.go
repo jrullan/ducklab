@@ -114,6 +114,16 @@ func (q *runQueue) start(s *Service, item *queued) {
 	if s.bus != nil {
 		s.bus.Publish(bus.Event{
 			Type: "run_started", RunID: item.rs.run.ID, ProjectID: item.rs.run.ProjectID,
+			// The desktop builds a provisional record from this event for runs
+			// it did not launch (CLI, autopilot). Without these fields it
+			// guessed: stage defaulted to "build" and started_at came from the
+			// bus timestamp — which serializes with the LOCAL offset, so the
+			// lexical sort against the API's UTC-Z strings buried a fresh run
+			// hours deep in the list.
+			Data: map[string]interface{}{
+				"stage": item.rs.run.Stage, "mode": item.rs.run.Mode,
+				"task_id": item.rs.run.TaskID, "started_at": item.rs.run.StartedAt,
+			},
 		})
 	}
 	go func() {

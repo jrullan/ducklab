@@ -228,3 +228,25 @@ describe("a failure arriving on the stream", () => {
     expect(r.status).toBe("done");
   });
 });
+
+// The autopilot's runs are born on the bus, not in this client — and the bus
+// timestamp arrives with a LOCAL offset while the API speaks UTC-Z. The
+// lexical sort mixed the two formats and buried a minutes-old run four hours
+// deep in the list. The provisional record normalizes to UTC-Z.
+describe("a run born on the bus", () => {
+  it("normalizes the provisional started_at to UTC-Z", () => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, acceptState: {}, needsResync: false, connection: "open" });
+    useRuns.getState().applyEvent({
+      type: "run_start",
+      run_id: "r-bus",
+      project_id: "p",
+      seq: 1,
+      ts: "2026-08-11T14:22:19.123-04:00",
+      data: { stage: "test", mode: "solo", task_id: "T-092" },
+    });
+    const r = useRuns.getState().runs["r-bus"]!;
+    expect(r.started_at).toBe("2026-08-11T18:22:19Z");
+    expect(r.stage).toBe("test");
+    expect(r.task_id).toBe("T-092");
+  });
+});

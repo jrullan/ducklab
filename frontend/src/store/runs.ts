@@ -144,7 +144,13 @@ export const useRuns = create<RunsState>((set) => ({
             task_id: String(e.data?.task_id ?? ""),
             status: "running",
             verdict: "",
-            started_at: String(e.ts ?? ""),
+            // The engine's own stamp when the event carries it; otherwise the
+            // bus timestamp NORMALIZED to UTC-Z — it arrives with a local
+            // offset, and a lexical sort against UTC-Z strings buried the
+            // provisional record hours away from where it belonged.
+            started_at: String(
+              e.data?.started_at ?? (e.ts ? new Date(String(e.ts)).toISOString().replace(/\.\d+Z$/, "Z") : ""),
+            ),
           },
         };
       } else if (run) {
