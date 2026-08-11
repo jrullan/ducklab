@@ -765,10 +765,13 @@ export class EngineClient {
    * cost. The one place that shows what a model was actually given — a prompt
    * is assembled from a task, a spec, a transcript and a toolbelt, and when the
    * answer is wrong the question is usually where to look. */
-  runLLM(id: string) {
+  runLLM(id: string, fromSeq = 0) {
+    // Query string built apart: the desktop-coverage pin reads the route
+    // literal, and a ternary inside it hid the path from the matcher.
+    const qs = fromSeq > 0 ? `?from_seq=${fromSeq}` : "";
     return this.request<{ items: LLMCall[] | null; total: number }>(
       "GET",
-      `/v1/runs/${id}/llm`,
+      `/v1/runs/${id}/llm` + qs,
     ).then((r) => r.items ?? []);
   }
   /** Resume a run the engine's own restart or shutdown paused. A human gate is

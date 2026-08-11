@@ -197,8 +197,35 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       });
     client.runVerify(runId).then(setVerify).catch(() => setVerify(""));
     client.runCandidates(runId).then(setCandidates).catch(() => setCandidates([]));
-    client.runLLM(runId).then(setCalls).catch(() => setCalls([]));
+    client
+      .runLLM(runId)
+      .then((cs) => {
+        setCalls(cs);
+        llmSeq.current = cs.reduce((m, c) => Math.max(m, c.seq), 0);
+      })
+      .catch(() => setCalls([]));
   }, [runId, client, run?.status]);
+
+  // The calls panel used to load once and refresh only on a status change,
+  // so during a run it froze while the timeline moved — the two looked like
+  // different runs. New model calls are fetched incrementally (from_seq) as
+  // events arrive; the full payloads are heavy, the increments are not.
+  const llmSeq = useRef(0);
+  const working = run?.status === "running" || run?.status === "queued";
+  useEffect(() => {
+    if (!working) return;
+    const t = setTimeout(() => {
+      client
+        .runLLM(runId, llmSeq.current)
+        .then((more) => {
+          if (more.length === 0) return;
+          llmSeq.current = more.reduce((m, c) => Math.max(m, c.seq), llmSeq.current);
+          setCalls((prev) => [...prev, ...more.filter((c) => !prev.some((p) => p.seq === c.seq))]);
+        })
+        .catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [events.length, working, runId, client]);
 
   const chainBuild = chainedBuildId(events);
   useEffect(() => {
@@ -1163,7 +1190,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 {tabsFolded ? "›" : "⌄"}
               </span>
             )}
-            {t}
+            {/* The timeline above counts TOOL calls; this tab counts calls
+                to the MODEL. Two counters labelled alike read as one broken
+                counter. */}
+            {t === "calls" ? "model calls" : t}
             {note && <span className="ml-1 text-xs text-ink-muted">{note}</span>}
           </button>
         ))}
