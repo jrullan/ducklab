@@ -342,3 +342,22 @@ describe("RunView — asking a stage for changes", () => {
     expect(screen.queryByTestId("request-changes-button")).toBeNull();
   });
 });
+
+// The settings sub-menu: one concern on screen at a time (the user's own
+// mock). Config cards stay mounted — hidden, not unmounted — so switching
+// sections never loses unsaved edits or the single Save.
+describe("the settings sub-menu", () => {
+  it("shows one section at a time and keeps the others mounted", () => {
+    render(
+      <Settings theme="system" onTheme={() => {}} engineVersion="1" connection="open" />,
+    );
+    // Default section is the team; the engine card exists but is hidden.
+    const engineBtn = screen.getByTestId("settings-nav-engine");
+    const engineCard = screen.getByText(/environment variables/).closest("div")!;
+    expect(engineCard.className).toContain("hidden");
+    fireEvent.click(engineBtn);
+    expect(screen.getByText(/environment variables/).closest("div")!.className).not.toContain(
+      "hidden",
+    );
+  });
+});

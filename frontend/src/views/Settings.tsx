@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Ducklings } from "./Ducklings";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { quack } from "../lib/attention";
 import { seatLabel } from "../lib/seats";
@@ -28,8 +29,18 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
+type SettingsSection = "team" | "fleet" | "budgets" | "appearance" | "engine";
+
+const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "team", label: "your team" },
+  { id: "fleet", label: "ducklings & providers" },
+  { id: "budgets", label: "budgets & limits" },
+  { id: "appearance", label: "appearance & alerts" },
+  { id: "engine", label: "engine" },
+];
+
 export function Settings({
-  theme, onTheme, engineVersion, connection, client, onEngine, engineBusy, engineError,
+  theme, onTheme, engineVersion, connection, client, projectId, onEngine, engineBusy, engineError,
 }: {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -37,6 +48,7 @@ export function Settings({
   connection: string;
   /** Optional so a Settings screen still renders with no engine to ask. */
   client?: EngineClient;
+  projectId?: string;
   /** Engine supervision, provided by the desktop shell. The stale banner
    * offers these when something breaks; this is the same pair on demand —
    * restart after a make install without waiting for a failure to say so. */
@@ -49,10 +61,36 @@ export function Settings({
     saveTheme(t);
     onTheme(t);
   };
+  const [section, setSection] = useState<SettingsSection>("team");
   return (
-    <div className="mx-auto max-w-3xl p-4" data-testid="settings">
-      {client && <ConfigSection client={client} />}
+    <div className="flex gap-6 p-4" data-testid="settings">
+      {/* The sub-menu: one concern on screen at a time (the user's own
+          mock). Nothing unmounts except the fleet — config state and its
+          one Save survive switching via CSS visibility. */}
+      <nav className="w-44 shrink-0 space-y-1" data-testid="settings-nav">
+        {SETTINGS_SECTIONS.map((sec) => (
+          <button
+            key={sec.id}
+            type="button"
+            data-testid={`settings-nav-${sec.id}`}
+            aria-pressed={section === sec.id}
+            onClick={() => setSection(sec.id)}
+            className={`block w-full rounded px-2 py-1 text-left text-sm ${
+              section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
+            }`}
+          >
+            {sec.label}
+          </button>
+        ))}
+      </nav>
 
+      <div className="min-w-0 max-w-3xl flex-1">
+      {client && <ConfigSection client={client} section={section} />}
+      {section === "fleet" && client && (
+        <Ducklings client={client} projectId={projectId ?? ""} />
+      )}
+
+      <div className={section === "appearance" ? "" : "hidden"}>
       <SettingsCard
         title="appearance & alerts"
         desc="how ducklab looks, and when it speaks up"
@@ -73,7 +111,9 @@ export function Settings({
         </div>
         <QuackToggle />
       </SettingsCard>
+      </div>
 
+      <div className={section === "engine" ? "" : "hidden"}>
       <SettingsCard
         title="engine"
         desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
@@ -115,6 +155,8 @@ export function Settings({
           </div>
         )}
       </SettingsCard>
+      </div>
+      </div>
     </div>
   );
 }
@@ -165,7 +207,7 @@ function QuackToggle() {
  * of that decision across buttons makes the reader work out which of their
  * changes each one carries, and being wrong is silent.
  */
-function ConfigSection({ client }: { client: EngineClient }) {
+function ConfigSection({ client, section }: { client: EngineClient; section: SettingsSection }) {
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
   const [fleet, setFleet] = useState<string[]>([]);
@@ -303,6 +345,7 @@ function ConfigSection({ client }: { client: EngineClient }) {
 
   return (
     <div data-testid="config-settings">
+      <div className={section === "team" ? "" : "hidden"}>
       {fleet.length > 1 && (
         <SettingsCard
           title="your team"
@@ -410,7 +453,9 @@ function ConfigSection({ client }: { client: EngineClient }) {
           </p>
         </SettingsCard>
       )}
+      </div>
 
+      <div className={section === "budgets" ? "" : "hidden"}>
       <SettingsCard
         title="budgets & limits"
         desc="how much a run may spend before it pauses for you"
@@ -468,10 +513,11 @@ function ConfigSection({ client }: { client: EngineClient }) {
         by the round count. Empty uses the built-in value shown in the box.
       </p>
       </SettingsCard>
+      </div>
 
       {/* One button, at the end, after everything it carries. The page used to
           have two, and the second sat in the middle of its own fields. */}
-      <div className="mt-3 flex items-center gap-3">
+      <div className={`mt-3 flex items-center gap-3 ${section === "team" || section === "budgets" ? "" : "hidden"}`}>
         <button
           type="button"
           onClick={save}

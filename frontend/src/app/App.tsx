@@ -87,7 +87,6 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
   ],
   Config: [
     { label: "Settings", route: { name: "settings" } },
-    { label: "Ducklings", route: { name: "ducklings" } },
     { label: "Projects", route: { name: "projects" } },
   ],
 };
@@ -537,6 +536,7 @@ export function App() {
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
         {route.name === "settings" && (
           <Settings
+            projectId={projectId}
             theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection}
             client={client ?? undefined}
             onEngine={(a) => void superviseEngine(a)} engineBusy={restarting} engineError={restartError}
