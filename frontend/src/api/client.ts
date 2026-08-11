@@ -386,6 +386,12 @@ export interface ReleaseSummary {
 }
 
 /** One model call, as recorded in llm.jsonl. */
+export interface AutopilotDefaultsView {
+  max_tasks: number;
+  max_fails: number;
+  autonomy: string;
+}
+
 export interface AutopilotState {
   on: boolean;
   max_tasks: number;
@@ -1028,6 +1034,14 @@ export class EngineClient {
       `/v1/projects/${projectId}/reviews/${taskId}`,
     ).then((r) => r.markdown ?? "");
   }
+  autopilotDefaults() {
+    return this.request<AutopilotDefaultsView>("GET", "/v1/defaults/autopilot");
+  }
+
+  autopilotDefaultsSet(body: AutopilotDefaultsView) {
+    return this.request<AutopilotDefaultsView>("PUT", "/v1/defaults/autopilot", body);
+  }
+
   autopilot(projectId: string) {
     return this.request<AutopilotState>("GET", `/v1/projects/${projectId}/autopilot`);
   }

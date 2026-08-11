@@ -96,3 +96,37 @@ func TestTheHooksAreInertWhenOff(t *testing.T) {
 		t.Errorf("hooks moved state while off: %+v", st)
 	}
 }
+
+// The loop's leash is configuration, not code: the activation cap and the
+// failure tolerance come from defaults a person can edit, bounded so a typo
+// cannot configure an unsupervised thousand-task loop.
+func TestAutopilotDefaultsRoundTripAndBounds(t *testing.T) {
+	s := writableService(t, "pato-uno")
+
+	d := s.AutopilotDefaults()
+	if d.MaxTasks != autopilotDefaultMaxTasks || d.MaxFails != autopilotDefaultMaxFails {
+		t.Fatalf("built-ins = %+v", d)
+	}
+
+	if err := s.AutopilotDefaultsSet(AutopilotDefaultsView{MaxTasks: 3, MaxFails: 1, Autonomy: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	d = s.AutopilotDefaults()
+	if d.MaxTasks != 3 || d.MaxFails != 1 || d.Autonomy != "auto" {
+		t.Errorf("after set = %+v", d)
+	}
+	if s.autopilotConfigMaxFails() != 1 {
+		t.Error("the driver does not read the configured failure tolerance")
+	}
+
+	for _, bad := range []AutopilotDefaultsView{
+		{MaxTasks: 0, MaxFails: 2, Autonomy: "guarded"},
+		{MaxTasks: 1000, MaxFails: 2, Autonomy: "guarded"},
+		{MaxTasks: 5, MaxFails: 0, Autonomy: "guarded"},
+		{MaxTasks: 5, MaxFails: 2, Autonomy: "cowboy"},
+	} {
+		if err := s.AutopilotDefaultsSet(bad); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}

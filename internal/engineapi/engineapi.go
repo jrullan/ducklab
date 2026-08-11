@@ -1027,6 +1027,23 @@ func (s *Server) handleReleaseCut(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, out)
 }
 
+func (s *Server) handleAutopilotDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.AutopilotDefaults())
+}
+
+func (s *Server) handleAutopilotDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var req service.AutopilotDefaultsView
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.AutopilotDefaultsSet(req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.AutopilotDefaults())
+}
+
 func (s *Server) handleAutopilotGet(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.AutopilotStatus(r.PathValue("id")))
 }

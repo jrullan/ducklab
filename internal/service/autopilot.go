@@ -43,7 +43,30 @@ type autopilotState struct {
 	StoppedReason string `json:"stopped_reason,omitempty"`
 }
 
-const autopilotDefaultMaxTasks = 10
+const (
+	autopilotDefaultMaxTasks = 10
+	autopilotDefaultMaxFails = 2
+)
+
+// autopilotConfigMaxTasks is the configured activation cap.
+func (s *Service) autopilotConfigMaxTasks() int {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	if n := s.cfg.Defaults.AutopilotMaxTasks; n > 0 {
+		return n
+	}
+	return autopilotDefaultMaxTasks
+}
+
+// autopilotConfigMaxFails is how many consecutive failures stop the loop.
+func (s *Service) autopilotConfigMaxFails() int {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	if n := s.cfg.Defaults.AutopilotMaxFails; n > 0 {
+		return n
+	}
+	return autopilotDefaultMaxFails
+}
 
 // AutopilotStatus reports the state for one project, zero-valued when never
 // enabled.
@@ -76,7 +99,7 @@ func (s *Service) AutopilotSet(ctx context.Context, projectID string, on bool, m
 	st.StoppedReason = ""
 	if on {
 		if maxTasks <= 0 {
-			maxTasks = autopilotDefaultMaxTasks
+			maxTasks = s.autopilotConfigMaxTasks()
 		}
 		st.MaxTasks = maxTasks
 		st.Started = 0
@@ -138,7 +161,7 @@ func (s *Service) autopilotOnFail(run *runlog.Run) {
 	st.ConsecutiveFails++
 	fails := st.ConsecutiveFails
 	s.apMu.Unlock()
-	if fails >= 2 {
+	if fails >= s.autopilotConfigMaxFails() {
 		s.autopilotStop(run.ProjectID,
 			fmt.Sprintf("stopped after %d consecutive failures (last: %s) — the loop needs you", fails, run.ID))
 		return

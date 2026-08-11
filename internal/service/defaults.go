@@ -296,6 +296,76 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	return nil
 }
 
+// AutopilotDefaultsView is the loop's own knobs plus the global autonomy —
+// the "sensible defaults" a person should be able to see and change without
+// editing TOML: how far an unattended loop may go, how much failure it
+// tolerates, and what autonomy a run gets when nothing names one.
+type AutopilotDefaultsView struct {
+	MaxTasks int    `json:"max_tasks"`
+	MaxFails int    `json:"max_fails"`
+	Autonomy string `json:"autonomy"`
+}
+
+// AutopilotDefaults reports them, built-ins filled in.
+func (s *Service) AutopilotDefaults() AutopilotDefaultsView {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	v := AutopilotDefaultsView{
+		MaxTasks: s.cfg.Defaults.AutopilotMaxTasks,
+		MaxFails: s.cfg.Defaults.AutopilotMaxFails,
+		Autonomy: string(s.cfg.Defaults.Autonomy),
+	}
+	if v.MaxTasks <= 0 {
+		v.MaxTasks = autopilotDefaultMaxTasks
+	}
+	if v.MaxFails <= 0 {
+		v.MaxFails = autopilotDefaultMaxFails
+	}
+	if v.Autonomy == "" {
+		v.Autonomy = string(config.AutonomyGuarded)
+	}
+	return v
+}
+
+// AutopilotDefaultsSet replaces them and writes the config back.
+func (s *Service) AutopilotDefaultsSet(v AutopilotDefaultsView) error {
+	if err := s.canWriteConfig(); err != nil {
+		return err
+	}
+	// Bounded on both ends: a cap of zero would mean an autopilot that can
+	// start nothing, and a thousand-task activation is a loop nobody is
+	// supervising (the same I3 reasoning as rounds).
+	if v.MaxTasks < 1 || v.MaxTasks > 100 {
+		return fmt.Errorf("autopilot max_tasks must be 1 to 100; got %d", v.MaxTasks)
+	}
+	if v.MaxFails < 1 || v.MaxFails > 10 {
+		return fmt.Errorf("autopilot max_fails must be 1 to 10; got %d", v.MaxFails)
+	}
+	valid := false
+	for _, a := range config.ValidAutonomies() {
+		if string(a) == v.Autonomy {
+			valid = true
+		}
+	}
+	if !valid {
+		return fmt.Errorf("unknown autonomy %q", v.Autonomy)
+	}
+
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	prevTasks, prevFails := s.cfg.Defaults.AutopilotMaxTasks, s.cfg.Defaults.AutopilotMaxFails
+	prevAutonomy := s.cfg.Defaults.Autonomy
+	s.cfg.Defaults.AutopilotMaxTasks = v.MaxTasks
+	s.cfg.Defaults.AutopilotMaxFails = v.MaxFails
+	s.cfg.Defaults.Autonomy = config.Autonomy(v.Autonomy)
+	if err := s.saveConfig(); err != nil {
+		s.cfg.Defaults.AutopilotMaxTasks, s.cfg.Defaults.AutopilotMaxFails = prevTasks, prevFails
+		s.cfg.Defaults.Autonomy = prevAutonomy
+		return err
+	}
+	return nil
+}
+
 // ducklingsFor returns the line-up a run should use: the one it named, else the
 // one configured for its mode, else none — which leaves the roster to decide.
 func (s *Service) ducklingsFor(mode string, requested []string) []string {

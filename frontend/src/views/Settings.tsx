@@ -29,12 +29,13 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
-type SettingsSection = "team" | "fleet" | "budgets" | "appearance" | "engine";
+type SettingsSection = "team" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "team", label: "your team" },
   { id: "fleet", label: "ducklings & providers" },
   { id: "budgets", label: "budgets & limits" },
+  { id: "autopilot", label: "autopilot & autonomy" },
   { id: "appearance", label: "appearance & alerts" },
   { id: "engine", label: "engine" },
 ];
@@ -229,6 +230,20 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
 
   const touched = () => setState({ kind: "idle" });
 
+  // The autopilot's knobs ride the same single Save (the one-save pin is
+  // right: two buttons re-ask "which of my changes does this carry"). Loaded
+  // defensively — a client without the method must not blank the page — and
+  // included in the save only once actually loaded. Declared HERE, above the
+  // loading early-return: a hook below a conditional return renders a
+  // different hook count per pass, which React rejects wholesale.
+  const [ap, setAp] = useState<{ max_tasks: string; max_fails: string; autonomy: string } | null>(null);
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => client.autopilotDefaults())
+      .then((d) => setAp({ max_tasks: String(d.max_tasks), max_fails: String(d.max_fails), autonomy: d.autonomy }))
+      .catch(() => {});
+  }, [client]);
+
   // What the engine kept, applied to the drafts. Used on load and after a save,
   // so the values on screen are always the ones it has and never the ones that
   // were typed.
@@ -293,6 +308,13 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
     // applied, and what ends up on screen is what the engine kept — never what
     // was typed.
     Promise.all([
+      ap
+        ? client.autopilotDefaultsSet({
+            max_tasks: Number(ap.max_tasks) || 0,
+            max_fails: Number(ap.max_fails) || 0,
+            autonomy: ap.autonomy,
+          })
+        : Promise.resolve(null),
       client.budgetDefaultsSet({
         max_usd: Number(b.max_usd) || 0,
         max_tokens: Number(b.max_tokens) || 0,
@@ -311,7 +333,10 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
         role_turns: numbersOnly(roleTurns),
       }),
     ])
-      .then(([savedBudget, savedModes]) => {
+      .then(([savedAp, savedBudget, savedModes]) => {
+        if (savedAp) {
+          setAp({ max_tasks: String(savedAp.max_tasks), max_fails: String(savedAp.max_fails), autonomy: savedAp.autonomy });
+        }
         applyBudget(savedBudget);
         applyModes(savedModes);
         setState({ kind: "saved" });
@@ -455,6 +480,59 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
       )}
       </div>
 
+      <div className={section === "autopilot" ? "" : "hidden"}>
+        <SettingsCard
+          title="autopilot & autonomy"
+          desc="the unattended loop's leash, and what autonomy a run gets when nothing names one"
+          testid="autopilot-defaults"
+        >
+          {ap ? (
+            <div className="flex flex-wrap items-end gap-3 text-sm text-ink-secondary">
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                tasks per activation
+                <input
+                  data-testid="ap-max-tasks"
+                  value={ap.max_tasks}
+                  onChange={(e) => { setAp({ ...ap, max_tasks: e.target.value }); touched(); }}
+                  className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                failures before stopping
+                <input
+                  data-testid="ap-max-fails"
+                  value={ap.max_fails}
+                  onChange={(e) => { setAp({ ...ap, max_fails: e.target.value }); touched(); }}
+                  className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+                />
+              </label>
+              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                default autonomy
+                <select
+                  data-testid="ap-autonomy"
+                  value={ap.autonomy}
+                  onChange={(e) => { setAp({ ...ap, autonomy: e.target.value }); touched(); }}
+                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                >
+                  {["manual", "guarded", "auto", "yolo"].map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : (
+            <p className="text-sm text-ink-muted">This engine does not expose autopilot defaults yet.</p>
+          )}
+          <p className="mt-2 text-xs text-ink-muted">
+            The autopilot stops itself at the task cap and after consecutive
+            failures — money caps, UNVERIFIED and reviewer dissent always stop
+            it regardless. Default autonomy applies to runs that do not pick
+            one: guarded waits for you at every gate; auto and yolo accept
+            green gates themselves.
+          </p>
+        </SettingsCard>
+      </div>
+
       <div className={section === "budgets" ? "" : "hidden"}>
       <SettingsCard
         title="budgets & limits"
@@ -517,7 +595,7 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
 
       {/* One button, at the end, after everything it carries. The page used to
           have two, and the second sat in the middle of its own fields. */}
-      <div className={`mt-3 flex items-center gap-3 ${section === "team" || section === "budgets" ? "" : "hidden"}`}>
+      <div className={`mt-3 flex items-center gap-3 ${section === "team" || section === "budgets" || section === "autopilot" ? "" : "hidden"}`}>
         <button
           type="button"
           onClick={save}

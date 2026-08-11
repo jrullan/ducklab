@@ -112,6 +112,11 @@ type Defaults struct {
 	RepairAttempts     int      `toml:"repair_attempts" json:"repair_attempts"`
 	ToolResultMaxBytes int      `toml:"tool_result_max_bytes" json:"tool_result_max_bytes"`
 	AgentMaxTurns      int      `toml:"agent_max_turns" json:"agent_max_turns"`
+	// AutopilotMaxTasks caps how many runs one autopilot activation may start
+	// (0 = built-in default). AutopilotMaxFails is how many consecutive
+	// failures stop the loop (0 = built-in default of 2).
+	AutopilotMaxTasks int `toml:"autopilot_max_tasks" json:"autopilot_max_tasks"`
+	AutopilotMaxFails int `toml:"autopilot_max_fails" json:"autopilot_max_fails"`
 	// Rounds is how many rounds each mode runs, keyed by mode name. Absent or
 	// zero leaves the script's own limit alone.
 	//
