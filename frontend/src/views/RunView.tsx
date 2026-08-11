@@ -76,6 +76,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // tab shows it again. Not persisted — a diff hidden by yesterday's fold
   // is a diff unread before an accept.
   const [tabsFolded, setTabsFolded] = useState(false);
+  const tabPanelRef = useRef<HTMLDivElement | null>(null);
   // A stage run's subject: the document it proposed. Fetched from the
   // artifact store once the run pauses at its gate, shown only when the
   // pending proposal is THIS run's — an older proposal would be someone
@@ -1087,26 +1088,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       </div>
 
 
-      {/* Pinned to the viewport's bottom edge while the transcript above it
-          scrolls — the same "consulted, not read" contract as the rail. It
-          rejoins the normal flow once you scroll past it into the tabs.
-          Except in a live chat: the composer owns the bottom edge there,
-          and two sticky claimants rendered on top of each other. */}
+      {/* The bottom dock: timeline and tab bar pinned together to the
+          viewport's bottom edge while the transcript scrolls — the same
+          "consulted, not read" contract as the rail. The tab bar lived below
+          a build's long diff and went unseen: calls looked absent from build
+          runs when it was one unscrolled click away. Except in a live chat:
+          the composer owns the bottom edge there. */}
       <div
-        className={
-          chatLive
-            ? "px-4 py-2"
-            : "sticky bottom-0 z-10 border-t border-hairline bg-page px-4 py-2"
-        }
+        className={chatLive ? "" : "sticky bottom-0 z-10 border-t border-hairline bg-page"}
+        data-testid="bottom-dock"
       >
-        <ToolTimeline calls={timeline} />
-      </div>
+        <div className="px-4 pt-2">
+          <ToolTimeline calls={timeline} />
+        </div>
 
-      {/* A tab with nothing in it is dimmed and counted, so an empty one reads
-          as "there was none" rather than "something failed to load". A run
-          with no candidates is not a broken run — solo, pair and split never
-          have any. */}
-      <nav className="mt-3 flex gap-2 border-b border-hairline px-4">
+        {/* A tab with nothing in it is dimmed and counted, so an empty one
+            reads as "there was none" rather than "something failed to load".
+            A run with no candidates is not a broken run — solo, pair and
+            split never have any. */}
+        <nav className="mt-1 flex gap-2 px-4">
         {(codeRun
           ? ([
               ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
@@ -1130,6 +1130,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 setTab(t);
                 setTabsFolded(false);
               }
+              // The panel sits below the dock's natural position; a click
+              // from mid-transcript must land the reader on the content.
+              requestAnimationFrame(() =>
+                tabPanelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }),
+              );
             }}
             data-testid={`tab-${t}`}
             className={`px-2 py-1 text-sm ${shownTab === t && !tabsFolded ? "text-ink" : "text-ink-muted"}`}
@@ -1143,10 +1148,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {note && <span className="ml-1 text-xs text-ink-muted">{note}</span>}
           </button>
         ))}
-      </nav>
+        </nav>
+      </div>
 
       {!tabsFolded && (
-      <div className="p-2">
+      <div className="p-2" ref={tabPanelRef}>
         {/* The test hunks come first, above the rest of the diff, because the
             whole point is that they are read before the decision and not
             after. Not a blocker — sometimes a test is genuinely wrong (05
