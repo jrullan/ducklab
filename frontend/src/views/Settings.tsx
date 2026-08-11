@@ -5,6 +5,25 @@ import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
 import type { BudgetView, EngineClient, ModeDefaultsView } from "../api/client";
 
+/** One titled card per concern. The page was a flat column of ten unrelated
+ * headings — a cognitive disaster to scan (the user's words). Cards group by
+ * task, ordered by how often each is touched: team first, budgets second,
+ * appearance and engine last. */
+function SettingsCard({ title, desc, children, testid }: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+  testid?: string;
+}) {
+  return (
+    <section className="mb-4 rounded-card border border-hairline p-4" data-testid={testid}>
+      <h2 className="text-sm font-medium text-ink">{title}</h2>
+      {desc && <p className="mt-0.5 text-xs text-ink-muted">{desc}</p>}
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
 /**
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
@@ -31,10 +50,14 @@ export function Settings({
     onTheme(t);
   };
   return (
-    <div className="p-4" data-testid="settings">
-      <section>
-        <h2 className="text-sm text-ink-muted">theme</h2>
-        <div className="mt-1 flex gap-2">
+    <div className="mx-auto max-w-3xl p-4" data-testid="settings">
+      {client && <ConfigSection client={client} />}
+
+      <SettingsCard
+        title="appearance & alerts"
+        desc="how ducklab looks, and when it speaks up"
+      >
+        <div className="flex gap-2">
           {(["light", "dark", "system"] as Theme[]).map((t) => (
             <button
               key={t}
@@ -48,18 +71,14 @@ export function Settings({
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="mt-4">
-        <h2 className="text-sm text-ink-muted">attention</h2>
         <QuackToggle />
-      </section>
+      </SettingsCard>
 
-      {client && <ConfigSection client={client} />}
-
-      <section className="mt-4">
-        <h2 className="text-sm text-ink-muted">engine</h2>
-        <div className="mt-1 flex items-center gap-3">
+      <SettingsCard
+        title="engine"
+        desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
+      >
+        <div className="flex items-center gap-3">
           <StatusChip
             role={connection === "open" ? "good" : connection === "reconnecting" ? "warning" : "critical"}
             label={connection}
@@ -95,10 +114,7 @@ export function Settings({
             )}
           </div>
         )}
-        <p className="mt-2 text-sm text-ink-muted">
-          API keys are read from environment variables and are never stored or displayed here.
-        </p>
-      </section>
+      </SettingsCard>
     </div>
   );
 }
@@ -286,56 +302,13 @@ function ConfigSection({ client }: { client: EngineClient }) {
   );
 
   return (
-    <section className="mt-4" data-testid="config-settings">
-      <h2 className="text-sm text-ink-muted">run budget</h2>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
-        {num(b.max_tokens ?? "", (v) => setB({ ...b, max_tokens: v }), "tokens", "budget-max_tokens")}
-        {num(b.max_usd ?? "", (v) => setB({ ...b, max_usd: v }), "USD", "budget-max_usd")}
-        {num(b.max_turns ?? "", (v) => setB({ ...b, max_turns: v }), "turns", "budget-max_turns")}
-        {num(b.max_wallclock_s ?? "", (v) => setB({ ...b, max_wallclock_s: v }), "seconds", "budget-max_wallclock_s")}
-      </div>
-      <p className="mt-1 text-sm text-ink-muted">
-        tokens counts prompt and completion together, and every round re-sends the
-        conversation — so a long task spends most of its budget on input.
-        Currently {budget.max_tokens.toLocaleString()} per run.
-      </p>
-
-      <h2 className="mt-4 text-sm text-ink-muted">rounds per mode</h2>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
-        {Object.keys(modes.script_rounds ?? {})
-          .sort()
-          .map((mode) =>
-            num(
-              rounds[mode] ?? "",
-              (v) => setRounds({ ...rounds, [mode]: v }),
-              mode,
-              `rounds-${mode}`,
-              String(modes.script_rounds?.[mode] ?? ""),
-              "w-16",
-            ),
-          )}
-      </div>
-
-      <h2 className="mt-4 text-sm text-ink-muted">model calls per turn</h2>
-      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
-        {Object.keys(modes.script_role_turns ?? {})
-          .sort()
-          .map((role) =>
-            num(
-              roleTurns[role] ?? "",
-              (v) => setRoleTurns({ ...roleTurns, [role]: v }),
-              role,
-              `role-turns-${role}`,
-              String(modes.script_role_turns?.[role] ?? ""),
-              "w-16",
-            ),
-          )}
-        {num(agentTurns, setAgentTurns, "fallback", "rounds-agent-max-turns", undefined, "w-20")}
-      </div>
-
+    <div data-testid="config-settings">
       {fleet.length > 1 && (
-        <>
-          <h2 className="mt-4 text-sm text-ink-muted">default modes</h2>
+        <SettingsCard
+          title="your team"
+          desc="who does the work: the modes the launcher opens on, and which model sits in each seat"
+        >
+          <h3 className="text-xs text-ink-muted">default modes</h3>
           {/* The person who always builds in pair and tests in solo re-picked
               both on every task; the launcher should open on their habit. */}
           <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary" data-testid="default-modes">
@@ -368,7 +341,7 @@ function ConfigSection({ client }: { client: EngineClient }) {
             </label>
           </div>
 
-          <h2 className="mt-4 text-sm text-ink-muted">ducklings per mode</h2>
+          <h3 className="mt-4 text-xs text-ink-muted">ducklings per mode</h3>
           {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
               ten models made the old row a wall of boxes, and the row grew
               with every duckling added. Seats are the stable dimension — solo
@@ -430,18 +403,71 @@ function ConfigSection({ client }: { client: EngineClient }) {
                 );
               })}
           </div>
-        </>
+          <p className="mt-2 text-xs text-ink-muted">
+            Each seat names the role its position carries: solo seats one model,
+            pair an implementer and its reviewer, council a drafter and a critic
+            per further seat you fill. Empty uses the built-in default.
+          </p>
+        </SettingsCard>
       )}
 
-      <p className="mt-2 text-sm text-ink-muted">
+      <SettingsCard
+        title="budgets & limits"
+        desc="how much a run may spend before it pauses for you"
+      >
+      <h3 className="text-xs text-ink-muted">run budget</h3>
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {num(b.max_tokens ?? "", (v) => setB({ ...b, max_tokens: v }), "tokens", "budget-max_tokens")}
+        {num(b.max_usd ?? "", (v) => setB({ ...b, max_usd: v }), "USD", "budget-max_usd")}
+        {num(b.max_turns ?? "", (v) => setB({ ...b, max_turns: v }), "turns", "budget-max_turns")}
+        {num(b.max_wallclock_s ?? "", (v) => setB({ ...b, max_wallclock_s: v }), "seconds", "budget-max_wallclock_s")}
+      </div>
+      <p className="mt-1 text-sm text-ink-muted">
+        tokens counts prompt and completion together, and every round re-sends the
+        conversation — so a long task spends most of its budget on input.
+        Currently {budget.max_tokens.toLocaleString()} per run.
+      </p>
+
+      <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {Object.keys(modes.script_rounds ?? {})
+          .sort()
+          .map((mode) =>
+            num(
+              rounds[mode] ?? "",
+              (v) => setRounds({ ...rounds, [mode]: v }),
+              mode,
+              `rounds-${mode}`,
+              String(modes.script_rounds?.[mode] ?? ""),
+              "w-16",
+            ),
+          )}
+      </div>
+
+      <h3 className="mt-4 text-xs text-ink-muted">model calls per turn</h3>
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {Object.keys(modes.script_role_turns ?? {})
+          .sort()
+          .map((role) =>
+            num(
+              roleTurns[role] ?? "",
+              (v) => setRoleTurns({ ...roleTurns, [role]: v }),
+              role,
+              `role-turns-${role}`,
+              String(modes.script_role_turns?.[role] ?? ""),
+              "w-16",
+            ),
+          )}
+        {num(agentTurns, setAgentTurns, "fallback", "rounds-agent-max-turns", undefined, "w-20")}
+      </div>
+
+      <p className="mt-2 text-xs text-ink-muted">
         A round is one pass over every participant, so pair spends two turns on
         each. "Model calls per turn" is the separate limit on one participant
         chaining tool calls — a model working in circles is stopped by that, not
-        by the round count. Empty uses the built-in value shown in the box. Each
-        seat names the role its position carries: solo seats one model, pair an
-        implementer and its reviewer, council a drafter and a critic per
-        further seat you fill.
+        by the round count. Empty uses the built-in value shown in the box.
       </p>
+      </SettingsCard>
 
       {/* One button, at the end, after everything it carries. The page used to
           have two, and the second sat in the middle of its own fields. */}
@@ -462,7 +488,7 @@ function ConfigSection({ client }: { client: EngineClient }) {
           </span>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
