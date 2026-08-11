@@ -1048,6 +1048,65 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               );
             }}
           </VirtualList>
+      {/* The chat composer, attached to the conversation box itself: the
+          transcript scrolls INSIDE the list above, so sitting right under it
+          keeps the reply box in reach without floating over the timeline and
+          the model-calls dock, which a viewport-sticky composer did. */}
+      {chatLive && (
+        <section
+          className="border-t border-hairline bg-surface p-3"
+          data-testid="chat-reply"
+        >
+          <div className="flex items-start gap-2">
+            <textarea
+              aria-label="chat message"
+              value={chatMsg}
+              onChange={(e) => setChatMsg(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && chatMsg.trim() && !chatBusy && pending?.kind === "chat") {
+                  e.preventDefault();
+                  setChatBusy(true);
+                  void client
+                    .chatSend(runId, chatMsg.trim())
+                    .then(() => setChatMsg(""))
+                    .catch(() => {})
+                    .finally(() => setChatBusy(false));
+                }
+              }}
+              rows={2}
+              disabled={pending?.kind !== "chat"}
+              placeholder={pending?.kind === "chat" ? "your reply… (Enter to send)" : "the consultant is thinking…"}
+              className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
+            />
+            <button
+              type="button"
+              data-testid="chat-send"
+              disabled={chatBusy || pending?.kind !== "chat" || !chatMsg.trim()}
+              onClick={() => {
+                setChatBusy(true);
+                void client
+                  .chatSend(runId, chatMsg.trim())
+                  .then(() => setChatMsg(""))
+                  .catch(() => {})
+                  .finally(() => setChatBusy(false));
+              }}
+              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+            >
+              {chatBusy ? "Sending…" : "Send"}
+            </button>
+            <button
+              type="button"
+              data-testid="chat-end"
+              disabled={chatBusy}
+              onClick={() => void client.chatEnd(runId).catch(() => {})}
+              title="Closes the conversation as finished; the transcript stays on the record"
+              className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted disabled:opacity-40"
+            >
+              End chat
+            </button>
+          </div>
+        </section>
+      )}
         </section>
 
         {railOpen ? (
@@ -1297,68 +1356,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </ul>
           ))}
       </div>
-      )}
-
-      {/* The chat composer, pinned to the bottom of the viewport like every
-          conversation the person already knows. It lived in the pending card
-          at the TOP: the conversation grew downward away from it, so each
-          turn meant scrolling down to read the reply and back up to answer.
-          Always present while the chat lives — disabled, saying why, while
-          the consultant is thinking — so the box never jumps around. */}
-      {chatLive && (
-        <section
-          className="sticky bottom-0 z-10 border-t border-hairline bg-surface p-3"
-          data-testid="chat-reply"
-        >
-          <div className="flex items-start gap-2">
-            <textarea
-              aria-label="chat message"
-              value={chatMsg}
-              onChange={(e) => setChatMsg(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && chatMsg.trim() && !chatBusy && pending?.kind === "chat") {
-                  e.preventDefault();
-                  setChatBusy(true);
-                  void client
-                    .chatSend(runId, chatMsg.trim())
-                    .then(() => setChatMsg(""))
-                    .catch(() => {})
-                    .finally(() => setChatBusy(false));
-                }
-              }}
-              rows={2}
-              disabled={pending?.kind !== "chat"}
-              placeholder={pending?.kind === "chat" ? "your reply… (Enter to send)" : "the consultant is thinking…"}
-              className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
-            />
-            <button
-              type="button"
-              data-testid="chat-send"
-              disabled={chatBusy || pending?.kind !== "chat" || !chatMsg.trim()}
-              onClick={() => {
-                setChatBusy(true);
-                void client
-                  .chatSend(runId, chatMsg.trim())
-                  .then(() => setChatMsg(""))
-                  .catch(() => {})
-                  .finally(() => setChatBusy(false));
-              }}
-              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
-            >
-              {chatBusy ? "Sending…" : "Send"}
-            </button>
-            <button
-              type="button"
-              data-testid="chat-end"
-              disabled={chatBusy}
-              onClick={() => void client.chatEnd(runId).catch(() => {})}
-              title="Closes the conversation as finished; the transcript stays on the record"
-              className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted disabled:opacity-40"
-            >
-              End chat
-            </button>
-          </div>
-        </section>
       )}
     </div>
   );
