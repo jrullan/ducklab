@@ -192,3 +192,25 @@ func TestAChatAboutDucklabCarriesTheHarnessDossier(t *testing.T) {
 		}
 	}
 }
+
+// The dossier teaches the HOW, not only the why: a first-time user with
+// nothing but an idea must be walkable, step by step, from a git repo to a
+// cut release. The load-bearing steps are pinned so a future edit cannot
+// quietly drop one.
+func TestTheDossierWalksTheWholePath(t *testing.T) {
+	for _, must := range []string{
+		"git repository",           // step 1: a place to work
+		"ducklings & providers",    // step 2: a team
+		"intake",                   // step 3: say the idea
+		"[verify]",                 // step 5: the gate that makes "done" mean something
+		"Test first",               // step 6: the build discipline
+		"promote",                  // step 8: bugs become tasks
+		"Autopilot",                // step 9: the unattended loop, gated
+		"Cut tags the version",     // step 10: the release
+		"meet them at their",       // pedagogy: never dump the list
+	} {
+		if !strings.Contains(harnessDossier, must) {
+			t.Errorf("the dossier lost %q from the idea-to-release path", must)
+		}
+	}
+}

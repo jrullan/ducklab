@@ -105,7 +105,9 @@ describe("the guide rail", () => {
   it("offers the ask-why chat at its foot", async () => {
     render(<GuideRail client={clientWith(STEPS)} projectId="p" />);
     await waitFor(() => screen.getByTestId("guide-rail"));
-    expect(screen.getByTestId("guide-ask").textContent).toContain("ask why");
+    // The chat teaches the how as well as the why — its dossier walks the
+    // idea-to-release path — and the label says so.
+    expect(screen.getByTestId("guide-ask").textContent).toContain("ask how & why");
   });
 
   it("renders nothing at all when the engine has no step to offer", async () => {

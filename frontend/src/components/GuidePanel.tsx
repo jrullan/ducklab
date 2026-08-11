@@ -201,7 +201,7 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           aboutKind="ducklab"
           aboutId=""
           ducklings={fleet}
-          label="ask why · chat about Ducklab"
+          label="ask how & why · chat about Ducklab"
           placeholder="e.g. why does the test come before the build?"
         />
       </div>
