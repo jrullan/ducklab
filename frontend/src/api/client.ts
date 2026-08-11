@@ -1038,6 +1038,16 @@ export class EngineClient {
       `/v1/projects/${projectId}/reviews/${taskId}`,
     ).then((r) => r.markdown ?? "");
   }
+  projectAutonomy(projectId: string) {
+    return this.request<{ autonomy: string }>("GET", `/v1/projects/${projectId}/autonomy`);
+  }
+
+  projectAutonomySet(projectId: string, autonomy: string) {
+    return this.request<{ autonomy: string }>("PUT", `/v1/projects/${projectId}/autonomy`, {
+      autonomy,
+    });
+  }
+
   autopilotDefaults() {
     return this.request<AutopilotDefaultsView>("GET", "/v1/defaults/autopilot");
   }

@@ -1049,6 +1049,30 @@ func (s *Server) handleAutopilotDefaultsSet(w http.ResponseWriter, r *http.Reque
 	s.json(w, http.StatusOK, s.svc.AutopilotDefaults())
 }
 
+func (s *Server) handleProjectAutonomyGet(w http.ResponseWriter, r *http.Request) {
+	a, err := s.svc.ProjectAutonomy(r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"autonomy": a})
+}
+
+func (s *Server) handleProjectAutonomySet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Autonomy string `json:"autonomy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.ProjectAutonomySet(r.PathValue("id"), req.Autonomy); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"autonomy": req.Autonomy})
+}
+
 func (s *Server) handleAutopilotGet(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.AutopilotStatus(r.PathValue("id")))
 }

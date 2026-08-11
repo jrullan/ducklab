@@ -86,6 +86,43 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 	return view, nil
 }
 
+// ProjectAutonomy reports the project's declared autonomy, empty when it
+// defers to the global default.
+func (s *Service) ProjectAutonomy(projectID string) (string, error) {
+	projCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		return "", err
+	}
+	return string(projCfg.Autonomy), nil
+}
+
+// ProjectAutonomySet persists the project's autonomy to project.toml — the
+// level the triage resolver and run defaults consult FIRST. It had no
+// control anywhere: the harness's own guidance was "edit the TOML", the
+// exact reflex this product exists to remove. Empty clears the override
+// back to the global default.
+func (s *Service) ProjectAutonomySet(projectID, autonomy string) error {
+	if autonomy != "" {
+		if err := config.ValidateAutonomy(config.Autonomy(autonomy)); err != nil {
+			return err
+		}
+	}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return err
+	}
+	projCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		return err
+	}
+	projCfg.Autonomy = config.Autonomy(autonomy)
+	path := filepath.Join(entry.Path, ".ducklab", "project.toml")
+	if err := writeProjectTOML(path, projCfg); err != nil {
+		return fmt.Errorf("write project.toml: %w", err)
+	}
+	return nil
+}
+
 // RosterSet assigns a duckling to a role and persists it to project.toml.
 func (s *Service) RosterSet(ctx context.Context, projectID, role, ducklingID string) (*RosterView, error) {
 	if !validRole(config.Role(role)) {

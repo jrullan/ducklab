@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -154,5 +156,41 @@ func TestAnEmptyModeTakesTheConfiguredDefault(t *testing.T) {
 	s.cfgMu.RUnlock()
 	if buildDefault != "pair" {
 		t.Errorf("build default = %q", buildDefault)
+	}
+}
+
+// The per-project autonomy — the level runs and triage consult FIRST — had
+// no control anywhere: the harness's own guidance was "edit the TOML".
+func TestProjectAutonomyRoundTrip(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry0, _ := s.registry.Get(projectID)
+	if err := os.MkdirAll(filepath.Join(entry0.Path, ".ducklab"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(entry0.Path, ".ducklab", "project.toml"),
+		[]byte("id = \"proj\"\nname = \"proj\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ProjectAutonomySet(projectID, "yolo"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ProjectAutonomy(projectID); a != "yolo" {
+		t.Errorf("autonomy = %q, want yolo", a)
+	}
+	entry, _ := s.registry.Get(projectID)
+	if got := s.triageAutonomy(entry.Path); got != "yolo" {
+		t.Errorf("the triage resolver does not see it: %q", got)
+	}
+	// Empty clears the override back to the default.
+	if err := s.ProjectAutonomySet(projectID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ProjectAutonomy(projectID); a != "" {
+		t.Errorf("clearing left %q", a)
+	}
+	if err := s.ProjectAutonomySet(projectID, "cowboy"); err == nil {
+		t.Error("an invalid autonomy was accepted")
 	}
 }

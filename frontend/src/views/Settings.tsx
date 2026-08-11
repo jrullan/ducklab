@@ -277,6 +277,16 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   // has ONE question, answered at two scopes, and showing them as two
   // unrelated widgets was the confusion itself.
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  // The project's own autonomy — the level runs and triage consult FIRST.
+  // It had no control anywhere; the guidance was "edit the TOML".
+  const [projAutonomy, setProjAutonomy] = useState<string | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    Promise.resolve()
+      .then(() => client.projectAutonomy(projectId))
+      .then((r) => setProjAutonomy(r.autonomy))
+      .catch(() => {});
+  }, [client, projectId]);
   const loadRoster = () => {
     if (!projectId) return;
     Promise.resolve()
@@ -644,6 +654,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
           testid="autopilot-defaults"
         >
           {ap ? (
+            <>
             <div className="flex flex-wrap items-end gap-3 text-sm text-ink-secondary">
               <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
                 tasks per activation
@@ -663,20 +674,57 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
                   className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
                 />
               </label>
-              <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                default autonomy
-                <select
-                  data-testid="ap-autonomy"
-                  value={ap.autonomy}
-                  onChange={(e) => { setAp({ ...ap, autonomy: e.target.value }); touched(); }}
-                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-                >
-                  {["manual", "guarded", "auto", "yolo"].map((a) => (
-                    <option key={a} value={a}>{a}</option>
-                  ))}
-                </select>
-              </label>
             </div>
+
+            {/* One question — how much may a run decide alone — answered at
+                two scopes, chips saying which, exactly like who-does-what.
+                The project's own level wins when set; it saves on pick like
+                every this-project control. */}
+            <h4 className="mt-4 flex items-center gap-2 text-xs text-ink-muted">
+              autonomy <ScopeChip scope="all projects" />
+            </h4>
+            <div className="mt-1 flex items-center gap-2 text-sm text-ink-secondary">
+              <span className="w-24 shrink-0">default</span>
+              <select
+                data-testid="ap-autonomy"
+                value={ap.autonomy}
+                onChange={(e) => { setAp({ ...ap, autonomy: e.target.value }); touched(); }}
+                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+              >
+                {["manual", "guarded", "auto", "yolo"].map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+            </div>
+            {projectId && projAutonomy !== null && (
+              <>
+                <h4 className="mt-3 flex items-center gap-2 text-xs text-ink-muted">
+                  autonomy{" "}
+                  <ScopeChip scope={projAutonomy === "" ? "engine picked" : "this project"} />
+                </h4>
+                <div className="mt-1 flex items-center gap-2 text-sm text-ink-secondary">
+                  <span className="w-24 shrink-0">{projectId}</span>
+                  <select
+                    data-testid="project-autonomy"
+                    value={projAutonomy}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      void client
+                        .projectAutonomySet(projectId, v)
+                        .then(() => setProjAutonomy(v))
+                        .catch(() => {});
+                    }}
+                    className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                  >
+                    <option value="">use the default</option>
+                    {["manual", "guarded", "auto", "yolo"].map((a) => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+            </>
           ) : (
             <p className="text-sm text-ink-muted">This engine does not expose autopilot defaults yet.</p>
           )}
