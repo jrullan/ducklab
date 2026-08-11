@@ -111,7 +111,7 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
         {ducklings.length === 0 ? (
           <p className="text-sm text-ink-muted">None configured.</p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="ducklings">
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(270px,1fr))]" data-testid="ducklings">
             {ducklings.map((d) => (
               <DucklingCard
                 key={d.id}
@@ -265,10 +265,13 @@ function DucklingCard({
 
   return (
     <div className="rounded-card border border-hairline p-3" data-testid={`duckling-card-${d.id}`}>
-      <header className="flex items-center gap-2">
+      {/* In the settings column the cards are narrower than they were as a
+          full page: a long id pushed Edit/Test/Remove out through the card
+          edge. The name truncates, the buttons wrap under it if they must. */}
+      <header className="flex flex-wrap items-center gap-2">
         <DuckAvatar id={d.id} roster={roster} color={color} />
-        <span className="text-md">{d.id}</span>
-        <span className="ml-auto flex gap-1">
+        <span className="text-md min-w-0 flex-1 truncate" title={d.id}>{d.id}</span>
+        <span className="flex shrink-0 gap-1">
           <button
             type="button"
             onClick={onEdit}
@@ -298,8 +301,8 @@ function DucklingCard({
         </span>
       </header>
       <dl className="mt-2 text-sm text-ink-secondary">
-        <div className="flex justify-between"><dt>provider</dt><dd>{d.provider}</dd></div>
-        <div className="flex justify-between"><dt>model</dt><dd className="font-mono">{d.model}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="shrink-0">provider</dt><dd className="min-w-0 break-all text-right">{d.provider}</dd></div>
+        <div className="flex justify-between gap-2"><dt className="shrink-0">model</dt><dd className="min-w-0 break-all text-right font-mono">{d.model}</dd></div>
         <div className="flex justify-between">
           <dt>tools</dt>
           <dd>{d.caps?.native_tools ? "native" : "text protocol"}</dd>
