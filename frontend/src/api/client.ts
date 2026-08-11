@@ -498,7 +498,12 @@ export class EngineClient {
   }
 
   health() {
-    return this.request<{ ok: boolean; version: string; active_runs: number }>("GET", "/v1/health");
+    return this.request<{
+      ok: boolean;
+      version: string;
+      /** The run queue's live counters — what explains a run sitting queued. */
+      queue?: { running: number; waiting: number; limit: number };
+    }>("GET", "/v1/health");
   }
   projects() {
     return this.request<{ items: Project[] }>("GET", "/v1/projects").then((r) => r.items ?? []);

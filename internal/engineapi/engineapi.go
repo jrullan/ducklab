@@ -810,11 +810,14 @@ func (s *Server) json(w http.ResponseWriter, status int, v interface{}) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	running, waiting, limit := s.svc.QueueStats()
 	s.json(w, http.StatusOK, map[string]interface{}{
-		"ok":          true,
-		"version":     s.version,
-		"uptime_s":    0, // TODO: track uptime
-		"active_runs": 0, // TODO: count active runs
+		"ok":      true,
+		"version": s.version,
+		// The queue's live counters. The one time they were needed — a run
+		// stuck in "queued" with nothing visibly running — they were
+		// invisible, and the diagnosis ran through disk archaeology.
+		"queue": map[string]int{"running": running, "waiting": waiting, "limit": limit},
 	})
 }
 

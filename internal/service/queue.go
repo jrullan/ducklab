@@ -157,14 +157,36 @@ func (q *runQueue) poke(s *Service) {
 // promoteLocked pops and reserves the first waiting run that can start.
 // Callers hold q.mu.
 func (q *runQueue) promoteLocked() *queued {
-	for i, w := range q.waiting {
+	for i := 0; i < len(q.waiting); {
+		w := q.waiting[i]
+		// A run that ended while it waited — aborted in the queue, mostly —
+		// must never be promoted: start() stamps whatever it is handed
+		// "running", and a dead run walked out of its grave wearing it.
+		if w.rs.run.Status == "failed" || w.rs.run.Status == "done" {
+			q.waiting = append(q.waiting[:i], q.waiting[i+1:]...)
+			continue
+		}
 		if q.canStart(w) {
 			q.waiting = append(q.waiting[:i], q.waiting[i+1:]...)
 			q.reserve(w)
 			return w
 		}
+		i++
 	}
 	return nil
+}
+
+// remove withdraws a waiting item — its run was aborted while it queued.
+func (q *runQueue) remove(rs *runState) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, w := range q.waiting {
+		if w.rs == rs {
+			q.waiting = append(q.waiting[:i], q.waiting[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // drain removes every waiting run, marking it paused. Used on shutdown so a

@@ -284,3 +284,97 @@ func TestQueueDrainReturnsWaitingRuns(t *testing.T) {
 		t.Errorf("%d runs still waiting after drain", waiting)
 	}
 }
+
+// T-075's relaunch sat queued forever in a project where nothing ran. Two
+// holes, one story: the paused holder was aborted and nothing re-examined
+// the line (the only pokes lived on gate decisions), and a run aborted WHILE
+// queued stayed in the line, waiting to be promoted into "running" from its
+// grave.
+func TestAbortingThePausedHolderWakesTheQueue(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+
+	// The holder: a paused build — projectHeld reports the tree busy.
+	hold := &runlog.Run{
+		ID: "r-hold", ProjectID: projectID, Stage: "build", TaskID: "T-1",
+		Status: "paused", PendingKind: "error", StartedAt: "2026-08-11T00:44:00Z",
+	}
+	wh, err := runlog.NewWriter(entry.Path, hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsHold := &runState{run: hold, writer: wh, runDir: wh.RunDir(), projectPath: entry.Path}
+	s.runsMu.Lock()
+	s.runs["r-hold"] = rsHold
+	s.runsMu.Unlock()
+
+	// The relaunch: queues behind the held tree.
+	started := make(chan struct{})
+	wait := &runlog.Run{
+		ID: "r-wait", ProjectID: projectID, Stage: "build", TaskID: "T-1",
+		Status: "running", StartedAt: "2026-08-11T00:46:00Z",
+	}
+	ww, err := runlog.NewWriter(entry.Path, wait)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsWait := &runState{run: wait, writer: ww, runDir: ww.RunDir(), projectPath: entry.Path}
+	s.runsMu.Lock()
+	s.runs["r-wait"] = rsWait
+	s.runsMu.Unlock()
+	s.queue.submit(s, &queued{rs: rsWait, ctx: context.Background(), exec: func(context.Context) { close(started) }})
+	if wait.Status != "queued" {
+		t.Fatalf("relaunch = %s, want queued behind the paused holder", wait.Status)
+	}
+
+	// Aborting the holder frees the tree — and must wake the line.
+	if err := s.RunAbort(context.Background(), "r-hold"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the holder was aborted and the queued run never started")
+	}
+}
+
+// A run aborted while it waited leaves the line at the abort; and a terminal
+// item that somehow remains is dropped at promotion, never resurrected —
+// start() stamps whatever it is handed "running".
+func TestATerminalRunNeverRisesFromTheWaitingLine(t *testing.T) {
+	q := newRunQueue(1)
+	first := queuedRun(t, "r-1", "proj", func() {})
+	q.mu.Lock()
+	q.reserve(first)
+	q.mu.Unlock()
+
+	dead := queuedRun(t, "r-dead", "proj", func() { t.Error("a dead run executed") })
+	dead.rs.run.Status = "failed"
+	live := queuedRun(t, "r-live", "proj", func() {})
+	live.rs.run.Status = "queued"
+	q.mu.Lock()
+	q.waiting = append(q.waiting, dead, live)
+	q.mu.Unlock()
+
+	q.mu.Lock()
+	q.running--
+	q.perProj["proj"]--
+	next := q.promoteLocked()
+	q.mu.Unlock()
+	if next == nil || next.rs.run.ID != "r-live" {
+		t.Fatalf("promoted %v, want r-live", next)
+	}
+	if len(q.waiting) != 0 {
+		t.Errorf("the dead item still waits: %d in line", len(q.waiting))
+	}
+
+	// And remove() withdraws an aborted waiter directly.
+	back := queuedRun(t, "r-back", "proj", func() {})
+	q.mu.Lock()
+	q.waiting = append(q.waiting, back)
+	q.mu.Unlock()
+	if !q.remove(back.rs) {
+		t.Error("remove did not find the waiting item")
+	}
+}

@@ -949,6 +949,14 @@ func (s *Service) projectHeld(projectID, taskID string) string {
 	return ""
 }
 
+// QueueStats reports the run queue's live counters — the numbers that
+// explain a run sitting in "queued": how many slots are taken, how many wait,
+// against what limit. Surfaced in /v1/health because the one time they were
+// needed they were invisible, and the diagnosis ran through disk archaeology.
+func (s *Service) QueueStats() (running, waiting, limit int) {
+	return s.queue.stats()
+}
+
 // executeDryRun renders prompts without calling any model. Synchronous.
 func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req RunRequest) {
 	defer close(rs.done)
@@ -1392,7 +1400,8 @@ func (s *Service) failRun(rs *runState, err error) {
 	// one click of headroom would have finished the task. It now pauses with
 	// the work in place: lift the binding cap on the run's meter and resume,
 	// or abort and get the restore.
-	if errors.Is(err, agent.ErrBudgetExceeded) && !s.shuttingDown.Load() {
+	if errors.Is(err, agent.ErrBudgetExceeded) && !s.shuttingDown.Load() &&
+		rs.run.Verdict != "ABORTED" {
 		recordSpend(rs, rs.tracker)
 		s.publishSpend(rs, rs.tracker)
 		rs.run.Status = "paused"
@@ -1909,7 +1918,16 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	// failRun restores — after the last writer has stopped.
 	// The run stays in the map: it is still inspectable through RunGet and
 	// still on disk. Deleting it made an aborted run vanish from run list.
-	return w.WriteState()
+	werr := w.WriteState()
+	// The abort changes the queue's answers twice over: a QUEUED run must
+	// leave the line (promoted later it would be resurrected), and whatever
+	// this run was holding — a slot about to free, a paused tree — may now
+	// let a waiting run start. Nothing else re-examines the line on abort:
+	// T-075's relaunch sat queued forever in a project where nothing ran,
+	// because the only pokes lived on the gate decisions.
+	s.queue.remove(rs)
+	s.queue.poke(s)
+	return werr
 }
 
 // RunDir returns the run directory for a run ID, or empty if not found.

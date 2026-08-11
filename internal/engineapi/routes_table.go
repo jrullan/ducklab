@@ -44,7 +44,7 @@ type healthResponse struct {
 	OK         bool   `json:"ok"`
 	Version    string `json:"version"`
 	UptimeS    int    `json:"uptime_s"`
-	ActiveRuns int    `json:"active_runs"`
+	Queue      map[string]int `json:"queue"`
 }
 
 type acceptRequest struct {
