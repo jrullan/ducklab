@@ -1,0 +1,72 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { RunView } from "./RunView";
+import { useRuns } from "../store/runs";
+import type { EngineClient, Run } from "../api/client";
+
+// UX-4: a stage run's subject is a DOCUMENT. The view used to give it the
+// code run's stack — diff, verify and candidates tabs, all empty by design —
+// while the proposal being decided rendered nowhere.
+describe("a spec run paused at its gate", () => {
+  const specRun = {
+    id: "r-spec", project_id: "p", stage: "spec", mode: "council",
+    status: "paused", pending_kind: "gate", verdict: "UNVERIFIED",
+    started_at: "2026-08-11T21:00:00Z",
+    roster: { architect: "luna" },
+    budget: { usd: 0.1, tokens: 50000, turns: 3, wallclock_s: 60,
+      limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+  } as unknown as Run;
+
+  const clientFor = (proposalRunId: string) =>
+    ({
+      run: vi.fn(() => Promise.resolve({ run: specRun, events: [] })),
+      artifact: vi.fn(() =>
+        Promise.resolve({
+          markdown: "old approved spec",
+          proposal: {
+            run_id: proposalRunId,
+            markdown: "## SPEC-030 — OAuth login\n\nThe app accepts Google sign-in.",
+            diff: "",
+          },
+        }),
+      ),
+      runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
+      runVerify: vi.fn(() => Promise.resolve("")),
+      runCandidates: vi.fn(() => Promise.resolve([])),
+      runLLM: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      tasks: vi.fn(() => Promise.resolve([])),
+    }) as unknown as EngineClient;
+
+  beforeEach(() => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+  });
+
+  it("renders the proposed document where the decision happens", async () => {
+    render(<RunView runId="r-spec" client={clientFor("r-spec")} />);
+    const prop = await waitFor(() => screen.getByTestId("stage-proposal"));
+    expect(prop.textContent).toContain("what Accept would approve");
+    expect(prop.textContent).toContain("OAuth login");
+  });
+
+  // An older proposal still pending is someone else's question: showing it on
+  // this run would attribute a document to a run that did not write it.
+  it("shows nothing when the pending proposal belongs to another run", async () => {
+    render(<RunView runId="r-spec" client={clientFor("r-someone-else")} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("stage-proposal")).toBeNull();
+  });
+
+  // Three tabs whose empty states truthfully said "none" taught the eye to
+  // skip the bar entirely, including the one tab that mattered.
+  it("offers only the calls tab — diff, verify and candidates are empty by design", async () => {
+    render(<RunView runId="r-spec" client={clientFor("r-spec")} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.getByTestId("tab-calls")).toBeTruthy();
+    for (const t of ["tab-diff", "tab-verify", "tab-candidates"]) {
+      expect(screen.queryByTestId(t)).toBeNull();
+    }
+  });
+});

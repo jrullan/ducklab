@@ -148,6 +148,7 @@ describe("a run view opened mid-run", () => {
 
   const client = {
     run: vi.fn(() => Promise.resolve({ run: midRun, events: [] })),
+    artifact: vi.fn(() => Promise.resolve({})),
     runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
     runVerify: vi.fn(() => Promise.resolve("")),
     runCandidates: vi.fn(() => Promise.resolve([])),
@@ -205,6 +206,7 @@ describe("a run that stopped running", () => {
 
   const client = {
     run: vi.fn(() => Promise.resolve({ run: pausedRun, events: [] })),
+    artifact: vi.fn(() => Promise.resolve({})),
     runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
     runVerify: vi.fn(() => Promise.resolve("")),
     runCandidates: vi.fn(() => Promise.resolve([])),

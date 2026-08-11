@@ -39,18 +39,18 @@ stream is closed AND requests 401/refuse, the honest UI is one full-screen
 card: "the engine restarted — relaunch the desktop (your token expired with
 it)", not fifteen broken panels. Highest-value fix on this list.
 
-**UX-3 · Nothing says "you are needed" from other views.** The quack says it
-audibly, once; the rail says it if you read it. The Now nav item should
-carry the waiting count as a badge (decisions + questions + chats waiting) —
-the standard idiom for "the inbox has mail", and the visual twin the quack
-lacks. Cheap: `pendingForHuman` already computes it.
+**UX-3 · Nothing says "you are needed" from other views.** ~~Resolved before
+this review noticed~~: the Now nav item already carries the waiting count
+(`nav-badge`), and the window title mirrors it. Review error, kept for
+honesty.
 
 **UX-4 · RunView is one very long page for five different kinds of run.**
 Build, test, chat, stage, triage all render the same stack: lanes, gate,
 budget, tabs, timeline. The chat's own layout (composer pinned, lanes as
-conversation) proved per-kind layouts pay. Stage runs deserve the same
-treatment next: what matters there is the proposal and its warnings, not
-diff/verify/candidates tabs that are empty by design.
+conversation) proved per-kind layouts pay. *Done for stage runs (Aug 11):
+the proposed document renders where the decision happens, and non-code runs
+offer only the calls tab.* Remaining candidates: triage already shows its
+proposals; build/test are the native shape.
 
 ## Tier B — real, not urgent
 

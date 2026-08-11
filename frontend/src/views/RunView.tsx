@@ -71,6 +71,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   }, [client, runId, streamedStatus, streamedPending]);
 
   const [tab, setTab] = useState<Tab>("diff");
+  // A stage run's subject: the document it proposed. Fetched from the
+  // artifact store once the run pauses at its gate, shown only when the
+  // pending proposal is THIS run's — an older proposal would be someone
+  // else's question.
+  const [proposal, setProposal] = useState<{ markdown?: string; diff?: string } | null>(null);
   const [diff, setDiff] = useState("");
   const [testHunks, setTestHunks] = useState("");
   const [verify, setVerify] = useState("");
@@ -186,6 +191,33 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   }, [chainBuild]);
 
+  const stageKind =
+    run?.stage === "intake" ? "requirements" : run?.stage === "spec" ? "spec" : run?.stage === "plan" ? "plan" : "";
+  useEffect(() => {
+    if (!stageKind || !run) {
+      setProposal(null);
+      return;
+    }
+    let live = true;
+    client
+      .artifact(run.project_id, stageKind)
+      .then((a) => {
+        if (!live) return;
+        setProposal(
+          a.proposal && a.proposal.run_id === runId
+            ? { markdown: a.proposal.markdown, diff: a.proposal.diff }
+            : null,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // Refetched when the run's status moves: the proposal lands exactly when
+    // the run pauses at its gate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, runId, stageKind, run?.status]);
+
   if (!run) return <p className="p-4 text-ink-muted">Loading run…</p>;
 
   const roster = Object.values(run.roster ?? {});
@@ -226,6 +258,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // software, and a stage reviewer's findings are about a draft — their
   // destiny is a revision (request changes), not the bug board.
   const codeRun = run.stage === "build" || run.stage === "test";
+  // The tab a non-code run actually shows: its bar offers only calls.
+  const shownTab: Tab = codeRun ? tab : "calls";
   const fileable = codeRun && lastVerdict && lastVerdict.findings.length > 0 &&
     (run.status === "paused" || run.status === "done");
   // A stage proposal whose reviewer asked for changes, waiting at its gate:
@@ -679,6 +713,31 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
+      {/* The stage run's subject IS a document. The lanes show the council
+          arguing; this is the thing being decided, rendered where the
+          decision happens — before this, a spec run paused at its gate
+          offering Accept over a diff tab that is empty by design. */}
+      {proposal && (proposal.markdown || proposal.diff) && (
+        <section data-testid="stage-proposal" className="m-2 rounded-card border border-hairline p-3">
+          <h2 className="text-sm text-ink-muted">the proposal — what Accept would approve</h2>
+          {proposal.markdown && (
+            <div className="mt-2 max-h-[50vh] overflow-y-auto">
+              <Prose body={proposal.markdown} suppress={[]} className="space-y-2 text-sm text-ink-secondary" />
+            </div>
+          )}
+          {proposal.diff && proposal.diff.trim() !== "" && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-ink-muted">
+                what changed against the approved document
+              </summary>
+              <div className="mt-1">
+                <DiffView files={parseDiff(proposal.diff)} />
+              </div>
+            </details>
+          )}
+        </section>
+      )}
+
       {/* What the gate is actually asking about. The proposals were written to
           the event stream in full and nothing rendered them, so a triage run
           paused offering Accept and Reject with the thing being decided nowhere
@@ -971,18 +1030,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           with no candidates is not a broken run — solo, pair and split never
           have any. */}
       <nav className="mt-3 flex gap-2 border-b border-hairline px-4">
-        {([
-          ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
-          ["verify", verify ? undefined : "no output"],
-          ["candidates", candidates.length ? String(candidates.length) : "none"],
-          ["calls", calls.length ? String(calls.length) : "none"],
-        ] as [Tab, string | undefined][]).map(([t, note]) => (
+        {(codeRun
+          ? ([
+              ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
+              ["verify", verify ? undefined : "no output"],
+              ["candidates", candidates.length ? String(candidates.length) : "none"],
+              ["calls", calls.length ? String(calls.length) : "none"],
+            ] as [Tab, string | undefined][])
+          : // A document, triage or chat run has no diff, no gate output and
+            // no candidates BY DESIGN — three dimmed tabs whose empty states
+            // all truthfully said "none" taught the eye to skip the bar
+            // entirely, including the one tab that mattered.
+            ([["calls", calls.length ? String(calls.length) : "none"]] as [Tab, string | undefined][])
+        ).map(([t, note]) => (
           <button
             key={t}
             type="button"
             onClick={() => setTab(t)}
             data-testid={`tab-${t}`}
-            className={`px-2 py-1 text-sm ${tab === t ? "text-ink" : "text-ink-muted"}`}
+            className={`px-2 py-1 text-sm ${shownTab === t ? "text-ink" : "text-ink-muted"}`}
           >
             {t}
             {note && <span className="ml-1 text-xs text-ink-muted">{note}</span>}
@@ -995,7 +1061,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             whole point is that they are read before the decision and not
             after. Not a blocker — sometimes a test is genuinely wrong (05
             §5.3) — so the Accept button stays exactly where it was. */}
-        {tab === "diff" && testHunks && (
+        {shownTab === "diff" && testHunks && (
           <section
             className="mb-3 rounded-card border border-serious p-2"
             data-testid="tests-modified"
@@ -1006,7 +1072,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <DiffView files={parseDiff(testHunks)} />
           </section>
         )}
-        {tab === "diff" &&
+        {shownTab === "diff" &&
           (diff ? (
             <DiffView files={parseDiff(diff)} />
           ) : (
@@ -1016,7 +1082,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 : "This run changed no files."}
             </p>
           ))}
-        {tab === "verify" &&
+        {shownTab === "verify" &&
           (verify ? (
             <pre className="overflow-x-auto bg-surface2 p-2 font-mono text-xs">{verify}</pre>
           ) : (
@@ -1026,7 +1092,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 : "The gate ran and printed nothing, which is what passing looks like."}
             </p>
           ))}
-        {tab === "candidates" &&
+        {shownTab === "candidates" &&
           (candidates.length === 0 ? (
             <p className="p-2 text-sm text-ink-muted">
               Only a tournament produces candidates; this run is {run.mode}.
@@ -1039,7 +1105,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </div>
           ))}
 
-        {tab === "calls" &&
+        {shownTab === "calls" &&
           (calls.length === 0 ? (
             <p className="text-sm text-ink-muted" data-testid="calls-empty">
               No model calls recorded for this run.
