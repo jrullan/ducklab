@@ -348,3 +348,46 @@ func TestDiffIncludesFilesGitHasNeverSeen(t *testing.T) {
 		t.Errorf("a newly created file is missing from the diff:\n%q", diff)
 	}
 }
+
+// The harness's own state never rides a task's diff: flipping the project's
+// autonomy in settings dirtied the tracked project.toml, and T-097's
+// reviewer flagged the "loosened safety constraints" as a critical finding
+// on a task about dashboard tests.
+func TestDiffExcludesTheHarnessDirectory(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".ducklab/project.toml", "autonomy = \"guarded\"\n")
+	write("app.py", "print(1)\n")
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("base"); err != nil {
+		t.Fatal(err)
+	}
+
+	write(".ducklab/project.toml", "autonomy = \"yolo\"\n")
+	write("app.py", "print(2)\n")
+
+	diff, err := g.Diff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "app.py") {
+		t.Error("the task's own change is missing from the diff")
+	}
+	if strings.Contains(diff, "project.toml") {
+		t.Error("harness state rode the task diff")
+	}
+}

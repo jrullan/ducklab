@@ -194,7 +194,12 @@ func (g *Git) Diff() (string, error) {
 	if _, err := g.run("add", "-AN"); err != nil {
 		return "", err
 	}
-	return g.run("diff", "HEAD")
+	// The harness's own state never rides a task's diff. project.toml is a
+	// tracked file, and flipping the project's autonomy in settings dirtied
+	// it — T-097's reviewer then flagged, CRITICAL, that the diff "loosens
+	// harness safety constraints without task justification". It was right
+	// about everything except whose change it was.
+	return g.run("diff", "HEAD", "--", ".", ":^.ducklab")
 }
 
 // DiffStat returns the diff stat, including untracked files.
@@ -202,7 +207,7 @@ func (g *Git) DiffStat() (string, error) {
 	if _, err := g.run("add", "-AN"); err != nil {
 		return "", err
 	}
-	return g.run("diff", "--stat", "HEAD")
+	return g.run("diff", "--stat", "HEAD", "--", ".", ":^.ducklab")
 }
 
 // WorktreeAdd creates a worktree.
@@ -402,7 +407,7 @@ func (g *Git) runWithIndex(indexFile string, args ...string) (string, error) {
 // harnessExclude keeps ducklab's own record out of snapshots. The run log is
 // APPENDED TO while the run executes; a restore that rewound it would destroy
 // the evidence of the very failure being cleaned up after.
-const harnessExclude = `":(exclude).ducklab"`
+const harnessExclude = `":^.ducklab"`
 
 // SnapshotTree captures the working tree — tracked and untracked, .gitignore
 // respected — as a tree object, without touching the real index or the tree.
