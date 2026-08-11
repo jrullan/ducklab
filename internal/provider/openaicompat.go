@@ -419,6 +419,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	var acc toolCallAccumulator
 	var usage Usage
 	var finishReason string
+	var upstream string
 
 	scanner := newSSEScanner(resp.Body)
 	for scanner.scan() {
@@ -444,10 +445,14 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *Usage `json:"usage"`
+			Usage    *Usage `json:"usage"`
+			Provider string `json:"provider"`
 		}
 		if err := json.Unmarshal([]byte(event), &chunk); err != nil {
 			continue
+		}
+		if chunk.Provider != "" {
+			upstream = chunk.Provider
 		}
 		if len(chunk.Choices) > 0 {
 			c := chunk.Choices[0]
@@ -503,6 +508,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	}
 
 	return ChatResponse{
+		Upstream: upstream,
 		Choices: []Choice{{
 			Message: Message{
 				Role:      "assistant",

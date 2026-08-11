@@ -168,6 +168,10 @@ type LLMCall struct {
 	Seq          int                    `json:"seq"`
 	Duckling     string                 `json:"duckling"`
 	Provider     string                 `json:"provider"`
+	// Upstream is the pool member OpenRouter routed the call to. One night a
+	// pool member accepted requests and never streamed a byte, and without
+	// this field the diagnosis read "the task is cursed".
+	Upstream     string                 `json:"upstream,omitempty"`
 	Model        string                 `json:"model"`
 	Role         string                 `json:"role"`
 	Request      map[string]interface{} `json:"request"`

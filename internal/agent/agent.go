@@ -131,6 +131,9 @@ type RunLogWriter interface {
 type LLMCallRecord struct {
 	Duckling     string
 	Provider     string
+	// Upstream is who OpenRouter actually routed the call to — the pool
+	// member, not the gateway. Empty for direct endpoints.
+	Upstream     string
 	Model        string
 	Role         string
 	Request      map[string]interface{}
@@ -380,6 +383,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			loop.RunWriter.AppendLLM(&LLMCallRecord{
 				Duckling:     string(loop.Duckling.ID),
 				Provider:     string(loop.Duckling.Provider),
+				Upstream:     resp.Upstream,
 				Model:        loop.Duckling.Model,
 				Role:         string(turn.Role),
 				Request:      reqMap,

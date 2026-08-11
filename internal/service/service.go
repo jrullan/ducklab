@@ -1047,6 +1047,7 @@ func (a *runLogAdapter) AppendLLM(call *agent.LLMCallRecord) error {
 	err := a.w.AppendLLM(&runlog.LLMCall{
 		Duckling:     call.Duckling,
 		Provider:     call.Provider,
+		Upstream:     call.Upstream,
 		Model:        call.Model,
 		Role:         call.Role,
 		Request:      call.Request,

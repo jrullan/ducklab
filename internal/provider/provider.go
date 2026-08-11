@@ -124,6 +124,12 @@ type ChatResponse struct {
 	Choices      []Choice `json:"choices"`
 	Usage        Usage    `json:"usage"`
 	FinishReason string   `json:"finish_reason"`
+	// Upstream is WHO actually served the call. OpenRouter routes each
+	// request across a pool of providers for the same model, and during the
+	// T-075 night one pool member accepted requests and never streamed a
+	// byte — indistinguishable from "the task is cursed" until the record
+	// says which upstream each call landed on.
+	Upstream string `json:"provider,omitempty"`
 }
 
 // Choice is a response choice.

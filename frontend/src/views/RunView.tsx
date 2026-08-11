@@ -1225,6 +1225,7 @@ function LLMCallRow({ call, color }: { call: LLMCall; color?: string }) {
           <span className="font-mono text-ink-muted">#{call.seq}</span>
           <span style={{ color }}>{call.duckling}</span>
           <span className="text-ink-muted">{call.role}</span>
+          {call.upstream && <span className="text-ink-muted">via {call.upstream}</span>}
           <span className="tabular-nums text-ink-secondary">
             {tokens(inTok)} in · {tokens(outTok)} out
             {/* Part of the output, not on top of it. Shown apart because a

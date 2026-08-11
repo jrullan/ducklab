@@ -388,6 +388,8 @@ export interface LLMCall {
   ts: string;
   duckling: string;
   provider: string;
+  /** The pool member OpenRouter routed this call to, when it says. */
+  upstream?: string;
   model: string;
   role: string;
   request?: Record<string, unknown>;
