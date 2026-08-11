@@ -194,3 +194,33 @@ func TestProjectAutonomyRoundTrip(t *testing.T) {
 		t.Error("an invalid autonomy was accepted")
 	}
 }
+
+// A blind relaunch of a deterministic failure reproduces it exactly. The
+// autopilot's retry carries the previous attempt's failure as a note, and
+// the note is consumed once — a note for one task must not haunt another.
+func TestTheRetryCarriesTheFailureAsANote(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	if _, err := s.AutopilotSet(context.Background(), projectID, true, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	s.autopilotOnFail(&runlog.Run{
+		ID: "r-old", ProjectID: projectID, TaskID: "T-042",
+		Failure: "the gate is still green, so the new test asserts nothing that is not already true",
+	})
+
+	s.apMu.Lock()
+	st := s.autopilots[projectID]
+	task, note := st.retryTask, st.retryNote
+	s.apMu.Unlock()
+	if task != "T-042" {
+		t.Fatalf("retry task = %q", task)
+	}
+	if !strings.Contains(note, "r-old") || !strings.Contains(note, "still green") {
+		t.Errorf("the note does not carry the failure: %q", note)
+	}
+	if !strings.Contains(note, "do not repeat") {
+		t.Errorf("the note does not instruct: %q", note)
+	}
+}

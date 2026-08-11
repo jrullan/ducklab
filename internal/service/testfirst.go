@@ -64,6 +64,9 @@ type TestFirstRequest struct {
 	Build RunRequest `json:"build,omitempty"`
 	// Origin marks a chain started by the autopilot rather than a person.
 	Origin string `json:"origin,omitempty"`
+	// Note rides the test prompt — what only the launcher knows now, which
+	// for an autopilot retry is why the previous attempt failed.
+	Note string `json:"note,omitempty"`
 }
 
 // TestStart writes the failing test for a task.
@@ -101,6 +104,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		Stream:    true,
 		Gate:      string(verify.Gate(projCfg.Verify.Mode)),
 		Origin:    req.Origin,
+		Note:      req.Note,
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
@@ -323,7 +327,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// words the model no longer used.
 		Prompt: testFirstPrompt(
 			s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, req.TaskID),
-			before.Command) + rs.answeredDecisions(),
+			before.Command) + humanNote(req.Note) + rs.answeredDecisions(),
 		ExecContext: ectx,
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
@@ -372,6 +376,22 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	verdict, detail := judgeTestFirst(before, after, diff, projCfg.Verify.TestGlobs)
 	rs.run.Verdict = verdict
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict, "detail": detail})
+
+	// Under yolo with the autopilot driving, a FAILED verdict — green gate,
+	// no test written — is a retryable terminal failure, not an inbox item:
+	// nobody is watching the pause, and the loop's retry carries the reason
+	// as a note. PASSED and UNVERIFIED keep their human gate even here —
+	// installing a spec nobody read stays off the table (P3).
+	if verdict == "FAILED" && rs.run.Autonomy == "yolo" && s.autopilotOn(rs.run.ProjectID) {
+		rs.run.Status = "failed"
+		rs.run.Failure = detail
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
+		restoreAfterUnaccepted(rs)
+		rs.writer.WriteState()
+		s.autopilotOnFail(rs.run)
+		return
+	}
 
 	// Always a human gate, whichever way it went. A failing test is the
 	// specification of the next run, and installing one nobody read would put

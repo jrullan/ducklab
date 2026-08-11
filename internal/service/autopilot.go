@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -41,6 +42,11 @@ type autopilotState struct {
 	// StoppedReason survives the off switch so the rail can say WHY it
 	// stopped rather than showing a silently cleared toggle.
 	StoppedReason string `json:"stopped_reason,omitempty"`
+	// The pending retry's context: which task failed and why. The note is
+	// what turns a retry into a second attempt instead of a repetition —
+	// a blind relaunch of a deterministic failure reproduces it exactly.
+	retryTask string
+	retryNote string
 }
 
 const (
@@ -160,6 +166,16 @@ func (s *Service) autopilotOnFail(run *runlog.Run) {
 	st := s.autopilots[run.ProjectID]
 	st.ConsecutiveFails++
 	fails := st.ConsecutiveFails
+	if run.TaskID != "" {
+		reason := strings.TrimSpace(run.Failure)
+		if reason == "" {
+			reason = "see the run record"
+		}
+		st.retryTask = run.TaskID
+		st.retryNote = fmt.Sprintf(
+			"Previous attempt (%s) failed: %s. Address that cause — do not repeat the same approach unchanged.",
+			run.ID, reason)
+	}
 	s.apMu.Unlock()
 	if fails >= s.autopilotConfigMaxFails() {
 		s.autopilotStop(run.ProjectID,
@@ -210,17 +226,29 @@ func (s *Service) autopilotAdvance(projectID string) {
 	}
 	s.apMu.Unlock()
 
+	// The retry note, when the guide re-suggests the task that just failed.
+	// Read-and-clear either way: a note for one task must not haunt another.
+	s.apMu.Lock()
+	note := ""
+	if st2 := s.autopilots[projectID]; st2 != nil {
+		if st2.retryTask == first.Ref {
+			note = st2.retryNote
+		}
+		st2.retryTask, st2.retryNote = "", ""
+	}
+	s.apMu.Unlock()
+
 	switch first.ID {
 	case "brief":
 		s.autopilotStop(projectID, "every task is done — nothing left to drive")
 	case "build":
 		_, err := s.RunStart(ctx, projectID, RunRequest{
-			TaskID: first.Ref, Autonomy: "yolo", Origin: "autopilot",
+			TaskID: first.Ref, Autonomy: "yolo", Origin: "autopilot", Note: note,
 		})
 		s.autopilotResult(projectID, "build "+first.Ref, err)
 	case "test-first":
 		_, err := s.TestStart(ctx, projectID, TestFirstRequest{
-			TaskID: first.Ref, ThenBuild: true, Origin: "autopilot",
+			TaskID: first.Ref, ThenBuild: true, Origin: "autopilot", Note: note,
 			Build: RunRequest{Autonomy: "yolo", Origin: "autopilot"},
 		})
 		s.autopilotResult(projectID, "test-first "+first.Ref, err)
