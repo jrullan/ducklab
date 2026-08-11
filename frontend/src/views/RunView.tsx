@@ -1073,7 +1073,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       </div>
 
 
-      <div className="px-4">
+      {/* Pinned to the viewport's bottom edge while the transcript above it
+          scrolls — the same "consulted, not read" contract as the rail. It
+          rejoins the normal flow once you scroll past it into the tabs. */}
+      <div className="sticky bottom-0 z-10 border-t border-hairline bg-page px-4 py-2">
         <ToolTimeline calls={timeline} />
       </div>
 
