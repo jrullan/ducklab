@@ -335,7 +335,21 @@ export function Board({
         </div>
 
         {filing && (
-          <div className="mb-3 space-y-2 rounded-card border border-hairline p-3" data-testid="bug-form">
+          <div
+            className="mb-3 space-y-2 rounded-card border border-hairline p-3"
+            data-testid="bug-form"
+            // A screenshot DROPPED on the form did nothing, silently — the
+            // reporter walked away sure it was attached, and the bug went to
+            // triage imageless (B-036). The whole form is a drop target now.
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const dropped = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                f.type.startsWith("image/"),
+              );
+              if (dropped.length > 0) setBugFiles((prev) => [...prev, ...dropped]);
+            }}
+          >
             <input
               aria-label="bug title"
               data-testid="bug-title"
@@ -379,8 +393,26 @@ export function Board({
                   onChange={(e) => setBugFiles(Array.from(e.target.files ?? []))}
                   className="text-xs"
                 />
-                {bugFiles.length > 0 && `${bugFiles.length} image${bugFiles.length === 1 ? "" : "s"}`}
               </label>
+              {/* Named, not counted: "1 image" reads the same whether it is
+                  the right screenshot or a stale pick. */}
+              {bugFiles.map((f, i) => (
+                <span
+                  key={`${f.name}-${i}`}
+                  data-testid="bug-file-chip"
+                  className="flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary"
+                >
+                  {f.name}
+                  <button
+                    type="button"
+                    aria-label={`remove ${f.name}`}
+                    onClick={() => setBugFiles(bugFiles.filter((_, j) => j !== i))}
+                    className="text-ink-muted"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
               <button
                 type="button"
                 data-testid="bug-submit"
@@ -401,7 +433,14 @@ export function Board({
                           r.onerror = () => rej(new Error(`could not read ${f.name}`));
                           r.readAsDataURL(f);
                         });
-                        await client.bugAttach(projectId, b.id, f.name, dataUrl.split(",", 2)[1] ?? "");
+                        await client.bugAttach(projectId, b.id, f.name, dataUrl.split(",", 2)[1] ?? "").catch((err) => {
+                          // The bug exists; only the evidence failed to ride.
+                          // A generic error over an open form hid that split
+                          // state completely.
+                          throw new Error(
+                            `${b.id} was filed, but ${f.name} failed to attach (${err instanceof Error ? err.message : String(err)}) — add it from the bug's gallery`,
+                          );
+                        });
                       }
                       setBugTitle("");
                       setBugBody("");
