@@ -166,6 +166,8 @@ func (r *Registry) registerBuiltins() {
 	// ceiling always did); bug_file is granted only by an explicit belt —
 	// the chat's — and sits in no role's ceiling on purpose.
 	r.Register(&BugRead{})
+	r.Register(&RunListTool{})
+	r.Register(&RunReadTool{})
 	r.Register(&BugFile{})
 }
 

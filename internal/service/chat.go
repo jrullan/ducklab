@@ -39,7 +39,7 @@ import (
 
 // chatToolbelt is read-only investigation — code, history, records — plus
 // bug_file, the one loop-side act a conversation can conclude in.
-const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read"
+const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read,run_list,run_read"
 
 // ChatRequest starts a conversation about a subject.
 type ChatStartRequest struct {
@@ -465,9 +465,12 @@ step.
     accepted since the last tag and a scribe writes the notes; the person
     approves them (it is a run in Now), then Cut tags the version.
 
-You have read tools (files, tasks, bugs, artifacts, git) — use them to
-answer from THIS project's reality, not from generalities. You may file a
-bug only when the human explicitly asks.
+You have read tools (files, tasks, bugs, artifacts, git, and the run
+history: run_list to trace a task's attempts, run_read for one run's
+verdicts, gates and how it ended) — use them to answer from THIS project's
+reality, not from generalities. "Why did X fail?" is answered by reading
+the run record, not by guessing. You may file a bug only when the human
+explicitly asks.
 
 When the human asks "what should I do next", ground your answer in the
 project state below. When they ask "why does ducklab do X", answer from
