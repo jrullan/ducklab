@@ -125,6 +125,22 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
       data-testid="guide-rail"
       className="w-60 shrink-0 overflow-y-auto border-r border-hairline p-3"
     >
+      {/* First thing in the panel, because it acts on ALL of it — parked
+          beside "next steps" it read as hiding that one section. */}
+      <div className="mb-2 flex justify-end">
+        <button
+          type="button"
+          data-testid="guide-hide"
+          onClick={() => {
+            localStorage.setItem(STORE, "off");
+            setOpen(false);
+          }}
+          title="collapse the guide (a strip stays to bring it back)"
+          className="text-xs text-ink-muted underline"
+        >
+          hide
+        </button>
+      </div>
       {active.length > 0 && (
         <section data-testid="rail-running" className="mb-3">
           <h2 className="text-sm text-ink-muted">running</h2>
@@ -166,21 +182,7 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
         )}
       </section>
 
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm text-ink-muted">next steps</h2>
-        <button
-          type="button"
-          data-testid="guide-hide"
-          onClick={() => {
-            localStorage.setItem(STORE, "off");
-            setOpen(false);
-          }}
-          title="collapse the guide (a strip stays to bring it back)"
-          className="text-xs text-ink-muted underline"
-        >
-          hide
-        </button>
-      </div>
+      <h2 className="text-sm text-ink-muted">next steps</h2>
       <ol className="mt-2 space-y-3">
         {steps.slice(0, 6).map((s, i) => (
           <li key={`${s.id}:${s.ref ?? i}`} data-testid="guide-step">
