@@ -560,7 +560,13 @@ export function touchesTests(files: readonly DiffFile[]): boolean {
  * with no text: invisible, unclickable, and the only runs that ever pause at a
  * human gate. */
 export function runLabel(run: { task_id?: string; stage?: string; id: string }): string {
-  return run.task_id || run.stage || run.id;
+  // The stage ALWAYS shows. A test run and a build run of the same task both
+  // read "T-083", and the person who launched a TDD chain could not tell
+  // which phase they were looking at — nor notice when a relaunch quietly
+  // became build-only.
+  const stage = run.stage || "";
+  if (run.task_id) return stage ? `${stage} · ${run.task_id}` : run.task_id;
+  return stage || run.id;
 }
 
 /** A report the triager could not classify, and why. */

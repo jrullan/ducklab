@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bug"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -233,6 +235,21 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	if err != nil {
 		return nil, err
 	}
+
+	// The config tripwire, first and alone. A project.toml that does not
+	// parse fails EVERY run at load — a duplicated key did exactly that,
+	// and every relaunch died with the same one-line error the person had
+	// to excavate per-run. Broken config outranks every other suggestion,
+	// and nothing else the guide would say is trustworthy while it stands.
+	if _, cfgErr := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); cfgErr != nil {
+		return []NextStep{{
+			ID:     "config",
+			Action: "Fix .ducklab/project.toml — it does not parse, and every run will fail at load",
+			Reason: cfgErr.Error(),
+			Kind:   "project",
+		}}, nil
+	}
+
 	st := projectSnapshot{}
 
 	if doc, lerr := artifact.Load(entry.Path, artifact.KindRequirements); lerr == nil && doc != nil && len(doc.Sections) > 0 {

@@ -68,3 +68,17 @@ describe("the cost column", () => {
     expect(cells).toContain("—");
   });
 });
+
+// A test run and a build run of the same task both read "T-083", so the
+// person who launched a TDD chain could not tell which phase finished — nor
+// notice when a relaunch quietly became build-only. The stage always shows.
+import { runLabel } from "../lib/runview";
+describe("runLabel names the kind", () => {
+  it("puts the stage beside the task, and stands alone without one", () => {
+    expect(runLabel({ id: "r1", stage: "test", task_id: "T-083" })).toBe("test · T-083");
+    expect(runLabel({ id: "r1", stage: "build", task_id: "T-083" })).toBe("build · T-083");
+    expect(runLabel({ id: "r1", stage: "spec" })).toBe("spec");
+    expect(runLabel({ id: "r1" })).toBe("r1");
+  });
+});
+

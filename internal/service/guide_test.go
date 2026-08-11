@@ -170,3 +170,33 @@ func TestFinalDissentReadsTheLastVerdict(t *testing.T) {
 		t.Error("a run with no reviewer invented a dissent")
 	}
 }
+
+// A project.toml that does not parse fails EVERY run at load — a duplicated
+// key did exactly that, and each relaunch died with the same excavated
+// one-liner. Broken config outranks every other suggestion: nothing else the
+// guide would say is trustworthy while it stands.
+func TestBrokenConfigOutranksEverything(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+	tomlPath := filepath.Join(entry.Path, ".ducklab", "project.toml")
+	if err := os.MkdirAll(filepath.Dir(tomlPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The exact real-world break: one key defined twice.
+	broken := "[verify]\n  timeout_s = 120\n  timeout_s = 900\n"
+	if err := os.WriteFile(tomlPath, []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	steps, err := s.ProjectNext(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 || steps[0].ID != "config" {
+		t.Fatalf("guide = %v, want exactly the config tripwire", ids(steps))
+	}
+	if !strings.Contains(steps[0].Reason, "already been defined") {
+		t.Errorf("the reason does not carry the parse error: %q", steps[0].Reason)
+	}
+}
