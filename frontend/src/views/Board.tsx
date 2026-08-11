@@ -1021,7 +1021,7 @@ function BugRail({
         <Row label="task" value={bug.task_id} />
       </dl>
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
-      <BugAttachments bug={bug} client={client} projectId={projectId} />
+      <BugAttachments bug={bug} client={client} projectId={projectId} onChanged={onDone} />
       {/* What to do next depends on where the bug is, and the loop's rules live
           in the engine. This used to print the CLI command that fits — honest,
           but it made the operate loop the one loop a desktop-only user could not
@@ -1035,7 +1035,7 @@ function BugRail({
 
 /** The report's screenshots, inline. The bytes come through the client (an
  * <img src> cannot carry the auth header) and render as local blob URLs. */
-function BugAttachments({ bug, client, projectId }: { bug: Bug; client: EngineClient; projectId: string }) {
+function BugAttachments({ bug, client, projectId, onChanged }: { bug: Bug; client: EngineClient; projectId: string; onChanged?: () => void }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const names = bug.attachments ?? [];
   useEffect(() => {
@@ -1059,7 +1059,38 @@ function BugAttachments({ bug, client, projectId }: { bug: Bug; client: EngineCl
   if (names.length === 0) return null;
   return (
     <div data-testid="bug-attachments-gallery" className="space-y-1">
-      <div className="text-xs text-ink-muted">attachments</div>
+      <div className="flex items-center gap-2 text-xs text-ink-muted">
+        attachments
+        {/* Evidence arrives late: a screenshot that missed the filing form
+            had NOWHERE to go — the gallery was read-only, and B-036 went to
+            triage imageless while its screenshot sat on the reporter's
+            desktop. */}
+        <label className="cursor-pointer underline">
+          add
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            data-testid="bug-attach-more"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              void (async () => {
+                for (const f of files) {
+                  const dataUrl = await new Promise<string>((res, rej) => {
+                    const r = new FileReader();
+                    r.onload = () => res(String(r.result));
+                    r.onerror = () => rej(new Error(`could not read ${f.name}`));
+                    r.readAsDataURL(f);
+                  });
+                  await client.bugAttach(projectId, bug.id, f.name, dataUrl.split(",", 2)[1] ?? "");
+                }
+              })().then(() => onChanged?.()).catch(() => {});
+            }}
+          />
+        </label>
+      </div>
       <div className="flex flex-wrap gap-2">
         {names.map((n) =>
           urls[n] ? (

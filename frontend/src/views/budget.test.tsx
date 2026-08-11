@@ -176,7 +176,8 @@ describe("mode line-ups in Settings", () => {
     const fns = screen.getByTestId("function-lineups").textContent!;
     expect(fns).toContain("drafts");
     expect(fns).toContain("critic 1");
-    expect(fns).toContain("all projects");
+    // The scope rides the stage header as a pill now.
+    expect(screen.getByTestId("stage-documents").textContent).toContain("all projects");
   });
 
   // A duckling already seated leaves the other dropdowns' menus: one model

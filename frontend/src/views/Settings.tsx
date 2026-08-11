@@ -9,6 +9,25 @@ import type { BudgetView, EngineClient, ModeDefaultsView, RosterEntry } from "..
 /** The workflow stages served by a single function role. Only these roles
  * appear as rows — implementer and reviewer are covered by the task modes,
  * and repeating them here would re-create the two-widget confusion. */
+const FUNCTION_ORDER = ["triager", "advisor", "scribe"];
+
+/** The scope, as a pill the eye can file: neutral for the global defaults,
+ * green for a choice this project made, amber for one the engine is making
+ * on the person's behalf — an invitation to claim it. */
+function ScopeChip({ scope }: { scope: "all projects" | "this project" | "engine picked" }) {
+  const tone =
+    scope === "this project"
+      ? "border-good text-good"
+      : scope === "engine picked"
+        ? "border-warning text-warning"
+        : "border-hairline text-ink-muted";
+  return (
+    <span className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${tone}`} data-testid="scope-chip">
+      {scope}
+    </span>
+  );
+}
+
 const WORKFLOW_ROWS: Record<string, { stage: string; help: string }> = {
   triager: { stage: "bugs — triage", help: "classifies reports: severity, duplicates, promotability" },
   advisor: { stage: "gates — advice", help: "drafts an answer while a paused run waits for you" },
@@ -404,213 +423,215 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       {fleet.length > 1 && (
         <SettingsCard
           title="your team"
-          desc="who does the work: the modes the launcher opens on, and which model sits in each seat"
+          desc="who does what, in the order the workflow asks it"
         >
           {/* ONE table, ordered by the workflow itself: documents, tasks,
-              bugs, gates, releases. The old layout asked the person to know
-              that "modes" and "roster" were two halves of the same question;
-              this asks nothing — each stage names who serves it, and a chip
-              says at which scope. */}
-          <h3 className="text-xs text-ink-muted">who does what</h3>
+              bugs, gates, releases. Each stage is a row with a strong name,
+              its plain-words detail, and a scope PILL on the right edge —
+              the previous draft set every label in the same muted size and
+              the page read as fog (the user's verdict: horrible). */}
+          <div className="divide-y divide-hairline">
 
-          <h4 className="mt-2 text-xs text-ink-muted" title="the council drafts intake, spec and plan — a drafter plus a critic per further seat">
-            documents — intake → spec → plan
-            <span className="ml-2 normal-case">all projects</span>
-          </h4>
-          <div className="mt-1 space-y-1" data-testid="function-lineups">
-            {(() => {
-              const mode = "council";
-              const picked = lineups[mode] ?? [];
-              const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
-              const setSeat = (i: number, id: string) => {
-                const next = [...picked];
-                while (next.length <= i) next.push("");
-                next[i] = id;
-                setLineups({ ...lineups, [mode]: next });
-                touched();
-              };
-              return (
-                <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-                  <span className="w-24 shrink-0" title="drafts intake, spec and plan — a drafter plus a critic per further seat">
-                    council
-                  </span>
-                  <span className="text-xs text-ink-muted">all projects ·</span>
-                  {Array.from({ length: cols }, (_, i) => (
-                    <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                      {seatLabel(mode, i)}
-                      <select
-                        value={picked[i] ?? ""}
-                        onChange={(e) => setSeat(i, e.target.value)}
-                        data-testid={`seat-${mode}-${i}`}
-                        className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+            <section className="py-3 first:pt-0" data-testid="stage-documents">
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm font-medium text-ink">documents</span>
+                <span className="text-xs text-ink-muted">intake → spec → plan</span>
+                <ScopeChip scope="all projects" />
+              </div>
+              <div className="mt-2" data-testid="function-lineups">
+                {(() => {
+                  const mode = "council";
+                  const picked = lineups[mode] ?? [];
+                  const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
+                  const setSeat = (i: number, id: string) => {
+                    const next = [...picked];
+                    while (next.length <= i) next.push("");
+                    next[i] = id;
+                    setLineups({ ...lineups, [mode]: next });
+                    touched();
+                  };
+                  return (
+                    <div className="flex flex-wrap items-end gap-2 text-sm text-ink-secondary">
+                      <span
+                        className="w-24 shrink-0 self-center text-ink-secondary"
+                        title="the council drafts the documents — a drafter plus a critic per further seat"
                       >
-                        <option value="">—</option>
-                        {fleet
-                          .filter((id) => id === picked[i] || !picked.includes(id))
-                          .map((id) => (
-                            <option key={id} value={id}>
-                              {id}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                  ))}
-                  <button
-                    type="button"
-                    data-testid={`seat-add-${mode}`}
-                    onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
-                    className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
-                    title="add a critic seat"
-                  >
-                    +
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
-
-          <h4 className="mt-4 text-xs text-ink-muted">
-            tasks — build & test
-            <span className="ml-2 normal-case">all projects</span>
-          </h4>
-          <h5 className="mt-1 text-xs text-ink-muted">default modes</h5>
-          {/* The person who always builds in pair and tests in solo re-picked
-              both on every task; the launcher should open on their habit. */}
-          <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary" data-testid="default-modes">
-            <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-              build
-              <select
-                data-testid="default-build-mode"
-                value={buildMode}
-                onChange={(e) => { setBuildMode(e.target.value); touched(); }}
-                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-              >
-                <option value="">solo (unset)</option>
-                {Object.keys(modes.script_rounds ?? {})
-                  .filter((m) => m !== "council")
-                  .sort()
-                  .map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-              test first
-              <select
-                data-testid="default-test-mode"
-                value={testMode}
-                onChange={(e) => { setTestMode(e.target.value); touched(); }}
-                className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-              >
-                <option value="">solo (unset)</option>
-                <option value="solo">solo</option>
-                <option value="pair">pair</option>
-              </select>
-            </label>
-          </div>
-
-          <h5 className="mt-2 text-xs text-ink-muted">seats per mode</h5>
-          {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
-              ten models made the old row a wall of boxes, and the row grew
-              with every duckling added. Seats are the stable dimension — solo
-              has one, pair exactly two, the open modes start at two and grow
-              one seat at a time. Each seat names the role its position
-              carries, because the position IS the assignment. */}
-          <div className="mt-1 space-y-1" data-testid="mode-lineups">
-            {Object.keys(modes.script_rounds ?? {})
-              .filter((m) => m !== "council")
-              .sort()
-              .map((mode) => {
-                const seats = modes.seats?.[mode] ?? 0;
-                const picked = lineups[mode] ?? [];
-                const cols =
-                  seats > 0
-                    ? seats
-                    : Math.max(2, picked.length, extraCols[mode] ?? 0);
-                const setSeat = (i: number, id: string) => {
-                  const next = [...picked];
-                  while (next.length <= i) next.push("");
-                  next[i] = id;
-                  setLineups({ ...lineups, [mode]: next });
-                  touched();
-                };
-                return (
-                  <div key={mode} className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-                    <span className="w-24 shrink-0">{mode}</span>
-                    {Array.from({ length: cols }, (_, i) => (
-                      <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                        {seatLabel(mode, i)}
-                        <select
-                          value={picked[i] ?? ""}
-                          onChange={(e) => setSeat(i, e.target.value)}
-                          data-testid={`seat-${mode}-${i}`}
-                          className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
-                        >
-                          <option value="">—</option>
-                          {fleet
-                            .filter((id) => id === picked[i] || !picked.includes(id))
-                            .map((id) => (
-                              <option key={id} value={id}>
-                                {id}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                    ))}
-                    {seats === 0 && (
+                        council
+                      </span>
+                      {Array.from({ length: cols }, (_, i) => (
+                        <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                          {seatLabel(mode, i)}
+                          <select
+                            value={picked[i] ?? ""}
+                            onChange={(e) => setSeat(i, e.target.value)}
+                            data-testid={`seat-${mode}-${i}`}
+                            className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+                          >
+                            <option value="">—</option>
+                            {fleet
+                              .filter((id) => id === picked[i] || !picked.includes(id))
+                              .map((id) => (
+                                <option key={id} value={id}>{id}</option>
+                              ))}
+                          </select>
+                        </label>
+                      ))}
                       <button
                         type="button"
                         data-testid={`seat-add-${mode}`}
                         onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
-                        className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
-                        title="add a seat"
+                        className="rounded border border-hairline px-2 py-0.5 text-xs"
+                        title="add a critic seat"
                       >
                         +
                       </button>
-                    )}
-                  </div>
-                );
-              })}
-          </div>
-          <p className="mt-2 text-xs text-ink-muted">
-            Each seat names the role its position carries: solo seats one model,
-            pair an implementer and its reviewer. Empty uses the built-in
-            default.
-          </p>
-
-          {roster.filter((e) => WORKFLOW_ROWS[e.role]).map((e) => (
-            <div key={e.role} className="mt-4" data-testid={`fn-${e.role}`}>
-              <h4 className="text-xs text-ink-muted">
-                {WORKFLOW_ROWS[e.role]!.stage}
-                <span className="ml-2">
-                  {e.source === "project" ? "this project" : "engine picked"}
-                </span>
-              </h4>
-              <div className="mt-1 flex items-center gap-2 text-sm text-ink-secondary">
-                <span className="w-24 shrink-0" title={WORKFLOW_ROWS[e.role]!.help}>{e.role}</span>
-                <select
-                  aria-label={`duckling for ${e.role}`}
-                  data-testid={`roster-select-${e.role}`}
-                  value={e.duckling}
-                  onChange={(ev) =>
-                    void client
-                      .rosterSet(projectId!, e.role, ev.target.value)
-                      .then(loadRoster)
-                      .catch(() => {})
-                  }
-                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-                >
-                  {fleet.map((id) => (
-                    <option key={id} value={id}>{id}</option>
-                  ))}
-                </select>
+                    </div>
+                  );
+                })()}
               </div>
-            </div>
-          ))}
+            </section>
 
-          <p className="mt-2 text-xs text-ink-muted">
-            Seats ride the Save button; the function rows above save the moment
-            you pick.
+            <section className="py-3" data-testid="stage-tasks">
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm font-medium text-ink">tasks</span>
+                <span className="text-xs text-ink-muted">test-first & build</span>
+                <ScopeChip scope="all projects" />
+              </div>
+              {/* The launcher's opening picks, aligned into the same label
+                  column as the seat rows below — "default modes" floated as
+                  its own orphan heading before. */}
+              <div className="mt-2 flex flex-wrap items-end gap-2 text-sm text-ink-secondary" data-testid="default-modes">
+                <span className="w-24 shrink-0 self-center" title="what the launchers open on">defaults</span>
+                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                  build
+                  <select
+                    data-testid="default-build-mode"
+                    value={buildMode}
+                    onChange={(e) => { setBuildMode(e.target.value); touched(); }}
+                    className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                  >
+                    <option value="">solo (unset)</option>
+                    {Object.keys(modes.script_rounds ?? {})
+                      .filter((m) => m !== "council")
+                      .sort()
+                      .map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                  test first
+                  <select
+                    data-testid="default-test-mode"
+                    value={testMode}
+                    onChange={(e) => { setTestMode(e.target.value); touched(); }}
+                    className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+                  >
+                    <option value="">solo (unset)</option>
+                    <option value="solo">solo</option>
+                    <option value="pair">pair</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-2 space-y-2" data-testid="mode-lineups">
+                {Object.keys(modes.script_rounds ?? {})
+                  .filter((m) => m !== "council")
+                  .sort()
+                  .map((mode) => {
+                    const seats = modes.seats?.[mode] ?? 0;
+                    const picked = lineups[mode] ?? [];
+                    const cols =
+                      seats > 0
+                        ? seats
+                        : Math.max(2, picked.length, extraCols[mode] ?? 0);
+                    const setSeat = (i: number, id: string) => {
+                      const next = [...picked];
+                      while (next.length <= i) next.push("");
+                      next[i] = id;
+                      setLineups({ ...lineups, [mode]: next });
+                      touched();
+                    };
+                    return (
+                      <div key={mode} className="flex flex-wrap items-end gap-2 text-sm text-ink-secondary">
+                        <span className="w-24 shrink-0 self-center">{mode}</span>
+                        {Array.from({ length: cols }, (_, i) => (
+                          <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                            {seatLabel(mode, i)}
+                            <select
+                              value={picked[i] ?? ""}
+                              onChange={(e) => setSeat(i, e.target.value)}
+                              data-testid={`seat-${mode}-${i}`}
+                              className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+                            >
+                              <option value="">—</option>
+                              {fleet
+                                .filter((id) => id === picked[i] || !picked.includes(id))
+                                .map((id) => (
+                                  <option key={id} value={id}>{id}</option>
+                                ))}
+                            </select>
+                          </label>
+                        ))}
+                        {seats === 0 && (
+                          <button
+                            type="button"
+                            data-testid={`seat-add-${mode}`}
+                            onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
+                            className="rounded border border-hairline px-2 py-0.5 text-xs"
+                            title="add a seat"
+                          >
+                            +
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </section>
+
+            {FUNCTION_ORDER.map((role) => {
+              const e = roster.find((r) => r.role === role);
+              if (!e || !WORKFLOW_ROWS[role]) return null;
+              const row = WORKFLOW_ROWS[role]!;
+              return (
+                <section key={role} className="py-3" data-testid={`fn-${role}`}>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-sm font-medium text-ink">{row.stage.split(" — ")[0]}</span>
+                    <span className="text-xs text-ink-muted">{row.stage.split(" — ")[1]}</span>
+                    {/* Hidden text keeps the stage's full name greppable and
+                        pinned ("bugs — triage") while the visible header
+                        splits it into name and detail. */}
+                    <span className="sr-only">{row.stage}</span>
+                    <ScopeChip scope={e.source === "project" ? "this project" : "engine picked"} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+                    <span className="w-24 shrink-0" title={row.help}>{e.role}</span>
+                    <select
+                      aria-label={`duckling for ${e.role}`}
+                      data-testid={`roster-select-${e.role}`}
+                      value={e.duckling}
+                      onChange={(ev) =>
+                        void client
+                          .rosterSet(projectId!, e.role, ev.target.value)
+                          .then(loadRoster)
+                          .catch(() => {})
+                      }
+                      className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+                    >
+                      {fleet.map((id) => (
+                        <option key={id} value={id}>{id}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-ink-muted">{row.help}</span>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+
+          <p className="mt-3 text-xs text-ink-muted">
+            Seat pickers ride the Save button below; the this-project pickers
+            (triager, advisor, scribe) apply the moment you choose.
           </p>
         </SettingsCard>
       )}

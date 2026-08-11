@@ -367,6 +367,13 @@ func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 	if cfg.Caps.ContextTokens != nil {
 		d.Caps.ContextTokens = *cfg.Caps.ContextTokens
 	}
+	// Same disease as native_tools above, found the same way: vision was
+	// declared in config, saved faithfully, and dropped here — so the list
+	// reported false for every duckling and the edit form un-ticked the box
+	// the person had just ticked.
+	if cfg.Caps.Vision != nil {
+		d.Caps.Vision = *cfg.Caps.Vision
+	}
 	return d
 }
 
