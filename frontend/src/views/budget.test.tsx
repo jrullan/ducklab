@@ -334,3 +334,31 @@ describe("mode seat capacity in Settings", () => {
     expect((screen.getByTestId("seat-council-2") as HTMLSelectElement).value).toBe("pato-luna");
   });
 });
+
+// The workflow has ONE question — who does what — answered at two scopes.
+// The fused table shows the function rows (triager, advisor, scribe) beside
+// the seats, each with its scope chip, saving the moment a pick is made.
+describe("the who-does-what table", () => {
+  it("shows a function row with its scope and saves on pick", async () => {
+    const rosterSet = vi.fn(() => Promise.resolve({}));
+    const client = clientWith({
+      roster: vi.fn(() =>
+        Promise.resolve({
+          entries: [
+            { role: "triager", duckling: "pato-atom", source: "project" },
+            { role: "scribe", duckling: "pato-sonnet", source: "default" },
+          ],
+        }),
+      ),
+      rosterSet,
+    } as unknown as Partial<EngineClient>);
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="1" connection="open" client={client} projectId="p" />);
+    const triager = await screen.findByTestId("fn-triager");
+    expect(triager.textContent).toContain("bugs — triage");
+    expect(triager.textContent).toContain("this project");
+    expect(screen.getByTestId("fn-scribe").textContent).toContain("engine picked");
+
+    fireEvent.change(screen.getByTestId("roster-select-triager"), { target: { value: "pato-sonnet" } });
+    await waitFor(() => expect(rosterSet).toHaveBeenCalledWith("p", "triager", "pato-sonnet"));
+  });
+});

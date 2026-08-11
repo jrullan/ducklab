@@ -4,7 +4,16 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { quack } from "../lib/attention";
 import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
-import type { BudgetView, EngineClient, ModeDefaultsView } from "../api/client";
+import type { BudgetView, EngineClient, ModeDefaultsView, RosterEntry } from "../api/client";
+
+/** The workflow stages served by a single function role. Only these roles
+ * appear as rows — implementer and reviewer are covered by the task modes,
+ * and repeating them here would re-create the two-widget confusion. */
+const WORKFLOW_ROWS: Record<string, { stage: string; help: string }> = {
+  triager: { stage: "bugs — triage", help: "classifies reports: severity, duplicates, promotability" },
+  advisor: { stage: "gates — advice", help: "drafts an answer while a paused run waits for you" },
+  scribe: { stage: "releases — notes", help: "writes the release notes from the accepted work" },
+};
 
 /** One titled card per concern. The page was a flat column of ten unrelated
  * headings — a cognitive disaster to scan (the user's words). Cards group by
@@ -92,10 +101,7 @@ export function Settings({
       {section === "team" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
       )}
-      {client && <ConfigSection client={client} section={section} />}
-      {section === "team" && client && projectId && (
-        <Ducklings client={client} projectId={projectId} only="roster" />
-      )}
+      {client && <ConfigSection client={client} section={section} projectId={projectId} />}
       {section === "fleet" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
       )}
@@ -217,7 +223,7 @@ function QuackToggle() {
  * of that decision across buttons makes the reader work out which of their
  * changes each one carries, and being wrong is silent.
  */
-function ConfigSection({ client, section }: { client: EngineClient; section: SettingsSection }) {
+function ConfigSection({ client, section, projectId }: { client: EngineClient; section: SettingsSection; projectId?: string }) {
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
   const [fleet, setFleet] = useState<string[]>([]);
@@ -246,6 +252,20 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
   // loading early-return: a hook below a conditional return renders a
   // different hook count per pass, which React rejects wholesale.
   const [ap, setAp] = useState<{ max_tasks: string; max_fails: string; autonomy: string } | null>(null);
+  // The per-project function assignments (triager, advisor, scribe), fused
+  // into the same "who does what" table as the global seats — the workflow
+  // has ONE question, answered at two scopes, and showing them as two
+  // unrelated widgets was the confusion itself.
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const loadRoster = () => {
+    if (!projectId) return;
+    Promise.resolve()
+      .then(() => client.roster(projectId))
+      .then((r) => setRoster(r.entries))
+      .catch(() => {});
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadRoster, [client, projectId]);
   useEffect(() => {
     Promise.resolve()
       .then(() => client.autopilotDefaults())
@@ -385,13 +405,74 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
           title="your team"
           desc="who does the work: the modes the launcher opens on, and which model sits in each seat"
         >
-          {/* Council is a FUNCTION (it writes the documents), not a way to
-              execute a task — the same script machinery underneath let it
-              leak into the task-mode pickers. The carve is the user's own:
-              task modes answer "how is a task implemented", functions answer
-              "who holds this responsibility". */}
-          <h3 className="text-xs text-ink-muted">task modes — who implements</h3>
-          <h4 className="mt-2 text-xs text-ink-muted">default modes</h4>
+          {/* ONE table, ordered by the workflow itself: documents, tasks,
+              bugs, gates, releases. The old layout asked the person to know
+              that "modes" and "roster" were two halves of the same question;
+              this asks nothing — each stage names who serves it, and a chip
+              says at which scope. */}
+          <h3 className="text-xs text-ink-muted">who does what</h3>
+
+          <h4 className="mt-2 text-xs text-ink-muted" title="the council drafts intake, spec and plan — a drafter plus a critic per further seat">
+            documents — intake → spec → plan
+            <span className="ml-2 normal-case">all projects</span>
+          </h4>
+          <div className="mt-1 space-y-1" data-testid="function-lineups">
+            {(() => {
+              const mode = "council";
+              const picked = lineups[mode] ?? [];
+              const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
+              const setSeat = (i: number, id: string) => {
+                const next = [...picked];
+                while (next.length <= i) next.push("");
+                next[i] = id;
+                setLineups({ ...lineups, [mode]: next });
+                touched();
+              };
+              return (
+                <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+                  <span className="w-24 shrink-0" title="drafts intake, spec and plan — a drafter plus a critic per further seat">
+                    council
+                  </span>
+                  <span className="text-xs text-ink-muted">all projects ·</span>
+                  {Array.from({ length: cols }, (_, i) => (
+                    <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+                      {seatLabel(mode, i)}
+                      <select
+                        value={picked[i] ?? ""}
+                        onChange={(e) => setSeat(i, e.target.value)}
+                        data-testid={`seat-${mode}-${i}`}
+                        className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
+                      >
+                        <option value="">—</option>
+                        {fleet
+                          .filter((id) => id === picked[i] || !picked.includes(id))
+                          .map((id) => (
+                            <option key={id} value={id}>
+                              {id}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    data-testid={`seat-add-${mode}`}
+                    onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
+                    className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
+                    title="add a critic seat"
+                  >
+                    +
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+
+          <h4 className="mt-4 text-xs text-ink-muted">
+            tasks — build & test
+            <span className="ml-2 normal-case">all projects</span>
+          </h4>
+          <h5 className="mt-1 text-xs text-ink-muted">default modes</h5>
           {/* The person who always builds in pair and tests in solo re-picked
               both on every task; the launcher should open on their habit. */}
           <div className="mt-1 flex flex-wrap items-end gap-3 text-sm text-ink-secondary" data-testid="default-modes">
@@ -427,7 +508,7 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
             </label>
           </div>
 
-          <h4 className="mt-4 text-xs text-ink-muted">seats per mode</h4>
+          <h5 className="mt-2 text-xs text-ink-muted">seats per mode</h5>
           {/* One dropdown per SEAT, not one checkbox per duckling: a fleet of
               ten models made the old row a wall of boxes, and the row grew
               with every duckling added. Seats are the stable dimension — solo
@@ -496,62 +577,39 @@ function ConfigSection({ client, section }: { client: EngineClient; section: Set
             default.
           </p>
 
-          <h3 className="mt-5 text-xs text-ink-muted">functions — who holds each responsibility</h3>
-          <div className="mt-1 space-y-1" data-testid="function-lineups">
-            {(() => {
-              const mode = "council";
-              const picked = lineups[mode] ?? [];
-              const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
-              const setSeat = (i: number, id: string) => {
-                const next = [...picked];
-                while (next.length <= i) next.push("");
-                next[i] = id;
-                setLineups({ ...lineups, [mode]: next });
-                touched();
-              };
-              return (
-                <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-                  <span className="w-24 shrink-0" title="drafts intake, spec and plan — a drafter plus a critic per further seat">
-                    council
-                  </span>
-                  <span className="text-xs text-ink-muted">all projects ·</span>
-                  {Array.from({ length: cols }, (_, i) => (
-                    <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                      {seatLabel(mode, i)}
-                      <select
-                        value={picked[i] ?? ""}
-                        onChange={(e) => setSeat(i, e.target.value)}
-                        data-testid={`seat-${mode}-${i}`}
-                        className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
-                      >
-                        <option value="">—</option>
-                        {fleet
-                          .filter((id) => id === picked[i] || !picked.includes(id))
-                          .map((id) => (
-                            <option key={id} value={id}>
-                              {id}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
+          {roster.filter((e) => WORKFLOW_ROWS[e.role]).map((e) => (
+            <div key={e.role} className="mt-4" data-testid={`fn-${e.role}`}>
+              <h4 className="text-xs text-ink-muted">
+                {WORKFLOW_ROWS[e.role]!.stage}
+                <span className="ml-2">
+                  {e.source === "project" ? "this project" : "engine picked"}
+                </span>
+              </h4>
+              <div className="mt-1 flex items-center gap-2 text-sm text-ink-secondary">
+                <span className="w-24 shrink-0" title={WORKFLOW_ROWS[e.role]!.help}>{e.role}</span>
+                <select
+                  aria-label={`duckling for ${e.role}`}
+                  data-testid={`roster-select-${e.role}`}
+                  value={e.duckling}
+                  onChange={(ev) =>
+                    void client
+                      .rosterSet(projectId!, e.role, ev.target.value)
+                      .then(loadRoster)
+                      .catch(() => {})
+                  }
+                  className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+                >
+                  {fleet.map((id) => (
+                    <option key={id} value={id}>{id}</option>
                   ))}
-                  <button
-                    type="button"
-                    data-testid={`seat-add-${mode}`}
-                    onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
-                    className="self-end rounded border border-hairline px-2 py-0.5 text-xs"
-                    title="add a critic seat"
-                  >
-                    +
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
-          <p className="mt-1 text-xs text-ink-muted">
-            The council writes the documents (intake, spec, plan): a drafter and
-            a critic per further seat. The roster below holds this project's
-            other responsibilities.
+                </select>
+              </div>
+            </div>
+          ))}
+
+          <p className="mt-2 text-xs text-ink-muted">
+            Seats ride the Save button; the function rows above save the moment
+            you pick.
           </p>
         </SettingsCard>
       )}
