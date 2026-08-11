@@ -453,6 +453,11 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
 	}
+	// A promote changes what the guide says without any run settling — the
+	// exact blind spot of the settle hooks. Poke the loop so an autopilot
+	// idling at "promote it" picks the new task up instead of waiting for an
+	// accept that will never come.
+	go s.autopilotAdvance(projectID)
 	return map[string]interface{}{"bug": bugID, "task": taskID, "status": rec.Status}, nil
 }
 

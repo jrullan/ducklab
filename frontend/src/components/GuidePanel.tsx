@@ -54,6 +54,16 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
     if (!projectId) return;
     client.projectNext(projectId).then(setSteps).catch(() => setSteps([]));
   }, [client, projectId, runs]);
+  // Runs are not the only thing that moves the guide: promoting a bug, parking
+  // one, filing a task all change the steps with no run to pulse the rail.
+  // A slow poll covers every such mutation without wiring each one.
+  useEffect(() => {
+    if (!projectId) return;
+    const t = setInterval(() => {
+      client.projectNext(projectId).then(setSteps).catch(() => {});
+    }, 10000);
+    return () => clearInterval(t);
+  }, [client, projectId]);
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [client]);
