@@ -199,7 +199,7 @@ func (s *Service) autopilotAdvance(projectID string) {
 		s.apMu.Unlock()
 		return
 	}
-	if first.ID == "build" || first.ID == "test-first" {
+	if first.ID == "build" || first.ID == "test-first" || first.ID == "triage" {
 		if st.Started >= st.MaxTasks {
 			s.apMu.Unlock()
 			s.autopilotStop(projectID,
@@ -224,6 +224,20 @@ func (s *Service) autopilotAdvance(projectID string) {
 			Build: RunRequest{Autonomy: "yolo", Origin: "autopilot"},
 		})
 		s.autopilotResult(projectID, "test-first "+first.Ref, err)
+	case "triage":
+		// Only when the project's own autonomy lets the classifications
+		// apply themselves — under guarded the run would pause at its gate
+		// and the loop would have manufactured an inbox item, not progress.
+		// Duplicate proposals still pause regardless (bugs.go): closing a
+		// report stays a person's call.
+		if entry, eerr := s.registry.Get(projectID); eerr == nil {
+			if a := s.triageAutonomy(entry.Path); a == "auto" || a == "yolo" {
+				_, err := s.BugTriage(ctx, projectID, "")
+				s.autopilotResult(projectID, "triage the open bugs", err)
+				return
+			}
+		}
+		s.autopilotNote(projectID, "needs you: "+first.Action)
 	default:
 		// A human gate: paused run, document approval, triage, broken
 		// config. The loop idles ON — the guide is already telling the

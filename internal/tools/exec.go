@@ -281,7 +281,10 @@ func (t *AskHuman) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	}
 
 	// Nobody is there to answer: say so plainly rather than stalling forever.
-	if ectx.NoHuman || ectx.Autonomy == config.AutonomyAuto || ectx.Autonomy == config.AutonomyYolo {
+	// Yolo is the exception now — its question pauses like anyone else's, and
+	// the advisor's drafted answer is submitted automatically (advisor.go):
+	// a considered second opinion beats forcing the asker to guess.
+	if ectx.NoHuman || ectx.Autonomy == config.AutonomyAuto {
 		return ErrorResult("no human available; proceed with your best judgement and state the assumption"), nil
 	}
 

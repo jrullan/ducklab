@@ -69,6 +69,22 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 			"question_id": q.ID, "advisor": advisor, "answer": answer,
 		})
 		_ = w.WriteState()
+
+		// Under yolo the draft IS the answer: the run asked, an advisor
+		// reasoned from the same documents, and nobody is watching the
+		// inbox. Submitted through the same RunAnswer a person would use,
+		// with the decider on the record — a failed submit degrades back to
+		// an ordinary question card.
+		if rs.run.Autonomy == "yolo" {
+			w.AppendEvent("advice_taken", map[string]interface{}{
+				"question_id": q.ID, "advisor": advisor,
+			})
+			if err := s.RunAnswer(context.Background(), rs.run.ID, q.ID, answer); err != nil {
+				w.AppendEvent("warning", map[string]interface{}{
+					"detail": "advisor auto-answer failed: " + err.Error(),
+				})
+			}
+		}
 	}()
 }
 

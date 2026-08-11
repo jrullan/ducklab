@@ -1,9 +1,12 @@
 # Autopilot (yolo mode) — plan
 
-*Status: steps 1–3 shipped 2026-08-11 (dissent-aware auto-accept; project
-autonomy honored + yolo checkbox; guide-driven autopilot with stop rails and
-rail toggle — internal/service/autopilot.go). Step 4 (advisor-auto-answer,
-triage auto-apply) remains.*
+*Status: COMPLETE. Steps 1–3 shipped 2026-08-11 (dissent-aware auto-accept;
+project autonomy honored + yolo checkbox; guide-driven autopilot with stop
+rails and rail toggle — internal/service/autopilot.go). Step 4 shipped
+2026-08-12: yolo questions pause and take the advisor's drafted answer
+automatically (advice_taken on the record); triage auto-applies under
+auto/yolo except duplicate proposals, which always wait for a person; the
+driver runs triage itself when the project's autonomy allows it.*
 
 ## What already exists (per-run autonomy)
 

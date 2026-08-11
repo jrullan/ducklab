@@ -87,9 +87,16 @@ func TestQuestionIDIsStableAndWhitespaceInsensitive(t *testing.T) {
 }
 
 // With nobody to ask, the tool says so rather than stalling the run forever.
+// Yolo is the exception: its questions pause like anyone else's, because the
+// advisor's drafted answer is auto-submitted — a considered second opinion
+// beats forcing the asker to guess.
 func TestAskHumanWithNoHumanAvailable(t *testing.T) {
 	tool := &tools.AskHuman{}
-	for _, autonomy := range []config.Autonomy{config.AutonomyAuto, config.AutonomyYolo} {
+	yctx := &tools.ExecContext{ProjectRoot: t.TempDir(), Autonomy: config.AutonomyYolo}
+	if _, err := tool.Execute(context.Background(), yctx, json.RawMessage(`{"question":"x?"}`)); err == nil {
+		t.Error("yolo did not pause its question for the advisor")
+	}
+	for _, autonomy := range []config.Autonomy{config.AutonomyAuto} {
 		ectx := &tools.ExecContext{ProjectRoot: t.TempDir(), Autonomy: autonomy}
 		res, err := tool.Execute(context.Background(), ectx, json.RawMessage(`{"question":"x?"}`))
 		if err != nil {

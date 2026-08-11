@@ -202,6 +202,7 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Stream:    true,
 		Gate:      "none",
+		Autonomy:  s.triageAutonomy(entry.Path),
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
@@ -340,10 +341,49 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	rs.run.PendingData = map[string]interface{}{
 		"triaged": len(proposals), "proposals": proposals,
 	}
+
+	// Auto-apply under auto and yolo — with one law standing: a duplicate
+	// proposal always waits for a person, because a wrong duplicate CLOSES a
+	// real report, and that is the one triage outcome that is not just
+	// metadata. Severity, component and title are reversible edits.
+	if rs.run.Autonomy == "auto" || rs.run.Autonomy == "yolo" {
+		hasDuplicate := false
+		for _, p := range proposals {
+			if _, ok := p["duplicate_of"]; ok {
+				hasDuplicate = true
+			}
+		}
+		if !hasDuplicate && len(proposals) > 0 {
+			rs.writer.WriteState()
+			if entry, err := s.entryFor(rs); err == nil {
+				if err := s.acceptRun(ctx, rs, entry, "", "auto-triage"); err == nil {
+					return
+				}
+			}
+			// A failed auto-apply degrades to the ordinary human gate below.
+		} else if hasDuplicate {
+			rs.run.PendingData["detail"] = "auto-apply declined: a proposal closes a report as duplicate — that decision is yours"
+		}
+	}
+
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{
 		"kind": "gate", "triaged": len(proposals),
 	})
 	rs.writer.WriteState()
+}
+
+// triageAutonomy resolves what a triage run may decide alone: the project's
+// declared autonomy, else the global default, else guarded.
+func (s *Service) triageAutonomy(projectPath string) string {
+	if projCfg, err := config.LoadProject(filepath.Join(projectPath, ".ducklab", "project.toml")); err == nil && projCfg.Autonomy != "" {
+		return string(projCfg.Autonomy)
+	}
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	if s.cfg.Defaults.Autonomy != "" {
+		return string(s.cfg.Defaults.Autonomy)
+	}
+	return "guarded"
 }
 
 // triagePrompt states one bug and the open bugs it might duplicate.
