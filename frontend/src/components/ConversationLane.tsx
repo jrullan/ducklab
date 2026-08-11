@@ -22,6 +22,8 @@ export function ConversationTurn({
   streamed,
   reasoning,
   color,
+  collapsed = false,
+  onToggle,
 }: {
   block: TurnBlock;
   roster: readonly string[];
@@ -34,20 +36,37 @@ export function ConversationTurn({
    * Collapsed by default: it is usually far longer than the reply, and a lane
    * that opens with a wall of deliberation buries what was actually decided. */
   reasoning?: string;
+  /** Finished turns fold to a one-line summary so a forty-turn run is a page,
+   * not a scroll marathon. What must never go dark survives the fold: the
+   * verdict, the tool count, the failures. The header is the toggle. */
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   const anonymous = !!block.label;
   const who = anonymous ? block.label! : block.duckling;
   const tint = anonymous ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
+  const failedTools = block.toolCalls.filter((c) => !c.ok).length;
+  const preview = (block.text ?? "").split("\n").find((l) => l.trim() !== "") ?? "";
 
   return (
     <article
       data-testid="conversation-turn"
       data-role={block.role}
       data-anonymous={anonymous ? "true" : "false"}
+      data-collapsed={String(collapsed)}
       className="border-l-2 py-2 pl-3"
       style={{ borderColor: tint }}
     >
-      <header className="flex items-center gap-2 text-sm">
+      <header
+        className={`flex items-center gap-2 text-sm ${onToggle ? "cursor-pointer select-none" : ""}`}
+        data-testid={onToggle ? "turn-toggle" : undefined}
+        onClick={onToggle}
+      >
+        {onToggle && (
+          <span aria-hidden="true" className="text-xs text-ink-muted">
+            {collapsed ? "›" : "⌄"}
+          </span>
+        )}
         {anonymous ? (
           <span
             aria-hidden="true"
@@ -78,9 +97,27 @@ export function ConversationTurn({
             thinking…
           </span>
         )}
+        {/* The fold must not hide a judgement or a failure. */}
+        {collapsed && block.verdict && (
+          <StatusChip
+            role={block.verdict === "approve" ? "good" : "serious"}
+            label={String(block.verdict)}
+          />
+        )}
+        {collapsed && failedTools > 0 && (
+          <span className="text-xs text-critical">✕ {failedTools} failed</span>
+        )}
       </header>
 
-      {block.toolCalls.length > 0 && (
+      {collapsed && (
+        <p className="mt-0.5 truncate text-xs text-ink-muted" data-testid="turn-summary" title={preview}>
+          {block.toolCalls.length > 0 && `${block.toolCalls.length} tool call${block.toolCalls.length === 1 ? "" : "s"}`}
+          {block.toolCalls.length > 0 && preview && " · "}
+          {preview}
+        </p>
+      )}
+
+      {!collapsed && block.toolCalls.length > 0 && (
         <ul className="mt-1">
           {block.toolCalls.map((c) => (
             <ToolCallLine key={`${c.seq}-${c.tool}`} call={c} />
@@ -90,7 +127,7 @@ export function ConversationTurn({
       {/* The tool that is running RIGHT NOW. A verify_run can legally take
           its whole ceiling; unnamed, those minutes read as a hang and taught
           the person to abort healthy work. */}
-      {!block.done && block.pendingTool && (
+      {!collapsed && !block.done && block.pendingTool && (
         <p className="mt-1 text-xs text-ink-muted" data-testid="tool-in-flight">
           <span className="animate-pulse">▸</span> {block.pendingTool.tool}
           {block.pendingTool.target ? ` ${block.pendingTool.target}` : ""} — running…
@@ -100,7 +137,7 @@ export function ConversationTurn({
       {/* A reviewer's turn is already structured. Rendering its raw text put
           `{"verdict":"approve", "findings":[]}` on screen — the one turn whose
           content the engine has already parsed, shown as a blob. */}
-      {(block.done || !streamed) && block.verdict && <VerdictBlock block={block} />}
+      {!collapsed && (block.done || !streamed) && block.verdict && <VerdictBlock block={block} />}
 
       {/* Thinking arrives before the answer and is billed either way. The
           stream parser used to read only delta.content, so a reasoning model
@@ -109,13 +146,13 @@ export function ConversationTurn({
       {/* A turn that ran out of budget or lost its provider still did real
           work, and the record of it is now kept — but a partial record read as a
           complete one is worse than none. */}
-      {block.incomplete && (
+      {!collapsed && block.incomplete && (
         <div className="mt-1" data-testid="turn-incomplete">
           <StatusChip role="warning" label="turn did not finish" />
         </div>
       )}
 
-      {reasoning && <ReasoningBlock text={reasoning} live={!!streamed && !block.done} />}
+      {!collapsed && reasoning && <ReasoningBlock text={reasoning} live={!!streamed && !block.done} />}
 
       {/* Live tokens while a turn is in flight, the RECORD once it is done.
           The streamed buffer holds whatever happened to stream — a chat
@@ -128,7 +165,7 @@ export function ConversationTurn({
       {/* Raw while tokens are still arriving — a half-written fence or bold
           marker cannot be parsed without guessing at what comes next — and
           rendered once the turn has settled. */}
-      {block.done && block.text && !block.verdict ? (
+      {!collapsed && (block.done && block.text && !block.verdict ? (
         <div data-testid="turn-text">
           <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
         </div>
@@ -146,7 +183,7 @@ export function ConversationTurn({
             <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
           </div>
         )
-      )}
+      ))}
     </article>
   );
 }

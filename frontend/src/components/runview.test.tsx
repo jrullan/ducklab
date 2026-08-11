@@ -437,3 +437,49 @@ describe("collapsing the tool timeline", () => {
     localStorage.removeItem("ducklab.timeline");
   });
 });
+
+// Finished turns fold to a one-line summary so a forty-turn run is a page,
+// not a scroll marathon. What must never go dark survives the fold: the
+// verdict, the failure count. The header is the toggle.
+describe("collapsing a finished turn", () => {
+  const block = {
+    duckling: "luna", role: "implementer", round: 1, turn: 1, done: true,
+    text: "Updated App.jsx to provide context.\nMore detail below.",
+    toolCalls: [
+      { seq: 1, tool: "fs_read", ok: true },
+      { seq: 2, tool: "fs_patch", ok: false },
+    ],
+  } as never;
+
+  it("folds to a summary that keeps count, failures and preview", () => {
+    const r = render(
+      <ConversationTurn block={block} roster={["luna"]} collapsed onToggle={() => {}} />,
+    );
+    expect(r.queryByTestId("tool-call")).toBeNull();
+    expect(r.queryByTestId("turn-text")).toBeNull();
+    const summary = r.getByTestId("turn-summary").textContent!;
+    expect(summary).toContain("2 tool calls");
+    expect(summary).toContain("Updated App.jsx");
+    expect(r.getByTestId("conversation-turn").textContent).toContain("1 failed");
+    r.unmount();
+  });
+
+  it("keeps a reviewer's verdict visible while folded", () => {
+    const reviewer = { ...(block as object), role: "reviewer", verdict: "request_changes", findings: [] } as never;
+    const r = render(
+      <ConversationTurn block={reviewer} roster={["luna"]} collapsed onToggle={() => {}} />,
+    );
+    expect(r.getByTestId("conversation-turn").textContent).toContain("request_changes");
+    r.unmount();
+  });
+
+  it("the header toggles", () => {
+    let toggled = 0;
+    const r = render(
+      <ConversationTurn block={block} roster={["luna"]} collapsed onToggle={() => { toggled++; }} />,
+    );
+    fireEvent.click(r.getByTestId("turn-toggle"));
+    expect(toggled).toBe(1);
+    r.unmount();
+  });
+});

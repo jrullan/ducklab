@@ -77,6 +77,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // is a diff unread before an accept.
   const [tabsFolded, setTabsFolded] = useState(false);
   const tabPanelRef = useRef<HTMLDivElement | null>(null);
+  // Explicit expand/collapse choices per turn, keyed round:turn. Held HERE
+  // because the virtualiser unmounts off-screen turns — state inside the turn
+  // would forget the reader's choice the moment they scrolled away.
+  const [turnChoice, setTurnChoice] = useState<Record<string, boolean>>({});
   // A stage run's subject: the document it proposed. Fetched from the
   // artifact store once the run pauses at its gate, shown only when the
   // pending proposal is THIS run's — an older proposal would be someone
@@ -979,15 +983,30 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
           <VirtualList items={turns} height="60vh">
-            {(t) => (
-              <ConversationTurn
-                block={t}
-                roster={roster}
-                color={ducklingColors[t.duckling]}
-                streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
-                reasoning={t.messageOnly ? undefined : reasoning[`${t.round}:${t.turn}`]}
-              />
-            )}
+            {(t, i) => {
+              // A finished turn folds to its summary; the LIVE turn and the
+              // last one stay open — that is where the reader's eyes are.
+              // Human chat messages never fold: they are short and they ARE
+              // the conversation.
+              const key = `${t.round}:${t.turn}`;
+              const foldable = t.done && !t.messageOnly;
+              const isCollapsed = foldable && !(turnChoice[key] ?? i === turns.length - 1);
+              return (
+                <ConversationTurn
+                  block={t}
+                  roster={roster}
+                  color={ducklingColors[t.duckling]}
+                  streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
+                  reasoning={t.messageOnly ? undefined : reasoning[`${t.round}:${t.turn}`]}
+                  collapsed={isCollapsed}
+                  onToggle={
+                    foldable
+                      ? () => setTurnChoice((c) => ({ ...c, [key]: isCollapsed }))
+                      : undefined
+                  }
+                />
+              );
+            }}
           </VirtualList>
         </section>
 
