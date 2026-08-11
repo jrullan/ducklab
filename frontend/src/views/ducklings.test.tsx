@@ -326,3 +326,25 @@ describe("the vision capability", () => {
     expect(body.caps.vision).toBe(true);
   });
 });
+
+// Editing a duckling buried deep in the grid opened the form at the TOP —
+// the person scrolled up to edit and back down to check. The form now takes
+// the card's own place in the grid.
+describe("editing in place", () => {
+  it("replaces the card with the form where it stands", async () => {
+    const client = clientWith(
+      [
+        { id: "a1", provider: "openrouter", model: "m1" } as never,
+        { id: "b2", provider: "openrouter", model: "m2" } as never,
+      ],
+      [{ id: "openrouter", base_url: "u", key_env: "K", key_set: true } as never],
+    );
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("duckling-edit-b2"));
+    const inplace = screen.getByTestId("duckling-edit-inplace");
+    expect(inplace).toBeTruthy();
+    // The edited card itself is gone — the form stands in its place.
+    expect(screen.queryByTestId("duckling-card-b2")).toBeNull();
+    expect(screen.getByTestId("duckling-card-a1")).toBeTruthy();
+  });
+});

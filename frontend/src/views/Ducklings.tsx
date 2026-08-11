@@ -109,7 +109,7 @@ export function Ducklings({ client, projectId, only }: {
           </p>
         )}
 
-        {editing !== null && (
+        {editing === "" && (
           <DucklingForm
             key={editing}
             client={client}
@@ -124,7 +124,22 @@ export function Ducklings({ client, projectId, only }: {
           <p className="text-sm text-ink-muted">None configured.</p>
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(270px,1fr))]" data-testid="ducklings">
-            {ducklings.map((d) => (
+            {ducklings.map((d) =>
+              editing === d.id ? (
+                // The form takes the card's own place in the grid: editing
+                // a duckling buried five rows deep meant the form opened at
+                // the top and the person scrolled up to it, then back down.
+                // Full-width so nine fields do not fold into a 270px column.
+                <div key={d.id} className="col-span-full" data-testid="duckling-edit-inplace">
+                  <DucklingForm
+                    client={client}
+                    providers={providers}
+                    existing={d}
+                    onDone={done}
+                    onCancel={() => setEditing(null)}
+                  />
+                </div>
+              ) : (
               <DucklingCard
                 key={d.id}
                 duckling={d}
@@ -136,7 +151,8 @@ export function Ducklings({ client, projectId, only }: {
                 onSaved={done}
                 client={client}
               />
-            ))}
+              ),
+            )}
           </div>
         )}
       </section>
