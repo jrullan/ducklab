@@ -10,7 +10,7 @@ import type { BudgetView, EngineClient, ModeDefaultsView } from "../api/client";
  * and the env var it reads, never the value (07 §4.9).
  */
 export function Settings({
-  theme, onTheme, engineVersion, connection, client,
+  theme, onTheme, engineVersion, connection, client, onEngine, engineBusy, engineError,
 }: {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -18,6 +18,12 @@ export function Settings({
   connection: string;
   /** Optional so a Settings screen still renders with no engine to ask. */
   client?: EngineClient;
+  /** Engine supervision, provided by the desktop shell. The stale banner
+   * offers these when something breaks; this is the same pair on demand —
+   * restart after a make install without waiting for a failure to say so. */
+  onEngine?: (action: "restart" | "reconnect") => void;
+  engineBusy?: boolean;
+  engineError?: string | null;
 }) {
   const change = (t: Theme) => {
     applyTheme(t);
@@ -60,6 +66,35 @@ export function Settings({
           />
           <span className="text-ink-secondary">version {engineVersion || "unknown"}</span>
         </div>
+        {onEngine && (
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="settings-restart-engine"
+              disabled={engineBusy}
+              onClick={() => onEngine("restart")}
+              title="stop the engine and start the installed binary (refused while runs are going, or if this app's environment lacks the provider keys)"
+              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
+            >
+              {engineBusy ? "Working…" : "Restart engine"}
+            </button>
+            <button
+              type="button"
+              data-testid="settings-reconnect-engine"
+              disabled={engineBusy}
+              onClick={() => onEngine("reconnect")}
+              title="adopt the engine already running — for a window whose session an external restart left behind"
+              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
+            >
+              Reconnect
+            </button>
+            {engineError && (
+              <span className="text-xs text-critical" data-testid="settings-engine-error">
+                {engineError}
+              </span>
+            )}
+          </div>
+        )}
         <p className="mt-2 text-sm text-ink-muted">
           API keys are read from environment variables and are never stored or displayed here.
         </p>

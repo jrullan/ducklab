@@ -536,7 +536,11 @@ export function App() {
         )}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
         {route.name === "settings" && (
-          <Settings theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection} client={client ?? undefined} />
+          <Settings
+            theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection}
+            client={client ?? undefined}
+            onEngine={(a) => void superviseEngine(a)} engineBusy={restarting} engineError={restartError}
+          />
         )}
       </main>
       </div>
