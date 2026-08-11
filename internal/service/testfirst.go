@@ -62,6 +62,8 @@ type TestFirstRequest struct {
 	ThenBuild bool `json:"then_build,omitempty"`
 	// Build configures the chained run: mode, ducklings, token ceiling.
 	Build RunRequest `json:"build,omitempty"`
+	// Origin marks a chain started by the autopilot rather than a person.
+	Origin string `json:"origin,omitempty"`
 }
 
 // TestStart writes the failing test for a task.
@@ -98,6 +100,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Stream:    true,
 		Gate:      string(verify.Gate(projCfg.Verify.Mode)),
+		Origin:    req.Origin,
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {

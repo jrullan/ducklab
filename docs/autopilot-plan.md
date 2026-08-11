@@ -1,7 +1,9 @@
 # Autopilot (yolo mode) — plan
 
-*Status: analyzed 2026-08-10, not started. This documents the survey and the
-agreed order so the work can be picked up cold.*
+*Status: steps 1–3 shipped 2026-08-11 (dissent-aware auto-accept; project
+autonomy honored + yolo checkbox; guide-driven autopilot with stop rails and
+rail toggle — internal/service/autopilot.go). Step 4 (advisor-auto-answer,
+triage auto-apply) remains.*
 
 ## What already exists (per-run autonomy)
 

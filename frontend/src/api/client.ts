@@ -386,6 +386,15 @@ export interface ReleaseSummary {
 }
 
 /** One model call, as recorded in llm.jsonl. */
+export interface AutopilotState {
+  on: boolean;
+  max_tasks: number;
+  started: number;
+  consecutive_fails: number;
+  last_action?: string;
+  stopped_reason?: string;
+}
+
 export interface LLMCall {
   seq: number;
   ts: string;
@@ -1019,6 +1028,17 @@ export class EngineClient {
       `/v1/projects/${projectId}/reviews/${taskId}`,
     ).then((r) => r.markdown ?? "");
   }
+  autopilot(projectId: string) {
+    return this.request<AutopilotState>("GET", `/v1/projects/${projectId}/autopilot`);
+  }
+
+  autopilotSet(projectId: string, on: boolean, maxTasks = 0) {
+    return this.request<AutopilotState>("POST", `/v1/projects/${projectId}/autopilot`, {
+      on,
+      max_tasks: maxTasks,
+    });
+  }
+
   releasePlan(projectId: string, bump: string) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/releases`, { bump });
   }

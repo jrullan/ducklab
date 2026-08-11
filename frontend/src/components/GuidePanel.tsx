@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Duckling, EngineClient, NextStep, Run } from "../api/client";
+import type { AutopilotState, Duckling, EngineClient, NextStep, Run } from "../api/client";
 import { useRuns } from "../store/runs";
 import { routeHref, type Route } from "../app/routes";
 import { ChatAbout } from "./ChatAbout";
@@ -57,6 +57,23 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [client]);
+  // The autopilot's state, refreshed on the same pulse as the guide: its
+  // whole point is acting between the person's glances.
+  const [ap, setAp] = useState<AutopilotState | null>(null);
+  const [apBusy, setApBusy] = useState(false);
+  useEffect(() => {
+    if (!projectId) return;
+    client.autopilot(projectId).then(setAp).catch(() => setAp(null));
+  }, [client, projectId, runs]);
+  const toggleAutopilot = () => {
+    if (!ap && !projectId) return;
+    setApBusy(true);
+    client
+      .autopilotSet(projectId, !(ap?.on ?? false))
+      .then(setAp)
+      .catch(() => {})
+      .finally(() => setApBusy(false));
+  };
 
   // The live pulse, above the plan: what is happening outranks what is next,
   // and the rail is the one place both survive every view change.
@@ -99,6 +116,37 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           </ul>
         </section>
       )}
+      {/* The loop's switch lives where its effects show. On: it drives the
+          guide's own next step whenever that step is mechanical, and idles —
+          saying why — when a human gate stands. Off with a reason: the rail
+          says what stopped it instead of showing a silently cleared toggle. */}
+      <section data-testid="rail-autopilot" className="mb-3 rounded-card border border-hairline p-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-ink-muted">autopilot</span>
+          <button
+            type="button"
+            data-testid="autopilot-toggle"
+            disabled={apBusy}
+            onClick={toggleAutopilot}
+            className={`rounded border px-2 py-0.5 text-xs ${
+              ap?.on ? "border-good text-good" : "border-hairline text-ink-muted"
+            }`}
+          >
+            {ap?.on ? "on — stop" : "start"}
+          </button>
+        </div>
+        {ap?.on && (
+          <p className="mt-1 text-xs text-ink-muted" data-testid="autopilot-status">
+            {ap.started}/{ap.max_tasks} tasks · {ap.last_action || "…"}
+          </p>
+        )}
+        {!ap?.on && ap?.stopped_reason && (
+          <p className="mt-1 text-xs text-serious" data-testid="autopilot-stopped">
+            {ap.stopped_reason}
+          </p>
+        )}
+      </section>
+
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm text-ink-muted">next steps</h2>
         <button

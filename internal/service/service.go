@@ -55,6 +55,10 @@ type Service struct {
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool
 	queue        *runQueue
+	// The autopilot's per-project state; in-memory on purpose — an engine
+	// restart lands every loop OFF (autopilot.go).
+	autopilots map[string]*autopilotState
+	apMu       sync.Mutex
 	appMu      sync.Mutex
 	apps       map[string]*appState
 }
@@ -721,6 +725,8 @@ type RunRequest struct {
 	Verify    string         `json:"verify"`
 	Budget    *budget.Budget `json:"budget"`
 	Autonomy  string         `json:"autonomy"`
+	// Origin marks a run started by the autopilot rather than a person.
+	Origin string `json:"origin,omitempty"`
 	// NoStream turns off token streaming for this run. The default is to
 	// stream, because the desktop exists to watch a run happen.
 	NoStream     bool `json:"no_stream"`
@@ -842,11 +848,20 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		DryRun:       req.DryRun,
 		UnsafeWrites: req.UnsafeWrites,
 		Autonomy:     req.Autonomy,
+		Origin:       req.Origin,
 		Note:         req.Note,
 		AgentTurns:   req.AgentTurns,
 	}
 	if run.Mode == "" {
 		run.Mode = "solo"
+	}
+	if run.Autonomy == "" {
+		// The project's configured autonomy is the default the plan promised
+		// and RunStart never read: a project.toml saying autonomy = "auto"
+		// launched guarded runs regardless.
+		if projCfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml")); err == nil {
+			run.Autonomy = string(projCfg.Autonomy)
+		}
 	}
 	if run.Autonomy == "" {
 		run.Autonomy = "guarded"
@@ -1500,10 +1515,18 @@ func (s *Service) failRun(rs *runState, err error) {
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
 	restoreAfterUnaccepted(rs)
 	rs.writer.WriteState()
+	s.autopilotOnFail(rs.run)
 }
 
 // acceptRun accepts a run and commits.
-func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string) error {
+func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string) (err error) {
+	// The autopilot follows every settled decision — an automatic accept and
+	// a human unblocking a paused run refuel the loop the same way.
+	defer func() {
+		if err == nil {
+			s.autopilotOnAccept(rs.run)
+		}
+	}()
 	if actor == "" {
 		actor = "human"
 	}

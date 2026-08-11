@@ -52,6 +52,9 @@ type Run struct {
 	Stream        bool                   `json:"stream"`
 	DryRun        bool                   `json:"dry_run"`
 	Autonomy      string                 `json:"autonomy"`
+	// Origin says who started the run when it was not a person at a button:
+	// "autopilot" today. Empty means human-initiated.
+	Origin string `json:"origin,omitempty"`
 	Budget        BudgetState            `json:"budget"`
 	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
 	TestsModified bool                   `json:"tests_modified"`

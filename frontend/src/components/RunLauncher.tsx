@@ -8,7 +8,7 @@ import { fixedSeats, seatLabel } from "../lib/seats";
 export type ModeEstimates = Record<string, { usd: number; runs: number }>;
 
 /** What a launch asks for. Anything unset falls back to the engine's defaults. */
-export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string; agentTurns?: number };
+export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string; agentTurns?: number; yes?: boolean };
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
@@ -191,6 +191,7 @@ export function RunLauncher({
   const [note, setNote] = useState("");
   const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
   const [maxTokens, setMaxTokens] = useState("");
+  const [yolo, setYolo] = useState(false);
   const [agentTurns, setAgentTurns] = useState("");
   // "no cap" for the per-reply call loop, same word as the budget lifts:
   // sent as -1, which the engine reads as "lift the cap for this run" — the
@@ -275,6 +276,22 @@ export function RunLauncher({
           />
           no cap
         </label>
+        {/* Per-run yolo: green gates accept themselves (dissent and
+            UNVERIFIED still stop), ask_human answers "no human available".
+            The budget caps are untouched — autonomy and money are separate
+            axes. */}
+        <label
+          className="flex items-center gap-1 text-xs text-ink-muted"
+          title="unattended: a green gate accepts itself; reviewer dissent and UNVERIFIED still wait for you"
+        >
+          <input
+            type="checkbox"
+            data-testid="run-yolo"
+            checked={yolo}
+            onChange={(e) => setYolo(e.target.checked)}
+          />
+          unattended
+        </label>
         {noteOpen ? (
           <textarea
             value={note}
@@ -297,7 +314,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined })
+            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
           }
           disabled={busy}
           data-testid="run-start"

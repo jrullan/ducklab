@@ -1027,6 +1027,27 @@ func (s *Server) handleReleaseCut(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, out)
 }
 
+func (s *Server) handleAutopilotGet(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.AutopilotStatus(r.PathValue("id")))
+}
+
+func (s *Server) handleAutopilotSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		On       bool `json:"on"`
+		MaxTasks int  `json:"max_tasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	st, err := s.svc.AutopilotSet(r.Context(), r.PathValue("id"), req.On, req.MaxTasks)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, st)
+}
+
 func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request) {
 	var req service.ReviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
