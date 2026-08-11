@@ -37,7 +37,14 @@ const ROLE_HELP: Record<string, string> = {
   scribe: "Writes release notes and changelog entries from the list of accepted work.",
 };
 
-export function Ducklings({ client, projectId }: { client: EngineClient; projectId: string }) {
+export function Ducklings({ client, projectId, only }: {
+  client: EngineClient;
+  projectId: string;
+  /** Render one half: "ducklings" (the team members, shown inside the
+   * settings' your-team section) or "providers" (the plumbing, its own
+   * section). Absent renders both — the standalone view's shape. */
+  only?: "ducklings" | "providers";
+}) {
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -47,7 +54,8 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
   const colors = assignDucklingColors(ducklings);
 
   const load = useCallback(() => {
-    Promise.all([client.ducklings(), client.providers()])
+    Promise.resolve()
+      .then(() => Promise.all([client.ducklings(), client.providers()]))
       .then(([d, p]) => {
         setDucklings(d);
         setProviders(p);
@@ -75,8 +83,11 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
         </p>
       )}
 
-      <ProviderSection client={client} providers={providers} onDone={done} />
+      {only !== "ducklings" && (
+        <ProviderSection client={client} providers={providers} onDone={done} />
+      )}
 
+      {only !== "providers" && (
       <section className="rounded-card border border-hairline p-3">
         <div className="mb-2 flex items-center gap-2">
           <h3 className="text-ink">Ducklings</h3>
@@ -128,8 +139,11 @@ export function Ducklings({ client, projectId }: { client: EngineClient; project
           </div>
         )}
       </section>
+      )}
 
-      {projectId && <RosterSection client={client} projectId={projectId} ducklings={ducklings} />}
+      {only !== "providers" && projectId && (
+        <RosterSection client={client} projectId={projectId} ducklings={ducklings} />
+      )}
     </div>
   );
 }
