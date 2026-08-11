@@ -318,7 +318,7 @@ export function Board({
               }
               className="rounded border border-hairline px-2 py-1 text-sm"
             >
-              Triage open
+              Triage all open ({bugs.filter((b) => b.status === "open").length})
             </button>
           )}
 
@@ -1189,10 +1189,11 @@ function BugNext({
           type="button"
           data-testid="bug-next-triage"
           disabled={busy}
-          onClick={() => act(() => client.triageBugs(projectId))}
+          onClick={() => act(() => client.triageBugs(projectId, bug.id))}
           className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+          title="classify this bug — severity, duplicates, promotability"
         >
-          Triage
+          Triage this bug
         </button>
       )}
       {bug.status === "triaged" && (

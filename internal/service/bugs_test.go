@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -153,7 +156,7 @@ func TestTriageRefusesWhenThereIsNothingToTriage(t *testing.T) {
 	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugTriage(context.Background(), id); err == nil {
+	if _, err := s.BugTriage(context.Background(), id, ""); err == nil {
 		t.Error("a triage run started with no untriaged bugs")
 	}
 }
@@ -261,5 +264,58 @@ func TestThePromotedTaskGetsItsOwnMilestone(t *testing.T) {
 		if task.ID != taskID && task.Milestone == milestone {
 			t.Errorf("%s landed in %s alongside %s, an existing milestone", taskID, milestone, task.ID)
 		}
+	}
+}
+
+// The button inside ONE bug's panel used to fire the whole batch — a panel
+// acting far beyond its own context. Naming a bug triages exactly that bug;
+// naming a non-open one is an error, not a silent batch.
+func TestTriageCanTargetOneBug(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	ctx := context.Background()
+	b1, err := s.BugAdd(ctx, projectID, BugRequest{Title: "one", Severity: "normal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugAdd(ctx, projectID, BugRequest{Title: "two", Severity: "normal"}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := s.BugTriage(ctx, projectID, b1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(ctx, run.ID)
+	// Only the named bug rode the run: the record's own run_start says how
+	// many reports were taken.
+	entry, _ := s.registry.Get(projectID)
+	data, err := os.ReadFile(filepath.Join(entry.Path, ".ducklab", "runs", run.ID, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	took := -1
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var e map[string]interface{}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		if e["type"] == "run_start" {
+			if d, ok := e["data"].(map[string]interface{}); ok {
+				if n, ok := d["bugs"].(float64); ok {
+					took = int(n)
+				}
+			}
+		}
+	}
+	if took != 1 {
+		t.Errorf("targeted triage took %d bugs, want exactly the named one", took)
+	}
+
+	if _, err := s.BugTriage(ctx, projectID, "B-999"); err == nil {
+		t.Error("triaging a ghost bug id did not error")
 	}
 }

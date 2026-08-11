@@ -23,7 +23,7 @@ func TestATriageRecordsWhatTheModelSaid(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.BugTriage(context.Background(), id)
+	run, err := s.BugTriage(context.Background(), id, "")
 	if err != nil {
 		t.Fatal(err)
 	}

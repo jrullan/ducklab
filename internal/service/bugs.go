@@ -155,12 +155,15 @@ func toBug(r *store.Bug) *bug.Bug {
 // about the third contaminate the seventh, and a batch is not a conversation.
 const MaxTriageBatch = 10
 
-// BugTriage classifies the open bugs, one turn each (05 §6).
+// BugTriage classifies open bugs, one turn each (05 §6). An empty bugID
+// takes the whole inbox (bounded by MaxTriageBatch); naming one triages
+// exactly that bug — the button inside ONE bug's panel used to fire the
+// batch, which read as the panel acting far beyond its own context.
 //
 // The classifications are proposals. Under manual and guarded autonomy nothing
 // is applied until a person says so — especially duplicates, where being wrong
 // closes a real report.
-func (s *Service) BugTriage(ctx context.Context, projectID string) (*runlog.Run, error) {
+func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runlog.Run, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
@@ -171,11 +174,14 @@ func (s *Service) BugTriage(ctx context.Context, projectID string) (*runlog.Run,
 	}
 	var todo []bug.Bug
 	for _, b := range open {
-		if b.Status == bug.Open {
+		if b.Status == bug.Open && (bugID == "" || b.ID == bugID) {
 			todo = append(todo, b)
 		}
 	}
 	if len(todo) == 0 {
+		if bugID != "" {
+			return nil, fmt.Errorf("bug %s is not open for triage", bugID)
+		}
 		return nil, fmt.Errorf("no untriaged bugs")
 	}
 	if len(todo) > MaxTriageBatch {

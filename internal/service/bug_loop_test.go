@@ -22,7 +22,7 @@ func TestAcceptingATaskMovesItsBugOn(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.BugTriage(context.Background(), id)
+	run, err := s.BugTriage(context.Background(), id, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAnAcceptedTaskDoesNotVerifyItsOwnBug(t *testing.T) {
 	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "x", Severity: "low"}); err != nil {
 		t.Fatal(err)
 	}
-	run, _ := s.BugTriage(context.Background(), id)
+	run, _ := s.BugTriage(context.Background(), id, "")
 	_, _ = s.waitForRun(context.Background(), run.ID)
 	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
 		t.Fatal(err)

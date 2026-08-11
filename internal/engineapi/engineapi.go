@@ -935,7 +935,12 @@ func (s *Server) handleArtifactDiscard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
-	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"))
+	// The body is optional: empty triages the whole inbox, {bug_id} one bug.
+	var req struct {
+		BugID string `json:"bug_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	run, err := s.svc.BugTriage(r.Context(), r.PathValue("id"), req.BugID)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

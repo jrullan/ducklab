@@ -948,8 +948,12 @@ export class EngineClient {
   }
   /** Triage every open report: severity, suspected files, duplicates. Returns
    * the run doing it, which is watchable like any other. */
-  triageBugs(projectId: string) {
-    return this.request<Run>("POST", `/v1/projects/${projectId}/bugs/triage`);
+  triageBugs(projectId: string, bugId?: string) {
+    return this.request<Run>(
+      "POST",
+      `/v1/projects/${projectId}/bugs/triage`,
+      bugId ? { bug_id: bugId } : undefined,
+    );
   }
   /** Correct what a report says. A bug could be moved, triaged and promoted but
    * never edited, so a typo or a missing detail lived as long as the bug did —

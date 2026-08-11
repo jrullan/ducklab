@@ -30,7 +30,7 @@ func TestEveryKindOfRunRecordsItsCeilings(t *testing.T) {
 		start func() (string, error)
 	}{
 		{"triage", func() (string, error) {
-			r, err := s.BugTriage(context.Background(), id)
+			r, err := s.BugTriage(context.Background(), id, "")
 			if err != nil {
 				return "", err
 			}
