@@ -195,7 +195,12 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 			Role: t.Role, Duckling: d, Prompt: prompt, Toolbelt: belt,
 			Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
 			Persona: t.Persona,
-			Round:   tc.Round, Index: tc.Index,
+			// The screenshots. Every field above was forwarded and this one
+			// was not, so the engine WARNED "shown to the triager" while the
+			// wire carried text alone — the model then truthfully reported
+			// the screenshot absent, twice, to a person who had attached it.
+			Images: t.Images,
+			Round:  tc.Round, Index: tc.Index,
 		}, &turnCtx)
 	}
 }
