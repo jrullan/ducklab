@@ -65,6 +65,15 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
     if (!projectId) return;
     client.autopilot(projectId).then(setAp).catch(() => setAp(null));
   }, [client, projectId, runs]);
+  // While the loop is ON its state changes between run events — "starting"
+  // becomes "needs you: …" with no run to pulse the rail — so it polls.
+  useEffect(() => {
+    if (!projectId || !ap?.on) return;
+    const t = setInterval(() => {
+      client.autopilot(projectId).then(setAp).catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [client, projectId, ap?.on]);
   const toggleAutopilot = () => {
     if (!ap && !projectId) return;
     setApBusy(true);
@@ -137,7 +146,7 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
         </div>
         {ap?.on && (
           <p className="mt-1 text-xs text-ink-muted" data-testid="autopilot-status">
-            {ap.started}/{ap.max_tasks} tasks · {ap.last_action || "…"}
+            {ap.started}/{ap.max_tasks} tasks started · {ap.last_action || "…"}
           </p>
         )}
         {!ap?.on && ap?.stopped_reason && (
