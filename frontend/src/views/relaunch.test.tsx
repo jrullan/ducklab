@@ -207,6 +207,35 @@ describe("the task's description in the run view", () => {
     expect(card.textContent).toContain("Parse numeric value in degrees");
   });
 
+  // A fresh chat rendered the PREVIOUS run's task card: the loader
+  // early-returned on an empty task_id instead of clearing, so "T-076 —
+  // OAuth test suite" stood over a chat about nothing of the sort.
+  it("clears the previous run's task when the next run has none", async () => {
+    const chatRun: Run = {
+      id: "r-c", project_id: "p", stage: "chat", mode: "solo", task_id: "",
+      status: "running", verdict: "", started_at: "2026-08-11T12:45:27Z",
+      roster: { implementer: "k3" },
+    };
+    const client = clientWith({
+      run: vi.fn((id: string) =>
+        Promise.resolve({ run: id === "r-c" ? chatRun : failed, events: [] }),
+      ),
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-015", title: "Handle angle input", milestone: "M-07", status: "blocked", body: "Parse numeric value in degrees" },
+        ]),
+      ),
+    } as unknown as Partial<EngineClient>);
+    useRuns.setState({
+      runs: { "r-1": failed, "r-c": chatRun },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    const { rerender } = render(<RunView runId="r-1" client={client} />);
+    await screen.findByTestId("run-task-card");
+    rerender(<RunView runId="r-c" client={client} />);
+    await waitFor(() => expect(screen.queryByTestId("run-task-card")).toBeNull());
+  });
+
   it("shows nothing when the task has no body to show", async () => {
     render(<RunView runId="r-1" client={clientWith()} />);
     await waitFor(() => screen.getByTestId("run-view"));

@@ -161,7 +161,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   }, [client, projectId]);
   const taskId = run?.task_id ?? "";
   useEffect(() => {
-    if (!projectId || !taskId) return;
+    // A run with no task must CLEAR the previous run's — the early return
+    // left T-076's card standing over a fresh chat, which reads as "this
+    // chat is about T-076" when it is about nothing of the sort.
+    if (!projectId || !taskId) {
+      setTask(null);
+      return;
+    }
     client
       .tasks(projectId)
       .then((all) => setTask(all.find((t) => t.id === taskId) ?? null))
@@ -289,6 +295,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const recordedFiling = findingsFiled(events);
   const filed = filedBugs ?? recordedFiling;
   const timeline = buildTimeline(events);
+  const chatLive =
+    run?.stage === "chat" &&
+    (run.status === "running" || run.status === "paused" || run.status === "queued");
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
   // The live figures while the run is GOING, the recorded ones once it is
@@ -1075,8 +1084,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
       {/* Pinned to the viewport's bottom edge while the transcript above it
           scrolls — the same "consulted, not read" contract as the rail. It
-          rejoins the normal flow once you scroll past it into the tabs. */}
-      <div className="sticky bottom-0 z-10 border-t border-hairline bg-page px-4 py-2">
+          rejoins the normal flow once you scroll past it into the tabs.
+          Except in a live chat: the composer owns the bottom edge there,
+          and two sticky claimants rendered on top of each other. */}
+      <div
+        className={
+          chatLive
+            ? "px-4 py-2"
+            : "sticky bottom-0 z-10 border-t border-hairline bg-page px-4 py-2"
+        }
+      >
         <ToolTimeline calls={timeline} />
       </div>
 
@@ -1180,7 +1197,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           turn meant scrolling down to read the reply and back up to answer.
           Always present while the chat lives — disabled, saying why, while
           the consultant is thinking — so the box never jumps around. */}
-      {run.stage === "chat" && (run.status === "running" || run.status === "paused" || run.status === "queued") && (
+      {chatLive && (
         <section
           className="sticky bottom-0 z-10 border-t border-hairline bg-surface p-3"
           data-testid="chat-reply"
