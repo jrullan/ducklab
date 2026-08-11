@@ -853,6 +853,15 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		AgentTurns:   req.AgentTurns,
 	}
 	if run.Mode == "" {
+		// The configured default build mode, not a hardcoded solo. The UI
+		// launcher pre-fills it client-side, so this gap only showed when a
+		// run started WITHOUT a launcher — the autopilot's first production
+		// build ran solo past a config that said pair.
+		s.cfgMu.RLock()
+		run.Mode = s.cfg.Defaults.BuildMode
+		s.cfgMu.RUnlock()
+	}
+	if run.Mode == "" {
 		run.Mode = "solo"
 	}
 	if run.Autonomy == "" {

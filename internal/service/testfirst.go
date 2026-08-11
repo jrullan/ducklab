@@ -94,7 +94,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		// read an accepted test-first as a finished task and offered
 		// "build again" for work that had never been built once.
 		Stage:     "test",
-		Mode:      testMode(req.Mode),
+		Mode:      testMode(s.testModeDefault(req.Mode)),
 		TaskID:    req.TaskID,
 		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
@@ -501,6 +501,17 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 }
 
 // testMode normalises the test phase's mode: pair is the one alternative.
+// testModeDefault fills an empty request from the configured default, so a
+// launcher-less caller (CLI, autopilot) tests the way the person chose.
+func (s *Service) testModeDefault(m string) string {
+	if m != "" {
+		return m
+	}
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg.Defaults.TestMode
+}
+
 func testMode(m string) string {
 	if m == "pair" {
 		return "pair"

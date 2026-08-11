@@ -130,3 +130,29 @@ func TestAutopilotDefaultsRoundTripAndBounds(t *testing.T) {
 		}
 	}
 }
+
+// The default modes are a promise to every caller, not just the launcher
+// that pre-fills them client-side: a run started with no mode — the CLI, the
+// autopilot — gets the configured build mode, not a hardcoded solo. The
+// autopilot's first production build ran solo past a config that said pair.
+func TestAnEmptyModeTakesTheConfiguredDefault(t *testing.T) {
+	s := writableService(t, "pato-uno", "pato-dos")
+	v := s.ModeDefaults()
+	v.BuildMode = "pair"
+	v.TestMode = "pair"
+	if err := s.ModeDefaultsSet(v); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.testModeDefault(""); got != "pair" {
+		t.Errorf("empty test mode resolved to %q, want the configured pair", got)
+	}
+	if got := s.testModeDefault("solo"); got != "solo" {
+		t.Errorf("an explicit mode was overridden: %q", got)
+	}
+	s.cfgMu.RLock()
+	buildDefault := s.cfg.Defaults.BuildMode
+	s.cfgMu.RUnlock()
+	if buildDefault != "pair" {
+		t.Errorf("build default = %q", buildDefault)
+	}
+}
