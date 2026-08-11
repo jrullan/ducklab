@@ -36,8 +36,6 @@ var knownGaps = map[string]string{
 	"POST /v1/projects/{id}/skills/{name}/run":      "same",
 	"GET /v1/projects/{id}/roster/suggest":          "roster is editable but the engine's suggestion is not offered",
 	"POST /v1/projects/{id}/roster/suggest":         "same",
-	"POST /v1/projects/{id}/releases":               "drafting a release — believed reachable until the guard learned methods; the path-only match let the GET list excuse it",
-	"POST /v1/projects/{id}/releases/{version}/cut": "cutting a release",
 	"GET /v1/runs/{id}/transcript":                  "the conversation is rebuilt from events; the engine's own rendering is unreachable",
 	"GET /v1/engine":                                "engine version and paths; Settings shows a version it gets from the event stream",
 }

@@ -1019,6 +1019,17 @@ export class EngineClient {
       `/v1/projects/${projectId}/reviews/${taskId}`,
     ).then((r) => r.markdown ?? "");
   }
+  releasePlan(projectId: string, bump: string) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/releases`, { bump });
+  }
+
+  releaseCut(projectId: string, version: string) {
+    return this.request<Record<string, unknown>>(
+      "POST",
+      `/v1/projects/${projectId}/releases/${version}/cut`,
+    );
+  }
+
   releases(projectId: string) {
     return this.request<{ items: ReleaseSummary[] | null }>(
       "GET",

@@ -19,6 +19,37 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   const [markdown, setMarkdown] = useState("");
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [planned, setPlanned] = useState<string | null>(null);
+
+  // Drafting starts a release RUN — a scribe writes the prose over the
+  // deterministically collected changelog — so the affordance here is
+  // "start it and point at the run", not a spinner that hides one.
+  const draft = async (bump: string) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const run = await client.releasePlan(projectId, bump);
+      setPlanned(run.id);
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cut = async (version: string) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await client.releaseCut(projectId, version);
+      await load();
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,7 +83,38 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   }, [client, projectId, selected]);
 
   if (!loading && items.length === 0 && !failure) {
-    return <EmptyState message="No releases yet — run `ducklab release plan` to draft one." />;
+    // The view used to point at the CLI from inside the desktop — the one
+    // place a desktop user cannot go. The affordance lives here now.
+    return (
+      <div className="p-4">
+        <EmptyState message="No releases yet." />
+        {planned ? (
+          <p className="mt-2 text-sm text-ink-secondary" data-testid="release-planned">
+            Drafting — watch the release run in Now, then come back to cut it.
+          </p>
+        ) : (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="release-draft"
+              disabled={busy}
+              onClick={() => void draft("minor")}
+              className="rounded border border-hairline px-3 py-1 text-sm text-ink"
+            >
+              Draft a release
+            </button>
+            <span className="text-xs text-ink-muted">
+              collects accepted work since the last tag; a scribe writes the notes
+            </span>
+          </div>
+        )}
+        {failure && (
+          <p className="mt-2 text-sm text-critical" data-testid="release-error">
+            {failure}
+          </p>
+        )}
+      </div>
+    );
   }
 
   const current = items.find((r) => r.version === selected) ?? null;
@@ -100,12 +162,20 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         {current?.drafted && (
           <div
             data-testid="release-draft-notice"
-            className="mb-3 rounded-card border border-serious p-3 text-sm"
+            className="mb-3 flex items-center justify-between rounded-card border border-serious p-3 text-sm"
           >
-            <div className="text-ink">These notes are a draft.</div>
-            <div className="mt-1 font-mono text-xs text-ink-secondary">
-              ducklab release cut {current.version}
+            <div className="text-ink">
+              These notes are a draft. Cutting tags {current.version} and makes them the record.
             </div>
+            <button
+              type="button"
+              data-testid="release-cut"
+              disabled={busy}
+              onClick={() => void cut(current.version)}
+              className="rounded border border-serious px-3 py-1 text-ink"
+            >
+              Cut {current.version}
+            </button>
           </div>
         )}
 

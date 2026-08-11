@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Review, stripFrontmatter } from "./Review";
 import { Release } from "./Release";
@@ -101,9 +101,8 @@ describe("Release", () => {
     render(<Release client={client()} projectId="p" />);
     await waitFor(() => expect(screen.getAllByTestId("release-item")).toHaveLength(2));
     expect(screen.getAllByTestId("release-item")[0]!.textContent).toContain("drafted");
-    expect(screen.getByTestId("release-draft-notice").textContent).toContain(
-      "ducklab release cut v0.2.0",
-    );
+    // The CLI hint became a button: the desktop cuts its own releases now.
+    expect(screen.getByTestId("release-cut").textContent).toContain("Cut v0.2.0");
   });
 
   it("carries the unverified count into the view", async () => {
@@ -118,5 +117,39 @@ describe("Release", () => {
     fireEvent.click(screen.getAllByTestId("release-item")[1]!);
     await waitFor(() => expect(screen.queryByTestId("release-draft-notice")).toBeNull());
     expect(screen.getAllByTestId("release-item")[1]!.textContent).toContain("tagged");
+  });
+});
+
+// The desktop can now do what the view used to delegate to the CLI: draft a
+// release (starts the scribe run) and cut a drafted one. The one place a
+// desktop user cannot go is the terminal the old empty-state pointed at.
+describe("drafting and cutting from the desktop", () => {
+  it("drafts from the empty state and reports the run", async () => {
+    const releasePlan = vi.fn(() => Promise.resolve({ id: "r-rel" }));
+    const client = {
+      releases: vi.fn(() => Promise.resolve([])),
+      releasePlan,
+    } as unknown as EngineClient;
+    render(<Release client={client} projectId="p" />);
+    const btn = await screen.findByTestId("release-draft");
+    fireEvent.click(btn);
+    await waitFor(() => expect(releasePlan).toHaveBeenCalledWith("p", "minor"));
+    await screen.findByTestId("release-planned");
+  });
+
+  it("cuts a drafted release and reloads", async () => {
+    const releaseCut = vi.fn(() => Promise.resolve({}));
+    const summaries = [
+      { version: "v0.1.0", drafted: true, tagged: false, tasks: 3, since: "" },
+    ];
+    const client = {
+      releases: vi.fn(() => Promise.resolve(summaries)),
+      release: vi.fn(() => Promise.resolve("# notes")),
+      releaseCut,
+    } as unknown as EngineClient;
+    render(<Release client={client} projectId="p" />);
+    const btn = await screen.findByTestId("release-cut");
+    fireEvent.click(btn);
+    await waitFor(() => expect(releaseCut).toHaveBeenCalledWith("p", "v0.1.0"));
   });
 });
