@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ConversationTurn } from "./ConversationLane";
 import { ToolTimeline } from "./ToolTimeline";
 import { GateCard } from "./GateCard";
@@ -406,5 +406,34 @@ describe("the gate card on a test-first run", () => {
   it("keeps the plain reading for a build run", () => {
     render(<GateCard gate={red} stage="build" />);
     expect(screen.getByTestId("gate-card").textContent).toContain("tests failed");
+  });
+});
+
+// The tick bar folds on request and stays folded across runs — a person
+// reading long transcripts wants the pixels back, but the one-line summary
+// (count, failures) survives the fold so nothing important goes dark.
+describe("collapsing the tool timeline", () => {
+  const calls = [
+    { seq: 1, tool: "fs_read", ok: true },
+    { seq: 2, tool: "shell", ok: false },
+  ] as never[];
+
+  it("folds the ticks, keeps the caption, and remembers", () => {
+    localStorage.removeItem("ducklab.timeline");
+    const first = render(<ToolTimeline calls={calls} />);
+    expect(first.getAllByTestId("timeline-tick")).toHaveLength(2);
+    fireEvent.click(first.getByTestId("timeline-toggle"));
+    expect(first.queryByTestId("timeline-tick")).toBeNull();
+    // The failure count survives the fold.
+    expect(first.getByTestId("timeline-failed").textContent).toContain("1 failed");
+    first.unmount();
+
+    // A fresh mount honours the remembered preference.
+    const second = render(<ToolTimeline calls={calls} />);
+    expect(second.queryByTestId("timeline-tick")).toBeNull();
+    fireEvent.click(second.getByTestId("timeline-toggle"));
+    expect(second.getAllByTestId("timeline-tick")).toHaveLength(2);
+    second.unmount();
+    localStorage.removeItem("ducklab.timeline");
   });
 });
