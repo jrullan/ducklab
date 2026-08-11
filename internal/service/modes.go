@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -42,6 +43,9 @@ type loopCache struct {
 	// onRetry lands every transient provider failure on the record as it
 	// happens — the alternative was up to twenty silent minutes.
 	onRetry func(*agent.Turn, int, error)
+	// onToolStart says what just began running — the other half of a gate
+	// command's fifteen legal minutes of silence.
+	onToolStart func(*agent.Turn, string, string, json.RawMessage)
 	mu      sync.Mutex
 	loops   map[config.DucklingID]*agent.Loop
 }
@@ -59,6 +63,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnDelta = c.onDelta
 	l.OnReasoning = c.onReasoning
 	l.OnToolCall = c.onToolCall
+	l.OnToolStart = c.onToolStart
 	l.OnRetry = c.onRetry
 	l.CapLift = c.capLift
 	c.loops[id] = l
@@ -269,7 +274,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// per-role caps as every other mode.
 		TurnCaps: s.roleTurnCapsFor(mc.req.AgentTurns),
 		Gate: func(ctx context.Context) (string, string, error) {
-			res, err := verify.Run(mc.entry.Path, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, mc.entry.Path, mc.projCfg.Verify)
 			if err != nil {
 				return "none", "", err
 			}
@@ -322,7 +327,7 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 		Ducklings:     contestants,
 		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
-			res, err := verify.Run(root, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, root, mc.projCfg.Verify)
 			if err != nil {
 				return "none", "", err
 			}
@@ -359,7 +364,7 @@ func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.E
 		Ducklings:     subtaskDucklings,
 		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
-			res, err := verify.Run(root, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, root, mc.projCfg.Verify)
 			if err != nil {
 				return "none", "", err
 			}

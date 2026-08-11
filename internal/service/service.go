@@ -1250,7 +1250,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 
 	// Run the gate
-	gateResult, err := verify.Run(entry.Path, projCfg.Verify)
+	gateResult, err := verify.Run(ctx, entry.Path, projCfg.Verify)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -2395,6 +2395,15 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			data["digest"] = rec.Digest
 		}
 		rs.writer.AppendEvent("tool_call", data)
+	}
+	// What just began running, before it either returns or eats its whole
+	// ceiling in silence.
+	cache.onToolStart = func(t *agent.Turn, duckling, name string, args json.RawMessage) {
+		rs.writer.AppendEvent("tool_call_started", map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": duckling,
+			"tool": name, "args": string(args),
+		})
 	}
 	// Provider weather, on the record as it happens: the person watching an
 	// idle run decides with "retrying (2): provider sent nothing for 2m0s"

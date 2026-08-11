@@ -87,6 +87,15 @@ export function ConversationTurn({
           ))}
         </ul>
       )}
+      {/* The tool that is running RIGHT NOW. A verify_run can legally take
+          its whole ceiling; unnamed, those minutes read as a hang and taught
+          the person to abort healthy work. */}
+      {!block.done && block.pendingTool && (
+        <p className="mt-1 text-xs text-ink-muted" data-testid="tool-in-flight">
+          <span className="animate-pulse">▸</span> {block.pendingTool.tool}
+          {block.pendingTool.target ? ` ${block.pendingTool.target}` : ""} — running…
+        </p>
+      )}
 
       {/* A reviewer's turn is already structured. Rendering its raw text put
           `{"verdict":"approve", "findings":[]}` on screen — the one turn whose

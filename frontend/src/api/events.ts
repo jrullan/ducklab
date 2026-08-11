@@ -196,6 +196,7 @@ export const KNOWN_EVENT_TYPES = [
   "turn_end",
   "llm_call",
   "tool_call",
+  "tool_call_started",
   "policy_violation",
   // Provider weather as it happens: a transient failure per attempt, so a
   // stalled upstream reads as "retrying (2)" instead of as death.

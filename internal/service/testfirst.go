@@ -250,7 +250,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// The gate before anything is written. A suite that was already red stays
 	// red for its own reasons, and reading that as "the new test fails" would
 	// accept a test that asserts nothing (05 §5.2).
-	before, err := verify.Run(projectRoot, projCfg.Verify)
+	before, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate before: %w", err))
 		return
@@ -325,7 +325,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
 		Gate: func(ctx context.Context) (string, string, error) {
-			res, err := verify.Run(projectRoot, projCfg.Verify)
+			res, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 			if err != nil {
 				return "none", "", err
 			}
@@ -352,7 +352,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		return
 	}
 
-	after, err := verify.Run(projectRoot, projCfg.Verify)
+	after, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate after: %w", err))
 		return

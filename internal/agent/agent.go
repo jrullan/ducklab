@@ -107,6 +107,11 @@ type Loop struct {
 	// so a thirty-call implementer turn showed an empty timeline for its
 	// entire length and then eighty ticks at once.
 	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
+	// OnToolStart, if set, fires as a tool BEGINS executing. Completion was
+	// the only event, so a gate command that ran for its whole 900s ceiling
+	// was fifteen minutes of unexplained silence — the person read it as a
+	// hang and aborted healthy work. The lane can now say what is running.
+	OnToolStart func(turn *Turn, duckling string, name string, args json.RawMessage)
 	// OnRetry, if set, hears every transient provider failure AS IT HAPPENS.
 	// The retry chain used to run in total silence: a stalled stream timed
 	// out at 300s, three fallback attempts re-ran the wait, and the record
@@ -1138,6 +1143,9 @@ func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, t
 	if !allowed {
 		return tools.ErrorResult("tool %q not in toolbelt", tc.Function.Name), nil
 	}
+	if loop.OnToolStart != nil {
+		loop.OnToolStart(turn, string(loop.Duckling.ID), tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+	}
 	result, err := loop.Registry.Execute(ctx, ectx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 	if err != nil {
 		// A pause is not a tool error: turning it into an error result would
@@ -1161,6 +1169,9 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 	}
 	if !allowed {
 		return tools.ErrorResult("tool %q not in toolbelt", tc.Name), nil
+	}
+	if loop.OnToolStart != nil {
+		loop.OnToolStart(turn, string(loop.Duckling.ID), tc.Name, tc.Args)
 	}
 	result, err := loop.Registry.Execute(ctx, ectx, tc.Name, tc.Args)
 	if err != nil {

@@ -1,7 +1,9 @@
 package verify
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,7 +93,7 @@ func TestRunExecutesConfiguredCommand(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Verify{Mode: "custom", Custom: "exit 0", TimeoutS: 30}
 
-	res, err := Run(dir, cfg)
+	res, err := Run(context.Background(), dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +106,7 @@ func TestRunCapturesNonZeroExit(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Verify{Mode: "custom", Custom: "exit 3", TimeoutS: 30}
 
-	res, err := Run(dir, cfg)
+	res, err := Run(context.Background(), dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +124,7 @@ func TestRunMissingBinaryIsNotAFailure(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Verify{Mode: "custom", Custom: "ducklab-no-such-binary-xyz", TimeoutS: 30}
 
-	res, err := Run(dir, cfg)
+	res, err := Run(context.Background(), dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +137,7 @@ func TestRunNoneModeSkipsExecution(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Verify{Mode: "none", TimeoutS: 30}
 
-	res, err := Run(dir, cfg)
+	res, err := Run(context.Background(), dir, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +158,7 @@ func TestTheGateStopsAtItsTimeout(t *testing.T) {
 		t.Skip("sleeps")
 	}
 	start := time.Now()
-	res, err := Run(t.TempDir(), config.Verify{
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{
 		Mode: "custom", Custom: "sleep 30", TimeoutS: 1,
 	})
 	elapsed := time.Since(start)
@@ -182,8 +184,41 @@ func TestTheGateStopsAtItsTimeout(t *testing.T) {
 
 // A gate that finishes inside its budget is untouched.
 func TestAQuickGateIsUnaffected(t *testing.T) {
-	res, err := Run(t.TempDir(), config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30})
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30})
 	if err != nil || res.ExitCode != 0 {
 		t.Errorf("res = %+v, err = %v", res, err)
+	}
+}
+
+// The night of four pytest orphans: verify ran on context.Background, so an
+// abort left the gate's process group running — holding the database
+// connections that hung the NEXT run's suite. The run's own context rides in
+// now: cancel returns promptly and leaves no survivors.
+func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
+	marker := "verify_abort_repro_sleeper"
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	res, err := Run(ctx, t.TempDir(), config.Verify{
+		Mode: "custom", Custom: "python3 -c 'import time; time.sleep(300) # " + marker + "'",
+		TimeoutS: 600,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("the abort took %s to land", took)
+	}
+	// Cancelled means UNVERIFIED, never a pass.
+	if res.ExitCode == 0 {
+		t.Errorf("a killed gate reported exit 0: %+v", res)
+	}
+	time.Sleep(200 * time.Millisecond)
+	out, _ := exec.Command("pgrep", "-f", marker).Output()
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Fatalf("the gate's child survived the abort: %s", s)
 	}
 }

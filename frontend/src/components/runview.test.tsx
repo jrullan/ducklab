@@ -151,6 +151,26 @@ describe("ConversationTurn", () => {
     expect(screen.getByText(/path escapes root/)).toBeTruthy();
   });
 
+  // A verify_run can legally run for its whole 900s ceiling; unnamed, those
+  // minutes read as a hang and taught the person to abort healthy work —
+  // four pytest orphans in one night. The lane names the tool in flight and
+  // clears it the moment it completes.
+  it("shows the tool in flight, and clears it on completion", () => {
+    const [started] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("tool_call_started", 2, { round: 1, turn: 0, tool: "verify_run", args: "{}" }),
+    ]);
+    render(<ConversationTurn block={started!} roster={["luna"]} />);
+    expect(screen.getByTestId("tool-in-flight").textContent).toContain("verify_run");
+
+    const [done] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("tool_call_started", 2, { round: 1, turn: 0, tool: "verify_run", args: "{}" }),
+      ev("tool_call", 3, { round: 1, turn: 0, tool: "verify_run", ok: true }),
+    ]);
+    expect(done!.pendingTool).toBeUndefined();
+  });
+
   it("renders streamed text when present", () => {
     const [block] = buildTurns([ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" })]);
     render(<ConversationTurn block={block!} roster={roster} streamed="func Add" />);

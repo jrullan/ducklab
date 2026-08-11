@@ -77,6 +77,10 @@ export interface TurnBlock {
    * contestant slot. Two lanes with the same role and the same duckling are
    * otherwise indistinguishable, which is exactly what a split produces. */
   subject?: string;
+  /** The tool that has STARTED and not yet completed — a gate command can
+   * legally run for fifteen minutes, and without this the lane showed that
+   * as unexplained silence. Cleared by the completion event. */
+  pendingTool?: { tool: string; target?: string };
   /** True when another turn was open at the same time.
    *
    * Lanes are stacked, so concurrency reads as sequence: a reviewer of a split
@@ -238,7 +242,14 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         }
         break;
       }
+      case "tool_call_started": {
+        const b = blockFor(d);
+        if (b) b.pendingTool = { tool: String(d.tool ?? "?"), target: toolTarget(d) };
+        break;
+      }
       case "tool_call": {
+        const b0 = blockFor(d);
+        if (b0) b0.pendingTool = undefined;
         blockFor(d)?.toolCalls.push({
           seq: e.seq ?? 0,
           tool: String(d.tool ?? "?"),

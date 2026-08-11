@@ -82,7 +82,7 @@ func Detect(root string) (Gate, string, error) {
 }
 
 // Run executes the gate command in the given root.
-func Run(root string, cfg config.Verify) (*Result, error) {
+func Run(ctx context.Context, root string, cfg config.Verify) (*Result, error) {
 	gate := Gate(cfg.Mode)
 	cmd := ""
 
@@ -130,7 +130,16 @@ func Run(root string, cfg config.Verify) (*Result, error) {
 	if timeoutS <= 0 {
 		timeoutS = 900
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutS)*time.Second)
+	// Bounded by the timeout AND by the caller: the run's own context rides
+	// in, so an abort — or a graceful engine shutdown, which cancels every
+	// run — kills the gate's process group instead of orphaning a pytest
+	// that holds database connections for the next run to trip over. Four
+	// such orphans, one per stalled T-075 attempt, each born at an engine
+	// restart that took the old Background timer down with it.
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS)*time.Second)
 	defer cancel()
 	started := time.Now()
 
