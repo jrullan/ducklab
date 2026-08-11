@@ -27,7 +27,11 @@ export function GateCard({ gate, stage }: { gate: GateState | null; stage?: stri
       data-unverified={String(gate.unverified)}
     >
       <div className="text-sm text-ink-muted">gate</div>
-      {gate.cmd && <div className="font-mono text-sm text-ink-secondary">{gate.cmd}</div>}
+      {/* Commands are long one-liners; unbroken they punched through the
+          rail's edge and the tail of the command was simply gone. */}
+      {gate.cmd && (
+        <div className="break-all font-mono text-xs text-ink-secondary">{gate.cmd}</div>
+      )}
       <div className="mt-1">
         {testFirst && gate.gate === "red" ? (
           <StatusChip role="good" label="red — the new test fails, as intended: it defines done" />

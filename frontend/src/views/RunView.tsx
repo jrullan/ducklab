@@ -476,6 +476,26 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </div>
       </header>
 
+      {/* The task's own words, fixed beneath the title: judging a run means
+          reading what it did against what was ASKED, and the ask lived at
+          the bottom of a rail that scrolled away mid-read. Bounded: a long
+          body scrolls inside its own box, never the page. */}
+      {task && task.body && (
+        <section
+          data-testid="run-task-card"
+          className="mx-4 mt-2 rounded-card border border-hairline p-3"
+        >
+          <div className="text-sm text-ink">
+            <span className="text-ink-muted">the task · </span>
+            {task.id} — {task.title}
+          </div>
+          <div className="mt-1 max-h-36 overflow-y-auto text-sm">
+            <Prose body={task.body ?? ""} />
+          </div>
+        </section>
+      )}
+
+
       {/* The moment you most want to change a setting and go again is while
           looking at the run that just failed. Doing it meant leaving for the
           board and finding the task by hand, which is enough friction that a
@@ -956,22 +976,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </VirtualList>
         </section>
 
-        <aside className="flex flex-col gap-3">
-          {/* What was asked for, next to what was done. Judging a run means
-              reading the diff against the task's own words, and those lived
-              only on the board — a different screen from the decision. */}
-          {task && (task.body ?? "").trim() !== "" && (
-            <div className="rounded-card border border-hairline p-3" data-testid="run-task-card">
-              <div className="text-sm text-ink-muted">the task</div>
-              <div className="mt-1 text-sm text-ink">
-                {task.id} — {task.title}
-              </div>
-              <div className="mt-2 max-h-64 overflow-y-auto text-sm">
-                <Prose body={task.body ?? ""} />
-              </div>
-            </div>
-          )}
-          <GateCard gate={gate} stage={run.stage} />
+        <aside
+          data-testid="run-rail"
+          className="flex flex-col gap-3 md:sticky md:top-2 md:max-h-[calc(100vh-7rem)] md:self-start md:overflow-y-auto"
+        >
           {budget && (
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
@@ -1060,8 +1068,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+          <GateCard gate={gate} stage={run.stage} />
         </aside>
       </div>
+
 
       <div className="px-4">
         <ToolTimeline calls={timeline} />
