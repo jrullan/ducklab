@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 
+	"github.com/jrullan/ducklab/internal/daemon"
 	"github.com/jrullan/ducklab/internal/desktop"
 	"github.com/jrullan/ducklab/internal/engineclt"
 )
@@ -62,6 +63,33 @@ func (s *Shell) RestartEngine() (map[string]string, error) {
 	info, err := desktop.Restart(ctl, s.enginePath, 15*time.Second)
 	if err != nil {
 		return nil, err
+	}
+	s.conn = engineclt.New(info)
+	return map[string]string{
+		"baseUrl": fmt.Sprintf("http://127.0.0.1:%d", info.Port),
+		"token":   info.Token,
+		"version": info.Version,
+	}, nil
+}
+
+// ReconnectEngineFQN is the name the frontend calls ReconnectEngine by.
+func ReconnectEngineFQN() string {
+	return reflect.TypeOf(Shell{}).PkgPath() + ".Shell.ReconnectEngine"
+}
+
+// ReconnectEngine re-reads the running engine's connection details without
+// touching the process.
+//
+// The case it exists for: the engine was restarted OUTSIDE the app — a
+// terminal, an upgrade — so this window's token died with the old process,
+// and every view wore a Load Error while a perfectly healthy engine sat one
+// file-read away. Reconnect is the remedy that owns nothing: no shutdown, no
+// spawn, no environment questions — just adopt the engine that is already
+// there.
+func (s *Shell) ReconnectEngine() (map[string]string, error) {
+	info, err := daemon.WaitReady(3 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("no healthy engine to reconnect to (%v) — start one, or use Restart engine", err)
 	}
 	s.conn = engineclt.New(info)
 	return map[string]string{

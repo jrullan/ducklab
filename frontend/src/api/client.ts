@@ -417,15 +417,20 @@ export class ApiError extends Error {
   }
 }
 
+/** How a connection went stale: "older" — the engine predates this app and
+ * must be restarted; "restarted" — the engine was replaced outside the app
+ * and this window only needs to reconnect. */
+export type StaleKind = "older" | "restarted";
+
 export interface ClientOptions {
   baseUrl: string;
   token: string;
   version?: string;
   fetchFn?: typeof fetch;
-  /** Called when a response reveals the engine predates this client — the
-   * signal the restart banner listens for. The error still throws; this is
-   * how the shell learns without every call site reporting upward. */
-  onStale?: () => void;
+  /** Called when a response reveals a stale connection — the signal the
+   * banner listens for, with which remedy applies. The error still throws;
+   * this is how the shell learns without every call site reporting upward. */
+  onStale?: (kind: StaleKind) => void;
 }
 
 export class EngineClient {
@@ -464,9 +469,22 @@ export class EngineClient {
       // ("POST /v1/bench/start failed") reported that state without naming it,
       // and the one action that fixes it — restart the engine — went unsaid.
       if (err?.message === undefined && (res.status === 404 || res.status === 405)) {
-        this.opts.onStale?.();
+        this.opts.onStale?.("older");
         throw new ApiError(
           `the engine does not know ${method} ${path} — it is older than this app. Restart the engine.`,
+          res.status,
+        );
+      }
+      // The inverse: the engine was restarted OUTSIDE the app, this window's
+      // token died with the old process, and every request 401s. Twice this
+      // month that state wore fifteen Load Errors and no explanation — the
+      // classifier only knew the older-engine case. Same banner, other
+      // remedy: reconnect (re-read the daemon's connection file), no restart
+      // needed.
+      if (res.status === 401) {
+        this.opts.onStale?.("restarted");
+        throw new ApiError(
+          "the engine no longer recognizes this window's session — it was restarted outside the app. Reconnect.",
           res.status,
         );
       }

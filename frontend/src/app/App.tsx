@@ -42,6 +42,7 @@ declare global {
       /** Wails binding name for engine supervision: stop the old engine,
        * start the installed one, hand back the new connection. */
       restartEngine?: string;
+      reconnectEngine?: string;
       /** Wails binding name for opening a URL in the system browser — the
        * webview swallows target=_blank anchors. Absent outside the desktop. */
       openURL?: string;
@@ -126,7 +127,7 @@ export function App() {
   );
   // A response revealed the engine predates this app. The one action that
   // fixes it gets a button, not a sentence telling someone to open a terminal.
-  const [stale, setStale] = useState(false);
+  const [stale, setStale] = useState<false | "older" | "restarted">(false);
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
 
@@ -157,7 +158,7 @@ export function App() {
       baseUrl: cfg.baseUrl,
       token: cfg.token,
       version: VERSION,
-      onStale: () => setStale(true),
+      onStale: (kind) => setStale((cur) => cur || kind),
     });
     setClient(c);
 
@@ -238,9 +239,13 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn]);
 
-  // Stop the old engine, start the installed one, reconnect in place.
-  async function restartEngine() {
-    const fqn = window.ducklab?.restartEngine;
+  // Two remedies, one shape: "restart" stops the old engine and starts the
+  // installed binary; "reconnect" adopts an engine already running whose
+  // token this window missed (it was restarted outside the app). Both hand
+  // back fresh connection details and the client rebuilds in place.
+  async function superviseEngine(action: "restart" | "reconnect") {
+    const fqn =
+      action === "restart" ? window.ducklab?.restartEngine : window.ducklab?.reconnectEngine;
     const call = window.wails?.Call?.ByName;
     if (!fqn || !call) {
       setRestartError("engine supervision is only available in the desktop app");
@@ -411,17 +416,31 @@ export function App() {
           data-testid="stale-banner"
         >
           <span className="text-serious">
-            The engine is older than this app — some features will fail until it restarts.
+            {stale === "restarted"
+              ? "The engine was restarted outside the app — this window's session died with it."
+              : "The engine is older than this app — some features will fail until it restarts."}
           </span>
-          <button
-            type="button"
-            onClick={() => void restartEngine()}
-            disabled={restarting}
-            data-testid="restart-engine"
-            className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
-          >
-            {restarting ? "Restarting…" : "Restart engine"}
-          </button>
+          {stale === "restarted" ? (
+            <button
+              type="button"
+              onClick={() => void superviseEngine("reconnect")}
+              disabled={restarting}
+              data-testid="reconnect-engine"
+              className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+            >
+              {restarting ? "Reconnecting…" : "Reconnect"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void superviseEngine("restart")}
+              disabled={restarting}
+              data-testid="restart-engine"
+              className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-50"
+            >
+              {restarting ? "Restarting…" : "Restart engine"}
+            </button>
+          )}
           {restartError && (
             <span className="text-xs text-critical" data-testid="restart-error">
               {restartError}

@@ -13,6 +13,7 @@ describe("the engine restart banner", () => {
       baseUrl: "http://e1",
       token: "t1",
       restartEngine: "shell.RestartEngine",
+      reconnectEngine: "shell.ReconnectEngine",
     };
     (window as unknown as { wails: unknown }).wails = {
       Call: { ByName: vi.fn(() => Promise.resolve({ baseUrl: "http://e2", token: "t2" })) },
@@ -51,6 +52,35 @@ describe("the engine restart banner", () => {
       ).toHaveBeenCalledWith("shell.RestartEngine"),
     );
     // The banner clears once the fresh connection is in hand.
+    await waitFor(() => expect(screen.queryByTestId("stale-banner")).toBeNull());
+    vi.unstubAllGlobals();
+  });
+
+  // The inverse of the older-engine case, and the one that actually bit
+  // twice: the engine restarted OUTSIDE the app, this window's token died
+  // with it, and every request 401ed into fifteen Load Errors with no
+  // explanation. Same banner, other remedy — reconnect adopts the running
+  // engine's fresh connection without touching the process.
+  it("offers Reconnect when the engine was restarted outside the app", async () => {
+    const fetchFn = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes("/v1/health")) return Promise.resolve(new Response(JSON.stringify({ version: "x" }), { status: 200 }));
+      if (u.startsWith("http://e2")) return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ error: { message: "invalid token" } }), { status: 401 }));
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchFn);
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("stale-banner")).toBeTruthy(), { timeout: 3000 });
+    expect(screen.getByTestId("stale-banner").textContent).toContain("restarted outside the app");
+    expect(screen.queryByTestId("restart-engine")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("reconnect-engine"));
+    await waitFor(() =>
+      expect(
+        (window as unknown as { wails: { Call: { ByName: ReturnType<typeof vi.fn> } } }).wails.Call.ByName,
+      ).toHaveBeenCalledWith("shell.ReconnectEngine"),
+    );
     await waitFor(() => expect(screen.queryByTestId("stale-banner")).toBeNull());
     vi.unstubAllGlobals();
   });
