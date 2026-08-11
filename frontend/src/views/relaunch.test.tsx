@@ -288,3 +288,27 @@ describe("relaunching a failed test-first", () => {
     expect(chain.agentTurns).toBe(-1);
   });
 });
+
+// The tab panel folds on an active-tab click: under a long transcript the
+// calls list is most of a screen, and the person asked for it back. Clicking
+// the active tab hides the panel; clicking it again (or any tab) shows it.
+describe("folding the tab panel", () => {
+  it("hides the calls list on an active-tab click and brings it back", async () => {
+    const client = clientWith({
+      runLLM: vi.fn(() =>
+        Promise.resolve([
+          { seq: 1, duckling: "dsv4flash", role: "implementer", tokens_in: 10, tokens_out: 5 },
+        ]),
+      ),
+    } as unknown as Partial<EngineClient>);
+    useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-1" client={client} />);
+    const tab = await screen.findByTestId("tab-calls");
+    fireEvent.click(tab); // switch to calls
+    await screen.findByTestId("calls");
+    fireEvent.click(tab); // active again → fold
+    expect(screen.queryByTestId("calls")).toBeNull();
+    fireEvent.click(tab); // unfold
+    await screen.findByTestId("calls");
+  });
+});

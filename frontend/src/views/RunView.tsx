@@ -71,6 +71,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   }, [client, runId, streamedStatus, streamedPending]);
 
   const [tab, setTab] = useState<Tab>("diff");
+  // The tab panel folds: clicking the ACTIVE tab hides its content (the
+  // calls list under a long transcript is most of a screen), clicking any
+  // tab shows it again. Not persisted — a diff hidden by yesterday's fold
+  // is a diff unread before an accept.
+  const [tabsFolded, setTabsFolded] = useState(false);
   // A stage run's subject: the document it proposed. Fetched from the
   // artifact store once the run pauses at its gate, shown only when the
   // pending proposal is THIS run's — an older proposal would be someone
@@ -1118,16 +1123,29 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <button
             key={t}
             type="button"
-            onClick={() => setTab(t)}
+            onClick={() => {
+              if (shownTab === t) {
+                setTabsFolded((v) => !v);
+              } else {
+                setTab(t);
+                setTabsFolded(false);
+              }
+            }}
             data-testid={`tab-${t}`}
-            className={`px-2 py-1 text-sm ${shownTab === t ? "text-ink" : "text-ink-muted"}`}
+            className={`px-2 py-1 text-sm ${shownTab === t && !tabsFolded ? "text-ink" : "text-ink-muted"}`}
           >
+            {shownTab === t && (
+              <span aria-hidden="true" className="mr-1 text-xs">
+                {tabsFolded ? "›" : "⌄"}
+              </span>
+            )}
             {t}
             {note && <span className="ml-1 text-xs text-ink-muted">{note}</span>}
           </button>
         ))}
       </nav>
 
+      {!tabsFolded && (
       <div className="p-2">
         {/* The test hunks come first, above the rest of the diff, because the
             whole point is that they are read before the decision and not
@@ -1190,6 +1208,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </ul>
           ))}
       </div>
+      )}
 
       {/* The chat composer, pinned to the bottom of the viewport like every
           conversation the person already knows. It lived in the pending card
