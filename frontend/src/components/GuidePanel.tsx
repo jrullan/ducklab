@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { Duckling, EngineClient, NextStep } from "../api/client";
+import type { Duckling, EngineClient, NextStep, Run } from "../api/client";
 import { useRuns } from "../store/runs";
 import { routeHref, type Route } from "../app/routes";
 import { ChatAbout } from "./ChatAbout";
+import { tokens } from "../lib/format";
 
 /** Where a step's button lives. The guide points, it never duplicates. */
 function hrefFor(step: NextStep): string {
@@ -57,7 +58,14 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [client]);
 
-  if (steps.length === 0) return null;
+  // The live pulse, above the plan: what is happening outranks what is next,
+  // and the rail is the one place both survive every view change.
+  const active = Object.values(runs).filter(
+    (r) => r.status === "running" || r.status === "queued",
+  );
+  const live = useRuns((s) => s.spend);
+
+  if (steps.length === 0 && active.length === 0) return null;
 
   if (!open) {
     return (
@@ -68,10 +76,10 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           localStorage.removeItem(STORE);
           setOpen(true);
         }}
-        title="show the next-step guide"
+        title="show the guide rail"
         className="shrink-0 self-start rounded-r border border-l-0 border-hairline px-1.5 py-2 text-xs text-ink-muted"
       >
-        ›{steps.length}
+        ›{active.length + steps.length}
       </button>
     );
   }
@@ -81,6 +89,16 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
       data-testid="guide-rail"
       className="w-60 shrink-0 overflow-y-auto border-r border-hairline p-3"
     >
+      {active.length > 0 && (
+        <section data-testid="rail-running" className="mb-3">
+          <h2 className="text-sm text-ink-muted">running</h2>
+          <ul className="mt-1 space-y-1">
+            {active.map((r) => (
+              <RailRun key={r.id} run={r} tokensUsed={live[r.id]?.tokens} />
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm text-ink-muted">next steps</h2>
         <button
@@ -121,5 +139,26 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
         />
       </div>
     </aside>
+  );
+}
+
+/** One live run, rail-compact: the status in its color, the shortest name
+ * that identifies it, live tokens when they exist. The inbox keeps the
+ * fuller row; this is the pulse. */
+function RailRun({ run, tokensUsed }: { run: Run; tokensUsed?: number }) {
+  const label = run.task_id || run.stage || run.id;
+  return (
+    <li data-testid="rail-run" className="text-xs">
+      <span className={run.status === "running" ? "text-good" : "text-ink-muted"}>
+        {run.status === "running" ? "\u25cf" : "\u25cb"}
+      </span>{" "}
+      <a href={routeHref({ name: "run", id: run.id })} className="text-ink underline">
+        {label}
+      </a>{" "}
+      <span className="text-ink-muted">
+        {run.mode}
+        {tokensUsed ? " \u00b7 " + tokens(tokensUsed) : ""}
+      </span>
+    </li>
   );
 }

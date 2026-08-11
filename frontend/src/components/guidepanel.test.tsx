@@ -71,6 +71,35 @@ describe("the guide rail", () => {
     await waitFor(() => screen.getByTestId("guide-rail"));
   });
 
+  // The live pulse sits above the plan: what is happening outranks what is
+  // next, and the rail is the one place both survive every view change.
+  it("shows running work at the top, even with no steps to offer", async () => {
+    useRuns.setState({
+      runs: {
+        "r-live": {
+          id: "r-live", project_id: "p", stage: "build", mode: "pair",
+          task_id: "T-079", status: "running", verdict: "", started_at: "2026-08-11T10:00:00Z",
+        } as never,
+      },
+      events: {}, deltas: {}, reasoning: {},
+      spend: { "r-live": { usd: 0, tokens: 189900, turns: 1, wallclock_s: 5, ducklings: {} } as never },
+    });
+    render(<GuideRail client={clientWith([])} projectId="p" />);
+    const pulse = await waitFor(() => screen.getByTestId("rail-running"));
+    expect(pulse.textContent).toContain("T-079");
+    expect(pulse.textContent).toContain("189.9k");
+    // Above the steps in document order when both exist.
+    render(<GuideRail client={clientWith(STEPS)} projectId="p2" />);
+    await waitFor(() => screen.getAllByTestId("guide-step"));
+    const rails = screen.getAllByTestId("guide-rail");
+    const withBoth = rails[rails.length - 1]!;
+    const running = withBoth.querySelector('[data-testid="rail-running"]')!;
+    const firstStep = withBoth.querySelector('[data-testid="guide-step"]')!;
+    expect(
+      running.compareDocumentPosition(firstStep) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   // The rail says WHAT; the chat at its foot explains WHY — same client,
   // same engine introspection, one story.
   it("offers the ask-why chat at its foot", async () => {

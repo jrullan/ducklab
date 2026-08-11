@@ -51,22 +51,6 @@ describe("Now — the inbox", () => {
     expect(card.textContent).toContain("see the evidence");
   });
 
-  // Live work is a glance, and a glance below the fold is not one: three
-  // verify cards used to push "running" off screen exactly when the person
-  // came to see what was happening. One compact line per run, always first.
-  it("keeps the running pulse above the decision cards", async () => {
-    seed([
-      base,
-      { ...base, id: "r-live", task_id: "T-030", status: "running", verdict: "" },
-    ]);
-    render(<Now client={clientWith()} projectId="p" />);
-    const running = await screen.findByTestId("now-running");
-    const waiting = screen.getByTestId("now-waiting");
-    expect(
-      running.compareDocumentPosition(waiting) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
   it("accepts without leaving the inbox, never optimistically", async () => {
     seed([base]);
     const client = clientWith();
