@@ -1800,7 +1800,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 // they lifted both quietly reverted at exactly the moment they were resuming
 // past.
 func resumeRequest(run *runlog.Run) RunRequest {
-	return RunRequest{
+	req := RunRequest{
 		TaskID:       run.TaskID,
 		Mode:         run.Mode,
 		Autonomy:     run.Autonomy,
@@ -1810,6 +1810,18 @@ func resumeRequest(run *runlog.Run) RunRequest {
 		UnsafeWrites: run.UnsafeWrites,
 		resumed:      true,
 	}
+	// The SEATS ride the record too. Without them the dispatch re-resolved
+	// the roster from the config defaults, so a run the person had
+	// explicitly seated came back speaking through another model — glm52's
+	// record, luna's calls — and only the per-call upstream field told on
+	// it. Mirrors what the test-first resume branch already carried.
+	if imp := run.Roster["implementer"]; imp != "" {
+		req.Ducklings = append(req.Ducklings, imp)
+		if rev := run.Roster["reviewer"]; rev != "" && run.Mode == "pair" {
+			req.Ducklings = append(req.Ducklings, rev)
+		}
+	}
+	return req
 }
 
 // RunBudgetLift removes one cap — tokens, usd, turns, wallclock, or calls —

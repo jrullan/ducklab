@@ -188,6 +188,7 @@ func TestResumeCarriesTheNoteAndTheLiftedCap(t *testing.T) {
 		TaskID: "T-051", Mode: "pair", Autonomy: "guarded", Stream: true,
 		Note:       "close every connection — the fix leaked",
 		AgentTurns: -1,
+		Roster:     map[string]string{"implementer": "glm52", "reviewer": "qwen38-max", "architect": "pato-sonnet"},
 	})
 	if req.Note == "" {
 		t.Error("the human's note was dropped on resume")
@@ -197,6 +198,12 @@ func TestResumeCarriesTheNoteAndTheLiftedCap(t *testing.T) {
 	}
 	if !req.resumed {
 		t.Error("a resume request must say it is one")
+	}
+	// The seats, in seat order — glm52's resumed run once came back
+	// speaking through the config default, and only the upstream field
+	// told on it.
+	if len(req.Ducklings) != 2 || req.Ducklings[0] != "glm52" || req.Ducklings[1] != "qwen38-max" {
+		t.Errorf("ducklings = %v, want the recorded seats [glm52 qwen38-max]", req.Ducklings)
 	}
 }
 
