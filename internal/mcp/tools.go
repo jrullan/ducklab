@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -108,14 +111,17 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name": "bug_attach",
-			"description": "Attach one image to a bug (base64 bytes, 8MB cap). The screenshot says what " +
-				"a paragraph cannot: a vision triager is shown the pixels themselves.",
+			"description": "Attach one image to a bug (8MB cap). Give `path` when the image is a file " +
+				"on this machine — a saved chat download — and the server reads and encodes it itself; " +
+				"never try to type base64 by hand, generated base64 arrives corrupted. The screenshot " +
+				"says what a paragraph cannot: a vision triager is shown the pixels themselves.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id":  str("the project id"),
 				"bug_id":      str("the bug, B-..."),
-				"filename":    str("a label like screenshot.png"),
-				"data_base64": str("the image bytes, standard base64"),
-			}, "project_id", "bug_id", "filename", "data_base64"),
+				"path":        str("absolute path to the image file on this machine (preferred)"),
+				"filename":    str("optional label; defaults to the file's own name"),
+				"data_base64": str("raw base64, ONLY when no file exists on disk"),
+			}, "project_id", "bug_id"),
 		},
 		{
 			"name": "bug_triage",
@@ -233,7 +239,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "bug_report":
-		req := map[string]string{"title": a.str("title"), "body": a.str("body")}
+		// Attributed: the record must say WHO filed it, and "mcp:elena" is
+		// auditable where an empty reporter is a shrug.
+		req := map[string]string{
+			"title": a.str("title"), "body": a.str("body"),
+			"reporter": "mcp:" + s.client, "source": "mcp",
+		}
 		if sev := a.str("severity"); sev != "" {
 			req["severity"] = sev
 		}
@@ -250,7 +261,29 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(bugs), nil
 	case "bug_attach":
-		items, err := s.eng.BugAttach(a.str("project_id"), a.str("bug_id"), a.str("filename"), a.str("data_base64"))
+		data := a.str("data_base64")
+		filename := a.str("filename")
+		if p := a.str("path"); p != "" {
+			// The model names a file; the server carries the bytes. A model
+			// cannot emit hundreds of kilobytes of base64 token by token
+			// without corrupting them — the first field agent to try proved
+			// it within the hour.
+			raw, err := os.ReadFile(p)
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %v", p, err)
+			}
+			if len(raw) > 8<<20 {
+				return nil, fmt.Errorf("%s is %d bytes; the cap is 8MB — attach a screenshot, not a recording", p, len(raw))
+			}
+			data = base64.StdEncoding.EncodeToString(raw)
+			if filename == "" {
+				filename = filepath.Base(p)
+			}
+		}
+		if data == "" {
+			return nil, fmt.Errorf("give path (preferred) or data_base64")
+		}
+		items, err := s.eng.BugAttach(a.str("project_id"), a.str("bug_id"), filename, data)
 		if err != nil {
 			return nil, err
 		}

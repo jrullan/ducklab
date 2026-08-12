@@ -2,8 +2,11 @@ package mcp
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,6 +17,8 @@ type fakeEngine struct {
 	accepted   []string
 	acceptedAs string
 	rejected   []string
+	attached     string
+	attachedName string
 	revised    []string
 }
 
@@ -208,6 +213,7 @@ func (f *fakeEngine) BugList(projectID string, openOnly bool) ([]map[string]inte
 }
 
 func (f *fakeEngine) BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error) {
+	f.attached, f.attachedName = dataB64, filename
 	return map[string]interface{}{"items": []string{filename}}, nil
 }
 
@@ -267,5 +273,33 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		if !strings.Contains(string(blob), must) {
 			t.Errorf("tools/list is missing %q", must)
 		}
+	}
+}
+
+// A model cannot emit hundreds of kilobytes of base64 token by token without
+// corrupting them — Elena proved it within the hour of getting the tool. The
+// operator names a PATH and the server carries the bytes itself.
+func TestBugAttachReadsTheFileItself(t *testing.T) {
+	img := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(img, []byte("png-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"elena"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"bug_attach","arguments":{"project_id":"p","bug_id":"B-001","path":"`+img+`"}}}`,
+	)
+	if resps[1]["error"] != nil {
+		t.Fatalf("path attach errored: %v", resps[1]["error"])
+	}
+	if eng.attached == "" {
+		t.Fatal("nothing reached the engine")
+	}
+	raw, err := base64.StdEncoding.DecodeString(eng.attached)
+	if err != nil || string(raw) != "png-bytes" {
+		t.Errorf("bytes corrupted in transit: %q %v", eng.attached, err)
+	}
+	if eng.attachedName != "shot.png" {
+		t.Errorf("filename = %q, want the file's own name", eng.attachedName)
 	}
 }
