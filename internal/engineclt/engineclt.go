@@ -280,6 +280,14 @@ func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild bool) (
 	return result, err
 }
 
+// ProjectNext is the engine's own guidance: the ordered next steps the
+// guide rail renders and the autopilot drives.
+func (c *Client) ProjectNext(projectID string) ([]map[string]interface{}, error) {
+	var result []map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/next", &result)
+	return result, err
+}
+
 // AppStatus reports the project app's run configuration and process state.
 func (c *Client) AppStatus(projectID string) (map[string]interface{}, error) {
 	var result map[string]interface{}

@@ -27,7 +27,10 @@ func toolList() []map[string]interface{} {
 		{
 			"name": "status",
 			"description": "What needs a decision and what is running, across every project. " +
-				"Start here. Each pending run carries `next`: the ONLY actions you may take on it.",
+				"Start here. Each pending run carries `next`: the ONLY actions you may take on it. " +
+				"Each project carries `next_steps` — the engine's own guidance, the same the desktop's " +
+				"rail shows. When the human asks what to do, answer FROM next_steps: it already knows " +
+				"that a triaged bug wants promoting and which task is buildable.",
 			"inputSchema": obj(map[string]interface{}{}),
 		},
 		{
@@ -368,11 +371,18 @@ func (s *Server) status() (map[string]interface{}, error) {
 				active = append(active, pick(r, "id", "stage", "task_id", "status"))
 			}
 		}
-		out = append(out, map[string]interface{}{
+		entry := map[string]interface{}{
 			"project": id, "name": p["name"],
 			"waiting_for_decision": waiting,
 			"running":              active,
-		})
+		}
+		// The guide's ordered steps: without them an operator reads a bug's
+		// raw status transitions and answers "in_progress, duplicate or
+		// wontfix" to a human whose actual next move was "promote it".
+		if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
+			entry["next_steps"] = steps
+		}
+		out = append(out, entry)
 	}
 	return toolJSON(out), nil
 }

@@ -229,6 +229,12 @@ func (f *fakeEngine) BugMove(projectID, bugID, status string) (map[string]interf
 	return map[string]interface{}{"status": status}, nil
 }
 
+func (f *fakeEngine) ProjectNext(projectID string) ([]map[string]interface{}, error) {
+	return []map[string]interface{}{
+		{"id": "promote", "action": "Promote B-037 to a task — or park it", "kind": "bug", "ref": "B-037"},
+	}, nil
+}
+
 func (f *fakeEngine) AppStatus(projectID string) (map[string]interface{}, error) {
 	return map[string]interface{}{"running": false, "command": "python app.py"}, nil
 }
@@ -301,5 +307,21 @@ func TestBugAttachReadsTheFileItself(t *testing.T) {
 	}
 	if eng.attachedName != "shot.png" {
 		t.Errorf("filename = %q, want the file's own name", eng.attachedName)
+	}
+}
+
+// Asked for status, the operator answered from a bug's raw state transitions
+// — "in_progress, duplicate or wontfix" — while the human's actual next move
+// was "promote it". status now carries the guide's own steps per project,
+// so the operator answers from the same brain the rail and autopilot use.
+func TestStatusCarriesTheGuide(t *testing.T) {
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{}}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status"}}`,
+	)
+	blob, _ := json.Marshal(resps[1])
+	if !strings.Contains(string(blob), "Promote B-037") {
+		t.Errorf("status does not carry the guide's steps: %s", blob)
 	}
 }
