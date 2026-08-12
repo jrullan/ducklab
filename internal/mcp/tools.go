@@ -75,8 +75,11 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{"project_id": str("the project id")}, "project_id"),
 		},
 		{
-			"name":        "run_start",
-			"description": "Build a task. Mode defaults to the project's habit; solo|pair|tournament|split.",
+			"name": "run_start",
+			"description": "Build a task WITHOUT the test-first discipline — an exception, not the " +
+				"ordinary path. When the human says to run, start or build a task, they mean " +
+				"test_start (the TDD chain); use run_start only when they explicitly ask to skip " +
+				"the test. Mode defaults to the project's habit; solo|pair|tournament|split.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"task_id":    str("a task whose next includes run"),
