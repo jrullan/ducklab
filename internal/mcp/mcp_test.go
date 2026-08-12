@@ -13,6 +13,7 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	tasks []map[string]interface{}
 	runs       map[string]map[string]interface{}
 	accepted   []string
 	acceptedAs string
@@ -62,7 +63,12 @@ func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (ma
 func (f *fakeEngine) ArtifactGet(string, string) (map[string]interface{}, error) {
 	return map[string]interface{}{"kind": "requirements"}, nil
 }
-func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) { return nil, nil }
+func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
+	if f.tasks != nil {
+		return f.tasks, nil
+	}
+	return nil, nil
+}
 func (f *fakeEngine) BugAdd(string, map[string]string) (map[string]interface{}, error) {
 	return map[string]interface{}{"id": "B-001"}, nil
 }
@@ -323,5 +329,38 @@ func TestStatusCarriesTheGuide(t *testing.T) {
 	blob, _ := json.Marshal(resps[1])
 	if !strings.Contains(string(blob), "Promote B-037") {
 		t.Errorf("status does not carry the guide's steps: %s", blob)
+	}
+}
+
+// task_list used to relay the engine's full task objects — bodies included,
+// 141KB on a hundred-task project. The operator asking was a local model
+// whose harness truncates tool results: what survived the cut was ONE task's
+// body and no status at all, from which it honestly told the human that a
+// finished project still had "T-001 pending". Compact rows, summary FIRST,
+// so the answer to "anything pending?" survives any truncation.
+func TestTaskListIsCompactWithTheSummaryFirst(t *testing.T) {
+	huge := strings.Repeat("Create relational database schema for all entities. ", 500)
+	eng := &fakeEngine{tasks: []map[string]interface{}{
+		{"id": "T-001", "status": "accepted", "title": "Database schema", "body": huge},
+		{"id": "T-002", "status": "todo", "title": "User boundary", "body": huge,
+			"next": []interface{}{"test", "run"}},
+	}}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_list","arguments":{"project_id":"p"}}}`,
+	)
+	blob, _ := json.Marshal(resps[1])
+	text := string(blob)
+	if !strings.Contains(text, "2 task(s): 1 todo; 1 accepted;") {
+		t.Errorf("no leading summary: %.300s", text)
+	}
+	if !strings.Contains(text, "T-002  todo  User boundary  [test run]") {
+		t.Errorf("no compact row: %.300s", text)
+	}
+	if strings.Contains(text, "Create relational database schema") {
+		t.Error("task bodies leaked into the listing — the truncation trap again")
+	}
+	if len(text) > 2000 {
+		t.Errorf("listing is %d bytes for two tasks; it would not survive a truncating harness", len(text))
 	}
 }

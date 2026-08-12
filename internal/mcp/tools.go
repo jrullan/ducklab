@@ -70,9 +70,14 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name": "task_list",
-			"description": "The project's tasks with status and `next`. A task offering no run is " +
-				"not startable — blocked tasks name what they wait on.",
-			"inputSchema": obj(map[string]interface{}{"project_id": str("the project id")}, "project_id"),
+			"description": "The project's tasks: a status summary first, then one compact line per " +
+				"task (id, status, title, next). Answer \"anything pending?\" from the summary. " +
+				"Bodies are omitted — read one task's brief via the run you start, or artifact_get " +
+				"the plan.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"status":     str("only tasks in this status, e.g. todo | in_progress | blocked | accepted (optional)"),
+			}, "project_id"),
 		},
 		{
 			"name": "run_start",
@@ -222,7 +227,55 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if err != nil {
 			return nil, err
 		}
-		return toolJSON(tasks), nil
+		// Compact on purpose, summary first. The raw list carries every
+		// task's full body — 141KB on a hundred-task project — and the
+		// operator that asked was a local model whose harness truncates
+		// tool results: what survived was ONE task's body and no status
+		// field, from which it honestly concluded the finished project had
+		// work pending. The summary line answers "anything pending?" even
+		// if everything after it is cut.
+		counts := map[string]int{}
+		for _, t := range tasks {
+			st, _ := t["status"].(string)
+			if st == "" {
+				st = "unknown"
+			}
+			counts[st]++
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d task(s):", len(tasks))
+		for _, st := range []string{"todo", "in_progress", "blocked", "test_ready", "accepted", "done", "unknown"} {
+			if counts[st] > 0 {
+				fmt.Fprintf(&b, " %d %s;", counts[st], st)
+			}
+		}
+		b.WriteString("\n")
+		filter := a.str("status")
+		shown := 0
+		for _, t := range tasks {
+			st, _ := t["status"].(string)
+			if filter != "" && st != filter {
+				continue
+			}
+			shown++
+			id, _ := t["id"].(string)
+			title, _ := t["title"].(string)
+			line := fmt.Sprintf("%s  %s  %s", id, st, title)
+			if next, ok := t["next"].([]interface{}); ok && len(next) > 0 {
+				parts := make([]string, 0, len(next))
+				for _, n := range next {
+					if ns, ok := n.(string); ok {
+						parts = append(parts, ns)
+					}
+				}
+				line += "  [" + strings.Join(parts, " ") + "]"
+			}
+			b.WriteString(line + "\n")
+		}
+		if filter != "" && shown == 0 {
+			fmt.Fprintf(&b, "no tasks in status %q\n", filter)
+		}
+		return toolText(b.String(), false), nil
 	case "run_start":
 		req := map[string]interface{}{"task_id": a.str("task_id")}
 		if m := a.str("mode"); m != "" {
