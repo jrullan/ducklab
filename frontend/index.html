@@ -7,6 +7,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Wails serves this path inside the desktop webview only; it attaches
+         window.wails (Call.ByName), which every native binding checks for.
+         In a browser or vite dev it 404s and those features report absent. -->
+    <script src="/wails/runtime.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
