@@ -209,10 +209,17 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	tracker := rs.tracker
 	if tracker == nil {
 		limits := &budget.Budget{
-			MaxUSD:        projCfg.Budget.MaxUSD,
-			MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
-			MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
-			MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
+			MaxUSD:    projCfg.Budget.MaxUSD,
+			MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+			MaxTurns:  s.cfg.Defaults.Budget.MaxTurns,
+			// No wallclock ceiling: the tracker's clock starts when the
+			// conversation opens and never stops, so it measures the
+			// PERSON's thinking time between messages, not the model's
+			// work. A chat left open through an afternoon died mid-question
+			// at 7515s against the 1800s meant to stop runaway runs. Each
+			// reply is still bounded — turn caps, provider timeouts — and
+			// tokens and dollars, which measure real spend, keep their caps.
+			MaxWallclockS: 0,
 		}
 		tracker = budget.NewTracker(limits)
 		recordLimits(rs, limits)
