@@ -29,7 +29,7 @@ func TestTheWebhookAnnouncesGateMoments(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		mu.Lock()
-		hits = append(hits, hit{body: body, sig: r.Header.Get("X-Ducklab-Signature")})
+		hits = append(hits, hit{body: body, sig: r.Header.Get("X-Hub-Signature-256")})
 		mu.Unlock()
 		w.WriteHeader(200)
 	}))
@@ -75,7 +75,7 @@ func TestTheWebhookAnnouncesGateMoments(t *testing.T) {
 	}
 	mac := hmac.New(sha256.New, []byte("quack"))
 	mac.Write(hits[0].body)
-	if hits[0].sig != hex.EncodeToString(mac.Sum(nil)) {
-		t.Error("the signature does not verify against the shared secret")
+	if hits[0].sig != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+		t.Error("the signature does not verify GitHub-style against the shared secret")
 	}
 }

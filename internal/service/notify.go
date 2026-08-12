@@ -54,9 +54,13 @@ func (s *Service) startNotifier() {
 				}
 				req.Header.Set("Content-Type", "application/json")
 				if secret != "" {
+					// The GitHub convention — sha256=<hex> in
+					// X-Hub-Signature-256 — because that is what webhook
+					// receivers already verify; a bespoke header worked for
+					// nobody, starting with Hermes.
 					mac := hmac.New(sha256.New, []byte(secret))
 					mac.Write(body)
-					req.Header.Set("X-Ducklab-Signature", hex.EncodeToString(mac.Sum(nil)))
+					req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 				}
 				resp, err := client.Do(req)
 				if err == nil {
