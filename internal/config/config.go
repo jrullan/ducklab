@@ -230,6 +230,18 @@ type Global struct {
 	Providers map[ProviderID]Provider `toml:"provider" json:"provider"`
 	Ducklings map[DucklingID]Duckling `toml:"duckling" json:"duckling"`
 	MCPs      map[string]MCP          `toml:"mcp" json:"mcp"`
+	Notify    Notify                  `toml:"notify" json:"notify"`
+}
+
+// Notify is the outbound webhook: where the engine announces the moments a
+// person (or the agent speaking for one) must know about — a run waiting at
+// its gate, a run ending, the autopilot stopping. Integration plumbing, so
+// it lives in the config file like the provider keys' env names do.
+type Notify struct {
+	WebhookURL string `toml:"webhook_url" json:"webhook_url"`
+	// Secret signs each payload (X-Ducklab-Signature: hex HMAC-SHA256) so
+	// the receiver can refuse forgeries. Optional on a loopback URL.
+	Secret string `toml:"secret" json:"secret,omitempty"`
 }
 
 // ShellPolicy holds shell policy configuration.

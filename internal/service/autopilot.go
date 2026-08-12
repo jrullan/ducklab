@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -133,11 +134,19 @@ func (s *Service) autopilotOn(projectID string) bool {
 // autopilotStop switches the loop off with a reason the rail will show.
 func (s *Service) autopilotStop(projectID, reason string) {
 	s.apMu.Lock()
-	defer s.apMu.Unlock()
 	if st, ok := s.autopilots[projectID]; ok {
 		st.On = false
 		st.StoppedReason = reason
 		st.LastAction = ""
+	}
+	s.apMu.Unlock()
+	// Announced: an unattended loop switching itself off is exactly the
+	// moment the person (or the agent speaking for them) must hear about.
+	if s.bus != nil {
+		s.bus.Publish(bus.Event{
+			Type: "autopilot", ProjectID: projectID, TS: time.Now(),
+			Data: map[string]interface{}{"on": false, "reason": reason},
+		})
 	}
 }
 

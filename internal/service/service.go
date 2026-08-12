@@ -146,6 +146,8 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		s.ducklings.Register(duckling.FromConfig(id, d))
 	}
 
+	s.startNotifier()
+
 	return s, nil
 }
 
