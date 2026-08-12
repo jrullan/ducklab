@@ -20,6 +20,21 @@ import { waitingFor } from "../lib/format";
 const FILTERS = ["all", "waiting", "running", "done", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
 
+/** A run's wall time, compact: the tracker's own wallclock when recorded,
+ * else the started→ended span, else started→now for one still going. */
+function took(r: Run): string {
+  let secs = r.budget?.wallclock_s ?? 0;
+  if (secs <= 0 && r.started_at) {
+    const end = r.ended_at ? Date.parse(r.ended_at) : Date.now();
+    secs = Math.max(0, (end - Date.parse(r.started_at)) / 1000);
+  }
+  if (secs <= 0) return "—";
+  if (secs < 60) return `${Math.round(secs)}s`;
+  const m = Math.floor(secs / 60);
+  if (m < 60) return `${m}m${Math.round(secs % 60)}s`;
+  return `${Math.floor(m / 60)}h${m % 60}m`;
+}
+
 export function Runs({ runs }: { runs: Run[] }) {
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -81,6 +96,8 @@ export function Runs({ runs }: { runs: Run[] }) {
             <th className="border-b border-hairline py-1 pr-3 font-normal">mode</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">verdict</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">cost</th>
+            <th className="border-b border-hairline py-1 pr-3 font-normal">took</th>
+            <th className="border-b border-hairline py-1 pr-3 font-normal">turns</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">started</th>
             <th className="border-b border-hairline py-1 font-normal">run</th>
           </tr>
@@ -109,6 +126,12 @@ export function Runs({ runs }: { runs: Run[] }) {
                 {r.budget && r.budget.usd > 0
                   ? `${r.tokens_estimated ? "~" : ""}${money(r.budget.usd)}`
                   : "—"}
+              </td>
+              <td className="border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary" data-testid="run-took">
+                {took(r)}
+              </td>
+              <td className="border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary" data-testid="run-turns">
+                {r.budget && r.budget.turns > 0 ? r.budget.turns : "—"}
               </td>
               <td className="border-b border-hairline py-1 pr-3 text-ink-muted">
                 {r.started_at ? waitingFor(r.started_at) + " ago" : "—"}

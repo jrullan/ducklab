@@ -82,3 +82,19 @@ describe("runLabel names the kind", () => {
   });
 });
 
+
+// The runs table says what each run cost in TIME and rounds, not only money:
+// the tracker's wallclock when recorded, the started→ended span otherwise.
+describe("took and turns in the runs table", () => {
+  it("renders the tracker's wallclock and the turn count", () => {
+    const run = {
+      id: "r-a", project_id: "p", stage: "build", mode: "pair", task_id: "T-1",
+      status: "done", verdict: "PASSED", started_at: "2026-08-11T22:00:00Z",
+      ended_at: "2026-08-11T22:06:00Z",
+      budget: { usd: 0.01, tokens: 1000, turns: 3, wallclock_s: 357.5 },
+    } as unknown as Run;
+    render(<Runs runs={[run]} />);
+    expect(screen.getByTestId("run-took").textContent).toBe("5m58s");
+    expect(screen.getByTestId("run-turns").textContent).toBe("3");
+  });
+});
