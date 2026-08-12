@@ -38,6 +38,12 @@ type Engine interface {
 	ArtifactGet(projectID, kind string) (map[string]interface{}, error)
 	TaskList(projectID string) ([]map[string]interface{}, error)
 	BugAdd(projectID string, req map[string]string) (map[string]interface{}, error)
+	BugList(projectID string, openOnly bool) ([]map[string]interface{}, error)
+	BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error)
+	BugTriage(projectID, bugID string) (map[string]interface{}, error)
+	BugPromote(projectID, bugID string) (map[string]interface{}, error)
+	BugMove(projectID, bugID, status string) (map[string]interface{}, error)
+	TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error)
 }
 
 // Server speaks MCP (JSON-RPC 2.0, newline-delimited) over a reader/writer

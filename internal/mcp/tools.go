@@ -90,12 +90,73 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "bug_report",
-			"description": "File a bug. Triage and promotion follow the ordinary loop.",
+			"description": "File a bug. Attach screenshots with bug_attach, then bug_triage classifies it, bug_promote turns it into a task, and test_start builds the fix.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"title":      str("one line"),
 				"body":       str("what happened, what was expected"),
+				"severity":   str("critical | high | normal | low (default normal)"),
 			}, "project_id", "title", "body"),
+		},
+		{
+			"name":        "bug_list",
+			"description": "The project's bugs with status: open (untriaged), triaged, in_progress, fixed (waiting for a person to verify), verified, closed.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"open_only":  map[string]interface{}{"type": "boolean", "description": "only bugs not yet resolved"},
+			}, "project_id"),
+		},
+		{
+			"name": "bug_attach",
+			"description": "Attach one image to a bug (base64 bytes, 8MB cap). The screenshot says what " +
+				"a paragraph cannot: a vision triager is shown the pixels themselves.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id":  str("the project id"),
+				"bug_id":      str("the bug, B-..."),
+				"filename":    str("a label like screenshot.png"),
+				"data_base64": str("the image bytes, standard base64"),
+			}, "project_id", "bug_id", "filename", "data_base64"),
+		},
+		{
+			"name": "bug_triage",
+			"description": "Classify bugs: severity, duplicates, suspected files. One bug when bug_id is " +
+				"given, every open one otherwise. The classifications are proposals on a run that may " +
+				"wait at its gate — check status and decide it like any other.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"bug_id":     str("optional: triage exactly this bug"),
+			}, "project_id"),
+		},
+		{
+			"name":        "bug_promote",
+			"description": "Turn a triaged bug into a task on the board. The task carries the report and the triage's analysis.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"bug_id":     str("a triaged bug, B-..."),
+			}, "project_id", "bug_id"),
+		},
+		{
+			"name": "bug_move",
+			"description": "Move a bug between states — most importantly fixed→verified, the judgement " +
+				"that the report is actually answered, which no model makes alone (I2). Only move to " +
+				"verified when the human you speak for has confirmed it.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"bug_id":     str("the bug, B-..."),
+				"status":     str("target status, e.g. verified | closed"),
+			}, "project_id", "bug_id", "status"),
+		},
+		{
+			"name": "test_start",
+			"description": "The TDD chain for a task: a model writes the FAILING test first; it lands red, " +
+				"is committed, and the build runs against it. then_build defaults true — one authorization, " +
+				"decided at the build's gate with the committed test in the diff. This is the primary way " +
+				"to build a task; run_start alone skips the test discipline.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"task_id":    str("a startable task, T-..."),
+				"then_build": map[string]interface{}{"type": "boolean", "description": "chain the build when the test lands red (default true)"},
+			}, "project_id", "task_id"),
 		},
 	}
 }
@@ -162,13 +223,56 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "bug_report":
-		bug, err := s.eng.BugAdd(a.str("project_id"), map[string]string{
-			"title": a.str("title"), "body": a.str("body"),
-		})
+		req := map[string]string{"title": a.str("title"), "body": a.str("body")}
+		if sev := a.str("severity"); sev != "" {
+			req["severity"] = sev
+		}
+		bug, err := s.eng.BugAdd(a.str("project_id"), req)
 		if err != nil {
 			return nil, err
 		}
 		return toolJSON(bug), nil
+	case "bug_list":
+		open, _ := a["open_only"].(bool)
+		bugs, err := s.eng.BugList(a.str("project_id"), open)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(bugs), nil
+	case "bug_attach":
+		items, err := s.eng.BugAttach(a.str("project_id"), a.str("bug_id"), a.str("filename"), a.str("data_base64"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(items), nil
+	case "bug_triage":
+		run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(run), nil
+	case "bug_promote":
+		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "bug_move":
+		out, err := s.eng.BugMove(a.str("project_id"), a.str("bug_id"), a.str("status"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "test_start":
+		then := true
+		if v, ok := a["then_build"].(bool); ok {
+			then = v
+		}
+		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(run), nil
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}

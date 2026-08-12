@@ -579,7 +579,7 @@ func bugCmd(verb string, args []string, repo string) int {
 		return 0
 
 	case "triage":
-		run, err := client.BugTriage(projectID)
+		run, err := client.BugTriage(projectID, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

@@ -202,3 +202,59 @@ func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 		t.Errorf("run_get is missing the diff or the actions:\n%s", text)
 	}
 }
+
+func (f *fakeEngine) BugList(projectID string, openOnly bool) ([]map[string]interface{}, error) {
+	return []map[string]interface{}{{"id": "B-001", "status": "open"}}, nil
+}
+
+func (f *fakeEngine) BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error) {
+	return map[string]interface{}{"items": []string{filename}}, nil
+}
+
+func (f *fakeEngine) BugTriage(projectID, bugID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"id": "r-triage"}, nil
+}
+
+func (f *fakeEngine) BugPromote(projectID, bugID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"task": "T-100"}, nil
+}
+
+func (f *fakeEngine) BugMove(projectID, bugID, status string) (map[string]interface{}, error) {
+	return map[string]interface{}{"status": status}, nil
+}
+
+func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error) {
+	return map[string]interface{}{"id": "r-test"}, nil
+}
+
+// The remote operator's full loop: file with severity, attach the screenshot,
+// triage that bug, promote it, and start the TDD chain — every step the
+// desktop offers, reachable from wherever Hermes runs.
+func TestTheFullBugCycleIsReachable(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"elena"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"bug_report","arguments":{"project_id":"p","title":"t","body":"b","severity":"high"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bug_attach","arguments":{"project_id":"p","bug_id":"B-001","filename":"shot.png","data_base64":"aGk="}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"bug_triage","arguments":{"project_id":"p","bug_id":"B-001"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"bug_promote","arguments":{"project_id":"p","bug_id":"B-001"}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"test_start","arguments":{"project_id":"p","task_id":"T-100"}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"bug_move","arguments":{"project_id":"p","bug_id":"B-001","status":"verified"}}}`,
+	)
+	for i, r := range resps[1:] {
+		if r["error"] != nil {
+			t.Errorf("step %d errored: %v", i+2, r["error"])
+		}
+	}
+	// The tool list itself names every step of the loop.
+	listResp := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+	)
+	blob, _ := json.Marshal(listResp[1])
+	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_start", "bug_list"} {
+		if !strings.Contains(string(blob), must) {
+			t.Errorf("tools/list is missing %q", must)
+		}
+	}
+}

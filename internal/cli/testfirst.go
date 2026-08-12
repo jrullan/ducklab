@@ -33,7 +33,7 @@ func testFirstCmd(args []string, repo string) int {
 	if code != 0 {
 		return code
 	}
-	run, err := client.TestStart(projectID, taskID, duckling)
+	run, err := client.TestStart(projectID, taskID, duckling, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

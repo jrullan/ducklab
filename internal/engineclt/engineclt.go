@@ -273,10 +273,10 @@ func (c *Client) DucklingRemove(id string) error {
 }
 
 // TestStart writes the failing test for a task.
-func (c *Client) TestStart(projectID, taskID, duckling string) (map[string]interface{}, error) {
+func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects/"+projectID+"/tests",
-		map[string]interface{}{"task_id": taskID, "duckling": duckling}, &result)
+		map[string]interface{}{"task_id": taskID, "duckling": duckling, "then_build": thenBuild}, &result)
 	return result, err
 }
 
@@ -414,10 +414,24 @@ func (c *Client) BugList(projectID string, openOnly bool) ([]map[string]interfac
 	return result.Items, err
 }
 
-// BugTriage classifies the open bugs.
-func (c *Client) BugTriage(projectID string) (map[string]interface{}, error) {
+// BugTriage classifies bugs: every open one when bugID is empty, exactly
+// that one otherwise.
+func (c *Client) BugTriage(projectID, bugID string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/projects/"+projectID+"/bugs/triage", nil, &result)
+	var body interface{}
+	if bugID != "" {
+		body = map[string]string{"bug_id": bugID}
+	}
+	err := c.post("/v1/projects/"+projectID+"/bugs/triage", body, &result)
+	return result, err
+}
+
+// BugAttach stores one attachment (base64 bytes) on a bug — the screenshot
+// that says what a paragraph cannot, sent from wherever the reporter is.
+func (c *Client) BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/attachments",
+		map[string]string{"filename": filename, "data": dataB64}, &result)
 	return result, err
 }
 
