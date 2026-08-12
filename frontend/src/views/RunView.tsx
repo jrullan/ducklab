@@ -23,6 +23,50 @@ import { runLabel } from "../lib/runview";
 type Tab = "diff" | "verify" | "candidates" | "calls";
 
 /** The Run view: conversation lanes, gate and budget, tool timeline, tabs. */
+/** Where this run sits in the development cycle, at a glance.
+ *
+ * The header named the stage — "intake", "build" — and assumed the reader
+ * carries the whole loop in their head. The map states it: every station,
+ * this run's lit. A test run sits at build (the failing test is the first
+ * half of building); a triage run sits at plan (its classifications become
+ * the tasks the plan grows by). Runs outside the cycle — chat — have no
+ * station and show no map. */
+const CYCLE = ["intake", "spec", "plan", "build", "release"] as const;
+
+function cycleStation(stage: string): string | null {
+  if (stage === "test" || stage === "build") return "build";
+  if (stage === "triage") return "plan";
+  return (CYCLE as readonly string[]).includes(stage) ? stage : null;
+}
+
+function CycleMap({ stage }: { stage: string }) {
+  const at = cycleStation(stage);
+  if (!at) return null;
+  const why =
+    stage === "test"
+      ? "a failing test is the first half of building"
+      : stage === "triage"
+        ? "triage feeds the plan: classified bugs become its tasks"
+        : `this run produces the ${at} step's document or work`;
+  return (
+    <span
+      data-testid="cycle-map"
+      data-at={at}
+      className="flex items-center gap-1 text-xs"
+      title={`where this run sits in the development cycle — ${why}`}
+    >
+      {CYCLE.map((s, i) => (
+        <span key={s} className="flex items-center gap-1">
+          {i > 0 && <span className="text-ink-muted">→</span>}
+          <span className={s === at ? "font-medium text-ink underline decoration-hairline underline-offset-4" : "text-ink-muted"}>
+            {s}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function RunView({ runId, client }: { runId: string; client: EngineClient }) {
   const run = useRuns((s) => s.runs[runId]);
   const events = useRuns((s) => s.events[runId] ?? []);
@@ -492,6 +536,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             same fallback the runs list uses — task, else stage, else id. */}
         <span className="text-md">{runLabel(run)}</span>
         <span className="text-ink-secondary">{run.mode}</span>
+        <CycleMap stage={run.stage} />
         {run.no_changes ? (
           <StatusChip role="muted" label="no changes — already in the tree" />
         ) : (

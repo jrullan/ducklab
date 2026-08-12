@@ -70,3 +70,48 @@ describe("a spec run paused at its gate", () => {
     }
   });
 });
+
+// The header named the stage and assumed the reader carries the whole loop in
+// their head. The cycle map states it: every station, this run's lit — asked
+// for while an intake run said only "intake council · in progress".
+describe("the cycle map in the run header", () => {
+  const runWith = (stage: string) =>
+    ({
+      id: "r-x", project_id: "p", stage, mode: "solo",
+      status: "running", started_at: "2026-08-12T10:00:00Z",
+      budget: { usd: 0, tokens: 0, turns: 0, wallclock_s: 0,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    }) as unknown as Run;
+
+  const clientWith = (run: Run) =>
+    ({
+      run: vi.fn(() => Promise.resolve({ run, events: [] })),
+      artifact: vi.fn(() => Promise.resolve({ markdown: "", proposal: null })),
+      runDiff: vi.fn(() => Promise.resolve({ diff: "", tests: "" })),
+      runVerify: vi.fn(() => Promise.resolve("")),
+      runCandidates: vi.fn(() => Promise.resolve([])),
+      runLLM: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      report: vi.fn(() => Promise.resolve({ rows: [], deltas: [], rendered: "" })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      tasks: vi.fn(() => Promise.resolve([])),
+    }) as unknown as EngineClient;
+
+  it.each([
+    ["intake", "intake"],
+    ["spec", "spec"],
+    ["test", "build"], // the failing test is the first half of building
+    ["triage", "plan"], // classified bugs become the plan's tasks
+  ])("a %s run lights the %s station", async (stage, station) => {
+    render(<RunView runId="r-x" client={clientWith(runWith(stage))} />);
+    const map = await waitFor(() => screen.getByTestId("cycle-map"));
+    expect(map.dataset.at).toBe(station);
+    expect(map.textContent).toContain("release"); // the whole cycle is visible
+  });
+
+  it("a chat run has no station and shows no map", async () => {
+    render(<RunView runId="r-x" client={clientWith(runWith("chat"))} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("cycle-map")).toBeNull();
+  });
+});
