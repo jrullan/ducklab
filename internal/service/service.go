@@ -729,6 +729,12 @@ type RunRequest struct {
 	Autonomy  string         `json:"autonomy"`
 	// Origin marks a run started by the autopilot rather than a person.
 	Origin string `json:"origin,omitempty"`
+	// Redo is the explicit consent to start fresh work on a task that was
+	// already accepted. Without it the engine refuses: T-001 was relaunched
+	// by an overnight operator that had no idea the task was finished, and
+	// the redundant runs this pattern leaves behind (T-101, T-102) are what
+	// every stale-failure cleanup in this file exists to mop up.
+	Redo bool `json:"redo,omitempty"`
 	// NoStream turns off token streaming for this run. The default is to
 	// stream, because the desktop exists to watch a run happen.
 	NoStream     bool `json:"no_stream"`
@@ -821,6 +827,16 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		// declared was display only.
 		if tv.Status == "blocked" && !slices.Contains(tv.Next, "run") {
 			return nil, fmt.Errorf("%s is not startable: %s", req.TaskID, tv.Blocked)
+		}
+		// Same door, other direction: a task that is DONE. The board hides
+		// its buttons, but an operator working from memory — or an agent
+		// working from a stale listing — can still ask, and what it gets is
+		// fresh work against something committed, then an abort, then a
+		// stale failure haunting two views.
+		if tv.Status == "accepted" && !req.Redo {
+			return nil, fmt.Errorf("%s is already accepted; its work is committed. "+
+				"A new run would redo finished work — pass redo (and say why in a note) "+
+				"if that is truly the intent", req.TaskID)
 		}
 	}
 

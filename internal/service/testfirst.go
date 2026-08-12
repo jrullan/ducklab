@@ -67,6 +67,9 @@ type TestFirstRequest struct {
 	// Note rides the test prompt — what only the launcher knows now, which
 	// for an autopilot retry is why the previous attempt failed.
 	Note string `json:"note,omitempty"`
+	// Redo is the explicit consent to redo a task that was already accepted;
+	// without it, launching finished work is refused (see RunRequest.Redo).
+	Redo bool `json:"redo,omitempty"`
 }
 
 // TestStart writes the failing test for a task.
@@ -77,6 +80,15 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
+	}
+	// A finished task is refused before any other door is tried: "your gate
+	// does not run tests" is noise when the real answer is "T-001 was done
+	// days ago". Launched test-first by an overnight operator, the launch
+	// itself is the mistake worth catching — before any model is paid.
+	if tv := s.findTask(ctx, projectID, req.TaskID); tv != nil && tv.Status == "accepted" && !req.Redo {
+		return nil, fmt.Errorf("%s is already accepted; its work is committed. "+
+			"A new run would redo finished work — pass redo (and say why in a note) "+
+			"if that is truly the intent", req.TaskID)
 	}
 	if err := checkRunnable(entry.Path); err != nil {
 		return nil, err

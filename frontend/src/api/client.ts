@@ -577,6 +577,9 @@ export class EngineClient {
        * this run. The default cap exists to stop circling; a hard task can
        * need more looking. */
       agentTurns?: number;
+      /** Explicit consent to redo a task that was already accepted; without
+       * it the engine refuses to relaunch finished work. */
+      redo?: boolean;
     } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/runs`, {
@@ -587,6 +590,7 @@ export class EngineClient {
       note: opts.note || undefined,
       agent_turns: opts.agentTurns || undefined,
       autonomy: opts.yes ? "yolo" : "",
+      redo: opts.redo || undefined,
       // Omitted rather than zeroed: the engine fills every unset limit from the
       // defaults, and a zero would be a ceiling of zero.
       ...(opts.maxTokens ? { budget: { max_tokens: opts.maxTokens } } : {}),
@@ -613,6 +617,8 @@ export class EngineClient {
       ducklings?: string[];
       maxTokens?: number;
       agentTurns?: number;
+      /** Explicit consent to redo a task that was already accepted. */
+      redo?: boolean;
     },
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/tests`, {
@@ -621,6 +627,7 @@ export class EngineClient {
       mode: chain?.testMode ?? "",
       ducklings: chain?.testDucklings ?? [],
       then_build: chain?.thenBuild ?? false,
+      redo: chain?.redo || undefined,
       build: chain?.thenBuild
         ? {
             task_id: taskId,

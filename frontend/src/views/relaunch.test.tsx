@@ -63,6 +63,10 @@ describe("relaunching from the run view", () => {
         mode: "solo",
         ducklings: ["dsv4flash", "pato-sonnet"],
         maxTokens: 1500000,
+        // The relaunch panel's caveat states the situation when the task was
+        // finished by a later run; clicking past it is the explicit consent
+        // the engine's accepted-task door asks for.
+        redo: true,
       }),
     );
     expect((await screen.findByTestId("relaunch-link")).getAttribute("href")).toBe("#/runs/r-2");

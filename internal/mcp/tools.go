@@ -84,6 +84,7 @@ func toolList() []map[string]interface{} {
 				"project_id": str("the project id"),
 				"task_id":    str("a task whose next includes run"),
 				"mode":       str("optional mode"),
+				"redo":       redoProp(),
 			}, "project_id", "task_id"),
 		},
 		{
@@ -178,6 +179,7 @@ func toolList() []map[string]interface{} {
 				"project_id": str("the project id"),
 				"task_id":    str("a startable task, T-..."),
 				"then_build": map[string]interface{}{"type": "boolean", "description": "chain the build when the test lands red (default true)"},
+				"redo":       redoProp(),
 			}, "project_id", "task_id"),
 		},
 	}
@@ -225,6 +227,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		req := map[string]interface{}{"task_id": a.str("task_id")}
 		if m := a.str("mode"); m != "" {
 			req["mode"] = m
+		}
+		if redo, _ := a["redo"].(bool); redo {
+			req["redo"] = true
 		}
 		run, err := s.eng.RunStart(a.str("project_id"), req)
 		if err != nil {
@@ -339,7 +344,8 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if v, ok := a["then_build"].(bool); ok {
 			then = v
 		}
-		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then)
+		redo, _ := a["redo"].(bool)
+		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then, redo)
 		if err != nil {
 			return nil, err
 		}
@@ -475,4 +481,18 @@ func pick(m map[string]interface{}, keys ...string) map[string]interface{} {
 		}
 	}
 	return out
+}
+
+// redoProp is the schema for the explicit-consent flag on task launches.
+// The engine refuses to start a task that was already accepted — its work is
+// committed — unless redo is true. The description is the warning: an
+// operator working from a stale listing learns the task is finished from the
+// refusal itself.
+func redoProp() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "boolean",
+		"description": "REQUIRED to launch a task that was already accepted. The engine refuses " +
+			"finished tasks otherwise: their work is committed, and a fresh run would redo it. " +
+			"Only set true when a human has explicitly asked to redo the task.",
+	}
 }

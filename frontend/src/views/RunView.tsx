@@ -503,8 +503,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               ducklings: chain?.ducklings ?? [],
               maxTokens: chain?.budget?.max_tokens,
               agentTurns: chain?.agent_turns,
+              // The relaunch panel already states the caveat when the task
+              // was finished by a later run; clicking past it is the consent
+              // the engine's accepted-task door asks for.
+              redo: true,
             })
-          : await client.runStart(run.project_id, run.task_id, opts);
+          : await client.runStart(run.project_id, run.task_id, { ...opts, redo: true });
       setRelaunched(started.id);
     } catch (e) {
       setRelaunchError(e instanceof Error ? e.message : String(e));
@@ -722,6 +726,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                         mode: run.mode,
                         ducklings: seatsFromRoster(run.mode, run.roster),
                         note,
+                        // The accept a moment ago made this task "accepted";
+                        // the fix-forward run is authorized by that same click.
+                        redo: true,
                       }),
                     )
                     .then((r) => {

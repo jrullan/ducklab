@@ -245,7 +245,7 @@ func (f *fakeEngine) AppStart(projectID string) (map[string]interface{}, error) 
 
 func (f *fakeEngine) AppStop(projectID string) error { return nil }
 
-func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error) {
+func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild, redo bool) (map[string]interface{}, error) {
 	return map[string]interface{}{"id": "r-test"}, nil
 }
 
