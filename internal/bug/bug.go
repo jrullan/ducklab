@@ -134,6 +134,10 @@ type Bug struct {
 	// Attachments are the report's files — screenshots, mostly — by name.
 	// Served per file; a triager with vision is shown the images themselves.
 	Attachments []string `json:"attachments,omitempty"`
+	// History is the audit trail: every status transition with who made it.
+	// Populated from the project's audit log on reads that carry full bugs;
+	// moves recorded before the log existed simply aren't here.
+	History []AuditEntry `json:"history,omitempty"`
 	// Next are the statuses this bug may legally move to.
 	//
 	// Reported by the engine rather than worked out by each client: the loop's
@@ -142,6 +146,20 @@ type Bug struct {
 	// happens not to handle, sitting with nothing to click on it, which is what
 	// left a fixed report stuck at in_progress with no way to move it by hand.
 	Next []Status `json:"next,omitempty"`
+}
+
+// AuditEntry is one signed status transition. Actor says who ("human",
+// "mcp:elena", "autopilot", "engine"); Via says through which door (move,
+// promote, triage, task-accepted, task-removed); Note carries the task id
+// when a task's fate is what moved the report.
+type AuditEntry struct {
+	TS    string `json:"ts"`
+	Bug   string `json:"bug"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Actor string `json:"actor"`
+	Via   string `json:"via"`
+	Note  string `json:"note,omitempty"`
 }
 
 // SortByUrgency orders bugs as someone deciding what to do next would want

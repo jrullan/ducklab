@@ -28,7 +28,7 @@ func TestAStaleTriageCannotUndoAPromotion(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugPromote(context.Background(), id, "B-001"); err != nil {
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,16 +59,16 @@ func TestTheClosureWalksFromWhereverTheBugStands(t *testing.T) {
 	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}
 	taskID, _ := out["task"].(string)
 	// Simulate the historical damage: knocked back after promotion.
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
 

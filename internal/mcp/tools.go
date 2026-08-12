@@ -301,13 +301,13 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "bug_promote":
-		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"))
+		out, err := s.eng.BugPromote(a.str("project_id"), a.str("bug_id"), "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}
 		return toolJSON(out), nil
 	case "bug_move":
-		out, err := s.eng.BugMove(a.str("project_id"), a.str("bug_id"), a.str("status"))
+		out, err := s.eng.BugMove(a.str("project_id"), a.str("bug_id"), a.str("status"), "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}

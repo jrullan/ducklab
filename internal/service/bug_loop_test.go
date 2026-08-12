@@ -30,7 +30,7 @@ func TestAcceptingATaskMovesItsBugOn(t *testing.T) {
 	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAnAcceptedTaskDoesNotVerifyItsOwnBug(t *testing.T) {
 	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := s.BugPromote(context.Background(), id, "B-001")
+	out, _ := s.BugPromote(context.Background(), id, "B-001", "human")
 	taskID, _ := out["task"].(string)
 	if _, err := s.BugFixedByTask(context.Background(), id, taskID); err != nil {
 		t.Fatal(err)

@@ -84,6 +84,10 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 		return nil, err
 	}
 	entry, entryErr := s.registry.Get(projectID)
+	var audit map[string][]bug.AuditEntry
+	if entryErr == nil {
+		audit = readBugAudit(entry.Path)
+	}
 	out := make([]bug.Bug, 0, len(rows))
 	for _, r := range rows {
 		b := *toBug(r)
@@ -92,6 +96,7 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 		}
 		if entryErr == nil {
 			b.Attachments = listAttachments(entry.Path, b.ID)
+			b.History = audit[b.ID]
 		}
 		out = append(out, b)
 	}
@@ -100,7 +105,15 @@ func (s *Service) BugList(ctx context.Context, projectID string, openOnly bool) 
 }
 
 // BugMove changes a bug's status, refusing moves the loop does not allow.
-func (s *Service) BugMove(ctx context.Context, projectID, id, to string) (*bug.Bug, error) {
+//
+// Signed. B-041 went from fixed back to in_progress and no record said who —
+// the agent operating overnight, asked directly, could neither confirm nor
+// deny. An unattributed move is indistinguishable from a malfunction.
+func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) (*bug.Bug, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
 		return nil, err
@@ -115,10 +128,17 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to string) (*bug.B
 	if err != nil {
 		return nil, err
 	}
+	from := rec.Status
 	rec.Status = string(next)
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
 	}
+	if actor == "" {
+		actor = "human"
+	}
+	appendBugAudit(entry.Path, bug.AuditEntry{
+		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "move",
+	})
 	return toBug(rec), nil
 }
 
@@ -418,7 +438,7 @@ func triagePrompt(b bug.Bug, all []bug.Bug) string {
 // The task's body carries the report verbatim. A fix written from a summary of
 // a bug is a fix for the summary, and the reproduction steps are the part most
 // easily lost in paraphrase.
-func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[string]interface{}, error) {
+func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string) (map[string]interface{}, error) {
 	db, err := s.openProjectDB(projectID)
 	if err != nil {
 		return nil, err
@@ -488,11 +508,18 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID string) (map[
 		return nil, err
 	}
 
+	from := rec.Status
 	rec.TaskID = taskID
 	rec.Status = string(next)
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
 	}
+	if actor == "" {
+		actor = "human"
+	}
+	appendBugAudit(entry.Path, bug.AuditEntry{
+		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "promote", Note: taskID,
+	})
 	// A promote changes what the guide says without any run settling — the
 	// exact blind spot of the settle hooks. Poke the loop so an autopilot
 	// idling at "promote it" picks the new task up instead of waiting for an
@@ -696,7 +723,13 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 				to = bug.Duplicate
 			}
 			if next, err := bug.Move(bug.Status(rec.Status), to); err == nil {
+				from := rec.Status
 				rec.Status = string(next)
+				if entry, eerr := s.registry.Get(projectID); eerr == nil {
+					appendBugAudit(entry.Path, bug.AuditEntry{
+						Bug: rec.ID, From: from, To: rec.Status, Actor: "engine", Via: "triage",
+					})
+				}
 			}
 		}
 		if err := db.UpdateBug(rec); err != nil {
@@ -753,9 +786,16 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		if st != bug.Fixed {
 			return "", fmt.Errorf("%s is %s and cannot reach fixed from there", rec.ID, rec.Status)
 		}
+		from := rec.Status
 		rec.Status = string(st)
 		if err := db.UpdateBug(rec); err != nil {
 			return "", err
+		}
+		if entry, eerr := s.registry.Get(projectID); eerr == nil {
+			appendBugAudit(entry.Path, bug.AuditEntry{
+				Bug: rec.ID, From: from, To: rec.Status, Actor: "engine",
+				Via: "task-accepted", Note: taskID,
+			})
 		}
 		return rec.ID, nil
 	}
@@ -901,12 +941,17 @@ func (s *Service) TaskRemove(ctx context.Context, projectID, taskID string) (map
 			continue
 		}
 		rec.TaskID = ""
+		from := rec.Status
 		if next, mErr := bug.Move(bug.Status(rec.Status), bug.Triaged); mErr == nil {
 			rec.Status = string(next)
 		}
 		if err := db.UpdateBug(rec); err == nil {
 			out["bug"] = rec.ID
 			out["bug_status"] = rec.Status
+			appendBugAudit(entry.Path, bug.AuditEntry{
+				Bug: rec.ID, From: from, To: rec.Status, Actor: "engine",
+				Via: "task-removed", Note: taskID,
+			})
 		} else {
 			out["warning"] = fmt.Sprintf("plan entry removed, but %s could not be reset: %v", rec.ID, err)
 		}

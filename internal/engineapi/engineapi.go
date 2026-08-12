@@ -949,7 +949,17 @@ func (s *Server) handleBugTriage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
-	out, err := s.svc.BugPromote(r.Context(), r.PathValue("id"), r.PathValue("bug"))
+	// The actor is optional and self-declared; "human" is the desktop's
+	// silence. Self-declaration is enough for an audit whose reader is the
+	// project's own operator — the point is distinguishing the person's
+	// clicks from the agents acting for them, not authentication.
+	var req struct {
+		Actor string `json:"actor"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&req)
+	}
+	out, err := s.svc.BugPromote(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Actor)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -960,12 +970,13 @@ func (s *Server) handleBugPromote(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBugMove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Status string `json:"status"`
+		Actor  string `json:"actor"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	b, err := s.svc.BugMove(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Status)
+	b, err := s.svc.BugMove(r.Context(), r.PathValue("id"), r.PathValue("bug"), req.Status, req.Actor)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

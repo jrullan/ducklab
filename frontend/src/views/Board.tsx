@@ -1067,7 +1067,28 @@ function BugRail({
           run. The engine refuses a transition it does not allow, so the button
           acts and the refusal is what gets shown. */}
       <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
+      <BugHistory bug={bug} />
       <ChatAbout client={client} projectId={projectId} aboutKind="bug" aboutId={bug.id} ducklings={ducklings} />
+    </div>
+  );
+}
+
+/** The audit trail: every status transition, signed. B-041 went from fixed
+ * back to in_progress overnight and nobody — not even the agent asked
+ * directly — could say who moved it. A status without an author is
+ * indistinguishable from a malfunction. */
+function BugHistory({ bug }: { bug: Bug }) {
+  const hist = bug.history ?? [];
+  if (hist.length === 0) return null;
+  return (
+    <div data-testid="bug-history" className="space-y-0.5">
+      <div className="text-xs text-ink-muted">history</div>
+      {hist.map((h, i) => (
+        <div key={i} className="font-mono text-[11px] text-ink-secondary">
+          {h.ts.slice(5, 16).replace("T", " ")} · {h.from.replace("_", " ")} → {h.to.replace("_", " ")} · {h.actor}
+          {h.via !== "move" ? ` (${h.via}${h.note ? ` ${h.note}` : ""})` : ""}
+        </div>
+      ))}
     </div>
   );
 }

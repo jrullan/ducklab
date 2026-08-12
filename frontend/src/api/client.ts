@@ -361,6 +361,21 @@ export interface Bug {
    * state it happens not to handle with nothing to click on it. */
   next?: string[];  /** Attached files, screenshots mostly, by name. */
   attachments?: string[];
+  /** The audit trail: every status transition, signed by who made it. */
+  history?: BugAuditEntry[];
+}
+
+/** One signed status transition from the bug's audit trail. */
+export interface BugAuditEntry {
+  ts: string;
+  bug: string;
+  from: string;
+  to: string;
+  /** "human", "mcp:elena", "autopilot", "engine" */
+  actor: string;
+  /** move | promote | triage | task-accepted | task-removed */
+  via: string;
+  note?: string;
 }
 
 /** One filed review, enough to list without reading the body. */

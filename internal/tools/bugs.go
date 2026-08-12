@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -86,6 +88,15 @@ func (t *BugRead) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		}
 		if rec.Body != "" {
 			fmt.Fprintf(&b, "\n%s\n", rec.Body)
+		}
+		// The audit trail answers the question a bare status can't: WHO put
+		// it there. A triager deciding whether a reopened report is a person's
+		// deliberate call or a stale sweep reads it here.
+		if hist := readBugHistory(ectx.ProjectRoot, rec.ID); len(hist) > 0 {
+			b.WriteString("\nhistory:\n")
+			for _, h := range hist {
+				b.WriteString("  " + h + "\n")
+			}
 		}
 		return &Result{Content: b.String()}, nil
 	}
@@ -190,4 +201,29 @@ func (t *BugFile) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		return &Result{IsError: true, Content: fmt.Sprintf("file bug: %v", err)}, nil
 	}
 	return &Result{Content: fmt.Sprintf("Filed %s [%s]: %s", rec.ID, rec.Severity, rec.Title)}, nil
+}
+
+// readBugHistory renders one bug's audit lines, oldest first. Best-effort:
+// a project from before the trail existed simply has none.
+func readBugHistory(projectRoot, bugID string) []string {
+	f, err := os.Open(filepath.Join(projectRoot, ".ducklab", "bugs", "audit.jsonl"))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		var e bug.AuditEntry
+		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Bug != bugID {
+			continue
+		}
+		line := fmt.Sprintf("%s  %s -> %s  by %s (%s)", e.TS, e.From, e.To, e.Actor, e.Via)
+		if e.Note != "" {
+			line += " " + e.Note
+		}
+		out = append(out, line)
+	}
+	return out
 }

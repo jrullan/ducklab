@@ -60,10 +60,10 @@ func TestRemovingAPromotedTaskReturnsItsReport(t *testing.T) {
 	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "drag broke"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRemovingAPromotedTaskReturnsItsReport(t *testing.T) {
 		}
 	}
 	// Promotable again, which is the point.
-	if _, err := s.BugPromote(context.Background(), id, "B-001"); err != nil {
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
 		t.Errorf("the report cannot be promoted again: %v", err)
 	}
 }

@@ -221,11 +221,11 @@ func (f *fakeEngine) BugTriage(projectID, bugID string) (map[string]interface{},
 	return map[string]interface{}{"id": "r-triage"}, nil
 }
 
-func (f *fakeEngine) BugPromote(projectID, bugID string) (map[string]interface{}, error) {
+func (f *fakeEngine) BugPromote(projectID, bugID, actor string) (map[string]interface{}, error) {
 	return map[string]interface{}{"task": "T-100"}, nil
 }
 
-func (f *fakeEngine) BugMove(projectID, bugID, status string) (map[string]interface{}, error) {
+func (f *fakeEngine) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
 	return map[string]interface{}{"status": status}, nil
 }
 

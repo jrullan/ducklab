@@ -74,10 +74,10 @@ func TestPromoteCarriesTheReportAndLinksIt(t *testing.T) {
 	id := projectWithBugs(t, s, BugRequest{
 		Title: "Login loops", Body: "1. open /login\n2. submit\n3. it returns to /login"})
 
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestPromoteCarriesTheReportAndLinksIt(t *testing.T) {
 func TestPromoteRefusesToDoItTwice(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "x"})
-	s.BugMove(context.Background(), id, "B-001", "triaged")
-	if _, err := s.BugPromote(context.Background(), id, "B-001"); err != nil {
+	s.BugMove(context.Background(), id, "B-001", "triaged", "human")
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.BugPromote(context.Background(), id, "B-001")
+	_, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err == nil {
 		t.Fatal("a bug was promoted twice")
 	}
@@ -140,10 +140,10 @@ func TestPromoteRefusesToDoItTwice(t *testing.T) {
 func TestPromoteRefusesADecidedBug(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "x"})
-	if _, err := s.BugMove(context.Background(), id, "B-001", "wontfix"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "wontfix", "human"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugPromote(context.Background(), id, "B-001"); err == nil {
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err == nil {
 		t.Error("a wontfix bug was promoted")
 	}
 }
@@ -153,7 +153,7 @@ func TestPromoteRefusesADecidedBug(t *testing.T) {
 func TestTriageRefusesWhenThereIsNothingToTriage(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "x"})
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.BugTriage(context.Background(), id, ""); err == nil {
@@ -168,7 +168,7 @@ func TestPromotingAnUntriagedBugCreatesNothing(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id := projectWithBugs(t, s, BugRequest{Title: "x"})
 
-	_, err := s.BugPromote(context.Background(), id, "B-001")
+	_, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err == nil {
 		t.Fatal("an untriaged bug was promoted")
 	}
@@ -199,11 +199,11 @@ func TestPromotedTaskJoinsThePlanWithAFreeID(t *testing.T) {
 	if _, err := s.BugAdd(context.Background(), id, BugRequest{Title: "Login loops"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged"); err != nil {
+	if _, err := s.BugMove(context.Background(), id, "B-001", "triaged", "human"); err != nil {
 		t.Fatal(err)
 	}
 
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +242,8 @@ func TestThePromotedTaskGetsItsOwnMilestone(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 	s.BugAdd(context.Background(), id, BugRequest{Title: "Login loops"})
-	s.BugMove(context.Background(), id, "B-001", "triaged")
-	out, err := s.BugPromote(context.Background(), id, "B-001")
+	s.BugMove(context.Background(), id, "B-001", "triaged", "human")
+	out, err := s.BugPromote(context.Background(), id, "B-001", "human")
 	if err != nil {
 		t.Fatal(err)
 	}

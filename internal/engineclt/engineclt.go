@@ -36,26 +36,77 @@ func New(info *daemon.EngineInfo) *Client {
 }
 
 func (c *Client) do(method, path string, body interface{}) (*http.Response, error) {
-	var bodyReader io.Reader
+	var data []byte
 	if body != nil {
-		data, err := json.Marshal(body)
+		var err error
+		data, err = json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		bodyReader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
+	build := func() (*http.Request, error) {
+		var bodyReader io.Reader
+		if data != nil {
+			bodyReader = bytes.NewReader(data)
+		}
+		req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+		if c.Version != "" {
+			req.Header.Set("X-Ducklab-Client", c.Version)
+		}
+		if data != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return req, nil
+	}
+	req, err := build()
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	if c.Version != "" {
-		req.Header.Set("X-Ducklab-Client", c.Version)
+	resp, err := c.HTTPClient.Do(req)
+	// A client that outlives the engine follows it. The MCP server is a
+	// long-lived process holding a port and token resolved once at startup;
+	// an engine restart moved both, and every tool answered "connection
+	// refused on 127.0.0.1:<dead port>" until someone restarted the agent's
+	// whole gateway. engine.json is the engine's forwarding address — when
+	// the dial fails and the file says somewhere new, go there. One retry;
+	// an engine that is genuinely down still says so.
+	if err != nil {
+		info, rerr := daemon.ReadEngineJSON()
+		if rerr != nil {
+			return resp, err
+		}
+		fresh := fmt.Sprintf("http://127.0.0.1:%d", info.Port)
+		if fresh == c.BaseURL && info.Token == c.Token {
+			return resp, err
+		}
+		c.BaseURL, c.Token = fresh, info.Token
+		req, berr := build()
+		if berr != nil {
+			return nil, berr
+		}
+		return c.HTTPClient.Do(req)
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	// The other face of a restart: the OS reused the port, so the dial
+	// succeeded and the stale token earned a 401 instead.
+	if resp.StatusCode == http.StatusUnauthorized {
+		if info, rerr := daemon.ReadEngineJSON(); rerr == nil {
+			fresh := fmt.Sprintf("http://127.0.0.1:%d", info.Port)
+			if fresh != c.BaseURL || info.Token != c.Token {
+				resp.Body.Close()
+				c.BaseURL, c.Token = fresh, info.Token
+				req, berr := build()
+				if berr != nil {
+					return nil, berr
+				}
+				return c.HTTPClient.Do(req)
+			}
+		}
 	}
-	return c.HTTPClient.Do(req)
+	return resp, err
 }
 
 // APIError is an error the engine reported, unwrapped from its JSON envelope.
@@ -462,18 +513,19 @@ func (c *Client) BugAttach(projectID, bugID, filename, dataB64 string) (map[stri
 	return result, err
 }
 
-// BugPromote turns a bug into a task.
-func (c *Client) BugPromote(projectID, bugID string) (map[string]interface{}, error) {
+// BugPromote turns a bug into a task. The actor signs the audit trail.
+func (c *Client) BugPromote(projectID, bugID, actor string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/promote", nil, &result)
+	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/promote",
+		map[string]string{"actor": actor}, &result)
 	return result, err
 }
 
-// BugMove changes a bug's status.
-func (c *Client) BugMove(projectID, bugID, status string) (map[string]interface{}, error) {
+// BugMove changes a bug's status. The actor signs the audit trail.
+func (c *Client) BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects/"+projectID+"/bugs/"+bugID+"/status",
-		map[string]string{"status": status}, &result)
+		map[string]string{"status": status, "actor": actor}, &result)
 	return result, err
 }
 
