@@ -539,3 +539,22 @@ func TestSectionBodySizeSeesThroughPlaceholders(t *testing.T) {
 		t.Errorf("the shrinkage guard would not fire: %d -> %d", cur, prop)
 	}
 }
+
+// An older accepted run outranks a newer failure: the accepted work is in
+// the tree, and a redundant rerun that died does not un-commit it. T-101
+// read "blocked — the last run failed" over a build accepted one minute
+// earlier, and its Now card offered redoing finished work.
+func TestAnAcceptedRunOutranksALaterFailure(t *testing.T) {
+	runs := []*runlog.Run{
+		{ID: "r-3", TaskID: "T-101", Stage: "build", Status: "failed", Verdict: "ABORTED", StartedAt: "2026-08-12T01:57:30Z"},
+		{ID: "r-2", TaskID: "T-101", Stage: "build", Status: "done", Verdict: "PASSED", Accepted: true, StartedAt: "2026-08-12T01:56:07Z"},
+		{ID: "r-1", TaskID: "T-101", Stage: "test", Status: "done", Verdict: "PASSED", Accepted: true, StartedAt: "2026-08-12T01:53:45Z"},
+	}
+	status, blocked, _, _, _ := deriveTaskRunState(runs)
+	if status["T-101"] != "accepted" {
+		t.Errorf("status = %q, want accepted despite the newer aborted rerun", status["T-101"])
+	}
+	if blocked["T-101"] != "" {
+		t.Errorf("blocked hint survived: %q", blocked["T-101"])
+	}
+}

@@ -249,3 +249,22 @@ describe("reopened reports in the inbox", () => {
     expect(screen.queryByTestId("now-reopened-card")).toBeNull();
   });
 });
+
+// T-101: an accepted build was followed a minute later by a redundant run
+// someone aborted, and the corpse sat in the inbox for eight hours "awaiting
+// your call" — over work already committed. Any accepted run retires its
+// task's failures from the inbox; history lives in Records.
+describe("failures of settled tasks", () => {
+  it("drops a failure whose task a run already accepted", async () => {
+    useRuns.setState({
+      runs: {
+        "r-ok": { id: "r-ok", project_id: "p", stage: "build", mode: "solo", task_id: "T-101", status: "done", verdict: "PASSED", accepted: true, started_at: "2026-08-12T01:56:07Z" } as never,
+        "r-dead": { id: "r-dead", project_id: "p", stage: "build", mode: "solo", task_id: "T-101", status: "failed", verdict: "ABORTED", started_at: "2026-08-12T01:57:30Z", ended_at: "2026-08-12T01:58:00Z" } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    render(<Now client={clientWith()} projectId="p" />);
+    await waitFor(() => screen.getByTestId("now-view"));
+    expect(screen.queryByTestId("now-failure")).toBeNull();
+  });
+});

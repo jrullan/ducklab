@@ -594,74 +594,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		return nil, err
 	}
 
-	// A task's status is its MOST RECENT run, and RunList answers newest
-	// first, so the first run seen for a task wins.
-	//
-	// This used to assign unconditionally on every branch, letting an older
-	// run overwrite a newer one: a task accepted this morning went back to
-	// "in progress" because a run from last week appeared later in the list.
-	// While RunList ranged over a map it was worse than wrong, it was
-	// unstable — the same board could show two different columns on two
-	// consecutive loads.
-	status := map[string]string{}
-	blocked := map[string]string{}
-	// A committed failing test: the task's definition of done exists and
-	// awaits the build that satisfies it.
-	testReady := map[string]bool{}
-	// The stage of the run that blocked its task, when one did.
-	failedStage := map[string]string{}
-	// Whether TaskRemove would refuse: an accepted run pins its task for good,
-	// an open one until it is decided. Tracked here so the offered action and
-	// the refusal can never disagree.
-	pinned := map[string]bool{}
-	for _, r := range runs {
-		if r.TaskID == "" {
-			continue
-		}
-		// A conversation ABOUT a task is not an attempt AT it: chat runs
-		// carry the task id for their dossier, and one that ended "done,
-		// unaccepted" was read as a failed attempt — stamping "the last run
-		// done — retry" on a delivered task. And a run that changed nothing
-		// says nothing either: it wears FAILED for honest pass-rates, but
-		// "the work was already in the tree" is not a verdict on the task.
-		if r.Stage == "chat" || r.NoChanges {
-			continue
-		}
-		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
-			pinned[r.TaskID] = true
-		}
-		// An accepted test-first run is not a finished task — it is the
-		// definition of done, committed. The task stays buildable, and says
-		// the test is waiting. A RETIRED one says nothing at all: its commit
-		// was reverted, so it neither awaits a build nor — via the Accepted
-		// fold below — marks the task accepted.
-		if r.Stage == "test" && r.Accepted {
-			if r.RevertSHA == "" {
-				testReady[r.TaskID] = true
-			}
-			continue
-		}
-		if status[r.TaskID] != "" {
-			continue
-		}
-		switch {
-		case r.Accepted:
-			status[r.TaskID] = "accepted"
-		case r.Status == "running" || r.Status == "queued":
-			status[r.TaskID] = "in_progress"
-		case r.Status == "paused":
-			status[r.TaskID] = "review"
-		default:
-			// Failed and aborted used to land back in "todo", where a task that
-			// had been tried and broken looked exactly like one nobody had
-			// touched. The board could not tell you the difference.
-			status[r.TaskID] = "blocked"
-			blocked[r.TaskID] = "the last run " + r.Status + " — read it, then retry or change the task"
-			// Which phase failed decides the retry the task offers: a failed
-			// build retries by building, a failed TEST retries the chain.
-			failedStage[r.TaskID] = r.Stage
-		}
-	}
+	status, blocked, testReady, failedStage, pinned := deriveTaskRunState(runs)
 
 	// Acceptance is a fact with a commit behind it: once a build was accepted,
 	// later failed experiments do not un-deliver the task.
@@ -1037,4 +970,88 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 		return err
 	}
 	return artifact.DiscardProposal(entry.Path, artifact.Kind(kind))
+}
+
+// deriveTaskRunState folds a task's run history (newest first) into its
+// board state. Extracted so the precedence rules — newest run wins, except
+// an accepted run outranks a later failure — are pinned without a disk.
+func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, testReady map[string]bool, failedStage map[string]string, pinned map[string]bool) {
+	// A task's status is its MOST RECENT run, and RunList answers newest
+	// first, so the first run seen for a task wins.
+	//
+	// This used to assign unconditionally on every branch, letting an older
+	// run overwrite a newer one: a task accepted this morning went back to
+	// "in progress" because a run from last week appeared later in the list.
+	// While RunList ranged over a map it was worse than wrong, it was
+	// unstable — the same board could show two different columns on two
+	// consecutive loads.
+	status = map[string]string{}
+	blocked = map[string]string{}
+	// A committed failing test: the task's definition of done exists and
+	// awaits the build that satisfies it.
+	testReady = map[string]bool{}
+	// The stage of the run that blocked its task, when one did.
+	failedStage = map[string]string{}
+	// Whether TaskRemove would refuse: an accepted run pins its task for good,
+	// an open one until it is decided. Tracked here so the offered action and
+	// the refusal can never disagree.
+	pinned = map[string]bool{}
+	for _, r := range runs {
+		if r.TaskID == "" {
+			continue
+		}
+		// A conversation ABOUT a task is not an attempt AT it: chat runs
+		// carry the task id for their dossier, and one that ended "done,
+		// unaccepted" was read as a failed attempt — stamping "the last run
+		// done — retry" on a delivered task. And a run that changed nothing
+		// says nothing either: it wears FAILED for honest pass-rates, but
+		// "the work was already in the tree" is not a verdict on the task.
+		if r.Stage == "chat" || r.NoChanges {
+			continue
+		}
+		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
+			pinned[r.TaskID] = true
+		}
+		// An accepted test-first run is not a finished task — it is the
+		// definition of done, committed. The task stays buildable, and says
+		// the test is waiting. A RETIRED one says nothing at all: its commit
+		// was reverted, so it neither awaits a build nor — via the Accepted
+		// fold below — marks the task accepted.
+		if r.Stage == "test" && r.Accepted {
+			if r.RevertSHA == "" {
+				testReady[r.TaskID] = true
+			}
+			continue
+		}
+		if status[r.TaskID] != "" {
+			// An older ACCEPTED run outranks a newer failure: the accepted
+			// work is in the tree, and a redundant rerun that died does not
+			// un-commit it. T-101 read "blocked — the last run failed" over
+			// a build accepted one minute earlier.
+			if r.Accepted && status[r.TaskID] == "blocked" {
+				status[r.TaskID] = "accepted"
+				delete(blocked, r.TaskID)
+				delete(failedStage, r.TaskID)
+			}
+			continue
+		}
+		switch {
+		case r.Accepted:
+			status[r.TaskID] = "accepted"
+		case r.Status == "running" || r.Status == "queued":
+			status[r.TaskID] = "in_progress"
+		case r.Status == "paused":
+			status[r.TaskID] = "review"
+		default:
+			// Failed and aborted used to land back in "todo", where a task that
+			// had been tried and broken looked exactly like one nobody had
+			// touched. The board could not tell you the difference.
+			status[r.TaskID] = "blocked"
+			blocked[r.TaskID] = "the last run " + r.Status + " — read it, then retry or change the task"
+			// Which phase failed decides the retry the task offers: a failed
+			// build retries by building, a failed TEST retries the chain.
+			failedStage[r.TaskID] = r.Stage
+		}
+	}
+	return status, blocked, testReady, failedStage, pinned
 }

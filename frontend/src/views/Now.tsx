@@ -378,15 +378,21 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
  * here would offer redoing finished work. */
 function actionableFailures(list: Run[]): Run[] {
   const latest = new Map<string, Run>();
+  // The docstring's promise, at last kept: T-101's accepted build was
+  // followed a minute later by a redundant run someone aborted, and that
+  // corpse sat in the inbox for eight hours "awaiting your call" — over
+  // work already committed to the tree.
+  const settled = new Set<string>();
   for (const r of list) {
     const key = r.task_id || r.stage || r.id;
+    if (r.accepted) settled.add(key);
     const cur = latest.get(key);
     if (!cur || (r.started_at ?? "") > (cur.started_at ?? "")) {
       latest.set(key, r);
     }
   }
   return [...latest.values()]
-    .filter((r) => r.status === "failed")
+    .filter((r) => r.status === "failed" && !settled.has(r.task_id || r.stage || r.id))
     .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
 }
 
