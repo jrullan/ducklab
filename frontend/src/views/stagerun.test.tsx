@@ -107,6 +107,8 @@ describe("the cycle map in the run header", () => {
     const map = await waitFor(() => screen.getByTestId("cycle-map"));
     expect(map.dataset.at).toBe(station);
     expect(map.textContent).toContain("release"); // the whole cycle is visible
+    // The one station whose artifact doesn't share its name says so.
+    expect(map.textContent).toContain("intake (reqs)");
   });
 
   it("a chat run has no station and shows no map", async () => {

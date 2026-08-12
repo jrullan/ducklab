@@ -33,6 +33,18 @@ type Tab = "diff" | "verify" | "candidates" | "calls";
  * station and show no map. */
 const CYCLE = ["intake", "spec", "plan", "build", "release"] as const;
 
+/** The station is the activity; the artifact is what it leaves behind. Most
+ * stations share a name with their artifact — spec writes the spec — but
+ * intake writes REQUIREMENTS, and a reader who hasn't internalized that saw
+ * a station whose output appears nowhere on the map. */
+const CYCLE_LABELS: Record<(typeof CYCLE)[number], string> = {
+  intake: "intake (reqs)",
+  spec: "spec",
+  plan: "plan",
+  build: "build",
+  release: "release",
+};
+
 function cycleStation(stage: string): string | null {
   if (stage === "test" || stage === "build") return "build";
   if (stage === "triage") return "plan";
@@ -59,7 +71,7 @@ function CycleMap({ stage }: { stage: string }) {
         <span key={s} className="flex items-center gap-1">
           {i > 0 && <span className="text-ink-muted">→</span>}
           <span className={s === at ? "font-medium text-ink underline decoration-hairline underline-offset-4" : "text-ink-muted"}>
-            {s}
+            {CYCLE_LABELS[s]}
           </span>
         </span>
       ))}
