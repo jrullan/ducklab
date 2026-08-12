@@ -147,6 +147,16 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "bug_id", "status"),
 		},
 		{
+			"name": "app",
+			"description": "The application under development: status shows its run command and " +
+				"whether it is up; start launches it as an engine-managed process; stop kills it. " +
+				"Useful before reproducing a bug — the report is better when the app was actually running.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"action":     str("status | start | stop"),
+			}, "project_id", "action"),
+		},
+		{
 			"name": "test_start",
 			"description": "The TDD chain for a task: a model writes the FAILING test first; it lands red, " +
 				"is committed, and the build runs against it. then_build defaults true — one authorization, " +
@@ -263,6 +273,28 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(out), nil
+	case "app":
+		switch a.str("action") {
+		case "status":
+			st, err := s.eng.AppStatus(a.str("project_id"))
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(st), nil
+		case "start":
+			st, err := s.eng.AppStart(a.str("project_id"))
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(st), nil
+		case "stop":
+			if err := s.eng.AppStop(a.str("project_id")); err != nil {
+				return nil, err
+			}
+			return toolText("stopped", false), nil
+		default:
+			return nil, fmt.Errorf("action must be status, start or stop")
+		}
 	case "test_start":
 		then := true
 		if v, ok := a["then_build"].(bool); ok {

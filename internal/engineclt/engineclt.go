@@ -280,6 +280,25 @@ func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild bool) (
 	return result, err
 }
 
+// AppStatus reports the project app's run configuration and process state.
+func (c *Client) AppStatus(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.get("/v1/projects/"+projectID+"/app", &result)
+	return result, err
+}
+
+// AppStart launches the app under development via its run.command.
+func (c *Client) AppStart(projectID string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/app/start", nil, &result)
+	return result, err
+}
+
+// AppStop stops the engine-managed app process.
+func (c *Client) AppStop(projectID string) error {
+	return c.post("/v1/projects/"+projectID+"/app/stop", nil, nil)
+}
+
 // ProjectGate reports the configured gate and the detectable one.
 func (c *Client) ProjectGate(projectID string) (map[string]interface{}, error) {
 	var result map[string]interface{}

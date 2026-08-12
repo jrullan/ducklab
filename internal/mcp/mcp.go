@@ -44,6 +44,9 @@ type Engine interface {
 	BugPromote(projectID, bugID string) (map[string]interface{}, error)
 	BugMove(projectID, bugID, status string) (map[string]interface{}, error)
 	TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error)
+	AppStatus(projectID string) (map[string]interface{}, error)
+	AppStart(projectID string) (map[string]interface{}, error)
+	AppStop(projectID string) error
 }
 
 // Server speaks MCP (JSON-RPC 2.0, newline-delimited) over a reader/writer

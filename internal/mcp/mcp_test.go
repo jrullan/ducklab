@@ -223,6 +223,16 @@ func (f *fakeEngine) BugMove(projectID, bugID, status string) (map[string]interf
 	return map[string]interface{}{"status": status}, nil
 }
 
+func (f *fakeEngine) AppStatus(projectID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"running": false, "command": "python app.py"}, nil
+}
+
+func (f *fakeEngine) AppStart(projectID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"running": true}, nil
+}
+
+func (f *fakeEngine) AppStop(projectID string) error { return nil }
+
 func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild bool) (map[string]interface{}, error) {
 	return map[string]interface{}{"id": "r-test"}, nil
 }
@@ -240,6 +250,7 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"bug_promote","arguments":{"project_id":"p","bug_id":"B-001"}}}`,
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"test_start","arguments":{"project_id":"p","task_id":"T-100"}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"bug_move","arguments":{"project_id":"p","bug_id":"B-001","status":"verified"}}}`,
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"app","arguments":{"project_id":"p","action":"start"}}}`,
 	)
 	for i, r := range resps[1:] {
 		if r["error"] != nil {
@@ -252,7 +263,7 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 	)
 	blob, _ := json.Marshal(listResp[1])
-	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_start", "bug_list"} {
+	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_start", "bug_list", "\"app\""} {
 		if !strings.Contains(string(blob), must) {
 			t.Errorf("tools/list is missing %q", must)
 		}
