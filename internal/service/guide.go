@@ -147,14 +147,32 @@ func nextSteps(st projectSnapshot) []NextStep {
 		})
 	}
 
-	// 5. Quiet project: everything accepted, inbox empty.
+	// 5. Quiet project: everything accepted, inbox empty. Three doors, each
+	// its own step with its own destination — one long sentence linking only
+	// to intake made the amendment and the release read as decoration on the
+	// brief. The autopilot still reads only the first: "brief" leading is
+	// what tells it the project is done.
 	if len(out) == 0 {
-		out = append(out, NextStep{
-			ID:     "brief",
-			Action: "Extend the spec with a feature brief, amend the plan for a small change — or cut a release",
-			Reason: "every task is done and the bug inbox is empty",
-			Kind:   "project",
-		})
+		out = append(out,
+			NextStep{
+				ID:     "brief",
+				Action: "New feature — write a brief",
+				Reason: "extends the requirements, then spec and plan follow",
+				Kind:   "stage", Ref: "intake",
+			},
+			NextStep{
+				ID:     "amend",
+				Action: "Quick change — amend the plan",
+				Reason: "one to three tasks, no redesign; uncovered work wears spec-debt",
+				Kind:   "stage", Ref: "plan",
+			},
+			NextStep{
+				ID:     "release",
+				Action: "Cut a release",
+				Reason: "everything accepted since the last one ships",
+				Kind:   "release",
+			},
+		)
 	}
 	return out
 }

@@ -16,7 +16,9 @@ function hrefFor(step: NextStep): string {
           ? { name: "board", tab: "bugs" }
           : step.kind === "task"
             ? { name: "board" }
-            : { name: "cycle" };
+            : step.kind === "release"
+              ? { name: "release" }
+              : { name: "cycle" };
   return routeHref(route);
 }
 

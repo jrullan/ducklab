@@ -111,8 +111,13 @@ func TestBugsThenQuiet(t *testing.T) {
 		HasRequirements: true, HasSpec: true, HasPlan: true,
 		Tasks: []TaskView{{ID: "T-001", Status: "accepted"}},
 	})
-	if len(quiet) != 1 || quiet[0].ID != "brief" {
-		t.Errorf("a finished project's guide = %v, want [brief]", ids(quiet))
+	// Three doors, brief first — the autopilot reads steps[0] to know the
+	// project is done, and each door carries its own destination.
+	if strings.Join(ids(quiet), ",") != "brief,amend,release" {
+		t.Errorf("a finished project's guide = %v, want [brief amend release]", ids(quiet))
+	}
+	if quiet[1].Ref != "plan" || quiet[1].Kind != "stage" {
+		t.Errorf("the amendment must land on the plan view: %+v", quiet[1])
 	}
 }
 

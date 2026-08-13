@@ -235,7 +235,7 @@ export interface NextStep {
   id: string;
   action: string;
   reason: string;
-  kind: "run" | "task" | "bug" | "stage" | "project";
+  kind: "run" | "task" | "bug" | "stage" | "project" | "release";
   ref?: string;
 }
 
