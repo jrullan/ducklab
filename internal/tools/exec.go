@@ -83,7 +83,23 @@ func (t *VerifyRun) Schema() interface{} {
 }
 
 // Execute runs the tool.
+// GateFailLimit is the brake on a red-gate spiral: after this many
+// consecutive failures the tool stops running the gate at all. Measured on
+// the run that earned it: 45 verify_run calls, all red, 53 patches between
+// them, 32KB of test output ballooning the context on every one — 8.7M
+// tokens on a datepicker default, ended only by the wallclock. An approach
+// that has failed this many times straight is not converging; running the
+// gate again does not change the answer.
+const GateFailLimit = 10
+
 func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	if ectx.ConsecGateFails >= GateFailLimit {
+		return &Result{IsError: true, Content: fmt.Sprintf(
+			"REFUSED: the gate has failed %d times in a row in this run. Running it again will "+
+				"not change the answer — this approach is not converging. Stop patching. State "+
+				"plainly what you tried and why you believe it keeps failing, then end your reply "+
+				"so a person (or the reviewer) can redirect the work.", ectx.ConsecGateFails)}, nil
+	}
 	// The same code path as the gate that decides the run, deliberately.
 	//
 	// This used to run "go test ./..." hardcoded. On a project whose gate was
@@ -98,8 +114,15 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	exitCode := res.ExitCode
 	result := fmt.Sprintf("gate: %s\ncmd: %s\nexit: %d\n%s", res.Gate, res.Command, exitCode, CapResult(res.Output, MaxToolResultBytes))
 	if exitCode != 0 {
+		ectx.ConsecGateFails++
+		if left := GateFailLimit - ectx.ConsecGateFails; left >= 0 && left <= 3 {
+			result += fmt.Sprintf("\n\n[gate brake: %d consecutive failure(s); %d attempt(s) left "+
+				"before verify_run refuses — if the cause is not clear yet, stop and say so]",
+				ectx.ConsecGateFails, left)
+		}
 		return &Result{Content: result, IsError: true}, nil
 	}
+	ectx.ConsecGateFails = 0
 	return SuccessResult("%s", result), nil
 }
 

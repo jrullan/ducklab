@@ -65,3 +65,48 @@ func TestAskHumanSaysWhenAskingWins(t *testing.T) {
 		}
 	}
 }
+
+// 45 verify_run calls, all red, 53 patches between them, 32KB of test output
+// ballooning the context each time — 8.7M tokens on a datepicker default,
+// ended only by the wallclock. An approach that has failed ten times straight
+// is not converging; the gate brake says so instead of letting it burn.
+func TestTheGateBrakeStopsARedSpiral(t *testing.T) {
+	dir := t.TempDir()
+	ectx := &ExecContext{
+		ProjectRoot: dir,
+		// A gate that always fails, cheaply.
+		Verify: config.Verify{Mode: "custom", Custom: "exit 1", TimeoutS: 30},
+	}
+	tool := &VerifyRun{}
+
+	for i := 1; i <= GateFailLimit; i++ {
+		res, err := tool.Execute(context.Background(), ectx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatalf("a failing gate reported success on attempt %d", i)
+		}
+		if i >= GateFailLimit-3 && !strings.Contains(res.Content, "gate brake") {
+			t.Errorf("attempt %d near the limit does not warn: %.120s", i, res.Content)
+		}
+	}
+	// Beyond the limit: refused, with orders to stop and explain.
+	res, err := tool.Execute(context.Background(), ectx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Content, "REFUSED") || !strings.Contains(res.Content, "not converging") {
+		t.Errorf("the brake did not engage: %.200s", res.Content)
+	}
+
+	// One green resets the count: progress is progress.
+	ectx.ConsecGateFails = 2
+	ectx.Verify = config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30}
+	if res, _ := tool.Execute(context.Background(), ectx, nil); res.IsError {
+		t.Fatalf("a passing gate reported failure: %.120s", res.Content)
+	}
+	if ectx.ConsecGateFails != 0 {
+		t.Errorf("a green gate must reset the streak, got %d", ectx.ConsecGateFails)
+	}
+}

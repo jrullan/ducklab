@@ -321,6 +321,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// the answer existed and never reached the tool.
 		Answers: rs.answers(),
 	}
+	rs.execCtx = ectx
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer:  s.llmWriter(rs, tracker),

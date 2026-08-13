@@ -74,6 +74,10 @@ type runState struct {
 	run    *runlog.Run
 	writer *runlog.Writer // nil for rehydrated runs until a mutation needs it
 	runDir string
+	// execCtx is the run's toolbelt context, kept so a pause can describe
+	// the run's SHAPE — a person deciding whether to lift a cap deserves to
+	// know the gate has failed thirty times in a row before they feed it.
+	execCtx *tools.ExecContext
 	// projectPath is kept so a rehydrated run can open its writer without
 	// a registry lookup that may have changed since the run started.
 	projectPath string
@@ -1037,6 +1041,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	rs.execCtx = ectx
 
 	// Build the turn that would be sent
 	turn := &agent.Turn{
@@ -1450,16 +1455,26 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "budget"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-		rs.run.Failure = err.Error()
+		// The decision the pause asks for is "lift, or stop?" — and the
+		// answer depends on the run's shape, not just its bill. A person
+		// shown only "budget exceeded" lifted the cap on a run whose gate
+		// had already failed dozens of times straight, and fed 5.7M more
+		// tokens to a loop the number would have named.
+		detail := err.Error()
+		if rs.execCtx != nil && rs.execCtx.ConsecGateFails >= 3 {
+			detail += fmt.Sprintf(" — CAUTION: the gate has failed %d times in a row in this run; "+
+				"lifting the cap may feed a loop, not finish the work", rs.execCtx.ConsecGateFails)
+		}
+		rs.run.Failure = detail
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
-			"kind": "budget", "detail": err.Error(),
+			"kind": "budget", "detail": detail,
 		})
 		rs.writer.WriteState()
 		if s.bus != nil {
 			s.bus.Publish(bus.Event{
 				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
 				TS:   time.Now(),
-				Data: map[string]interface{}{"kind": "budget", "detail": err.Error()},
+				Data: map[string]interface{}{"kind": "budget", "detail": detail},
 			})
 		}
 		return

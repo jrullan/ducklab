@@ -80,6 +80,9 @@ type ExecContext struct {
 	// writes the implementation too, the gate goes green immediately, and the
 	// test has proved nothing.
 	TestPathsOnly bool
+	// ConsecGateFails counts verify_run reds with no green between them,
+	// across the whole run — the loop's own I3, at gate level.
+	ConsecGateFails int
 	// Verify is the project's gate. verify_run runs this and nothing else:
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
