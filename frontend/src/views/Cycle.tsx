@@ -661,7 +661,7 @@ export function Cycle({
             <>
             {active.stage === "plan" && sections.length > 0 && roster.length > 0 && (
               <div className="mb-2">
-                <SeatChips entries={roster} fleet={fleet} />
+                <SeatChips entries={stageSeats(mode, roster)} fleet={fleet} />
               </div>
             )}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
@@ -831,6 +831,20 @@ function stripFront(md: string): string {
  * the architect alone: naming a reviewer that will never be asked would be
  * worse than naming nobody.
  */
+/** The seats a document stage ACTUALLY runs: the architect drafts, and in
+ * council the reviewer entries critique — one per critic. The full roster
+ * also lists implementer, judge, triager and scribe, and rendering those
+ * here claimed models a redraft never calls. Chips are a promise about who
+ * participates; only the participants earn one. */
+function stageSeats(mode: string, roster: readonly RosterEntry[]): RosterEntry[] {
+  const seats = roster.filter(
+    (r) => r.role === "architect" || (mode !== "solo" && r.role === "reviewer"),
+  );
+  // Council language on the chip: a critic critiques; "reviewer" is the
+  // build pair's word.
+  return seats.map((r) => (r.role === "reviewer" ? { ...r, role: "critic" } : r));
+}
+
 function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): string {
   const architect = roster.find((r) => r.role === "architect")?.duckling;
   if (!architect) return "roster not loaded";

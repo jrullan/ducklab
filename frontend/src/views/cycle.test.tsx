@@ -971,3 +971,40 @@ describe("the amendment's vision warning", () => {
     expect(screen.queryByTestId("plan-extend")).toBeNull();
   });
 });
+
+// Chips are a promise about who participates. The full roster also lists
+// implementer, judge, triager and scribe — none of whom a plan redraft ever
+// calls — and rendering them claimed models the run would not use.
+describe("the extend panel's seats", () => {
+  const FULL_ROSTER = [
+    { role: "architect", duckling: "glm52", source: "project" },
+    { role: "reviewer", duckling: "deepseekv4pro", source: "project" },
+    { role: "implementer", duckling: "luna", source: "project" },
+    { role: "judge", duckling: "dsv4flash", source: "project" },
+    { role: "triager", duckling: "luna", source: "project" },
+    { role: "scribe", duckling: "dsv4flash", source: "project" },
+  ];
+  const PLAN3 = {
+    kind: "plan", version: 1, approved: true, markdown: "---\nkind: plan\n---\n",
+    sections: [{ id: "M-001", title: "Core", body: "", fields: {}, children: [{ id: "T-001", title: "S", body: "", fields: {} }] }],
+  };
+
+  it("shows only the drafter and its critics", async () => {
+    const client = clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN3);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: FULL_ROSTER });
+      if (p === "/v1/ducklings") return json({ items: [] });
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-extend")));
+    const chips = await waitFor(() => screen.getAllByTestId("seat-chip"));
+    const text = chips.map((c) => c.textContent).join(" | ");
+    expect(text).toContain("architect");
+    expect(text).toContain("critic");
+    for (const ghost of ["implementer", "judge", "triager", "scribe"]) {
+      expect(text).not.toContain(ghost);
+    }
+  });
+});
