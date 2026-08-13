@@ -278,3 +278,38 @@ func TestASoloStageSeatsTheCouncilArchitect(t *testing.T) {
 		t.Errorf("solo stage architect = %q, want the documents seat pato-dos, not the tasks' solo pick", arch)
 	}
 }
+
+// The chip is a door: a request naming its own seats overrides for THIS run
+// alone — the team's saved seats stay untouched.
+func TestAStageRequestSeatsItsOwnDucklings(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	_ = dir
+
+	s.cfg.Defaults.ModeDucklings = map[string][]string{
+		"council": {"pato-uno", "pato-dos"},
+	}
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "add a small thing", Ducklings: []string{"pato-dos"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The roster lands when the stage's executor picks the run up.
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rs.run.Roster["architect"] != "pato-dos" {
+		t.Errorf("architect = %q, want the request's own pick pato-dos", rs.run.Roster["architect"])
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+	// The saved seats did not move.
+	if s.cfg.Defaults.ModeDucklings["council"][0] != "pato-uno" {
+		t.Error("a per-run pick must never edit the saved seats")
+	}
+}

@@ -1008,3 +1008,42 @@ describe("the extend panel's seats", () => {
     }
   });
 });
+
+// The chip is a DOOR: click it, pick a different duckling, and THIS run
+// seats the pick — the team's saved seats never move.
+describe("picking a seat from its chip", () => {
+  const PLAN4 = {
+    kind: "plan", version: 1, approved: true, markdown: "---\nkind: plan\n---\n",
+    sections: [{ id: "M-001", title: "Core", body: "", fields: {}, children: [{ id: "T-001", title: "S", body: "", fields: {} }] }],
+  };
+  it("amends with the picked duckling, this run only", async () => {
+    let sent: string[] | undefined;
+    const client = clientWith((p, init) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN4);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [{ role: "architect", duckling: "glm52", source: "project" }] });
+      if (p === "/v1/ducklings") return json({ items: [
+        { id: "glm52", provider: "z", model: "g", caps: { native_tools: true, context_tokens: 1000000 } },
+        { id: "luna", provider: "l", model: "l", caps: { native_tools: true, context_tokens: 1100000, vision: true } },
+      ] });
+      if (p === "/v1/projects/p/stages/plan" && init?.method === "POST") {
+        sent = JSON.parse(String(init.body)).ducklings;
+        return json({ id: "r-x", status: "running" });
+      }
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
+    // Click the chip, pick luna.
+    fireEvent.click(await waitFor(() => screen.getAllByTestId("seat-chip")[0]!));
+    fireEvent.change(await waitFor(() => screen.getByTestId("seat-pick-0")), { target: { value: "luna" } });
+    // The chip now wears the pick — and the vision warning logic follows it.
+    await waitFor(() => {
+      const chip = screen.getAllByTestId("seat-chip")[0]!;
+      expect(chip.textContent).toContain("luna");
+    });
+    fireEvent.change(screen.getByTestId("plan-extend-text"), { target: { value: "quick change" } });
+    fireEvent.click(screen.getByTestId("plan-extend-start"));
+    await waitFor(() => expect(sent).toEqual(["luna"]));
+  });
+});

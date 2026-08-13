@@ -2573,7 +2573,12 @@ func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapte
 // failing the run: the line-up is a preference, and a deleted model should
 // degrade the council, not close it.
 func (s *Service) stageCritics(mode string) []config.DucklingID {
-	lineup := s.stageLineupFor(mode)
+	return s.criticsFrom(mode, s.stageLineupFor(mode))
+}
+
+// criticsFrom reads the critics out of a given line-up — the saved one, or a
+// run's own override — so both paths seat critique turns identically.
+func (s *Service) criticsFrom(mode string, lineup []string) []config.DucklingID {
 	if len(lineup) < 2 {
 		return nil
 	}

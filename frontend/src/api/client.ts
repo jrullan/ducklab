@@ -870,7 +870,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean; images?: string[] } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean; images?: string[]; ducklings?: string[] } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -890,6 +890,9 @@ export class EngineClient {
       settle: opts.settle ?? false,
       // Amendment evidence: data-URL screenshots shown to a seeing architect.
       images: opts.images ?? undefined,
+      // Per-run seat override from the clicked chip; the team's saved seats
+      // stay untouched. Architect first, critics after.
+      ducklings: opts.ducklings ?? undefined,
       mode: opts.mode ?? "",
       rounds: opts.rounds ?? 0,
       stream: true,

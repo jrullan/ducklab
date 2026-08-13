@@ -62,6 +62,9 @@ export function Cycle({
   const [fleet, setFleet] = useState<Duckling[]>([]);
   // The amendment's own seat: the solo roster's architect.
   const [amendSeat, setAmendSeat] = useState<RosterEntry | null>(null);
+  // Per-run seat picks from clicked chips, keyed panel:index. A pick changes
+  // THIS run only; the team's saved seats stay untouched.
+  const [seatPicks, setSeatPicks] = useState<Record<string, string>>({});
   useEffect(() => {
     Promise.all([
       Promise.resolve().then(() => client.roster(projectId, "solo")),
@@ -76,9 +79,10 @@ export function Cycle({
         setAmendSeat(null);
       });
   }, [client, projectId]);
+  const amendDuckling = seatPicks["amend:0"] || amendSeat?.duckling || "";
   const architectSees = (() => {
-    if (!amendSeat) return null;
-    const d = fleet.find((x) => x.id === amendSeat.duckling);
+    if (!amendDuckling) return null;
+    const d = fleet.find((x) => x.id === amendDuckling);
     return d ? Boolean(d.caps?.vision) : null;
   })();
   // How many tasks the spec has not caught up with — the settle button's
@@ -87,6 +91,10 @@ export function Cycle({
   const [debtCount, setDebtCount] = useState(0);
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState("council");
+  // A pick belongs to the panel and mode it was made in.
+  useEffect(() => {
+    setSeatPicks({});
+  }, [planAction, mode]);
   const [rounds, setRounds] = useState(2);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [startedRun, setStartedRun] = useState<string | null>(null);
@@ -252,11 +260,21 @@ export function Cycle({
     setStarting(true);
     setFailure(null);
     try {
+      // Chip picks override seats for THIS run: architect first, critics
+      // after, holes filled from the saved seat they replaced.
+      let ducklings: string[] | undefined;
+      if (active.stage === "plan" && sections.length > 0) {
+        const seats = stageSeats(mode, roster).map(
+          (e, i) => seatPicks[`extend:${i}`] || e.duckling,
+        );
+        if (seats.some((_d, i) => seatPicks[`extend:${i}`])) ducklings = seats;
+      }
       const run = await client.stageStart(projectId, active.stage, {
         from: brief.trim(),
         mode,
         rounds,
         adopt,
+        ducklings,
       });
       setStartedRun(run.id);
       setBrief("");
@@ -572,7 +590,11 @@ export function Cycle({
               <div className="mb-3 rounded-card border border-hairline p-2" data-testid="plan-extend">
                 {amendSeat && (
                   <div className="mb-1">
-                    <SeatChips entries={[amendSeat]} fleet={fleet} />
+                    <SeatChips
+                      entries={[{ ...amendSeat, duckling: amendDuckling }]}
+                      fleet={fleet}
+                      onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`amend:${i}`]: id }))}
+                    />
                   </div>
                 )}
                 <p className="mb-1 text-xs text-ink-muted">
@@ -642,6 +664,7 @@ export function Cycle({
                       .stageStart(projectId, "plan", {
                         extend: amendment.trim(),
                         images: amendImages.length ? amendImages : undefined,
+                        ducklings: seatPicks["amend:0"] ? [seatPicks["amend:0"]] : undefined,
                       })
                       .then((run) => {
                         setStartedRun(run.id);
@@ -661,7 +684,14 @@ export function Cycle({
             <>
             {active.stage === "plan" && sections.length > 0 && roster.length > 0 && (
               <div className="mb-2">
-                <SeatChips entries={stageSeats(mode, roster)} fleet={fleet} />
+                <SeatChips
+                  entries={stageSeats(mode, roster).map((e, i) => ({
+                    ...e,
+                    duckling: seatPicks[`extend:${i}`] || e.duckling,
+                  }))}
+                  fleet={fleet}
+                  onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`extend:${i}`]: id }))}
+                />
               </div>
             )}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
@@ -869,17 +899,60 @@ function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): 
  * own colour, the context it can hold, and an eye when it can be shown
  * images. [glm52 384.0k 👁️] answers "who will do this and what can they
  * take" without a trip to Settings. */
-function SeatChips({ entries, fleet }: { entries: RosterEntry[]; fleet: Duckling[] }) {
+function SeatChips({
+  entries,
+  fleet,
+  onPick,
+}: {
+  entries: RosterEntry[];
+  fleet: Duckling[];
+  /** When given, a chip is a DOOR: clicking it opens the pick for that seat,
+   * this run only — more direct than a trip to the team settings. */
+  onPick?: (index: number, duckling: string) => void;
+}) {
   const colors = assignDucklingColors(fleet);
+  const [open, setOpen] = useState<number | null>(null);
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
-      {entries.map((e) => {
+      {entries.map((e, i) => {
         const d = fleet.find((x) => x.id === e.duckling);
+        if (open === i && onPick) {
+          return (
+            <label key={e.role + i} className="flex items-center gap-1 text-xs text-ink-muted">
+              {e.role}
+              <select
+                autoFocus
+                data-testid={`seat-pick-${i}`}
+                value={e.duckling}
+                onChange={(ev) => {
+                  onPick(i, ev.target.value);
+                  setOpen(null);
+                }}
+                onBlur={() => setOpen(null)}
+                className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
+              >
+                {fleet.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.id}
+                    {f.caps?.vision ? " 👁" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        }
         return (
-          <span
-            key={e.role + e.duckling}
-            className="flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs"
+          <button
+            key={e.role + i}
+            type="button"
+            disabled={!onPick}
+            onClick={() => onPick && setOpen(i)}
+            className={
+              "flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs" +
+              (onPick ? " cursor-pointer hover:border-ink" : "")
+            }
             data-testid="seat-chip"
+            title={onPick ? "click to pick a different duckling for this run only" : undefined}
           >
             <span className="text-ink-muted">{e.role}</span>
             <span style={{ color: colors[e.duckling] }} className="font-medium">
@@ -891,7 +964,7 @@ function SeatChips({ entries, fleet }: { entries: RosterEntry[]; fleet: Duckling
               </span>
             ) : null}
             {d?.caps?.vision && <span title="vision — can be shown images">👁️</span>}
-          </span>
+          </button>
         );
       })}
     </div>

@@ -42,6 +42,11 @@ type StageRequest struct {
 	// the engine wires back into the plan on accept. The person never writes
 	// this prompt; the engine assembles it from the debt itself.
 	Settle bool `json:"settle,omitempty"`
+	// Ducklings seats THIS run only — the chip clicked into a different
+	// pick. The team's saved seats stay untouched; an override is a choice
+	// about one run, not a settings edit. Order is the stage's own:
+	// architect first, critics after.
+	Ducklings []string `json:"ducklings,omitempty"`
 	// Images are data URLs riding an amendment: the screenshot that shows
 	// the cosmetic change better than a paragraph describes it. Shown to the
 	// architect only when it can see; dropped with a recorded warning when
@@ -280,8 +285,15 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	roster, warning := s.resolveRoster(projCfg)
 	// The mode's saved line-up, which for council is the ONLY place it can
 	// apply — council never runs as a task. First drafts, the rest critique.
-	applyStageLineup(roster, s.stageLineupFor(rs.run.Mode))
-	critics := s.stageCritics(rs.run.Mode)
+	// A request naming its own seats overrides for THIS run alone.
+	lineup := req.Ducklings
+	if len(lineup) == 0 {
+		lineup = s.stageLineupFor(rs.run.Mode)
+	} else if rs.run.Mode == "solo" && len(lineup) > 1 {
+		lineup = lineup[:1]
+	}
+	applyStageLineup(roster, lineup)
+	critics := s.criticsFrom(rs.run.Mode, lineup)
 	rs.run.Roster = rosterStrings(roster)
 	if warning != "" {
 		rs.run.Warning = warning
