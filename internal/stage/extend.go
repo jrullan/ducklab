@@ -38,6 +38,17 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}
+	// No document contract on an amendment. ArtifactScript demands
+	// markdown_sections:M — a full plan's shape — while the amendment prompt
+	// demands a T-900 fragment: two contradictory contracts in one turn.
+	// Models split between them: one fused its task into an M- heading to
+	// satisfy the validator (the phantom-task shape), another obeyed the
+	// fragment and was executed by the M contract — "no sections matching M
+	// found". The fragment contract in the prompt is the only one that
+	// speaks; runExtend's own parse and refusal handling judge the reply.
+	for i := range script.Turns {
+		script.Turns[i].Contract = ""
+	}
 	// The evidence rides the architect's own turn, like a bug's screenshots
 	// ride the triager's.
 	if len(p.Images) > 0 {

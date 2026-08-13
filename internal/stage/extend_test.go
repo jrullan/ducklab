@@ -303,3 +303,30 @@ func TestAmendmentImagesRideTheArchitectsTurn(t *testing.T) {
 		t.Errorf("the image never reached a turn: %v", seen)
 	}
 }
+
+// Two contracts, one turn: ArtifactScript demands full-plan M sections while
+// the amendment prompt demands a T-900 fragment. One model fused its task
+// into an M- heading to satisfy the validator; another obeyed the fragment
+// and was executed by the contract — "no sections matching M". An amendment
+// turn carries NO document contract; the prompt's fragment rules are the
+// only law.
+func TestTheAmendmentTurnCarriesNoDocumentContract(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan, "## M-001 — Core\n\n### T-001 — Schema\n\nDone.\n")
+	current, _ := artifact.Load(root, artifact.KindPlan)
+	_, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-c", Mode: "solo",
+		Extend: "small thing",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			for _, turn := range script.Turns {
+				if turn.Contract != "" {
+					t.Errorf("turn %s still carries contract %q", turn.Role, turn.Contract)
+				}
+			}
+			return "## T-900 — Small thing\n\nDo it.\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
