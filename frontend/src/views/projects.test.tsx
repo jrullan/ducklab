@@ -215,6 +215,35 @@ describe("Projects — the gate", () => {
     expect(screen.queryByTestId("gate-none")).toBeNull();
   });
 
+  // The person's exact flow: a CONFIGURED gate, edit, append && chains, Set —
+  // the row must show the refetched command, not the one it had.
+  it("edits a configured gate and the row follows", async () => {
+    const before = "TEST_DATABASE_URL=postgresql://tracker@localhost:55433/test_db .venv/bin/pytest -q";
+    const after = before + " && cd frontend && npm run build";
+    const client = clientWithGate(gate({ mode: "tests", command: before, best_verdict: "PASSED" }));
+    const cr = client as unknown as Record<string, unknown>;
+    cr.projectUpdate = vi.fn(() => Promise.resolve({}));
+    const gateFn = cr.projectGate as ReturnType<typeof vi.fn>;
+    gateFn.mockResolvedValueOnce(gate({ mode: "tests", command: before, best_verdict: "PASSED" }));
+    gateFn.mockImplementation(() =>
+      Promise.resolve(gate({ mode: "tests", command: after, best_verdict: "PASSED" })),
+    );
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("gate-edit"));
+    fireEvent.change(screen.getByTestId("gate-command"), { target: { value: after } });
+    fireEvent.click(screen.getByTestId("gate-save"));
+    await waitFor(() =>
+      expect(cr.projectUpdate).toHaveBeenCalledWith("alpha", {
+        "verify.mode": "tests",
+        "verify.tests": after,
+      }),
+    );
+    await waitFor(() => {
+      const row = screen.getByTestId("gate-ok");
+      expect(row.querySelector("[title]")?.getAttribute("title")).toBe(after);
+    });
+  });
+
   // The row was a single line carrying name, env-var soup, path and buttons —
   // unreadable at exactly the moment someone came to edit a command. Cards
   // now: one labeled row per config, commands truncated, full text on hover.
