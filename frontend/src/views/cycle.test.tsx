@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { act } from "@testing-library/react";
+import { saveChipFacts } from "../lib/chipfacts";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Cycle } from "./Cycle";
 import { EngineClient } from "../api/client";
@@ -1093,6 +1095,23 @@ describe("chip facts follow the appearance preference", () => {
     expect(chip.textContent).toContain("👁️");
     expect(chip.textContent).toContain("$3.00/M"); // avg of 2 in / 4 out
     expect(chip.textContent).not.toContain("1.1M"); // context unchecked
+    localStorage.removeItem("ducklab.chipfacts");
+  });
+
+  it("a settings change lands on chips already on screen", async () => {
+    localStorage.removeItem("ducklab.chipfacts");
+    render(<Cycle client={clientPriced()} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
+    const chip = (await waitFor(() => screen.getAllByTestId("seat-chip")))[0]!;
+    expect(chip.textContent).toContain("1.1M"); // context, by default
+    // The person unticks everything but vision in Settings — no save, no
+    // remount: the mounted chip must follow.
+    act(() => saveChipFacts(["vision"]));
+    await waitFor(() => {
+      const c = screen.getAllByTestId("seat-chip")[0]!;
+      expect(c.textContent).not.toContain("1.1M");
+      expect(c.textContent).toContain("👁️");
+    });
     localStorage.removeItem("ducklab.chipfacts");
   });
 

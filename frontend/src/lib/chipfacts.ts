@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 /** Which facts ride a seat chip — the person's own pick.
  *
  * Chips are glanceable promises, and which facts matter varies by fleet: an
@@ -35,4 +37,26 @@ export function loadChipFacts(): ChipFact[] {
 
 export function saveChipFacts(facts: ChipFact[]) {
   localStorage.setItem(KEY, JSON.stringify(facts));
+  // localStorage tells no one. Surfaces already on screen — the launchers,
+  // the plan panels — subscribe to this instead of re-reading on remount,
+  // so a change in Settings lands everywhere the moment it is made.
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
+const CHANGE_EVENT = "ducklab:chipfacts";
+
+/** The reactive read: re-renders when the preference changes, whether from
+ * this window's Settings or another window's (storage event). */
+export function useChipFacts(): ChipFact[] {
+  const [facts, setFacts] = useState<ChipFact[]>(loadChipFacts);
+  useEffect(() => {
+    const onChange = () => setFacts(loadChipFacts());
+    window.addEventListener(CHANGE_EVENT, onChange);
+    window.addEventListener("storage", onChange);
+    return () => {
+      window.removeEventListener(CHANGE_EVENT, onChange);
+      window.removeEventListener("storage", onChange);
+    };
+  }, []);
+  return facts;
 }

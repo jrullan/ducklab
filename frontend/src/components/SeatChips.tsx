@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Duckling } from "../api/client";
 import { assignDucklingColors } from "../lib/colors";
 import { tokens } from "../lib/format";
-import { loadChipFacts } from "../lib/chipfacts";
+import { useChipFacts } from "../lib/chipfacts";
 
 /** One seat for the chips row: the role's name and who sits in it. */
 export type SeatEntry = { role: string; duckling: string };
@@ -34,7 +34,9 @@ export function SeatChips({
 }) {
   const colors = assignDucklingColors(fleet);
   const [open, setOpen] = useState<number | null>(null);
-  const facts = loadChipFacts();
+  // The person's own pick of facts — reactive: a change in Settings lands
+  // here without a remount or a save button.
+  const facts = useChipFacts();
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
       {entries.map((e, i) => {
