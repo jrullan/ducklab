@@ -98,3 +98,25 @@ describe("took and turns in the runs table", () => {
     expect(screen.getByTestId("run-turns").textContent).toBe("3");
   });
 });
+
+// "No encuentro ninguna tarea test fallida de la T-110" — and the record had
+// two. A test-first that concludes cleanly with verdict FAILED (its test
+// never landed red) wears status "done"; the failed filter went by status
+// alone and the verdict was grey prose. The person hunting the runs they
+// were told to relaunch found only the crashed build.
+describe("failed runs are found by outcome", () => {
+  const runs: Run[] = [
+    mk({ id: "r-test-flop", stage: "test", task_id: "T-110", status: "done", verdict: "FAILED" }),
+    mk({ id: "r-build-crash", stage: "build", task_id: "T-110", status: "failed", verdict: "FAILED", started_at: "2026-07-21T00:00:00Z" }),
+    mk({ id: "r-good", status: "done", verdict: "PASSED", started_at: "2026-07-22T00:00:00Z" }),
+  ];
+
+  it("the failed filter includes done runs whose verdict is FAILED", () => {
+    render(<Runs runs={runs} />);
+    fireEvent.click(screen.getByTestId("runs-filter-failed"));
+    const shown = screen.getAllByTestId("runs-row").map((r) => r.dataset.run);
+    expect(shown).toContain("r-test-flop");
+    expect(shown).toContain("r-build-crash");
+    expect(shown).not.toContain("r-good");
+  });
+});

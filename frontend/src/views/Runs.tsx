@@ -14,7 +14,7 @@ import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 import { runLabel } from "../lib/runview";
 import { money } from "../lib/format";
-import { runStatusRole } from "../lib/colors";
+import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
 
 const FILTERS = ["all", "waiting", "running", "done", "failed"] as const;
@@ -54,7 +54,11 @@ export function Runs({ runs }: { runs: Run[] }) {
           case "done":
             return r.status === "done";
           case "failed":
-            return r.status === "failed";
+            // By outcome, not by status field. A test-first that concluded
+            // cleanly with verdict FAILED (its test never landed red) wears
+            // status "done" — filtering on status alone hid exactly the runs
+            // a person hunting T-110's failed tests was told to relaunch.
+            return r.status === "failed" || r.verdict === "FAILED" || r.verdict === "ABORTED";
           default:
             return true;
         }
@@ -116,8 +120,15 @@ export function Runs({ runs }: { runs: Run[] }) {
                 </a>
               </td>
               <td className="border-b border-hairline py-1 pr-3 text-ink-secondary">{r.mode}</td>
-              <td className="border-b border-hairline py-1 pr-3 text-ink-secondary">
-                {r.verdict || "—"}
+              <td className="border-b border-hairline py-1 pr-3">
+                {/* A chip, not grey prose: done-with-FAILED-verdict rows read
+                    as successes when the one word that says otherwise is the
+                    quietest thing in the row. */}
+                {r.verdict ? (
+                  <StatusChip role={verdictStatus(r.verdict as Verdict)} label={verdictLabel(r.verdict as Verdict)} />
+                ) : (
+                  <span className="text-ink-secondary">—</span>
+                )}
               </td>
               {/* What the run spent — live for a running one, since the
                   record serves the tracker's numbers. ~ marks a cost built on
