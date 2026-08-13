@@ -50,7 +50,11 @@ export function seatLabel(mode: string, i: number): string {
     case "pair":
       return i === 0 ? "implementer" : "reviewer";
     case "council":
-      return i === 0 ? "drafts" : `critic ${i}`;
+      // Named for the ROLE, verb attached: this seat runs as "architect"
+      // everywhere else — transcripts, roster, the plan panels' chips — and
+      // labelling it only "drafts" left the product's most-configured seat
+      // with no findable home in Settings.
+      return i === 0 ? "architect · drafts" : `critic ${i}`;
     case "tournament":
       return `contestant ${i + 1}`;
     case "split":

@@ -174,7 +174,9 @@ describe("mode line-ups in Settings", () => {
     // functions group, and the task-mode grid must no longer offer it.
     expect(text).not.toContain("council");
     const fns = screen.getByTestId("function-lineups").textContent!;
-    expect(fns).toContain("drafts");
+    // The seat is named for its ROLE — architect — with the verb attached,
+    // so the chips, transcripts and Settings finally speak one language.
+    expect(fns).toContain("architect · drafts");
     expect(fns).toContain("critic 1");
     // The scope rides the stage header as a pill now.
     expect(screen.getByTestId("stage-documents").textContent).toContain("all projects");
