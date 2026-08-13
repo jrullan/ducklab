@@ -918,3 +918,36 @@ describe("the spec-debt settle button", () => {
     expect(screen.queryByTestId("spec-settle")).toBeNull();
   });
 });
+
+// A warning delivered in the run's event log after launch is a warning
+// delivered after the decision it should have informed. The seat's vision is
+// checked the moment the screenshot is added.
+describe("the amendment's vision warning", () => {
+  const PLAN2 = {
+    kind: "plan", version: 1, approved: true, markdown: "---\nkind: plan\n---\n",
+    sections: [{ id: "M-001", title: "Core", body: "", fields: {}, children: [{ id: "T-001", title: "S", body: "", fields: {} }] }],
+  };
+  const clientBlind = () =>
+    clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN2);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [{ role: "architect", duckling: "glm52", source: "project" }] });
+      if (p === "/v1/ducklings") return json({ items: [{ id: "glm52", provider: "z", model: "glm", caps: { native_tools: true, context_tokens: 128000 } }] });
+      return json({ items: [] });
+    });
+
+  it("warns when the screenshot lands on a blind architect", async () => {
+    render(<Cycle client={clientBlind()} projectId="p" stage="plan" />);
+    const input = await waitFor(() => screen.getByTestId("plan-extend-image"));
+    const file = new File(["png"], "mock.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => screen.getByTestId("plan-extend-image-chip"));
+    expect(screen.getByTestId("plan-extend-vision-warn").textContent).toContain("cannot see images");
+  });
+
+  it("stays quiet with no image attached", async () => {
+    render(<Cycle client={clientBlind()} projectId="p" stage="plan" />);
+    await waitFor(() => screen.getByTestId("plan-extend"));
+    expect(screen.queryByTestId("plan-extend-vision-warn")).toBeNull();
+  });
+});

@@ -52,6 +52,23 @@ export function Cycle({
   // The amendment's screenshots, as data URLs — the cosmetic change shown,
   // not just described.
   const [amendImages, setAmendImages] = useState<string[]>([]);
+  // Whether the architect who will read the amendment can SEE. Answered at
+  // the moment the screenshot is added — a warning that only appears in the
+  // run's event log after launch is a warning delivered after the decision
+  // it should have informed.
+  const [architectSees, setArchitectSees] = useState<boolean | null>(null);
+  useEffect(() => {
+    Promise.all([
+      Promise.resolve().then(() => client.roster(projectId, "solo")),
+      Promise.resolve().then(() => client.ducklings()),
+    ])
+      .then(([r, ds]) => {
+        const arch = (r.entries ?? []).find((e) => e.role === "architect");
+        const d = ds.find((x) => x.id === arch?.duckling);
+        setArchitectSees(d ? Boolean(d.caps?.vision) : null);
+      })
+      .catch(() => setArchitectSees(null));
+  }, [client, projectId]);
   // How many tasks the spec has not caught up with — the settle button's
   // number, fetched with the artifact so the spec tab can offer the one-click
   // repayment without the person counting markers on the board.
@@ -560,6 +577,13 @@ export function Cycle({
                     </span>
                   ))}
                 </div>
+                {amendImages.length > 0 && architectSees === false && (
+                  <p className="mb-1 text-xs text-warn" data-testid="plan-extend-vision-warn">
+                    the architect seated for amendments cannot see images — these will be
+                    dropped. Seat a vision model (Settings → my ducklings) for the screenshot
+                    to count.
+                  </p>
+                )}
                 <button
                   type="button"
                   data-testid="plan-extend-start"
