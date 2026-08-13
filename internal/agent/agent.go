@@ -113,6 +113,11 @@ type Loop struct {
 	// so a thirty-call implementer turn showed an empty timeline for its
 	// entire length and then eighty ticks at once.
 	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
+	// OnCapNear, if set, fires once as a reply is about to spend its LAST
+	// allowed model call. The person watching can lift the cap live (the
+	// budget card's calls/reply "no cap"), but only if they learn in time —
+	// an intake died at 12/12 with the lift sitting unticked beside it.
+	OnCapNear func(turn *Turn, used, max int)
 	// OnToolStart, if set, fires as a tool BEGINS executing. Completion was
 	// the only event, so a gate command that ran for its whole 900s ceiling
 	// was fifteen minutes of unexplained silence — the person read it as a
@@ -213,6 +218,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// instead of after the death it was about to cause.
 		if maxTurns < UncappedTurns && loop.CapLift != nil && loop.CapLift() {
 			maxTurns = UncappedTurns
+		}
+		if turnNum == maxTurns && maxTurns < UncappedTurns && loop.OnCapNear != nil {
+			loop.OnCapNear(turn, turnNum-1, maxTurns)
 		}
 
 		// Budget check

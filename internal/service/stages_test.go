@@ -685,3 +685,23 @@ func TestUnbuiltDebtDoesNotSettle(t *testing.T) {
 		t.Errorf("settleable debt = %d, want only the accepted one", n)
 	}
 }
+
+// The intake that died at 12/12 had no way to be launched with more calls.
+// The stage request now carries its own cap — recorded on the run so the
+// budget card shows the number instead of "default".
+func TestAStageCarriesItsOwnCallCap(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "small change", AgentTurns: 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.AgentTurns != 30 {
+		t.Errorf("agent_turns = %d, want the request's 30 on the record", run.AgentTurns)
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+}

@@ -43,6 +43,9 @@ type loopCache struct {
 	// onRetry lands every transient provider failure on the record as it
 	// happens — the alternative was up to twenty silent minutes.
 	onRetry func(*agent.Turn, int, error)
+	// onCapNear says, in time to act, that a reply is on its last allowed
+	// model call.
+	onCapNear func(*agent.Turn, int, int)
 	// onToolStart says what just began running — the other half of a gate
 	// command's fifteen legal minutes of silence.
 	onToolStart func(*agent.Turn, string, string, json.RawMessage)
@@ -66,6 +69,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnToolStart = c.onToolStart
 	l.OnRetry = c.onRetry
 	l.CapLift = c.capLift
+	l.OnCapNear = c.onCapNear
 	c.loops[id] = l
 	return l, nil
 }

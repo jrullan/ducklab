@@ -1018,6 +1018,29 @@ describe("picking a seat from its chip", () => {
     kind: "plan", version: 1, approved: true, markdown: "---\nkind: plan\n---\n",
     sections: [{ id: "M-001", title: "Core", body: "", fields: {}, children: [{ id: "T-001", title: "S", body: "", fields: {} }] }],
   };
+  it("carries the calls-per-reply cap on an amendment", async () => {
+    let sent: number | undefined;
+    const client = clientWith((p, init) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN4);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [{ role: "architect", duckling: "glm52", source: "project" }] });
+      if (p === "/v1/ducklings") return json({ items: [] });
+      if (p === "/v1/projects/p/stages/plan" && init?.method === "POST") {
+        sent = JSON.parse(String(init.body)).agent_turns;
+        return json({ id: "r-x", status: "running" });
+      }
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-extend")));
+    fireEvent.change(await waitFor(() => screen.getByTestId("stage-agent-turns")), { target: { value: "30" } });
+    fireEvent.click(screen.getByTestId("plan-action-extend")); // fold extend
+    fireEvent.click(screen.getByTestId("plan-action-amend"));
+    fireEvent.change(screen.getByTestId("plan-extend-text"), { target: { value: "quick" } });
+    fireEvent.click(screen.getByTestId("plan-extend-start"));
+    await waitFor(() => expect(sent).toBe(30));
+  });
+
   it("amends with the picked duckling, this run only", async () => {
     let sent: string[] | undefined;
     const client = clientWith((p, init) => {

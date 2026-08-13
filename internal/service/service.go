@@ -2470,6 +2470,17 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			"tool": name, "args": string(args),
 		})
 	}
+	// In time to act: the reply is about to spend its last allowed call,
+	// and the lift that could save it sits one tick away in the budget card.
+	cache.onCapNear = func(t *agent.Turn, used, max int) {
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": string(t.Duckling),
+			"detail": fmt.Sprintf("%s is on the LAST of its %d calls for this reply — tick "+
+				"\"no cap\" on calls/reply in the budget card to let it keep working, or it "+
+				"will answer from what it has", t.Role, max),
+		})
+	}
 	// Provider weather, on the record as it happens: the person watching an
 	// idle run decides with "retrying (2): provider sent nothing for 2m0s"
 	// where before they had silence.

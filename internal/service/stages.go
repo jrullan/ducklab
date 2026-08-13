@@ -37,6 +37,10 @@ type StageRequest struct {
 	// this one", which is the answer to a proposal that is almost right.
 	Revise   string `json:"revise"`
 	Autonomy string `json:"autonomy"`
+	// AgentTurns caps model calls per reply for every seat in this stage —
+	// the intake that died at 12/12 had no way to be launched with more.
+	// Zero keeps the defaults; -1 lifts the cap.
+	AgentTurns int `json:"agent_turns,omitempty"`
 	// Settle is the spec-debt eraser: a spec revision documenting, as built,
 	// the amendment tasks no section covers — each gaining a Covers: field
 	// the engine wires back into the plan on accept. The person never writes
@@ -199,14 +203,15 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		mode = "council"
 	}
 	run := &runlog.Run{
-		ID:        runlog.GenerateRunID(),
-		ProjectID: projectID,
-		Stage:     req.Stage,
-		Mode:      mode,
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		Autonomy:  orDefault(req.Autonomy, "guarded"),
-		Stream:    req.Stream,
+		ID:         runlog.GenerateRunID(),
+		ProjectID:  projectID,
+		Stage:      req.Stage,
+		Mode:       mode,
+		Status:     "running",
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		Autonomy:   orDefault(req.Autonomy, "guarded"),
+		AgentTurns: req.AgentTurns,
+		Stream:     req.Stream,
 		// An artifact stage has no executable gate: the verdict is UNVERIFIED
 		// until a person approves it, and saying so is the honest label (P3).
 		Gate: "none",
@@ -379,7 +384,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
-			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, 0), &strategy.ExecuteParams{
+			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
 				// Decisions the person already made ride the prompt, like on
@@ -1209,7 +1214,6 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 	}
 	return status, blocked, testReady, failedStage, pinned
 }
-
 
 // taskSpecDebt: covered by no existing spec section, and not a bug's task.
 // A project with no spec at all owes none — there is nothing to be behind.

@@ -107,6 +107,12 @@ export function Cycle({
     setSeatPicks({});
   }, [planAction, mode]);
   const [rounds, setRounds] = useState(2);
+  // Calls-per-reply for the stage's seats. The intake that died at 12/12
+  // had no launch-time door for more; empty keeps the default, "no cap"
+  // lifts it.
+  const [agentTurns, setAgentTurns] = useState("");
+  const [turnsNoCap, setTurnsNoCap] = useState(false);
+  const stageAgentTurns = () => (turnsNoCap ? -1 : Number(agentTurns) || undefined);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [startedRun, setStartedRun] = useState<string | null>(null);
   // Whether the tree already holds code, which decides the doors the empty
@@ -286,6 +292,7 @@ export function Cycle({
         rounds,
         adopt,
         ducklings,
+        agentTurns: stageAgentTurns(),
       });
       setStartedRun(run.id);
       setBrief("");
@@ -677,6 +684,7 @@ export function Cycle({
                         extend: amendment.trim(),
                         images: amendImages.length ? amendImages : undefined,
                         ducklings: seatPicks["amend:0"] ? [seatPicks["amend:0"]] : undefined,
+                        agentTurns: stageAgentTurns(),
                       })
                       .then((run) => {
                         setStartedRun(run.id);
@@ -734,6 +742,27 @@ export function Cycle({
                   {rounds === 1 ? "round" : "rounds"}
                 </label>
               )}
+              <input
+                aria-label="calls per reply"
+                data-testid="stage-agent-turns"
+                placeholder={turnsNoCap ? "no cap" : "calls/reply (default)"}
+                disabled={turnsNoCap}
+                value={turnsNoCap ? "" : agentTurns}
+                onChange={(e) => setAgentTurns(e.target.value)}
+                className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs disabled:opacity-40"
+              />
+              <label
+                className="flex items-center gap-1 text-xs text-ink-muted"
+                title="no cap on model calls per reply — the token and cost budgets still guard"
+              >
+                <input
+                  type="checkbox"
+                  data-testid="stage-turns-nocap"
+                  checked={turnsNoCap}
+                  onChange={(e) => setTurnsNoCap(e.target.checked)}
+                />
+                no cap
+              </label>
               <span data-testid="stage-who" className="text-xs text-ink-muted">
                 {describeRun(mode, roster, rounds)}
               </span>
