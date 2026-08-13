@@ -49,6 +49,9 @@ export function Cycle({
   // The plan amendment's text — Review's light exit, separate from the brief
   // so the two doors never share a box.
   const [amendment, setAmendment] = useState("");
+  // The amendment's screenshots, as data URLs — the cosmetic change shown,
+  // not just described.
+  const [amendImages, setAmendImages] = useState<string[]>([]);
   // How many tasks the spec has not caught up with — the settle button's
   // number, fetched with the artifact so the spec tab can offer the one-click
   // repayment without the person counting markers on the board.
@@ -522,6 +525,41 @@ export function Cycle({
                   onChange={(e) => setAmendment(e.target.value)}
                   className="mb-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
                 />
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer text-xs text-ink-muted underline">
+                    add a screenshot
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      data-testid="plan-extend-image"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files ?? []).slice(0, 3);
+                        e.target.value = "";
+                        for (const f of files) {
+                          const reader = new FileReader();
+                          reader.onload = () =>
+                            setAmendImages((cur) => [...cur, String(reader.result)].slice(0, 3));
+                          reader.readAsDataURL(f);
+                        }
+                      }}
+                    />
+                  </label>
+                  {amendImages.map((_, i) => (
+                    <span key={i} data-testid="plan-extend-image-chip" className="flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">
+                      image {i + 1}
+                      <button
+                        type="button"
+                        aria-label={`remove image ${i + 1}`}
+                        onClick={() => setAmendImages(amendImages.filter((_, j) => j !== i))}
+                        className="text-ink-muted"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
                 <button
                   type="button"
                   data-testid="plan-extend-start"
@@ -530,10 +568,14 @@ export function Cycle({
                     setStarting(true);
                     setFailure(null);
                     void client
-                      .stageStart(projectId, "plan", { extend: amendment.trim() })
+                      .stageStart(projectId, "plan", {
+                        extend: amendment.trim(),
+                        images: amendImages.length ? amendImages : undefined,
+                      })
                       .then((run) => {
                         setStartedRun(run.id);
                         setAmendment("");
+                        setAmendImages([]);
                       })
                       .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
                       .finally(() => setStarting(false));

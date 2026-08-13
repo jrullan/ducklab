@@ -277,3 +277,29 @@ func TestABareMilestoneHeadingIsStillADeclaration(t *testing.T) {
 		t.Error("prose is work, whatever the id")
 	}
 }
+
+// A screenshot says what a paragraph cannot: the amendment's images ride the
+// architect's own turn, like a bug's screenshots ride the triager's.
+func TestAmendmentImagesRideTheArchitectsTurn(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan, "## M-001 — Core\n\n### T-001 — Schema\n\nDone.\n")
+	current, _ := artifact.Load(root, artifact.KindPlan)
+	var seen []string
+	_, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-i", Mode: "solo",
+		Extend: "match this mock",
+		Images: []string{"data:image/png;base64,aGk="},
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			for _, turn := range script.Turns {
+				seen = append(seen, turn.Images...)
+			}
+			return "## T-900 — Match the mock\n\nDo it.\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != "data:image/png;base64,aGk=" {
+		t.Errorf("the image never reached a turn: %v", seen)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -36,6 +37,16 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
+	}
+	// The evidence rides the architect's own turn, like a bug's screenshots
+	// ride the triager's.
+	if len(p.Images) > 0 {
+		for i := range script.Turns {
+			if script.Turns[i].Role == config.RoleArchitect {
+				script.Turns[i].Images = p.Images
+				break
+			}
+		}
 	}
 	raw, err := p.Execute(ctx, script, prompt)
 	if err != nil {

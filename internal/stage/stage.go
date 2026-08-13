@@ -69,6 +69,10 @@ type Params struct {
 	// Adopt turns intake into a survey of the existing tree: requirements for
 	// what the code ALREADY satisfies, not an interview about an idea.
 	Adopt bool
+	// Images are data URLs shown to the architect alongside the amendment
+	// text — the screenshot that says what a paragraph cannot. The caller
+	// gates them on the architect's vision capability.
+	Images []string
 	// Extend is the plan amendment: the architect returns ONLY the new task
 	// sections and the engine merges them — a fragment by contract, because
 	// re-emitting a hundred-task plan to add two tasks made a cosmetic

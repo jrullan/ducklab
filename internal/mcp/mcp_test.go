@@ -13,6 +13,7 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	images []string
 	settled []string
 	extended []string
 	testThenBuild bool
@@ -67,6 +68,9 @@ func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (ma
 	}
 	if settle, _ := req["settle"].(bool); settle {
 		f.settled = append(f.settled, stage)
+	}
+	if imgs, ok := req["images"].([]string); ok {
+		f.images = append(f.images, imgs...)
 	}
 	return map[string]interface{}{"id": "r-rev"}, nil
 }
@@ -432,5 +436,26 @@ func TestSpecSettleIsOneCall(t *testing.T) {
 	}
 	if len(eng.settled) != 1 || eng.settled[0] != "spec" {
 		t.Errorf("settle did not reach the spec stage: %v", eng.settled)
+	}
+}
+
+// The screenshot goes by path — the server reads and encodes it itself,
+// because models cannot type base64 — and rides the amendment to a seeing
+// architect.
+func TestPlanExtendCarriesAScreenshotByPath(t *testing.T) {
+	img := filepath.Join(t.TempDir(), "mock.png")
+	if err := os.WriteFile(img, []byte("pngbytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_extend","arguments":{"project_id":"p","change":"match the mock","image_path":"`+img+`"}}}`,
+	)
+	if resps[1]["error"] != nil {
+		t.Fatalf("plan_extend errored: %v", resps[1]["error"])
+	}
+	if len(eng.images) != 1 || !strings.HasPrefix(eng.images[0], "data:image/png;base64,") {
+		t.Errorf("no data URL reached the engine: %v", eng.images)
 	}
 }

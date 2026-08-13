@@ -42,6 +42,11 @@ type StageRequest struct {
 	// the engine wires back into the plan on accept. The person never writes
 	// this prompt; the engine assembles it from the debt itself.
 	Settle bool `json:"settle,omitempty"`
+	// Images are data URLs riding an amendment: the screenshot that shows
+	// the cosmetic change better than a paragraph describes it. Shown to the
+	// architect only when it can see; dropped with a recorded warning when
+	// it cannot, because a text-only model sent an image array 400s.
+	Images []string `json:"images,omitempty"`
 	// Extend is the light path out of Review: a small change that deserves
 	// tasks but not a redesign. It runs as a plan revision — the architect
 	// adds the fewest tasks that deliver it, wiring Implements: to existing
@@ -322,6 +327,32 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	s.attachStreaming(rs, cache)
 
+	// The amendment's evidence, gated like the triager's: only a seeing
+	// architect is shown images.
+	images := req.Images
+	if len(images) > 0 {
+		arch := roster[config.RoleArchitect]
+		if dcfg, ok := s.cfg.Ducklings[arch]; !ok || dcfg.Caps.Vision == nil || !*dcfg.Caps.Vision {
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": fmt.Sprintf("%d image(s) dropped: architect %s has no vision capability", len(images), arch),
+			})
+			images = nil
+		} else {
+			total := 0
+			kept := images[:0]
+			for _, im := range images {
+				if total += len(im); total > 8<<20 {
+					rs.writer.AppendEvent("warning", map[string]interface{}{
+						"detail": "image(s) beyond the 8MB budget were dropped",
+					})
+					break
+				}
+				kept = append(kept, im)
+			}
+			images = kept
+		}
+	}
+
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot: projectRoot,
 		Stage:       stage.Name(req.Stage),
@@ -332,6 +363,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Revision:    req.Revise,
 		Adopt:       req.Adopt,
 		Extend:      req.Extend,
+		Images:      images,
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {

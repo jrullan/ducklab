@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,7 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"change":     str("what to add or improve, in the human's words"),
+				"image_path": str("optional: absolute path to a screenshot on this machine, shown to the architect beside the text"),
 			}, "project_id", "change"),
 		},
 		{
@@ -324,8 +326,23 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(run), nil
 	case "plan_extend":
-		run, err := s.eng.StageStart(a.str("project_id"), "plan",
-			map[string]interface{}{"extend": a.str("change")})
+		req := map[string]interface{}{"extend": a.str("change")}
+		if path := strings.TrimSpace(a.str("image_path")); path != "" {
+			// The server reads the file itself — models cannot type base64.
+			data, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return nil, fmt.Errorf("cannot read image %s: %v", path, rerr)
+			}
+			if len(data) > 8<<20 {
+				return nil, fmt.Errorf("image is %d bytes; the amendment carries at most 8MB", len(data))
+			}
+			ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+			if !strings.HasPrefix(ct, "image/") {
+				return nil, fmt.Errorf("%s is not an image", path)
+			}
+			req["images"] = []string{"data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(data)}
+		}
+		run, err := s.eng.StageStart(a.str("project_id"), "plan", req)
 		if err != nil {
 			return nil, err
 		}
