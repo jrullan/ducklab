@@ -47,7 +47,7 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 
 	lineup := map[config.Role]bool{}
 	if mode != "" {
-		for _, role := range applyStageLineup(resolved, s.ducklingsFor(mode, nil)) {
+		for _, role := range applyStageLineup(resolved, s.stageLineupFor(mode)) {
 			lineup[role] = true
 		}
 	}

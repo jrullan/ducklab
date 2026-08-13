@@ -2573,7 +2573,7 @@ func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapte
 // failing the run: the line-up is a preference, and a deleted model should
 // degrade the council, not close it.
 func (s *Service) stageCritics(mode string) []config.DucklingID {
-	lineup := s.ducklingsFor(mode, nil)
+	lineup := s.stageLineupFor(mode)
 	if len(lineup) < 2 {
 		return nil
 	}
@@ -2588,6 +2588,20 @@ func (s *Service) stageCritics(mode string) []config.DucklingID {
 		critics = append(critics, config.DucklingID(id))
 	}
 	return critics
+}
+
+// stageLineupFor is the seat source for DOCUMENT stages, whatever their
+// mode: the documents group's own line-up (council), first seat only when
+// the stage runs solo. Settings files the architect under documents —
+// "architect · drafts" — and a solo amendment reading the TASKS' solo
+// line-up meant saving a new architect there changed nothing the amendment
+// used: the person edited the right seat and the engine looked at another.
+func (s *Service) stageLineupFor(mode string) []string {
+	lineup := s.ducklingsFor("council", nil)
+	if mode == "solo" && len(lineup) > 1 {
+		lineup = lineup[:1]
+	}
+	return lineup
 }
 
 func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string) []config.Role {

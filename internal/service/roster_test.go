@@ -10,6 +10,8 @@ import (
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+
+	"github.com/jrullan/ducklab/internal/artifact"
 )
 
 // serviceWithDucklings builds a service with named ducklings configured.
@@ -246,4 +248,33 @@ func writeRunWithRoster(t *testing.T, dir, projectID, id, verdict string, roster
 		t.Fatal(err)
 	}
 	w.Close()
+}
+
+// Settings files the architect under DOCUMENTS — "architect · drafts", the
+// council's first seat. A solo amendment used to read the TASKS' solo
+// line-up instead: the person saved a new architect in the right place and
+// the amendment's chip, and the run, kept the old one. Document stages seat
+// from the documents group whatever their mode.
+func TestASoloStageSeatsTheCouncilArchitect(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	s.cfg.Defaults.ModeDucklings = map[string][]string{
+		"council": {"pato-dos", "pato-uno"}, // the documents group: architect · drafts = pato-dos
+		"solo":    {"pato-uno"},             // the tasks group's solo implementer
+	}
+
+	view, err := s.RosterGet(context.Background(), id, "solo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	arch := ""
+	for _, e := range view.Entries {
+		if e.Role == "architect" {
+			arch = e.Duckling
+		}
+	}
+	if arch != "pato-dos" {
+		t.Errorf("solo stage architect = %q, want the documents seat pato-dos, not the tasks' solo pick", arch)
+	}
 }

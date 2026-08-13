@@ -280,7 +280,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	roster, warning := s.resolveRoster(projCfg)
 	// The mode's saved line-up, which for council is the ONLY place it can
 	// apply — council never runs as a task. First drafts, the rest critique.
-	applyStageLineup(roster, s.ducklingsFor(rs.run.Mode, nil))
+	applyStageLineup(roster, s.stageLineupFor(rs.run.Mode))
 	critics := s.stageCritics(rs.run.Mode)
 	rs.run.Roster = rosterStrings(roster)
 	if warning != "" {
