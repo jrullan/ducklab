@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 /**
@@ -17,6 +17,7 @@ export function VirtualList<T>({
   overscan = 8,
   threshold = 50,
   height = 520,
+  followTail = false,
   children,
 }: {
   items: readonly T[];
@@ -26,9 +27,29 @@ export function VirtualList<T>({
   /** Number of pixels, or a CSS length. "100%" lets the list fill a flex parent
    * instead of a magic number that ignores the window. */
   height?: number | string;
+  /** Keep the newest content in view while it arrives — the person watching
+   * a live run reads the tail. Sticky, not tyrannical: scrolling up detaches
+   * the follow; returning to the bottom reattaches it. */
+  followTail?: boolean;
   children: (item: T, index: number) => ReactNode;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
+  // Whether the person is AT the tail. Starts true; their own scrolling is
+  // the only thing that changes it.
+  const stick = useRef(true);
+  const onScroll = () => {
+    const el = parentRef.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+  // After every render: content grew (new turns, streamed tokens) and the
+  // reader was at the tail, so the tail stays in view.
+  useEffect(() => {
+    if (!followTail || !stick.current) return;
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  });
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -44,6 +65,8 @@ export function VirtualList<T>({
     // forty-nine — the layout changed under you as the run went on.
     return (
       <div
+        ref={parentRef}
+        onScroll={onScroll}
         data-testid="virtual-list"
         data-virtualised="false"
         style={{ height, overflow: "auto" }}
@@ -60,6 +83,7 @@ export function VirtualList<T>({
   return (
     <div
       ref={parentRef}
+      onScroll={onScroll}
       data-testid="virtual-list"
       data-virtualised="true"
       data-total={items.length}

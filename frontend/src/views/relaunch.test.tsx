@@ -347,6 +347,17 @@ describe("hiding the run rail", () => {
 // the task whose failed run you are LOOKING AT meant leaving for Work →
 // Tasks and finding it again. The card now carries the engine's own next
 // actions — remove appears exactly when the engine would allow it.
+describe("the run header names the task", () => {
+  // The header said "T-015" and the WHY lived a scan away in the card. The
+  // title rides the header now, truncated, whole on hover.
+  it("shows the task title beside its id", async () => {
+    render(<RunView runId="r-1" client={clientWith()} />);
+    const title = await screen.findByTestId("run-task-title");
+    expect(title.textContent).toContain("Handle angle input");
+    expect(title.getAttribute("title")).toBe("Handle angle input");
+  });
+});
+
 describe("the task's coverage on the run view card", () => {
   it("names the spec sections a covered task implements", async () => {
     const client = clientWith({

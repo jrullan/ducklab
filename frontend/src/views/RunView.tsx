@@ -564,6 +564,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             a stage opened with an empty space where its name should be. The
             same fallback the runs list uses — task, else stage, else id. */}
         <span className="text-md">{runLabel(run)}</span>
+        {/* The task's title beside its id: the header answers "what is being
+            built" without a trip down to the card. Truncated; the card and
+            the hover carry the whole of it. */}
+        {task?.title && (
+          <span
+            className="max-w-md truncate text-sm text-ink-muted"
+            data-testid="run-task-title"
+            title={task.title}
+          >
+            — {task.title}
+          </span>
+        )}
         <span className="text-ink-secondary">{run.mode}</span>
         <CycleMap stage={run.stage} />
         {run.no_changes ? (
@@ -1139,7 +1151,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <section data-testid="conversation" className="min-w-0">
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
-          <VirtualList items={turns} height="60vh">
+          <VirtualList items={turns} height="60vh" followTail={liveNow}>
             {(t, i) => {
               // A finished turn folds to its summary; the LIVE turn and the
               // last one stay open — that is where the reader's eyes are.
