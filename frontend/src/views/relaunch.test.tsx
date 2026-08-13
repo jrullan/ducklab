@@ -347,6 +347,35 @@ describe("hiding the run rail", () => {
 // the task whose failed run you are LOOKING AT meant leaving for Work →
 // Tasks and finding it again. The card now carries the engine's own next
 // actions — remove appears exactly when the engine would allow it.
+describe("the task's coverage on the run view card", () => {
+  it("names the spec sections a covered task implements", async () => {
+    const client = clientWith({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-015", title: "Covered", milestone: "M-1", status: "accepted", body: "done", implements: ["SPEC-007", "SPEC-008"] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    const cov = await screen.findByTestId("task-coverage");
+    expect(cov.textContent).toContain("covered by SPEC-007, SPEC-008");
+  });
+
+  it("states the debt when nothing covers it", async () => {
+    const client = clientWith({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-015", title: "Uncovered", milestone: "M-1", status: "accepted", body: "done", spec_debt: true },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    const debt = await screen.findByTestId("task-spec-debt");
+    expect(debt.textContent).toContain("spec-debt");
+    expect(screen.queryByTestId("task-coverage")).toBeNull();
+  });
+});
+
 describe("task actions on the run view card", () => {
   it("offers remove when the engine lists it, and executes it", async () => {
     const removed: string[] = [];

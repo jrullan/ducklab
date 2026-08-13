@@ -612,6 +612,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               task.body hid it for exactly the malformed task whose actions
               (remove, chat) the person was hunting: the phantom with a title
               and nothing else. An empty brief is a fact worth stating. */}
+          {task.spec_debt ? (
+            <p className="mt-1 text-xs text-warn" data-testid="task-spec-debt">
+              spec-debt — no spec section covers this task; it settles into the spec after its build is accepted
+            </p>
+          ) : (task.implements?.length ?? 0) > 0 ? (
+            <p className="mt-1 text-xs text-ink-muted" data-testid="task-coverage">
+              covered by {task.implements!.join(", ")}
+            </p>
+          ) : null}
           {task.body ? (
             <div className="mt-1 max-h-36 overflow-y-auto text-sm">
               <Prose body={task.body} />

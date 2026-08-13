@@ -516,6 +516,18 @@ export function Board({
                             accepted test-first used to land the task in
                             Accepted, where every offered action implied the
                             work was done — and it had never been built once. */}
+                        {/* The mirror of the debt chip: silence needed an
+                            explanation. "Why no settle options?" — because
+                            the amendment self-wired; now the card says so. */}
+                        {!isBugs && !(it as Task).spec_debt && ((it as Task).implements?.length ?? 0) > 0 && (
+                          <div
+                            data-testid="task-coverage"
+                            className="mt-1 text-xs text-ink-muted"
+                            title="the spec sections this task implements — its coverage is already wired, nothing to settle"
+                          >
+                            covered by {(it as Task).implements!.join(", ")}
+                          </div>
+                        )}
                         {!isBugs && (it as Task).spec_debt && (
                           <div
                             data-testid="spec-debt"
