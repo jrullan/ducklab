@@ -339,3 +339,41 @@ describe("hiding the run rail", () => {
     localStorage.removeItem("ducklab.runrail");
   });
 });
+
+// Any legal manipulation, offerable where the task is on screen: removing
+// the task whose failed run you are LOOKING AT meant leaving for Work →
+// Tasks and finding it again. The card now carries the engine's own next
+// actions — remove appears exactly when the engine would allow it.
+describe("task actions on the run view card", () => {
+  it("offers remove when the engine lists it, and executes it", async () => {
+    const removed: string[] = [];
+    const client = clientWith({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-015", title: "Phantom", milestone: "M-1", status: "todo", body: "empty shell", next: ["run", "remove"] },
+        ]),
+      ),
+      taskRemove: vi.fn((_p: string, id: string) => {
+        removed.push(id);
+        return Promise.resolve({ removed: id });
+      }),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    fireEvent.click(await screen.findByTestId("task-remove"));
+    fireEvent.click(await screen.findByTestId("task-remove-yes"));
+    await waitFor(() => expect(removed).toEqual(["T-015"]));
+  });
+
+  it("offers nothing when the engine lists nothing", async () => {
+    const client = clientWith({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-015", title: "Delivered", milestone: "M-1", status: "accepted", body: "done", next: [] },
+        ]),
+      ),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    await waitFor(() => screen.getByTestId("run-task-card"));
+    expect(screen.queryByTestId("task-remove")).toBeNull();
+  });
+});

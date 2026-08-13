@@ -12,6 +12,7 @@ import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
+import { RemoveTask } from "../components/RemoveTask";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
@@ -609,6 +610,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <div className="mt-1 max-h-36 overflow-y-auto text-sm">
             <Prose body={task.body ?? ""} />
           </div>
+          {/* Every legal manipulation, offered where the task is on screen:
+              the person reading this run's failure should not have to hunt
+              the task down on the board to act on what they just learned. */}
+          {task.next?.includes("remove") && (
+            <div className="mt-2">
+              <RemoveTask
+                task={task}
+                client={client}
+                projectId={run.project_id}
+                onDone={() => setTask(null)}
+              />
+            </div>
+          )}
         </section>
       )}
 

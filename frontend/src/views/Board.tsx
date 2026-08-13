@@ -17,6 +17,7 @@ import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { ChatAbout } from "../components/ChatAbout";
+import { RemoveTask } from "../components/RemoveTask";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -1005,10 +1006,17 @@ function TaskRunner({
       {/* Only while nothing has run it. The engine refuses afterwards — the
           runs, the reports and the spine all name the task — and a button that
           only ever errors is worse than none. */}
+      {/* Each its own line: rendered inline these two links fused into one
+          reading — "remove from planchat about this" — and an action that
+          deletes should never share a sentence with one that talks. */}
       {next.includes("remove") && (
-        <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
+        <div className="mt-2">
+          <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
+        </div>
       )}
-      <ChatAbout client={client} projectId={projectId} aboutKind="task" aboutId={task.id} ducklings={ducklings} />
+      <div className="mt-2">
+        <ChatAbout client={client} projectId={projectId} aboutKind="task" aboutId={task.id} ducklings={ducklings} />
+      </div>
 
       {accepted && (
         <p className="text-xs text-ink-muted" data-testid="accepted-note">
@@ -1468,66 +1476,3 @@ function BugBody({
  * triage had run, so the task carries the reporter's prose and none of what was
  * worked out. Removing it puts the report back where it was, ready to be
  * promoted again with everything since. */
-function RemoveTask({
-  task,
-  client,
-  projectId,
-  onDone,
-}: {
-  task: Task;
-  client: EngineClient;
-  projectId: string;
-  onDone: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
-
-  if (!confirming) {
-    return (
-      <button
-        type="button"
-        data-testid="task-remove"
-        onClick={() => setConfirming(true)}
-        className="text-xs text-ink-muted underline"
-      >
-        remove from plan
-      </button>
-    );
-  }
-  return (
-    <div className="space-y-1" data-testid="task-remove-confirm">
-      <p className="text-xs text-ink-secondary">
-        Remove {task.id} from the plan? If it came from a report, the report goes
-        back to triaged.
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          data-testid="task-remove-yes"
-          onClick={() => {
-            setFailure(null);
-            void client
-              .taskRemove(projectId, task.id)
-              .then(() => onDone())
-              .catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
-          }}
-          className="rounded border border-critical px-2 py-1 text-xs text-critical"
-        >
-          Remove
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirming(false)}
-          className="text-xs text-ink-muted underline"
-        >
-          keep it
-        </button>
-      </div>
-      {failure && (
-        <p className="text-xs text-critical" data-testid="task-remove-error">
-          {failure}
-        </p>
-      )}
-    </div>
-  );
-}
