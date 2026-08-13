@@ -207,8 +207,25 @@ describe("Projects — the gate", () => {
       gate({ mode: "tests", command: "go test ./...", best_verdict: "PASSED" }),
     );
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
-    expect((await screen.findByTestId("gate-ok")).textContent).toContain("gate tests");
+    // The row reads label · mode · command now, each its own element.
+    const row = await screen.findByTestId("gate-ok");
+    expect(row.textContent).toContain("gate");
+    expect(row.textContent).toContain("tests");
+    expect(row.textContent).toContain("go test ./...");
     expect(screen.queryByTestId("gate-none")).toBeNull();
+  });
+
+  // The row was a single line carrying name, env-var soup, path and buttons —
+  // unreadable at exactly the moment someone came to edit a command. Cards
+  // now: one labeled row per config, commands truncated, full text on hover.
+  it("truncates long commands instead of flooding the row", async () => {
+    const long = "TEST_DATABASE_URL=postgresql://tracker@localhost:55433/test_db .venv/bin/pytest -q && cd frontend && npm run build";
+    const client = clientWithGate(gate({ mode: "tests", command: long, best_verdict: "PASSED" }));
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    const row = await screen.findByTestId("gate-ok");
+    const cmd = row.querySelector("[title]")!;
+    expect(cmd.getAttribute("title")).toBe(long); // the full text survives on hover
+    expect(cmd.className).toContain("truncate");
   });
 });
 
@@ -247,3 +264,4 @@ describe("Projects — the path field", () => {
     expect(screen.getByTestId("project-create").hasAttribute("disabled")).toBe(false);
   });
 });
+

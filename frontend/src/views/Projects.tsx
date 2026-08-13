@@ -198,114 +198,123 @@ export function Projects({
         {projects.length === 0 ? (
           <p className="text-sm text-ink-muted">None yet.</p>
         ) : (
-          <ul className="space-y-1">
+          <ul className="space-y-2">
             {projects.map((p) => (
               <li
                 key={p.id}
                 data-testid={`project-row-${p.id}`}
                 className={
-                  "flex flex-wrap items-center gap-2 rounded p-2 " +
+                  "rounded-card border border-hairline p-3 " +
                   (p.id === selected ? "bg-surface2" : "")
                 }
               >
-                {renaming === p.id ? (
-                  <>
-                    <input
-                      aria-label="new name"
-                      data-testid="rename-input"
-                      value={renameTo}
-                      onChange={(e) => setRenameTo(e.target.value)}
-                      className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void rename(p.id)}
-                      data-testid="rename-save"
-                      className="rounded border border-hairline px-2 py-1 text-xs"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRenaming(null)}
-                      className="rounded border border-hairline px-2 py-1 text-xs"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onSelect(p.id)}
-                      data-testid={`project-select-${p.id}`}
-                      className="text-left text-ink"
-                    >
-                      {p.name || p.id}
-                    </button>
-                    {/* Not a warning chip on a missing project: it is the whole
-                        reason the board looks empty, so it is stated plainly. */}
-                    {p.missing && <StatusChip role="critical" label="folder is gone" />}
-                    <AppChip
-                      status={apps[p.id]}
-                      onSet={async (command, url, health, preflight, requires) => {
-                        try {
-                          await client.projectUpdate(p.id, {
-                            "run.command": command, "run.url": url, "run.health": health,
-                            "run.preflight": preflight, "run.requires": requires,
-                          });
-                          const a = await client.appStatus(p.id);
-                          setApps((cur) => ({ ...cur, [p.id]: a }));
-                        } catch (err) {
-                          setFailure(err instanceof Error ? err.message : String(err));
-                        }
-                      }}
-                    />
-                    <GateChip
-                      status={gates[p.id]}
-                      onAdopt={() =>
-                        void client
-                          .projectGateAdopt(p.id)
-                          .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
-                          .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                {/* Header: identity left, actions right — never sharing a
+                    line with a shell command. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {renaming === p.id ? (
+                    <>
+                      <input
+                        aria-label="new name"
+                        data-testid="rename-input"
+                        value={renameTo}
+                        onChange={(e) => setRenameTo(e.target.value)}
+                        className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void rename(p.id)}
+                        data-testid="rename-save"
+                        className="rounded border border-hairline px-2 py-1 text-xs"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenaming(null)}
+                        className="rounded border border-hairline px-2 py-1 text-xs"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(p.id)}
+                        data-testid={`project-select-${p.id}`}
+                        className="text-left text-sm font-medium text-ink"
+                      >
+                        {p.name || p.id}
+                      </button>
+                      {p.missing && <StatusChip role="critical" label="folder is gone" />}
+                      <span className="ml-auto flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenaming(p.id);
+                            setRenameTo(p.name || p.id);
+                          }}
+                          data-testid={`project-rename-${p.id}`}
+                          className="rounded border border-hairline px-2 py-0.5 text-xs"
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void forget(p)}
+                          data-testid={`project-forget-${p.id}`}
+                          className="rounded border border-hairline px-2 py-0.5 text-xs"
+                        >
+                          Forget
+                        </button>
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="mt-0.5 truncate font-mono text-xs text-ink-muted" title={p.path}>
+                  {p.path}
+                </div>
+                {/* Config rows: label · value · edit, one per line. Commands
+                    truncate with the full text on hover; editors open below
+                    at full width. */}
+                <div className="mt-2 space-y-1 border-t border-hairline pt-2">
+                  <AppChip
+                    status={apps[p.id]}
+                    onSet={async (command, url, health, preflight, requires) => {
+                      try {
+                        await client.projectUpdate(p.id, {
+                          "run.command": command, "run.url": url, "run.health": health,
+                          "run.preflight": preflight, "run.requires": requires,
+                        });
+                        const a = await client.appStatus(p.id);
+                        setApps((cur) => ({ ...cur, [p.id]: a }));
+                      } catch (err) {
+                        setFailure(err instanceof Error ? err.message : String(err));
                       }
-                      onSet={async (mode, command) => {
-                        try {
-                          await client.projectUpdate(p.id, {
-                            "verify.mode": mode,
-                            ["verify." + (mode === "custom" ? "custom" : mode)]: command,
-                          });
-                          const g = await client.projectGate(p.id);
-                          setGates((cur) => ({ ...cur, [p.id]: g }));
-                        } catch (err) {
-                          setFailure(err instanceof Error ? err.message : String(err));
-                        }
-                      }}
-                    />
-                    <span className="font-mono text-xs text-ink-muted">{p.path}</span>
-                    <span className="ml-auto flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRenaming(p.id);
-                          setRenameTo(p.name || p.id);
-                        }}
-                        data-testid={`project-rename-${p.id}`}
-                        className="rounded border border-hairline px-2 py-0.5 text-xs"
-                      >
-                        Rename
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void forget(p)}
-                        data-testid={`project-forget-${p.id}`}
-                        className="rounded border border-hairline px-2 py-0.5 text-xs"
-                      >
-                        Forget
-                      </button>
-                    </span>
-                  </>
-                )}
+                    }}
+                  />
+                  <GateChip
+                    status={gates[p.id]}
+                    onAdopt={() =>
+                      void client
+                        .projectGateAdopt(p.id)
+                        .then((g) => setGates((cur) => ({ ...cur, [p.id]: g })))
+                        .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                    }
+                    onSet={async (mode, command) => {
+                      try {
+                        await client.projectUpdate(p.id, {
+                          "verify.mode": mode,
+                          ["verify." + (mode === "custom" ? "custom" : mode)]: command,
+                        });
+                        const g = await client.projectGate(p.id);
+                        setGates((cur) => ({ ...cur, [p.id]: g }));
+                      } catch (err) {
+                        setFailure(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                  />
+                </div>
               </li>
             ))}
           </ul>
@@ -375,31 +384,38 @@ function AppChip({
     </div>
   );
   return (
-    <span className="flex items-center gap-1 text-xs text-ink-muted" data-testid="app-chip">
-      {status.configured ? (
-        <>app <span className="font-mono">({status.command})</span></>
-      ) : (
-        <span style={{ color: "var(--status-warning)" }}>no run.command — the app cannot start</span>
-      )}
-      {!editing && (
-        <button
-          type="button"
-          onClick={() => {
-            setCommand(status.command ?? "");
-            setUrl(status.url ?? "");
-            setHealth("");
-            setPreflight(status.preflight ?? "");
-            setRequires(status.requires ?? "");
-            setEditing(true);
-          }}
-          data-testid="app-edit"
-          className="underline"
-        >
-          {status.configured ? "edit" : "set it"}
-        </button>
-      )}
+    <div data-testid="app-chip">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-10 shrink-0 text-ink-muted">app</span>
+        {status.configured ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-secondary" title={status.command}>
+            {status.command}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate" style={{ color: "var(--status-warning)" }}>
+            not set — the app cannot start
+          </span>
+        )}
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setCommand(status.command ?? "");
+              setUrl(status.url ?? "");
+              setHealth("");
+              setPreflight(status.preflight ?? "");
+              setRequires(status.requires ?? "");
+              setEditing(true);
+            }}
+            data-testid="app-edit"
+            className="shrink-0 text-ink-muted underline"
+          >
+            {status.configured ? "edit" : "set it"}
+          </button>
+        )}
+      </div>
       {editor}
-    </span>
+    </div>
   );
 }
 
@@ -427,8 +443,11 @@ function GateChip({
   // this, that case dead-ended at a warning telling nobody what to do next.
   // The gate stays human-set by design (a gate decides what a verdict means),
   // which is exactly why the human needs a place to set it.
+  // Full-width, below the row: the command this edits can be a hundred
+  // characters of env vars and && chains — a 10rem inline input made the
+  // most important field on the page the least usable one.
   const editor = editing && (
-    <span className="flex items-center gap-1" data-testid="gate-editor">
+    <div className="mt-1 flex w-full items-center gap-1" data-testid="gate-editor">
       <select
         value={mode}
         onChange={(e) => setMode(e.target.value)}
@@ -442,9 +461,9 @@ function GateChip({
       <input
         value={command}
         onChange={(e) => setCommand(e.target.value)}
-        placeholder="pytest -q"
+        placeholder="pytest -q  (chain more with && — e.g. pytest -q && cd frontend && npm run build)"
         data-testid="gate-command"
-        className="w-40 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
+        className="min-w-0 flex-1 rounded border border-hairline bg-surface2 px-1 py-0.5 font-mono text-xs"
       />
       <button
         type="button"
@@ -460,14 +479,20 @@ function GateChip({
       <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
         cancel
       </button>
-    </span>
+    </div>
   );
 
   if (status.mode !== "none") {
     return (
-      <span className="flex items-center gap-1 text-xs text-ink-muted" data-testid="gate-ok">
-        gate {status.mode}
-        {status.command && <span className="font-mono">({status.command})</span>}
+      <div data-testid="gate-ok">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-10 shrink-0 text-ink-muted">gate</span>
+        <span className="shrink-0 text-ink-muted">{status.mode}</span>
+        {status.command && (
+          <span className="min-w-0 flex-1 truncate font-mono text-ink-secondary" title={status.command}>
+            {status.command}
+          </span>
+        )}
         {!editing && (
           <button
             type="button"
@@ -477,18 +502,20 @@ function GateChip({
               setEditing(true);
             }}
             data-testid="gate-edit"
-            className="underline"
+            className="shrink-0 text-ink-muted underline"
           >
             edit
           </button>
         )}
-        {editor}
-      </span>
+      </div>
+      {editor}
+      </div>
     );
   }
   return (
-    <span className="flex items-center gap-1" data-testid="gate-none">
-      <StatusChip role="serious" label="no gate — runs end UNVERIFIED" />
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="gate-none">
+      <span className="w-10 shrink-0 text-ink-muted">gate</span>
+      <StatusChip role="serious" label="none — runs end UNVERIFIED" />
       {status.adoptable && !editing && (
         <button
           type="button"
@@ -511,6 +538,6 @@ function GateChip({
         </button>
       )}
       {editor}
-    </span>
+    </div>
   );
 }
