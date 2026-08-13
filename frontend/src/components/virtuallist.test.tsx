@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, fireEvent, screen } from "@testing-library/react";
+import { render, fireEvent, screen, waitFor } from "@testing-library/react";
 import { VirtualList } from "./VirtualList";
 
 function sizeable(el: HTMLElement, scrollHeight: number, clientHeight: number) {
@@ -49,5 +49,23 @@ describe("followTail", () => {
     sizeable(el, 1000, 200);
     rerender(<VirtualList items={items(12)}>{(t) => <div>{t}</div>}</VirtualList>);
     expect(el.scrollTop).toBe(0);
+  });
+});
+
+// A stage run streams one long turn whose text grows through the store —
+// no re-render of the list, so the after-render follow never fired and the
+// spec transcript sat still while its words arrived. The list watches its
+// own content.
+describe("followTail between renders", () => {
+  it("follows text that grows without a re-render", async () => {
+    render(
+      <VirtualList items={["turn"]} followTail>{(t) => <div data-testid="turn-body">{t}</div>}</VirtualList>,
+    );
+    const el = screen.getByTestId("virtual-list");
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 500 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 200 });
+    // The streamed tokens mutate the DOM directly — no React render involved.
+    screen.getByTestId("turn-body").textContent = "turn plus freshly streamed words";
+    await waitFor(() => expect(el.scrollTop).toBe(500));
   });
 });

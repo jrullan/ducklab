@@ -50,6 +50,21 @@ export function VirtualList<T>({
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   });
+  // And between renders. A stage run streams one long turn whose text grows
+  // through the store WITHOUT re-rendering this list — the after-render
+  // effect never fired and the spec run's transcript sat still while its
+  // words arrived. The list watches its own content instead of trusting
+  // whoever re-renders.
+  useEffect(() => {
+    if (!followTail) return;
+    const el = parentRef.current;
+    if (!el) return;
+    const obs = new MutationObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    obs.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => obs.disconnect();
+  }, [followTail]);
 
   const virtualizer = useVirtualizer({
     count: items.length,
