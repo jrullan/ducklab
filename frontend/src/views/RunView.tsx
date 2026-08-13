@@ -13,6 +13,7 @@ import { BudgetMeter } from "../components/BudgetMeter";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { RemoveTask } from "../components/RemoveTask";
+import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { money, tokens, duration } from "../lib/format";
@@ -598,7 +599,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           reading what it did against what was ASKED, and the ask lived at
           the bottom of a rail that scrolled away mid-read. Bounded: a long
           body scrolls inside its own box, never the page. */}
-      {task && task.body && (
+      {task && (
         <section
           data-testid="run-task-card"
           className="mx-4 mt-2 rounded-card border border-hairline p-3"
@@ -607,9 +608,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <span className="text-ink-muted">the task · </span>
             {task.id} — {task.title}
           </div>
-          <div className="mt-1 max-h-36 overflow-y-auto text-sm">
-            <Prose body={task.body ?? ""} />
-          </div>
+          {/* Shown even bodiless — ESPECIALLY bodiless. Gating the card on
+              task.body hid it for exactly the malformed task whose actions
+              (remove, chat) the person was hunting: the phantom with a title
+              and nothing else. An empty brief is a fact worth stating. */}
+          {task.body ? (
+            <div className="mt-1 max-h-36 overflow-y-auto text-sm">
+              <Prose body={task.body} />
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-warn" data-testid="task-empty-body">
+              this task has no body — a model working it would have to guess what it means
+            </p>
+          )}
           {/* Every legal manipulation, offered where the task is on screen:
               the person reading this run's failure should not have to hunt
               the task down on the board to act on what they just learned. */}
@@ -623,6 +634,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               />
             </div>
           )}
+          <div className="mt-2">
+            <ChatAbout client={client} projectId={run.project_id} aboutKind="task" aboutId={task.id} ducklings={fleet} />
+          </div>
         </section>
       )}
 

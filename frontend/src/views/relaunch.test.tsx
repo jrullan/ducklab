@@ -240,10 +240,13 @@ describe("the task's description in the run view", () => {
     await waitFor(() => expect(screen.queryByTestId("run-task-card")).toBeNull());
   });
 
-  it("shows nothing when the task has no body to show", async () => {
+  // Reversed on purpose: hiding the card on an empty body hid it for exactly
+  // the malformed task whose actions the person was hunting — the phantom
+  // with a title and nothing else. An empty brief is a fact worth stating.
+  it("says so when the task has no body, instead of hiding the card", async () => {
     render(<RunView runId="r-1" client={clientWith()} />);
-    await waitFor(() => screen.getByTestId("run-view"));
-    expect(screen.queryByTestId("run-task-card")).toBeNull();
+    await waitFor(() => screen.getByTestId("run-task-card"));
+    expect(screen.getByTestId("task-empty-body").textContent).toContain("no body");
   });
 });
 
@@ -348,9 +351,11 @@ describe("task actions on the run view card", () => {
   it("offers remove when the engine lists it, and executes it", async () => {
     const removed: string[] = [];
     const client = clientWith({
+      // Bodiless on purpose: the phantom task is exactly the one whose card
+      // used to hide (it was gated on task.body), taking remove with it.
       tasks: vi.fn(() =>
         Promise.resolve([
-          { id: "T-015", title: "Phantom", milestone: "M-1", status: "todo", body: "empty shell", next: ["run", "remove"] },
+          { id: "T-015", title: "Phantom", milestone: "M-1", status: "todo", next: ["run", "remove"] },
         ]),
       ),
       taskRemove: vi.fn((_p: string, id: string) => {
@@ -359,6 +364,7 @@ describe("task actions on the run view card", () => {
       }),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
+    await waitFor(() => screen.getByTestId("task-empty-body"));
     fireEvent.click(await screen.findByTestId("task-remove"));
     fireEvent.click(await screen.findByTestId("task-remove-yes"));
     await waitFor(() => expect(removed).toEqual(["T-015"]));
