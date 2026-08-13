@@ -82,13 +82,26 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		if tErr != nil {
 			return nil, tErr
 		}
+		// Only DELIVERED debt settles: the spec documents what exists, and
+		// an amendment task still todo would be written up as as-built
+		// behaviour nobody built. It settles after its build is accepted.
 		var debt []TaskView
+		waiting := 0
 		for _, t := range tasks {
-			if t.SpecDebt {
+			if !t.SpecDebt {
+				continue
+			}
+			if t.Status == "accepted" {
 				debt = append(debt, t)
+			} else {
+				waiting++
 			}
 		}
 		if len(debt) == 0 {
+			if waiting > 0 {
+				return nil, fmt.Errorf("%d task(s) wear spec-debt but none are built yet — "+
+					"the spec documents what exists; build and accept them first", waiting)
+			}
 			return nil, fmt.Errorf("no task wears spec-debt — there is nothing to settle")
 		}
 		req.Revise = specSettleNote(debt)

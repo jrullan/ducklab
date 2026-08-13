@@ -356,10 +356,13 @@ func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
 }
 
 // specDebtCount: how many tasks the spec has not caught up with.
+// specDebtCount counts only DELIVERED debt: the guide's settle step says
+// "teach the spec what was built", and an amendment task still todo is not
+// built — it appears here once its build is accepted.
 func specDebtCount(tasks []TaskView) int {
 	n := 0
 	for _, t := range tasks {
-		if t.SpecDebt {
+		if t.SpecDebt && t.Status == "accepted" {
 			n++
 		}
 	}

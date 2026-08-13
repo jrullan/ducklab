@@ -666,3 +666,22 @@ func TestAcceptedCoversFieldsWireThePlan(t *testing.T) {
 		t.Errorf("a second promotion re-wired: %v", again)
 	}
 }
+
+// The spec documents what EXISTS. An amendment task still todo wears its
+// debt on the board, but the settle refuses to write it up as as-built
+// behaviour nobody built — it settles after its build is accepted.
+func TestUnbuiltDebtDoesNotSettle(t *testing.T) {
+	spec := map[string]bool{"SPEC-001": true}
+	none := map[string]bool{}
+	if !taskSpecDebt("T-115", nil, spec, none) {
+		t.Fatal("precondition: T-115 wears debt")
+	}
+	// The service-level filter is status-based; pin the counter the guide
+	// uses so "teach the spec what was built" never counts the unbuilt.
+	if n := specDebtCount([]TaskView{
+		{ID: "T-115", SpecDebt: true, Status: "todo"},
+		{ID: "T-110", SpecDebt: true, Status: "accepted"},
+	}); n != 1 {
+		t.Errorf("settleable debt = %d, want only the accepted one", n)
+	}
+}
