@@ -147,10 +147,32 @@ export function App() {
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
+  // The shell injects window.ducklab via a script the webview runs around
+  // page load — sometimes after this bundle has already started. Reading it
+  // once turned that race into a permanent "no engine connection details"
+  // that a relaunch usually won, which is exactly how it presented: red on
+  // some starts, fine on the next. The injection is not an event anyone can
+  // subscribe to, so the app waits for it briefly; only genuine absence — a
+  // plain browser, a truly broken shell — earns the error.
+  useEffect(() => {
+    if (conn) return;
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (window.ducklab) {
+        clearInterval(iv);
+        setError(null);
+        setConn({ baseUrl: window.ducklab.baseUrl, token: window.ducklab.token });
+      } else if (++tries >= 100) {
+        clearInterval(iv);
+        setError("no engine connection details were provided by the host");
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }, [conn]);
+
   useEffect(() => {
     const cfg = conn;
     if (!cfg) {
-      setError("no engine connection details were provided by the host");
       return;
     }
     const c = new EngineClient({

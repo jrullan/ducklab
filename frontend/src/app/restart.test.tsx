@@ -85,3 +85,35 @@ describe("the engine restart banner", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// The shell injects window.ducklab via a script the webview runs around page
+// load — sometimes after the bundle. Reading it once turned that race into a
+// permanent "no engine connection details" that a relaunch usually won:
+// red on some starts, fine on the next. The app now waits for the injection.
+describe("the connection-details race at startup", () => {
+  beforeEach(() => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    delete window.ducklab; // the bundle woke first
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      onopen: unknown; onerror: unknown;
+      addEventListener() {}
+      close() {}
+    };
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify({ items: [], version: "x" }), { status: 200 })),
+    ) as unknown as typeof fetch);
+  });
+
+  it("connects when the injection lands late instead of erroring forever", async () => {
+    render(<App />);
+    // Too early to condemn: the poller is still waiting.
+    expect(screen.queryByText(/no engine connection details/)).toBeNull();
+
+    // The shell's script lands a beat later.
+    window.ducklab = { baseUrl: "http://late", token: "tok" };
+    await waitFor(() => {
+      expect(screen.queryByText(/no engine connection details/)).toBeNull();
+      expect(screen.queryByTestId("app-shell") ?? document.querySelector("nav")).toBeTruthy();
+    });
+  });
+});
