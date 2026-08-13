@@ -16,6 +16,7 @@ import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
+import type { MeasuredSpend } from "../components/SeatChips";
 import { money, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
 import { seatsFromRoster } from "../lib/seats";
@@ -191,6 +192,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // correctly, as a second implementation.
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
   const [estimates, setEstimates] = useState<ModeEstimates>({});
+  // Measured spend per duckling, for the relaunch panel's seat chips.
+  const [measured, setMeasured] = useState<MeasuredSpend>({});
   const [relaunched, setRelaunched] = useState<string | null>(null);
   // The task's own status, which is not the same question as this run's. A run
   // that failed and whose task was finished by a later run still reported
@@ -234,6 +237,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         setEstimates(est);
       } catch {
         setEstimates({});
+      }
+      try {
+        const rep = await client.report(projectId, "duckling");
+        const m: MeasuredSpend = {};
+        for (const row of rep.rows) m[row.key] = { usd: row.cost_usd, runs: row.runs };
+        setMeasured(m);
+      } catch {
+        setMeasured({});
       }
     })();
   }, [client, projectId]);
@@ -689,6 +700,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             seated as this run ran — the board launches with your Settings line-up
           </p>
           <RunLauncher
+            measured={measured}
             // Remounted when the mode arrives: the run reaches the store in two
             // steps (a run_start event, then the resync), and a launcher that
             // read initialMode from the first was offering "solo" to relaunch a

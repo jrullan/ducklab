@@ -1066,6 +1066,25 @@ describe("chip facts follow the appearance preference", () => {
       return json({ items: [] });
     });
 
+  it("carries the measured cost per run when chosen", async () => {
+    localStorage.setItem("ducklab.chipfacts", JSON.stringify(["mprice"]));
+    const client = clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN5);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [{ role: "architect", duckling: "luna", source: "project" }] });
+      if (p === "/v1/ducklings") return json({ items: [{ id: "luna", provider: "l", model: "l", caps: { native_tools: true, context_tokens: 1100000 } }] });
+      if (p.startsWith("/v1/projects/p/reports/duckling") || p.includes("duckling")) {
+        return json({ rows: [{ key: "luna", cost_usd: 0.9, runs: 30 }], deltas: [], rendered: "" });
+      }
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
+    const chip = (await waitFor(() => screen.getAllByTestId("chip-mprice")))[0]!;
+    expect(chip.textContent).toContain("~$0.030/run"); // 0.9 usd over 30 runs, measured
+    localStorage.removeItem("ducklab.chipfacts");
+  });
+
   it("shows only the chosen facts", async () => {
     localStorage.setItem("ducklab.chipfacts", JSON.stringify(["vision", "price"]));
     render(<Cycle client={clientPriced()} projectId="p" stage="plan" />);

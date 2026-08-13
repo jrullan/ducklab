@@ -15,6 +15,7 @@ import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import type { MeasuredSpend } from "../components/SeatChips";
 import { TddLaunch } from "../components/TddLaunch";
 import { ChatAbout } from "../components/ChatAbout";
 import { RemoveTask } from "../components/RemoveTask";
@@ -83,6 +84,8 @@ export function Board({
   });
   // What each mode has cost in THIS project, for the launcher's mode picker.
   const [estimates, setEstimates] = useState<ModeEstimates>({});
+  // Measured spend per duckling, for the seat chips on every launcher.
+  const [measured, setMeasured] = useState<MeasuredSpend>({});
   // Filing a report was reachable only from the CLI: the engine has had
   // POST /bugs since the operate loop was built, and the board's own empty
   // state told you to go and run `ducklab bug add`. On a desktop-only setup the
@@ -146,6 +149,14 @@ export function Board({
         setEstimates(est);
       } catch {
         setEstimates({});
+      }
+      try {
+        const rep = await client.report(projectId, "duckling");
+        const m: MeasuredSpend = {};
+        for (const row of rep.rows) m[row.key] = { usd: row.cost_usd, runs: row.runs };
+        setMeasured(m);
+      } catch {
+        setMeasured({});
       }
     })();
     client
@@ -610,6 +621,7 @@ export function Board({
             preferred={preferred}
             phaseDefaults={phaseDefaults}
             estimates={estimates}
+            measured={measured}
             gate={gate}
             gateCommand={gateCommand}
             onDone={() => void load()}
@@ -631,6 +643,7 @@ function TaskRail({
   gate,
   gateCommand,
   onDone,
+  measured,
 }: {
   task: Task;
   client: EngineClient;
@@ -642,6 +655,7 @@ function TaskRail({
   gate: string;
   gateCommand: string;
   onDone: () => void;
+  measured?: MeasuredSpend;
 }) {
   return (
     <div className="space-y-2">
@@ -655,6 +669,7 @@ function TaskRail({
           deciding how to run needs them; instead the actions sit at the top
           and the body scrolls in its own pane beneath. */}
       <TaskRunner
+        measured={measured}
         task={task}
         client={client}
         projectId={projectId}
@@ -699,6 +714,7 @@ function TaskRunner({
   gate,
   gateCommand,
   onDone,
+  measured,
 }: {
   task: Task;
   client: EngineClient;
@@ -710,6 +726,7 @@ function TaskRunner({
   gate: string;
   gateCommand: string;
   onDone: () => void;
+  measured?: MeasuredSpend;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -830,6 +847,7 @@ function TaskRunner({
           return (
             <div key={action} data-testid="run-again">
               <RunLauncher
+            measured={measured}
                 key={phaseDefaults.build}
                 ducklings={ducklings}
                 initialMode={phaseDefaults.build}
@@ -851,6 +869,7 @@ function TaskRunner({
                 rail and not the other. Keyed so a default arriving after
                 mount still lands (read-a-prop-once, again). */}
             <RunLauncher
+            measured={measured}
               key={phaseDefaults.build}
               ducklings={ducklings}
               initialMode={phaseDefaults.build}
@@ -871,6 +890,7 @@ function TaskRunner({
         if (primary) {
           return (
             <TddLaunch
+            measured={measured}
               key={`${phaseDefaults.test}:${phaseDefaults.build}`}
               ducklings={ducklings}
               preferred={preferred}

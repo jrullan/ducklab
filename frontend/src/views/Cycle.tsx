@@ -11,9 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Artifact, Duckling, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
-import { assignDucklingColors } from "../lib/colors";
-import { tokens } from "../lib/format";
-import { loadChipFacts } from "../lib/chipfacts";
+import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
@@ -66,6 +64,18 @@ export function Cycle({
   // Per-run seat picks from clicked chips, keyed panel:index. A pick changes
   // THIS run only; the team's saved seats stay untouched.
   const [seatPicks, setSeatPicks] = useState<Record<string, string>>({});
+  // Measured spend per duckling — the project's own record, for the chips.
+  const [measured, setMeasured] = useState<MeasuredSpend>({});
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => client.report(projectId, "duckling"))
+      .then((rep) => {
+        const out: MeasuredSpend = {};
+        for (const row of rep.rows) out[row.key] = { usd: row.cost_usd, runs: row.runs };
+        setMeasured(out);
+      })
+      .catch(() => setMeasured({}));
+  }, [client, projectId]);
   useEffect(() => {
     Promise.all([
       Promise.resolve().then(() => client.roster(projectId, "solo")),
@@ -594,6 +604,7 @@ export function Cycle({
                     <SeatChips
                       entries={[{ ...amendSeat, duckling: amendDuckling }]}
                       fleet={fleet}
+                      measured={measured}
                       onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`amend:${i}`]: id }))}
                     />
                   </div>
@@ -691,6 +702,7 @@ export function Cycle({
                     duckling: seatPicks[`extend:${i}`] || e.duckling,
                   }))}
                   fleet={fleet}
+                  measured={measured}
                   onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`extend:${i}`]: id }))}
                 />
               </div>
@@ -896,97 +908,3 @@ function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): 
     (rounds > 1 ? `, and they go round again unless ${critics.length === 1 ? critics[0] : "every critic"} approves` : "");
 }
 
-/** A seat, said with everything that matters at a glance: the duckling in its
- * own colour, the context it can hold, and an eye when it can be shown
- * images. [glm52 384.0k 👁️] answers "who will do this and what can they
- * take" without a trip to Settings. */
-function SeatChips({
-  entries,
-  fleet,
-  onPick,
-}: {
-  entries: RosterEntry[];
-  fleet: Duckling[];
-  /** When given, a chip is a DOOR: clicking it opens the pick for that seat,
-   * this run only — more direct than a trip to the team settings. */
-  onPick?: (index: number, duckling: string) => void;
-}) {
-  const colors = assignDucklingColors(fleet);
-  const [open, setOpen] = useState<number | null>(null);
-  // The person's own pick of facts, from appearance settings.
-  const facts = loadChipFacts();
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
-      {entries.map((e, i) => {
-        const d = fleet.find((x) => x.id === e.duckling);
-        if (open === i && onPick) {
-          return (
-            <label key={e.role + i} className="flex items-center gap-1 text-xs text-ink-muted">
-              {e.role}
-              <select
-                autoFocus
-                data-testid={`seat-pick-${i}`}
-                value={e.duckling}
-                onChange={(ev) => {
-                  onPick(i, ev.target.value);
-                  setOpen(null);
-                }}
-                onBlur={() => setOpen(null)}
-                className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
-              >
-                {fleet.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.id}
-                    {f.caps?.vision ? " 👁" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          );
-        }
-        return (
-          <button
-            key={e.role + i}
-            type="button"
-            disabled={!onPick}
-            onClick={() => onPick && setOpen(i)}
-            className={
-              "flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs" +
-              (onPick ? " cursor-pointer hover:border-ink" : "")
-            }
-            data-testid="seat-chip"
-            title={onPick ? "click to pick a different duckling for this run only" : undefined}
-          >
-            <span className="text-ink-muted">{e.role}</span>
-            <span style={{ color: colors[e.duckling] }} className="font-medium">
-              {e.duckling}
-            </span>
-            {facts.includes("context") && d?.caps?.context_tokens ? (
-              <span className="text-ink-muted" title="context window">
-                {tokens(d.caps.context_tokens)}
-              </span>
-            ) : null}
-            {facts.includes("vision") && d?.caps?.vision && (
-              <span title="vision — can be shown images">👁️</span>
-            )}
-            {facts.includes("price") && d?.cost && (d.cost.input_per_mtok || d.cost.output_per_mtok) ? (
-              <span
-                className="text-ink-muted"
-                title="average of declared input/output cost per Mtok"
-                data-testid="chip-price"
-              >
-                ${(((d.cost.input_per_mtok ?? 0) + (d.cost.output_per_mtok ?? 0)) / 2).toFixed(2)}/M
-              </span>
-            ) : null}
-            {facts.includes("tools") && d?.caps?.native_tools && (
-              <span title="calls tools natively">🔧</span>
-            )}
-            {facts.includes("json") && d?.caps?.json_mode && (
-              <span className="text-ink-muted" title="has a JSON mode">{"{}"}</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}

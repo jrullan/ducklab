@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Duckling } from "../api/client";
 import { LaunchConfig, type PhaseConfig, type ModeEstimates } from "./RunLauncher";
+import type { MeasuredSpend } from "./SeatChips";
 
 /** The TDD chain's launcher: two phases, each with its own mode and seats,
  * one click for the whole intent.
@@ -20,6 +21,7 @@ export function TddLaunch({
   onTdd,
   onTestOnly,
   onBuildOnly,
+  measured,
 }: {
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
@@ -29,6 +31,7 @@ export function TddLaunch({
   onTdd: (test: PhaseConfig, build: PhaseConfig) => void;
   onTestOnly: (test: PhaseConfig) => void;
   onBuildOnly: (build: PhaseConfig) => void;
+  measured?: MeasuredSpend;
 }) {
   const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({
     mode: phaseDefaults.test,
@@ -52,6 +55,7 @@ export function TddLaunch({
       <div>
         <div className="text-xs font-medium text-ink-muted">1 · write the failing test</div>
         <LaunchConfig
+          measured={measured}
           ducklings={ducklings}
           value={testCfg}
           onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
@@ -61,6 +65,7 @@ export function TddLaunch({
       <div>
         <div className="text-xs font-medium text-ink-muted">2 · build until it passes</div>
         <LaunchConfig
+          measured={measured}
           ducklings={ducklings}
           value={buildCfg}
           onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}

@@ -6,12 +6,13 @@
  * no engine involvement), read at render.
  */
 
-export type ChipFact = "context" | "vision" | "price" | "tools" | "json";
+export type ChipFact = "context" | "vision" | "price" | "mprice" | "tools" | "json";
 
 export const CHIP_FACTS: { id: ChipFact; label: string; hint: string }[] = [
   { id: "context", label: "context", hint: "context window, e.g. 384.0k" },
   { id: "vision", label: "vision 👁️", hint: "an eye when the model can be shown images" },
   { id: "price", label: "avg price", hint: "average of declared input/output cost per Mtok" },
+  { id: "mprice", label: "measured $/run", hint: "what this duckling actually cost per run it took part in, from this project's own record" },
   { id: "tools", label: "tools 🔧", hint: "a wrench when the model calls tools natively" },
   { id: "json", label: "json {}", hint: "braces when the model has a JSON mode" },
 ];

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Duckling } from "../api/client";
 import { money } from "../lib/format";
 import { fixedSeats, seatLabel } from "../lib/seats";
+import { SeatChips, type MeasuredSpend } from "./SeatChips";
 
 /** What a mode has cost here before: total dollars over how many runs, from
  * the project's own history. */
@@ -28,6 +29,7 @@ export function LaunchConfig({
   modes = [...MODES],
   estimates,
   showTokens = false,
+  measured,
 }: {
   ducklings: readonly Duckling[];
   value: PhaseConfig;
@@ -35,6 +37,7 @@ export function LaunchConfig({
   modes?: string[];
   estimates?: ModeEstimates;
   showTokens?: boolean;
+  measured?: MeasuredSpend;
 }) {
   const [extraSeats, setExtraSeats] = useState(0);
   const seats = fixedSeats(value.mode);
@@ -140,6 +143,20 @@ export function LaunchConfig({
           </span>
         </label>
       )}
+      {value.ducklings.some((id) => id) && (
+        <div className="w-full">
+          {/* The chips beside the pickers: same promise as everywhere a
+              duckling is named for a launch — who sits, and the facts the
+              person chose to care about. */}
+          <SeatChips
+            entries={value.ducklings
+              .map((id, i) => ({ role: seatLabel(value.mode, i), duckling: id }))
+              .filter((e) => e.duckling)}
+            fleet={[...ducklings]}
+            measured={measured}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -163,6 +180,7 @@ export function RunLauncher({
   busy = false,
   onLaunch,
   onDucklingsChange,
+  measured,
 }: {
   ducklings: readonly Duckling[];
   initialMode?: string;
@@ -182,6 +200,7 @@ export function RunLauncher({
   /** Reported as it changes, not only on launch: a caller may have its own
    * buttons that act on the selection — writing the test first, for one. */
   onDucklingsChange?: (ids: string[]) => void;
+  measured?: MeasuredSpend;
 }) {
   const [mode, setMode] = useState(initialMode);
   // The run-specific instruction — the consultant's "relaunch with a note"
@@ -324,6 +343,20 @@ export function RunLauncher({
         </button>
       </div>
 
+      {chosen.some(Boolean) && (
+        <div className="mb-1">
+          {/* Same promise as every launch surface: who sits, with the facts
+              the person chose to care about. The dropdowns below remain the
+              pickers; the chips are the glance. */}
+          <SeatChips
+            entries={chosen
+              .map((id, i) => ({ role: seatLabel(mode, i), duckling: id }))
+              .filter((e) => e.duckling)}
+            fleet={[...ducklings]}
+            measured={measured}
+          />
+        </div>
+      )}
       {/* One dropdown per seat, labelled with the role its position carries —
           the same picker Settings uses, because two pickers that disagree
           about what a seat means would be worse than the checkbox wall this
