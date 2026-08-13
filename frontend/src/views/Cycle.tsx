@@ -46,6 +46,9 @@ export function Cycle({
   const [failure, setFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
   const [brief, setBrief] = useState("");
+  // The plan amendment's text — Review's light exit, separate from the brief
+  // so the two doors never share a box.
+  const [amendment, setAmendment] = useState("");
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState("council");
   const [rounds, setRounds] = useState(2);
@@ -463,6 +466,44 @@ export function Cycle({
                   ? "Reads the accepted requirements and proposes a specification."
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
+            )}
+            {active.stage === "plan" && sections.length > 0 && (
+              <div className="mb-3 rounded-card border border-hairline p-2" data-testid="plan-extend">
+                <p className="mb-1 text-xs text-ink-muted">
+                  Small change, no redesign: an architect amends the plan with one to three tasks.
+                  Tasks no spec section covers wear a spec-debt marker. If it changes what the
+                  product IS, write a brief instead.
+                </p>
+                <textarea
+                  aria-label="plan amendment"
+                  data-testid="plan-extend-text"
+                  rows={2}
+                  placeholder="What to add or improve, in a sentence or two"
+                  value={amendment}
+                  onChange={(e) => setAmendment(e.target.value)}
+                  className="mb-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+                />
+                <button
+                  type="button"
+                  data-testid="plan-extend-start"
+                  disabled={!amendment.trim() || starting}
+                  onClick={() => {
+                    setStarting(true);
+                    setFailure(null);
+                    void client
+                      .stageStart(projectId, "plan", { extend: amendment.trim() })
+                      .then((run) => {
+                        setStartedRun(run.id);
+                        setAmendment("");
+                      })
+                      .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                      .finally(() => setStarting(false));
+                  }}
+                  className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+                >
+                  Amend the plan
+                </button>
+              </div>
             )}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
               <select

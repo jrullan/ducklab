@@ -253,6 +253,9 @@ export interface Task {
   /** A committed failing test already defines done: the natural next act is
    * the build that makes it pass. */
   test_ready?: boolean;
+  /** No spec section covers this task — the plan amendment's toll, worn
+   * until the scribe teaches the spec what was built. */
+  spec_debt?: boolean;
   /** The actions a person may legally start from this task, stated by the
    * engine — run, test_first, review, remove. */
   next?: string[];
@@ -867,7 +870,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -879,6 +882,9 @@ export class EngineClient {
       // Intake only: survey the tree into the requirements the code already
       // satisfies, instead of interviewing about an idea.
       adopt: opts.adopt ?? false,
+      // Plan only: the light path out of review — an architect amends the
+      // plan for a small change instead of running the whole design cycle.
+      extend: opts.extend ?? "",
       mode: opts.mode ?? "",
       rounds: opts.rounds ?? 0,
       stream: true,

@@ -138,7 +138,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 	if len(out) == 0 {
 		out = append(out, NextStep{
 			ID:     "brief",
-			Action: "Extend the spec with a feature brief — or cut a release",
+			Action: "Extend the spec with a feature brief, amend the plan for a small change — or cut a release",
 			Reason: "every task is done and the bug inbox is empty",
 			Kind:   "project",
 		})

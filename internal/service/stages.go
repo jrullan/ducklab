@@ -36,6 +36,14 @@ type StageRequest struct {
 	// this one", which is the answer to a proposal that is almost right.
 	Revise   string `json:"revise"`
 	Autonomy string `json:"autonomy"`
+	// Extend is the light path out of Review: a small change that deserves
+	// tasks but not a redesign. It runs as a plan revision — the architect
+	// adds the fewest tasks that deliver it, wiring Implements: to existing
+	// SPEC sections where they genuinely cover it. What nothing covers wears
+	// a spec-debt marker until the spec catches up. Changes that alter what
+	// the product IS belong to a brief, and the note tells the architect to
+	// add nothing in that case so the empty diff says so.
+	Extend string `json:"extend,omitempty"`
 	// Adopt turns intake into a survey: the architect reads the tree and
 	// writes the requirements the code ALREADY satisfies, instead of
 	// interviewing a person about a product that is still an idea. For a
@@ -59,6 +67,19 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// The plan amendment: Review's "this needs more, but not a redesign".
+	if strings.TrimSpace(req.Extend) != "" {
+		if req.Stage != "plan" {
+			return nil, fmt.Errorf("extend amends the plan; %s grows through a brief", req.Stage)
+		}
+		plan, pErr := artifact.Load(entry.Path, artifact.KindPlan)
+		if pErr != nil || plan == nil || len(plan.Sections) == 0 {
+			return nil, fmt.Errorf("no plan to extend yet — the design cycle creates it; " +
+				"describe what to build in a brief instead")
+		}
+		req.Revise = planExtendNote(req.Extend)
+	}
+
 	// A first plan over a fully as-built spec has nothing to plan: every
 	// section is already delivered by the tree the project adopted. Refusing
 	// beats letting a model invent tasks to build what is built — the plan
@@ -567,6 +588,11 @@ type TaskView struct {
 	// Next are the actions a person may legally start from this task, in the
 	// order a client should offer them (docs/ux-evaluation.md §5.4).
 	Next []string `json:"next,omitempty"`
+	// SpecDebt marks a task no spec section covers — the toll of the plan
+	// amendment's light path. Legal, and never invisible: the scribe settles
+	// it by teaching the spec what was built. Bug-promoted tasks trace to
+	// their report and owe the spec nothing.
+	SpecDebt bool `json:"spec_debt,omitempty"`
 }
 
 // TaskList reads tasks from the plan and folds in what runs have done to them.
@@ -595,6 +621,29 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	}
 
 	status, blocked, testReady, failedStage, pinned := deriveTaskRunState(runs)
+
+	// The spec's sections, for the debt check — and the bug-born tasks,
+	// which trace to their report rather than to the spec.
+	specIDs := map[string]bool{}
+	if spec, sErr := artifact.Load(entry.Path, artifact.KindSpec); sErr == nil {
+		for _, sp := range spec.Sections {
+			specIDs[sp.ID] = true
+			for _, c := range sp.Children {
+				specIDs[c.ID] = true
+			}
+		}
+	}
+	bugTasks := map[string]bool{}
+	if db, dbErr := s.openProjectDB(projectID); dbErr == nil {
+		if recs, lErr := db.ListBugs(); lErr == nil {
+			for _, b := range recs {
+				if b.TaskID != "" {
+					bugTasks[b.TaskID] = true
+				}
+			}
+		}
+		db.Close()
+	}
 
 	// Acceptance is a fact with a commit behind it: once a build was accepted,
 	// later failed experiments do not un-deliver the task.
@@ -640,6 +689,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				TestReady: testReady[t.ID] && (st == "todo" || st == "blocked"),
 				Next: taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID],
 					failedStage[t.ID] == "test"),
+				SpecDebt: taskSpecDebt(t.ID, t.Implements, specIDs, bugTasks),
 			})
 		}
 	}
@@ -1054,4 +1104,36 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 		}
 	}
 	return status, blocked, testReady, failedStage, pinned
+}
+
+// planExtendNote frames a small extension as a plan revision. The rules are
+// the amendment's whole contract: fewest tasks, honest Implements wiring,
+// and a refusal-by-empty-diff when the change is really a requirements
+// change wearing a small hat.
+func planExtendNote(change string) string {
+	return "Extend the plan for this change, WITHOUT a redesign:\n\n" +
+		strings.TrimSpace(change) + "\n\n" +
+		"Rules for this extension:\n" +
+		"- Add the fewest tasks that deliver it — one to three — under the milestone " +
+		"that fits, or a new final milestone when none does.\n" +
+		"- Wire each new task's **Implements:** to existing SPEC sections ONLY where they " +
+		"genuinely cover the change. A task nothing covers carries no Implements line — it " +
+		"will wear a spec-debt marker until the spec catches up. Never invent section ids.\n" +
+		"- If this change alters what the product IS — its requirements — add NOTHING and " +
+		"return the document exactly as given: the empty diff tells the person to write a " +
+		"feature brief instead."
+}
+
+// taskSpecDebt: covered by no existing spec section, and not a bug's task.
+// A project with no spec at all owes none — there is nothing to be behind.
+func taskSpecDebt(taskID string, implements []string, specIDs, bugTasks map[string]bool) bool {
+	if len(specIDs) == 0 || bugTasks[taskID] {
+		return false
+	}
+	for _, im := range implements {
+		if specIDs[im] {
+			return false
+		}
+	}
+	return true
 }

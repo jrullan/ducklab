@@ -13,6 +13,7 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	extended []string
 	testThenBuild bool
 	testNote      string
 	tasks []map[string]interface{}
@@ -60,6 +61,9 @@ func (f *fakeEngine) RunStart(string, map[string]interface{}) (map[string]interf
 }
 func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (map[string]interface{}, error) {
 	f.revised = append(f.revised, fmt.Sprint(req["revise"]))
+	if ext, ok := req["extend"].(string); ok && ext != "" {
+		f.extended = append(f.extended, ext)
+	}
 	return map[string]interface{}{"id": "r-rev"}, nil
 }
 func (f *fakeEngine) ArtifactGet(string, string) (map[string]interface{}, error) {
@@ -391,5 +395,22 @@ func TestTheTestToolsSayWhatTheyChain(t *testing.T) {
 	)
 	if !eng.testThenBuild {
 		t.Error("test_build did not chain the build")
+	}
+}
+
+// The light path out of review, remotely: a dictated improvement becomes a
+// plan amendment instead of a fake bug report. The tool wraps stage_start
+// with the extend field; the engine owns the contract.
+func TestPlanExtendReachesTheEngine(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_extend","arguments":{"project_id":"p","change":"add CSV export"}}}`,
+	)
+	if resps[1]["error"] != nil {
+		t.Fatalf("plan_extend errored: %v", resps[1]["error"])
+	}
+	if len(eng.extended) != 1 || eng.extended[0] != "add CSV export" {
+		t.Errorf("the change did not reach the engine's extend field: %v", eng.extended)
 	}
 }

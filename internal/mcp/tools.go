@@ -104,6 +104,18 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "stage"),
 		},
 		{
+			"name": "plan_extend",
+			"description": "The light path out of review: add tasks for a small change WITHOUT the " +
+				"redesign cycle. An architect amends the plan (1-3 tasks, wired to existing spec " +
+				"sections where they cover it; uncovered tasks wear spec-debt). If the change alters " +
+				"what the product IS — its requirements — the amendment comes back empty: write a " +
+				"brief via stage_start intake instead. The proposal pauses for the human's accept.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"change":     str("what to add or improve, in the human's words"),
+			}, "project_id", "change"),
+		},
+		{
 			"name":        "bug_report",
 			"description": "File a bug. Attach screenshots with bug_attach, then bug_triage classifies it, bug_promote turns it into a task, and test_build builds the fix.",
 			"inputSchema": obj(map[string]interface{}{
@@ -297,6 +309,13 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			req["redo"] = true
 		}
 		run, err := s.eng.RunStart(a.str("project_id"), req)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(run), nil
+	case "plan_extend":
+		run, err := s.eng.StageStart(a.str("project_id"), "plan",
+			map[string]interface{}{"extend": a.str("change")})
 		if err != nil {
 			return nil, err
 		}

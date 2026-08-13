@@ -558,3 +558,63 @@ func TestAnAcceptedRunOutranksALaterFailure(t *testing.T) {
 		t.Errorf("blocked hint survived: %q", blocked["T-101"])
 	}
 }
+
+// Review's light exit: a small change deserves tasks, not a redesign. The
+// only doors were the full brief or disguising the enhancement as a bug —
+// which is how bug boards everywhere rot. The amendment needs a plan to
+// amend; without one, the refusal points at the brief.
+func TestPlanExtendNeedsAPlanToAmend(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{})
+
+	_, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "add a CSV export next to the JSON one",
+	})
+	if err == nil {
+		t.Fatal("an amendment without a plan was accepted")
+	}
+	if !strings.Contains(err.Error(), "brief") {
+		t.Errorf("the refusal does not point at the brief: %v", err)
+	}
+}
+
+// The note IS the amendment's contract; the architect never sees our code.
+func TestTheAmendmentNoteStatesTheContract(t *testing.T) {
+	note := planExtendNote("add a CSV export")
+	for _, must := range []string{
+		"WITHOUT a redesign",
+		"add a CSV export",
+		"one to three",
+		"spec-debt",
+		"Never invent section ids",
+		"add NOTHING",
+		"feature brief",
+	} {
+		if !strings.Contains(note, must) {
+			t.Errorf("the note lost %q", must)
+		}
+	}
+}
+
+// The amendment's toll, computed: a task no spec section covers wears the
+// marker; wired tasks and bug-born tasks do not; a spec-less project owes
+// nothing because there is nothing to be behind.
+func TestSpecDebtMarksOnlyTheUncovered(t *testing.T) {
+	spec := map[string]bool{"SPEC-001": true}
+	bugs := map[string]bool{"T-003": true}
+	if taskSpecDebt("T-001", []string{"SPEC-001"}, spec, bugs) {
+		t.Error("a wired task owes nothing")
+	}
+	if !taskSpecDebt("T-002", nil, spec, bugs) {
+		t.Error("an uncovered task must wear the marker")
+	}
+	if taskSpecDebt("T-002", []string{"SPEC-999"}, spec, bugs) == false {
+		t.Error("an invented section id is not coverage")
+	}
+	if taskSpecDebt("T-003", nil, spec, bugs) {
+		t.Error("a bug's task traces to its report, not the spec")
+	}
+	if taskSpecDebt("T-004", nil, map[string]bool{}, bugs) {
+		t.Error("a project with no spec owes none")
+	}
+}

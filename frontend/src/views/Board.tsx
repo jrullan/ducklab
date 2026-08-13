@@ -515,6 +515,15 @@ export function Board({
                             accepted test-first used to land the task in
                             Accepted, where every offered action implied the
                             work was done — and it had never been built once. */}
+                        {!isBugs && (it as Task).spec_debt && (
+                          <div
+                            data-testid="spec-debt"
+                            className="mt-1 text-xs text-warn"
+                            title="no spec section covers this task — the plan amendment's toll; the scribe settles it by teaching the spec what was built"
+                          >
+                            spec-debt
+                          </div>
+                        )}
                         {!isBugs && (it as Task).test_ready && (
                           <div data-testid="test-ready" className="mt-1 text-xs text-good">
                             failing test committed — build it to make it pass

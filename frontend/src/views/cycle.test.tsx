@@ -833,3 +833,50 @@ describe("a proposal whose run was already decided", () => {
     expect(screen.queryByTestId("cycle-rejected-draft")).toBeNull();
   });
 });
+
+// Review's light exit, in the place plans live: a small change becomes a
+// plan amendment — one to three tasks from an architect — without the
+// reqs→spec→plan pass. The only doors before this were the full brief or
+// filing the enhancement as a fake bug.
+describe("the plan amendment", () => {
+  const PLAN = {
+    kind: "plan",
+    version: 1,
+    approved: true,
+    markdown: "---\nkind: plan\n---\n",
+    sections: [
+      { id: "M-001", title: "Core", body: "", fields: {}, children: [
+        { id: "T-001", title: "Schema", body: "", fields: {} },
+      ] },
+    ],
+  };
+
+  it("offers the form on an existing plan and posts the extend field", async () => {
+    let extendSent = "";
+    const client = clientWith((p, init) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p === "/v1/projects/p/stages/plan" && init?.method === "POST") {
+        extendSent = String(JSON.parse(String(init.body)).extend ?? "");
+        return json({ id: "r-amend", status: "running" });
+      }
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    const box = await waitFor(() => screen.getByTestId("plan-extend-text"));
+    fireEvent.change(box, { target: { value: "add a CSV export button" } });
+    fireEvent.click(screen.getByTestId("plan-extend-start"));
+    await waitFor(() => expect(extendSent).toBe("add a CSV export button"));
+  });
+
+  it("keeps the door shut when no plan exists yet", async () => {
+    const client = clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json({ kind: "plan", sections: null });
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="plan" />);
+    await waitFor(() => screen.getByTestId("cycle-view"));
+    expect(screen.queryByTestId("plan-extend")).toBeNull();
+  });
+});
