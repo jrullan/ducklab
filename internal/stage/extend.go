@@ -47,12 +47,18 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	// contract's headings under one synthetic milestone, so refusal prose —
 	// which parses as that milestone's body — yields none.
 	var tasks []artifact.Section
+	real := 0
 	if perr == nil {
 		for _, sec := range produced.Sections {
 			tasks = append(tasks, sec.Children...)
 		}
+		for _, t := range tasks {
+			if !strings.HasPrefix(strings.ToUpper(t.ID), "M-") {
+				real++
+			}
+		}
 	}
-	if len(tasks) == 0 {
+	if real == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
 		reason := strings.TrimSpace(raw)
@@ -152,9 +158,43 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 		existing = append(existing, m.Children...)
 	}
 
+	// An architect extending the plan may declare a NEW milestone: a heading
+	// like "## M-015 — Dashboard UI" above its tasks. Flattened, that heading
+	// arrived in the task list and became a phantom task — title, no body —
+	// which the person launched first, and a test-writer handed an empty
+	// brief invented one. A fragment section wearing the milestone prefix is
+	// a placement declaration: find it by id or title, create it with a real
+	// id when it is genuinely new, and alias the fragment's id so the tasks'
+	// own Milestone: fields resolve to the milestone that actually exists.
+	alias := map[string]string{}
+	lastDeclared := ""
+	resolveMilestone := func(decl artifact.Section) string {
+		for i := range out.Sections {
+			if strings.EqualFold(out.Sections[i].ID, decl.ID) ||
+				strings.EqualFold(strings.TrimSpace(out.Sections[i].Title), strings.TrimSpace(decl.Title)) {
+				return out.Sections[i].ID
+			}
+		}
+		id := fmt.Sprintf("M-%03d", NextFree(out.Sections, "M"))
+		out.Sections = append(out.Sections, artifact.Section{ID: id, Title: decl.Title})
+		return id
+	}
+
 	for _, t := range tasks {
+		if strings.HasPrefix(strings.ToUpper(t.ID), "M-") {
+			real := resolveMilestone(t)
+			alias[strings.ToUpper(t.ID)] = real
+			lastDeclared = real
+			continue
+		}
 		id := fmt.Sprintf("T-%03d", NextFree(existing, "T"))
 		milestone := strings.TrimSpace(t.Field("milestone"))
+		if real, ok := alias[strings.ToUpper(milestone)]; ok {
+			milestone = real
+		}
+		if milestone == "" {
+			milestone = lastDeclared
+		}
 		// The placement field did its job; the task body should not carry it.
 		var kept []string
 		for _, line := range strings.Split(t.Body, "\n") {

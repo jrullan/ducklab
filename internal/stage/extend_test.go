@@ -148,3 +148,73 @@ func TestRunExtendWritesAMergedProposal(t *testing.T) {
 		t.Errorf("no proposal on disk: %v", pErr)
 	}
 }
+
+// The phantom task, pinned with the exact fragment that created it: an
+// architect declaring a NEW milestone above its task. The heading became
+// task "Dashboard UI" — title, no body — the person launched it first, and
+// a test-writer handed an empty brief invented one. A milestone declaration
+// creates a milestone; only tasks become tasks.
+func TestAMilestoneDeclarationNeverBecomesATask(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Schema\n\nDone.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment := "## M-015 — Dashboard UI\n" +
+		"## T-900 — Move the Streak card to the top\n" +
+		"**Milestone:** M-015\n" +
+		"**Implements:** SPEC-007\n\n" +
+		"Reorder the JSX only — do not alter the card's content.\n"
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-a", Mode: "solo",
+		Extend: "streak card first",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			return fragment, nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Proposed
+	if len(got.Sections) != 2 {
+		t.Fatalf("sections = %d, want Core + the new Dashboard UI milestone", len(got.Sections))
+	}
+	dash := got.Sections[1]
+	if dash.Title != "Dashboard UI" || dash.ID != "M-002" {
+		t.Errorf("new milestone = %s — %s, want M-002 — Dashboard UI", dash.ID, dash.Title)
+	}
+	if len(dash.Children) != 1 {
+		t.Fatalf("dashboard tasks = %d, want exactly the real one — no phantom", len(dash.Children))
+	}
+	task := dash.Children[0]
+	if task.ID != "T-002" || !strings.Contains(task.Body, "Reorder the JSX only") {
+		t.Errorf("the real task lost its id or body: %s %q", task.ID, task.Body)
+	}
+	// And nothing empty-bodied landed anywhere.
+	for _, m := range got.Sections {
+		for _, c := range m.Children {
+			if strings.TrimSpace(c.Body) == "" {
+				t.Errorf("phantom task %s — %s with empty body", c.ID, c.Title)
+			}
+		}
+	}
+}
+
+// A fragment that is ONLY a milestone declaration added no work: refusal.
+func TestAMilestoneAloneIsNotAnAmendment(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan, "## M-001 — Core\n\n### T-001 — Schema\n\nDone.\n")
+	current, _ := artifact.Load(root, artifact.KindPlan)
+	_, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-b",
+		Extend: "something",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			return "## M-020 — A new era\n", nil
+		},
+	}, current)
+	if err == nil {
+		t.Fatal("a milestone with no tasks was accepted as an amendment")
+	}
+}
