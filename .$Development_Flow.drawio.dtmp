@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="Page-1" id="b6ltbmyMNYO8pfqu4edS">
-    <mxGraphModel dx="1213" dy="1203" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="582" dy="578" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -111,6 +111,9 @@
           <mxGeometry relative="1" x="-0.8706" y="-3" as="geometry">
             <mxPoint x="16" y="-5" as="offset" />
           </mxGeometry>
+        </mxCell>
+        <mxCell id="-0ztOJPWPcViOK7e9o7t-64" parent="-0ztOJPWPcViOK7e9o7t-24" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=7;" value="Modes: Solo , Council" vertex="1">
+          <mxGeometry height="10" width="80" x="326" y="382" as="geometry" />
         </mxCell>
         <mxCell id="-0ztOJPWPcViOK7e9o7t-34" edge="1" parent="1" source="-0ztOJPWPcViOK7e9o7t-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="-0ztOJPWPcViOK7e9o7t-24">
           <mxGeometry relative="1" as="geometry" />

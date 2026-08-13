@@ -218,3 +218,62 @@ func TestAMilestoneAloneIsNotAnAmendment(t *testing.T) {
 		t.Fatal("a milestone with no tasks was accepted as an amendment")
 	}
 }
+
+// From the field, verbatim: an architect fused its milestone and its task
+// into one M- heading carrying a complete brief — and the id-only rule filed
+// the work as a declaration and refused the run. The person's expectation is
+// the law here: an amendment that was given real work always produces work.
+// Ask strictly, read generously.
+func TestWorkWearingAMilestoneIdIsStillWork(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-015 — Dashboard UI\n\n### T-114 — Move the streak card\n\nReorder.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment := "## M-015 — Dashboard UI: Streak card reordering\n" +
+		"**Milestone:** M-015\n" +
+		"**Implements:** SPEC-007, SPEC-012\n\n" +
+		"In `frontend/src/DashboardPage.jsx`, move the Streak card to be the first card " +
+		"rendered inside the dashboard grid. No changes to data fetching — only the render order.\n"
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-f", Mode: "solo",
+		Extend: "streak card first",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			return fragment, nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatalf("real work was refused: %v", err)
+	}
+	dash := res.Proposed.Sections[0]
+	if len(dash.Children) != 2 {
+		t.Fatalf("M-015 children = %d, want the old task plus the new one", len(dash.Children))
+	}
+	task := dash.Children[1]
+	if task.ID != "T-115" {
+		t.Errorf("id = %s, want the next free T-115", task.ID)
+	}
+	if !strings.Contains(task.Body, "only the render order") {
+		t.Errorf("the brief was lost: %q", task.Body)
+	}
+	// The Milestone: field named M-015 — an existing milestone — so the task
+	// landed there, not in a duplicate.
+	if len(res.Proposed.Sections) != 1 {
+		t.Errorf("a duplicate milestone was created: %d sections", len(res.Proposed.Sections))
+	}
+}
+
+// A bare M- heading — empty body or fields only — is still a declaration.
+func TestABareMilestoneHeadingIsStillADeclaration(t *testing.T) {
+	if !looksLikeMilestoneDecl(artifact.Section{ID: "M-020", Title: "New era"}) {
+		t.Error("empty body must read as a declaration")
+	}
+	if !looksLikeMilestoneDecl(artifact.Section{ID: "M-020", Title: "New era", Body: "**Milestone:** M-020"}) {
+		t.Error("fields-only body must read as a declaration")
+	}
+	if looksLikeMilestoneDecl(artifact.Section{ID: "M-020", Title: "X", Body: "Move the card to the top."}) {
+		t.Error("prose is work, whatever the id")
+	}
+}

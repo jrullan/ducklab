@@ -53,7 +53,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 			tasks = append(tasks, sec.Children...)
 		}
 		for _, t := range tasks {
-			if !strings.HasPrefix(strings.ToUpper(t.ID), "M-") {
+			if !looksLikeMilestoneDecl(t) {
 				real++
 			}
 		}
@@ -181,7 +181,7 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 	}
 
 	for _, t := range tasks {
-		if strings.HasPrefix(strings.ToUpper(t.ID), "M-") {
+		if looksLikeMilestoneDecl(t) {
 			real := resolveMilestone(t)
 			alias[strings.ToUpper(t.ID)] = real
 			lastDeclared = real
@@ -225,4 +225,25 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 		}
 	}
 	return &out
+}
+
+// looksLikeMilestoneDecl separates placement from work by the evidence, not
+// the id alone. The contract asks for T-900 headings, but an architect fused
+// its milestone and its task into one M- heading — carrying a full brief,
+// Implements, out-of-scope notes — and the id-only rule filed real work as a
+// declaration and refused the run. A declaration is a bare heading: empty
+// body, or field lines only. Prose is a brief, and a brief is a task,
+// whatever id the model dressed it in.
+func looksLikeMilestoneDecl(s artifact.Section) bool {
+	if !strings.HasPrefix(strings.ToUpper(s.ID), "M-") {
+		return false
+	}
+	for _, line := range strings.Split(s.Body, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "**") {
+			continue
+		}
+		return false // prose: this is work wearing the wrong id
+	}
+	return true
 }
