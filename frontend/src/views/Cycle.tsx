@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Artifact, Duckling, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
 import { assignDucklingColors } from "../lib/colors";
 import { tokens } from "../lib/format";
+import { loadChipFacts } from "../lib/chipfacts";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
@@ -912,6 +913,8 @@ function SeatChips({
 }) {
   const colors = assignDucklingColors(fleet);
   const [open, setOpen] = useState<number | null>(null);
+  // The person's own pick of facts, from appearance settings.
+  const facts = loadChipFacts();
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
       {entries.map((e, i) => {
@@ -958,12 +961,29 @@ function SeatChips({
             <span style={{ color: colors[e.duckling] }} className="font-medium">
               {e.duckling}
             </span>
-            {d?.caps?.context_tokens ? (
+            {facts.includes("context") && d?.caps?.context_tokens ? (
               <span className="text-ink-muted" title="context window">
                 {tokens(d.caps.context_tokens)}
               </span>
             ) : null}
-            {d?.caps?.vision && <span title="vision — can be shown images">👁️</span>}
+            {facts.includes("vision") && d?.caps?.vision && (
+              <span title="vision — can be shown images">👁️</span>
+            )}
+            {facts.includes("price") && d?.cost && (d.cost.input_per_mtok || d.cost.output_per_mtok) ? (
+              <span
+                className="text-ink-muted"
+                title="average of declared input/output cost per Mtok"
+                data-testid="chip-price"
+              >
+                ${(((d.cost.input_per_mtok ?? 0) + (d.cost.output_per_mtok ?? 0)) / 2).toFixed(2)}/M
+              </span>
+            ) : null}
+            {facts.includes("tools") && d?.caps?.native_tools && (
+              <span title="calls tools natively">🔧</span>
+            )}
+            {facts.includes("json") && d?.caps?.json_mode && (
+              <span className="text-ink-muted" title="has a JSON mode">{"{}"}</span>
+            )}
           </button>
         );
       })}

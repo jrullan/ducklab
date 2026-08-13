@@ -1047,3 +1047,43 @@ describe("picking a seat from its chip", () => {
     await waitFor(() => expect(sent).toEqual(["luna"]));
   });
 });
+
+// Which facts ride a chip is the person's own pick: "if what I care about is
+// vision and average price, the chip carries those two and nothing else."
+describe("chip facts follow the appearance preference", () => {
+  const PLAN5 = {
+    kind: "plan", version: 1, approved: true, markdown: "---\nkind: plan\n---\n",
+    sections: [{ id: "M-001", title: "Core", body: "", fields: {}, children: [{ id: "T-001", title: "S", body: "", fields: {} }] }],
+  };
+  const clientPriced = () =>
+    clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/plan") return json(PLAN5);
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [{ role: "architect", duckling: "luna", source: "project" }] });
+      if (p === "/v1/ducklings") return json({ items: [
+        { id: "luna", provider: "l", model: "l", caps: { native_tools: true, context_tokens: 1100000, vision: true }, cost: { input_per_mtok: 2, output_per_mtok: 4 } },
+      ] });
+      return json({ items: [] });
+    });
+
+  it("shows only the chosen facts", async () => {
+    localStorage.setItem("ducklab.chipfacts", JSON.stringify(["vision", "price"]));
+    render(<Cycle client={clientPriced()} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
+    const chip = (await waitFor(() => screen.getAllByTestId("seat-chip")))[0]!;
+    expect(chip.textContent).toContain("👁️");
+    expect(chip.textContent).toContain("$3.00/M"); // avg of 2 in / 4 out
+    expect(chip.textContent).not.toContain("1.1M"); // context unchecked
+    localStorage.removeItem("ducklab.chipfacts");
+  });
+
+  it("defaults to context and vision when nothing is saved", async () => {
+    localStorage.removeItem("ducklab.chipfacts");
+    render(<Cycle client={clientPriced()} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
+    const chip = (await waitFor(() => screen.getAllByTestId("seat-chip")))[0]!;
+    expect(chip.textContent).toContain("1.1M");
+    expect(chip.textContent).toContain("👁️");
+    expect(chip.textContent).not.toContain("/M$"); // no price by default
+  });
+});

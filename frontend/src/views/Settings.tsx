@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Ducklings } from "./Ducklings";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
+import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
@@ -146,6 +147,7 @@ export function Settings({
           ))}
         </div>
         <QuackToggle />
+        <ChipFactsPicker />
       </SettingsCard>
       </div>
 
@@ -821,3 +823,32 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   );
 }
 
+
+/** Which facts ride the seat chips — instant-save, like the theme: a display
+ * choice, not an engine setting. */
+function ChipFactsPicker() {
+  const [facts, setFacts] = useState<ChipFact[]>(() => loadChipFacts());
+  const toggle = (f: ChipFact) => {
+    const next = facts.includes(f) ? facts.filter((x) => x !== f) : [...facts, f];
+    setFacts(next);
+    saveChipFacts(next);
+  };
+  return (
+    <div className="mt-3" data-testid="chip-facts">
+      <div className="text-xs text-ink-muted">seat chips show</div>
+      <div className="mt-1 flex flex-wrap gap-3">
+        {CHIP_FACTS.map((c) => (
+          <label key={c.id} className="flex items-center gap-1 text-sm text-ink-secondary" title={c.hint}>
+            <input
+              type="checkbox"
+              data-testid={`chip-fact-${c.id}`}
+              checked={facts.includes(c.id)}
+              onChange={() => toggle(c.id)}
+            />
+            {c.label}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
