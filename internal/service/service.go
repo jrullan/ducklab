@@ -2470,6 +2470,15 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			"tool": name, "args": string(args),
 		})
 	}
+	// Where the reply stands against its cap, as it moves. The card read
+	// "default" while an architect sat at 19 calls of an invisible 24.
+	cache.onCall = func(t *agent.Turn, n, max int) {
+		rs.writer.AppendEvent("reply_call", map[string]interface{}{
+			"round": t.Round, "turn": t.Index,
+			"role": string(t.Role), "duckling": string(t.Duckling),
+			"n": n, "max": max,
+		})
+	}
 	// In time to act: the reply is about to spend its last allowed call,
 	// and the lift that could save it sits one tick away in the budget card.
 	cache.onCapNear = func(t *agent.Turn, used, max int) {

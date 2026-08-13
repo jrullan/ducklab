@@ -204,6 +204,7 @@ export const KNOWN_EVENT_TYPES = [
   "gate",
   "round_gate",
   "gate_started",
+  "reply_call",
   "gate_resolved",
   "message",
   "proposal",

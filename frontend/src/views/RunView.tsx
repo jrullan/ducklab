@@ -1286,8 +1286,23 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 >
                   <span>calls / reply</span>
                   <span className="flex items-baseline gap-2">
-                    <span className="tabular-nums">
-                      {run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default"}
+                    {/* Live: where the CURRENT reply stands against its real
+                        cap, from the loop's own count — the only thing that
+                        knows both numbers. At rest: the configured shape. */}
+                    <span className="tabular-nums" data-testid="calls-cap-value">
+                      {(() => {
+                        if (liveNow) {
+                          for (let i = events.length - 1; i >= 0; i--) {
+                            const e = events[i]!;
+                            if (e.type === "reply_call") {
+                              const d = e.data as { n?: number; max?: number };
+                              const max = d.max ?? 0;
+                              return `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
+                            }
+                          }
+                        }
+                        return run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default";
+                      })()}
                     </span>
                     {canLift && (
                       <label

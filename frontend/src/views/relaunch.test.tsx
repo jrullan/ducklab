@@ -347,6 +347,52 @@ describe("hiding the run rail", () => {
 // the task whose failed run you are LOOKING AT meant leaving for Work →
 // Tasks and finding it again. The card now carries the engine's own next
 // actions — remove appears exactly when the engine would allow it.
+describe("the calls/reply row", () => {
+  // "default" while the architect sat at 19 calls of an invisible 24 — the
+  // loop's own count now rides the card while the run is live.
+  it("shows the live count against the real cap", async () => {
+    const running = {
+      ...failed, status: "running" as const, verdict: "",
+      budget: { usd: 0.1, tokens: 700000, turns: 1, wallclock_s: 60,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    };
+    useRuns.setState({
+      runs: { "r-1": running },
+      events: { "r-1": [
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24 } },
+      ] as never },
+      deltas: {}, reasoning: {}, spend: {},
+    });
+    render(<RunView runId="r-1" client={clientWith({
+      run: vi.fn(() => Promise.resolve({ run: running, events: [
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24 } },
+      ] })),
+    } as Partial<EngineClient>)} />);
+    await waitFor(() => expect(screen.getByTestId("calls-cap-value").textContent).toBe("19 / 24"));
+  });
+
+  it("says no cap when the loop runs lifted", async () => {
+    const running = {
+      ...failed, status: "running" as const, verdict: "",
+      budget: { usd: 0.1, tokens: 700000, turns: 1, wallclock_s: 60,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    };
+    useRuns.setState({
+      runs: { "r-1": running },
+      events: { "r-1": [
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 31, max: 10000 } },
+      ] as never },
+      deltas: {}, reasoning: {}, spend: {},
+    });
+    render(<RunView runId="r-1" client={clientWith({
+      run: vi.fn(() => Promise.resolve({ run: running, events: [
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 31, max: 10000 } },
+      ] })),
+    } as Partial<EngineClient>)} />);
+    await waitFor(() => expect(screen.getByTestId("calls-cap-value").textContent).toBe("31 / no cap"));
+  });
+});
+
 describe("the run header names the task", () => {
   // The header said "T-015" and the WHY lived a scan away in the card. The
   // title rides the header now, truncated, whole on hover.

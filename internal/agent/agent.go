@@ -113,6 +113,11 @@ type Loop struct {
 	// so a thirty-call implementer turn showed an empty timeline for its
 	// entire length and then eighty ticks at once.
 	OnToolCall func(turn *Turn, duckling string, rec *ToolCallRecord)
+	// OnCall, if set, fires as each model call of a reply begins, with the
+	// call number and the effective cap. The budget card read "default"
+	// while an architect sat at 19 calls of an invisible 24 — the loop is
+	// the only thing that knows both numbers.
+	OnCall func(turn *Turn, n, max int)
 	// OnCapNear, if set, fires once as a reply is about to spend its LAST
 	// allowed model call. The person watching can lift the cap live (the
 	// budget card's calls/reply "no cap"), but only if they learn in time —
@@ -221,6 +226,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		}
 		if turnNum == maxTurns && maxTurns < UncappedTurns && loop.OnCapNear != nil {
 			loop.OnCapNear(turn, turnNum-1, maxTurns)
+		}
+		if loop.OnCall != nil {
+			loop.OnCall(turn, turnNum, maxTurns)
 		}
 
 		// Budget check
