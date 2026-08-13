@@ -7,10 +7,10 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Wails serves this path inside the desktop webview only; it attaches
-         window.wails (Call.ByName), which every native binding checks for.
-         In a browser or vite dev it 404s and those features report absent. -->
-    <script src="/wails/runtime.js"></script>
+    <!-- The Wails runtime (/wails/runtime.js) is loaded from main.tsx via a
+         dynamic import: it is an ES module — a classic script tag here died
+         parsing its `export` line and executed nothing — and a static module
+         tag would make vite try to resolve a path only the desktop serves. -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
