@@ -578,23 +578,6 @@ func TestPlanExtendNeedsAPlanToAmend(t *testing.T) {
 	}
 }
 
-// The note IS the amendment's contract; the architect never sees our code.
-func TestTheAmendmentNoteStatesTheContract(t *testing.T) {
-	note := planExtendNote("add a CSV export")
-	for _, must := range []string{
-		"WITHOUT a redesign",
-		"add a CSV export",
-		"one to three",
-		"spec-debt",
-		"Never invent section ids",
-		"add NOTHING",
-		"feature brief",
-	} {
-		if !strings.Contains(note, must) {
-			t.Errorf("the note lost %q", must)
-		}
-	}
-}
 
 // The amendment's toll, computed: a task no spec section covers wears the
 // marker; wired tasks and bug-born tasks do not; a spec-less project owes

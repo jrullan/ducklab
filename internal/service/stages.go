@@ -95,6 +95,9 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	}
 
 	// The plan amendment: Review's "this needs more, but not a redesign".
+	// Solo and one round unless asked otherwise: the architect returns a
+	// fragment the engine merges, and a council re-reading a hundred-task
+	// outline to add two tasks is cost without judgment.
 	if strings.TrimSpace(req.Extend) != "" {
 		if req.Stage != "plan" {
 			return nil, fmt.Errorf("extend amends the plan; %s grows through a brief", req.Stage)
@@ -104,7 +107,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 			return nil, fmt.Errorf("no plan to extend yet — the design cycle creates it; " +
 				"describe what to build in a brief instead")
 		}
-		req.Revise = planExtendNote(req.Extend)
+		if req.Mode == "" {
+			req.Mode = "solo"
+		}
+		if req.Rounds == 0 {
+			req.Rounds = 1
+		}
 	}
 
 	// A first plan over a fully as-built spec has nothing to plan: every
@@ -310,6 +318,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
 		Adopt:       req.Adopt,
+		Extend:      req.Extend,
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
@@ -1144,23 +1153,6 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 	return status, blocked, testReady, failedStage, pinned
 }
 
-// planExtendNote frames a small extension as a plan revision. The rules are
-// the amendment's whole contract: fewest tasks, honest Implements wiring,
-// and a refusal-by-empty-diff when the change is really a requirements
-// change wearing a small hat.
-func planExtendNote(change string) string {
-	return "Extend the plan for this change, WITHOUT a redesign:\n\n" +
-		strings.TrimSpace(change) + "\n\n" +
-		"Rules for this extension:\n" +
-		"- Add the fewest tasks that deliver it — one to three — under the milestone " +
-		"that fits, or a new final milestone when none does.\n" +
-		"- Wire each new task's **Implements:** to existing SPEC sections ONLY where they " +
-		"genuinely cover the change. A task nothing covers carries no Implements line — it " +
-		"will wear a spec-debt marker until the spec catches up. Never invent section ids.\n" +
-		"- If this change alters what the product IS — its requirements — add NOTHING and " +
-		"return the document exactly as given: the empty diff tells the person to write a " +
-		"feature brief instead."
-}
 
 // taskSpecDebt: covered by no existing spec section, and not a bug's task.
 // A project with no spec at all owes none — there is nothing to be behind.

@@ -69,6 +69,12 @@ type Params struct {
 	// Adopt turns intake into a survey of the existing tree: requirements for
 	// what the code ALREADY satisfies, not an interview about an idea.
 	Adopt bool
+	// Extend is the plan amendment: the architect returns ONLY the new task
+	// sections and the engine merges them — a fragment by contract, because
+	// re-emitting a hundred-task plan to add two tasks made a cosmetic
+	// amendment cost thirty thousand prompt tokens a call and bet the whole
+	// document on the model not truncating it.
+	Extend string
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)
@@ -103,6 +109,9 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	current, err := artifact.Load(p.ProjectRoot, kind)
 	if err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(p.Extend) != "" {
+		return runExtend(ctx, p, current)
 	}
 	// A revision works from the draft that was actually shown, which is the
 	// proposal when one is pending. Revising the accepted version instead
