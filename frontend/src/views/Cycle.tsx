@@ -49,6 +49,10 @@ export function Cycle({
   // The plan amendment's text — Review's light exit, separate from the brief
   // so the two doors never share a box.
   const [amendment, setAmendment] = useState("");
+  // How many tasks the spec has not caught up with — the settle button's
+  // number, fetched with the artifact so the spec tab can offer the one-click
+  // repayment without the person counting markers on the board.
+  const [debtCount, setDebtCount] = useState(0);
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState("council");
   const [rounds, setRounds] = useState(2);
@@ -91,6 +95,15 @@ export function Cycle({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    // Deferred a tick so a partial test client without tasks() rejects
+    // instead of throwing synchronously in the effect.
+    Promise.resolve()
+      .then(() => client.tasks(projectId))
+      .then((ts) => setDebtCount(ts.filter((t) => t.spec_debt).length))
+      .catch(() => setDebtCount(0));
+  }, [client, projectId, startedRun]);
 
   // Who will actually do it. A button that says only "Draft it" hides the two
   // things worth knowing before spending minutes and tokens: which models, and
@@ -466,6 +479,32 @@ export function Cycle({
                   ? "Reads the accepted requirements and proposes a specification."
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
+            )}
+            {active.stage === "spec" && debtCount > 0 && (
+              <div className="mb-3 rounded-card border border-hairline p-2" data-testid="spec-settle">
+                <p className="mb-1 text-xs text-ink-muted">
+                  {debtCount} task(s) wear spec-debt: the plan grew without a redesign and the spec
+                  has not caught up. One click — the engine assembles the revision from the debt
+                  itself; you accept the diff at the gate, and the markers come off.
+                </p>
+                <button
+                  type="button"
+                  data-testid="spec-settle-start"
+                  disabled={starting}
+                  onClick={() => {
+                    setStarting(true);
+                    setFailure(null);
+                    void client
+                      .stageStart(projectId, "spec", { settle: true })
+                      .then((run) => setStartedRun(run.id))
+                      .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                      .finally(() => setStarting(false));
+                  }}
+                  className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+                >
+                  Settle spec-debt ({debtCount})
+                </button>
+              </div>
             )}
             {active.stage === "plan" && sections.length > 0 && (
               <div className="mb-3 rounded-card border border-hairline p-2" data-testid="plan-extend">

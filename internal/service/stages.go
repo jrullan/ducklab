@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,11 @@ type StageRequest struct {
 	// this one", which is the answer to a proposal that is almost right.
 	Revise   string `json:"revise"`
 	Autonomy string `json:"autonomy"`
+	// Settle is the spec-debt eraser: a spec revision documenting, as built,
+	// the amendment tasks no section covers — each gaining a Covers: field
+	// the engine wires back into the plan on accept. The person never writes
+	// this prompt; the engine assembles it from the debt itself.
+	Settle bool `json:"settle,omitempty"`
 	// Extend is the light path out of Review: a small change that deserves
 	// tasks but not a redesign. It runs as a plan revision — the architect
 	// adds the fewest tasks that deliver it, wiring Implements: to existing
@@ -67,6 +73,27 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// The debt settle: one click, no prose — the engine knows what is owed.
+	if req.Settle {
+		if req.Stage != "spec" {
+			return nil, fmt.Errorf("settle teaches the SPEC what was built; %s has no debt to settle", req.Stage)
+		}
+		tasks, tErr := s.TaskList(ctx, projectID)
+		if tErr != nil {
+			return nil, tErr
+		}
+		var debt []TaskView
+		for _, t := range tasks {
+			if t.SpecDebt {
+				debt = append(debt, t)
+			}
+		}
+		if len(debt) == 0 {
+			return nil, fmt.Errorf("no task wears spec-debt — there is nothing to settle")
+		}
+		req.Revise = specSettleNote(debt)
+	}
+
 	// The plan amendment: Review's "this needs more, but not a redesign".
 	if strings.TrimSpace(req.Extend) != "" {
 		if req.Stage != "plan" {
@@ -479,6 +506,13 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	// three of them had accumulated on the timesheet project, each still
 	// claiming to be waiting for an answer that had been given hours before.
 	s.resolveStageRun(runID, approvedBy)
+	// The settle's other half: Covers: fields in the accepted spec wire the
+	// named tasks' Implements in the plan, and the spec-debt markers come
+	// off because the coverage is now real and human-approved.
+	var wired map[string][]string
+	if artifact.Kind(kind) == artifact.KindSpec {
+		wired = wireCoveredTasks(entry.Path)
+	}
 	// The trace check runs on promotion, not on demand: an artifact accepted
 	// into a broken spine should say so immediately, while the person who
 	// accepted it is still looking.
@@ -488,7 +522,11 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	}
 	// The proposal has just been consumed, so this reads approved artifacts —
 	// which is what a report about what was accepted should read.
-	return map[string]interface{}{"promoted": kind, "trace_errors": res.Errors}, nil
+	out := map[string]interface{}{"promoted": kind, "trace_errors": res.Errors}
+	if len(wired) > 0 {
+		out["wired"] = wired
+	}
+	return out, nil
 }
 
 // resolveStageRun marks the run behind an accepted artifact as finished.
@@ -1136,4 +1174,107 @@ func taskSpecDebt(taskID string, implements []string, specIDs, bugTasks map[stri
 		}
 	}
 	return true
+}
+
+// specSettleNote frames the debt as a spec revision. The Covers: field is the
+// contract's return path: on accept, the engine wires each named task's
+// Implements back in the plan, and the marker comes off by itself.
+func specSettleNote(debt []TaskView) string {
+	var b strings.Builder
+	b.WriteString("Teach this specification what was already built, WITHOUT redesigning it.\n\n")
+	b.WriteString("These plan tasks are covered by no spec section (spec-debt):\n\n")
+	for _, t := range debt {
+		fmt.Fprintf(&b, "- %s — %s\n", t.ID, t.Title)
+		if body := strings.TrimSpace(t.Body); body != "" {
+			if len(body) > 400 {
+				body = body[:400] + "…"
+			}
+			fmt.Fprintf(&b, "  %s\n", strings.ReplaceAll(body, "\n", "\n  "))
+		}
+	}
+	b.WriteString("\nRules for this settlement:\n" +
+		"- Add or extend the FEWEST sections that honestly describe the behaviour these tasks " +
+		"deliver. Describe what IS built — invent nothing aspirational.\n" +
+		"- Mark each such section **As-built:** yes, and give it **Covers:** naming the task " +
+		"ids it covers (e.g. Covers: T-110, T-112).\n" +
+		"- Every other section comes back exactly as it is, same id, same wording.\n")
+	return b.String()
+}
+
+// wireCoveredTasks reads the approved spec's Covers: fields and writes the
+// named tasks' Implements in the plan. The settle run's other half: the
+// architect declared coverage in the document a person accepted; the wiring
+// is mechanical and the marker comes off because the coverage is real.
+func wireCoveredTasks(projectRoot string) map[string][]string {
+	spec, err := artifact.Load(projectRoot, artifact.KindSpec)
+	if err != nil || spec == nil {
+		return nil
+	}
+	covers := map[string][]string{}
+	var walk func(secs []artifact.Section)
+	walk = func(secs []artifact.Section) {
+		for _, sp := range secs {
+			for _, taskID := range splitList(sp.Field("covers")) {
+				covers[taskID] = append(covers[taskID], sp.ID)
+			}
+			walk(sp.Children)
+		}
+	}
+	walk(spec.Sections)
+	if len(covers) == 0 {
+		return nil
+	}
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil || plan == nil {
+		return nil
+	}
+	wired := map[string][]string{}
+	changed := false
+	for mi := range plan.Sections {
+		for ti := range plan.Sections[mi].Children {
+			t := &plan.Sections[mi].Children[ti]
+			var add []string
+			for _, specID := range covers[t.ID] {
+				if !slices.Contains(t.Implements, specID) {
+					add = append(add, specID)
+				}
+			}
+			if len(add) == 0 {
+				continue
+			}
+			// The edge lives as a `**Implements:**` line in the section's
+			// body text — Render re-emits bodies verbatim, so the body is
+			// what must change, not the parsed slice beside it.
+			lines := strings.Split(t.Body, "\n")
+			placed := false
+			for i, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "**Implements:**") {
+					lines[i] = strings.TrimRight(line, " ") + ", " + strings.Join(add, ", ")
+					placed = true
+					break
+				}
+			}
+			if placed {
+				t.Body = strings.Join(lines, "\n")
+			} else {
+				line := "**Implements:** " + strings.Join(add, ", ")
+				if strings.TrimSpace(t.Body) == "" {
+					t.Body = line
+				} else {
+					t.Body = line + "\n\n" + t.Body
+				}
+			}
+			t.Implements = append(t.Implements, add...)
+			wired[t.ID] = add
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
+		[]byte(artifact.Render(plan)), 0o644); err != nil {
+		return nil
+	}
+	return wired
 }

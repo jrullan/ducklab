@@ -618,3 +618,68 @@ func TestSpecDebtMarksOnlyTheUncovered(t *testing.T) {
 		t.Error("a project with no spec owes none")
 	}
 }
+
+// The settle prompt is assembled BY THE ENGINE from the debt itself — the
+// person clicks, never writes. Its contract: honest as-built sections, a
+// Covers: field per section, everything else untouched.
+func TestTheSettleNoteNamesTheDebtAndTheContract(t *testing.T) {
+	note := specSettleNote([]TaskView{
+		{ID: "T-110", Title: "Weight indicator format", Body: "Fixes the sign."},
+		{ID: "T-112", Title: "CSV export"},
+	})
+	for _, must := range []string{
+		"WITHOUT redesigning",
+		"T-110 — Weight indicator format",
+		"T-112 — CSV export",
+		"As-built:",
+		"Covers:",
+		"invent nothing aspirational",
+		"exactly as it is",
+	} {
+		if !strings.Contains(note, must) {
+			t.Errorf("the note lost %q", must)
+		}
+	}
+}
+
+// The settle's other half: the accepted spec's Covers: fields wire the named
+// tasks' Implements in the plan — mechanically, because a person accepted the
+// document that declares the coverage. The marker comes off by consequence.
+func TestAcceptedCoversFieldsWireThePlan(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Core\n\n### T-110 — Weight indicator\n\nFix the sign.\n\n### T-111 — Wired already\n\n**Implements:** SPEC-001\n\nDone.\n"
+	spec := "## SPEC-001 — Snapshot\n\nShows weight.\n\n## SPEC-009 — Weight indicator format\n\n**As-built:** yes\n**Covers:** T-110\n\nSigned one-decimal pounds.\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindSpec), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wired := wireCoveredTasks(dir)
+	if got := wired["T-110"]; len(got) != 1 || got[0] != "SPEC-009" {
+		t.Fatalf("T-110 wired = %v, want [SPEC-009]", wired)
+	}
+	after, err := artifact.Load(dir, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var t110 *artifact.Section
+	for i := range after.Sections {
+		for j := range after.Sections[i].Children {
+			if after.Sections[i].Children[j].ID == "T-110" {
+				t110 = &after.Sections[i].Children[j]
+			}
+		}
+	}
+	if t110 == nil || len(t110.Implements) != 1 || t110.Implements[0] != "SPEC-009" {
+		t.Errorf("the plan on disk does not carry the wiring: %+v", t110)
+	}
+	// Idempotent: promoting the same spec twice adds nothing twice.
+	if again := wireCoveredTasks(dir); again != nil {
+		t.Errorf("a second promotion re-wired: %v", again)
+	}
+}

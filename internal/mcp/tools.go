@@ -116,6 +116,16 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "change"),
 		},
 		{
+			"name": "spec_settle",
+			"description": "Erase spec-debt: a spec revision documents, as built, the tasks no " +
+				"section covers. The engine assembles the prompt from the debt itself — no text " +
+				"needed. On the human's accept, Covers: fields wire the plan and the markers come " +
+				"off. Use when task_list or the guide reports spec-debt.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+			}, "project_id"),
+		},
+		{
 			"name":        "bug_report",
 			"description": "File a bug. Attach screenshots with bug_attach, then bug_triage classifies it, bug_promote turns it into a task, and test_build builds the fix.",
 			"inputSchema": obj(map[string]interface{}{
@@ -316,6 +326,13 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 	case "plan_extend":
 		run, err := s.eng.StageStart(a.str("project_id"), "plan",
 			map[string]interface{}{"extend": a.str("change")})
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(run), nil
+	case "spec_settle":
+		run, err := s.eng.StageStart(a.str("project_id"), "spec",
+			map[string]interface{}{"settle": true})
 		if err != nil {
 			return nil, err
 		}

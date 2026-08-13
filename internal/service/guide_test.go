@@ -200,3 +200,31 @@ func TestBrokenConfigOutranksEverything(t *testing.T) {
 		t.Errorf("the reason does not carry the parse error: %q", steps[0].Reason)
 	}
 }
+
+// The amendment's toll is the guide's business: the person should learn the
+// spec fell behind from the rail, not from counting markers on the board —
+// and clicking through lands where settling is one button.
+func TestTheGuideSurfacesSpecDebt(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Tasks: []TaskView{
+			{ID: "T-110", Status: "accepted", SpecDebt: true},
+			{ID: "T-111", Status: "accepted"},
+		},
+	})
+	found := false
+	for _, st := range steps {
+		if st.ID == "spec-debt" {
+			found = true
+			if st.Ref != "spec" || st.Kind != "stage" {
+				t.Errorf("the debt step must land on the spec stage: %+v", st)
+			}
+			if !strings.Contains(st.Action, "1 task(s)") {
+				t.Errorf("the step does not count the debt: %q", st.Action)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no spec-debt step in %v", ids(steps))
+	}
+}

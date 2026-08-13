@@ -13,6 +13,7 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	settled []string
 	extended []string
 	testThenBuild bool
 	testNote      string
@@ -63,6 +64,9 @@ func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (ma
 	f.revised = append(f.revised, fmt.Sprint(req["revise"]))
 	if ext, ok := req["extend"].(string); ok && ext != "" {
 		f.extended = append(f.extended, ext)
+	}
+	if settle, _ := req["settle"].(bool); settle {
+		f.settled = append(f.settled, stage)
 	}
 	return map[string]interface{}{"id": "r-rev"}, nil
 }
@@ -412,5 +416,21 @@ func TestPlanExtendReachesTheEngine(t *testing.T) {
 	}
 	if len(eng.extended) != 1 || eng.extended[0] != "add CSV export" {
 		t.Errorf("the change did not reach the engine's extend field: %v", eng.extended)
+	}
+}
+
+// Settling remotely takes no prose: the tool sends the click and the engine
+// assembles the revision from the debt itself.
+func TestSpecSettleIsOneCall(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"spec_settle","arguments":{"project_id":"p"}}}`,
+	)
+	if resps[1]["error"] != nil {
+		t.Fatalf("spec_settle errored: %v", resps[1]["error"])
+	}
+	if len(eng.settled) != 1 || eng.settled[0] != "spec" {
+		t.Errorf("settle did not reach the spec stage: %v", eng.settled)
 	}
 }

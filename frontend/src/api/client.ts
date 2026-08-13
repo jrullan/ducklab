@@ -870,7 +870,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -885,6 +885,9 @@ export class EngineClient {
       // Plan only: the light path out of review — an architect amends the
       // plan for a small change instead of running the whole design cycle.
       extend: opts.extend ?? "",
+      // Spec only: settle spec-debt — the engine assembles the revision
+      // prompt from the debt itself, so the person clicks instead of writing.
+      settle: opts.settle ?? false,
       mode: opts.mode ?? "",
       rounds: opts.rounds ?? 0,
       stream: true,

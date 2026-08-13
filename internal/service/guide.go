@@ -134,6 +134,19 @@ func nextSteps(st projectSnapshot) []NextStep {
 		}
 	}
 
+	// 4b. The amendment's toll, surfaced where it gets settled. After the
+	// buildable work on purpose: build the change first, document it after.
+	// Clicking through lands on the Cycle spec tab, where settling is one
+	// button — the person never writes the maintenance prompt.
+	if n := specDebtCount(st.Tasks); n > 0 {
+		out = append(out, NextStep{
+			ID:     "spec-debt",
+			Action: fmt.Sprintf("Teach the spec what was built — %d task(s) wear spec-debt", n),
+			Reason: "the plan grew without a redesign; the spec has not caught up",
+			Kind:   "stage", Ref: "spec",
+		})
+	}
+
 	// 5. Quiet project: everything accepted, inbox empty.
 	if len(out) == 0 {
 		out = append(out, NextStep{
@@ -322,4 +335,15 @@ func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
 		return "", 0, false
 	}
 	return verdict, findings, true
+}
+
+// specDebtCount: how many tasks the spec has not caught up with.
+func specDebtCount(tasks []TaskView) int {
+	n := 0
+	for _, t := range tasks {
+		if t.SpecDebt {
+			n++
+		}
+	}
+	return n
 }

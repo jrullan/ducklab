@@ -401,6 +401,12 @@ roles under engineering discipline. Its laws:
   plan -> tasks -> test-first builds -> review -> bugs -> release. Documents
   are drafted by model councils and APPROVED BY THE HUMAN; nothing is
   written into the approved set without a person accepting it.
+- Review's light exit: a small, NON-CORE change amends the plan directly
+  (the Cycle plan tab's "Amend the plan", or plan_extend) — one to three
+  tasks, no redesign. Tasks no spec section covers wear a spec-debt marker;
+  a one-click settle run (Cycle spec tab, or spec_settle) teaches the spec
+  what was built and the markers come off on accept. Changes that alter what
+  the product IS still go through a brief.
 - Test-first: for a task, a model writes the failing test first; it lands
   red and is committed; the build then runs against it. The chain is one
   authorization.

@@ -880,3 +880,41 @@ describe("the plan amendment", () => {
     expect(screen.queryByTestId("plan-extend")).toBeNull();
   });
 });
+
+// Settling the debt is one click, not an essay: the engine assembles the
+// revision from the debt itself; the person's job is the diff at the gate.
+describe("the spec-debt settle button", () => {
+  it("appears with the count and posts settle", async () => {
+    let settleSent = false;
+    const client = clientWith((p, init) => {
+      if (p === "/v1/projects/p/artifacts/spec") return json({ kind: "spec", sections: [{ id: "SPEC-001", title: "S", body: "", fields: {} }] });
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p === "/v1/projects/p/tasks") return json({ items: [
+        { id: "T-110", title: "t", milestone: "M-001", status: "accepted", spec_debt: true },
+        { id: "T-111", title: "t2", milestone: "M-001", status: "accepted" },
+      ] });
+      if (p === "/v1/projects/p/stages/spec" && init?.method === "POST") {
+        settleSent = Boolean(JSON.parse(String(init.body)).settle);
+        return json({ id: "r-settle", status: "running" });
+      }
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" />);
+    const btn = await waitFor(() => screen.getByTestId("spec-settle-start"));
+    expect(btn.textContent).toContain("(1)");
+    fireEvent.click(btn);
+    await waitFor(() => expect(settleSent).toBe(true));
+  });
+
+  it("stays away when nothing owes the spec", async () => {
+    const client = clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/spec") return json({ kind: "spec", sections: [] });
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p === "/v1/projects/p/tasks") return json({ items: [{ id: "T-110", title: "t", milestone: "M", status: "accepted" }] });
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" />);
+    await waitFor(() => screen.getByTestId("cycle-view"));
+    expect(screen.queryByTestId("spec-settle")).toBeNull();
+  });
+});
