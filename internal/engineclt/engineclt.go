@@ -324,10 +324,10 @@ func (c *Client) DucklingRemove(id string) error {
 }
 
 // TestStart writes the failing test for a task.
-func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild, redo bool) (map[string]interface{}, error) {
+func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
 	var result map[string]interface{}
 	err := c.post("/v1/projects/"+projectID+"/tests",
-		map[string]interface{}{"task_id": taskID, "duckling": duckling, "then_build": thenBuild, "redo": redo}, &result)
+		map[string]interface{}{"task_id": taskID, "duckling": duckling, "then_build": thenBuild, "redo": redo, "note": note}, &result)
 	return result, err
 }
 

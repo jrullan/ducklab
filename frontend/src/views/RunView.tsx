@@ -630,13 +630,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {relaunchCaveat && !anyway ? (
             <p className="text-sm text-ink-muted" data-testid="relaunch-done">
               {relaunchCaveat}{" "}
+              {/* Says what it does: it UNFOLDS the launcher — mode, seats,
+                  and the note that carries the new expectations. Labelled
+                  "run it anyway" it read as fire-without-setup, so the person
+                  who most needed the note never clicked to find it. */}
               <button
                 type="button"
                 onClick={() => setAnyway(true)}
                 data-testid="relaunch-anyway"
                 className="text-ink underline"
               >
-                run it anyway
+                set up the rerun →
               </button>
             </p>
           ) : (

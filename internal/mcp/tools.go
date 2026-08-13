@@ -83,7 +83,7 @@ func toolList() []map[string]interface{} {
 			"name": "run_start",
 			"description": "Build a task WITHOUT the test-first discipline — an exception, not the " +
 				"ordinary path. When the human says to run, start or build a task, they mean " +
-				"test_start (the TDD chain); use run_start only when they explicitly ask to skip " +
+				"test_build (the TDD chain); use run_start only when they explicitly ask to skip " +
 				"the test. Mode defaults to the project's habit; solo|pair|tournament|split.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
@@ -105,7 +105,7 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "bug_report",
-			"description": "File a bug. Attach screenshots with bug_attach, then bug_triage classifies it, bug_promote turns it into a task, and test_start builds the fix.",
+			"description": "File a bug. Attach screenshots with bug_attach, then bug_triage classifies it, bug_promote turns it into a task, and test_build builds the fix.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"title":      str("one line"),
@@ -175,15 +175,27 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "action"),
 		},
 		{
-			"name": "test_start",
-			"description": "The TDD chain for a task: a model writes the FAILING test first; it lands red, " +
-				"is committed, and the build runs against it. then_build defaults true — one authorization, " +
-				"decided at the build's gate with the committed test in the diff. This is the primary way " +
-				"to build a task; run_start alone skips the test discipline.",
+			"name": "test_build",
+			"description": "The ordinary way to build a task: a model writes the FAILING test first; it " +
+				"lands red, is committed, and the build runs against it — one authorization, decided at " +
+				"the build's gate with the committed test in the diff. When the human says to run, start " +
+				"or build a task, they mean this.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"task_id":    str("a startable task, T-..."),
-				"then_build": map[string]interface{}{"type": "boolean", "description": "chain the build when the test lands red (default true)"},
+				"note":       noteProp(),
+				"redo":       redoProp(),
+			}, "project_id", "task_id"),
+		},
+		{
+			"name": "test_only",
+			"description": "Write the failing test for a task and STOP — no build chained. The red test " +
+				"pauses for the human's accept; the build is launched separately later. Use only when " +
+				"the human asked for the test alone; test_build is the ordinary path.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"task_id":    str("a startable task, T-..."),
+				"note":       noteProp(),
 				"redo":       redoProp(),
 			}, "project_id", "task_id"),
 		},
@@ -392,13 +404,15 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		default:
 			return nil, fmt.Errorf("action must be status, start or stop")
 		}
-	case "test_start":
-		then := true
+	case "test_build", "test_only", "test_start":
+		// test_start survives unlisted as an alias: the operator's own skill
+		// notes may still name it, and "unknown tool" teaches nothing.
+		then := name != "test_only"
 		if v, ok := a["then_build"].(bool); ok {
 			then = v
 		}
 		redo, _ := a["redo"].(bool)
-		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then, redo)
+		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then, redo, a.str("note"))
 		if err != nil {
 			return nil, err
 		}
@@ -547,5 +561,16 @@ func redoProp() map[string]interface{} {
 		"description": "REQUIRED to launch a task that was already accepted. The engine refuses " +
 			"finished tasks otherwise: their work is committed, and a fresh run would redo it. " +
 			"Only set true when a human has explicitly asked to redo the task.",
+	}
+}
+
+// noteProp is the schema for the launch note — the channel for what only the
+// launcher knows now: new expectations on a redo, the cause of the failure
+// being retried. It rides the test-writer's prompt.
+func noteProp() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "string",
+		"description": "Context for the model doing the work — e.g. why the previous attempt missed " +
+			"expectations, or what the human just clarified. Always pass it on a redo.",
 	}
 }

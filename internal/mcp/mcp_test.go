@@ -13,6 +13,8 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	testThenBuild bool
+	testNote      string
 	tasks []map[string]interface{}
 	runs       map[string]map[string]interface{}
 	accepted   []string
@@ -251,7 +253,8 @@ func (f *fakeEngine) AppStart(projectID string) (map[string]interface{}, error) 
 
 func (f *fakeEngine) AppStop(projectID string) error { return nil }
 
-func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild, redo bool) (map[string]interface{}, error) {
+func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
+	f.testThenBuild, f.testNote = thenBuild, note
 	return map[string]interface{}{"id": "r-test"}, nil
 }
 
@@ -266,6 +269,7 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bug_attach","arguments":{"project_id":"p","bug_id":"B-001","filename":"shot.png","data_base64":"aGk="}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"bug_triage","arguments":{"project_id":"p","bug_id":"B-001"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"bug_promote","arguments":{"project_id":"p","bug_id":"B-001"}}}`,
+		// test_start is the old name, kept as an unlisted alias — this call IS the pin for it.
 		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"test_start","arguments":{"project_id":"p","task_id":"T-100"}}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"bug_move","arguments":{"project_id":"p","bug_id":"B-001","status":"verified"}}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"app","arguments":{"project_id":"p","action":"start"}}}`,
@@ -281,7 +285,7 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 	)
 	blob, _ := json.Marshal(listResp[1])
-	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_start", "bug_list", "\"app\""} {
+	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_build", "test_only", "bug_list", "\"app\""} {
 		if !strings.Contains(string(blob), must) {
 			t.Errorf("tools/list is missing %q", must)
 		}
@@ -362,5 +366,30 @@ func TestTaskListIsCompactWithTheSummaryFirst(t *testing.T) {
 	}
 	if len(text) > 2000 {
 		t.Errorf("listing is %d bytes for two tasks; it would not survive a truncating harness", len(text))
+	}
+}
+
+// "test_first vs test_start" — neither name says whether a build follows,
+// and the operator guessing wrong launches the wrong thing. The names now
+// state the shape: test_build chains the build, test_only stops at the red
+// test, and both carry the note that a redo's new expectations ride in.
+func TestTheTestToolsSayWhatTheyChain(t *testing.T) {
+	eng := &fakeEngine{}
+	drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_only","arguments":{"project_id":"p","task_id":"T-110","note":"the indicator must read {+/-}#.# lbs"}}}`,
+	)
+	if eng.testThenBuild {
+		t.Error("test_only chained a build")
+	}
+	if eng.testNote != "the indicator must read {+/-}#.# lbs" {
+		t.Errorf("the note did not ride through: %q", eng.testNote)
+	}
+	drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_build","arguments":{"project_id":"p","task_id":"T-110"}}}`,
+	)
+	if !eng.testThenBuild {
+		t.Error("test_build did not chain the build")
 	}
 }

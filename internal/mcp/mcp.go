@@ -43,7 +43,7 @@ type Engine interface {
 	BugTriage(projectID, bugID string) (map[string]interface{}, error)
 	BugPromote(projectID, bugID, actor string) (map[string]interface{}, error)
 	BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error)
-	TestStart(projectID, taskID, duckling string, thenBuild, redo bool) (map[string]interface{}, error)
+	TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error)
 	AppStatus(projectID string) (map[string]interface{}, error)
 	AppStart(projectID string) (map[string]interface{}, error)
 	AppStop(projectID string) error
