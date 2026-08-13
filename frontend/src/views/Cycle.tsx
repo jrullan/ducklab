@@ -10,7 +10,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Artifact, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
+import type { Artifact, Duckling, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
+import { assignDucklingColors } from "../lib/colors";
+import { tokens } from "../lib/format";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
@@ -52,23 +54,33 @@ export function Cycle({
   // The amendment's screenshots, as data URLs — the cosmetic change shown,
   // not just described.
   const [amendImages, setAmendImages] = useState<string[]>([]);
-  // Whether the architect who will read the amendment can SEE. Answered at
-  // the moment the screenshot is added — a warning that only appears in the
-  // run's event log after launch is a warning delivered after the decision
-  // it should have informed.
-  const [architectSees, setArchitectSees] = useState<boolean | null>(null);
+  // Which plan action is unfolded. Both panels stacked open read as noise;
+  // an action's UI appears when the action is chosen, per the person's own
+  // mockup.
+  const [planAction, setPlanAction] = useState<"" | "extend" | "amend">("");
+  // The fleet, for seat chips and the vision check.
+  const [fleet, setFleet] = useState<Duckling[]>([]);
+  // The amendment's own seat: the solo roster's architect.
+  const [amendSeat, setAmendSeat] = useState<RosterEntry | null>(null);
   useEffect(() => {
     Promise.all([
       Promise.resolve().then(() => client.roster(projectId, "solo")),
       Promise.resolve().then(() => client.ducklings()),
     ])
       .then(([r, ds]) => {
-        const arch = (r.entries ?? []).find((e) => e.role === "architect");
-        const d = ds.find((x) => x.id === arch?.duckling);
-        setArchitectSees(d ? Boolean(d.caps?.vision) : null);
+        setFleet(ds);
+        setAmendSeat((r.entries ?? []).find((e) => e.role === "architect") ?? null);
       })
-      .catch(() => setArchitectSees(null));
+      .catch(() => {
+        setFleet([]);
+        setAmendSeat(null);
+      });
   }, [client, projectId]);
+  const architectSees = (() => {
+    if (!amendSeat) return null;
+    const d = fleet.find((x) => x.id === amendSeat.duckling);
+    return d ? Boolean(d.caps?.vision) : null;
+  })();
   // How many tasks the spec has not caught up with — the settle button's
   // number, fetched with the artifact so the spec tab can offer the one-click
   // repayment without the person counting markers on the board.
@@ -443,6 +455,36 @@ export function Cycle({
                   ? "Add to the requirements — a feature, a change of scope"
                   : `Extend the ${active.label.toLowerCase()}`}
             </div>
+            {active.stage === "plan" && sections.length > 0 && (
+              <>
+                {/* Two actions, one unfolded at a time — both panels stacked
+                    open read as noise; the UI appears when the action is
+                    chosen, per the person's own mockup. */}
+                <div className="mb-2 flex items-center gap-2" data-testid="plan-actions">
+                  {(["extend", "amend"] as const).map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      data-testid={`plan-action-${a}`}
+                      aria-pressed={planAction === a}
+                      onClick={() => setPlanAction((cur) => (cur === a ? "" : a))}
+                      className={
+                        "rounded border px-2 py-1 text-sm " +
+                        (planAction === a ? "border-ink text-ink" : "border-hairline text-ink-muted")
+                      }
+                    >
+                      {a === "extend" ? "Extend" : "Amend"}
+                    </button>
+                  ))}
+                </div>
+                {planAction === "" && (
+                  <p className="mb-2 text-xs text-ink-muted" data-testid="plan-actions-hint">
+                    Extend redrafts the plan with the council; Amend adds one to three tasks
+                    for a quick change, no redesign.
+                  </p>
+                )}
+              </>
+            )}
             {/* The other door. A project initialised on an existing repo went
                 mute here: the brief asked what to build as if the product were
                 an idea, while forty thousand lines already ran. Adoption
@@ -526,8 +568,13 @@ export function Cycle({
                 </button>
               </div>
             )}
-            {active.stage === "plan" && sections.length > 0 && (
+            {active.stage === "plan" && sections.length > 0 && planAction === "amend" && (
               <div className="mb-3 rounded-card border border-hairline p-2" data-testid="plan-extend">
+                {amendSeat && (
+                  <div className="mb-1">
+                    <SeatChips entries={[amendSeat]} fleet={fleet} />
+                  </div>
+                )}
                 <p className="mb-1 text-xs text-ink-muted">
                   Small change, no redesign: an architect amends the plan with one to three tasks.
                   Tasks no spec section covers wear a spec-debt marker. If it changes what the
@@ -610,6 +657,13 @@ export function Cycle({
                 </button>
               </div>
             )}
+            {(active.stage !== "plan" || sections.length === 0 || planAction === "extend") && (
+            <>
+            {active.stage === "plan" && sections.length > 0 && roster.length > 0 && (
+              <div className="mb-2">
+                <SeatChips entries={roster} fleet={fleet} />
+              </div>
+            )}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
               <select
                 aria-label="mode"
@@ -669,6 +723,8 @@ export function Cycle({
                 </span>
               )}
             </div>
+            </>
+            )}
           </section>
         )}
 
@@ -793,4 +849,37 @@ function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): 
   // and not a plan: raising it costs nothing on a draft that converges.
   return `${architect} drafts, ${listed} ${critics.length === 1 ? "critiques" : "each critique"}` +
     (rounds > 1 ? `, and they go round again unless ${critics.length === 1 ? critics[0] : "every critic"} approves` : "");
+}
+
+/** A seat, said with everything that matters at a glance: the duckling in its
+ * own colour, the context it can hold, and an eye when it can be shown
+ * images. [glm52 384.0k 👁️] answers "who will do this and what can they
+ * take" without a trip to Settings. */
+function SeatChips({ entries, fleet }: { entries: RosterEntry[]; fleet: Duckling[] }) {
+  const colors = assignDucklingColors(fleet);
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
+      {entries.map((e) => {
+        const d = fleet.find((x) => x.id === e.duckling);
+        return (
+          <span
+            key={e.role + e.duckling}
+            className="flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs"
+            data-testid="seat-chip"
+          >
+            <span className="text-ink-muted">{e.role}</span>
+            <span style={{ color: colors[e.duckling] }} className="font-medium">
+              {e.duckling}
+            </span>
+            {d?.caps?.context_tokens ? (
+              <span className="text-ink-muted" title="context window">
+                {tokens(d.caps.context_tokens)}
+              </span>
+            ) : null}
+            {d?.caps?.vision && <span title="vision — can be shown images">👁️</span>}
+          </span>
+        );
+      })}
+    </div>
+  );
 }

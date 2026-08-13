@@ -863,6 +863,8 @@ describe("the plan amendment", () => {
       return json({ items: [] });
     });
     render(<Cycle client={client} projectId="p" stage="plan" />);
+    // Folded until chosen: the panel opens from its action tab.
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
     const box = await waitFor(() => screen.getByTestId("plan-extend-text"));
     fireEvent.change(box, { target: { value: "add a CSV export button" } });
     fireEvent.click(screen.getByTestId("plan-extend-start"));
@@ -938,6 +940,7 @@ describe("the amendment's vision warning", () => {
 
   it("warns when the screenshot lands on a blind architect", async () => {
     render(<Cycle client={clientBlind()} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
     const input = await waitFor(() => screen.getByTestId("plan-extend-image"));
     const file = new File(["png"], "mock.png", { type: "image/png" });
     fireEvent.change(input, { target: { files: [file] } });
@@ -947,7 +950,24 @@ describe("the amendment's vision warning", () => {
 
   it("stays quiet with no image attached", async () => {
     render(<Cycle client={clientBlind()} projectId="p" stage="plan" />);
+    fireEvent.click(await waitFor(() => screen.getByTestId("plan-action-amend")));
     await waitFor(() => screen.getByTestId("plan-extend"));
     expect(screen.queryByTestId("plan-extend-vision-warn")).toBeNull();
+  });
+
+  // Both panels folded until chosen — stacked open they read as noise — and
+  // the chosen one names its seat with the chips that matter.
+  it("folds both actions until one is chosen, then names the seat", async () => {
+    render(<Cycle client={clientBlind()} projectId="p" stage="plan" />);
+    await waitFor(() => screen.getByTestId("plan-actions"));
+    expect(screen.queryByTestId("plan-extend")).toBeNull();
+    expect(screen.queryByTestId("stage-mode")).toBeNull();
+    fireEvent.click(screen.getByTestId("plan-action-amend"));
+    await waitFor(() => screen.getByTestId("plan-extend"));
+    const chip = await waitFor(() => screen.getAllByTestId("seat-chip")[0]);
+    expect(chip?.textContent).toContain("glm52");
+    // Toggle off folds it again.
+    fireEvent.click(screen.getByTestId("plan-action-amend"));
+    expect(screen.queryByTestId("plan-extend")).toBeNull();
   });
 });
