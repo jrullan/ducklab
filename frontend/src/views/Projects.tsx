@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, EngineClient, GateStatus, Project } from "../api/client";
 import { canChooseDirectory, chooseDirectory } from "../lib/picker";
 import { StatusChip } from "../components/StatusChip";
+import { ShellCmd } from "../components/ShellCmd";
 
 export function Projects({
   client,
@@ -388,9 +389,7 @@ function AppChip({
       <div className="flex items-center gap-2 text-xs">
         <span className="w-10 shrink-0 text-ink-muted">app</span>
         {status.configured ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-ink-secondary" title={status.command}>
-            {status.command}
-          </span>
+          <ShellCmd cmd={status.command ?? ""} className="min-w-0 flex-1 truncate font-mono text-ink-secondary" />
         ) : (
           <span className="min-w-0 flex-1 truncate" style={{ color: "var(--status-warning)" }}>
             not set — the app cannot start
@@ -489,9 +488,7 @@ function GateChip({
         <span className="w-10 shrink-0 text-ink-muted">gate</span>
         <span className="shrink-0 text-ink-muted">{status.mode}</span>
         {status.command && (
-          <span className="min-w-0 flex-1 truncate font-mono text-ink-secondary" title={status.command}>
-            {status.command}
-          </span>
+          <ShellCmd cmd={status.command} className="min-w-0 flex-1 truncate font-mono text-ink-secondary" />
         )}
         {!editing && (
           <button
