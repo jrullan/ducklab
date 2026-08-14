@@ -177,7 +177,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				"round": round, "turn": i, "role": string(turn.Role), "duckling": string(duckling),
 			})
 
-			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: i})
+			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
 			if outcome != nil {
 				result.Outcome = outcome
 			}
@@ -204,7 +204,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			result.Text = outcome.Text
 
 			result.Transcript.Add(conv.Entry{
-				Round: round, Index: i, Role: turn.Role,
+				Round: round, Index: script.TurnIndexBase + i, Role: turn.Role,
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
 

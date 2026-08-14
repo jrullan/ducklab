@@ -94,6 +94,11 @@ type Script struct {
 	Turns     []Turn
 	Until     string
 	MaxRounds int
+	// TurnIndexBase offsets every turn's Index. A sectioned document update
+	// runs MANY small conversations in one run; without distinct
+	// coordinates their streamed text lands in the same delta key and the
+	// lanes concatenate strangers.
+	TurnIndexBase int
 }
 
 // Turn is a script turn.

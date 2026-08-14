@@ -69,6 +69,12 @@ type Params struct {
 	// Adopt turns intake into a survey of the existing tree: requirements for
 	// what the code ALREADY satisfies, not an interview about an idea.
 	Adopt bool
+	// SectionWise routes a fragment update through the sectioned
+	// orchestrator: one triage pass, then one fresh conversation per touched
+	// section. The caller decides by seat — a small local architect gets the
+	// engine as its working memory; a large one takes the whole fragment in
+	// one reply, fewer calls.
+	SectionWise bool
 	// Images are data URLs shown to the architect alongside the amendment
 	// text — the screenshot that says what a paragraph cannot. The caller
 	// gates them on the architect's vision capability.

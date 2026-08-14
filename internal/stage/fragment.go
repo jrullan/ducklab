@@ -26,6 +26,9 @@ import (
 func fragmentPlaceholder(prefix string) string { return prefix + "-900" }
 
 func runFragment(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {
+	if p.SectionWise {
+		return runSectioned(ctx, p, base, ask)
+	}
 	kind := p.Stage.Kind()
 	prefix := kind.Prefix()
 

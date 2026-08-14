@@ -381,6 +381,13 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Adopt:       req.Adopt,
 		Extend:      req.Extend,
 		Images:      images,
+		// A small architect gets the engine as its working memory: below
+		// 64k of declared context, document updates run sectioned — one
+		// triage pass, then one fresh conversation per touched section.
+		SectionWise: func() bool {
+			d, derr := s.ducklings.Get(roster[config.RoleArchitect])
+			return derr == nil && d.Caps.ContextTokens > 0 && d.Caps.ContextTokens < 65536
+		}(),
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
