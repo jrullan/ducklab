@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "./Board";
 import { useRuns } from "../store/runs";
 import { EngineClient, type Bug, type Task } from "../api/client";
@@ -1020,5 +1020,41 @@ describe("the rail puts actions before the prose", () => {
     const body = screen.getByTestId("task-body");
     // Document order: the runner precedes the body.
     expect(runner.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// "When triage finishes the Bugs view should refresh and the running task
+// should update too." The refetch key used to watch only which runs were
+// ACTIVE, so a paused triage being accepted — the moment ApplyTriage rewrites
+// every bug — changed nothing the key could see, and the board kept its
+// pre-triage columns until something else forced a load.
+describe("the board follows a run to its end", () => {
+  it("refetches bugs when a run changes status, not only when one appears", async () => {
+    useRuns.setState({
+      runs: {
+        "r-tri": { id: "r-tri", project_id: "p", task_id: "", stage: "triage",
+          mode: "solo", status: "paused", pending_kind: "gate", verdict: "" } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    const bugs = vi.fn(() => Promise.resolve([]));
+    const client = (({
+      tasks: vi.fn(() => Promise.resolve([])),
+      bugs,
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    await waitFor(() => expect(bugs).toHaveBeenCalled());
+    const before = bugs.mock.calls.length;
+
+    act(() => {
+      useRuns.setState((s) => ({
+        runs: { ...s.runs, "r-tri": { ...s.runs["r-tri"], status: "done" } as never },
+      }));
+    });
+    await waitFor(() => expect(bugs.mock.calls.length).toBeGreaterThan(before));
   });
 });

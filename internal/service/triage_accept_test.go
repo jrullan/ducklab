@@ -76,3 +76,41 @@ func TestAcceptingATriageDoesNotCreateATask(t *testing.T) {
 		t.Errorf("status = %q", bugs[0].Status)
 	}
 }
+
+// The desktop's store flips a run's status only on what the stream says —
+// human_needed, error, run_end. The triage accept set Status="done" in the
+// state file and returned without a word, so the rail showed the triage
+// "running" forever and the Bugs board never refetched the verdicts it had
+// just applied. Ending a run and saying so are the same act.
+func TestAcceptingATriageSaysRunEndOnTheStream(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{
+		Title: "vertex drag never starts", Severity: "normal",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.BugTriage(context.Background(), id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), run.ID)
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range detail.Events {
+		if e.Type == "run_end" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("accepting a triage emitted no run_end — the desktop never hears it finish")
+	}
+}

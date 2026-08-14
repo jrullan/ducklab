@@ -100,6 +100,9 @@ export function Board({
   const [bugFiles, setBugFiles] = useState<File[]>([]);
   const [bugError, setBugError] = useState<string | null>(null);
   const [triageRun, setTriageRun] = useState<string | null>(null);
+  // The banner follows the run it announced: "started — watch it" is a lie
+  // once the triage is done and the verdicts are already on the board.
+  const triageStatus = useRuns((s) => (triageRun ? s.runs[triageRun]?.status : undefined));
   // What to start. Derived by the engine — dependencies accepted, nothing
   // blocked, nothing already running — because the board showed every task's
   // state and never answered the question a person arrives with.
@@ -181,14 +184,17 @@ export function Board({
     void load();
   }, [load]);
 
-  // Runs started or finished ANYWHERE — the CLI, an MCP operator, another
-  // window — move tasks between columns. The store already hears run_start
-  // and run_end on the stream; the board refetches when this project's set
-  // of active runs changes, instead of waiting for someone to change views.
+  // Runs started, paused or finished ANYWHERE — the CLI, an MCP operator,
+  // another window — move tasks between columns and bugs between statuses.
+  // The key carries each run's status, not just its id: keyed on the set of
+  // ACTIVE runs, a paused triage being accepted (paused → done, the moment
+  // ApplyTriage rewrites every bug) changed nothing the key could see, and
+  // the Bugs board kept its pre-triage columns. Terminal statuses are
+  // stable, so a finished run stops moving the key after its one last change.
   const activeRunKey = useRuns((s) =>
     Object.values(s.runs)
-      .filter((r) => r.project_id === projectId && (r.status === "running" || r.status === "queued"))
-      .map((r) => r.id)
+      .filter((r) => r.project_id === projectId)
+      .map((r) => `${r.id}:${r.status}`)
       .sort()
       .join(","),
   );
@@ -325,7 +331,14 @@ export function Board({
               onClick={() =>
                 void client
                   .triageBugs(projectId)
-                  .then((r) => setTriageRun(r.id))
+                  .then((r) => {
+                    setTriageRun(r.id);
+                    // Seed the store with the engine's own record instead of
+                    // waiting for the stream's run_start to race back: the
+                    // refetch key sees the run (and later its ending) even if
+                    // this tab's stream reconnects mid-triage.
+                    useRuns.getState().setRun(r);
+                  })
                   .catch((e) => setBugError(e instanceof Error ? e.message : String(e)))
               }
               className="rounded border border-hairline px-2 py-1 text-sm"
@@ -478,7 +491,13 @@ export function Board({
         {triageRun && (
           <p className="mb-2 text-sm" data-testid="triage-run">
             <a href={`#/runs/${triageRun}`} className="text-ink underline">
-              triage started — watch it
+              {triageStatus === "done"
+                ? "triage finished — the reports below carry its verdicts"
+                : triageStatus === "paused"
+                  ? "triage awaiting your decision — open it"
+                  : triageStatus === "failed"
+                    ? "triage failed — see why"
+                    : "triage started — watch it"}
             </a>
           </p>
         )}

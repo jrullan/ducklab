@@ -1621,6 +1621,11 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Status = "done"
 		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		// Every other terminal path says so on the stream; without this the
+		// desktop's store never hears the triage end — the run reads
+		// "running" in the rail forever and the Bugs board keeps its
+		// pre-triage columns until something else forces a refetch.
+		rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
 		rs.writer.WriteState()
 		return nil
 	}
