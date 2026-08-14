@@ -88,6 +88,13 @@ type Params struct {
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)
+	// Drafts returns the architect's earlier replies from the LAST Execute,
+	// newest first, excluding the final one Execute already returned. A
+	// council revise that stands pat replies in prose — "verified, no
+	// changes" — and the engine keeps the draft it stood on rather than
+	// failing the run for work the model refused to re-type. Optional; nil
+	// means no fallback.
+	Drafts func() []string
 }
 
 // Result is what a stage produced.

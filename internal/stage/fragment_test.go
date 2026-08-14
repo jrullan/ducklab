@@ -242,3 +242,49 @@ func TestPlanUpdatesCarryTheirGaps(t *testing.T) {
 		t.Error("the plan hint leaked into other kinds")
 	}
 }
+
+// The night the adopt refresh died: the architect's draft added three real
+// sections, a critic asked to VERIFY them, and the revise answered with the
+// verification in prose instead of re-typing its own work. The final reply
+// parsed to no sections and the engine threw the draft away. A revise that
+// stands pat means the draft stands — the engine keeps it.
+func TestAStandPatReviseKeepsTheDraft(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Login\n\nFine as is.\n")
+	base, _ := artifact.Load(root, artifact.KindSpec)
+	res, err := runFragment(context.Background(), Params{
+		ProjectRoot: root, Stage: Spec, RunID: "r-sp", Mode: "council",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			// What Execute returns is the FINAL turn: prose.
+			return "Verified: all three sections are real shipped capabilities. No changes needed.", nil
+		},
+		Drafts: func() []string {
+			// The architect's earlier draft, newest first.
+			return []string{"## SPEC-900 — Advisor\n\nA second model drafts the answer.\n"}
+		},
+	}, base, "add what shipped since the survey")
+	if err != nil {
+		t.Fatalf("the stand-pat revise still discarded the draft: %v", err)
+	}
+	if len(res.Proposed.Sections) != 2 || res.Proposed.Sections[1].Title != "Advisor" {
+		t.Fatalf("draft did not survive the revise: %+v", res.Proposed.Sections)
+	}
+}
+
+// With no draft anywhere, prose is still an answer — the refusal keeps
+// speaking exactly as before.
+func TestAStandPatWithNoDraftStillRefuses(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Login\n\nFine as is.\n")
+	base, _ := artifact.Load(root, artifact.KindSpec)
+	_, err := runFragment(context.Background(), Params{
+		ProjectRoot: root, Stage: Spec, RunID: "r-sq", Mode: "council",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			return "Nothing should change: the document already covers it.", nil
+		},
+		Drafts: func() []string { return []string{"also prose, no sections here either"} },
+	}, base, "add nothing")
+	if err == nil || !strings.Contains(err.Error(), "already covers") {
+		t.Fatalf("refusal lost its words: %v", err)
+	}
+}

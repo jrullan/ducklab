@@ -66,13 +66,19 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 
 	tasks, real := parsePlanItems(raw)
 	if real == 0 {
+		// A council revise that stood pat replies in prose; the draft it
+		// stood on is still the amendment. Fall back before refusing.
+		for _, draft := range drafts(p) {
+			if t2, r2 := parsePlanItems(draft); r2 > 0 {
+				tasks, real = t2, r2
+				break
+			}
+		}
+	}
+	if real == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
-		reason := strings.TrimSpace(raw)
-		if len(reason) > 300 {
-			reason = reason[:300] + "…"
-		}
-		return nil, fmt.Errorf("the architect added no tasks: %s", reason)
+		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
 
 	proposed := mergeExtension(current, tasks)

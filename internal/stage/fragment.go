@@ -64,21 +64,32 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	if kind == artifact.KindPlan {
 		items, real := parsePlanItems(raw)
 		if real == 0 {
-			reason := strings.TrimSpace(raw)
-			if len(reason) > 300 {
-				reason = reason[:300] + "…"
+			// The revise stood pat: fall back through the architect's own
+			// earlier drafts before declaring nothing happened. The draft
+			// the critique verified IS the proposal.
+			for _, draft := range drafts(p) {
+				if items2, real2 := parsePlanItems(draft); real2 > 0 {
+					items, real = items2, real2
+					break
+				}
 			}
-			return nil, fmt.Errorf("the architect changed no sections: %s", reason)
+		}
+		if real == 0 {
+			return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
 		}
 		proposed = mergePlanFragment(base, items)
 	} else {
 		produced, perr := artifact.Parse(raw, kind)
 		if perr != nil || len(produced.Sections) == 0 {
-			reason := strings.TrimSpace(raw)
-			if len(reason) > 300 {
-				reason = reason[:300] + "…"
+			for _, draft := range drafts(p) {
+				if d2, e2 := artifact.Parse(draft, kind); e2 == nil && len(d2.Sections) > 0 {
+					produced, perr = d2, nil
+					break
+				}
 			}
-			return nil, fmt.Errorf("the architect changed no sections: %s", reason)
+		}
+		if perr != nil || len(produced.Sections) == 0 {
+			return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
 		}
 		proposed = mergeFragment(base, produced.Sections, prefix)
 	}
@@ -346,4 +357,22 @@ func planGapsHint(projectRoot string, kind artifact.Kind) string {
 		"at a time: read THAT spec section (artifact_read), then emit the task(s) delivering " +
 		"it — **Implements:** naming the section, **Milestone:** naming where it belongs (or " +
 		"declare a new milestone heading above its tasks):\n" + strings.Join(gaps, "\n") + "\n\n"
+}
+
+// drafts unwraps p.Drafts for the stand-pat fallback: nil-safe, empty when
+// the executor keeps no history.
+func drafts(p Params) []string {
+	if p.Drafts == nil {
+		return nil
+	}
+	return p.Drafts()
+}
+
+// clip bounds a model reply quoted inside an error message.
+func clip(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 300 {
+		return s[:300] + "…"
+	}
+	return s
 }

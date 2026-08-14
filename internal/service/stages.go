@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sync/atomic"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -370,6 +371,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		}
 	}
 
+	// The architect replies from the most recent Execute, kept for the
+	// stand-pat fallback: sectioned updates call Execute once per pass, and
+	// the fallback must read the pass it belongs to, never a stale one.
+	var lastArchitectTexts atomic.Pointer[[]string]
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot: projectRoot,
 		Stage:       stage.Name(req.Stage),
@@ -390,6 +395,23 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		}(),
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
+		// The architect's earlier replies from the latest Execute, newest
+		// first, without the final one: the stand-pat fallback's memory.
+		Drafts: func() []string {
+			texts := lastArchitectTexts.Load()
+			if texts == nil {
+				return nil
+			}
+			all := *texts
+			if len(all) < 2 {
+				return nil
+			}
+			prior := make([]string, 0, len(all)-1)
+			for i := len(all) - 2; i >= 0; i-- {
+				prior = append(prior, all[i])
+			}
+			return prior
+		},
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
 			// Context-fit preflight: the engine knows the prompt AND every
 			// seat's declared window before a single token is paid. A stage
@@ -405,7 +427,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			if fatal != "" {
 				return "", fmt.Errorf("%s", fatal)
 			}
-			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
+			res, rerr := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
 				// Decisions the person already made ride the prompt, like on
@@ -419,13 +441,17 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					rs.writer.AppendEvent(kind, data)
 				},
 			})
-			if err != nil {
+			if res != nil {
+				texts := res.RoleTexts[string(config.RoleArchitect)]
+				lastArchitectTexts.Store(&texts)
+			}
+			if rerr != nil {
 				// pendingOrErr, or the question dies with the run: this
 				// closure returned the raw error, so the pendingErr branch
 				// below it never fired — a spec architect that asked the
 				// human left "human input needed" on the record with no
 				// question, no pending state, and nothing to answer.
-				return "", pendingOrErr(res, err)
+				return "", pendingOrErr(res, rerr)
 			}
 			return res.Text, nil
 		},

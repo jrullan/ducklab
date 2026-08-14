@@ -88,7 +88,11 @@ type ExecuteResult struct {
 	Transcript *conv.Transcript
 	State      conv.State
 	Records    []RoundRecord
-	Error      error
+	// RoleTexts holds every reply per role, in turn order — the memory Text
+	// lacks. The stage layer falls back through an architect's earlier
+	// drafts when the final revise carries no sections.
+	RoleTexts map[string][]string
+	Error     error
 }
 
 // ExecuteSolo executes the solo mode.
@@ -202,6 +206,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			result.Outcome = outcome
 			result.Text = outcome.Text
+			// Every reply by role, in order. Text alone keeps only the LAST
+			// turn, and for artifact councils that is the revise — a revise
+			// that stands pat would otherwise erase the draft it stood on.
+			if result.RoleTexts == nil {
+				result.RoleTexts = map[string][]string{}
+			}
+			result.RoleTexts[string(turn.Role)] = append(result.RoleTexts[string(turn.Role)], outcome.Text)
 
 			result.Transcript.Add(conv.Entry{
 				Round: round, Index: script.TurnIndexBase + i, Role: turn.Role,
