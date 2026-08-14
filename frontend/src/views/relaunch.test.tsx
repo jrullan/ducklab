@@ -484,6 +484,18 @@ describe("the run header names the task", () => {
     expect(title.textContent).toContain("Handle angle input");
     expect(title.getAttribute("title")).toBe("Handle angle input");
   });
+
+  // The header is the run's identity and its one live control; scrolling the
+  // transcript used to take both away. Pinned — and opaque, so the lanes
+  // pass under it rather than through it.
+  it("stays pinned while the transcript scrolls", async () => {
+    render(<RunView runId="r-1" client={clientWith()} />);
+    const title = await screen.findByTestId("run-task-title");
+    const header = title.closest("header");
+    expect(header?.className).toContain("sticky");
+    expect(header?.className).toContain("top-0");
+    expect(header?.className).toContain("bg-page");
+  });
 });
 
 describe("the task's coverage on the run view card", () => {

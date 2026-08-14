@@ -574,7 +574,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // nav stays visible because the app shell holds the scroll, not this view.
   return (
     <div data-testid="run-view">
-      <header className="flex flex-wrap items-center gap-3 border-b border-hairline px-4 py-3">
+      {/* Pinned while the transcript scrolls: the header is the run's
+          identity — what is being built, where in the cycle, and the one
+          control that stops it — and losing it to the scroll meant reading
+          a wall of tool calls with no way to tell WHOSE they were, or to
+          abort without scrolling back up. Opaque so the lanes pass under
+          it, not through it. */}
+      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-hairline bg-page px-4 py-3">
         {/* A run with no task showed nothing at all: the header of a triage or
             a stage opened with an empty space where its name should be. The
             same fallback the runs list uses — task, else stage, else id. */}
@@ -1287,7 +1293,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         {railOpen ? (
         <aside
           data-testid="run-rail"
-          className="flex flex-col gap-3 md:sticky md:top-2 md:max-h-[calc(100vh-7rem)] md:self-start md:overflow-y-auto"
+          className="flex flex-col gap-3 md:sticky md:top-14 md:max-h-[calc(100vh-10rem)] md:self-start md:overflow-y-auto"
         >
           <button
             type="button"
@@ -1410,7 +1416,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             data-testid="run-rail-pill"
             onClick={toggleRail}
             title="show budget and gate"
-            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-2"
+            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-14"
           >
             ‹
           </button>
