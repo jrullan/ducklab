@@ -37,7 +37,8 @@ describe("the run launcher's saved line-ups", () => {
     render(
       <RunLauncher ducklings={fleet} preferred={{ pair: ["pato-sonnet"] }} onLaunch={onLaunch} />,
     );
-    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-atom" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
+    fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "pato-atom" } });
     fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
     fireEvent.click(screen.getByTestId("run-start"));
 

@@ -282,7 +282,8 @@ describe("relaunching a failed test-first", () => {
     expect(screen.getByTestId("relaunch").textContent).toContain("Test T-076 again → then build");
 
     // The changed model must be one the fleet actually offers.
-    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "dsv4flash" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
+    fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "dsv4flash" } });
     fireEvent.click(screen.getByTestId("run-start"));
     await waitFor(() => expect(testStart).toHaveBeenCalled());
     const [, taskId, , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];

@@ -71,27 +71,22 @@ export function LaunchConfig({
           })}
         </select>
       </label>
-      {ducklings.length > 0 &&
-        Array.from({ length: cols }, (_, i) => (
-          <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-            {seatLabel(value.mode, i)}
-            <select
-              value={value.ducklings[i] ?? ""}
-              onChange={(e) => setSeat(i, e.target.value)}
-              data-testid={`cfg-seat-${i}`}
-              className="rounded border border-hairline bg-surface2 px-1 py-1 text-xs text-ink-secondary"
-            >
-              <option value="">default</option>
-              {ducklings
-                .filter((d) => d.id === value.ducklings[i] || !value.ducklings.includes(d.id))
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.id}
-                  </option>
-                ))}
-            </select>
-          </label>
-        ))}
+      {/* The chips ARE the picker here too — one seat UI on every surface. */}
+      {ducklings.length > 0 && (
+        <SeatChips
+          entries={Array.from({ length: cols }, (_, i) => ({
+            role: seatLabel(value.mode, i),
+            duckling: value.ducklings[i] ?? "",
+          }))}
+          fleet={[...ducklings]}
+          measured={measured}
+          allowDefault
+          optionsFor={(i) =>
+            ducklings.filter((d) => d.id === value.ducklings[i] || !value.ducklings.includes(d.id))
+          }
+          onPick={(i, id) => setSeat(i, id)}
+        />
+      )}
       {seats === 0 && (
         <button
           type="button"
@@ -142,20 +137,6 @@ export function LaunchConfig({
             </label>
           </span>
         </label>
-      )}
-      {value.ducklings.some((id) => id) && (
-        <div className="w-full">
-          {/* The chips beside the pickers: same promise as everywhere a
-              duckling is named for a launch — who sits, and the facts the
-              person chose to care about. */}
-          <SeatChips
-            entries={value.ducklings
-              .map((id, i) => ({ role: seatLabel(value.mode, i), duckling: id }))
-              .filter((e) => e.duckling)}
-            fleet={[...ducklings]}
-            measured={measured}
-          />
-        </div>
       )}
     </div>
   );
@@ -343,46 +324,22 @@ export function RunLauncher({
         </button>
       </div>
 
-      {chosen.some(Boolean) && (
-        <div className="mb-1">
-          {/* Same promise as every launch surface: who sits, with the facts
-              the person chose to care about. The dropdowns below remain the
-              pickers; the chips are the glance. */}
+      {/* The chips ARE the picker, as on every stage form: click a seat to
+          reseat it, "default" leaves it to the roster. One seat UI, not a
+          glance row above a dropdown row saying the same thing twice. */}
+      {ducklings.length > 1 && (
+        <div className="mb-1 flex flex-wrap items-center gap-2">
           <SeatChips
-            entries={chosen
-              .map((id, i) => ({ role: seatLabel(mode, i), duckling: id }))
-              .filter((e) => e.duckling)}
+            entries={Array.from({ length: cols }, (_, i) => ({
+              role: seatLabel(mode, i),
+              duckling: chosen[i] ?? "",
+            }))}
             fleet={[...ducklings]}
             measured={measured}
+            allowDefault
+            optionsFor={(i) => ducklings.filter((d) => d.id === chosen[i] || !chosen.includes(d.id))}
+            onPick={(i, id) => setSeat(i, id)}
           />
-        </div>
-      )}
-      {/* One dropdown per seat, labelled with the role its position carries —
-          the same picker Settings uses, because two pickers that disagree
-          about what a seat means would be worse than the checkbox wall this
-          replaced. Ten ducklings configured never widens the row. */}
-      {ducklings.length > 1 && (
-        <div className="flex flex-wrap items-end gap-2 text-xs text-ink-secondary">
-          {Array.from({ length: cols }, (_, i) => (
-            <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-              {seatLabel(mode, i)}
-              <select
-                value={chosen[i] ?? ""}
-                onChange={(e) => setSeat(i, e.target.value)}
-                data-testid={`run-seat-${i}`}
-                className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs text-ink-secondary"
-              >
-                <option value="">default</option>
-                {ducklings
-                  .filter((d) => d.id === chosen[i] || !chosen.includes(d.id))
-                  .map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.id}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          ))}
           {seats === 0 && (
             <button
               type="button"

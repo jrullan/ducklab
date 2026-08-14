@@ -26,11 +26,17 @@ export function SeatChips({
   fleet,
   measured,
   onPick,
+  optionsFor,
+  allowDefault = false,
 }: {
   entries: SeatEntry[];
   fleet: Duckling[];
   measured?: MeasuredSpend;
   onPick?: (index: number, duckling: string) => void;
+  /** Narrow the picker per seat (e.g. exclude ducklings already seated). */
+  optionsFor?: (index: number) => Duckling[];
+  /** Offer "default" (empty) — the roster decides that seat. */
+  allowDefault?: boolean;
 }) {
   const colors = assignDucklingColors(fleet);
   const [open, setOpen] = useState<number | null>(null);
@@ -57,7 +63,8 @@ export function SeatChips({
                 onBlur={() => setOpen(null)}
                 className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
               >
-                {fleet.map((f) => (
+                {allowDefault && <option value="">default</option>}
+                {(optionsFor ? optionsFor(i) : fleet).map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.id}
                     {f.caps?.vision ? " 👁" : ""}
@@ -81,9 +88,13 @@ export function SeatChips({
             title={onPick ? "click to pick a different duckling for this run only" : undefined}
           >
             <span className="text-ink-muted">{e.role}</span>
-            <span style={{ color: colors[e.duckling] }} className="font-medium">
-              {e.duckling}
-            </span>
+            {e.duckling ? (
+              <span style={{ color: colors[e.duckling] }} className="font-medium">
+                {e.duckling}
+              </span>
+            ) : (
+              <span className="text-ink-muted">default</span>
+            )}
             {facts.includes("context") && d?.caps?.context_tokens ? (
               <span className="text-ink-muted" title="context window">
                 {tokens(d.caps.context_tokens)}

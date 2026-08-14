@@ -34,6 +34,12 @@
         <mxCell id="-0ztOJPWPcViOK7e9o7t-63" parent="-0ztOJPWPcViOK7e9o7t-22" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=7;" value="Modes: Solo , Council" vertex="1">
           <mxGeometry height="10" width="80" x="40" y="280" as="geometry" />
         </mxCell>
+        <mxCell id="-0ztOJPWPcViOK7e9o7t-66" parent="-0ztOJPWPcViOK7e9o7t-22" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=7;" value="⭐ &lt;span style=&quot;color: rgb(0, 153, 0);&quot;&gt;Local&lt;/span&gt;" vertex="1">
+          <mxGeometry height="10" width="40" x="40" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="-0ztOJPWPcViOK7e9o7t-67" parent="-0ztOJPWPcViOK7e9o7t-22" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontSize=7;" value="⭐ &lt;span style=&quot;color: rgb(0, 153, 0);&quot;&gt;Local&lt;/span&gt;" vertex="1">
+          <mxGeometry height="10" width="40" x="40" y="230" as="geometry" />
+        </mxCell>
         <mxCell id="-0ztOJPWPcViOK7e9o7t-24" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="Review" vertex="1">
           <mxGeometry height="413" width="463" x="194" y="491" as="geometry" />
         </mxCell>

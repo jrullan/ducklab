@@ -257,8 +257,10 @@ describe("Board — starting the work", () => {
 
     // Mode first: solo shows one seat, tournament opens two.
     fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "tournament" } });
-    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
-    fireEvent.change(screen.getByTestId("run-seat-1"), { target: { value: "pato-local" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
+    fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "pato-sonnet" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[1]!);
+    fireEvent.change(screen.getByTestId("seat-pick-1"), { target: { value: "pato-local" } });
     fireEvent.click(screen.getByTestId("run-start"));
 
     await waitFor(() =>
@@ -309,7 +311,8 @@ describe("Board — starting the work", () => {
     const client = runClient();
     render(<Board client={client} projectId="p" />);
     await openRail();
-    fireEvent.change(screen.getByTestId("run-seat-0"), { target: { value: "pato-sonnet" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
+    fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "pato-sonnet" } });
     fireEvent.click(screen.getByTestId("test-first-start"));
     await waitFor(() => expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "pato-sonnet"));
   });
@@ -795,10 +798,13 @@ describe("the rail follows the contract's order", () => {
     await openRail();
     const [testCfg, buildCfg] = screen.getAllByTestId("launch-config");
     expect((testCfg!.querySelector("[data-testid=cfg-mode]") as HTMLSelectElement).value).toBe("solo");
-    expect((testCfg!.querySelector("[data-testid=cfg-seat-0]") as HTMLSelectElement).value).toBe("pato-local");
+    // Seats read from the chips now — the picker and the glance are one UI.
+    const chipText = (el: Element, i: number) =>
+      el.querySelectorAll('[data-testid="seat-chip"]')[i]!.textContent ?? "";
+    expect(chipText(testCfg!, 0)).toContain("pato-local");
     expect((buildCfg!.querySelector("[data-testid=cfg-mode]") as HTMLSelectElement).value).toBe("pair");
-    expect((buildCfg!.querySelector("[data-testid=cfg-seat-0]") as HTMLSelectElement).value).toBe("pato-sonnet");
-    expect((buildCfg!.querySelector("[data-testid=cfg-seat-1]") as HTMLSelectElement).value).toBe("pato-local");
+    expect(chipText(buildCfg!, 0)).toContain("pato-sonnet");
+    expect(chipText(buildCfg!, 1)).toContain("pato-local");
   });
 
   // The plain launcher — a test-ready task where run is primary — opens on
@@ -823,8 +829,9 @@ describe("the rail follows the contract's order", () => {
     render(<Board client={client} projectId="p" />);
     await openRail();
     expect((screen.getByTestId("run-mode") as HTMLSelectElement).value).toBe("pair");
-    expect((screen.getByTestId("run-seat-0") as HTMLSelectElement).value).toBe("pato-sonnet");
-    expect((screen.getByTestId("run-seat-1") as HTMLSelectElement).value).toBe("pato-local");
+    const chips = screen.getAllByTestId("seat-chip");
+    expect(chips[0]!.textContent).toContain("pato-sonnet");
+    expect(chips[1]!.textContent).toContain("pato-local");
   });
 
   // A committed failing test is a promise with two exits, and the rail must
@@ -884,12 +891,16 @@ describe("the rail follows the contract's order", () => {
     render(<Board client={client} projectId="p" />);
     await openRail();
     const [testCfg, buildCfg] = screen.getAllByTestId("launch-config");
+    const pickIn = (cfg: Element, i: number, val: string) => {
+      fireEvent.click(cfg.querySelectorAll('[data-testid="seat-chip"]')[i]!);
+      fireEvent.change(cfg.querySelector(`[data-testid="seat-pick-${i}"]`)!, { target: { value: val } });
+    };
     // Test phase: solo, written by pato-local (cheap).
-    fireEvent.change(testCfg!.querySelector("[data-testid=cfg-seat-0]")!, { target: { value: "pato-local" } });
+    pickIn(testCfg!, 0, "pato-local");
     // Build phase: pair with its own seats.
     fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-mode]")!, { target: { value: "pair" } });
-    fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-seat-0]")!, { target: { value: "pato-sonnet" } });
-    fireEvent.change(buildCfg!.querySelector("[data-testid=cfg-seat-1]")!, { target: { value: "pato-local" } });
+    pickIn(buildCfg!, 0, "pato-sonnet");
+    pickIn(buildCfg!, 1, "pato-local");
     fireEvent.click(screen.getByTestId("tdd-start"));
     await waitFor(() =>
       expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "", {
