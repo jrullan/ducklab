@@ -54,6 +54,7 @@ func (d *DB) Migrate() error {
 	migrations := []Migration{
 		{Version: 1, Name: "001_init", SQL: migration001},
 		{Version: 2, Name: "002_triage_findings", SQL: migration002},
+		{Version: 3, Name: "003_test_strategy", SQL: migration003},
 	}
 
 	for _, m := range migrations {
@@ -261,6 +262,10 @@ type Task struct {
 	SuspectedFiles string // newline-separated, in the order the triager gave them
 	TaskTitle      string
 	TriageReason   string
+	// The triager's judgment on the honest verification for the fix:
+	// "test-first" | "build-only" | "" (no recommendation).
+	TestStrategy string
+	TestReason   string
 }
 
 // CreateTask creates a task.
@@ -386,6 +391,10 @@ type Bug struct {
 	SuspectedFiles string // newline-separated, in the order the triager gave them
 	TaskTitle      string
 	TriageReason   string
+	// The triager's judgment on the honest verification for the fix:
+	// "test-first" | "build-only" | "" (no recommendation).
+	TestStrategy string
+	TestReason   string
 }
 
 // CreateBug inserts a bug.
@@ -418,10 +427,10 @@ func nullable(s string) interface{} {
 func (d *DB) GetBug(id string) (*Bug, error) {
 	var b Bug
 	var dup, task sql.NullString
-	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason
+	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason
 		FROM bug WHERE id = ?`, id).Scan(
 		&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status, &dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
-		&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason)
+		&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +441,7 @@ func (d *DB) GetBug(id string) (*Bug, error) {
 // ListBugs returns every bug, oldest first. Ordering for a person is the
 // caller's job: urgency is a product decision, not a storage one.
 func (d *DB) ListBugs() ([]*Bug, error) {
-	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason
+	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason
 		FROM bug ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -444,7 +453,7 @@ func (d *DB) ListBugs() ([]*Bug, error) {
 		var dup, task sql.NullString
 		if err := rows.Scan(&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status,
 			&dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
-			&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason); err != nil {
+			&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason); err != nil {
 			return nil, err
 		}
 		b.DuplicateOf, b.TaskID = dup.String, task.String
@@ -458,11 +467,11 @@ func (d *DB) UpdateBug(b *Bug) error {
 	b.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
 		duplicate_of = ?, task_id = ?, updated_at = ?,
-		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?
+		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?, test_strategy = ?, test_reason = ?
 		WHERE id = ?`,
 		b.Title, b.Body, b.Severity, b.Status,
 		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt,
-		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.ID)
+		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.TestStrategy, b.TestReason, b.ID)
 	return err
 }
 
@@ -508,6 +517,14 @@ ALTER TABLE bug ADD COLUMN component TEXT NOT NULL DEFAULT '';
 ALTER TABLE bug ADD COLUMN suspected_files TEXT NOT NULL DEFAULT '';
 ALTER TABLE bug ADD COLUMN task_title TEXT NOT NULL DEFAULT '';
 ALTER TABLE bug ADD COLUMN triage_reason TEXT NOT NULL DEFAULT '';
+`
+
+// The triager's judgment on the honest verification for the fix — a forced
+// gate test on a visual bug degenerates into grepping the source, and one
+// such run burned 8.7M tokens on a datepicker default.
+const migration003 = `
+ALTER TABLE bug ADD COLUMN test_strategy TEXT NOT NULL DEFAULT '';
+ALTER TABLE bug ADD COLUMN test_reason TEXT NOT NULL DEFAULT '';
 `
 
 // DeleteTask removes a task and the traceability edges that name it.

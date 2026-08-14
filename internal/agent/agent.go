@@ -1294,10 +1294,21 @@ Reply with one JSON object:
  "suspected_files": ["path", …],
  "reproducible": true|false|null,
  "task_title": "imperative one-liner for the fix task, or empty if not actionable",
+ "test_strategy": "test-first" | "build-only",
+ "test_reason": "one line",
  "reason": "one sentence"}
 
 Base "duplicate_of" only on the open bugs you were given. If you are unsure,
-answer null; a missed duplicate is cheaper than a wrongly closed bug.`
+answer null; a missed duplicate is cheaper than a wrongly closed bug.
+
+"test_strategy" is your judgment on the HONEST verification for the fix:
+- "test-first" when the bug is reproducible as an automated test (behaviour,
+  crash, wrong data). Then "test_reason" sketches the reproduction the
+  test-writer starts from, e.g. "POST /profile with empty name expects 422".
+- "build-only" when the honest check is eyes (visual, cosmetic, layout,
+  config): a forced test degenerates into grepping the source, which pins the
+  implementation and not the bug. Then "test_reason" says why in one line.
+You recommend; a person decides.`
 
 // usageMap is what goes to llm.jsonl for one call.
 //

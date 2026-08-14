@@ -124,6 +124,15 @@ func nextSteps(st projectSnapshot) []NextStep {
 				Reason: "a committed test is waiting for the code that makes it pass",
 				Kind:   "task", Ref: t.ID,
 			})
+		} else if t.BuildOnly {
+			// The triager judged this fix unverifiable by automated test:
+			// the front door is the build, the honest reviewer is eyes.
+			out = append(out, NextStep{
+				ID:     "build",
+				Action: fmt.Sprintf("Build %s — triage recommends no gate test", t.ID),
+				Reason: "the fix verifies by eyes, not by test; test-first stays one click away",
+				Kind:   "task", Ref: t.ID,
+			})
 		} else {
 			out = append(out, NextStep{
 				ID:     "test-first",

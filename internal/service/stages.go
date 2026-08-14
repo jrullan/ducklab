@@ -718,6 +718,10 @@ type TaskView struct {
 	// Next are the actions a person may legally start from this task, in the
 	// order a client should offer them (docs/ux-evaluation.md §5.4).
 	Next []string `json:"next,omitempty"`
+	// BuildOnly carries the triager's verification judgment: the honest
+	// check for this fix is eyes, not an automated test — the front door is
+	// a plain build. Recommended, never imposed.
+	BuildOnly bool `json:"build_only,omitempty"`
 	// SpecDebt marks a task no spec section covers — the toll of the plan
 	// amendment's light path. Legal, and never invisible: the scribe settles
 	// it by teaching the spec what was built. Bug-promoted tasks trace to
@@ -764,11 +768,18 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		}
 	}
 	bugTasks := map[string]bool{}
+	// The triager's verification judgment per task, when its bug carries
+	// one: "build-only" flips the task's front door from the TDD chain to a
+	// plain build — recommended, and reversible by the person in one click.
+	buildOnly := map[string]bool{}
 	if db, dbErr := s.openProjectDB(projectID); dbErr == nil {
 		if recs, lErr := db.ListBugs(); lErr == nil {
 			for _, b := range recs {
 				if b.TaskID != "" {
 					bugTasks[b.TaskID] = true
+					if b.TestStrategy == "build-only" {
+						buildOnly[b.TaskID] = true
+					}
 				}
 			}
 		}
@@ -818,8 +829,9 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				// for a person, still urging "build it to make it pass".
 				TestReady: testReady[t.ID] && (st == "todo" || st == "blocked"),
 				Next: taskNextActions(st, gateMode, !pinned[t.ID], depsWaiting, testReady[t.ID],
-					failedStage[t.ID] == "test"),
-				SpecDebt: taskSpecDebt(t.ID, t.Implements, specIDs, bugTasks),
+					failedStage[t.ID] == "test", buildOnly[t.ID]),
+				SpecDebt:  taskSpecDebt(t.ID, t.Implements, specIDs, bugTasks),
+				BuildOnly: buildOnly[t.ID],
 			})
 		}
 	}

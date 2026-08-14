@@ -108,7 +108,7 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 		{"done", "accepted", "tests", false, []string{"review", "run"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false, false, false)
+			got := taskNextActions(tc.status, tc.gateMode, tc.removable, false, false, false, false)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("next = %v, want %v", got, tc.want)
 			}
@@ -118,17 +118,17 @@ func TestWhatATaskOffersMatchesTheGuards(t *testing.T) {
 	// Once the failing test is committed, building it is the front door — and
 	// withdrawing the promise stands right beside it, because a state that
 	// can hold the project's queue owes the person both exits.
-	if got := taskNextActions("todo", "tests", true, false, true, false); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
+	if got := taskNextActions("todo", "tests", true, false, true, false, false); !slices.Equal(got, []string{"run", "retire_test", "test_first", "remove"}) {
 		t.Errorf("test-ready next = %v, want run first then retire_test", got)
 	}
 	// A failed BUILD retries by building, not by writing another test.
-	if got := taskNextActions("blocked", "tests", true, false, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+	if got := taskNextActions("blocked", "tests", true, false, false, false, false); !slices.Equal(got, []string{"run", "test_first", "remove"}) {
 		t.Errorf("retry next = %v, want run first", got)
 	}
 	// But a failed TEST retries the chain: the definition of done never
 	// landed, so TDD is still the front door — an aborted test-first left
 	// the person with no way to restart the test+build they had asked for.
-	if got := taskNextActions("blocked", "tests", true, false, false, true); !slices.Equal(got, []string{"test_first", "run", "remove"}) {
+	if got := taskNextActions("blocked", "tests", true, false, false, true, false); !slices.Equal(got, []string{"test_first", "run", "remove"}) {
 		t.Errorf("failed-test retry next = %v, want test_first first", got)
 	}
 }
@@ -197,5 +197,21 @@ func TestAPausedDocumentStageOffersResume(t *testing.T) {
 	r := &runlog.Run{Stage: "triage", Status: "paused", PendingKind: "error"}
 	if slices.Contains(runNext(r), "resume") {
 		t.Error("triage cannot re-enter; offering resume would be a button that only errors")
+	}
+}
+
+// The triager judged the fix unverifiable by automated test — visual,
+// cosmetic, config — so the front door is the build. test_first stays
+// offered: the recommendation is one click to overrule, and the autopilot
+// follows the first action like every client.
+func TestBuildOnlyFlipsTheFrontDoor(t *testing.T) {
+	got := taskNextActions("todo", "tests", true, false, false, false, true)
+	if !slices.Equal(got, []string{"run", "test_first", "remove"}) {
+		t.Errorf("build-only order = %v, want run first with test_first still offered", got)
+	}
+	// Without the recommendation the TDD chain keeps the front door.
+	got = taskNextActions("todo", "tests", true, false, false, false, false)
+	if got[0] != "test_first" {
+		t.Errorf("default order lost the TDD front door: %v", got)
 	}
 }

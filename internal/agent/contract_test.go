@@ -262,3 +262,23 @@ func TestTheImplementerIsToldWhenToAsk(t *testing.T) {
 		}
 	}
 }
+
+// The strategy normalizes from what models actually type, and NEVER invents:
+// an absent or unrecognizable answer stays empty — no recommendation.
+func TestTriageTestStrategyNormalizes(t *testing.T) {
+	for in, want := range map[string]string{
+		"test-first": "test-first", "Test First": "test-first", "TESTS": "test-first",
+		"build-only": "build-only", "build only": "build-only", "Only build": "build-only",
+		"": "", "whatever": "",
+	} {
+		got, err := parseTriage(`{"severity":"low","duplicate_of":null,"component":"x",` +
+			`"suspected_files":[],"reproducible":true,"task_title":"t",` +
+			`"test_strategy":"` + in + `","test_reason":"r","reason":"because"}`)
+		if err != nil {
+			t.Fatalf("%q: %v", in, err)
+		}
+		if got.TestStrategy != want {
+			t.Errorf("normalize(%q) = %q, want %q", in, got.TestStrategy, want)
+		}
+	}
+}

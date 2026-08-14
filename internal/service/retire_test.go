@@ -188,7 +188,7 @@ func TestRetiringABuiltTestIsRefused(t *testing.T) {
 // the board renders the exit next to "build it" instead of hiding it in an
 // API only I know about.
 func TestATestReadyTaskOffersTheRetireAction(t *testing.T) {
-	next := taskNextActions("todo", "tests", true, false, true, false)
+	next := taskNextActions("todo", "tests", true, false, true, false, false)
 	found := false
 	for _, a := range next {
 		if a == "retire_test" {
@@ -199,7 +199,7 @@ func TestATestReadyTaskOffersTheRetireAction(t *testing.T) {
 		t.Errorf("next = %v — the promise has no withdraw button", next)
 	}
 	// And a task with no outstanding test has nothing to retire.
-	for _, a := range taskNextActions("todo", "tests", true, false, false, false) {
+	for _, a := range taskNextActions("todo", "tests", true, false, false, false, false) {
 		if a == "retire_test" {
 			t.Error("retire_test offered with no committed test outstanding")
 		}

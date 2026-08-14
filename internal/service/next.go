@@ -97,7 +97,7 @@ func runNext(r *runlog.Run) []string {
 // TaskRemove's own guard — no accepted run, none still open — so the button
 // and the refusal can never disagree. testFailed says the run that blocked
 // the task was the TEST phase itself.
-func taskNextActions(status, gateMode string, removable, depsWaiting, testReady, testFailed bool) []string {
+func taskNextActions(status, gateMode string, removable, depsWaiting, testReady, testFailed, buildOnly bool) []string {
 	var out []string
 	switch status {
 	case "todo", "blocked":
@@ -119,7 +119,16 @@ func taskNextActions(status, gateMode string, removable, depsWaiting, testReady,
 			// build, and wrong about a test that never landed — an aborted
 			// test-first left the person with no way to restart the chain
 			// they had asked for.
-			if gateMode == "tests" && !testReady && (status == "todo" || testFailed) {
+			// The triager judged this fix unverifiable by automated test —
+			// visual, cosmetic, config — so the front door is the build and
+			// the honest reviewer is eyes. test_first stays offered: the
+			// recommendation is one click to overrule.
+			if buildOnly {
+				out = append(out, "run")
+				if gateMode == "tests" {
+					out = append(out, "test_first")
+				}
+			} else if gateMode == "tests" && !testReady && (status == "todo" || testFailed) {
 				out = append(out, "test_first", "run")
 			} else {
 				out = append(out, "run")

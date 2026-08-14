@@ -341,6 +341,14 @@ type Triage struct {
 	// TaskTitle is empty when the bug is not actionable.
 	TaskTitle string `json:"task_title"`
 	Reason    string `json:"reason"`
+	// TestStrategy is the triager's judgment on the honest verification for
+	// this bug: "test-first" when it is reproducible as an automated test
+	// (behavioural, crash, data), "build-only" when the honest check is
+	// eyes (visual/cosmetic/config). Recommends, never decides.
+	TestStrategy string `json:"test_strategy"`
+	// TestReason is one line: why that strategy — and for test-first, a
+	// sketch of the reproduction the test-writer can start from.
+	TestReason string `json:"test_reason"`
 }
 
 var validTriageSeverities = map[string]bool{
@@ -364,6 +372,16 @@ func parseTriage(text string) (*Triage, error) {
 		// A classification with no reason cannot be argued with, and this one
 		// is going in front of a person who has to decide whether to trust it.
 		return nil, fmt.Errorf("triage contract: no reason given")
+	}
+	// Normalized, tolerant of variants, never invented: an empty strategy
+	// stays empty — older triages and unsure models simply do not recommend.
+	switch v := strings.ToLower(strings.TrimSpace(t.TestStrategy)); {
+	case strings.Contains(v, "test"):
+		t.TestStrategy = "test-first"
+	case strings.Contains(v, "build") || strings.Contains(v, "only"):
+		t.TestStrategy = "build-only"
+	default:
+		t.TestStrategy = ""
 	}
 	return &t, nil
 }

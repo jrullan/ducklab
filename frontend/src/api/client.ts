@@ -259,6 +259,9 @@ export interface Task {
   /** No spec section covers this task — the plan amendment's toll, worn
    * until the scribe teaches the spec what was built. */
   spec_debt?: boolean;
+  /** The triager judged this fix unverifiable by automated test: the front
+   * door is the build, the honest reviewer is eyes. One click overrules. */
+  build_only?: boolean;
   /** The actions a person may legally start from this task, stated by the
    * engine — run, test_first, review, remove. */
   next?: string[];

@@ -337,6 +337,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			"bug": b.ID, "severity": t.Severity, "reason": t.Reason,
 			"component": t.Component, "task_title": t.TaskTitle,
 			"suspected_files": t.SuspectedFiles,
+			"test_strategy": t.TestStrategy, "test_reason": t.TestReason,
 		}
 		if t.DuplicateOf != "" {
 			p["duplicate_of"] = t.DuplicateOf
@@ -554,6 +555,13 @@ func promotedTaskBody(b *store.Bug) string {
 		if b.TriageReason != "" {
 			sb.WriteString("\n" + strings.TrimSpace(b.TriageReason) + "\n")
 		}
+		if b.TestStrategy != "" {
+			fmt.Fprintf(&sb, "\n**Verification (triage recommends):** %s", b.TestStrategy)
+			if b.TestReason != "" {
+				fmt.Fprintf(&sb, " — %s", strings.TrimSpace(b.TestReason))
+			}
+			sb.WriteString("\n")
+		}
 		// Said out loud, because it is a model's opinion and the reporter's
 		// words are not. An implementer that finds the cause elsewhere should
 		// not doubt itself.
@@ -692,6 +700,12 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		}
 		if v, _ := p["task_title"].(string); v != "" {
 			rec.TaskTitle = v
+		}
+		if v, _ := p["test_strategy"].(string); v != "" {
+			rec.TestStrategy = v
+		}
+		if v, _ := p["test_reason"].(string); v != "" {
+			rec.TestReason = v
 		}
 		if v, _ := p["reason"].(string); v != "" {
 			rec.TriageReason = v
