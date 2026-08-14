@@ -1437,7 +1437,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         {railOpen ? (
         <aside
           data-testid="run-rail"
-          className="flex flex-col gap-3 p-4 md:sticky md:top-14 md:h-[calc(100vh-12rem)] md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:border-l md:border-hairline"
+          // overscroll-contain: the dock's scroll ends AT the dock. Without
+          // it, reaching its bottom chained the wheel into the page scroller
+          // and the transcript crawled away under a rail that felt "linked".
+          className="flex flex-col gap-3 p-4 md:sticky md:top-14 md:h-[calc(100vh-12rem)] md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:overscroll-contain md:border-l md:border-hairline"
         >
           <button
             type="button"

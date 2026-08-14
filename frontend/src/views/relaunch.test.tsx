@@ -506,6 +506,10 @@ describe("the run header names the task", () => {
     const rail = await screen.findByTestId("run-rail");
     expect(rail.className).toContain("md:sticky");
     expect(rail.className).toContain("md:border-l");
+    // Its scroll must END at the dock: without overscroll containment,
+    // bottoming out the rail chained the wheel into the page and dragged
+    // the transcript along with it.
+    expect(rail.className).toContain("md:overscroll-contain");
     // The sticky grip is only as long as its container: the same wrapper
     // must hold the conversation AND the bottom dock (whose tabs open the
     // diff), or the rail lets go before the read is over.

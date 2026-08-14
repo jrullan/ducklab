@@ -247,6 +247,21 @@ func (s *Service) waitForRun(ctx context.Context, runID string) (*runlog.Run, er
 		run := detail.Run
 		switch run.Status {
 		case "done", "failed":
+			// Terminal STATUS lands before the run goroutine's deferred
+			// cleanup does: a caller that proceeds on status alone races the
+			// writer's last files — test TempDir cleanups kept finding
+			// directories still being written. The done channel closes when
+			// the goroutine actually returns; wait for it when we know it.
+			s.runsMu.RLock()
+			rs := s.runs[runID]
+			s.runsMu.RUnlock()
+			if rs != nil && rs.done != nil {
+				select {
+				case <-rs.done:
+				case <-deadline:
+				case <-ctx.Done():
+				}
+			}
 			return run, nil
 		case "paused":
 			// Under yolo a pause means a question nobody can answer. Recorded
