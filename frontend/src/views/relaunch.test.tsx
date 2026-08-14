@@ -513,6 +513,21 @@ describe("the run header names the task", () => {
     expect(wrapper.querySelector('[data-testid="conversation"]')).toBeTruthy();
     expect(wrapper.querySelector('[data-testid="bottom-dock"]')).toBeTruthy();
   });
+
+  // Collapsed, the rail leaves a pill to bring it back — which is only true
+  // if the pill can be CLICKED. Flush against the window edge it sat in the
+  // overlay scrollbar's lane and every click landed on the scrollbar; the
+  // margin is the fix, so it is the pin.
+  it("keeps the collapsed pill clear of the scrollbar's lane", async () => {
+    localStorage.setItem("ducklab.runrail", "off");
+    try {
+      render(<RunView runId="r-1" client={clientWith()} />);
+      const pill = await screen.findByTestId("run-rail-pill");
+      expect(pill.className).toContain("mr-3");
+    } finally {
+      localStorage.removeItem("ducklab.runrail");
+    }
+  });
 });
 
 describe("the task's coverage on the run view card", () => {

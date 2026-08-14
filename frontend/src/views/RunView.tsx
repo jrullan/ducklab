@@ -1560,7 +1560,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             data-testid="run-rail-pill"
             onClick={toggleRail}
             title="show budget and gate"
-            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-14"
+            // mr-3 keeps the pill out of the overlay scrollbar's lane: flush
+            // against the window edge, every click landed on the scrollbar
+            // and the collapsed rail could never be reopened. A full border
+            // now that it floats free of the edge it used to hug.
+            className="mr-3 self-start rounded border border-hairline px-2 py-2 text-xs text-ink-muted md:sticky md:top-14"
           >
             ‹
           </button>
