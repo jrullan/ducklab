@@ -621,6 +621,11 @@ func TestTheSettleNoteNamesTheDebtAndTheContract(t *testing.T) {
 		"Covers:",
 		"invent nothing aspirational",
 		"exactly as it is",
+		// The upward wiring: settle flows UP the spine — as-built sections
+		// wire to the requirement that genuinely covers them, and what
+		// cannot wire surfaces honestly as requirements-debt.
+		"Wire UPWARD",
+		"requirements-debt",
 	} {
 		if !strings.Contains(note, must) {
 			t.Errorf("the note lost %q", must)

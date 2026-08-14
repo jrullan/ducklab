@@ -1268,9 +1268,16 @@ func specSettleNote(debt []TaskView) string {
 	}
 	b.WriteString("\nRules for this settlement:\n" +
 		"- Add or extend the FEWEST sections that honestly describe the behaviour these tasks " +
-		"deliver. Describe what IS built — invent nothing aspirational.\n" +
+		"deliver. Describe what IS built — invent nothing aspirational; the code is your " +
+		"source, read it.\n" +
 		"- Mark each such section **As-built:** yes, and give it **Covers:** naming the task " +
 		"ids it covers (e.g. Covers: T-110, T-112).\n" +
+		"- Wire UPWARD too: give each section **Implements:** naming the existing requirement " +
+		"that genuinely covers this behaviour. Never invent a requirement id. When NO existing " +
+		"requirement covers it, leave Implements off — the section will surface on the " +
+		"traceability rail as requirements-debt, which is the truth: the amendment added " +
+		"capability the requirements have not caught up with, and the person extends them " +
+		"through a brief.\n" +
 		"- Every other section comes back exactly as it is, same id, same wording.\n")
 	return b.String()
 }
