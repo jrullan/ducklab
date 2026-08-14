@@ -132,3 +132,50 @@ func TestAFragmentRefusalSpeaks(t *testing.T) {
 		t.Fatalf("the refusal lost the architect's words: %v", err)
 	}
 }
+
+// The plan updates by fragment too — a 110-task plan redraft died on a 20k
+// output cap for re-typing what it kept. Task edits replace in place with
+// id and position preserved; a milestone edit keeps custody of nothing (its
+// tasks survive); new tasks ride the amendment's placement machinery.
+func TestPlanFragmentEditsInPlace(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\nFoundation.\n\n"+
+			"### T-001 — Schema\n\nOriginal schema.\n\n"+
+			"### T-002 — Boundary\n\nOriginal boundary.\n\n"+
+			"## M-002 — Polish\n\nLater.\n\n"+
+			"### T-007 — Colors\n\nOriginal colors.\n")
+	base, _ := artifact.Load(root, artifact.KindPlan)
+	res, err := runFragment(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-pf", Mode: "solo",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if !strings.Contains(prompt, "T-012 — Title") && !strings.Contains(prompt, "EXISTING id") {
+				t.Error("the plan rules did not reach the prompt")
+			}
+			return "## T-002 — Boundary, hardened\n\nNew boundary body.\n\n" +
+				"## M-002 — Polish and delight\n\nRenamed milestone.\n\n" +
+				"## T-900 — Export CSV\n**Milestone:** M-002\n\nAdd the export.\n", nil
+		},
+	}, base, "harden the boundary, rename polish, add export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Proposed
+	// T-002 replaced in place, inside M-001, id kept.
+	if got.Sections[0].Children[1].Body != "New boundary body." || got.Sections[0].Children[1].ID != "T-002" {
+		t.Errorf("task edit missed: %+v", got.Sections[0].Children[1])
+	}
+	if got.Sections[0].Children[0].Body != "Original schema." {
+		t.Error("an untouched task changed")
+	}
+	// M-002 renamed, its child intact.
+	if got.Sections[1].Title != "Polish and delight" || len(got.Sections[1].Children) < 1 ||
+		got.Sections[1].Children[0].Body != "Original colors." {
+		t.Errorf("milestone edit claimed custody: %+v", got.Sections[1])
+	}
+	// The new task landed under M-002 with the next real id.
+	last := got.Sections[1].Children[len(got.Sections[1].Children)-1]
+	if last.Title != "Export CSV" || last.ID != "T-008" {
+		t.Errorf("new task = %s — %s, want T-008 — Export CSV", last.ID, last.Title)
+	}
+}

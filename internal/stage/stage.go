@@ -136,8 +136,10 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	// what it adds or changes and the engine merges — never the whole
 	// document re-typed through an output cap. First drafts and adoption
 	// surveys still write whole documents; they have no unchanged majority
-	// to protect. The plan's own light path (Extend) branched above.
-	if !p.Adopt && p.Stage != Plan && base != nil && len(base.Sections) > 0 {
+	// to protect. The plan's add-only light path (Extend) branched above;
+	// its full updates go by fragment like every other document — a 110-task
+	// plan redraft died on a 20k output cap for re-typing what it kept.
+	if !p.Adopt && base != nil && len(base.Sections) > 0 {
 		ask := strings.TrimSpace(p.Revision)
 		if ask == "" {
 			ask = strings.TrimSpace(p.Seed)

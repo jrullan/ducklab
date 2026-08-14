@@ -82,12 +82,15 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		if strings.Contains(strings.ToUpper(reply), "UNCHANGED") && !strings.Contains(reply, "## ") {
 			continue
 		}
-		got, perr := artifact.Parse(reply, kind)
-		if perr != nil || len(got.Sections) == 0 {
+		repl, ok := parseSectionReply(reply, kind)
+		if !ok {
 			continue // an unusable pass leaves its section untouched — never the document
 		}
-		repl := got.Sections[0]
 		repl.ID = sec.ID // the id is not the model's to change
+		if kind == artifact.KindPlan {
+			repl.Body = stripMilestoneField(repl.Body)
+			repl.Children = sec.Children // a milestone edit never claims custody of its tasks
+		}
 		*sec = repl
 	}
 
@@ -101,11 +104,17 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		if err != nil {
 			return nil, err
 		}
-		got, perr := artifact.Parse(reply, kind)
-		if perr != nil || len(got.Sections) == 0 {
+		sec, ok := parseSectionReply(reply, kind)
+		if !ok {
 			continue
 		}
-		sec := got.Sections[0]
+		if kind == artifact.KindPlan {
+			// A new plan item is a TASK: the amendment's placement machinery
+			// owns milestones, aliases and real ids.
+			merged := mergeExtension(&proposed, []artifact.Section{sec})
+			proposed = *merged
+			continue
+		}
 		sec.ID = fmt.Sprintf("%s-%03d", prefix, NextFree(proposed.Sections, prefix))
 		proposed.Sections = append(proposed.Sections, sec)
 	}
@@ -173,7 +182,10 @@ func parseTriagePass(raw string, base *artifact.Document, prefix string) (ids []
 	seen := map[string]bool{}
 	for _, m := range sectionIDRe.FindAllStringSubmatch(raw, -1) {
 		id := strings.ToUpper(m[1])
-		if !strings.HasPrefix(id, prefix+"-") || seen[id] || findSection(base, id) == nil {
+		// The plan is two-level: its milestones wear the document prefix and
+		// its tasks wear T- — both are editable units.
+		ok := strings.HasPrefix(id, prefix+"-") || (prefix == "M" && strings.HasPrefix(id, "T-"))
+		if !ok || seen[id] || findSection(base, id) == nil {
 			continue
 		}
 		seen[id] = true
@@ -209,7 +221,32 @@ func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Doc
 	for _, sec := range doc.Sections {
 		fmt.Fprintf(&b, "- %s — %s\n", sec.ID, sec.Title)
 	}
+	if kind == artifact.KindPlan {
+		fmt.Fprintf(&b, "\n## Answer format\n\nThe one new task, heading and body, with its "+
+			"milestone named:\n\n## T-900 — %s\n**Milestone:** <an existing M-id from the "+
+			"outline>\n<body>\n", title)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "\n## Answer format\n\nThe one new section, heading and body:\n\n"+
 		"## %s — %s\n<body>\n", fragmentPlaceholder(prefix), title)
 	return b.String()
+}
+
+// parseSectionReply reads ONE section out of a pass reply, whatever level
+// the model emitted it at. The plan's two-level parser needs normalization
+// (a bare ## T-012 is not a valid plan top level); flat documents parse
+// directly.
+func parseSectionReply(reply string, kind artifact.Kind) (artifact.Section, bool) {
+	if kind == artifact.KindPlan {
+		items, _ := parsePlanItems(reply)
+		for _, it := range items {
+			return it, true
+		}
+		return artifact.Section{}, false
+	}
+	got, perr := artifact.Parse(reply, kind)
+	if perr != nil || len(got.Sections) == 0 {
+		return artifact.Section{}, false
+	}
+	return got.Sections[0], true
 }

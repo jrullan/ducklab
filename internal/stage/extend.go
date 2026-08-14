@@ -64,22 +64,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		return nil, err
 	}
 
-	produced, perr := artifact.Parse(normalizeFragment(raw), kind)
-	// Tasks are the parsed sections' CHILDREN: normalization demotes the
-	// contract's headings under one synthetic milestone, so refusal prose —
-	// which parses as that milestone's body — yields none.
-	var tasks []artifact.Section
-	real := 0
-	if perr == nil {
-		for _, sec := range produced.Sections {
-			tasks = append(tasks, sec.Children...)
-		}
-		for _, t := range tasks {
-			if !looksLikeMilestoneDecl(t) {
-				real++
-			}
-		}
-	}
+	tasks, real := parsePlanItems(raw)
 	if real == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
@@ -268,4 +253,24 @@ func looksLikeMilestoneDecl(s artifact.Section) bool {
 		return false // prose: this is work wearing the wrong id
 	}
 	return true
+}
+
+// parsePlanItems reads a plan fragment: headings normalized under one
+// synthetic milestone, flattened to items (task edits, new tasks, milestone
+// declarations/edits). real counts the items that are WORK — refusal prose
+// parses as the synthetic milestone's body and yields none.
+func parsePlanItems(raw string) (items []artifact.Section, real int) {
+	produced, perr := artifact.Parse(normalizeFragment(raw), artifact.KindPlan)
+	if perr != nil {
+		return nil, 0
+	}
+	for _, sec := range produced.Sections {
+		items = append(items, sec.Children...)
+	}
+	for _, t := range items {
+		if !looksLikeMilestoneDecl(t) {
+			real++
+		}
+	}
+	return items, real
 }

@@ -118,3 +118,36 @@ func TestSectionedRefusesARedesign(t *testing.T) {
 		t.Fatalf("a 14-section update was not refused: %v", err)
 	}
 }
+
+// Sectioned, for the plan: the triage names TASKS (T-) as well as
+// milestones, each visited in its own fresh conversation.
+func TestSectionedPlanVisitsTasks(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\nFoundation.\n\n### T-001 — Schema\n\nOriginal schema.\n\n### T-002 — Boundary\n\nOriginal boundary.\n")
+	base, _ := artifact.Load(root, artifact.KindPlan)
+	call := 0
+	res, err := runSectioned(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-sp",
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			call++
+			if call == 1 {
+				return "T-002\n", nil
+			}
+			if !strings.Contains(prompt, "Original boundary.") {
+				t.Error("the task pass did not carry the task's body")
+			}
+			return "## T-002 — Boundary, hardened\n\nNew boundary body.\n", nil
+		},
+	}, base, "harden the boundary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Proposed
+	if got.Sections[0].Children[1].Body != "New boundary body." {
+		t.Errorf("the visited task did not change: %+v", got.Sections[0].Children[1])
+	}
+	if got.Sections[0].Children[0].Body != "Original schema." {
+		t.Error("an unvisited task changed")
+	}
+}

@@ -60,16 +60,28 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		return nil, err
 	}
 
-	produced, perr := artifact.Parse(raw, kind)
-	if perr != nil || len(produced.Sections) == 0 {
-		reason := strings.TrimSpace(raw)
-		if len(reason) > 300 {
-			reason = reason[:300] + "…"
+	var proposed *artifact.Document
+	if kind == artifact.KindPlan {
+		items, real := parsePlanItems(raw)
+		if real == 0 {
+			reason := strings.TrimSpace(raw)
+			if len(reason) > 300 {
+				reason = reason[:300] + "…"
+			}
+			return nil, fmt.Errorf("the architect changed no sections: %s", reason)
 		}
-		return nil, fmt.Errorf("the architect changed no sections: %s", reason)
+		proposed = mergePlanFragment(base, items)
+	} else {
+		produced, perr := artifact.Parse(raw, kind)
+		if perr != nil || len(produced.Sections) == 0 {
+			reason := strings.TrimSpace(raw)
+			if len(reason) > 300 {
+				reason = reason[:300] + "…"
+			}
+			return nil, fmt.Errorf("the architect changed no sections: %s", reason)
+		}
+		proposed = mergeFragment(base, produced.Sections, prefix)
 	}
-
-	proposed := mergeFragment(base, produced.Sections, prefix)
 	proposed.Front.Kind = kind
 	proposed.Front.Project = base.Front.Project
 	// A surveyed origin survives an update: the document still describes a
@@ -110,6 +122,21 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	}
 	b.WriteString("\n")
 
+	if kind == artifact.KindPlan {
+		b.WriteString("## Rules\n\n" +
+			"- Read before you write: use artifact_read to see the full text of anything you " +
+			"consider changing — the outline above carries titles only.\n" +
+			"- To CHANGE a task, emit it in full under its EXISTING id: ## T-012 — Title. Its " +
+			"place in the plan is preserved.\n" +
+			"- To CHANGE a milestone's title or description, emit ## M-002 — Title with the new " +
+			"prose; its tasks are untouched.\n" +
+			"- To ADD a task, use the literal id T-900 with a **Milestone:** field naming where " +
+			"it belongs — real ids are assigned by the engine.\n" +
+			"- Emit nothing else: no unchanged tasks, no prose between sections. What you leave " +
+			"out is untouched by construction.\n" +
+			"- If nothing should change, return NO sections: one sentence saying why.\n")
+		return b.String(), nil
+	}
 	fmt.Fprintf(&b, "## Rules\n\n"+
 		"- Read before you write: use artifact_read to see the full text of any section you "+
 		"consider changing — the outline above carries titles only.\n"+
@@ -150,4 +177,77 @@ func mergeFragment(base *artifact.Document, produced []artifact.Section, prefix 
 		out.Sections = append(out.Sections, sec)
 	}
 	return &out
+}
+
+// mergePlanFragment applies a plan fragment to a copy of the base. Task
+// edits replace in place — id and milestone position preserved, so nothing
+// re-orders under the reader. A milestone edit with prose updates its title
+// and body and KEEPS its children: a heading is not custody of the tasks
+// beneath it. Everything new — bare milestone declarations and unknown
+// tasks — rides the amendment's own placement machinery.
+func mergePlanFragment(base *artifact.Document, items []artifact.Section) *artifact.Document {
+	out := *base
+	out.Sections = make([]artifact.Section, len(base.Sections))
+	copy(out.Sections, base.Sections)
+
+	var appendix []artifact.Section
+	for _, it := range items {
+		up := strings.ToUpper(it.ID)
+		if strings.HasPrefix(up, "M-") {
+			if looksLikeMilestoneDecl(it) {
+				appendix = append(appendix, it) // placement for what follows
+				continue
+			}
+			edited := false
+			for i := range out.Sections {
+				if strings.EqualFold(out.Sections[i].ID, it.ID) {
+					kept := out.Sections[i].Children
+					id := out.Sections[i].ID
+					out.Sections[i] = it
+					out.Sections[i].ID = id
+					out.Sections[i].Children = kept
+					edited = true
+					break
+				}
+			}
+			if !edited {
+				appendix = append(appendix, it)
+			}
+			continue
+		}
+		// A task: replace in place when it exists, else it is new work.
+		replaced := false
+		for mi := range out.Sections {
+			for ti := range out.Sections[mi].Children {
+				if strings.EqualFold(out.Sections[mi].Children[ti].ID, it.ID) {
+					it.ID = out.Sections[mi].Children[ti].ID
+					it.Body = stripMilestoneField(it.Body)
+					out.Sections[mi].Children[ti] = it
+					replaced = true
+					break
+				}
+			}
+			if replaced {
+				break
+			}
+		}
+		if !replaced {
+			appendix = append(appendix, it)
+		}
+	}
+	if len(appendix) > 0 {
+		return mergeExtension(&out, appendix)
+	}
+	return &out
+}
+
+func stripMilestoneField(body string) string {
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "**Milestone:**") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
