@@ -80,6 +80,13 @@ describe("runLabel names the kind", () => {
     expect(runLabel({ id: "r1", stage: "spec" })).toBe("spec");
     expect(runLabel({ id: "r1" })).toBe("r1");
   });
+
+  it("names a taskless run's subject — the bug a triage read", () => {
+    expect(runLabel({ id: "r1", stage: "triage", subject: "B-059" })).toBe("triage · B-059");
+    expect(runLabel({ id: "r1", stage: "triage", subject: "3 open bugs" })).toBe("triage · 3 open bugs");
+    // A task outranks a subject: builds keep naming their task.
+    expect(runLabel({ id: "r1", stage: "build", task_id: "T-083", subject: "B-1" })).toBe("build · T-083");
+  });
 });
 
 

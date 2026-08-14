@@ -614,13 +614,21 @@ export function touchesTests(files: readonly DiffFile[]): boolean {
  * stages — intake, spec and plan carry no task. Those rows rendered an anchor
  * with no text: invisible, unclickable, and the only runs that ever pause at a
  * human gate. */
-export function runLabel(run: { task_id?: string; stage?: string; id: string }): string {
+export function runLabel(run: {
+  task_id?: string;
+  stage?: string;
+  subject?: string;
+  id: string;
+}): string {
   // The stage ALWAYS shows. A test run and a build run of the same task both
   // read "T-083", and the person who launched a TDD chain could not tell
   // which phase they were looking at — nor notice when a relaunch quietly
   // became build-only.
   const stage = run.stage || "";
   if (run.task_id) return stage ? `${stage} · ${run.task_id}` : run.task_id;
+  // A taskless run may still have a subject — the bug a triage read. Every
+  // triage row said "triage" and telling two apart meant opening both.
+  if (run.subject) return stage ? `${stage} · ${run.subject}` : run.subject;
   return stage || run.id;
 }
 

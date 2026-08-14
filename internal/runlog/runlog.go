@@ -42,6 +42,11 @@ type Run struct {
 	// The acceptance stays in the record (it happened); this says the promise
 	// it made was withdrawn, and by which commit.
 	RevertSHA     string                 `json:"revert_sha,omitempty"`
+	// Subject names what a taskless run was about — the bug a triage read,
+	// where a build would name its task. Without it a triage row said
+	// "triage" and nothing else, and telling two triages apart meant opening
+	// both.
+	Subject       string                 `json:"subject,omitempty"`
 	StartedAt     string                 `json:"started_at"`
 	EndedAt       string                 `json:"ended_at"`
 	WallclockMs   int64                  `json:"wallclock_ms"`

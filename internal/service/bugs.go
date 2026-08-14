@@ -223,6 +223,7 @@ func (s *Service) BugTriage(ctx context.Context, projectID, bugID string) (*runl
 		Stream:    true,
 		Gate:      "none",
 		Autonomy:  s.triageAutonomy(entry.Path),
+		Subject:   triageSubject(todo),
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
@@ -1174,4 +1175,21 @@ func str(v interface{}) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", v))
+}
+
+// triageSubject names what a triage run is reading, in the space a task id
+// would occupy: the bug ids when they fit on a row, the count when they
+// would not. "triage" alone made every triage row identical.
+func triageSubject(todo []bug.Bug) string {
+	if len(todo) == 0 {
+		return ""
+	}
+	if len(todo) <= 3 {
+		ids := make([]string, len(todo))
+		for i, b := range todo {
+			ids[i] = b.ID
+		}
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%d open bugs", len(todo))
 }

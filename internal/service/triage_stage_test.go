@@ -33,3 +33,24 @@ func TestATriageRunSaysItIsATriage(t *testing.T) {
 		t.Errorf("stage = %q, want triage", run.Stage)
 	}
 }
+
+// Every triage row in the list read "triage" and nothing else; telling two
+// apart meant opening both. The run now records WHAT it read, where a build
+// would name its task.
+func TestATriageRunNamesItsBugs(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{
+		Title: "vertex drag never starts", Severity: "critical",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.BugTriage(context.Background(), id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Subject != "B-001" {
+		t.Errorf("subject = %q, want the bug it reads (B-001)", run.Subject)
+	}
+}
