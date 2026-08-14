@@ -543,3 +543,23 @@ func TestListingsShowDotGitignoreButNotDotGit(t *testing.T) {
 		t.Error("search cannot see inside .gitignore")
 	}
 }
+
+// A flat 32KB cap handed a 32k-token model a quarter of its whole context in
+// ONE tool result — two verify_runs and the model had forgotten its task,
+// which is what a "loop" is. The bound scales to the seat reading it.
+func TestToolResultsScaleToTheSeat(t *testing.T) {
+	cases := []struct {
+		context int
+		want    int
+	}{
+		{0, MaxToolResultBytes},       // unknown window: the flat cap
+		{1_000_000, MaxToolResultBytes}, // huge window: ceilinged, unchanged
+		{32_768, 16_384},              // 32k seat: an eighth of its context
+		{4_096, 4_096},                // tiny seat: floored to stay usable
+	}
+	for _, c := range cases {
+		if got := resultCapFor(c.context); got != c.want {
+			t.Errorf("resultCapFor(%d) = %d, want %d", c.context, got, c.want)
+		}
+	}
+}

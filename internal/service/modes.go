@@ -193,6 +193,7 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 		turnCtx := *ectx
 		turnCtx.Role = t.Role
 		turnCtx.Duckling = d
+		turnCtx.SeatContextTokens = loop.Duckling.Caps.ContextTokens
 		// A contestant works in its own worktree. Leaving the project root
 		// here is what let every tournament contestant edit the shared tree.
 		if tc.Root != "" {

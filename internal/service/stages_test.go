@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -815,4 +816,38 @@ func TestATruncatedDocumentPausesInsteadOfDying(t *testing.T) {
 		t.Errorf("the pause does not name the way out: %q", rs.run.Failure)
 	}
 	s.RunAbort(context.Background(), run.ID)
+}
+
+// The engine knows the prompt AND every seat's window before a token is
+// paid: a stage whose opening prompt eats a small local seat's context was a
+// predictable loop — predicted now, at the door. Warned when cramped,
+// refused when impossible, silent about seats that never declared a window.
+func TestContextFitSpeaksAtTheDoor(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	small, err := s.ducklings.Get("pato-uno")
+	if err != nil {
+		t.Fatal(err)
+	}
+	small.Caps.ContextTokens = 32768
+	big, _ := s.ducklings.Get("pato-dos")
+	big.Caps.ContextTokens = 0 // never declared: skipped, not guessed
+
+	seats := []config.DucklingID{"pato-uno", "pato-dos"}
+
+	// Comfortable: ~2k tokens in a 32k seat says nothing.
+	if w, f := s.contextFitNotes(8_000, seats); len(w) != 0 || f != "" {
+		t.Errorf("comfortable fit complained: %v %q", w, f)
+	}
+	// Cramped: ~16k tokens is half the window — warned, with the chip named.
+	w, f := s.contextFitNotes(64_000, seats)
+	if f != "" || len(w) != 1 {
+		t.Fatalf("cramped fit = warns %v fatal %q, want one warning", w, f)
+	}
+	if !strings.Contains(w[0], "pato-uno") || !strings.Contains(w[0], "chip") {
+		t.Errorf("the warning does not name the seat and the lever: %q", w[0])
+	}
+	// Impossible: ~30k tokens in a 32k window — refused before spending.
+	if _, f := s.contextFitNotes(120_000, seats); !strings.Contains(f, "cannot meaningfully work") {
+		t.Errorf("an impossible fit was not refused: %q", f)
+	}
 }

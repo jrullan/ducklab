@@ -384,6 +384,20 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Ducklings:   ducklingList(roster),
 		Critics:     critics,
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			// Context-fit preflight: the engine knows the prompt AND every
+			// seat's declared window before a single token is paid. A stage
+			// whose opening prompt eats most of a small local seat's context
+			// was a predictable loop — predicted now, at the door.
+			seats := []config.DucklingID{roster[config.RoleArchitect]}
+			seats = append(seats, critics...)
+			warns, fatal := s.contextFitNotes(len(prompt), seats)
+			for _, wmsg := range warns {
+				rs.run.Warning = wmsg
+				rs.writer.AppendEvent("warning", map[string]interface{}{"detail": wmsg})
+			}
+			if fatal != "" {
+				return "", fmt.Errorf("%s", fatal)
+			}
 			res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
@@ -1330,4 +1344,38 @@ func wireCoveredTasks(projectRoot string) map[string][]string {
 		return nil
 	}
 	return wired
+}
+
+// contextFitNotes sizes the opening prompt against each participating seat's
+// declared context window. Past ~40% the seat starts its work already
+// cramped — warned, so the person can reseat via the chips. Past ~90% it
+// cannot meaningfully work at all — refused before a token is spent, naming
+// the numbers and the levers. A seat with no declared window is skipped:
+// silence about the unknown beats a guess.
+func (s *Service) contextFitNotes(promptChars int, seats []config.DucklingID) (warns []string, fatal string) {
+	promptTokens := promptChars / 4
+	seen := map[config.DucklingID]bool{}
+	for _, id := range seats {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		d, err := s.ducklings.Get(id)
+		if err != nil || d.Caps.ContextTokens <= 0 {
+			continue
+		}
+		pct := promptTokens * 100 / d.Caps.ContextTokens
+		switch {
+		case pct >= 90:
+			fatal = fmt.Sprintf("the opening prompt is ~%dk tokens — %d%% of %s's declared "+
+				"context (%dk). This seat cannot meaningfully work; reseat it (click its chip) "+
+				"or trim what the stage carries", promptTokens/1000, pct, id, d.Caps.ContextTokens/1000)
+			return
+		case pct >= 40:
+			warns = append(warns, fmt.Sprintf("the opening prompt is ~%dk tokens — %d%% of %s's "+
+				"declared context (%dk). Headroom is thin: expect loops or truncation; a larger "+
+				"seat is one chip-click away", promptTokens/1000, pct, id, d.Caps.ContextTokens/1000))
+		}
+	}
+	return
 }

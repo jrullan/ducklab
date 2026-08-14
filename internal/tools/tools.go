@@ -80,6 +80,11 @@ type ExecContext struct {
 	// writes the implementation too, the gate goes green immediately, and the
 	// test has proved nothing.
 	TestPathsOnly bool
+	// SeatContextTokens is the acting seat's declared context window, set
+	// per turn. Tool results scale to it: a flat 32KB cap handed a 32k-token
+	// model a quarter of its whole context in ONE result — two verify_runs
+	// and the model had forgotten its task, which is what a "loop" is.
+	SeatContextTokens int
 	// ConsecGateFails counts verify_run reds with no green between them,
 	// across the whole run — the loop's own I3, at gate level.
 	ConsecGateFails int
@@ -212,9 +217,26 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		// llm.jsonl — and the next request was refused for exceeding the
 		// model's context by a factor of one. I3 says nothing is unbounded,
 		// and a tool result is the largest thing a turn can pull in.
-		res.Content = CapResult(res.Content, MaxToolResultBytes)
+		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+// resultCapFor scales the tool-result bound to the seat reading it: an
+// eighth of the seat's context (tokens/8 ≈ bytes/2), floored so even a tiny
+// model sees enough to act on, ceilinged at the flat cap big models keep.
+func resultCapFor(contextTokens int) int {
+	if contextTokens <= 0 {
+		return MaxToolResultBytes
+	}
+	scaled := contextTokens / 2 // bytes: (tokens/8) * 4
+	if scaled < 4096 {
+		return 4096
+	}
+	if scaled > MaxToolResultBytes {
+		return MaxToolResultBytes
+	}
+	return scaled
 }
 
 // MaxToolResultBytes bounds what one tool call can add to a conversation.
