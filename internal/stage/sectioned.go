@@ -170,6 +170,7 @@ func buildTriagePassPrompt(projectRoot string, kind artifact.Kind, base *artifac
 			fmt.Fprintf(&b, "  - %s — %s\n", c.ID, c.Title)
 		}
 	}
+	b.WriteString(coverageGapsHint(projectRoot, kind))
 	b.WriteString("\n## Answer format\n\n" +
 		"One line per item, nothing else:\n" +
 		"- an existing id to CHANGE, e.g. " + kind.Prefix() + "-012\n" +

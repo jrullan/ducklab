@@ -40,8 +40,17 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
+	// Ask strictly, read generously: a small model put the KIND in the id
+	// field — {"id":"plan"} — and the old error named the valid values
+	// without naming the field, so the model read "available: plan",
+	// thought "that is what I said", and repeated the identical call six
+	// times. When the intent is unambiguous, honor it.
+	if a.Kind == "" && artifact.ValidKind(a.ID) {
+		a.Kind, a.ID = a.ID, ""
+	}
 	if !artifact.ValidKind(a.Kind) {
-		return ErrorResult("unknown artifact %q (available: requirements, spec, plan, project)", a.Kind), nil
+		return ErrorResult("the %q FIELD must be one of requirements | spec | plan | project "+
+			"— e.g. {%q:%q}. You sent kind=%q id=%q", "kind", "kind", "plan", a.Kind, a.ID), nil
 	}
 
 	doc, err := artifact.Load(ectx.ProjectRoot, artifact.Kind(a.Kind))

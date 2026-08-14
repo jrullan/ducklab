@@ -563,3 +563,57 @@ func TestToolResultsScaleToTheSeat(t *testing.T) {
 		}
 	}
 }
+
+// {"id":"plan"} — the kind in the id field, six identical retries, because
+// the old error named the valid VALUES without naming the FIELD. When the
+// intent is unambiguous, honor it; when it is not, teach the field.
+func TestArtifactReadForgivesTheKindInTheIDField(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "plan.md"),
+		[]byte("## M-001 — Core\n\n### T-001 — Schema\n\nBody.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &ArtifactRead{}
+	res, err := tool.Execute(context.Background(), &ExecContext{ProjectRoot: dir},
+		json.RawMessage(`{"id":"plan"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError || !strings.Contains(res.Content, "T-001") {
+		t.Errorf("the unambiguous intent was not honored: %.150s", res.Content)
+	}
+	// Genuinely wrong args teach the FIELD, not just the values.
+	res, _ = tool.Execute(context.Background(), &ExecContext{ProjectRoot: dir},
+		json.RawMessage(`{"kind":"blueprints"}`))
+	if !res.IsError || !strings.Contains(res.Content, `"kind" FIELD`) {
+		t.Errorf("the error does not teach the field: %.150s", res.Content)
+	}
+}
+
+// Identical inputs cannot produce a different answer. The third identical
+// failing call is refused with orders to change something — the generic
+// form of the gate brake, for the arguments-wrong loop.
+func TestTheExecutorRefusesRepeatedFailingCalls(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&ArtifactRead{})
+	ectx := &ExecContext{ProjectRoot: t.TempDir()}
+	bad := json.RawMessage(`{"kind":"nope"}`)
+	for i := 0; i < RepeatFailLimit; i++ {
+		res, _ := reg.Execute(context.Background(), ectx, "artifact_read", bad)
+		if !res.IsError || strings.Contains(res.Content, "REFUSED") {
+			t.Fatalf("call %d should fail normally: %.100s", i+1, res.Content)
+		}
+	}
+	res, _ := reg.Execute(context.Background(), ectx, "artifact_read", bad)
+	if !strings.Contains(res.Content, "REFUSED") || !strings.Contains(res.Content, "CHANGE the arguments") {
+		t.Errorf("the repeat was not refused with correction: %.200s", res.Content)
+	}
+	// Changing the arguments resets the brake.
+	res, _ = reg.Execute(context.Background(), ectx, "artifact_read", json.RawMessage(`{"kind":"also-nope"}`))
+	if strings.Contains(res.Content, "REFUSED") {
+		t.Error("a CHANGED call must run, not be refused")
+	}
+}

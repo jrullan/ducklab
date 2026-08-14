@@ -122,6 +122,7 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	}
 	b.WriteString("\n")
 
+	b.WriteString(coverageGapsHint(projectRoot, kind))
 	if kind == artifact.KindPlan {
 		b.WriteString("## Rules\n\n" +
 			"- Read before you write: use artifact_read to see the full text of anything you " +
@@ -250,4 +251,38 @@ func stripMilestoneField(body string) string {
 		kept = append(kept, line)
 	}
 	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+// coverageGapsHint is the spine speaking into a spec update: the engine
+// KNOWS which requirements no spec section implements, deterministically —
+// and a small architect's triage under-selects without it. A spec produced
+// by a sectioned update simply skipped two new requirements; nobody noticed
+// until the person read both documents side by side. The engine reads them
+// on every update instead.
+func coverageGapsHint(projectRoot string, kind artifact.Kind) string {
+	if kind != artifact.KindSpec {
+		return ""
+	}
+	spine, err := artifact.LoadSpine(projectRoot)
+	if err != nil {
+		return ""
+	}
+	titles := map[string]string{}
+	if reqs, rerr := artifact.Load(projectRoot, artifact.KindRequirements); rerr == nil && reqs != nil {
+		for _, r := range reqs.Sections {
+			titles[r.ID] = r.Title
+		}
+	}
+	var gaps []string
+	for _, te := range spine.Check() {
+		if te.Kind == artifact.OrphanRequirement {
+			gaps = append(gaps, fmt.Sprintf("- %s — %s", te.ID, titles[te.ID]))
+		}
+	}
+	if len(gaps) == 0 {
+		return ""
+	}
+	return "## Coverage gaps (computed by the engine)\n\nThese requirements have NO spec " +
+		"section implementing them. Cover every one this request touches — add sections for " +
+		"them, with **Implements:** naming the requirement:\n" + strings.Join(gaps, "\n") + "\n\n"
 }

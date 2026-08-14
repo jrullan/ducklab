@@ -88,6 +88,14 @@ type ExecContext struct {
 	// ConsecGateFails counts verify_run reds with no green between them,
 	// across the whole run — the loop's own I3, at gate level.
 	ConsecGateFails int
+	// lastFailSig and lastFailCount track the most recent FAILING call's
+	// tool+args, for the repetition brake: a small model that gets its
+	// arguments wrong retries the identical call — six artifact_reads of
+	// {"id":"plan"} on one run — because the error reads like disagreement,
+	// not correction. The third identical failure is refused with orders to
+	// change something.
+	lastFailSig   string
+	lastFailCount int
 	// Verify is the project's gate. verify_run runs this and nothing else:
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
@@ -208,7 +216,23 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if err != nil {
 		return ErrorResult("unknown tool %q", name), nil
 	}
+	sig := name + "\x00" + string(args)
+	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
+		return &Result{IsError: true, Content: fmt.Sprintf(
+			"REFUSED: you have made this exact failing call %d times — %s with the same "+
+				"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
+				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
+	}
 	res, err := t.Execute(ctx, ectx, args)
+	if res != nil && res.IsError {
+		if ectx.lastFailSig == sig {
+			ectx.lastFailCount++
+		} else {
+			ectx.lastFailSig, ectx.lastFailCount = sig, 1
+		}
+	} else {
+		ectx.lastFailSig, ectx.lastFailCount = "", 0
+	}
 	if res != nil {
 		// Capped here rather than in each tool, so a tool cannot forget.
 		//
@@ -241,6 +265,11 @@ func resultCapFor(contextTokens int) int {
 
 // MaxToolResultBytes bounds what one tool call can add to a conversation.
 const MaxToolResultBytes = 32768
+
+// RepeatFailLimit is how many times the SAME failing call runs before the
+// executor refuses the repeat: identical inputs cannot produce a different
+// answer, and a model that has not changed anything is not going to.
+const RepeatFailLimit = 3
 
 // IsHarnessPath reports whether a path belongs to ducklab's own record rather
 // than to the project.

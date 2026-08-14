@@ -179,3 +179,28 @@ func TestPlanFragmentEditsInPlace(t *testing.T) {
 		t.Errorf("new task = %s — %s, want T-008 — Export CSV", last.ID, last.Title)
 	}
 }
+
+// The spine speaks into spec updates: the engine KNOWS which requirements
+// no spec section implements — a sectioned update simply skipped two new
+// requirements and nobody noticed until the person read both documents side
+// by side. Deterministic knowledge rides the prompt; judgment stays with
+// the model.
+func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindRequirements,
+		"## REQ-001 — Login\n\n**Priority:** must\n\nUsers log in.\n\n"+
+			"## REQ-002 — Exercise search\n\n**Priority:** must\n\nUsers search the catalog.\n")
+	writeDoc(t, root, artifact.KindSpec,
+		"## SPEC-001 — Login\n\n**Implements:** REQ-001\n\nLogin flow.\n")
+	hint := coverageGapsHint(root, artifact.KindSpec)
+	if !strings.Contains(hint, "REQ-002") || !strings.Contains(hint, "Exercise search") {
+		t.Errorf("the uncovered requirement is missing from the hint: %q", hint)
+	}
+	if strings.Contains(hint, "REQ-001") {
+		t.Error("a covered requirement was reported as a gap")
+	}
+	// Other kinds stay quiet; a plan prompt owes the spine nothing here.
+	if coverageGapsHint(root, artifact.KindPlan) != "" {
+		t.Error("the hint leaked outside spec updates")
+	}
+}
