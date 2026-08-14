@@ -218,6 +218,10 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
  * fuller row; this is the pulse. */
 function RailRun({ run, tokensUsed }: { run: Run; tokensUsed?: number }) {
   const label = run.task_id || run.stage || run.id;
+  // "T-120 pair" says who but not WHAT: a task runs as test or build, and
+  // which one decides whether you expect a red gate or a diff. Shown only
+  // when the label did not already say it (a stage run's label IS its stage).
+  const stage = run.task_id && run.stage ? run.stage + " \u00b7 " : "";
   return (
     <li data-testid="rail-run" className="text-xs">
       <span className={run.status === "running" ? "text-good" : "text-ink-muted"}>
@@ -227,6 +231,7 @@ function RailRun({ run, tokensUsed }: { run: Run; tokensUsed?: number }) {
         {label}
       </a>{" "}
       <span className="text-ink-muted">
+        {stage}
         {run.mode}
         {tokensUsed ? " \u00b7 " + tokens(tokensUsed) : ""}
       </span>

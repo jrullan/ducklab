@@ -88,6 +88,9 @@ describe("the guide rail", () => {
     const pulse = await waitFor(() => screen.getByTestId("rail-running"));
     expect(pulse.textContent).toContain("T-079");
     expect(pulse.textContent).toContain("189.9k");
+    // The stage beside the task: "T-079 pair" says who but not WHAT — test
+    // or build decides whether you expect a red gate or a diff.
+    expect(pulse.textContent).toContain("build · pair");
     // Above the steps in document order when both exist.
     render(<GuideRail client={clientWith(STEPS)} projectId="p2" />);
     await waitFor(() => screen.getAllByTestId("guide-step"));
