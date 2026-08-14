@@ -639,6 +639,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </div>
       </header>
 
+      {/* The rail is metadata of the WHOLE run — budget, spend, gate — so it
+          docks at the right edge for the whole read, not just the stretch of
+          page its old grid column happened to span. The wrapper holds every
+          scrolling region (cards, transcript, dock, diff), which is what
+          lets the aside's sticky keep its grip from the first card to the
+          last hunk of the diff instead of drowning when the grid ended. */}
+      <div className="md:flex md:items-start">
+        <div className="min-w-0 flex-1">
+
       {/* The task's own words, fixed beneath the title: judging a run means
           reading what it did against what was ASKED, and the ask lived at
           the bottom of a rail that scrolled away mid-read. Bounded: a long
@@ -1196,8 +1205,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
-      <div className={`grid gap-4 p-4 ${railOpen ? "md:grid-cols-[1fr_260px]" : "md:grid-cols-[1fr_auto]"}`}>
-        {/* min-w-0: a 1fr grid column will not shrink below its content
+      <div className="p-4">
+        {/* min-w-0: a flex/grid column will not shrink below its content
             without it, so one long unbroken thinking line forced the column
             wide and shoved the rail off the window's edge on resize. */}
         <section data-testid="conversation" className="min-w-0">
@@ -1290,137 +1299,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
         </section>
 
-        {railOpen ? (
-        <aside
-          data-testid="run-rail"
-          className="flex flex-col gap-3 md:sticky md:top-14 md:max-h-[calc(100vh-10rem)] md:self-start md:overflow-y-auto"
-        >
-          <button
-            type="button"
-            data-testid="run-rail-hide"
-            onClick={toggleRail}
-            title="hide the rail (a strip stays to bring it back)"
-            className="self-end text-xs text-ink-muted underline"
-          >
-            hide
-          </button>
-          {budget && (
-            <div className="rounded-card border border-hairline p-3">
-              <div className="text-sm text-ink-muted">budget</div>
-              <div className="mt-2 flex flex-col gap-2">
-                {/* While the run lives, each cap carries its own "no cap"
-                    checkbox: a run near a ceiling gets headroom in place —
-                    per-cap, one-way, recorded — instead of dying at the limit
-                    and losing the work. The engine's budget event refreshes
-                    the meter the moment the lift lands. */}
-                <BudgetMeter
-                  label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens}
-                  inFlight={inFlightTokens}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
-                />
-                <BudgetMeter
-                  label="cost" used={budget.usd} limit={limit.usd} format={money}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "usd").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
-                />
-                <BudgetMeter
-                  label="turns"
-                  used={budget.turns}
-                  limit={limit.turns}
-                  format={(n) => String(Math.round(n))}
-                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
-                />
-                {/* Not a meter — the per-reply call cap inside the agent
-                    loop, the ceiling a reviewer once died on at exactly call
-                    one hundred. The lift lands mid-reply: every live loop
-                    consults it before its next call. */}
-                <div
-                  className="flex items-baseline justify-between gap-2 text-sm text-ink-secondary"
-                  data-testid="calls-cap"
-                >
-                  <span>calls / reply</span>
-                  <span className="flex items-baseline gap-2">
-                    {/* Live: where the CURRENT reply stands against its real
-                        cap, from the loop's own count — the only thing that
-                        knows both numbers. At rest: the configured shape. */}
-                    <span className="tabular-nums" data-testid="calls-cap-value">
-                      {(() => {
-                        if (liveNow) {
-                          for (let i = events.length - 1; i >= 0; i--) {
-                            const e = events[i]!;
-                            if (e.type === "reply_call") {
-                              const d = e.data as { n?: number; max?: number };
-                              const max = d.max ?? 0;
-                              return `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
-                            }
-                          }
-                        }
-                        return run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default";
-                      })()}
-                    </span>
-                    {canLift && (
-                      <label
-                        className="flex items-center gap-1 text-xs text-ink-muted"
-                        title={
-                          run.agent_turns === -1
-                            ? "no cap on calls per reply — the budgets still guard"
-                            : "remove the per-reply call cap now, mid-flight (cannot be undone)"
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          data-testid="lift-calls"
-                          checked={run.agent_turns === -1}
-                          disabled={run.agent_turns === -1}
-                          onChange={() => void client.runBudgetLift(run.id, "calls").then((r) => useRuns.getState().setRun(r)).catch(() => {})}
-                        />
-                        no cap
-                      </label>
-                    )}
-                  </span>
-                </div>
-              </div>
-              {/* One tracker serves every duckling and every turn, so the run's
-                  total cannot say which model is burning it. In a mode with two
-                  models that is usually the only question worth asking. */}
-              {perDuckling.length > 1 && (
-                <dl className="mt-3 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling">
-                  {perDuckling.map(([id, d]) => (
-                    <div key={id} className="flex justify-between gap-2">
-                      <dt className="min-w-0 truncate">
-                        <span style={{ color: ducklingColors[id] }}>{id}</span>
-                        {rolesByDuckling[id] && (
-                          <span className="ml-1.5 text-ink-muted">{rolesByDuckling[id].join(" · ")}</span>
-                        )}
-                      </dt>
-                      {d && d.calls > 0 ? (
-                        <dd className="shrink-0 tabular-nums text-ink-secondary">
-                          {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
-                          {d.calls === 1 ? "" : "s"}
-                        </dd>
-                      ) : (
-                        <dd className="shrink-0 text-ink-muted">
-                          {runIsLive ? "no calls yet" : "never called"}
-                        </dd>
-                      )}
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </div>
-          )}
-          <GateCard gate={gate} stage={run.stage} />
-        </aside>
-        ) : (
-          <button
-            type="button"
-            data-testid="run-rail-pill"
-            onClick={toggleRail}
-            title="show budget and gate"
-            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-14"
-          >
-            ‹
-          </button>
-        )}
       </div>
 
 
@@ -1554,6 +1432,140 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ))}
       </div>
       )}
+        </div>
+
+        {railOpen ? (
+        <aside
+          data-testid="run-rail"
+          className="flex flex-col gap-3 p-4 md:sticky md:top-14 md:h-[calc(100vh-12rem)] md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:border-l md:border-hairline"
+        >
+          <button
+            type="button"
+            data-testid="run-rail-hide"
+            onClick={toggleRail}
+            title="hide the rail (a strip stays to bring it back)"
+            className="self-end text-xs text-ink-muted underline"
+          >
+            hide
+          </button>
+          {budget && (
+            <div className="rounded-card border border-hairline p-3">
+              <div className="text-sm text-ink-muted">budget</div>
+              <div className="mt-2 flex flex-col gap-2">
+                {/* While the run lives, each cap carries its own "no cap"
+                    checkbox: a run near a ceiling gets headroom in place —
+                    per-cap, one-way, recorded — instead of dying at the limit
+                    and losing the work. The engine's budget event refreshes
+                    the meter the moment the lift lands. */}
+                <BudgetMeter
+                  label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens}
+                  inFlight={inFlightTokens}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
+                />
+                <BudgetMeter
+                  label="cost" used={budget.usd} limit={limit.usd} format={money}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "usd").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
+                />
+                <BudgetMeter
+                  label="turns"
+                  used={budget.turns}
+                  limit={limit.turns}
+                  format={(n) => String(Math.round(n))}
+                  lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "turns").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
+                />
+                {/* Not a meter — the per-reply call cap inside the agent
+                    loop, the ceiling a reviewer once died on at exactly call
+                    one hundred. The lift lands mid-reply: every live loop
+                    consults it before its next call. */}
+                <div
+                  className="flex items-baseline justify-between gap-2 text-sm text-ink-secondary"
+                  data-testid="calls-cap"
+                >
+                  <span>calls / reply</span>
+                  <span className="flex items-baseline gap-2">
+                    {/* Live: where the CURRENT reply stands against its real
+                        cap, from the loop's own count — the only thing that
+                        knows both numbers. At rest: the configured shape. */}
+                    <span className="tabular-nums" data-testid="calls-cap-value">
+                      {(() => {
+                        if (liveNow) {
+                          for (let i = events.length - 1; i >= 0; i--) {
+                            const e = events[i]!;
+                            if (e.type === "reply_call") {
+                              const d = e.data as { n?: number; max?: number };
+                              const max = d.max ?? 0;
+                              return `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
+                            }
+                          }
+                        }
+                        return run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default";
+                      })()}
+                    </span>
+                    {canLift && (
+                      <label
+                        className="flex items-center gap-1 text-xs text-ink-muted"
+                        title={
+                          run.agent_turns === -1
+                            ? "no cap on calls per reply — the budgets still guard"
+                            : "remove the per-reply call cap now, mid-flight (cannot be undone)"
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          data-testid="lift-calls"
+                          checked={run.agent_turns === -1}
+                          disabled={run.agent_turns === -1}
+                          onChange={() => void client.runBudgetLift(run.id, "calls").then((r) => useRuns.getState().setRun(r)).catch(() => {})}
+                        />
+                        no cap
+                      </label>
+                    )}
+                  </span>
+                </div>
+              </div>
+              {/* One tracker serves every duckling and every turn, so the run's
+                  total cannot say which model is burning it. In a mode with two
+                  models that is usually the only question worth asking. */}
+              {perDuckling.length > 1 && (
+                <dl className="mt-3 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling">
+                  {perDuckling.map(([id, d]) => (
+                    <div key={id} className="flex justify-between gap-2">
+                      <dt className="min-w-0 truncate">
+                        <span style={{ color: ducklingColors[id] }}>{id}</span>
+                        {rolesByDuckling[id] && (
+                          <span className="ml-1.5 text-ink-muted">{rolesByDuckling[id].join(" · ")}</span>
+                        )}
+                      </dt>
+                      {d && d.calls > 0 ? (
+                        <dd className="shrink-0 tabular-nums text-ink-secondary">
+                          {tokens(d.tokens)} · {money(d.cost_usd)} · {d.calls} call
+                          {d.calls === 1 ? "" : "s"}
+                        </dd>
+                      ) : (
+                        <dd className="shrink-0 text-ink-muted">
+                          {runIsLive ? "no calls yet" : "never called"}
+                        </dd>
+                      )}
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+          )}
+          <GateCard gate={gate} stage={run.stage} />
+        </aside>
+        ) : (
+          <button
+            type="button"
+            data-testid="run-rail-pill"
+            onClick={toggleRail}
+            title="show budget and gate"
+            className="self-start rounded-l border border-r-0 border-hairline px-1.5 py-2 text-xs text-ink-muted md:sticky md:top-14"
+          >
+            ‹
+          </button>
+        )}
+      </div>
     </div>
   );
 }

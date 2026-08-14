@@ -496,6 +496,23 @@ describe("the run header names the task", () => {
     expect(header?.className).toContain("top-0");
     expect(header?.className).toContain("bg-page");
   });
+
+  // The rail is metadata of the WHOLE run, so it rides as a full-height dock
+  // whose sticky container spans everything that scrolls — transcript, dock
+  // and diff alike. As a grid column it drowned when its grid ended, which
+  // was exactly at the point the diff began.
+  it("docks the rail beside ALL the scrolling content, not just the lanes", async () => {
+    render(<RunView runId="r-1" client={clientWith()} />);
+    const rail = await screen.findByTestId("run-rail");
+    expect(rail.className).toContain("md:sticky");
+    expect(rail.className).toContain("md:border-l");
+    // The sticky grip is only as long as its container: the same wrapper
+    // must hold the conversation AND the bottom dock (whose tabs open the
+    // diff), or the rail lets go before the read is over.
+    const wrapper = rail.parentElement!;
+    expect(wrapper.querySelector('[data-testid="conversation"]')).toBeTruthy();
+    expect(wrapper.querySelector('[data-testid="bottom-dock"]')).toBeTruthy();
+  });
 });
 
 describe("the task's coverage on the run view card", () => {
