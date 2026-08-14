@@ -381,6 +381,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A judge's turns are anonymised; the mapping is dropped, not hidden.
   const anonymise = run.mode === "tournament";
   const turns = anonymiseTurns(buildTurns(events), anonymise);
+  // Spend inside the CURRENT streaming call, estimated from the text that
+  // has arrived (chars/4). Settled usage lands only when a call completes —
+  // with long streams allowed to live, a ten-minute architect read as frozen
+  // zeros while its words visibly flowed. Approximate on purpose, worn with
+  // a ~: turns whose message has landed are excluded, their usage is real.
+  const inFlightTokens = (() => {
+    if (!liveNow) return 0;
+    let chars = 0;
+    for (const t of turns) {
+      if (t.done || t.messageOnly) continue;
+      const k = `${t.round}:${t.turn}`;
+      chars += (deltas[k]?.length ?? 0) + (reasoning[k]?.length ?? 0);
+    }
+    return Math.round(chars / 4);
+  })();
   const gate = buildGate(events);
   const pending = buildPending(events);
   // A green gate over an unconvinced reviewer must not be silent (T-028:
@@ -1294,6 +1309,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                     the meter the moment the lift lands. */}
                 <BudgetMeter
                   label="tokens" used={budget.tokens} limit={limit.tokens} format={tokens}
+                  inFlight={inFlightTokens}
                   lift={canLift ? { onLift: () => void client.runBudgetLift(run.id, "tokens").then((r) => useRuns.getState().setRun(r)).catch(() => {}) } : undefined}
                 />
                 <BudgetMeter

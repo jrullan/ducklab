@@ -347,6 +347,36 @@ describe("hiding the run rail", () => {
 // the task whose failed run you are LOOKING AT meant leaving for Work →
 // Tasks and finding it again. The card now carries the engine's own next
 // actions — remove appears exactly when the engine would allow it.
+describe("the in-flight token estimate", () => {
+  // With long streams allowed to live, a ten-minute architect read as
+  // frozen zeros while its words visibly flowed — settled usage lands only
+  // when a call completes. The meter now wears an estimate of the stream.
+  it("estimates the current stream beside the settled number", async () => {
+    const running = {
+      ...failed, status: "running" as const, verdict: "",
+      budget: { usd: 0, tokens: 0, turns: 0, wallclock_s: 10,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    };
+    const streamed = "x".repeat(4000); // ~1k tokens of arrived text
+    useRuns.setState({
+      runs: { "r-1": running },
+      events: { "r-1": [
+        { type: "turn_start", run_id: "r-1", ts: "t", data: { round: 1, turn: 0, role: "architect", duckling: "k3" } },
+      ] as never },
+      deltas: { "r-1": { "1:0": streamed } },
+      reasoning: {}, spend: {},
+    });
+    render(<RunView runId="r-1" client={clientWith({
+      run: vi.fn(() => Promise.resolve({ run: running, events: [
+        { type: "turn_start", run_id: "r-1", ts: "t", data: { round: 1, turn: 0, role: "architect", duckling: "k3" } },
+      ] })),
+    } as Partial<EngineClient>)} />);
+    const est = await screen.findByTestId("meter-inflight");
+    expect(est.textContent).toContain("~1.0k");
+    expect(est.textContent).toContain("streaming");
+  });
+});
+
 describe("the reseat offer on a weather pause", () => {
   // k3's provider timed out for ten minutes while its declared fallback sat
   // configured and unoffered. A provider-paused run whose failing duckling

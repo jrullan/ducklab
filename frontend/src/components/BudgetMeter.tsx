@@ -8,13 +8,16 @@ import { meterRole, statusVar } from "../lib/colors";
  * A lifted (or never-set) cap renders as "no cap" with the box checked and
  * frozen: there is no un-lifting, only the other caps still standing guard. */
 export function BudgetMeter({
-  label, used, limit, format, lift,
+  label, used, limit, format, lift, inFlight,
 }: {
   label: string;
   used: number;
   limit: number;
   format: (n: number) => string;
   lift?: { onLift: () => void };
+  /** Estimated spend inside the CURRENT streaming call — settled usage only
+   * lands when a call completes, and a long stream read as frozen zeros. */
+  inFlight?: number;
 }) {
   const lifted = limit <= 0;
   const role = meterRole(used, limit);
@@ -27,6 +30,11 @@ export function BudgetMeter({
           <span className="tabular-nums">
             {format(used)} / {lifted ? "no cap" : format(limit)}
           </span>
+          {(inFlight ?? 0) > 0 && (
+            <span className="text-xs text-ink-muted" data-testid="meter-inflight" title="estimated from the text streamed so far; the settled number lands when the call completes">
+              + ~{format(inFlight!)} streaming
+            </span>
+          )}
           {lift && (
             <label
               className="flex items-center gap-1 text-xs text-ink-muted"
