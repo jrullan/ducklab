@@ -160,7 +160,96 @@ func Diff(projectRoot string, kind Kind) (string, error) {
 	if proposed == nil {
 		return "", nil
 	}
+	// Section-aware when both sides have structure: a fragment update
+	// replaces mid-document and appends at the end, and the prefix/suffix
+	// LineDiff — fooled first by the frontmatter, which ALWAYS differs —
+	// showed a whole-document replacement over four added sections. The
+	// person deciding reads sections; the diff speaks in them.
+	if len(current.Sections) > 0 && len(proposed.Sections) > 0 {
+		if d := SectionDiff(current, proposed); d != "" || current.Raw == proposed.Raw {
+			return d, nil
+		}
+	}
 	return LineDiff(current.Raw, proposed.Raw), nil
+}
+
+type diffUnit struct {
+	ID    string
+	Title string
+	Text  string
+}
+
+func flattenUnits(doc *Document) []diffUnit {
+	var out []diffUnit
+	for _, sec := range doc.Sections {
+		out = append(out, diffUnit{ID: sec.ID, Title: sec.Title, Text: sec.Body})
+		for _, c := range sec.Children {
+			out = append(out, diffUnit{ID: c.ID, Title: c.Title, Text: c.Body})
+		}
+	}
+	return out
+}
+
+// SectionDiff renders one hunk per added, changed or removed section — the
+// units a person deciding a document actually reads. Frontmatter is ignored:
+// version and timestamps ALWAYS differ and say nothing about the content.
+func SectionDiff(current, proposed *Document) string {
+	cur := flattenUnits(current)
+	prop := flattenUnits(proposed)
+	curMap := map[string]diffUnit{}
+	for _, u := range cur {
+		curMap[u.ID] = u
+	}
+	propSeen := map[string]bool{}
+	var out strings.Builder
+
+	for _, u := range prop {
+		propSeen[u.ID] = true
+		before, existed := curMap[u.ID]
+		switch {
+		case !existed:
+			fmt.Fprintf(&out, "@@ %s — %s (new) @@\n", u.ID, u.Title)
+			for _, line := range strings.Split(strings.TrimRight(u.Text, "\n"), "\n") {
+				fmt.Fprintf(&out, "+%s\n", line)
+			}
+		case before.Text != u.Text || before.Title != u.Title:
+			fmt.Fprintf(&out, "@@ %s — %s @@\n", u.ID, u.Title)
+			out.WriteString(lineDiffBody(before.Text, u.Text))
+		}
+	}
+	for _, u := range cur {
+		if !propSeen[u.ID] {
+			fmt.Fprintf(&out, "@@ %s — %s (removed) @@\n", u.ID, u.Title)
+			for _, line := range strings.Split(strings.TrimRight(u.Text, "\n"), "\n") {
+				fmt.Fprintf(&out, "-%s\n", line)
+			}
+		}
+	}
+	return out.String()
+}
+
+// lineDiffBody is LineDiff's core without the hunk header: prefix and suffix
+// trimmed, the middle as -/+ lines.
+func lineDiffBody(before, after string) string {
+	a := strings.Split(strings.TrimRight(before, "\n"), "\n")
+	b := strings.Split(strings.TrimRight(after, "\n"), "\n")
+	start := 0
+	for start < len(a) && start < len(b) && a[start] == b[start] {
+		start++
+	}
+	endA, endB := len(a), len(b)
+	for endA > start && endB > start && a[endA-1] == b[endB-1] {
+		endA--
+		endB--
+	}
+	var out strings.Builder
+	for _, line := range a[start:endA] {
+		fmt.Fprintf(&out, "-%s\n", line)
+	}
+	for _, line := range b[start:endB] {
+		fmt.Fprintf(&out, "+%s\n", line)
+	}
+	return out.String()
 }
 
 // LineDiff is a minimal unified-style diff.

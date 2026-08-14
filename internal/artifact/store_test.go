@@ -228,3 +228,41 @@ func TestPromoteAcceptsAnOldProposalWithoutAStamp(t *testing.T) {
 		t.Fatalf("an unstamped proposal was refused: %v", err)
 	}
 }
+
+// A sectioned spec update appended four sections to a 2300-line document —
+// and "what changed against the approved document" showed a whole-document
+// replacement, because the prefix/suffix diff died at the frontmatter
+// (which ALWAYS differs) and never reached the real change. The diff now
+// speaks in the units the person reads: one hunk per section.
+func TestTheDocumentDiffSpeaksInSections(t *testing.T) {
+	current := &Document{Sections: []Section{
+		{ID: "SPEC-001", Title: "Login", Body: "Original login."},
+		{ID: "SPEC-002", Title: "Profile", Body: "Original profile."},
+		{ID: "SPEC-003", Title: "Dashboard", Body: "Original dashboard."},
+	}}
+	proposed := &Document{Sections: []Section{
+		{ID: "SPEC-001", Title: "Login", Body: "Original login."},
+		{ID: "SPEC-002", Title: "Profile", Body: "Reworked profile."},
+		{ID: "SPEC-003", Title: "Dashboard", Body: "Original dashboard."},
+		{ID: "SPEC-004", Title: "Exercise images", Body: "New behaviour."},
+	}}
+	d := SectionDiff(current, proposed)
+	if !strings.Contains(d, "@@ SPEC-002 — Profile @@") || !strings.Contains(d, "-Original profile.") || !strings.Contains(d, "+Reworked profile.") {
+		t.Errorf("the changed section is not its own hunk: %q", d)
+	}
+	if !strings.Contains(d, "@@ SPEC-004 — Exercise images (new) @@") || !strings.Contains(d, "+New behaviour.") {
+		t.Errorf("the added section is not its own hunk: %q", d)
+	}
+	if strings.Contains(d, "Original login.") || strings.Contains(d, "Original dashboard.") {
+		t.Errorf("unchanged sections leaked into the diff: %q", d)
+	}
+	// Removal is a hunk too.
+	d2 := SectionDiff(proposed, current)
+	if !strings.Contains(d2, "@@ SPEC-004 — Exercise images (removed) @@") || !strings.Contains(d2, "-New behaviour.") {
+		t.Errorf("the removed section is not its own hunk: %q", d2)
+	}
+	// Identical content — whatever the frontmatter says — is an empty diff.
+	if SectionDiff(current, current) != "" {
+		t.Error("identical sections produced a diff")
+	}
+}
