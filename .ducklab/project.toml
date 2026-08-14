@@ -17,6 +17,8 @@ autonomy = "guarded"
   timeout_s = 900
 
 [roster]
+  scribe = "beelink-local"
+  triager = "beelink-local"
 
 [modes]
 
@@ -42,3 +44,10 @@ autonomy = "guarded"
   allow_prefixes = ["go ", "npm ", "pnpm ", "yarn ", "pytest", "python ", "cargo ", "make ", "ls", "cat", "grep", "rg", "sed -n", "find", "git status", "git diff", "git log", "node ", "tsc", "docker compose config"]
   timeout_s = 120
   network = "deny"
+
+[run]
+  command = ""
+  url = ""
+  health = ""
+  preflight = ""
+  requires = ""

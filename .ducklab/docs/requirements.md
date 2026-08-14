@@ -1,12 +1,12 @@
 ---
 kind: requirements
-version: 1
-updated_at: 2026-08-05T13:15:31Z
-run_id: r-20260805-130519-7cyn
-ducklings: [pato-sonnet, deepseekv4pro, luna, dsv4flash]
-based_on: e3b0c44298fc1c14
+version: 2
+updated_at: 2026-08-14T23:26:06Z
+run_id: r-20260814-231255-ym4e
+ducklings: [beelink-local, k3, atom-local, glm52]
+based_on: f7c41bc479704126
 origin: adopted
-approved_by: human
+approved_by: mcp:claude-code
 ---
 
 ## REQ-001 — Three-binary client-server architecture
@@ -296,4 +296,156 @@ Models never interpret gate output or decide pass/fail. Exit codes are the only 
 API keys read from environment at call time. No config file, API response, or state file ever contains a credential.
 
 **Assumption:** From README.md §137-138 "--key-env is the **name** of an environment variable, never a key" and §170 "Secrets never touch project state."
+
+## REQ-037 — Plan amendment without redesign
+
+**Priority:** must
+
+The plan stage supports a light amendment path for changes that extend the plan without redesigning it. The architect receives the plan as an outline (ids and titles) plus the spec as a wiring list, and returns only a fragment of new tasks (one to three by design) under a literal placeholder id; the engine merges the fragment by code, assigns real task ids, and places the tasks under their milestone. Amendment turns carry no whole-document contract — the fragment contract in the prompt is the only one that speaks. An amendment that adds nothing fails with the architect's reason; a change that alters what the product IS is refused toward a requirements brief. Tasks no spec section covers wear a spec-debt marker, and a one-click settle run (`spec_settle`) writes a spec revision documenting the delivered ones as built, wiring their `Implements:` upward and surfacing what cannot wire as requirements-debt.
+
+**Assumption:** From `internal/stage/extend.go` runExtend (outline-in, fragment-out, no document contract, spec-debt wiring) and `internal/mcp/tools.go` spec_settle.
+
+## REQ-038 — Fragment-based document updates
+
+**Priority:** must
+
+Updates to an existing artifact (requirements, spec, plan) are fragment-based: the architect receives the document as an outline and returns only the sections it adds or changes; the engine merges the fragment deterministically by code. A section the model does not emit survives exactly as it is, and new sections written under a literal placeholder id (`REQ-900`, `SPEC-900`, `T-900`) receive real ids at merge. The prompt's fragment contract is the only contract on the turn; the whole-document contract is removed so the two never compete. What a model never re-types, a model cannot lose.
+
+**Assumption:** From `internal/stage/fragment.go` runFragment/fragmentPlaceholder and `internal/stage/extend.go` mergeExtension.
+
+## REQ-039 — Section-at-a-time document orchestration
+
+**Priority:** must
+
+A fragment update may be routed through sectioned orchestration for small-context architects: a cheap triage pass names the sections the request touches (existing ids or `NEW:` titles), then each section is updated in its own fresh conversation carrying only the request and that section's full text, while the engine keeps the working memory and merges. Sectioned updates are solo by construction whatever mode was asked, and an update naming more sections than one should touch (cap: 12) is refused as a redesign wearing an update's clothes.
+
+**Assumption:** From `internal/stage/sectioned.go` runSectioned, sectionedPassCap, and soloPass.
+
+## REQ-040 — Context-fit preflight and scaled tool results
+
+**Priority:** must
+
+Each duckling declares its context window. Before a stage spends a token, the engine sizes the opening prompt against every participating seat's declared window: past ~40% it warns that headroom is thin (reseat is one chip-click away), past ~90% it refuses before a token is spent, naming the numbers and the levers; seats with no declared window are skipped. At run time, tool-result caps scale to the acting seat's declared context instead of a flat byte limit, so one tool result cannot consume a small seat's working memory.
+
+**Assumption:** From `internal/service/stages.go` contextFitNotes and `internal/tools/tools.go` SeatContextTokens.
+
+## REQ-041 — Loop rails
+
+**Priority:** must
+
+The harness brakes loops deterministically at tool level, never by asking a model: (a) a consecutive-gate-fail brake — after a run of consecutive red `verify_run` results with no green between, the tool stops running the gate and directs the run to a person or reviewer, with warnings in the final three; (b) an identical-repeat brake — the third identical failing tool call is refused with orders to change something; (c) a per-run cap on model calls per reply, accounted live against the cap, with the last allowed call announced in advance. A call cap can be lifted mid-flight (negative means uncapped); the lift is recorded on the run and a resume re-enters with the ceiling the person chose.
+
+**Assumption:** From `internal/tools/tools.go` ConsecGateFails/lastFailSig/lastFailCount, `internal/tools/exec.go` GateFailLimit, `internal/agent/agent.go` OnCapNear/CapLift, and `internal/runlog/runlog.go` per-run call accounting.
+
+## REQ-042 — Provider resilience and resumable weather
+
+**Priority:** must
+
+Streaming calls are guarded by a stall watchdog — no bytes for a bounded interval declares the stream stalled — not by whole-stream timeouts, so a slow provider is not a dead one. Transient failures (rate limits, 5xx, connection resets, stalls) are retried; exhausted retries classify as provider weather and pause the run resumable rather than failing it. An output-truncated turn on a document stage pauses with the fix named (raise max_tokens or reseat) instead of dying. Document-stage runs persist their request and resume continuing their own life: recorded ceilings, ledger, and seats intact.
+
+**Assumption:** From `internal/provider/openaicompat.go` stall watchdog, `internal/provider/provider.go` transient/weather classification, `internal/agent/agent.go` OnRetry, and `internal/service/stages.go` resumed-stage handling.
+
+## REQ-043 — Declared fallback ducklings and human-decided reseat
+
+**Priority:** must
+
+Each duckling may declare a fallback stand-in for provider weather (never itself). A run paused on provider weather may be reseated onto a fallback only by explicit human decision, never by an automatic router: the reseat swaps every seat the failed duckling held, records a `seat_failover` event (from, to, roles, reason) on the run, persists the swap into a stage run's saved request, and resumes with the ledger intact. Reseat answers availability only; a run paused at a human gate has nothing to reseat.
+
+**Assumption:** From `internal/config/config.go` Fallback, `internal/service/service.go` RunReseat, and `internal/engineapi/routes_table.go` /v1/runs/{id}/reseat.
+
+## REQ-044 — Per-run overrides at launch
+
+**Priority:** must
+
+Any run launch may carry its own overrides of the configured defaults: seat picks (this run's duckling line-up), an agent turn cap applied to every role for this run (negative lifts the cap entirely), and attached screenshots shown to the architect — routed only to vision-capable seats, with a warning when a screenshot meets a seat that cannot see. Overrides are recorded on the run and survive resume.
+
+**Assumption:** From `internal/service/modes.go` per-run line-up and capOverride, `internal/service/service.go` persisted per-run seats, and `internal/stage/extend.go` Images on the architect's turn.
+
+## REQ-045 — Triage-recommended verification strategy
+
+**Priority:** must
+
+The triage contract requires a per-bug verification recommendation: test-first when the bug is reproducible as an automated test (behaviour, crash, wrong data), with a one-line reproduction sketch the test-writer starts from; or build-only when the honest check is eyes (visual, cosmetic, layout, config), with a one-line reason. The triager recommends; a person decides. The task's front door follows the recommendation: a build-only task leads with the build run while test-first stays one click away.
+
+**Assumption:** From `internal/agent/agent.go` triagerPrompt (test_strategy/test_reason), `internal/agent/contract.go` TestStrategy, and `internal/service/next.go` BuildOnly flipping the front door.
+
+## REQ-046 — Subject on taskless runs
+
+**Priority:** must
+
+A run with no task records a Subject naming what it was about — the bug a triage read — where a build would name its task. The subject rides the run record and its listings, so two taskless runs are distinguishable without opening both.
+
+**Assumption:** From `internal/runlog/runlog.go` Subject and `internal/service/bugs.go` triageSubject.
+
+## REQ-047 — Retiring an accepted test-first commit
+
+**Priority:** must
+
+An accepted test-first whose build has not landed may be retired: the engine reverts the test's commit by git, records the retire on the run (revert SHA, test_retired event; the acceptance stays in the record — it happened), and releases the chain's hold on the project. Retirement is refused with its reason when a run for the task is still open, when the build already landed (the test is part of the accepted work), when the run recorded no commit, or when the working tree is dirty.
+
+**Assumption:** From `internal/service/testfirst.go` TestRetire and `internal/runlog/runlog.go` RevertSHA.
+
+## REQ-048 — Signed bug audit trail
+
+**Priority:** must
+
+Every bug status transition is signed and appended to a per-project audit log (`.ducklab/bugs/audit.jsonl`): who moved it (human, mcp:<client>, autopilot, engine), through which door, from and to which states, and when. The log is append-only and best-effort — a line that cannot be written never blocks the move it describes.
+
+**Assumption:** From `internal/service/bugaudit.go` appendBugAudit and `internal/bug/bug.go` AuditEntry.
+
+## REQ-049 — Autopilot
+
+**Priority:** must
+
+An optional per-project autopilot drives the project guide: each time a run settles it asks the guide's computed next steps and acts only when the first step is mechanical — test-first or build — launched through the same service methods and queue as the buttons, with origin "autopilot" on every run it starts. Every other step is a human gate where the autopilot idles. Stop rails are fixed: a per-activation cap on runs started, two consecutive failures switch it off with a recorded reason, a retry carries the failure in hand rather than blind-relaunching, and it never lifts a money cap nor crosses UNVERIFIED. State is in-memory; an engine restart lands the autopilot off.
+
+**Assumption:** From `internal/service/autopilot.go` and `internal/config/config.go` AutopilotMaxTasks/AutopilotMaxFails.
+
+## REQ-050 — Managed application process
+
+**Priority:** must
+
+The engine runs the project's own app as a first-class managed process: `[run]` in project.toml declares the start command, optional URL, preflight environment check, and requirements. Launch runs the preflight first — a failure names what is missing in its own words — then starts the command with output to `.ducklab/app.log`, and tracks pid, health, exit error, and log tail. Stop kills the whole process group. Launch and Stop sit beside the project on every client.
+
+**Assumption:** From `internal/service/app.go` AppStart/AppStatus and `internal/config/config.go` RunApp.
+
+## REQ-051 — Project guide: computed next steps
+
+**Priority:** must
+
+The engine answers "what do I do now?" per project: a computed, ordered list of next steps derived from live state — documents awaiting acceptance, buildable tasks, spec-debt to settle, bugs to triage, releases to cut — each with its reason and the surface it lands on. The guide is the single brain behind the desktop's guide rail, the autopilot, and the MCP operator's status; clients render it, none re-derive it.
+
+**Assumption:** From `internal/service/guide.go` NextStep/projectSnapshot, `internal/service/next.go` ProjectNext, and `internal/mcp/mcp.go` next_steps.
+
+## REQ-052 — Spend reports per mode and per duckling
+
+**Priority:** must
+
+The engine aggregates run history into spend reports groupable by mode, duckling, role, or task, over an optional since window: runs, verdicts, tokens, cost attributed to the ducklings that made the calls (never multiplied across seats), and wallclock, rendered for CLI and desktop. Modes are compared against the solo baseline.
+
+**Assumption:** From `internal/report/report.go` Build/Row and `internal/service/spend.go` backfillSpend.
+
+## REQ-053 — Advisor drafts the answer a paused question waits for
+
+**Priority:** must
+
+When a run pauses on a question, a second model — the advisor — drafts the answer the human should give, asynchronously and without blocking the pause. The recommendation lands on the record as an `advice` event and on the question card; the human still decides (accept the draft, edit it, or answer from scratch). No advice is a degraded card, not a failure. The advisor is decisive by design: it picks one recommendation, cites the project's own spec when that decides the matter, and replies as the answer itself.
+
+**Assumption:** From `internal/service/advisor.go` adviseQuestion/advisorSystemPrompt.
+
+## REQ-054 — Consultation runs (chat)
+
+**Priority:** must
+
+A conversation with a chosen duckling about a subject — a bug whose fix landed and did not fix it, a task that went sideways — is itself a run (stage "chat"): it gets the record, the spend tracking, the live stream, and the transcript for free. The consultant reads and advises with a read-only investigation toolbelt (code, history, records) plus one loop-side act, `bug_file`, and only on the person's explicit word; it does not touch the tree. Its closing duty is to suggest actions from the person's own menu, which the person executes with the buttons that already exist.
+
+**Assumption:** From `internal/service/chat.go` chatToolbelt and ChatStartRequest.
+
+## REQ-055 — Outbound webhook notifications
+
+**Priority:** must
+
+The engine announces run-settled moments to one configured webhook URL: `human_needed`, `run_end`, and `autopilot` stops, signed GitHub-style with the configured secret. Delivery is best-effort by construction — a five-second timeout, one retry, and failures dropped silently — because a dead receiver must never block or slow a run; the record on disk is the source of truth and the webhook is a doorbell.
+
+**Assumption:** From `internal/service/notify.go` startNotifier.
 
