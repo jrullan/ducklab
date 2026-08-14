@@ -977,6 +977,31 @@ describe("the amendment's vision warning", () => {
 // Chips are a promise about who participates. The full roster also lists
 // implementer, judge, triager and scribe — none of whom a plan redraft ever
 // calls — and rendering them claimed models the run would not use.
+describe("every document stage shows its seats", () => {
+  // The plan's panel had chips; Requirements and Spec asked the same
+  // question — who will do this — with no answer on screen. Same format
+  // everywhere: mode first, then the seats the mode decides.
+  it("the spec tab wears the chips under its mode row", async () => {
+    const client = clientWith((p) => {
+      if (p === "/v1/projects/p/artifacts/spec") return json({ kind: "spec", sections: [{ id: "SPEC-001", title: "S", body: "", fields: {} }] });
+      if (p === "/v1/projects/p/trace") return json({ errors: [] });
+      if (p.startsWith("/v1/projects/p/roster")) return json({ entries: [
+        { role: "architect", duckling: "k3", source: "project" },
+        { role: "reviewer", duckling: "deepseekv4pro", source: "project" },
+      ] });
+      if (p === "/v1/ducklings") return json({ items: [] });
+      return json({ items: [] });
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" />);
+    const chips = await waitFor(() => screen.getAllByTestId("seat-chip"));
+    expect(chips.map((c) => c.textContent).join(" ")).toContain("k3");
+    // Order: the mode select renders before the chips in the document flow.
+    const modeEl = screen.getByTestId("stage-mode");
+    const chipsEl = screen.getByTestId("seat-chips");
+    expect(modeEl.compareDocumentPosition(chipsEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
 describe("the extend panel's seats", () => {
   const FULL_ROSTER = [
     { role: "architect", duckling: "glm52", source: "project" },

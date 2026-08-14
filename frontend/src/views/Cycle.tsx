@@ -280,7 +280,7 @@ export function Cycle({
       // Chip picks override seats for THIS run: architect first, critics
       // after, holes filled from the saved seat they replaced.
       let ducklings: string[] | undefined;
-      if (active.stage === "plan" && sections.length > 0) {
+      {
         const seats = stageSeats(mode, roster).map(
           (e, i) => seatPicks[`extend:${i}`] || e.duckling,
         );
@@ -702,19 +702,6 @@ export function Cycle({
             )}
             {(active.stage !== "plan" || sections.length === 0 || planAction === "extend") && (
             <>
-            {active.stage === "plan" && sections.length > 0 && roster.length > 0 && (
-              <div className="mb-2">
-                <SeatChips
-                  entries={stageSeats(mode, roster).map((e, i) => ({
-                    ...e,
-                    duckling: seatPicks[`extend:${i}`] || e.duckling,
-                  }))}
-                  fleet={fleet}
-                  measured={measured}
-                  onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`extend:${i}`]: id }))}
-                />
-              </div>
-            )}
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
               <select
                 aria-label="mode"
@@ -767,6 +754,22 @@ export function Cycle({
                 {describeRun(mode, roster, rounds)}
               </span>
             </div>
+            {/* The seats under the mode that decides them — mode first, who
+                second, on every document stage alike. Chips stay doors: a
+                click picks a different duckling for this run only. */}
+            {roster.length > 0 && (
+              <div className="mb-2">
+                <SeatChips
+                  entries={stageSeats(mode, roster).map((e, i) => ({
+                    ...e,
+                    duckling: seatPicks[`extend:${i}`] || e.duckling,
+                  }))}
+                  fleet={fleet}
+                  measured={measured}
+                  onPick={(i, id) => setSeatPicks((cur) => ({ ...cur, [`extend:${i}`]: id }))}
+                />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"
