@@ -61,7 +61,14 @@ func NewOpenAICompat(id, baseURL, apiKey string, opts ...OpenAICompatOption) *Op
 		apiKey:  apiKey,
 		headers: make(map[string]string),
 		httpClient: &http.Client{
-			Timeout: 300 * time.Second,
+			// No total-request timeout. Client.Timeout bounds the WHOLE
+			// exchange including a streaming body, so an architect actively
+			// writing a long spec was guillotined mid-word at five minutes —
+			// twice, by different models, both healthy. Silence is what kills
+			// a stream, and the stall watchdog already bounds silence
+			// (first byte and every gap). Non-streaming calls, which have no
+			// watchdog, carry their own per-request deadline in Chat.
+			Timeout: 0,
 		},
 	}
 	for _, opt := range opts {
@@ -79,6 +86,10 @@ func (p *OpenAICompat) ID() string {
 func (p *OpenAICompat) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	req.Stream = false
 	p.askForBilledCost(&req)
+	// A non-streaming call has no stall watchdog: its deadline lives here,
+	// bounding this one exchange rather than every stream the client makes.
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
+	defer cancel()
 	return p.doChat(ctx, req)
 }
 

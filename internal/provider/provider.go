@@ -380,5 +380,9 @@ func Retry(ctx context.Context, policy RetryPolicy, fn func() error) error {
 			}
 		}
 	}
-	return fmt.Errorf("after %d attempts: %w", policy.MaxAttempts, lastErr)
+	// Reaching here means every attempt failed TRANSIENTLY — the provider is
+	// weather, and the caller's weather branch pauses the run resumable. The
+	// unwrapped version failed runs outright: three timeouts became a verdict
+	// on the work instead of a fact about the network.
+	return fmt.Errorf("%w: after %d attempts: %v", ErrProviderUnavailable, policy.MaxAttempts, lastErr)
 }

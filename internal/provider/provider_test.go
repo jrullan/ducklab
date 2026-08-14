@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -211,5 +212,30 @@ func TestMessagesWithImagesMarshalAsContentParts(t *testing.T) {
 		if !strings.Contains(string(withImg), want) {
 			t.Errorf("vision wire missing %s: %s", want, withImg)
 		}
+	}
+}
+
+// Three transient failures are weather, not a verdict: the exhausted-retries
+// error must wrap ErrProviderUnavailable so the run PAUSES resumable instead
+// of failing — two healthy spec runs died as FAILED on read timeouts that
+// deserved a pause and a reseat offer.
+func TestExhaustedRetriesAreWeather(t *testing.T) {
+	calls := 0
+	err := Retry(context.Background(), RetryPolicy{MaxAttempts: 3, InitialWait: time.Millisecond, MaxWait: time.Millisecond},
+		func() error {
+			calls++
+			return fmt.Errorf("read response: %w", context.DeadlineExceeded)
+		})
+	if calls != 3 {
+		t.Fatalf("attempts = %d, want 3", calls)
+	}
+	if !errors.Is(err, ErrProviderUnavailable) {
+		t.Errorf("exhausted transient retries must classify as provider weather: %v", err)
+	}
+	// A non-transient error keeps its own identity — no weather costume.
+	hard := Retry(context.Background(), RetryPolicy{MaxAttempts: 3, InitialWait: time.Millisecond, MaxWait: time.Millisecond},
+		func() error { return fmt.Errorf("401 unauthorized") })
+	if errors.Is(hard, ErrProviderUnavailable) {
+		t.Error("a hard error dressed as weather would pause runs that can never resume")
 	}
 }
