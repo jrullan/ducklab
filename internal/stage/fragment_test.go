@@ -201,7 +201,7 @@ func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
 	}
 	// Coverage says WHAT to write; the code says in what TENSE — the
 	// as-built marker is what keeps the plan from tasking finished work.
-	for _, must := range []string{"check the tree", "As-built:", "tense"} {
+	for _, must := range []string{"WHOLE assignment", "one at a time", "As-built:", "tense"} {
 		if !strings.Contains(hint, must) {
 			t.Errorf("the hint lost the code-check instruction %q", must)
 		}
