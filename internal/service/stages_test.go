@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"encoding/json"
+	"fmt"
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
@@ -778,4 +780,39 @@ func readEventTypes(t *testing.T, runDir string) []string {
 		}
 	}
 	return out
+}
+
+// A document that does not fit its author's output cap is a settings problem
+// wearing a run's clothes: the pause keeps the run alive so the person can
+// raise max_tokens — or reseat — and resume replays with the fresh config.
+// Failing it lost the draft AND the fix, twice in one night.
+func TestATruncatedDocumentPausesInsteadOfDying(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	_ = dir
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "small change",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	<-rs.done // let the real execution settle first
+
+	// The failure the field produced, replayed through the same door.
+	rs.run.Status = "running"
+	rs.run.Verdict = ""
+	rs.done = make(chan struct{})
+	s.failRun(rs, fmt.Errorf("%w: the whole document did not fit in pato-uno's output cap (20000 tokens)", agent.ErrTruncated))
+
+	if rs.run.Status != "paused" || rs.run.PendingKind != "error" {
+		t.Fatalf("truncation must pause resumable, got %s/%s", rs.run.Status, rs.run.PendingKind)
+	}
+	if !strings.Contains(rs.run.Failure, "resume") {
+		t.Errorf("the pause does not name the way out: %q", rs.run.Failure)
+	}
+	s.RunAbort(context.Background(), run.ID)
 }

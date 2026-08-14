@@ -1479,6 +1479,32 @@ func (s *Service) failRun(rs *runState, err error) {
 		}
 		return
 	}
+	// A document that does not fit its author's output cap is a settings
+	// problem wearing a run's clothes. Failing it threw away the draft AND
+	// the fix: the person raises max_tokens (or reseats the stage) and
+	// RESUME replays with the fresh config — the run is the wrong thing to
+	// lose over a number in Settings.
+	if errors.Is(err, agent.ErrTruncated) && !s.shuttingDown.Load() &&
+		rs.run.Verdict != "ABORTED" {
+		recordSpend(rs, rs.tracker)
+		s.publishSpend(rs, rs.tracker)
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "error"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.Failure = err.Error() + " — then resume: the run replays with the new settings"
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{
+			"kind": "error", "detail": rs.run.Failure,
+		})
+		rs.writer.WriteState()
+		if s.bus != nil {
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "error", "detail": rs.run.Failure},
+			})
+		}
+		return
+	}
 	// A provider that cannot be reached — retries exhausted — is weather, not
 	// a verdict on the work. Failing here restored the tree: a sustained
 	// OpenRouter hiccup rolled back everything a long run had built, when
