@@ -30,11 +30,6 @@ export function BudgetMeter({
           <span className="tabular-nums">
             {format(used)} / {lifted ? "no cap" : format(limit)}
           </span>
-          {(inFlight ?? 0) > 0 && (
-            <span className="text-xs text-ink-muted" data-testid="meter-inflight" title="estimated from the text streamed so far; the settled number lands when the call completes">
-              + ~{format(inFlight!)} streaming
-            </span>
-          )}
           {lift && (
             <label
               className="flex items-center gap-1 text-xs text-ink-muted"
@@ -56,6 +51,16 @@ export function BudgetMeter({
           )}
         </span>
       </div>
+      {/* Supplementary, on its own line: riding the value row it broke the
+          row's shape and the symmetry with the meters below — the main line
+          stays identical to its siblings, the estimate whispers under it. */}
+      {(inFlight ?? 0) > 0 && (
+        <div className="flex justify-end">
+          <span className="text-xs text-ink-muted" data-testid="meter-inflight" title="estimated from the text streamed so far; the settled number lands when the call completes">
+            + ~{format(inFlight!)} streaming
+          </span>
+        </div>
+      )}
       <div className="mt-1 h-1.5 w-full rounded bg-surface2">
         <div className="h-full rounded" style={{ width: `${pct}%`, background: statusVar(role) }} />
       </div>
