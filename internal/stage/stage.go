@@ -126,6 +126,21 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			base = proposed
 		}
 	}
+	// An existing document updates by FRAGMENT: the architect emits only
+	// what it adds or changes and the engine merges — never the whole
+	// document re-typed through an output cap. First drafts and adoption
+	// surveys still write whole documents; they have no unchanged majority
+	// to protect. The plan's own light path (Extend) branched above.
+	if !p.Adopt && p.Stage != Plan && base != nil && len(base.Sections) > 0 {
+		ask := strings.TrimSpace(p.Revision)
+		if ask == "" {
+			ask = strings.TrimSpace(p.Seed)
+		}
+		if ask == "" {
+			ask = "Review the document against the project as it stands and update only what needs it."
+		}
+		return runFragment(ctx, p, base, ask)
+	}
 	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision, p.Adopt)
 	if err != nil {
 		return nil, err
