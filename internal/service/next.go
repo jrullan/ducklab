@@ -41,11 +41,15 @@ func runNext(r *runlog.Run) []string {
 			return []string{"reply", "end", "abort"}
 		case "budget", "provider", "error":
 			// Stopped by its own ceiling, a provider that went away, or any
-			// error at all — work intact in the tree either way, because no
-			// error may discard work automatically. Fix what needs fixing and
-			// resume; or abort, which restores. Build and test know how to
-			// re-enter their strategy; anything else relaunches instead.
-			if r.Stage == "build" || r.Stage == "test" {
+			// error at all — work intact either way, because no error may
+			// discard work automatically. Fix what needs fixing and resume;
+			// or abort. Build and test re-enter their strategy from the
+			// record; document stages re-enter through the request persisted
+			// beside them — a rule written before that machinery existed
+			// kept offering a paused plan "resumible" prose and an
+			// abort-only menu.
+			switch r.Stage {
+			case "build", "test", "intake", "spec", "plan":
 				return []string{"resume", "abort"}
 			}
 			return []string{"abort"}

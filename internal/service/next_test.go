@@ -179,3 +179,23 @@ func TestAnAcceptedStageRunOffersTheNextStage(t *testing.T) {
 		t.Errorf("a failed intake offers %v", got)
 	}
 }
+
+// The pause said "then resume: the run replays with the new settings" while
+// the menu offered only abort — a rule written before document stages could
+// re-enter through their persisted request. The promise and the menu now
+// agree, for every stage that can keep it.
+func TestAPausedDocumentStageOffersResume(t *testing.T) {
+	for _, stage := range []string{"intake", "spec", "plan", "build", "test"} {
+		r := &runlog.Run{Stage: stage, Status: "paused", PendingKind: "error"}
+		next := runNext(r)
+		if !slices.Contains(next, "resume") {
+			t.Errorf("a paused %s offers %v — the resume its pause text promises is missing", stage, next)
+		}
+	}
+	// A stage with no persisted-request machinery does not promise what it
+	// cannot keep.
+	r := &runlog.Run{Stage: "triage", Status: "paused", PendingKind: "error"}
+	if slices.Contains(runNext(r), "resume") {
+		t.Error("triage cannot re-enter; offering resume would be a button that only errors")
+	}
+}
