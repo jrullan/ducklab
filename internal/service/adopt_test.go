@@ -125,7 +125,13 @@ func TestPlanRefusesAFullyAsBuiltSpec(t *testing.T) {
 	if err := os.WriteFile(artifact.Path(dir, artifact.KindSpec), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StageStart(context.Background(), id, StageRequest{Stage: "plan", Mode: "solo"}); err != nil {
+	run, err := s.StageStart(context.Background(), id, StageRequest{Stage: "plan", Mode: "solo"})
+	if err != nil {
 		t.Errorf("a spec with a real gap was refused: %v", err)
+		return
 	}
+	// Close what was opened: the leaked goroutine raced OTHER tests' TempDir
+	// cleanups and flaked the suite at random for an afternoon.
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
 }
