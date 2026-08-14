@@ -1076,6 +1076,37 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             onResume={() => void client.runResume(runId).catch(() => {})}
             revisionRun={revisionRun}
           />
+          {/* The declared-fallback door: provider weather, a stand-in named
+              in Settings, one click to swap the seats and go — recorded as
+              seat_failover, never a router's silent choice. */}
+          {(() => {
+            if (run.pending_kind !== "provider" && run.pending_kind !== "error") return null;
+            if (!next.includes("resume")) return null;
+            for (let i = events.length - 1; i >= 0; i--) {
+              const e = events[i]!;
+              if (e.type === "provider_retry") {
+                const from = (e.data as { duckling?: string }).duckling ?? "";
+                const to = fleet.find((d) => d.id === from)?.fallback;
+                if (!from || !to) return null;
+                return (
+                  <div className="mt-2 flex items-center gap-2" data-testid="reseat-offer">
+                    <button
+                      type="button"
+                      data-testid="reseat-button"
+                      onClick={() => void client.runReseat(runId, from, to).catch(() => {})}
+                      className="rounded border border-hairline px-2 py-1 text-sm"
+                    >
+                      Reseat to {to} & resume
+                    </button>
+                    <span className="text-xs text-ink-muted">
+                      {from} is unreachable; {to} is its declared fallback and inherits the work
+                    </span>
+                  </div>
+                );
+              }
+            }
+            return null;
+          })()}
         </section>
       )}
 

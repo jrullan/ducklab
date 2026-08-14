@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"encoding/json"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
@@ -578,7 +579,6 @@ func TestPlanExtendNeedsAPlanToAmend(t *testing.T) {
 	}
 }
 
-
 // The amendment's toll, computed: a task no spec section covers wears the
 // marker; wired tasks and bug-born tasks do not; a spec-less project owes
 // nothing because there is nothing to be behind.
@@ -704,4 +704,78 @@ func TestAStageCarriesItsOwnCallCap(t *testing.T) {
 	}
 	s.RunAbort(context.Background(), run.ID)
 	s.waitForRun(context.Background(), run.ID)
+}
+
+// The declared-fallback door: provider weather paused a spec mid-draft, the
+// person clicked once, and the run resumed with its seats on the stand-in —
+// recorded, never a router's silent choice. The stage's persisted request
+// must carry the swap too, or resume would re-resolve the line-up from
+// config and quietly undo it.
+func TestReseatSwapsTheSeatsAndResumes(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "plan", Extend: "small change", Ducklings: []string{"pato-uno"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	// Wait for the roster, then simulate the weather pause.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(rs.run.Roster) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+	rs.run.Status = "paused"
+	rs.run.PendingKind = "provider"
+	rs.run.Failure = "provider unavailable: timeout"
+
+	out, err := s.RunReseat(context.Background(), run.ID, "pato-uno", "pato-dos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Roster["architect"] != "pato-dos" {
+		t.Errorf("architect = %q, want the fallback pato-dos", out.Roster["architect"])
+	}
+	sreq, ok := loadStageRequest(rs.runDir)
+	if !ok || len(sreq.Ducklings) == 0 || sreq.Ducklings[0] != "pato-dos" {
+		t.Errorf("the persisted request does not carry the swap: %v", sreq.Ducklings)
+	}
+	found := false
+	for _, line := range readEventTypes(t, rs.runDir) {
+		if line == "seat_failover" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no seat_failover on the record — an unrecorded swap is a router")
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+}
+
+func readEventTypes(t *testing.T, runDir string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(runDir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var e struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(line), &e) == nil {
+			out = append(out, e.Type)
+		}
+	}
+	return out
 }

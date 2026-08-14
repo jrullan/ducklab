@@ -1518,3 +1518,20 @@ func (s *Server) handleTraceShow(w http.ResponseWriter, r *http.Request) {
 	}
 	s.json(w, http.StatusOK, node)
 }
+
+func (s *Server) handleRunReseat(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	run, err := s.svc.RunReseat(r.Context(), r.PathValue("id"), req.From, req.To)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, run)
+}

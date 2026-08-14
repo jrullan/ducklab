@@ -184,6 +184,9 @@ export interface Duckling {
   color?: number;
   caps?: { native_tools: boolean; json_mode?: boolean; context_tokens: number; vision?: boolean };
   cost?: { input_per_mtok: number; output_per_mtok: number };
+  /** The declared stand-in for provider weather — named by the person,
+   * never chosen by a router. */
+  fallback?: string;
 }
 
 /** One numbered item in an artifact: a REQ, a SPEC, a milestone. */
@@ -816,6 +819,10 @@ export class EngineClient {
   }
   /** Resume a run the engine's own restart or shutdown paused. A human gate is
    * not a resume point — it is answered, not continued. */
+  /** Reseat a weather-paused run's seats onto the fallback and resume. */
+  runReseat(id: string, from: string, to: string) {
+    return this.request<Run>("POST", `/v1/runs/${id}/reseat`, { from, to });
+  }
   runResume(id: string) {
     return this.request<Run>("POST", `/v1/runs/${id}/resume`);
   }

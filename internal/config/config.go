@@ -207,6 +207,11 @@ type Duckling struct {
 	Params   SamplingParams `toml:"params" json:"params"`
 	Caps     Caps           `toml:"caps" json:"caps"`
 	Cost     Cost           `toml:"cost" json:"cost"`
+	// Fallback names the duckling that takes this one's seats when its
+	// provider is unreachable — declared here by the person, never chosen by
+	// a router. Availability only; quality-based switching is Switchyard's
+	// road and not ours.
+	Fallback string `toml:"fallback,omitempty" json:"fallback,omitempty"`
 	// Color is which of the eight series slots this duckling is drawn in.
 	// 0 means the fleet order decides. A slot number rather than a hex, so the
 	// palette keeps its light and dark variants and a duckling cannot be given

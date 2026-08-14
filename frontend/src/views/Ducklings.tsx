@@ -115,6 +115,7 @@ export function Ducklings({ client, projectId, only }: {
             client={client}
             providers={providers}
             existing={ducklings.find((d) => d.id === editing)}
+            fleet={ducklings}
             onDone={done}
             onCancel={() => setEditing(null)}
           />
@@ -135,6 +136,7 @@ export function Ducklings({ client, projectId, only }: {
                     client={client}
                     providers={providers}
                     existing={d}
+                    fleet={ducklings}
                     onDone={done}
                     onCancel={() => setEditing(null)}
                   />
@@ -595,12 +597,15 @@ function DucklingForm({
   client,
   providers,
   existing,
+  fleet = [],
   onDone,
   onCancel,
 }: {
   client: EngineClient;
   providers: readonly ProviderView[];
   existing?: Duckling;
+  /** The other ducklings, for the fallback pick. */
+  fleet?: readonly Duckling[];
   onDone: (err?: unknown) => void;
   onCancel: () => void;
 }) {
@@ -633,6 +638,10 @@ function DucklingForm({
   // wherever it appears, which is the whole point: a colour that changes
   // between runs cannot be learned.
   const [color, setColor] = useState(existing?.color ?? 0);
+  // The declared stand-in for provider weather: when this duckling's
+  // provider is unreachable, the paused run offers a one-click reseat to
+  // this one. Named by the person, never chosen by a router.
+  const [fallback, setFallback] = useState(existing?.fallback ?? "");
 
   const save = () => {
     void client
@@ -660,6 +669,7 @@ function DucklingForm({
           vision,
         },
         cost: { input_per_mtok: Number(costIn) || 0, output_per_mtok: Number(costOut) || 0 },
+        fallback: fallback || undefined,
       })
       .then(() => onDone())
       .catch(onDone);
@@ -733,6 +743,26 @@ function DucklingForm({
             onChange={(e) => setVision(e.target.checked)}
           />
           vision
+        </label>
+        <label className="flex items-center gap-1">
+          fallback
+          <select
+            aria-label="fallback duckling"
+            data-testid="duckling-fallback"
+            value={fallback}
+            onChange={(e) => setFallback(e.target.value)}
+            title="when this duckling's provider is unreachable, a paused run offers a one-click reseat to this stand-in"
+            className="rounded border border-hairline bg-surface2 px-2 py-1"
+          >
+            <option value="">none</option>
+            {fleet
+              .filter((d) => d.id !== (existing?.id ?? ""))
+              .map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.id}
+                </option>
+              ))}
+          </select>
         </label>
         <label className="flex items-center gap-1">
           $/Mtok in

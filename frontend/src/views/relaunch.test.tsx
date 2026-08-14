@@ -347,6 +347,57 @@ describe("hiding the run rail", () => {
 // the task whose failed run you are LOOKING AT meant leaving for Work →
 // Tasks and finding it again. The card now carries the engine's own next
 // actions — remove appears exactly when the engine would allow it.
+describe("the reseat offer on a weather pause", () => {
+  // k3's provider timed out for ten minutes while its declared fallback sat
+  // configured and unoffered. A provider-paused run whose failing duckling
+  // has a fallback now offers the swap in one click — recorded, resumed.
+  it("offers the declared fallback and posts the reseat", async () => {
+    const paused = {
+      ...failed, status: "paused" as const, verdict: "", pending_kind: "provider",
+      next: ["resume", "abort"],
+      budget: { usd: 0.1, tokens: 700000, turns: 1, wallclock_s: 60,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    };
+    const reseated: string[] = [];
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: paused, events: [
+        { type: "provider_retry", run_id: "r-1", ts: "t", data: { duckling: "k3", attempt: 2, error: "timeout" } },
+      ] })),
+      ducklings: vi.fn(() => Promise.resolve([
+        { id: "k3", provider: "openrouter", model: "kimi", fallback: "dsv4flash" },
+        { id: "dsv4flash", provider: "openrouter", model: "d" },
+      ])),
+      runReseat: vi.fn((_id: string, from: string, to: string) => {
+        reseated.push(`${from}->${to}`);
+        return Promise.resolve(paused);
+      }),
+    } as Partial<EngineClient>);
+    useRuns.setState({ runs: { "r-1": paused }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-1" client={client} />);
+    const btn = await screen.findByTestId("reseat-button");
+    expect(btn.textContent).toContain("dsv4flash");
+    fireEvent.click(btn);
+    await waitFor(() => expect(reseated).toEqual(["k3->dsv4flash"]));
+  });
+
+  it("offers nothing when no fallback is declared", async () => {
+    const paused = {
+      ...failed, status: "paused" as const, verdict: "", pending_kind: "provider",
+      next: ["resume", "abort"],
+    };
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: paused, events: [
+        { type: "provider_retry", run_id: "r-1", ts: "t", data: { duckling: "k3", attempt: 2, error: "timeout" } },
+      ] })),
+      ducklings: vi.fn(() => Promise.resolve([{ id: "k3", provider: "openrouter", model: "kimi" }])),
+    } as Partial<EngineClient>);
+    useRuns.setState({ runs: { "r-1": paused }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-1" client={client} />);
+    await screen.findByTestId("run-view");
+    expect(screen.queryByTestId("reseat-button")).toBeNull();
+  });
+});
+
 describe("the calls/reply row", () => {
   // "default" while the architect sat at 19 calls of an invisible 24 — the
   // loop's own count now rides the card while the run is live.

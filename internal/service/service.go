@@ -2655,3 +2655,61 @@ func applyStageLineup(roster map[config.Role]config.DucklingID, lineup []string)
 	}
 	return filled
 }
+
+// RunReseat moves a paused run's seats from one duckling to its stand-in —
+// the declared-fallback door for provider weather. Explicit and recorded,
+// never a router's choice: the person (or their pre-authorized chain) names
+// the swap, a seat_failover event lands on the record, and the run resumes
+// with its ledger intact. Availability only — a run paused at a human gate
+// has nothing to reseat.
+func (s *Service) RunReseat(ctx context.Context, id, from, to string) (*runlog.Run, error) {
+	s.runsMu.RLock()
+	rs, ok := s.runs[id]
+	s.runsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", id)
+	}
+	if rs.run.Status != "paused" || (rs.run.PendingKind != "provider" && rs.run.PendingKind != "error") {
+		return nil, fmt.Errorf("reseat answers provider weather; this run is %s/%s",
+			rs.run.Status, orDefault(rs.run.PendingKind, "none"))
+	}
+	if _, err := s.ducklings.Get(config.DucklingID(to)); err != nil {
+		return nil, fmt.Errorf("no duckling %q to reseat onto", to)
+	}
+	var roles []string
+	for role, d := range rs.run.Roster {
+		if d == from {
+			rs.run.Roster[role] = to
+			roles = append(roles, role)
+		}
+	}
+	if len(roles) == 0 {
+		return nil, fmt.Errorf("%s holds no seat on this run", from)
+	}
+	sort.Strings(roles)
+	// A stage run re-resolves its line-up from config on resume, which would
+	// quietly undo the swap: the override goes into the persisted request,
+	// the same per-run seat door the chips use.
+	if rs.run.Stage != "build" && rs.run.Stage != "test" {
+		if sreq, ok := loadStageRequest(rs.runDir); ok {
+			lineup := sreq.Ducklings
+			if len(lineup) == 0 {
+				lineup = s.stageLineupFor(rs.run.Mode)
+			}
+			for i := range lineup {
+				if lineup[i] == from {
+					lineup[i] = to
+				}
+			}
+			sreq.Ducklings = lineup
+			writeStageRequest(rs.runDir, sreq)
+		}
+	}
+	if w, err := s.ensureWriter(rs); err == nil {
+		w.AppendEvent("seat_failover", map[string]interface{}{
+			"from": from, "to": to, "roles": roles,
+			"reason": orDefault(rs.run.Failure, "provider unreachable"),
+		})
+	}
+	return s.RunResume(ctx, id)
+}

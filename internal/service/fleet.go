@@ -53,6 +53,8 @@ type DucklingView struct {
 	Cost     config.Cost           `json:"cost"`
 	// Color is one of the eight series slots, or 0 for "decide from the fleet".
 	Color int `json:"color,omitempty"`
+	// Fallback is the declared stand-in for provider weather.
+	Fallback string `json:"fallback,omitempty"`
 }
 
 // ProviderList returns every configured provider.
@@ -206,11 +208,14 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 			id, view.Color)
 	}
 
+	if view.Fallback == id {
+		return fmt.Errorf("duckling %q cannot be its own fallback", id)
+	}
 	d := config.Duckling{
 		Provider: config.ProviderID(view.Provider), Model: view.Model,
 		Roles: roles, Notes: view.Notes,
 		Params: view.Params, Caps: view.Caps, Cost: view.Cost,
-		Color: view.Color,
+		Color: view.Color, Fallback: view.Fallback,
 	}
 
 	if s.cfg.Ducklings == nil {
@@ -286,6 +291,7 @@ func (s *Service) DucklingGet(ctx context.Context, id string) (*DucklingView, er
 		ID: id, Provider: string(d.Provider), Model: d.Model,
 		Roles: roles, Notes: d.Notes,
 		Params: d.Params, Caps: d.Caps, Cost: d.Cost,
+		Color: d.Color, Fallback: d.Fallback,
 	}, nil
 }
 

@@ -855,3 +855,11 @@ func (c *Client) ProviderKeyEnvs() ([]string, error) {
 	}
 	return envs, nil
 }
+
+// RunReseat moves a weather-paused run's seats onto a fallback duckling and
+// resumes it.
+func (c *Client) RunReseat(runID, from, to string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/runs/"+runID+"/reseat", map[string]string{"from": from, "to": to}, &result)
+	return result, err
+}
