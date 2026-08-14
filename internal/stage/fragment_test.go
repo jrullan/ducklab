@@ -211,3 +211,34 @@ func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
 		t.Error("the hint leaked outside spec updates")
 	}
 }
+
+// The plan update's compass, mirrored from the spec's: open spec sections —
+// not as-built, not excluded — that no task delivers. A plan update opened
+// on the generic "review the project" and the architect enumerated its own
+// priorities with the real assignment (four freshly accepted spec sections)
+// nowhere in them.
+func TestPlanUpdatesCarryTheirGaps(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec,
+		"## SPEC-001 — Login\n\n**As-built:** yes\n\nBuilt.\n\n"+
+			"## SPEC-002 — Never mind\n\n**Priority:** wont\n\nExcluded.\n\n"+
+			"## SPEC-037 — Exercise images\n\nNew behaviour to build.\n\n"+
+			"## SPEC-038 — Image selection\n\nAlso new.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Images groundwork\n\n**Implements:** SPEC-038\n\nStarted.\n")
+	hint := planGapsHint(root, artifact.KindPlan)
+	if !strings.Contains(hint, "SPEC-037") {
+		t.Errorf("the undelivered open section is missing: %q", hint)
+	}
+	for _, not := range []string{"SPEC-001", "SPEC-002", "SPEC-038"} {
+		if strings.Contains(hint, not+" —") {
+			t.Errorf("%s should not be a gap (as-built/wont/covered): %q", not, hint)
+		}
+	}
+	if !strings.Contains(hint, "WHOLE assignment") || !strings.Contains(hint, "one\nat a time") && !strings.Contains(hint, "one at a time") {
+		t.Errorf("the hint lost its prescription: %q", hint)
+	}
+	if planGapsHint(root, artifact.KindSpec) != "" {
+		t.Error("the plan hint leaked into other kinds")
+	}
+}

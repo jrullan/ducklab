@@ -145,7 +145,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			ask = strings.TrimSpace(p.Seed)
 		}
 		if ask == "" {
-			ask = "Review the document against the project as it stands and update only what needs it."
+			if p.Stage == Plan {
+				ask = "The specification grew or changed since this plan was written. Bring the " +
+					"plan up to date: the engine's computed gap list below is the assignment."
+			} else {
+				ask = "Review the document against the project as it stands and update only what needs it."
+			}
 		}
 		return runFragment(ctx, p, base, ask)
 	}

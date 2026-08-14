@@ -123,6 +123,7 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	b.WriteString("\n")
 
 	b.WriteString(coverageGapsHint(projectRoot, kind))
+	b.WriteString(planGapsHint(projectRoot, kind))
 	if kind == artifact.KindPlan {
 		b.WriteString("## Rules\n\n" +
 			"- Read before you write: use artifact_read to see the full text of anything you " +
@@ -296,4 +297,53 @@ func coverageGapsHint(projectRoot string, kind artifact.Kind) string {
 		"marker and describes the contract to build — the plan generates tasks ONLY from " +
 		"sections without the marker, so a wrong tense creates tasks for finished work or " +
 		"omits the ones that are owed.\n\n"
+}
+
+// planGapsHint is the spine speaking into a plan update: the engine KNOWS
+// which open spec sections — not as-built, not excluded — no task delivers.
+// Without it a plan update opened on the generic "review the project" and a
+// small architect enumerated its own priorities with the real assignment
+// (four freshly accepted spec sections) nowhere in them.
+func planGapsHint(projectRoot string, kind artifact.Kind) string {
+	if kind != artifact.KindPlan {
+		return ""
+	}
+	spec, err := artifact.Load(projectRoot, artifact.KindSpec)
+	if err != nil || spec == nil || len(spec.Sections) == 0 {
+		return ""
+	}
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil || plan == nil {
+		return ""
+	}
+	covered := map[string]bool{}
+	for _, m := range plan.Sections {
+		for _, t := range m.Children {
+			for _, im := range t.Implements {
+				covered[strings.ToUpper(im)] = true
+			}
+		}
+	}
+	var gaps []string
+	for _, sp := range spec.Sections {
+		if strings.EqualFold(strings.TrimSpace(sp.Field("priority")), "wont") {
+			continue
+		}
+		if v := strings.ToLower(strings.TrimSpace(sp.Field("as-built"))); v == "yes" || v == "true" {
+			continue
+		}
+		if covered[strings.ToUpper(sp.ID)] {
+			continue
+		}
+		gaps = append(gaps, fmt.Sprintf("- %s — %s", sp.ID, sp.Title))
+	}
+	if len(gaps) == 0 {
+		return ""
+	}
+	return "## Plan gaps (computed by the engine)\n\nThese spec sections are NOT as-built and " +
+		"NO task delivers them. This list is your WHOLE assignment — do not audit the rest of " +
+		"the plan against the code; unlisted work is covered or already built. Take them one " +
+		"at a time: read THAT spec section (artifact_read), then emit the task(s) delivering " +
+		"it — **Implements:** naming the section, **Milestone:** naming where it belongs (or " +
+		"declare a new milestone heading above its tasks):\n" + strings.Join(gaps, "\n") + "\n\n"
 }
