@@ -199,6 +199,13 @@ func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
 	if strings.Contains(hint, "REQ-001") {
 		t.Error("a covered requirement was reported as a gap")
 	}
+	// Coverage says WHAT to write; the code says in what TENSE — the
+	// as-built marker is what keeps the plan from tasking finished work.
+	for _, must := range []string{"check the tree", "As-built:", "tense"} {
+		if !strings.Contains(hint, must) {
+			t.Errorf("the hint lost the code-check instruction %q", must)
+		}
+	}
 	// Other kinds stay quiet; a plan prompt owes the spine nothing here.
 	if coverageGapsHint(root, artifact.KindPlan) != "" {
 		t.Error("the hint leaked outside spec updates")

@@ -284,5 +284,11 @@ func coverageGapsHint(projectRoot string, kind artifact.Kind) string {
 	}
 	return "## Coverage gaps (computed by the engine)\n\nThese requirements have NO spec " +
 		"section implementing them. Cover every one this request touches — add sections for " +
-		"them, with **Implements:** naming the requirement:\n" + strings.Join(gaps, "\n") + "\n\n"
+		"them, with **Implements:** naming the requirement:\n" + strings.Join(gaps, "\n") + "\n\n" +
+		"For EACH gap, check the tree before writing (fs_search/fs_read): the coverage list " +
+		"says WHAT to write, the code says in what tense. Behaviour that already exists gets " +
+		"**As-built:** yes and describes reality; behaviour not built yet gets no as-built " +
+		"marker and describes the contract to build — the plan generates tasks ONLY from " +
+		"sections without the marker, so a wrong tense creates tasks for finished work or " +
+		"omits the ones that are owed.\n\n"
 }
