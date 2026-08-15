@@ -20,6 +20,7 @@ type fakeEngine struct {
 	testThenBuild bool
 	testNote      string
 	tasks []map[string]interface{}
+	nextSteps []map[string]interface{}
 	runs       map[string]map[string]interface{}
 	accepted   []string
 	acceptedAs string
@@ -253,6 +254,49 @@ func TestStatusListsWaitingAndRunning(t *testing.T) {
 	}
 }
 
+func TestStatusIncludesEmptyNextSteps(t *testing.T) {
+	eng := &fakeEngine{nextSteps: []map[string]interface{}{}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	var projects []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &projects); err != nil {
+		t.Fatalf("status is not JSON: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects, want 1", len(projects))
+	}
+	steps, ok := projects[0]["next_steps"]
+	if !ok {
+		t.Fatal("status omitted next_steps for a project with no guidance")
+	}
+	if got, ok := steps.([]interface{}); !ok || len(got) != 0 {
+		t.Errorf("next_steps = %#v, want an empty array", steps)
+	}
+}
+
+func TestStatusIncludesProjectNextSteps(t *testing.T) {
+	resps := drive(t, &fakeEngine{}, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	var projects []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &projects); err != nil {
+		t.Fatalf("status is not JSON: %v", err)
+	}
+	steps, ok := projects[0]["next_steps"]
+	if !ok {
+		t.Fatal("status omitted next_steps")
+	}
+	got, ok := steps.([]interface{})
+	if !ok || len(got) != 1 || got[0].(map[string]interface{})["id"] != "promote" {
+		t.Errorf("next_steps = %#v, want the engine's project guidance", steps)
+	}
+}
+
 func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 	eng := &fakeEngine{runs: map[string]map[string]interface{}{
 		"r-1": {"id": "r-1", "status": "paused", "verdict": "PASSED", "next": []interface{}{"accept", "reject"}},
@@ -286,6 +330,9 @@ func (f *fakeEngine) BugMove(projectID, bugID, status, actor string) (map[string
 }
 
 func (f *fakeEngine) ProjectNext(projectID string) ([]map[string]interface{}, error) {
+	if f.nextSteps != nil {
+		return f.nextSteps, nil
+	}
 	return []map[string]interface{}{
 		{"id": "promote", "action": "Promote B-037 to a task — or park it", "kind": "bug", "ref": "B-037"},
 	}, nil

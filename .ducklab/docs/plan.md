@@ -48,4 +48,25 @@ A token-level loop consumes substantial GPU time while bypassing existing brakes
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-003 — Always include next_steps in MCP status response, even when empty
+
+Fixes B-002.
+
+## Reported
+
+What happened: the status tool's description instructs the agent "When the human asks what to do, answer FROM next_steps: it already knows that a triaged bug wants promoting and which task is buildable" — but the response objects carry only name/project/running/waiting_for_decision. No next_steps field arrives, for any project (observed against three projects, one with a pending gate).
+
+Expected: each project in the status response carries next_steps (the same ProjectNext the desktop's guide rail shows), or the tool description stops promising it. An agent operator (Elena) told to answer FROM a field that never arrives either invents guidance or goes silent.
+
+## Triage
+
+**Component:** mcp
+**Suspected files:** internal/mcp/tools.go
+
+The status() function conditionally omits next_steps when ProjectNext returns empty, contradicting the tool description that promises it for every project.
+
+**Verification (triage recommends):** test-first — MCP status tool response must include next_steps field for every project, even when empty
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
