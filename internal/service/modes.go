@@ -51,6 +51,7 @@ type loopCache struct {
 	// onToolStart says what just began running — the other half of a gate
 	// command's fifteen legal minutes of silence.
 	onToolStart func(*agent.Turn, string, string, json.RawMessage)
+	onRepetitionLoop func(*agent.Turn, string)
 	mu      sync.Mutex
 	loops   map[config.DucklingID]*agent.Loop
 }
@@ -69,6 +70,7 @@ func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop,
 	l.OnReasoning = c.onReasoning
 	l.OnToolCall = c.onToolCall
 	l.OnToolStart = c.onToolStart
+	l.OnRepetitionLoop = c.onRepetitionLoop
 	l.OnRetry = c.onRetry
 	l.CapLift = c.capLift
 	l.OnCapNear = c.onCapNear

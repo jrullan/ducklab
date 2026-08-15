@@ -1,42 +1,34 @@
 package agent
 
-import (
-	"errors"
-	"strings"
-)
+import "strings"
 
-// repetitionDetector watches assembled stream deltas for a short phrase that
-// repeats enough times to be a generation loop. It deliberately works on
-// words rather than bytes so chunk boundaries do not hide a loop.
+// repetitionDetector identifies a short n-gram repeated enough times to be
+// diagnostic, while allowing ordinary prose to contain repeated words.
 type repetitionDetector struct {
-	text string
-	seen int
-	loop string
+ text     string
+ words    []string
+ pending  string
+ repeated string
 }
-
 func newRepetitionDetector() *repetitionDetector { return &repetitionDetector{} }
-
-func (d *repetitionDetector) Add(delta string) bool {
-	d.text += delta
-	words := strings.Fields(d.text)
-	if len(words) < 12 {
-		return false
-	}
-	for n := 3; n <= 8 && n*3 <= len(words); n++ {
-		last := strings.Join(words[len(words)-n:], " ")
-		prev := strings.Join(words[len(words)-2*n:len(words)-n], " ")
-		if last == prev {
-			d.seen++
-			d.loop = last
-			return d.seen >= 2
-		}
-	}
-	d.seen = 0
-	return false
+func (d *repetitionDetector) Add(s string) bool {
+ d.text += s
+ if d.repeated != "" { return true }
+ // Keep the final partial word for the next delta. This avoids re-tokenizing
+ // the complete accumulated response on every streamed chunk.
+ words := strings.Fields(d.pending + s)
+ if len(words) == 0 { d.pending += s; return false }
+ trailingSpace := len(s) > 0 && strings.ContainsAny(s[len(s)-1:], " \t\r\n")
+ d.pending = ""
+ if !trailingSpace {
+  d.pending = words[len(words)-1]
+  words = words[:len(words)-1]
+ }
+ d.words = append(d.words, words...)
+ for n := 3; n <= 12 && n*3 <= len(d.words); n++ {
+  a := strings.Join(d.words[len(d.words)-n:], " ")
+  if strings.Join(d.words[len(d.words)-2*n:len(d.words)-n], " ") == a && strings.Join(d.words[len(d.words)-3*n:len(d.words)-2*n], " ") == a { d.repeated = a; return true }
+ }
+ return false
 }
-
-// Loop returns the repeated phrase, if one has been detected.
-func (d *repetitionDetector) Loop() string { return d.loop }
-
-// ErrRepetitionLoop identifies a stream cut caused by repeated output.
-var ErrRepetitionLoop = errors.New("repetition loop detected")
+func (d *repetitionDetector) Repeated() string { return d.repeated }

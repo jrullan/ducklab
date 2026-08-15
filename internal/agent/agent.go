@@ -128,6 +128,8 @@ type Loop struct {
 	// was fifteen minutes of unexplained silence — the person read it as a
 	// hang and aborted healthy work. The lane can now say what is running.
 	OnToolStart func(turn *Turn, duckling string, name string, args json.RawMessage)
+	// OnRepetitionLoop, if set, fires when streaming detects a repeated n-gram.
+	OnRepetitionLoop func(turn *Turn, repeated string)
 	// OnRetry, if set, hears every transient provider failure AS IT HAPPENS.
 	// The retry chain used to run in total silence: a stalled stream timed
 	// out at 300s, three fallback attempts re-ran the wait, and the record
@@ -254,7 +256,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		if loop.Duckling.Params.TopP != nil {
 			req.TopP = loop.Duckling.Params.TopP
 		}
-		req.MaxTokens = outputCap(loop.Duckling.Params.MaxTokens)
+		req.MaxTokens = outputCapForContract(loop.Duckling.Params.MaxTokens, turn.Contract)
 		if len(loop.Duckling.Params.Stop) > 0 {
 			req.Stop = loop.Duckling.Params.Stop
 		}
@@ -278,6 +280,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
+				if errors.Is(err, ErrRepetitionLoop) && attempt == 1 {
+					if loop.OnRepetitionLoop != nil { loop.OnRepetitionLoop(turn, repetitionLoopText(err)) }
+					req.Messages = append(req.Messages, provider.Message{Role: "user", Content: fmt.Sprintf("A repetition loop was detected (%s). Stop repeating it and answer directly.", repetitionLoopText(err))})
+					continue
+				}
 
 			if err != nil && provider.IsTransient(err) {
 				// Retry with backoff — VISIBLY. Each transient failure lands
@@ -597,7 +604,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 					"answer rather than refusing to answer.",
 			}),
 		}
-		final.MaxTokens = outputCap(loop.Duckling.Params.MaxTokens)
+		final.MaxTokens = outputCapForContract(loop.Duckling.Params.MaxTokens, turn.Contract)
 		if loop.Duckling.Params.DisableThinking {
 			applyThinkingSuppression(&final, loop.Duckling.Caps)
 		}
@@ -644,6 +651,13 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	return outcome, nil
 }
 
+// ErrRepetitionLoop reports a token repetition loop detected in a stream.
+var ErrRepetitionLoop = errors.New("repetition loop")
+type repetitionError struct{ text string }
+func (e *repetitionError) Error() string { return fmt.Sprintf("%s: %s", ErrRepetitionLoop, e.text) }
+func (e *repetitionError) Unwrap() error { return ErrRepetitionLoop }
+func repetitionLoopText(err error) string { var e *repetitionError; if errors.As(err, &e) { return e.text }; return "repeated output" }
+
 // chatMaybeStreaming streams when the caller asked for it and the provider can,
 // and falls back to a plain call otherwise.
 //
@@ -652,11 +666,19 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 // on deltas. A dropped subscriber therefore cannot affect a run.
 func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest) (provider.ChatResponse, error) {
 	if loop.OnDelta == nil && loop.OnReasoning == nil {
-		return loop.Provider.Chat(ctx, req)
+		resp, err := loop.Provider.Chat(ctx, req)
+		if err == nil && len(resp.Choices) > 0 {
+			d := newRepetitionDetector()
+			if d.Add(resp.Choices[0].Message.Content) { return provider.ChatResponse{}, &repetitionError{text: d.Repeated()} }
+		}
+		return resp, err
 	}
 
 	ch := make(chan provider.Delta, 64)
 	done := make(chan struct{})
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var loopErr error
 	go func() {
 		defer close(done)
 		// Deltas used to go to the answer untouched, so a model that inlines its
@@ -664,7 +686,12 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		// `</think>` markers for the whole run. One splitter per call: a marker
 		// can be split across two chunks.
 		var split thinkSplitter
+		detector := newRepetitionDetector()
 		emit := func(answer, reasoning string) {
+			if answer != "" && detector.Add(answer) && loopErr == nil {
+				loopErr = &repetitionError{text: detector.Repeated()}
+				cancel()
+			}
 			if answer != "" && loop.OnDelta != nil {
 				loop.OnDelta(turn, answer)
 			}
@@ -684,7 +711,7 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		emit(split.Flush())
 	}()
 
-	resp, err := loop.Provider.ChatStream(ctx, req, ch)
+	resp, err := loop.Provider.ChatStream(streamCtx, req, ch)
 	close(ch)
 	<-done
 
@@ -708,6 +735,7 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 			}
 		}
 	}
+	if loopErr != nil { return provider.ChatResponse{}, loopErr }
 	return resp, err
 }
 
@@ -1074,6 +1102,17 @@ const DefaultMaxOutputTokens = 8192
 
 // outputCap returns the per-call token limit, never nil.
 func outputCap(declared *int) *int {
+	return outputCapForContract(declared, "")
+}
+
+func outputCapForContract(declared *int, contract string) *int {
+	if strings.HasPrefix(contract, "json:") {
+		n := 2048
+		if declared != nil && *declared > 0 && *declared < n {
+			n = *declared
+		}
+		return &n
+	}
 	if declared != nil && *declared > 0 {
 		return declared
 	}

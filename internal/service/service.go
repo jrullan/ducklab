@@ -2535,6 +2535,12 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 			"attempt": attempt, "error": err.Error(),
 		})
 	}
+	cache.onRepetitionLoop = func(t *agent.Turn, repeated string) {
+		rs.writer.AppendEvent("repetition_loop", map[string]interface{}{
+			"round": t.Round, "turn": t.Index, "role": string(t.Role),
+			"duckling": string(t.Duckling), "repeated": repeated,
+		})
+	}
 	if !rs.run.Stream || s.bus == nil {
 		return
 	}
