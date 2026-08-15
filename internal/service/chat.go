@@ -222,6 +222,9 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 			MaxWallclockS: 0,
 		}
 		merged := projectBudget(*limits, projCfg.Budget)
+		// Chat never caps wallclock time: the clock includes the person's
+		// thinking time between messages, not just model work.
+		merged.MaxWallclockS = 0
 		limits = &merged
 		tracker = budget.NewTracker(limits)
 		recordLimits(rs, limits)
