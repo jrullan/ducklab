@@ -1058,3 +1058,24 @@ describe("the board follows a run to its end", () => {
     await waitFor(() => expect(bugs.mock.calls.length).toBeGreaterThan(before));
   });
 });
+
+
+// The run view's dock learned this first: a bounded scroller that bottoms
+// out must NOT hand the wheel to the page. Same contract on every board
+// rail — the UI is consistent about where a scroll ends.
+describe("board rail contains its own scroll", () => {
+  it("carries overscroll containment", async () => {
+    const client = (({
+      tasks: vi.fn(() => Promise.resolve([{ id: "T-001", title: "A thing", milestone: "M-1", status: "todo", next: [] }])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    fireEvent.click(await screen.findByText("A thing"));
+    const rail = await screen.findByTestId("board-rail");
+    expect(rail.className).toContain("overscroll-contain");
+  });
+});

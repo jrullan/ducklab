@@ -125,7 +125,7 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
   return (
     <aside
       data-testid="guide-rail"
-      className="w-60 shrink-0 overflow-y-auto border-r border-hairline p-3"
+      className="w-60 shrink-0 overflow-y-auto overscroll-contain border-r border-hairline p-3"
     >
       {/* First thing in the panel, because it acts on ALL of it — parked
           beside "next steps" it read as hiding that one section. */}

@@ -624,7 +624,7 @@ export function Board({
           long column used to mean scrolling back to the top to find the rail
           that describes it. The kanban and the rail are different documents;
           they scroll like it. */}
-      <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto">
+      <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto overscroll-contain">
         {current === null ? (
           <p className="text-sm text-ink-muted">
             Select {isBugs ? "a bug" : "a task"} to see its record.
@@ -707,7 +707,7 @@ function TaskRail({
         <Row label="depends on" value={task.depends_on?.join(", ")} />
       </dl>
       {task.body && (
-        <div className="max-h-72 overflow-y-auto border-t border-hairline pt-2" data-testid="task-body">
+        <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-hairline pt-2" data-testid="task-body">
           <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>
         </div>
       )}

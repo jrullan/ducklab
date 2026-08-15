@@ -1,3 +1,11 @@
 {"ts":"2026-08-14T23:10:18Z","bug":"B-001","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-14T23:10:18Z","bug":"B-002","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-14T23:10:18Z","bug":"B-003","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-15T00:51:05Z","bug":"B-004","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-15T00:51:05Z","bug":"B-007","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-15T00:51:05Z","bug":"B-005","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-15T00:51:05Z","bug":"B-006","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-15T00:54:19Z","bug":"B-001","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-15T00:54:24Z","bug":"B-001","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-15T00:55:25Z","bug":"B-001","from":"fixed","to":"verified","actor":"human","via":"move"}
+{"ts":"2026-08-15T00:55:59Z","bug":"B-004","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-001"}

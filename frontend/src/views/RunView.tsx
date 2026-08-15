@@ -675,7 +675,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </p>
           ) : null}
           {task.body ? (
-            <div className="mt-1 max-h-36 overflow-y-auto text-sm">
+            <div className="mt-1 max-h-36 overflow-y-auto overscroll-contain text-sm">
               <Prose body={task.body} />
             </div>
           ) : (
@@ -998,7 +998,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <section data-testid="stage-proposal" className="m-2 rounded-card border border-hairline p-3">
           <h2 className="text-sm text-ink-muted">the proposal — what Accept would approve</h2>
           {proposal.markdown && (
-            <div className="mt-2 max-h-[50vh] overflow-y-auto">
+            <div className="mt-2 max-h-[50vh] overflow-y-auto overscroll-contain">
               <Prose body={proposal.markdown} suppress={[]} className="space-y-2 text-sm text-ink-secondary" />
             </div>
           )}

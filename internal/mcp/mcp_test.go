@@ -26,6 +26,8 @@ type fakeEngine struct {
 	attached     string
 	attachedName string
 	revised    []string
+	budgetLifted string
+	resumeCount int
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -56,7 +58,24 @@ func (f *fakeEngine) RunReject(id, reason string) error {
 	return nil
 }
 func (f *fakeEngine) RunAbort(string) error                          { return nil }
-func (f *fakeEngine) RunResume(string) (map[string]interface{}, error) { return nil, nil }
+func (f *fakeEngine) RunResume(id string) (map[string]interface{}, error) {
+	f.resumeCount++
+	if f.budgetLifted == "" {
+		return map[string]interface{}{"id": id, "status": "paused", "pending_kind": "budget"}, nil
+	}
+	if run, ok := f.runs[id]; ok {
+		run["status"] = "running"
+		run["next"] = []interface{}{}
+	}
+	return map[string]interface{}{"id": id, "status": "running"}, nil
+}
+func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface{}, error) {
+	if kind != "tokens" && kind != "time" {
+		return nil, fmt.Errorf("kind must name a budget cap: tokens or time")
+	}
+	f.budgetLifted = kind + " by " + actor
+	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
+}
 func (f *fakeEngine) RunAnswer(string, string, string) error          { return nil }
 func (f *fakeEngine) RunStart(string, map[string]interface{}) (map[string]interface{}, error) {
 	return map[string]interface{}{"id": "r-new"}, nil
@@ -146,7 +165,7 @@ func TestInitializeAndToolListSpeakMCP(t *testing.T) {
 	for _, tl := range tools {
 		names[fmt.Sprint(tl.(map[string]interface{})["name"])] = true
 	}
-	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start"} {
+	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start", "budget_lift"} {
 		if !names[must] {
 			t.Errorf("tool %q missing", must)
 		}
@@ -186,6 +205,45 @@ func TestADecisionOutsideNextIsRefused(t *testing.T) {
 	}
 	if len(eng.accepted) != 0 {
 		t.Error("the engine was asked to accept anyway")
+	}
+}
+
+// A capped run must be liftable through the same MCP surface that offers resume;
+// otherwise resume simply pauses again and a remote operator is trapped.
+func TestBudgetLiftThroughMCPAllowsResume(t *testing.T) {
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{
+		"r-cap": {"id": "r-cap", "status": "paused", "pending_kind": "budget", "next": []interface{}{"resume", "abort"}},
+	}}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"elena"}}}`,
+		callFrame(2, "budget_lift", `{"run_id":"r-cap","kind":"tokens"}`),
+		callFrame(3, "decide", `{"run_id":"r-cap","action":"resume","reason":"lift the token cap and continue the run"}`),
+	)
+	if text, isErr := toolResultText(t, resps[1]); isErr || !strings.Contains(text, "tokens") {
+		t.Fatalf("budget_lift failed or omitted the cap kind: %q", text)
+	}
+	if text, isErr := toolResultText(t, resps[2]); isErr || !strings.Contains(text, "running") {
+		t.Fatalf("resume did not proceed after lifting the cap: %q", text)
+	}
+	if eng.budgetLifted != "tokens by mcp:elena" {
+		t.Errorf("lift attribution = %q, want tokens by mcp:elena", eng.budgetLifted)
+	}
+	if eng.resumeCount != 1 {
+		t.Errorf("resume count = %d, want 1", eng.resumeCount)
+	}
+}
+
+// Bad budget kinds must teach the caller which field is wrong, not merely list
+// the permitted values.
+func TestBudgetLiftInvalidKindNamesTheField(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		initFrame,
+		callFrame(2, "budget_lift", `{"run_id":"r-cap","kind":"widgets"}`),
+	)
+	text, isErr := toolResultText(t, resps[1])
+	if !isErr || !strings.Contains(strings.ToLower(text), "kind") {
+		t.Fatalf("invalid lift error does not identify kind: %q", text)
 	}
 }
 
