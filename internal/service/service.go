@@ -1685,6 +1685,18 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	}
 
 	git := vcs.New(entry.Path)
+	// Test-first acceptance records the red-test promise even for projects that
+	// have not initialized git yet; the chained BUILD will enforce the normal
+	// repository requirement when it starts.
+	if rs.run.Stage == "test" && !git.HasGit() {
+		defer s.continueChain(ctx, rs)
+		rs.run.Accepted = true
+		rs.run.Status = "done"
+		rs.run.Resolution = "accepted by " + actor
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		clearPending(rs.run)
+		return s.logResolution(rs, "accept")
+	}
 	if message == "" {
 		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
 	}
@@ -1716,13 +1728,13 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Resolution = "accepted by " + actor + "; the tree already carried this change"
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
-		// The report this task came from, if any: promoting a bug set its task
-		// id and moved it to in_progress, and nothing ever moved it again. The
-		// loop had an entrance and no exit.
-		if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
-			rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
-				"bug": id, "task": rs.run.TaskID,
-			})
+		// The report this task came from is fixed only by an accepted BUILD.
+		if rs.run.Stage == "build" {
+			if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
+				rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
+					"bug": id, "task": rs.run.TaskID,
+				})
+			}
 		}
 
 		if err := s.logResolution(rs, "accept"); err != nil {
@@ -1750,13 +1762,13 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	rs.run.Resolution = "accepted by " + actor
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
-	// The report this task came from, if any: promoting a bug set its task
-	// id and moved it to in_progress, and nothing ever moved it again. The
-	// loop had an entrance and no exit.
-	if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
-		rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
-			"bug": id, "task": rs.run.TaskID,
-		})
+	// The report this task came from is fixed only by an accepted BUILD.
+	if rs.run.Stage == "build" {
+		if id, berr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); berr == nil && id != "" {
+			rs.writer.AppendEvent("bug_fixed", map[string]interface{}{
+				"bug": id, "task": rs.run.TaskID,
+			})
+		}
 	}
 
 	// Logged, not assumed. These appends were ignored, and when the writer had
