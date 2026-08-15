@@ -661,17 +661,21 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 		}
 	}
 	s.runsMu.RUnlock()
-	// Load project to get task counts
-	ducklabDir := filepath.Join(entry.Path, ".ducklab")
-	db, err := store.Open(filepath.Join(ducklabDir, "ducklab.db"))
+	// Task counts come from the plan — the authoritative task source that
+	// `task list` and the board read — not the db `task` table. That table is
+	// a secondary mirror written once at bug promotion (status "todo", never
+	// updated) and never pruned when a re-plan drops a task, so counting it
+	// reported phantom tasks (a re-planned-out task lingered) and frozen
+	// statuses (an accepted task still counted "todo"). Status then disagreed
+	// with the very board it summarises. deriveTaskRunState, inside TaskList,
+	// gives each plan task the same status the board shows.
+	views, err := s.TaskList(ctx, id)
 	if err != nil {
-		return &Status{ActiveRuns: active}, nil
+		return &Status{StageProgress: stageProgress(entry.Path), ActiveRuns: active}, nil
 	}
-	defer db.Close()
-	tasks, _ := db.ListTasks()
 	taskCounts := make(map[string]int)
-	for _, t := range tasks {
-		taskCounts[t.Status]++
+	for _, tv := range views {
+		taskCounts[tv.Status]++
 	}
 	return &Status{
 		StageProgress: stageProgress(entry.Path),
