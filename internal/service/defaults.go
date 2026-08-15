@@ -80,6 +80,13 @@ func (s *Service) BudgetDefaultsSet(v BudgetView) error {
 // raising only the token ceiling set the other three to zero — and the tracker
 // reads zero as a ceiling of zero, so the run failed before its first call. That
 // is the opposite of what asking for more budget means.
+func projectBudget(defaults budget.Budget, project config.Budget) budget.Budget {
+	return mergeBudget(defaults, &budget.Budget{
+		MaxUSD: project.MaxUSD, MaxTokens: project.MaxTokens,
+		MaxTurns: project.MaxTurns, MaxWallclockS: project.MaxWallclockS,
+	})
+}
+
 func mergeBudget(defaults budget.Budget, req *budget.Budget) budget.Budget {
 	out := defaults
 	if req == nil {

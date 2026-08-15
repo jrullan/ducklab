@@ -221,6 +221,8 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 			// tokens and dollars, which measure real spend, keep their caps.
 			MaxWallclockS: 0,
 		}
+		merged := projectBudget(*limits, projCfg.Budget)
+		limits = &merged
 		tracker = budget.NewTracker(limits)
 		recordLimits(rs, limits)
 		rs.setTracker(tracker)

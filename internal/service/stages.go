@@ -306,12 +306,11 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
 	}
 
-	limits := &budget.Budget{
-		MaxUSD:        projCfg.Budget.MaxUSD,
-		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
-		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
-		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	}
+	limitsValue := projectBudget(budget.Budget{
+		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
+	}, projCfg.Budget)
+	limits := &limitsValue
 	tracker := budget.NewTracker(limits)
 	if req.resumed {
 		// A resumed stage continues its own life: recorded ceilings, ledger

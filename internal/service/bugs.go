@@ -257,12 +257,11 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		return
 	}
 	roster, _ := s.resolveRoster(projCfg)
-	limits := &budget.Budget{
-		MaxUSD:        projCfg.Budget.MaxUSD,
-		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
-		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
-		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	}
+	limitsValue := projectBudget(budget.Budget{
+		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
+	}, projCfg.Budget)
+	limits := &limitsValue
 	tracker := budget.NewTracker(limits)
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)

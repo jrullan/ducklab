@@ -1219,12 +1219,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// three limits to zero, and the tracker reads zero as a ceiling of zero. The
 	// run would fail before its first call, which is the opposite of what asking
 	// for more budget means.
-	b := mergeBudget(budget.Budget{
-		MaxUSD:        projCfg.Budget.MaxUSD,
-		MaxTokens:     int64(s.cfg.Defaults.Budget.MaxTokens),
-		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS,
-		MaxTurns:      s.cfg.Defaults.Budget.MaxTurns,
-	}, req.Budget)
+	b := mergeBudget(projectBudget(budget.Budget{
+		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
+		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,
+	}, projCfg.Budget), req.Budget)
 	tracker := budget.NewTracker(&b)
 	if req.resumed {
 		// A resumed run continues its own life, not a fresh one. Its ceilings
