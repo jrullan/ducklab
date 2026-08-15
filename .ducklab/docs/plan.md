@@ -151,4 +151,24 @@ The MCP adapter returns []string under a field documented and served by HTTP as 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-008 — Apply project budget max_tokens and other named caps to runs
+
+Fixes B-019.
+
+## Reported
+
+What happened: after three budget pauses at the default 3M token cap, project.toml gained [budget] max_tokens = 25000000 — and the very next run (r-20260815-044232-eggr) paused at 3,006,404 >= 3,000,000 anyway. The run's token limit came from the global defaults, ignoring the project's setting; only max_usd from the project block appears to reach runs. A config key that accepts a value and silently doesn't apply it is a promise-vs-delivery break (the B-002 class, in TOML).
+
+Expected: the project [budget] block governs its runs for every cap it names (tokens, usd, wallclock, turns), overriding global defaults — or the loader rejects the keys it will not honor, so the person finds out at write time instead of at the fourth pause.
+
+## Triage
+
+**Component:** budget
+
+The project accepts max_tokens but silently ignores it, causing runs to pause at the global token limit instead of the configured project limit.
+
+**Verification (triage recommends):** test-first — Configure a project budget max_tokens above the global default and verify its run uses the project token cap.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

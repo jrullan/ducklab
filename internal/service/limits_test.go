@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 // The limits were recorded at one of the six places a tracker is created, so
@@ -13,6 +16,34 @@ import (
 //
 // A meter against a ceiling of zero is worse than no meter: it reads as a run
 // that has already spent everything it was allowed.
+func TestProjectBudgetOverridesGlobalDefaultsForRuns(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithConfig(t, s, "budgeted")
+
+	project, err := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Budget = config.Budget{MaxUSD: 7, MaxTokens: 25000000, MaxWallclockS: 7200, MaxTurns: 99}
+	if err := config.SaveProject(filepath.Join(dir, ".ducklab", "project.toml"), project); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{Stage: "spec"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), run.ID)
+	got, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := runlog.BudgetLimits{USD: 7, Tokens: 25000000, WallclockS: 7200, Turns: 99}
+	if got.Run.Budget.Limit != want {
+		t.Fatalf("run budget = %+v, want project budget %+v", got.Run.Budget.Limit, want)
+	}
+}
+
 func TestEveryKindOfRunRecordsItsCeilings(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{
