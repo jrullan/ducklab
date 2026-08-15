@@ -90,4 +90,25 @@ MCP status lacks document lifecycle state, forcing agents to pay for full docume
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-005 — Expose reviewer findings and filing action through MCP run tools
+
+Fixes B-010.
+
+## Reported
+
+What happened: T-002's build (r-20260815-130948-qka6) passed with the reviewer's approve carrying 4 minor findings. The desktop shows them on the run with a one-click "File N findings as bugs" (POST /v1/runs/{id}/file-findings). run_get over MCP returns diff, budget, verdict and next — but no findings at all, and no MCP tool wraps file-findings. The operator deciding accept/reject sees strictly less than the human at the desktop, and the findings→bugs loop the UI offers in one click does not exist for an agent.
+
+Expected: run_get carries the reviewer's findings (severity, file, line, issue, fix — they are already structured), and a file_findings tool (or a decide-adjacent action) lets the operator land them as bugs with attribution, exactly like the desktop button. Small-operator-first: the findings are compact and structured — cheap to carry, decisive to have.
+
+## Triage
+
+**Component:** MCP run operations
+**Suspected files:** internal/mcp/tools.go, internal/mcp/mcp_test.go
+
+The MCP run surface omits findings and provides no wrapper for the existing findings-file endpoint, leaving operators unable to make equally informed decisions or file findings.
+
+**Verification (triage recommends):** test-first — run_get for a completed run with structured reviewer findings should return all finding fields, and file_findings should create attributed bugs.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

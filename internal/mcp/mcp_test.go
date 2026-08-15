@@ -27,6 +27,7 @@ type fakeEngine struct {
 	accepted   []string
 	acceptedAs string
 	rejected   []string
+	filed      []map[string]string
 	attached     string
 	attachedName string
 	revised    []string
@@ -110,8 +111,9 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 	}
 	return nil, nil
 }
-func (f *fakeEngine) BugAdd(string, map[string]string) (map[string]interface{}, error) {
-	return map[string]interface{}{"id": "B-001"}, nil
+func (f *fakeEngine) BugAdd(_ string, req map[string]string) (map[string]interface{}, error) {
+	f.filed = append(f.filed, req)
+	return map[string]interface{}{"id": fmt.Sprintf("B-%03d", len(f.filed))}, nil
 }
 
 // drive sends JSON-RPC lines and returns the decoded responses.
@@ -173,7 +175,7 @@ func TestInitializeAndToolListSpeakMCP(t *testing.T) {
 	for _, tl := range tools {
 		names[fmt.Sprint(tl.(map[string]interface{})["name"])] = true
 	}
-	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start", "budget_lift"} {
+	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start", "budget_lift", "file_findings"} {
 		if !names[must] {
 			t.Errorf("tool %q missing", must)
 		}
@@ -366,6 +368,67 @@ func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 	text, _ := toolResultText(t, resps[1])
 	if !strings.Contains(text, "+fixed") || !strings.Contains(text, "accept") {
 		t.Errorf("run_get is missing the diff or the actions:\n%s", text)
+	}
+}
+
+func TestRunGetCarriesStructuredReviewerFindings(t *testing.T) {
+	findings := []interface{}{
+		map[string]interface{}{"severity": "high", "file": "internal/mcp/tools.go", "line": 42, "issue": "missing action", "fix": "add the tool"},
+		map[string]interface{}{"severity": "minor", "file": "README.md", "line": 7, "issue": "stale example", "fix": "refresh the example"},
+	}
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{
+		"r-review": {"id": "r-review", "status": "paused", "verdict": "PASSED", "findings": findings},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "run_get", `{"run_id":"r-review"}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatalf("run_get is not JSON: %v", err)
+	}
+	gotFindings, ok := got["findings"].([]interface{})
+	if !ok || len(gotFindings) != 2 {
+		t.Fatalf("findings = %#v, want both reviewer findings", got["findings"])
+	}
+	for _, key := range []string{"severity", "file", "line", "issue", "fix"} {
+		if _, ok := gotFindings[0].(map[string]interface{})[key]; !ok {
+			t.Errorf("finding omitted %q: %#v", key, gotFindings[0])
+		}
+	}
+}
+
+func TestFileFindingsCreatesAttributedBugs(t *testing.T) {
+	eng := &fakeEngine{runs: map[string]map[string]interface{}{
+		"r-review": {"id": "r-review", "project_id": "calc", "status": "paused", "findings": []interface{}{
+			map[string]interface{}{"severity": "high", "file": "a.go", "line": 12, "issue": "unsafe conversion", "fix": "check the input"},
+			map[string]interface{}{"severity": "minor", "file": "b.go", "line": 8, "issue": "unclear name", "fix": "rename it"},
+		}},
+	}}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"elena"}}}`,
+		callFrame(2, "file_findings", `{"run_id":"r-review"}`),
+	)
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatalf("file_findings failed: %v", resps[1])
+	}
+	if len(eng.filed) != 2 {
+		t.Fatalf("filed %d bugs, want 2", len(eng.filed))
+	}
+	for i, bug := range eng.filed {
+		if bug["reporter"] != "mcp:elena" || bug["source"] != "mcp" {
+			t.Errorf("bug lacks MCP attribution: %#v", bug)
+		}
+		wantSeverity := []string{"high", "minor"}[i]
+		if bug["severity"] != wantSeverity {
+			t.Errorf("bug severity = %q, want %q", bug["severity"], wantSeverity)
+		}
+		for _, part := range []string{"file", "line", "issue", "fix"} {
+			if !strings.Contains(bug["body"], part) {
+				t.Errorf("bug body lacks finding field %q: %#v", part, bug)
+			}
+		}
 	}
 }
 
