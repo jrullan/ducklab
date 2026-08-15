@@ -570,7 +570,8 @@ func (s *Server) status() (map[string]interface{}, error) {
 				entry["accepted-unreleased"] = accepted
 			branches := []string{}
 			for _, task := range tasks { if status, ok := task["status"].(string); ok && status == "accepted" { if branch, ok := task["branch"].(string); ok && branch != "" && branch != "main" { branches = append(branches, branch) } } }
-			entry["unreleased_branches"] = branches
+			entry["unreleased_branches"] = len(branches)
+				entry["unreleased_branch_names"] = branches
 		} else {
 			entry["tasks"] = 0
 		}

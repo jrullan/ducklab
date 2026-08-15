@@ -25,3 +25,4 @@
 {"ts":"2026-08-15T14:40:10Z","bug":"B-018","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-006"}
 {"ts":"2026-08-15T15:23:23Z","bug":"B-021","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-15T15:23:26Z","bug":"B-021","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-007"}
+{"ts":"2026-08-15T15:24:02Z","bug":"B-021","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-007"}
