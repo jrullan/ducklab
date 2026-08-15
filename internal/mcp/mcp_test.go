@@ -20,6 +20,8 @@ type fakeEngine struct {
 	testThenBuild bool
 	testNote      string
 	tasks []map[string]interface{}
+	artifacts map[string]map[string]interface{}
+	bugs []map[string]interface{}
 	nextSteps []map[string]interface{}
 	runs       map[string]map[string]interface{}
 	accepted   []string
@@ -93,7 +95,13 @@ func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (ma
 	}
 	return map[string]interface{}{"id": "r-rev"}, nil
 }
-func (f *fakeEngine) ArtifactGet(string, string) (map[string]interface{}, error) {
+func (f *fakeEngine) ArtifactGet(_, kind string) (map[string]interface{}, error) {
+	if f.artifacts != nil {
+		if doc, ok := f.artifacts[kind]; ok {
+			return doc, nil
+		}
+		return nil, fmt.Errorf("artifact %q not found", kind)
+	}
 	return map[string]interface{}{"kind": "requirements"}, nil
 }
 func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
@@ -254,6 +262,59 @@ func TestStatusListsWaitingAndRunning(t *testing.T) {
 	}
 }
 
+func TestStatusIncludesDocumentLifecycleState(t *testing.T) {
+	eng := &fakeEngine{
+		artifacts: map[string]map[string]interface{}{
+			"requirements": {"approved": true, "markdown": "FULL REQUIREMENTS BODY"},
+			"spec":        {"approved": false, "markdown": "FULL SPEC BODY", "proposal": map[string]interface{}{"run_id": "r-spec"}},
+		},
+		tasks: []map[string]interface{}{
+			{"id": "T-001", "status": "todo"},
+			{"id": "T-002", "status": "accepted"},
+			{"id": "T-003", "status": "blocked"},
+		},
+		bugs: []map[string]interface{}{
+			{"id": "B-001", "status": "open"},
+			{"id": "B-002", "status": "triaged"},
+			{"id": "B-003", "status": "closed"},
+		},
+	}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	var projects []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &projects); err != nil {
+		t.Fatalf("status is not JSON: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects, want 1", len(projects))
+	}
+	docs, ok := projects[0]["documents"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("status documents = %#v, want an object", projects[0]["documents"])
+	}
+	for kind, want := range map[string]string{
+		"requirements": "approved",
+		"spec":         "proposed",
+		"plan":         "none",
+	} {
+		if got := docs[kind]; got != want {
+			t.Errorf("documents.%s = %#v, want %q", kind, got, want)
+		}
+	}
+	if got, ok := projects[0]["tasks"].(float64); !ok || got != 3 {
+		t.Errorf("tasks = %#v, want 3", projects[0]["tasks"])
+	}
+	if got, ok := projects[0]["open_bugs"].(float64); !ok || got != 2 {
+		t.Errorf("open_bugs = %#v, want 2", projects[0]["open_bugs"])
+	}
+	if strings.Contains(text, "FULL REQUIREMENTS BODY") || strings.Contains(text, "FULL SPEC BODY") {
+		t.Error("status leaked a document body; lifecycle orientation must remain cheap")
+	}
+}
+
 func TestStatusIncludesEmptyNextSteps(t *testing.T) {
 	eng := &fakeEngine{nextSteps: []map[string]interface{}{}}
 	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
@@ -309,7 +370,22 @@ func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 }
 
 func (f *fakeEngine) BugList(projectID string, openOnly bool) ([]map[string]interface{}, error) {
-	return []map[string]interface{}{{"id": "B-001", "status": "open"}}, nil
+	bugs := f.bugs
+	if bugs == nil {
+		bugs = []map[string]interface{}{{"id": "B-001", "status": "open"}}
+	}
+	if !openOnly {
+		return bugs, nil
+	}
+	var open []map[string]interface{}
+	for _, b := range bugs {
+		switch b["status"] {
+		case "verified", "closed", "duplicate", "wontfix":
+		default:
+			open = append(open, b)
+		}
+	}
+	return open, nil
 }
 
 func (f *fakeEngine) BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error) {

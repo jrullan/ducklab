@@ -69,4 +69,25 @@ The status() function conditionally omits next_steps when ProjectNext returns em
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-004 — Add per-project document lifecycle state to MCP status response
+
+Fixes B-003.
+
+## Reported
+
+What happened: driving the ducklab adopt via MCP, there was no way to learn which lifecycle documents exist and whether they are approved. status doesn't say; the only discovery paths were (a) colliding with stage_start errors ("this project already has requirements") and (b) artifact_get, which returns the ENTIRE document — the ducklab spec is ~15k tokens, fatal context spend for a small local operator (pato-atom, 32k) that only needed "does it exist? approved?".
+
+Expected: a cheap orientation surface — either status gains per-project document state (requirements: approved, spec: approved, plan: none, tasks: N, open bugs: N), or artifact_get grows a summary mode (ids + titles + approved flag, no bodies). The error-message teaching is excellent (it names the right next door) but discovery-by-collision costs a failed call and a confused operator.
+
+## Triage
+
+**Component:** mcp
+**Suspected files:** internal/mcp/mcp.go
+
+MCP status lacks document lifecycle state, forcing agents to pay for full documents via artifact_get or collide with stage_start errors
+
+**Verification (triage recommends):** test-first — MCP status tool should return per-project document lifecycle state (requirements/spec/plan status, task count, bug count) without requiring artifact_get
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
