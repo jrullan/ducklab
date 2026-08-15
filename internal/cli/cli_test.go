@@ -1,9 +1,32 @@
 package cli
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestVersionPrintsInstalledProvenance(t *testing.T) {
+	oldArgs, oldVersion := os.Args, Version
+	defer func() { os.Args, Version = oldArgs, oldVersion }()
+	os.Args = []string{"ducklab", "--version"}
+	Version = "0.4.0"
+	read, write, err := os.Pipe()
+	if err != nil { t.Fatal(err) }
+	oldStdout := os.Stdout
+	os.Stdout = write
+	if code := Run([]string{"--version"}); code != 0 { t.Fatalf("exit code = %d", code) }
+	write.Close()
+	os.Stdout = oldStdout
+	// The exact values are build-time data; the operator-facing contract is that
+	// branch and commit are present, rather than an untraceable version number.
+	buf := make([]byte, 4096)
+	n, _ := read.Read(buf)
+	text := string(buf[:n])
+	if !strings.Contains(text, "dev") || !strings.Contains(text, "0.4.0") {
+		t.Fatalf("version omitted installed provenance: %q", text)
+	}
+}
 
 // A word in the subcommand position used to fall through to "it must be a task
 // ID", so `ducklab run diff <id>` started a model run on a task called "diff"

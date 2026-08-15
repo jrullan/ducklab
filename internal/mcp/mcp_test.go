@@ -333,6 +333,28 @@ func TestStatusIncludesDocumentLifecycleState(t *testing.T) {
 	}
 }
 
+// Accepted is a gate result, not a release. Status must carry the pileup and
+// the branches holding it so an operator can tell what is installed versus what
+// merely passed review.
+func TestStatusSurfacesAcceptedUnreleasedWork(t *testing.T) {
+	eng := &fakeEngine{tasks: []map[string]interface{}{
+		{"id": "T-001", "status": "accepted", "branch": "ducklab/T-001"},
+		{"id": "T-002", "status": "accepted", "branch": "ducklab/T-002"},
+		{"id": "T-003", "status": "todo", "branch": "main"},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	if !strings.Contains(text, "accepted-unreleased") || !strings.Contains(text, "2") {
+		t.Fatalf("status does not surface the accepted-unreleased count: %s", text)
+	}
+	if !strings.Contains(text, "ducklab/T-001") || !strings.Contains(text, "ducklab/T-002") {
+		t.Errorf("status does not identify branches holding accepted work: %s", text)
+	}
+}
+
 func TestStatusIncludesEmptyNextSteps(t *testing.T) {
 	eng := &fakeEngine{nextSteps: []map[string]interface{}{}}
 	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))

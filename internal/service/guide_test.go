@@ -67,6 +67,24 @@ func TestPausedRunsOutrankEverything(t *testing.T) {
 // One task, not the backlog: the guide picks the next buildable — test-ready
 // first, else the first todo whose dependencies are all accepted. The board
 // already lists everything; a guide that does too is a second board.
+// Accepted work is not shipped merely because its gate is green. The guide must
+// make the release obligation visible and put it ahead of the quiet-project
+// doors, so an operator cannot mistake accepted for released.
+func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Tasks: []TaskView{
+			{ID: "T-001", Status: "accepted"},
+		},
+	})
+	if len(steps) == 0 || steps[0].ID != "release" {
+		t.Fatalf("guide = %v, want release first for accepted-but-unreleased work", ids(steps))
+	}
+	if !strings.Contains(steps[0].Action, "1") || !strings.Contains(steps[0].Reason, "accepted") {
+		t.Errorf("release step does not surface the accepted count: %+v", steps[0])
+	}
+}
+
 func TestTheGuideSuggestsOneBuildableTask(t *testing.T) {
 	st := projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,

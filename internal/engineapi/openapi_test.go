@@ -2,6 +2,7 @@ package engineapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +101,28 @@ func TestCandidateSchemaHasNoAuthorship(t *testing.T) {
 	for _, forbidden := range []string{"duckling", "author", "provider", "model"} {
 		if _, present := props[forbidden]; present {
 			t.Errorf("candidate schema exposes %q", forbidden)
+		}
+	}
+}
+
+func TestHealthReportsInstalledBinaryProvenance(t *testing.T) {
+	srv := &Server{mux: http.NewServeMux(), token: "t", version: "0.4.0"}
+	srv.routes()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/v1/engine", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"branch", "commit"} {
+		if strings.TrimSpace(fmt.Sprint(got[key])) == "" {
+			t.Errorf("health.%s is missing installed provenance: %#v", key, got[key])
 		}
 	}
 }

@@ -111,4 +111,25 @@ The MCP run surface omits findings and provides no wrapper for the existing find
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-006 — Surface accepted-unreleased work and stamp installed binaries with branch and commit provenance
+
+Fixes B-018.
+
+## Reported
+
+What happened (the root cause of a whole night of confusion): T-001's accepted budget_lift lived on ducklab/T-001, never merged; T-002's chain branched from main WITHOUT it; make install ships whichever branch the tree has checked out — so a later install silently REGRESSED the MCP binary, removing a tool an operator was told exists. Three observers (two Claude sessions and Elena) spent hours reconciling what "exists" meant. Nobody had run release; nothing anywhere said accepted-but-unreleased work was piling up on branches.
+
+Expected: the accepted-unreleased pileup is a first-class signal — status/guide surface "N accepted tasks on M branches await a release" with the release step promoted when it grows; and ideally the record warns when installed binary provenance diverges from main (even just a version stamp with branch+sha, printable by ducklab --version and shown in engine health). Accepted must not read as shipped.
+
+## Triage
+
+**Component:** release/install provenance
+**Suspected files:** Makefile, internal/cli/cli.go, internal/service/service.go, internal/engineapi/engineapi.go, frontend/src
+
+Accepted work can remain stranded on task branches while install silently ships the checked-out tree, causing operators to believe unreleased functionality is present.
+
+**Verification (triage recommends):** test-first — Create accepted tasks on unmerged branches and verify status/guide counts them, promotes release, and reports installed provenance distinct from main.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
