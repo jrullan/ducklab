@@ -564,6 +564,13 @@ func (s *Server) status() (map[string]interface{}, error) {
 		entry["documents"] = documents
 		if tasks, err := s.eng.TaskList(id); err == nil {
 			entry["tasks"] = len(tasks)
+			accepted := 0
+			for _, task := range tasks { if status, ok := task["status"].(string); ok && status == "accepted" { if branch, ok := task["branch"].(string); ok && branch != "" && branch != "main" { accepted++ } } }
+			entry["accepted_unreleased"] = accepted
+				entry["accepted-unreleased"] = accepted
+			branches := []string{}
+			for _, task := range tasks { if status, ok := task["status"].(string); ok && status == "accepted" { if branch, ok := task["branch"].(string); ok && branch != "" && branch != "main" { branches = append(branches, branch) } } }
+			entry["unreleased_branches"] = branches
 		} else {
 			entry["tasks"] = 0
 		}

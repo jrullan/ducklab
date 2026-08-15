@@ -31,8 +31,9 @@ type Server struct {
 	svc     *service.Service
 	bus     *bus.Bus
 	token   string
-	version string
-	mux     *http.ServeMux
+	version    string
+	provenance string
+	mux        *http.ServeMux
 
 	// OnShutdown, if set, is invoked by POST /v1/shutdown. The daemon owns
 	// the actual stop sequence; the API only requests it.
@@ -49,13 +50,18 @@ type Server struct {
 }
 
 // New creates a new engine API server.
-func New(svc *service.Service, b *bus.Bus, token, version string) *Server {
+func New(svc *service.Service, b *bus.Bus, token, version, provenance string) *Server {
+	p := provenance
+	if p == "" {
+		p = "unknown@unknown"
+	}
 	s := &Server{
-		svc:     svc,
-		bus:     b,
-		token:   token,
-		version: version,
-		mux:     http.NewServeMux(),
+		svc:        svc,
+		bus:        b,
+		token:      token,
+		version:    version,
+		provenance: p,
+		mux:        http.NewServeMux(),
 	}
 	s.runDirFn = func(runID string) string { return svc.RunDir(runID) }
 	s.projectIDFn = func(runID string) string {
@@ -820,7 +826,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	running, waiting, limit := s.svc.QueueStats()
 	s.json(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,
-		"version": s.version,
+		"version":    s.version,
+		"provenance": s.provenance,
 		// The queue's live counters. The one time they were needed — a run
 		// stuck in "queued" with nothing visibly running — they were
 		// invisible, and the diagnosis ran through disk archaeology.
@@ -830,7 +837,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEngine(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{
-		"version": s.version,
+		"version":    s.version,
+		"provenance": s.provenance,
 	})
 }
 

@@ -43,6 +43,7 @@ type listOf struct {
 type healthResponse struct {
 	OK         bool   `json:"ok"`
 	Version    string `json:"version"`
+	Provenance string `json:"provenance,omitempty"`
 	UptimeS    int    `json:"uptime_s"`
 	Queue      map[string]int `json:"queue"`
 }

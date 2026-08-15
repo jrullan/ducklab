@@ -27,6 +27,7 @@ type Run struct {
 	Verdict       string                 `json:"verdict"`
 	Accepted      bool                   `json:"accepted"`
 	CommitSHA     string                 `json:"commit_sha"`
+	Branch        string                 `json:"branch,omitempty"`
 	// Note is what the person told this run beyond the task body — typically
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.

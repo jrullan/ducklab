@@ -23,6 +23,7 @@ import (
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/registry"
@@ -364,6 +365,9 @@ type Status struct {
 	TaskCounts    map[string]int    `json:"task_counts"`
 	BudgetSpent   float64           `json:"budget_spent_today"`
 	ActiveRuns    int               `json:"active_runs"`
+	AcceptedUnreleased int            `json:"accepted_unreleased"`
+	UnreleasedBranches int            `json:"unreleased_branches"`
+	Provenance         string         `json:"provenance,omitempty"`
 }
 
 // resolveProjectPath turns a path a person typed into one the engine can use.
@@ -671,17 +675,29 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	// gives each plan task the same status the board shows.
 	views, err := s.TaskList(ctx, id)
 	if err != nil {
-		return &Status{StageProgress: stageProgress(entry.Path), ActiveRuns: active}, nil
+		return &Status{StageProgress: stageProgress(entry.Path), ActiveRuns: active, Provenance: build.Provenance()}, nil
 	}
 	taskCounts := make(map[string]int)
 	for _, tv := range views {
 		taskCounts[tv.Status]++
 	}
+	accepted, branches := acceptedUnreleased(views)
 	return &Status{
-		StageProgress: stageProgress(entry.Path),
-		TaskCounts:    taskCounts,
-		ActiveRuns:    active,
+		StageProgress: stageProgress(entry.Path), TaskCounts: taskCounts, ActiveRuns: active,
+		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance(),
 	}, nil
+}
+
+func acceptedUnreleased(views []TaskView) (int, int) {
+	branches := map[string]bool{}
+	count := 0
+	for _, v := range views {
+		if v.Status == "accepted" && v.Branch != "" && v.Branch != "main" {
+			count++
+			branches[v.Branch] = true
+		}
+	}
+	return count, len(branches)
 }
 
 // stageProgress reports where each artifact stage stands. It was never
@@ -1677,6 +1693,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// Create branch if needed
 	branch := fmt.Sprintf("ducklab/%s", rs.run.TaskID)
 	git.CreateBranch(branch)
+	// Persist the work branch with the acceptance record. This is the provenance
+	// that lets status distinguish accepted work from work shipped on main.
+	rs.run.Branch, _ = git.CurrentBranch()
 	// Stage all changes
 	if err := git.AddAll(); err != nil {
 		s.failRun(rs, fmt.Errorf("git add: %w", err))

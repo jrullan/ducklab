@@ -22,7 +22,7 @@ import (
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("ducklab-engine %s (%s, go1.24+, %s/%s)\n", build.Version, "dev", "linux", "amd64")
+		fmt.Printf("ducklab-engine %s (%s, go1.24+, %s/%s)\n", build.Version, build.Provenance(), "linux", "amd64")
 		os.Exit(0)
 	}
 
@@ -82,7 +82,8 @@ func main() {
 		PID:       os.Getpid(),
 		Port:      port,
 		Token:     token,
-		Version:   build.Version,
+		Version:    build.Version,
+		Provenance: build.Provenance(),
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		StateDir:  stateDir,
 	}
@@ -100,7 +101,7 @@ func main() {
 	}
 
 	// Create server
-	server := engineapi.New(svc, b, token, build.Version)
+	server := engineapi.New(svc, b, token, build.Version, build.Provenance())
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,

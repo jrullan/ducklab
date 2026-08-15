@@ -54,6 +54,8 @@ type projectSnapshot struct {
 	OpenSpecSections int
 	HasPlan          bool
 	Tasks            []TaskView
+	AcceptedUnreleased int
+	UnreleasedBranches int
 	Bugs             []bug.Bug
 	// Paused runs, newest first.
 	Paused []*runlog.Run
@@ -62,6 +64,13 @@ type projectSnapshot struct {
 // nextSteps is the guide's whole brain: the loop's own order, stated.
 func nextSteps(st projectSnapshot) []NextStep {
 	var out []NextStep
+	if st.AcceptedUnreleased == 0 {
+		for _, t := range st.Tasks {
+			if t.Status == "accepted" && t.Branch != "" && t.Branch != "main" { st.AcceptedUnreleased++ }
+		}
+	}
+	// A branch is required to classify accepted work as unreleased; accepted work
+	// without provenance is retained as shipped-compatible legacy state.
 
 	// 1. Work already paid for waits on one click. Nothing outranks it.
 	for _, r := range st.Paused {
@@ -94,6 +103,18 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Kind:   "stage", Ref: "plan",
 		})
 		return out
+	}
+
+	// Accepted work is not shipped merely because its gate passed. Keep the
+	// release door visible and promote it ahead of new work.
+	if st.AcceptedUnreleased > 0 && nextBuildable(st.Tasks) == nil && st.UnreleasedBranches > 0 {
+		branches := st.UnreleasedBranches
+		out = append(out, NextStep{
+			ID: "release",
+			Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
+			Reason: fmt.Sprintf("%d accepted task(s) on %d branch(es) await a release", st.AcceptedUnreleased, branches),
+			Kind: "release",
+		})
 	}
 
 	// 3. The bug inbox: classify before starting new work.
@@ -177,7 +198,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 			},
 			NextStep{
 				ID:     "release",
-				Action: "Cut a release",
+				Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
 				Reason: "everything accepted since the last one ships",
 				Kind:   "release",
 			},
@@ -320,6 +341,17 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	// Tolerant gathers: a missing plan makes TaskList error, and a project
 	// with no tasks yet still deserves guidance about everything else.
 	st.Tasks, _ = s.TaskList(ctx, projectID)
+	for _, task := range st.Tasks {
+		if task.Status == "accepted" && task.Branch != "" && task.Branch != "main" { st.AcceptedUnreleased++ }
+	}
+	branches := map[string]bool{}
+	for _, task := range st.Tasks {
+		if task.Status == "accepted" && task.Branch != "" && task.Branch != "main" {
+			branches[task.Branch] = true
+		}
+	}
+	st.UnreleasedBranches = len(branches)
+
 	st.Bugs, _ = s.BugList(ctx, projectID, false)
 	if runs, rerr := s.RunList(ctx, RunFilter{ProjectID: projectID}); rerr == nil {
 		for _, r := range runs {

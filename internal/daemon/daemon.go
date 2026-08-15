@@ -20,6 +20,7 @@ type EngineInfo struct {
 	Port      int    `json:"port"`
 	Token     string `json:"token"`
 	Version   string `json:"version"`
+	Provenance string `json:"provenance,omitempty"`
 	StartedAt string `json:"started_at"`
 	StateDir  string `json:"state_dir"`
 }

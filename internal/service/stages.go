@@ -732,6 +732,7 @@ type TaskView struct {
 	Complexity string   `json:"complexity,omitempty"`
 	DependsOn  []string `json:"depends_on,omitempty"`
 	Status     string   `json:"status"`
+	Branch     string   `json:"branch,omitempty"`
 	Body       string   `json:"body,omitempty"`
 	// Blocked says why, in one sentence, when Status is "blocked". A column
 	// that shows work stopped without saying what stopped it is a column that
@@ -781,6 +782,12 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	}
 
 	status, blocked, testReady, failedStage, pinned := deriveTaskRunState(runs)
+	branches := map[string]string{}
+	for _, r := range runs {
+		if r.TaskID != "" && r.Accepted && r.Stage == "build" && r.Branch != "" {
+			branches[r.TaskID] = r.Branch
+		}
+	}
 
 	// The spec's sections, for the debt check — and the bug-born tasks,
 	// which trace to their report rather than to the spec.
@@ -846,6 +853,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Complexity: t.Field("complexity"),
 				DependsOn:  deps,
 				Status:     st,
+				Branch:     branches[t.ID],
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
 				// A committed test AWAITS its build — so the flag speaks

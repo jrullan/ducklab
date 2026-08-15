@@ -21,11 +21,22 @@ export interface BudgetBudget {
   max_wallclock_s?: number;
 }
 
+export interface BugAuditEntry {
+  actor?: string;
+  bug?: string;
+  from?: string;
+  note?: string;
+  to?: string;
+  ts?: string;
+  via?: string;
+}
+
 export interface BugBug {
   attachments?: string[];
   body?: string;
   created_at?: string;
   duplicate_of?: string;
+  history?: BugAuditEntry[];
   id?: string;
   next?: string[];
   reporter?: string;
@@ -131,6 +142,7 @@ export interface DucklingDuckling {
   caps?: DucklingCapabilities;
   color?: number;
   cost?: ConfigCost;
+  fallback?: string;
   id?: string;
   model?: string;
   notes?: string;
@@ -187,8 +199,9 @@ export interface EngineapiducklingTestResponse {
 }
 
 export interface EngineapihealthResponse {
-  active_runs?: number;
   ok?: boolean;
+  provenance?: string;
+  queue?: Record<string, number>;
   uptime_s?: number;
   version?: string;
 }
@@ -304,7 +317,9 @@ export interface RunlogEvent {
 
 export interface RunlogRun {
   accepted?: boolean;
+  agent_turns?: number;
   autonomy?: string;
+  branch?: string;
   budget?: RunlogBudgetState;
   chain_build?: Record<string, unknown>;
   commit_sha?: string;
@@ -317,6 +332,7 @@ export interface RunlogRun {
   next?: string[];
   no_changes?: boolean;
   note?: string;
+  origin?: string;
   pending_data?: Record<string, unknown>;
   pending_kind?: string;
   pending_since?: string;
@@ -329,6 +345,7 @@ export interface RunlogRun {
   started_at?: string;
   status?: string;
   stream?: boolean;
+  subject?: string;
   task_id?: string;
   tests_modified?: boolean;
   tokens_estimated?: boolean;
@@ -355,6 +372,12 @@ export interface ServiceAppStatus {
   running?: boolean;
   started_at?: string;
   url?: string;
+}
+
+export interface ServiceAutopilotDefaultsView {
+  autonomy?: string;
+  max_fails?: number;
+  max_tasks?: number;
 }
 
 export interface ServiceBenchSummary {
@@ -399,6 +422,7 @@ export interface ServiceDucklingView {
   caps?: ConfigCaps;
   color?: number;
   cost?: ConfigCost;
+  fallback?: string;
   id?: string;
   model?: string;
   notes?: string;
@@ -442,6 +466,14 @@ export interface ServiceModeDefaultsView {
   script_rounds?: Record<string, number>;
   seats?: Record<string, number>;
   test_mode?: string;
+}
+
+export interface ServiceNextStep {
+  action?: string;
+  id?: string;
+  kind?: string;
+  reason?: string;
+  ref?: string;
 }
 
 export interface ServiceProject {
@@ -499,7 +531,9 @@ export interface ServiceRunRequest {
   mode?: string;
   no_stream?: boolean;
   note?: string;
+  origin?: string;
   parallel?: boolean;
+  redo?: boolean;
   rounds?: number;
   task_id?: string;
   unsafe_writes?: boolean;
@@ -519,20 +553,28 @@ export interface ServiceSkillSummary {
 
 export interface ServiceStageRequest {
   adopt?: boolean;
+  agent_turns?: number;
   autonomy?: string;
+  ducklings?: string[];
+  extend?: string;
   from?: string;
+  images?: string[];
   mode?: string;
   revise?: string;
   rounds?: number;
+  settle?: boolean;
   stage?: string;
   stream?: boolean;
 }
 
 export interface ServiceStatus {
+  accepted_unreleased?: number;
   active_runs?: number;
   budget_spent_today?: number;
+  provenance?: string;
   stage_progress?: Record<string, string>;
   task_counts?: Record<string, number>;
+  unreleased_branches?: number;
 }
 
 export interface ServiceSuggestion {
@@ -547,12 +589,15 @@ export interface ServiceSuggestion {
 export interface ServiceTaskView {
   blocked?: string;
   body?: string;
+  branch?: string;
+  build_only?: boolean;
   complexity?: string;
   depends_on?: string[];
   id?: string;
   implements?: string[];
   milestone?: string;
   next?: string[];
+  spec_debt?: boolean;
   status?: string;
   test_ready?: boolean;
   title?: string;
@@ -563,6 +608,9 @@ export interface ServiceTestFirstRequest {
   duckling?: string;
   ducklings?: string[];
   mode?: string;
+  note?: string;
+  origin?: string;
+  redo?: boolean;
   task_id?: string;
   then_build?: boolean;
 }
@@ -580,6 +628,8 @@ export const OPERATIONS = [
   { id: "Bench", method: "POST", path: "/v1/bench" },
   { id: "BenchStart", method: "POST", path: "/v1/bench/start" },
   { id: "BenchGet", method: "GET", path: "/v1/bench/{suite}/{stamp}" },
+  { id: "AutopilotDefaults", method: "GET", path: "/v1/defaults/autopilot" },
+  { id: "AutopilotDefaultsSet", method: "PUT", path: "/v1/defaults/autopilot" },
   { id: "BudgetDefaults", method: "GET", path: "/v1/defaults/budget" },
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
@@ -603,6 +653,10 @@ export const OPERATIONS = [
   { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
   { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
   { id: "ArtifactDiscard", method: "DELETE", path: "/v1/projects/{id}/artifacts/{kind}/proposal" },
+  { id: "ProjectAutonomy", method: "GET", path: "/v1/projects/{id}/autonomy" },
+  { id: "ProjectAutonomySet", method: "PUT", path: "/v1/projects/{id}/autonomy" },
+  { id: "AutopilotStatus", method: "GET", path: "/v1/projects/{id}/autopilot" },
+  { id: "AutopilotSet", method: "POST", path: "/v1/projects/{id}/autopilot" },
   { id: "BugList", method: "GET", path: "/v1/projects/{id}/bugs" },
   { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
   { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },
@@ -615,6 +669,7 @@ export const OPERATIONS = [
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
+  { id: "ProjectNext", method: "GET", path: "/v1/projects/{id}/next" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
   { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
   { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },
@@ -659,6 +714,7 @@ export const OPERATIONS = [
   { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },
   { id: "RunReject", method: "POST", path: "/v1/runs/{id}/reject" },
+  { id: "RunReseat", method: "POST", path: "/v1/runs/{id}/reseat" },
   { id: "RunResume", method: "POST", path: "/v1/runs/{id}/resume" },
   { id: "RunTranscript", method: "GET", path: "/v1/runs/{id}/transcript" },
   { id: "RunVerify", method: "GET", path: "/v1/runs/{id}/verify" },

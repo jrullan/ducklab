@@ -55,6 +55,40 @@
         ],
         "type": "object"
       },
+      "BugAuditEntry": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "bug": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "bug",
+          "from",
+          "to",
+          "ts",
+          "via"
+        ],
+        "type": "object"
+      },
       "BugBug": {
         "properties": {
           "attachments": {
@@ -71,6 +105,12 @@
           },
           "duplicate_of": {
             "type": "string"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/BugAuditEntry"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -451,6 +491,9 @@
           "cost": {
             "$ref": "#/components/schemas/ConfigCost"
           },
+          "fallback": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -635,11 +678,17 @@
       },
       "EngineapihealthResponse": {
         "properties": {
-          "active_runs": {
-            "type": "integer"
-          },
           "ok": {
             "type": "boolean"
+          },
+          "provenance": {
+            "type": "string"
+          },
+          "queue": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
           },
           "uptime_s": {
             "type": "integer"
@@ -649,8 +698,8 @@
           }
         },
         "required": [
-          "active_runs",
           "ok",
+          "queue",
           "uptime_s",
           "version"
         ],
@@ -1021,7 +1070,13 @@
           "accepted": {
             "type": "boolean"
           },
+          "agent_turns": {
+            "type": "integer"
+          },
           "autonomy": {
+            "type": "string"
+          },
+          "branch": {
             "type": "string"
           },
           "budget": {
@@ -1062,6 +1117,9 @@
             "type": "boolean"
           },
           "note": {
+            "type": "string"
+          },
+          "origin": {
             "type": "string"
           },
           "pending_data": {
@@ -1106,6 +1164,9 @@
           },
           "stream": {
             "type": "boolean"
+          },
+          "subject": {
+            "type": "string"
           },
           "task_id": {
             "type": "string"
@@ -1206,6 +1267,25 @@
         "required": [
           "configured",
           "running"
+        ],
+        "type": "object"
+      },
+      "ServiceAutopilotDefaultsView": {
+        "properties": {
+          "autonomy": {
+            "type": "string"
+          },
+          "max_fails": {
+            "type": "integer"
+          },
+          "max_tasks": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "autonomy",
+          "max_fails",
+          "max_tasks"
         ],
         "type": "object"
       },
@@ -1345,6 +1425,9 @@
           },
           "cost": {
             "$ref": "#/components/schemas/ConfigCost"
+          },
+          "fallback": {
+            "type": "string"
           },
           "id": {
             "type": "string"
@@ -1521,6 +1604,32 @@
           "script_role_turns",
           "script_rounds",
           "seats"
+        ],
+        "type": "object"
+      },
+      "ServiceNextStep": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "kind",
+          "reason"
         ],
         "type": "object"
       },
@@ -1707,7 +1816,13 @@
           "note": {
             "type": "string"
           },
+          "origin": {
+            "type": "string"
+          },
           "parallel": {
+            "type": "boolean"
+          },
+          "redo": {
             "type": "boolean"
           },
           "rounds": {
@@ -1785,11 +1900,29 @@
           "adopt": {
             "type": "boolean"
           },
+          "agent_turns": {
+            "type": "integer"
+          },
           "autonomy": {
+            "type": "string"
+          },
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "extend": {
             "type": "string"
           },
           "from": {
             "type": "string"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "mode": {
             "type": "string"
@@ -1799,6 +1932,9 @@
           },
           "rounds": {
             "type": "integer"
+          },
+          "settle": {
+            "type": "boolean"
           },
           "stage": {
             "type": "string"
@@ -1820,11 +1956,17 @@
       },
       "ServiceStatus": {
         "properties": {
+          "accepted_unreleased": {
+            "type": "integer"
+          },
           "active_runs": {
             "type": "integer"
           },
           "budget_spent_today": {
             "type": "number"
+          },
+          "provenance": {
+            "type": "string"
           },
           "stage_progress": {
             "additionalProperties": {
@@ -1837,13 +1979,18 @@
               "type": "integer"
             },
             "type": "object"
+          },
+          "unreleased_branches": {
+            "type": "integer"
           }
         },
         "required": [
+          "accepted_unreleased",
           "active_runs",
           "budget_spent_today",
           "stage_progress",
-          "task_counts"
+          "task_counts",
+          "unreleased_branches"
         ],
         "type": "object"
       },
@@ -1886,6 +2033,12 @@
           "body": {
             "type": "string"
           },
+          "branch": {
+            "type": "string"
+          },
+          "build_only": {
+            "type": "boolean"
+          },
           "complexity": {
             "type": "string"
           },
@@ -1912,6 +2065,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "spec_debt": {
+            "type": "boolean"
           },
           "status": {
             "type": "string"
@@ -1947,6 +2103,15 @@
           },
           "mode": {
             "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "redo": {
+            "type": "boolean"
           },
           "task_id": {
             "type": "string"
@@ -2127,6 +2292,52 @@
           }
         ],
         "summary": "One bench result"
+      }
+    },
+    "/v1/defaults/autopilot": {
+      "get": {
+        "operationId": "AutopilotDefaults",
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Autopilot and autonomy defaults"
+      },
+      "put": {
+        "operationId": "AutopilotDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAutopilotDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace autopilot and autonomy defaults"
       }
     },
     "/v1/defaults/budget": {
@@ -2880,6 +3091,118 @@
         "summary": "Discard a pending proposal. A rejected one stays on disk by design (05 §1.1); this is the person's explicit act of letting it go."
       }
     },
+    "/v1/projects/{id}/autonomy": {
+      "get": {
+        "operationId": "ProjectAutonomy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The project's declared autonomy"
+      },
+      "put": {
+        "operationId": "ProjectAutonomySet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set the project's autonomy"
+      }
+    },
+    "/v1/projects/{id}/autopilot": {
+      "get": {
+        "operationId": "AutopilotStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Autopilot state for a project"
+      },
+      "post": {
+        "operationId": "AutopilotSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Turn the autopilot on or off"
+      }
+    },
     "/v1/projects/{id}/bugs": {
       "get": {
         "operationId": "BugList",
@@ -3345,6 +3668,57 @@
           }
         ],
         "summary": "Run the gate now and report what happened. On demand: a gate can be a whole test suite."
+      }
+    },
+    "/v1/projects/{id}/next": {
+      "get": {
+        "operationId": "ProjectNext",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceNextStep"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The project's suggested next steps"
       }
     },
     "/v1/projects/{id}/releases": {
@@ -4813,7 +5187,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Remove one budget cap (tokens, usd, turns, wallclock) from a live run — one-way, recorded"
+        "summary": "Remove one budget cap (tokens, usd, turns, wallclock, calls) from a live run — one-way, recorded"
       }
     },
     "/v1/runs/{id}/candidates": {
@@ -5087,6 +5461,42 @@
           }
         ],
         "summary": "Reject"
+      }
+    },
+    "/v1/runs/{id}/reseat": {
+      "post": {
+        "operationId": "RunReseat",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunlogRun"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Reseat a weather-paused run onto a fallback duckling and resume"
       }
     },
     "/v1/runs/{id}/resume": {

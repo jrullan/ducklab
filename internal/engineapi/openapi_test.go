@@ -2,7 +2,6 @@ package engineapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,7 +105,7 @@ func TestCandidateSchemaHasNoAuthorship(t *testing.T) {
 }
 
 func TestHealthReportsInstalledBinaryProvenance(t *testing.T) {
-	srv := &Server{mux: http.NewServeMux(), token: "t", version: "0.4.0"}
+	srv := &Server{mux: http.NewServeMux(), token: "t", version: "0.4.0", provenance: "ducklab/T-006@abc123"}
 	srv.routes()
 
 	rec := httptest.NewRecorder()
@@ -120,10 +119,12 @@ func TestHealthReportsInstalledBinaryProvenance(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"branch", "commit"} {
-		if strings.TrimSpace(fmt.Sprint(got[key])) == "" {
-			t.Errorf("health.%s is missing installed provenance: %#v", key, got[key])
-		}
+	provenance, ok := got["provenance"].(string)
+	if !ok || strings.TrimSpace(provenance) == "" {
+		t.Errorf("health.provenance is missing installed provenance: %#v", got["provenance"])
+	}
+	if provenance != "ducklab/T-006@abc123" {
+		t.Errorf("health.provenance = %q, want stamped provenance", provenance)
 	}
 }
 

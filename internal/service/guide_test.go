@@ -74,8 +74,9 @@ func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
 		Tasks: []TaskView{
-			{ID: "T-001", Status: "accepted"},
+			{ID: "T-001", Status: "accepted", Branch: "ducklab/T-001"},
 		},
+		UnreleasedBranches: 1,
 	})
 	if len(steps) == 0 || steps[0].ID != "release" {
 		t.Fatalf("guide = %v, want release first for accepted-but-unreleased work", ids(steps))

@@ -22,3 +22,4 @@
 {"ts":"2026-08-15T13:48:12Z","bug":"B-010","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-005"}
 {"ts":"2026-08-15T14:37:23Z","bug":"B-018","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-15T14:37:31Z","bug":"B-018","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-006"}
+{"ts":"2026-08-15T14:40:10Z","bug":"B-018","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-006"}

@@ -26,6 +26,7 @@ import (
 // for the version constant directly: the rule is about what the client can
 // reach, not about how harmless this particular symbol is.
 var Version = "dev"
+var Provenance = "dev@unknown"
 
 // Run runs the CLI.
 func Run(args []string) int {
@@ -51,7 +52,7 @@ func Run(args []string) int {
 		case "--no-autostart":
 			noAutostart = true
 		case "--version":
-			fmt.Printf("ducklab %s (%s, go1.24+, %s/%s)\n", Version, "dev", "linux", "amd64")
+			fmt.Printf("ducklab %s (%s, go1.24+, %s/%s)\n", Version, Provenance, "linux", "amd64")
 			return 0
 		default:
 			break
