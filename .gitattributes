@@ -1,0 +1,5 @@
+# Append-only ducklab records: on any merge or revert, keep both sides'
+# lines instead of conflicting. A revert of a run's commit should undo its
+# CODE, never un-happen the audit trail around it.
+.ducklab/bugs/audit.jsonl merge=union
+.ducklab/app.log merge=union
