@@ -168,7 +168,7 @@ func (p *capProbeProvider) ChatStream(context.Context, provider.ChatRequest, cha
 func (p *capProbeProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
 	p.requests = append(p.requests, req)
 	return provider.ChatResponse{Choices: []provider.Choice{{
-		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"x"}`},
+		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`}, 
 		FinishReason: provider.FinishStop,
 	}}}, nil
 }
@@ -188,6 +188,15 @@ func TestStructuredTriageUsesAContractAwareOutputCap(t *testing.T) {
 	}
 	if got := *p.requests[0].MaxTokens; got > 2048 {
 		t.Fatalf("triage cap = %d, want a classification cap no larger than 2048", got)
+	}
+	// The cap is contract-aware, not a blanket duckling cap: a document reply
+	// from the same duckling may retain its declared long-document budget.
+	freeform := &Turn{Role: config.RoleArchitect, Prompt: "draft", Contract: "freeform", MaxTurns: 1}
+	if _, err := RunTurn(context.Background(), loop, freeform, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.requests) != 2 || p.requests[1].MaxTokens == nil || *p.requests[1].MaxTokens != 20000 {
+		t.Fatalf("freeform cap = %+v, want declared 20000", p.requests[1].MaxTokens)
 	}
 }
 
@@ -223,7 +232,7 @@ func (p *repetitionProvider) ChatStream(ctx context.Context, req provider.ChatRe
 		return provider.ChatResponse{}, ctx.Err()
 	}
 	return provider.ChatResponse{Choices: []provider.Choice{{
-		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"fixed"}`},
+		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"fixed","reason":"classified"}`}, 
 		FinishReason: provider.FinishStop,
 	}}}, nil
 }
@@ -231,7 +240,10 @@ func (p *repetitionProvider) ChatStream(ctx context.Context, req provider.ChatRe
 func TestStreamingRepetitionIsCanceledAndRetriedWithDiagnosis(t *testing.T) {
 	p := &repetitionProvider{}
 	loop := testLoop(p, 0)
-	turn := &Turn{Role: config.RoleTriager, Prompt: "classify", Contract: "json:triage", MaxTurns: 1}
+	turn := &Turn{Role: config.RoleTriager, Prompt: "classify", Contract: "json:triage", MaxTurns: 2}
+	// Repetition detection is deliberately a stream-layer behavior; without a
+	// delta consumer RunTurn takes the non-streaming path.
+	loop.OnDelta = func(_ *Turn, _ string) {}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	out, err := RunTurn(ctx, loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
