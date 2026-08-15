@@ -9,3 +9,7 @@
 {"ts":"2026-08-15T00:54:24Z","bug":"B-001","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-15T00:55:25Z","bug":"B-001","from":"fixed","to":"verified","actor":"human","via":"move"}
 {"ts":"2026-08-15T00:55:59Z","bug":"B-004","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-001"}
+{"ts":"2026-08-15T02:03:47Z","bug":"B-004","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-001"}
+{"ts":"2026-08-15T02:04:01Z","bug":"B-004","from":"fixed","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-15T02:22:09Z","bug":"B-007","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-002"}
+{"ts":"2026-08-15T02:23:58Z","bug":"B-007","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-002"}
