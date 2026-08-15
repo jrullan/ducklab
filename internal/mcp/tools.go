@@ -530,7 +530,8 @@ func (s *Server) status() (map[string]interface{}, error) {
 		// The guide's ordered steps: without them an operator reads a bug's
 		// raw status transitions and answers "in_progress, duplicate or
 		// wontfix" to a human whose actual next move was "promote it".
-		if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
+		entry["next_steps"] = []map[string]interface{}{}
+			if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
 			entry["next_steps"] = steps
 		}
 		out = append(out, entry)
