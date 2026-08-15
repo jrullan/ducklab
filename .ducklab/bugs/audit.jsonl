@@ -45,3 +45,5 @@
 {"ts":"2026-08-15T15:46:23Z","bug":"B-009","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-009"}
 {"ts":"2026-08-15T16:28:07Z","bug":"B-022","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-010"}
 {"ts":"2026-08-15T16:29:25Z","bug":"B-022","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-010"}
+{"ts":"2026-08-15T23:17:09Z","bug":"B-022","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
+{"ts":"2026-08-15T23:35:20Z","bug":"B-016","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-011"}

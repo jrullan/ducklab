@@ -216,4 +216,25 @@ Chat unexpectedly inherits a project wallclock cap despite explicitly disabling 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-011 — Govern advisor replies through contract validation and record advice failures or timeouts
+
+Fixes B-016.
+
+## Reported
+
+What happened: T-004's test run asked a question; the advisor (atom-local, 2.5 min) delivered its unfiltered internal monologue as the advice — "We need answer user's request... Need decide... We need be careful..." — the opposite of the prompt's contract (2-8 sentences, decisive, no preamble). The advise() path is a one-shot chat with none of the rails every other turn gets: no contract parsing, no repair pass with the error named, no think-splitter separating deliberation from answer. Separately, when advice never arrives the card degrades silently — nothing on the record says whether the advisor is still thinking or died.
+
+Expected: the advisor's reply passes the same governance as any contracted turn — enforce the shape, repair once with the violation named, strip thinking; and an absent advice stamps its cause (advice_failed with the error, or none within a deadline) so the degraded card can say why.
+
+## Triage
+
+**Component:** advisor
+**Suspected files:** internal/service/advisor.go, internal/service/lifecycle.go
+
+The one-shot advisor path stores raw model output and silently drops failed or timed-out advice, allowing ungoverned text and unexplained degraded cards.
+
+**Verification (triage recommends):** test-first — Stub the advisor with deliberation or an error and verify repaired advice is concise while failure metadata records its cause.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
