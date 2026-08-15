@@ -13,6 +13,7 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
+	lastRunReq map[string]interface{}
 	images []string
 	settled []string
 	extended []string
@@ -74,7 +75,8 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
 }
 func (f *fakeEngine) RunAnswer(string, string, string) error          { return nil }
-func (f *fakeEngine) RunStart(string, map[string]interface{}) (map[string]interface{}, error) {
+func (f *fakeEngine) RunStart(_ string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.lastRunReq = req
 	return map[string]interface{}{"id": "r-new"}, nil
 }
 func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (map[string]interface{}, error) {
@@ -491,5 +493,18 @@ func TestPlanExtendCarriesAScreenshotByPath(t *testing.T) {
 	}
 	if len(eng.images) != 1 || !strings.HasPrefix(eng.images[0], "data:image/png;base64,") {
 		t.Errorf("no data URL reached the engine: %v", eng.images)
+	}
+}
+
+
+// Elena's blocker, live from the T-002 redo: the failed build's lesson had
+// no channel — run_start's schema omitted the note the engine always
+// accepted, so the one thing a redo exists to carry could not ride it.
+func TestRunStartCarriesTheRedoNote(t *testing.T) {
+	eng := &fakeEngine{}
+	drive(t, eng, initFrame,
+		callFrame(2, "run_start", `{"project_id":"p","task_id":"T-002","note":"fs_patch chokes on backticks; rewrite whole functions with fs_write"}`))
+	if eng.lastRunReq == nil || eng.lastRunReq["note"] != "fs_patch chokes on backticks; rewrite whole functions with fs_write" {
+		t.Fatalf("the note did not reach the engine: %+v", eng.lastRunReq)
 	}
 }

@@ -98,6 +98,7 @@ func toolList() []map[string]interface{} {
 				"project_id": str("the project id"),
 				"task_id":    str("a task whose next includes run"),
 				"mode":       str("optional mode"),
+				"note":       noteProp(),
 				"redo":       redoProp(),
 			}, "project_id", "task_id"),
 		},
@@ -330,6 +331,13 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		req := map[string]interface{}{"task_id": a.str("task_id")}
 		if m := a.str("mode"); m != "" {
 			req["mode"] = m
+		}
+		// The redo-after-failure channel. The engine always accepted a note;
+		// only this schema forgot it — so an operator relaunching a build
+		// with the LESSON from the failed attempt (the whole point of a
+		// redo) had no way to say it. test_build carried one all along.
+		if n := a.str("note"); n != "" {
+			req["note"] = n
 		}
 		if redo, _ := a["redo"].(bool); redo {
 			req["redo"] = true
