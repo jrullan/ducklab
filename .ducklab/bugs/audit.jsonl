@@ -16,3 +16,4 @@
 {"ts":"2026-08-15T13:26:28Z","bug":"B-002","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-003"}
 {"ts":"2026-08-15T13:27:12Z","bug":"B-002","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-003"}
 {"ts":"2026-08-15T13:29:41Z","bug":"B-003","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-004"}
+{"ts":"2026-08-15T13:35:30Z","bug":"B-003","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-004"}

@@ -534,6 +534,33 @@ func (s *Server) status() (map[string]interface{}, error) {
 			if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
 			entry["next_steps"] = steps
 		}
+		// Cheap lifecycle orientation: never include document bodies in status.
+		documents := map[string]string{}
+		for _, kind := range []string{"requirements", "spec", "plan"} {
+			doc, err := s.eng.ArtifactGet(id, kind)
+			if err != nil {
+				documents[kind] = "none"
+			} else if doc["proposal"] != nil {
+				documents[kind] = "proposed"
+			} else if markdown, ok := doc["markdown"].(string); !ok || strings.TrimSpace(markdown) == "" {
+				documents[kind] = "none"
+			} else if approved, ok := doc["approved"].(bool); ok && approved {
+				documents[kind] = "approved"
+			} else {
+				documents[kind] = "draft"
+			}
+		}
+		entry["documents"] = documents
+		if tasks, err := s.eng.TaskList(id); err == nil {
+			entry["tasks"] = len(tasks)
+		} else {
+			entry["tasks"] = 0
+		}
+		if bugs, err := s.eng.BugList(id, true); err == nil {
+			entry["open_bugs"] = len(bugs)
+		} else {
+			entry["open_bugs"] = 0
+		}
 		out = append(out, entry)
 	}
 	return toolJSON(out), nil
