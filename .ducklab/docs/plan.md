@@ -171,4 +171,24 @@ The project accepts max_tokens but silently ignores it, causing runs to pause at
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-009 — Only mark bugs fixed after an accepted BUILD run
+
+Fixes B-009.
+
+## Reported
+
+What happened: B-007 was promoted to T-002 and its TDD chain started. When the test-first run was auto-accepted (accepted by auto:tdd — the red test landing, committed), the engine's task-accepted hook moved B-007 in_progress → fixed at 02:23:58, while the chained BUILD was only just starting. The board showed the bug fixed with zero fix built; anyone reading it during the build window sees a false record.
+
+Expected: the task-accepted → bug-fixed transition should fire only for accepted BUILD runs (the work that answers the report). An accepted test-first is a promise recorded, not a fix delivered — the bug should stay in_progress until the build lands.
+
+## Triage
+
+**Component:** workflow state transitions
+
+The task-accepted hook falsely marks a bug fixed when only its red test has been accepted, before any implementation is built.
+
+**Verification (triage recommends):** test-first — Accept a chained test-first run and verify the bug remains in_progress until the chained BUILD run is accepted.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
