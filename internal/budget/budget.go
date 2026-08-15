@@ -220,7 +220,7 @@ func (t *Tracker) Lift(kind string) (was float64, err error) {
 	case "wallclock":
 		was, t.Budget.MaxWallclockS = float64(t.Budget.MaxWallclockS), 0
 	default:
-		return 0, fmt.Errorf("no budget cap named %q — one of tokens, usd, turns, wallclock", kind)
+		return 0, fmt.Errorf("invalid kind %q: no budget cap named %q — one of tokens, usd, turns, wallclock", kind, kind)
 	}
 	return was, nil
 }
