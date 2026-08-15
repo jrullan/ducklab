@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
@@ -220,6 +222,36 @@ func TestTheDossierWalksTheWholePath(t *testing.T) {
 // messages. A consultant chat left open through an afternoon died
 // mid-question at 7515s against the 1800s meant to stop runaway runs.
 // Tokens, dollars and turns — the meters of real spend — keep their caps.
+func TestAChatProjectWallclockOverrideDoesNotCreateACeiling(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, dir := projectWithConfig(t, s, "chat-budget")
+	project, err := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.Budget.MaxWallclockS = 7200
+	if err := config.SaveProject(filepath.Join(dir, ".ducklab", "project.toml"), project); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := s.ChatStart(context.Background(), projectID, ChatStartRequest{
+		Duckling: "pato-uno", Message: "how is the project doing?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for rs.run.Budget.Limit.Tokens == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rs.run.Budget.Limit.WallclockS != 0 {
+		t.Errorf("chat inherited project wallclock ceiling = %d, want none", rs.run.Budget.Limit.WallclockS)
+	}
+}
+
 func TestAChatHasNoWallclockCeiling(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	dir := t.TempDir()

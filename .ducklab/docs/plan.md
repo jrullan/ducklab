@@ -191,4 +191,29 @@ The task-accepted hook falsely marks a bug fixed when only its red test has been
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-010 — Preserve an uncapped wallclock budget for chat after merging project settings
+
+Fixes B-022.
+
+## Reported
+
+The deliberate zeroing of MaxWallclockS for chat (to avoid capping person thinking time) can now be overridden by a project that sets max_wallclock_s, since projectBudget will merge it in via mergeBudget's >0 check.
+
+Where: internal/service/chat.go:224
+
+Suggested fix: If chat should never have a wallclock cap, zero out MaxWallclockS after the projectBudget call; if this is intentional per the task, add a comment noting the project can opt chat into wallclock.
+
+Found by glm52 reviewing T-008 in run r-20260815-153336-ze43 (verdict: approve).
+
+## Triage
+
+**Component:** chat budget
+**Suspected files:** internal/service/chat.go
+
+Chat unexpectedly inherits a project wallclock cap despite explicitly disabling wallclock limits to avoid counting the person's thinking time.
+
+**Verification (triage recommends):** test-first — Configure a positive project max_wallclock_s and verify chat retains MaxWallclockS=0.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
