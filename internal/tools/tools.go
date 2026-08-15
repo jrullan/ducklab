@@ -425,8 +425,29 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 				(strings.HasPrefix(trimmed, "=======") && !isConflictedFile(absPath)) {
 				return ErrorResult("marker guard: line %d contains conflict/protocol marker: %s", i+1, trimmed)
 			}
-			if strings.Contains(line, "```ducklab") || strings.Contains(line, "```payload:") {
-				return ErrorResult("marker guard: line %d contains protocol marker", i+1)
+		}
+		// Protocol-marker guard: refuse only the markers this write INTRODUCES.
+		//
+		// A blanket refusal on any ```ducklab / ```payload: line walled off every
+		// file that legitimately contains the text protocol's own fences — agent.go
+		// defines them, the docs quote them, the service mocks embed them — so no
+		// duckling could edit them at all: it hit "marker guard: protocol marker"
+		// on content it never authored. The guard's real job is to catch a model
+		// accidentally echoing a ```ducklab fence into a source file, which shows
+		// up as a NET-NEW marker line. Compare against what the file already holds
+		// and only refuse when the result carries more.
+		if newN := countProtocolMarkers(contentStr); newN > 0 {
+			oldN := 0
+			if existing, err := os.ReadFile(absPath); err == nil {
+				oldN = countProtocolMarkers(string(existing))
+			}
+			if newN > oldN {
+				for i, line := range lines {
+					if strings.Contains(line, "```ducklab") || strings.Contains(line, "```payload:") {
+						return ErrorResult("marker guard: line %d introduces a protocol marker "+
+							"(```ducklab / ```payload:) not already in the file", i+1)
+					}
+				}
 			}
 		}
 	}
@@ -456,6 +477,20 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 	}
 
 	return nil
+}
+
+// countProtocolMarkers counts lines carrying a Dialect B text-protocol fence
+// (```ducklab or ```payload:). The marker guard compares this between the
+// existing file and the write to tell a net-new marker (a model leaking the
+// protocol into source) from one the file already legitimately contains.
+func countProtocolMarkers(s string) int {
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, "```ducklab") || strings.Contains(line, "```payload:") {
+			n++
+		}
+	}
+	return n
 }
 
 func isConflictedFile(path string) bool {

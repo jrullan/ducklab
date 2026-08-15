@@ -150,8 +150,8 @@ type RunLogWriter interface {
 
 // LLMCallRecord is a record of an LLM call for logging.
 type LLMCallRecord struct {
-	Duckling     string
-	Provider     string
+	Duckling string
+	Provider string
 	// Upstream is who OpenRouter actually routed the call to — the pool
 	// member, not the gateway. Empty for direct endpoints.
 	Upstream     string
@@ -789,7 +789,10 @@ tagged ` + "```ducklab" + ` containing a single JSON object:
 Rules:
 - One tool call per message. Nothing after the closing fence.
 - To pass a large or multi-line string (like file content), write the value as
-  "@payload:N" and add a fenced block tagged ` + "```payload:N" + ` after the ducklab block:
+  "@payload:N", then add a fenced block that OPENS with ` + "```payload:N" + ` and
+  CLOSES with ` + "```payload:N:end" + ` on its own line — an id-tagged terminator,
+  NOT a bare fence. That closer is what lets the payload safely contain code
+  fences, Markdown, or ` + "```" + ` sequences of its own:
 
 ` + "```ducklab" + `
 {"tool": "fs_write", "args": {"path": "src/main.go", "content": "@payload:1"}}
@@ -798,7 +801,7 @@ Rules:
 package main
 
 func main() {}
-` + "```" + `
+` + "```payload:1:end" + `
 
 - When you are finished and have no tool to call, reply with your answer and no
   ` + "```ducklab" + ` block at all.`
@@ -1102,16 +1105,35 @@ type TextToolCall struct {
 }
 
 var ducklabBlockRe = regexp.MustCompile("(?s)```ducklab\\s*\\n(.*?)\\n```")
-var payloadBlockRe = regexp.MustCompile("(?s)```payload:(\\d+)\\s*\\n(.*?)\\n```")
+
+// A payload block opens with ```payload:N and closes with an explicit,
+// id-bearing terminator ```payload:N:end on its own line — NOT a bare ```.
+//
+// A bare closer let payload CONTENT terminate the block early: any value that
+// itself contained a ``` fence — a Markdown code block, or ducklab's own
+// protocol text when editing agent.go — was truncated at the first fence, and
+// a ```ducklab line inside that content spawned a phantom second envelope that
+// made parseTextToolCall drop the whole call. Editing any file that mentions
+// the protocol was therefore impossible. The id in the terminator makes an
+// accidental collision with file content effectively impossible.
+//
+// RE2 has no backreferences, so this generic strip lets the open/close ids
+// differ; per-id extraction in parseTextToolCall pins them to the same value.
+var payloadBlockRe = regexp.MustCompile("(?s)```payload:\\d+\\s*\\n.*?\\n```payload:\\d+:end")
 
 // parseTextToolCall parses a Dialect B tool call from text.
 func parseTextToolCall(text string) (*TextToolCall, string) {
-	matches := ducklabBlockRe.FindAllStringSubmatch(text, -1)
-	if len(matches) == 0 {
-		return nil, text
-	}
-	if len(matches) > 1 {
-		// Multiple ducklab blocks; error
+	// Locate the envelope on a copy with payload blocks removed. Payload CONTENT
+	// can legitimately contain a ```ducklab line or a bare ``` fence (editing
+	// agent.go, or any Markdown), and scanning the raw text let that content
+	// masquerade as a second envelope (dropped) or truncate the first. The
+	// values are still read from the ORIGINAL text, by id, below.
+	envelope := payloadBlockRe.ReplaceAllString(text, "")
+
+	matches := ducklabBlockRe.FindAllStringSubmatch(envelope, -1)
+	if len(matches) != 1 {
+		// Zero envelopes: not a tool call. More than one: ambiguous — refuse
+		// rather than guess which the model meant.
 		return nil, text
 	}
 
@@ -1130,26 +1152,30 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 		return nil, text
 	}
 	for k, v := range args {
-		if s, ok := v.(string); ok {
-			if strings.HasPrefix(s, "@payload:") {
-				payloadID := strings.TrimPrefix(s, "@payload:")
-				payloadRe := regexp.MustCompile("(?s)```payload:" + payloadID + "\\s*\\n(.*?)\\n```")
-				payloadMatch := payloadRe.FindStringSubmatch(text)
-				if len(payloadMatch) < 2 {
-					return nil, text
-				}
-				args[k] = payloadMatch[1]
-			}
+		s, ok := v.(string)
+		if !ok || !strings.HasPrefix(s, "@payload:") {
+			continue
 		}
+		payloadID := strings.TrimPrefix(s, "@payload:")
+		// Open and close both carry the id, so file content with a bare ``` — or
+		// even another payload's fence — cannot terminate this block early.
+		id := regexp.QuoteMeta(payloadID)
+		payloadRe := regexp.MustCompile("(?s)```payload:" + id + "\\s*\\n(.*?)\\n```payload:" + id + ":end")
+		payloadMatch := payloadRe.FindStringSubmatch(text)
+		if len(payloadMatch) < 2 {
+			return nil, text
+		}
+		args[k] = payloadMatch[1]
 	}
 	newArgs, err := json.Marshal(args)
 	if err != nil {
 		return nil, text
 	}
 
-	// Remove the ducklab block and payload blocks from the text
-	remaining := ducklabBlockRe.ReplaceAllString(text, "")
-	remaining = payloadBlockRe.ReplaceAllString(remaining, "")
+	// Strip the payload blocks first, then the envelope, so payload content that
+	// contains a ```ducklab fence isn't left behind as stray prose.
+	remaining := payloadBlockRe.ReplaceAllString(text, "")
+	remaining = ducklabBlockRe.ReplaceAllString(remaining, "")
 	remaining = strings.TrimSpace(remaining)
 
 	return &TextToolCall{Name: call.Tool, Args: newArgs}, remaining
