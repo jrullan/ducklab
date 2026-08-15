@@ -678,6 +678,15 @@ func (c *Client) RunBudgetLift(id, kind, actor string) (map[string]interface{}, 
 	return result, err
 }
 
+// RunFileFindings files the run's final reviewer findings as attributed bug reports.
+func (c *Client) RunFileFindings(id string) ([]map[string]interface{}, error) {
+	var result struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	err := c.post("/v1/runs/"+id+"/findings/file", nil, &result)
+	return result.Items, err
+}
+
 // RunAnswer answers a run's pending question.
 func (c *Client) RunAnswer(id, questionID, answer string) error {
 	return c.post("/v1/runs/"+id+"/answer", map[string]string{

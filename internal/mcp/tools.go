@@ -42,6 +42,11 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{"run_id": str("the run id, r-...")}, "run_id"),
 		},
 		{
+			"name": "file_findings",
+			"description": "File the run's final structured reviewer findings as bugs, exactly like the desktop action. Bugs retain review provenance and are attributed to this MCP operator.",
+			"inputSchema": obj(map[string]interface{}{"run_id": str("the completed run id, r-...")}, "run_id"),
+		},
+		{
 			"name": "decide",
 			"description": "Decide a run waiting at its gate. `action` must come from the run's " +
 				"`next` list. `reason` is required and recorded — you are deciding as yourself, " +
@@ -256,6 +261,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return s.runGet(a.str("run_id"))
 	case "decide":
 		return s.decide(a.str("run_id"), a.str("action"), a.str("reason"))
+	case "file_findings":
+		bugs, err := s.eng.RunFileFindings(a.str("run_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(bugs), nil
 	case "budget_lift":
 		out, err := s.eng.RunBudgetLift(a.str("run_id"), a.str("kind"), "mcp:"+s.client)
 		if err != nil {
@@ -572,7 +583,7 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	view := pick(run, "id", "project_id", "stage", "mode", "task_id", "status", "verdict",
-		"failure", "resolution", "pending_kind", "pending_data", "next", "budget", "warning")
+		"failure", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings")
 	if diff, _, _, dErr := s.eng.RunDiff(id); dErr == nil && diff != "" {
 		view["diff"] = diff
 	}

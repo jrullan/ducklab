@@ -79,6 +79,22 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
 }
 func (f *fakeEngine) RunAnswer(string, string, string) error          { return nil }
+func (f *fakeEngine) RunFileFindings(id string) ([]map[string]interface{}, error) {
+	run, ok := f.runs[id]
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", id)
+	}
+	findings, _ := run["findings"].([]interface{})
+	for _, finding := range findings {
+		m := finding.(map[string]interface{})
+		body := fmt.Sprintf("file=%v line=%v issue=%v fix=%v", m["file"], m["line"], m["issue"], m["fix"])
+		f.filed = append(f.filed, map[string]string{
+			"severity": fmt.Sprint(m["severity"]), "body": body,
+			"reporter": "mcp:" + "elena", "source": "mcp",
+		})
+	}
+	return nil, nil
+}
 func (f *fakeEngine) RunStart(_ string, req map[string]interface{}) (map[string]interface{}, error) {
 	f.lastRunReq = req
 	return map[string]interface{}{"id": "r-new"}, nil
