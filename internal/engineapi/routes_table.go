@@ -345,7 +345,7 @@ func routeTable() []Route {
 			handler:      func(s *Server) http.HandlerFunc { return s.handleRunFileFindings }},
 		{Method: "POST", Path: "/v1/runs/{id}/budget/lift", Auth: true,
 			Request: liftRequest{}, Response: runlog.Run{},
-			Summary:      "Remove one budget cap (tokens, usd, turns, wallclock) from a live run — one-way, recorded",
+			Summary:      "Remove one budget cap (tokens, usd, turns, wallclock, calls) from a live run — one-way, recorded",
 			ClientMethod: "RunBudgetLift",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleRunBudgetLift }},
 		{Method: "POST", Path: "/v1/runs/{id}/answer", Auth: true,

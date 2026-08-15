@@ -671,6 +671,13 @@ func (c *Client) RunResume(id string) (map[string]interface{}, error) {
 	return result, err
 }
 
+// RunBudgetLift removes one cap from a live or paused run.
+func (c *Client) RunBudgetLift(id, kind, actor string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/runs/"+id+"/budget/lift", map[string]string{"kind": kind, "actor": actor}, &result)
+	return result, err
+}
+
 // RunAnswer answers a run's pending question.
 func (c *Client) RunAnswer(id, questionID, answer string) error {
 	return c.post("/v1/runs/"+id+"/answer", map[string]string{

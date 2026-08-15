@@ -53,6 +53,14 @@ func toolList() []map[string]interface{} {
 			}, "run_id", "action", "reason"),
 		},
 		{
+			"name": "budget_lift",
+			"description": "Remove one budget cap from a live or paused run so resume can proceed. One-way, per-cap, and attributed to this MCP operator; use kind tokens | usd | turns | wallclock | calls.",
+			"inputSchema": obj(map[string]interface{}{
+				"run_id": str("the run id, r-..."),
+				"kind": str("the cap to remove: tokens | usd | turns | wallclock | calls"),
+			}, "run_id", "kind"),
+		},
+		{
 			"name":        "answer",
 			"description": "Answer a question a run asked (pending_kind=question in run_get).",
 			"inputSchema": obj(map[string]interface{}{
@@ -247,6 +255,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return s.runGet(a.str("run_id"))
 	case "decide":
 		return s.decide(a.str("run_id"), a.str("action"), a.str("reason"))
+	case "budget_lift":
+		out, err := s.eng.RunBudgetLift(a.str("run_id"), a.str("kind"), "mcp:"+s.client)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "answer":
 		if err := s.eng.RunAnswer(a.str("run_id"), a.str("question_id"), a.str("answer")); err != nil {
 			return nil, err
