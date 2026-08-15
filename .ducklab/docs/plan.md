@@ -132,4 +132,23 @@ Accepted work can remain stranded on task branches while install silently ships 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-007 — Align MCP status unreleased branch fields with the OpenAPI contract
+
+Fixes B-021.
+
+## Reported
+
+Inconsistencia introducida por el build de B-018 entre el contrato OpenAPI y la respuesta MCP de status. En docs/openapi.json, ServiceStatus.unreleased_branches está declarado como integer. Sin embargo, internal/mcp/tools.go asigna entry["unreleased_branches"] = branches, donde branches es []string con los nombres de rama (por ejemplo ["ducklab/T-001", "ducklab/T-002"]). El servicio HTTP usa el conteo entero, pero el adaptador MCP expone una lista bajo el mismo campo. Clientes que consuman el contrato pueden fallar o interpretar incorrectamente la respuesta. Esperado: usar un campo separado como unreleased_branch_names para la lista y mantener unreleased_branches como integer, o actualizar explícitamente el contrato si se decide que debe ser una lista; ambos canales deben coincidir y tener tests de contrato.
+
+## Triage
+
+**Component:** MCP status contract
+**Suspected files:** internal/mcp/tools.go, docs/openapi.json
+
+The MCP adapter returns []string under a field documented and served by HTTP as an integer, causing contract-incompatible status responses.
+
+**Verification (triage recommends):** test-first — Call MCP status with unreleased branches and assert unreleased_branches is an integer matching the HTTP contract while branch names use a separate field.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -355,6 +355,46 @@ func TestStatusSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	}
 }
 
+// MCP status follows ServiceStatus: unreleased_branches is the numeric count,
+// while the branch identities use the additive unreleased_branch_names field.
+func TestStatusUsesServiceStatusUnreleasedBranchContract(t *testing.T) {
+	eng := &fakeEngine{tasks: []map[string]interface{}{
+		{"id": "T-001", "status": "accepted", "branch": "ducklab/T-001"},
+		{"id": "T-002", "status": "accepted", "branch": "ducklab/T-002"},
+		{"id": "T-003", "status": "accepted", "branch": "main"},
+		{"id": "T-004", "status": "todo", "branch": "ducklab/T-004"},
+	}}
+	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	var projects []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &projects); err != nil {
+		t.Fatalf("status is not JSON: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("got %d projects, want 1", len(projects))
+	}
+	project := projects[0]
+	if got, ok := project["unreleased_branches"].(float64); !ok || got != 2 {
+		t.Fatalf("unreleased_branches = %#v, want integer count 2", project["unreleased_branches"])
+	}
+	names, ok := project["unreleased_branch_names"].([]interface{})
+	if !ok {
+		t.Fatalf("unreleased_branch_names = %#v, want an array", project["unreleased_branch_names"])
+	}
+	want := []string{"ducklab/T-001", "ducklab/T-002"}
+	if len(names) != len(want) {
+		t.Fatalf("unreleased_branch_names = %#v, want %#v", names, want)
+	}
+	for i, name := range want {
+		if names[i] != name {
+			t.Errorf("unreleased_branch_names[%d] = %#v, want %q", i, names[i], name)
+		}
+	}
+}
+
 func TestStatusIncludesEmptyNextSteps(t *testing.T) {
 	eng := &fakeEngine{nextSteps: []map[string]interface{}{}}
 	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
