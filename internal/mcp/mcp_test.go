@@ -194,10 +194,36 @@ func TestInitializeAndToolListSpeakMCP(t *testing.T) {
 	for _, tl := range tools {
 		names[fmt.Sprint(tl.(map[string]interface{})["name"])] = true
 	}
-	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start", "budget_lift", "file_findings"} {
+	for _, must := range []string{"status", "run_get", "decide", "answer", "task_list", "run_start", "stage_start", "budget_lift", "file_findings", "bug_reopen"} {
 		if !names[must] {
 			t.Errorf("tool %q missing", must)
 		}
+	}
+
+	// Reopen is an explicit consent door, not an undocumented synonym for move.
+	var reopen map[string]interface{}
+	for _, tl := range tools {
+		tool := tl.(map[string]interface{})
+		if tool["name"] == "bug_reopen" {
+			reopen = tool
+		}
+	}
+	if reopen == nil {
+		t.Fatal("bug_reopen tool missing")
+	}
+	schema := reopen["inputSchema"].(map[string]interface{})
+	props := schema["properties"].(map[string]interface{})
+	for _, field := range []string{"project_id", "bug_id"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("bug_reopen schema missing %q", field)
+		}
+	}
+	required := fmt.Sprint(schema["required"])
+	if !strings.Contains(required, "project_id") || !strings.Contains(required, "bug_id") {
+		t.Errorf("bug_reopen required fields = %s", required)
+	}
+	if !strings.Contains(strings.ToLower(fmt.Sprint(reopen["description"])), "consent") {
+		t.Errorf("bug_reopen description should explain consent: %q", reopen["description"])
 	}
 }
 

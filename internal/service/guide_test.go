@@ -70,6 +70,58 @@ func TestPausedRunsOutrankEverything(t *testing.T) {
 // Accepted work is not shipped merely because its gate is green. The guide must
 // make the release obligation visible and put it ahead of the quiet-project
 // doors, so an operator cannot mistake accepted for released.
+// A fixed bug still needs a person's verification, and accepted work may be
+// deliberately reopened with redo consent. Both doors belong in the same
+// guide so clients do not have to know the lifecycle by heart.
+func TestTheGuideSurfacesReopenDoors(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Bugs: []bug.Bug{{ID: "B-017", Status: bug.Fixed}},
+		Tasks: []TaskView{{ID: "T-016", Status: "accepted"}},
+	})
+
+	byRef := map[string]NextStep{}
+	for _, step := range steps {
+		byRef[step.Ref] = step
+	}
+	bugStep, ok := byRef["B-017"]
+	if !ok {
+		t.Fatalf("guide = %v, want a reopen step for fixed bug B-017", ids(steps))
+	}
+	if bugStep.ID != "reopen-bug" || bugStep.Kind != "bug" {
+		t.Errorf("fixed bug step = %+v, want id reopen-bug and kind bug", bugStep)
+	}
+	if !strings.Contains(strings.ToLower(bugStep.Action), "reopen") || bugStep.Reason == "" {
+		t.Errorf("fixed bug step must explain the reopen outcome and reason: %+v", bugStep)
+	}
+
+	taskStep, ok := byRef["T-016"]
+	if !ok {
+		t.Fatalf("guide = %v, want a reopen step for accepted task T-016", ids(steps))
+	}
+	if taskStep.ID != "reopen-task" || taskStep.Kind != "task" {
+		t.Errorf("accepted task step = %+v, want id reopen-task and kind task", taskStep)
+	}
+	if !strings.Contains(strings.ToLower(taskStep.Action), "reopen") || taskStep.Reason == "" {
+		t.Errorf("accepted task step must explain the reopen outcome and reason: %+v", taskStep)
+	}
+	if !strings.Contains(strings.ToLower(taskStep.Action), "redo") && !strings.Contains(strings.ToLower(taskStep.Reason), "redo") {
+		t.Errorf("accepted task reopen must disclose the redo path: %+v", taskStep)
+	}
+
+	// Reopen is not a generic action for every bug or task: only fixed bugs
+	// and accepted tasks earn it.
+	quiet := nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true,
+		Bugs: []bug.Bug{{ID: "B-018", Status: bug.Verified}},
+		Tasks: []TaskView{{ID: "T-017", Status: "todo"}},
+	})
+	for _, step := range quiet {
+		if step.ID == "reopen-bug" || step.ID == "reopen-task" {
+			t.Errorf("ineligible object received reopen step: %+v", step)
+		}
+	}
+}
+
 func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
