@@ -97,8 +97,8 @@ func TestAdvisorFailureIsRecordedOnQuestion(t *testing.T) {
 		events, _ := runlog.ReadEvents(w.RunDir())
 		for _, e := range events {
 			if e.Type == "advice_failed" {
-				data, ok := e.Data.(map[string]interface{})
-				if !ok || !strings.Contains(data["error"].(string), "advisor offline") {
+				data := e.Data
+				if !strings.Contains(data["error"].(string), "advisor offline") {
 					t.Fatalf("advice_failed event lacks cause: %+v", e.Data)
 				}
 				return

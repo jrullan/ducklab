@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,7 +46,8 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 		defer cancel()
 		answer, advisor, err := s.advise(ctx, rs, q)
 		if err != nil || strings.TrimSpace(answer) == "" {
-			// No advice is a degraded question card, not a failure: the
+			s.recordAdviceFailure(rs, q, advisor, adviceError(err))
+			// No advice is a degraded question card, not a failure:
 			// person can still answer, exactly as before advisors existed.
 			return
 		}
@@ -133,6 +135,21 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 		return "", string(advisorID), err
 	}
 
+	answer := stripAdvisorThinking(answerText(resp))
+	if violation := advisorViolation(answer); violation != "" {
+		repairPrompt := b.String() + "\n\nYour previous answer was:\n" + answer +
+			"\n\nContract violation: " + violation +
+			". Reply with only the corrected answer text."
+		repair, repairErr := p.Chat(ctx, provider.ChatRequest{Model: d.Model, Messages: []provider.Message{
+			{Role: "system", Content: advisorSystemPrompt}, {Role: "user", Content: repairPrompt},
+		}, MaxTokens: &maxTok})
+		if repairErr != nil { return "", string(advisorID), repairErr }
+		answer = stripAdvisorThinking(answerText(repair))
+		if violation = advisorPostRepairViolation(answer); violation != "" {
+			return "", string(advisorID), fmt.Errorf("advisor contract violation after repair: %s", violation)
+		}
+	}
+
 	// The consultation is real spend: on the tracker and in llm.jsonl like
 	// every other call this run caused.
 	calc := provider.CostCalculator{
@@ -148,13 +165,13 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 			Role:    "advisor",
 			Request: map[string]interface{}{"question": q.Question},
 			Response: map[string]interface{}{
-				"content": firstN(answerText(resp), 2000),
+				"content": firstN(answer, 2000),
 			},
 			CostUSD:      cost,
 			FinishReason: resp.FinishReason,
 		})
 	}
-	return strings.TrimSpace(answerText(resp)), string(advisorID), nil
+	return strings.TrimSpace(answer), string(advisorID), nil
 }
 
 // pickAdvisor prefers the run's recorded architect — decorrelated from the
@@ -167,6 +184,105 @@ func (s *Service) pickAdvisor(rs *runState) config.DucklingID {
 		return id
 	}
 	return ""
+}
+
+func adviceError(err error) string {
+	if err == nil {
+		return "no advice returned"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "none within deadline"
+	}
+	return err.Error()
+}
+
+// recordAdviceFailure keeps a failed consultation visible on both the question
+// card and the event log. Advice is optional, but silently losing it makes a
+// degraded card indistinguishable from one whose advisor is still working.
+func (s *Service) recordAdviceFailure(rs *runState, q *tools.PendingQuestion, advisor, cause string) {
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return
+	}
+	rs.wmu.Lock()
+	if rs.run.PendingData == nil {
+		rs.run.PendingData = map[string]interface{}{}
+	}
+	rs.run.PendingData["advice_failed"] = cause
+	rs.wmu.Unlock()
+	w.AppendEvent("advice_failed", map[string]interface{}{
+		"question_id": q.ID,
+		"advisor":     advisor,
+		"error":       cause,
+	})
+	_ = w.WriteState()
+}
+
+// stripAdvisorThinking removes provider-specific deliberation wrappers before
+// validating or persisting the answer. An unterminated block is not answer
+// text, so discard it rather than leaking the model's private reasoning.
+func stripAdvisorThinking(text string) string {
+	for _, tag := range []string{"think", "thinking", "analysis"} {
+		for {
+			lower := strings.ToLower(text)
+			start := strings.Index(lower, "<"+tag+">")
+			if start < 0 {
+				break
+			}
+			end := strings.Index(lower[start:], "</"+tag+">")
+			if end < 0 {
+				text = text[:start]
+				break
+			}
+			text = text[:start] + text[start+end+len(tag)+3:]
+		}
+	}
+	return strings.TrimSpace(text)
+}
+
+func advisorViolation(text string) string {
+	text = stripAdvisorThinking(text)
+	if text == "" {
+		return "empty answer"
+	}
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "we need") || strings.Contains(lower, "i recommend") {
+		return "preamble or deliberation"
+	}
+	sentences := advisorSentenceCount(text)
+	if sentences < 2 || sentences > 8 {
+		return fmt.Sprintf("expected 2-8 sentences, got %d", sentences)
+	}
+	return ""
+}
+
+// Some existing providers return a terse single-sentence recommendation even
+// after being asked to repair. Keep that usable answer rather than dropping a
+// previously available draft; deliberation, emptiness, and overlong replies
+// remain rejected.
+func advisorPostRepairViolation(text string) string {
+	text = stripAdvisorThinking(text)
+	if text == "" {
+		return "empty answer"
+	}
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "we need") || strings.Contains(lower, "i recommend") {
+		return "preamble or deliberation"
+	}
+	if sentences := advisorSentenceCount(text); sentences > 8 {
+		return fmt.Sprintf("expected 2-8 sentences, got %d", sentences)
+	}
+	return ""
+}
+
+func advisorSentenceCount(text string) int {
+	sentences := 0
+	for _, r := range text {
+		if r == '.' || r == '!' || r == '?' {
+			sentences++
+		}
+	}
+	return sentences
 }
 
 func answerText(resp provider.ChatResponse) string {
