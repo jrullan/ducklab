@@ -480,8 +480,8 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolJSON(items), nil
 	case "bug_triage":
 		req := map[string]interface{}{}
-			copyRunOverrides(req, a)
-			run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"), req)
+		copyRunOverrides(req, a)
+		run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"), req)
 		if err != nil {
 			return nil, err
 		}
