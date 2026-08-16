@@ -37,10 +37,14 @@ type fakeEngine struct {
 	lastTriageReq map[string]interface{}
 	budgetLifted string
 	resumeCount int
+	projectStatus map[string]interface{}
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
 	return []map[string]interface{}{{"id": "calc", "name": "Calculator"}}, nil
+}
+func (f *fakeEngine) ProjectStatus(string) (map[string]interface{}, error) {
+	return f.projectStatus, nil
 }
 func (f *fakeEngine) RunList(string) ([]map[string]interface{}, error) {
 	var out []map[string]interface{}
@@ -382,7 +386,7 @@ func TestStatusSurfacesAcceptedUnreleasedWork(t *testing.T) {
 		{"id": "T-001", "status": "accepted", "branch": "ducklab/T-001"},
 		{"id": "T-002", "status": "accepted", "branch": "ducklab/T-002"},
 		{"id": "T-003", "status": "todo", "branch": "main"},
-	}}
+	}, projectStatus: map[string]interface{}{"accepted_unreleased": 2, "unreleased_branches": 2}}
 	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
 	text, isErr := toolResultText(t, resps[1])
 	if isErr {
@@ -404,7 +408,7 @@ func TestStatusUsesServiceStatusUnreleasedBranchContract(t *testing.T) {
 		{"id": "T-002", "status": "accepted", "branch": "ducklab/T-002"},
 		{"id": "T-003", "status": "accepted", "branch": "main"},
 		{"id": "T-004", "status": "todo", "branch": "ducklab/T-004"},
-	}}
+	}, projectStatus: map[string]interface{}{"accepted_unreleased": 2, "unreleased_branches": 2}}
 	resps := drive(t, eng, initFrame, callFrame(2, "status", `{}`))
 	text, isErr := toolResultText(t, resps[1])
 	if isErr {

@@ -107,12 +107,11 @@ func nextSteps(st projectSnapshot) []NextStep {
 
 	// Accepted work is not shipped merely because its gate passed. Keep the
 	// release door visible and promote it ahead of new work.
-	if st.AcceptedUnreleased > 0 && nextBuildable(st.Tasks) == nil && st.UnreleasedBranches > 0 {
-		branches := st.UnreleasedBranches
+	if st.AcceptedUnreleased > 0 && nextBuildable(st.Tasks) == nil {
 		out = append(out, NextStep{
 			ID: "release",
 			Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
-			Reason: fmt.Sprintf("%d accepted task(s) on %d branch(es) await a release", st.AcceptedUnreleased, branches),
+			Reason: fmt.Sprintf("%d accepted task(s) await a release", st.AcceptedUnreleased),
 			Kind: "release",
 		})
 	}
@@ -370,16 +369,10 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	// Tolerant gathers: a missing plan makes TaskList error, and a project
 	// with no tasks yet still deserves guidance about everything else.
 	st.Tasks, _ = s.TaskList(ctx, projectID)
-	for _, task := range st.Tasks {
-		if task.Status == "accepted" && task.Branch != "" && task.Branch != "main" { st.AcceptedUnreleased++ }
+	if accepted, branches, countErr := s.acceptedUnreleased(ctx, projectID, entry.Path, st.Tasks); countErr == nil {
+		st.AcceptedUnreleased = accepted
+		st.UnreleasedBranches = branches
 	}
-	branches := map[string]bool{}
-	for _, task := range st.Tasks {
-		if task.Status == "accepted" && task.Branch != "" && task.Branch != "main" {
-			branches[task.Branch] = true
-		}
-	}
-	st.UnreleasedBranches = len(branches)
 
 	st.Bugs, _ = s.BugList(ctx, projectID, false)
 	if runs, rerr := s.RunList(ctx, RunFilter{ProjectID: projectID}); rerr == nil {

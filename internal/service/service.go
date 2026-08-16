@@ -27,6 +27,7 @@ import (
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/registry"
+	"github.com/jrullan/ducklab/internal/release"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/store"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -702,23 +703,65 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	for _, tv := range views {
 		taskCounts[tv.Status]++
 	}
-	accepted, branches := acceptedUnreleased(views)
+	accepted, branches, err := s.acceptedUnreleased(ctx, id, entry.Path, views)
+	if err != nil {
+		return nil, err
+	}
 	return &Status{
 		StageProgress: stageProgress(entry.Path), TaskCounts: taskCounts, ActiveRuns: active,
 		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance(),
 	}, nil
 }
 
-func acceptedUnreleased(views []TaskView) (int, int) {
-	branches := map[string]bool{}
-	count := 0
-	for _, v := range views {
-		if v.Status == "accepted" && v.Branch != "" && v.Branch != "main" {
-			count++
-			branches[v.Branch] = true
+// acceptedUnreleased counts accepted task commits not included in the latest
+// release tag. Branch names are provenance only: they survive both merging and
+// deletion, so cannot define whether work has shipped.
+func (s *Service) acceptedUnreleased(ctx context.Context, projectID, root string, views []TaskView) (int, int, error) {
+	git := vcs.New(root)
+	var latest release.Version
+	hasRelease := false
+	if git.HasGit() {
+		tags, err := git.Tags()
+		if err != nil {
+			return 0, 0, err
+		}
+		latest, hasRelease = release.Latest(tags)
+	}
+
+	current := map[string]TaskView{}
+	for _, view := range views {
+		if view.Status == "accepted" {
+			current[view.ID] = view
 		}
 	}
-	return count, len(branches)
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
+	if err != nil {
+		return 0, 0, err
+	}
+	seen := map[string]bool{}
+	branches := map[string]bool{}
+	count := 0
+	for _, run := range runs { // newest first: a reaccepted task has one current commit
+		view, wanted := current[run.TaskID]
+		if !wanted || seen[run.TaskID] || !run.Accepted || run.CommitSHA == "" {
+			continue
+		}
+		seen[run.TaskID] = true
+		if hasRelease {
+			shipped, err := git.IsAncestor(run.CommitSHA, latest.String())
+			if err != nil {
+				return 0, 0, err
+			}
+			if shipped {
+				continue
+			}
+		}
+		count++
+		if view.Branch != "" && view.Branch != "main" {
+			branches[view.Branch] = true
+		}
+	}
+	return count, len(branches), nil
 }
 
 // stageProgress reports where each artifact stage stands. It was never

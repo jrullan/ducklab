@@ -600,17 +600,27 @@ func (s *Server) status() (map[string]interface{}, error) {
 		entry["documents"] = documents
 		if tasks, err := s.eng.TaskList(id); err == nil {
 			entry["tasks"] = len(tasks)
-			accepted := 0
-			for _, task := range tasks { if status, ok := task["status"].(string); ok && status == "accepted" { if branch, ok := task["branch"].(string); ok && branch != "" && branch != "main" { accepted++ } } }
-			entry["accepted_unreleased"] = accepted
-				entry["accepted-unreleased"] = accepted
-			branches := []string{}
-			for _, task := range tasks { if status, ok := task["status"].(string); ok && status == "accepted" { if branch, ok := task["branch"].(string); ok && branch != "" && branch != "main" { branches = append(branches, branch) } } }
-			entry["unreleased_branches"] = len(branches)
-				entry["unreleased_branch_names"] = branches
 		} else {
 			entry["tasks"] = 0
 		}
+		if status, err := s.eng.ProjectStatus(id); err == nil {
+			entry["accepted_unreleased"] = status["accepted_unreleased"]
+			entry["accepted-unreleased"] = status["accepted_unreleased"]
+			entry["unreleased_branches"] = status["unreleased_branches"]
+		}
+		// Branch names remain useful provenance, but counts above must come from
+		// the release-aware service status rather than this retained metadata.
+		branches := []string{}
+		if tasks, err := s.eng.TaskList(id); err == nil {
+			for _, task := range tasks {
+				if status, _ := task["status"].(string); status == "accepted" {
+					if branch, _ := task["branch"].(string); branch != "" && branch != "main" {
+						branches = append(branches, branch)
+					}
+				}
+			}
+		}
+		entry["unreleased_branch_names"] = branches
 		if bugs, err := s.eng.BugList(id, true); err == nil {
 			entry["open_bugs"] = len(bugs)
 		} else {

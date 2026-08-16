@@ -52,6 +52,7 @@ type Engine interface {
 	AppStart(projectID string) (map[string]interface{}, error)
 	AppStop(projectID string) error
 	ProjectNext(projectID string) ([]map[string]interface{}, error)
+	ProjectStatus(projectID string) (map[string]interface{}, error)
 }
 
 // Server speaks MCP (JSON-RPC 2.0, newline-delimited) over a reader/writer

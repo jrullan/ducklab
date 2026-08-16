@@ -43,7 +43,7 @@ autonomy = "yolo"
 [shell]
   mode = "guarded"
   deny = ["rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="]
-  allow_prefixes = ["go ", "npm ", "pnpm ", "yarn ", "pytest", "python ", "cargo ", "make ", "ls", "cat", "grep", "rg", "sed -n", "find", "git status", "git diff", "git log", "node ", "tsc", "docker compose config"]
+  allow_prefixes = ["go ", "gofmt", "goimports", "npm ", "pnpm ", "yarn ", "pytest", "python ", "cargo ", "make ", "ls", "cat", "grep", "rg", "sed -n", "find", "git status", "git diff", "git log", "node ", "tsc", "docker compose config"]
   timeout_s = 120
   network = "deny"
 

@@ -358,6 +358,20 @@ func (g *Git) RevListAfter(ref string) ([]string, error) {
 	return shas, nil
 }
 
+// IsAncestor reports whether ancestor is reachable from descendant.
+func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
+	_, err := g.run("merge-base", "--is-ancestor", ancestor, descendant)
+	if err == nil {
+		return true, nil
+	}
+	// git merge-base uses exit status 1 for the ordinary "not an ancestor"
+	// result; preserve real invocation errors for callers.
+	if strings.Contains(err.Error(), "exit status 1") {
+		return false, nil
+	}
+	return false, err
+}
+
 // Tag creates an annotated tag on HEAD.
 //
 // Annotated rather than lightweight: a release is a claim about a moment, and
