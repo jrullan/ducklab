@@ -5,14 +5,12 @@ import "strings"
 // repetitionDetector identifies a short n-gram repeated enough times to be
 // diagnostic, while allowing ordinary prose to contain repeated words.
 type repetitionDetector struct {
- text     string
  words    []string
  pending  string
  repeated string
 }
 func newRepetitionDetector() *repetitionDetector { return &repetitionDetector{} }
 func (d *repetitionDetector) Add(s string) bool {
- d.text += s
  if d.repeated != "" { return true }
  // Keep the final partial word for the next delta. This avoids re-tokenizing
  // the complete accumulated response on every streamed chunk.

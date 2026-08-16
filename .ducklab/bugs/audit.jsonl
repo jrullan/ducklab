@@ -123,3 +123,4 @@
 {"ts":"2026-08-16T23:27:40Z","bug":"B-040","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-042"}
 {"ts":"2026-08-16T23:27:43Z","bug":"B-041","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-043"}
 {"ts":"2026-08-16T23:34:37Z","bug":"B-013","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-034"}
+{"ts":"2026-08-16T23:37:38Z","bug":"B-015","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-036"}
