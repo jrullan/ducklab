@@ -567,4 +567,25 @@ The traceability system exempts promoted bug tasks from the no-Implements debt p
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-031 — Draft and expose an advisor-attributed redo note on failed-run decision cards
+
+Fixes B-031.
+
+## Reported
+
+Jose's proposal, watching T-020's test fail twice: the decision card on a failed run says what happened ("the gate is still green, so the new test asserts nothing that is not already true") and then leaves the person to distill the lesson and write the redo note by hand. Every chain that converged after failing this week (T-002, T-018, excercise-tracker's T-132) converged BECAUSE of a hand-written redo note — the one link of the failure cycle the harness does not carry, though every input lives in the run record.
+
+Expected: when a run fails (or a test-first lands green), the advisor drafts a redo note from bounded inputs — task body, failure detail, gate tail, diff summary — and it arrives as an editable draft on the decision card ("Retry with this note") and in run_get for MCP operators, attributed as advisor-drafted. Recommends, never decides: the person or operator edits, accepts or discards; only under yolo may the autopilot relaunch with it unedited. Same governance as B-016's advisor contract; same seat configuration as B-017.
+
+## Triage
+
+**Component:** advisor and run decision cards
+**Suspected files:** internal/service/service.go, internal/service/advisor.go, internal/runlog/runlog.go, internal/mcp/tools.go, frontend/src/lib/runview.ts
+
+Failed runs currently expose the failure but do not carry the bounded, editable advisor recommendation needed to make the next retry actionable.
+
+**Verification (triage recommends):** test-first — A failed run with task, failure, gate-tail, and diff inputs should produce an editable redo draft in RunGet and the decision-card model without auto-deciding.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
