@@ -383,4 +383,23 @@ Paused gate cards omit a legal stop/decision action, forcing operators to leave 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-022 — Include blocked reasons in MCP task_list rows
+
+Fixes B-026.
+
+## Reported
+
+What happened: task_list over MCP reports a task as blocked but does not include the reason for the blocked state. In this incident, the blocked flag was inherited from an older failed run for a recycled task ID, not a dependency or real execution lock; the engine still offered test_first. Without the reason string, the operator interpreted the state as a genuine dependency/candado and nearly stopped. Expected: every blocked task includes a concise blocked_reason (or equivalent) explaining the actual blocker, its source, and the legal next action.
+
+## Triage
+
+**Component:** MCP task listing
+**Suspected files:** internal/mcp/tools.go, internal/mcp/mcp_test.go, internal/service/stages.go
+
+The engine already derives a blocked explanation, but MCP task_list drops it while formatting compact rows, misleading operators about why work is blocked.
+
+**Verification (triage recommends):** test-first — Call task_list with a blocked task and assert its output includes the blocker reason and available next action.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

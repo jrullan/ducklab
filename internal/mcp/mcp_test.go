@@ -751,6 +751,27 @@ func TestTaskListIsCompactWithTheSummaryFirst(t *testing.T) {
 // and the operator guessing wrong launches the wrong thing. The names now
 // state the shape: test_build chains the build, test_only stops at the red
 // test, and both carry the note that a redo's new expectations ride in.
+// A blocked row must explain both why the task is blocked and what the operator
+// can legally do next. Status alone is ambiguous: a stale failed run and an
+// unmet dependency must not look like the same candado.
+func TestTaskListIncludesBlockedReasonAndNextAction(t *testing.T) {
+	eng := &fakeEngine{tasks: []map[string]interface{}{
+		{"id": "T-022", "status": "blocked", "title": "Expose blocked state",
+			"blocked": "blocked by failed run r-old; retry is allowed with test_first",
+			"next":    []interface{}{"test_first", "remove"}},
+	}}
+	resps := drive(t, eng,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_list","arguments":{"project_id":"p"}}}`,
+	)
+	text, _ := toolResultText(t, resps[1])
+	for _, want := range []string{"blocked by failed run r-old", "test_first"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("blocked task listing omits %q: %s", want, text)
+		}
+	}
+}
+
 func TestTheTestToolsSayWhatTheyChain(t *testing.T) {
 	eng := &fakeEngine{}
 	drive(t, eng,
