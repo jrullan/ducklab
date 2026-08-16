@@ -539,6 +539,14 @@ func judgeTestFirst(before, after *verify.Result, diff string, globs []string) (
 		// install a permanent false green.
 		return "FAILED", "the gate is still green, so the new test asserts nothing that is not already true"
 	}
+	// A non-zero test command is not enough: go test also returns non-zero when
+	// the package (including the new test) cannot be compiled. That is a broken
+	// specification, not the assertion-red state the implementation run is
+	// supposed to turn green. Check this before the already-red guard so a
+	// compile error is never hidden by an unrelated pre-existing failure.
+	if compileFailure(after.Output) {
+		return "FAILED", fmt.Sprintf("the test specification does not compile; fix the compiler error before retrying: %s", after.Output)
+	}
 	if before.ExitCode != 0 {
 		// Honest about what is and is not known. The suite was already red, so
 		// "it is red now" proves nothing on its own — a person has to read the
@@ -547,6 +555,27 @@ func judgeTestFirst(before, after *verify.Result, diff string, globs []string) (
 	}
 	return "PASSED", fmt.Sprintf("the gate was green and is now red: %s specifies work that does not exist yet",
 		strings.Join(touched.Files, ", "))
+}
+
+// compileFailure reports the compiler/build diagnostics emitted by a test gate.
+// Keep this deliberately conservative: ordinary assertion failures remain valid
+// red specifications, while the common Go compile diagnostics are rejected.
+func compileFailure(output string) bool {
+	lower := strings.ToLower(output)
+	for _, marker := range []string{
+		"[build failed]",
+		"build failed",
+		"undefined:",
+		"syntax error",
+		"cannot find package",
+		"could not import",
+		"does not compile",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // testFirstPrompt asks for the test and only the test.
