@@ -74,3 +74,8 @@
 {"ts":"2026-08-16T18:04:05Z","bug":"B-025","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-021"}
 {"ts":"2026-08-16T18:05:21Z","bug":"B-028","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-16T18:07:17Z","bug":"B-026","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-022"}
+{"ts":"2026-08-16T18:10:20Z","bug":"B-026","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-022"}
+{"ts":"2026-08-16T18:13:58Z","bug":"B-030","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-16T18:13:59Z","bug":"B-029","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-16T18:14:00Z","bug":"B-032","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-16T18:14:00Z","bug":"B-031","from":"open","to":"triaged","actor":"engine","via":"triage"}
