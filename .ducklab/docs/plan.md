@@ -546,4 +546,25 @@ A paused sibling can reapply classifications already accepted by a newer triage,
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-030 — Mark all accepted unimplemented tasks as spec debt and wire spec_settle to document them
+
+Fixes B-036.
+
+## Reported
+
+What happened: 25 of the plan's 29 tasks carry no Implements field — every task born from bug promotion, which is ALL of v0.5.0 — yet spec-debt reports zero. The debt marker is applied only to amendment-born tasks (the Extend flow); promoted tasks are invisible to it, so spec_settle looks at a board full of undocumented as-built behavior and sees nothing to settle. The traceability spine has a blind spot exactly where the project does most of its work: the spec is one full release stale (budget_lift, repetition detector, contract-aware caps, advisor governance, webhook notifications, tree restore, provenance — none covered) while the machinery built to catch that reports clean. Same family as B-009 and B-034: a counter reading the wrong source.
+
+Expected: any accepted task with no Implements wires — whatever flow created it — wears spec-debt, and the settle prompt documents it as-built with a Covers: field wired back, exactly as the amendment flow already does. With the marker honest, one spec_settle run brings the spec current after every release; without it, "0 debt" is the most expensive kind of lie — the one that cancels the cure.
+
+## Triage
+
+**Component:** spec-debt traceability
+**Suspected files:** internal/artifact/trace.go, internal/stage/extend.go, internal/mcp/tools.go, internal/service/guide.go
+
+The traceability system exempts promoted bug tasks from the no-Implements debt path, causing an entire release of undocumented behavior to report clean.
+
+**Verification (triage recommends):** test-first — Promote a bug into an accepted task without Implements and verify spec-debt and spec_settle expose it with a Covers edge.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -690,6 +690,18 @@ func TestSpecDebtMarksOnlyTheUncovered(t *testing.T) {
 	}
 }
 
+// Bug promotion is an alternate way to create an accepted task, not an
+// exemption from documenting what was built. Its bug edge still justifies the
+// task in the trace, but a missing Implements edge must remain settleable spec
+// debt so spec_settle can document it and wire Covers back.
+func TestPromotedUnimplementedTaskWearsSpecDebt(t *testing.T) {
+	spec := map[string]bool{"SPEC-001": true}
+	bugTask := map[string]bool{"T-003": true}
+	if !taskSpecDebt("T-003", nil, spec, bugTask) {
+		t.Fatal("a promoted task without Implements must wear spec-debt")
+	}
+}
+
 // The settle prompt is assembled BY THE ENGINE from the debt itself — the
 // person clicks, never writes. Its contract: honest as-built sections, a
 // Covers: field per section, everything else untouched.
