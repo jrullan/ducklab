@@ -802,8 +802,11 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		// Check version
 		clientVersion := r.Header.Get("X-Ducklab-Client")
 		if clientVersion != "" {
-			clientMajor := strings.Split(clientVersion, ".")[0]
-			serverMajor := strings.Split(s.version, ".")[0]
+			// Tags carry a v; semver comparison does not. Trim BOTH sides:
+			// a stamped "v0.5.0" once locked every client out with
+			// "0" != "v0" — a letter, not a version, deciding compatibility.
+			clientMajor := strings.Split(strings.TrimPrefix(clientVersion, "v"), ".")[0]
+			serverMajor := strings.Split(strings.TrimPrefix(s.version, "v"), ".")[0]
 			if clientMajor != serverMajor {
 				s.error(w, http.StatusConflict, "version_skew", fmt.Sprintf("client major version %s != server major version %s", clientMajor, serverMajor))
 				return

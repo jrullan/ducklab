@@ -7,7 +7,7 @@ node_modules/
 *.out
 coverage.*
 dist/
-build/
+/build/
 bin/
 .DS_Store
 

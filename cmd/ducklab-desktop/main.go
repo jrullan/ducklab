@@ -83,7 +83,7 @@ func main() {
 		JS: fmt.Sprintf(
 			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q, restartEngine: %q, reconnectEngine: %q, openURL: %q };`+
 				`if (%q) location.hash = %q;`,
-			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Version,
+			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Semver(),
 			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(), RestartEngineFQN(), ReconnectEngineFQN(), OpenURLFQN(),
 			route, route,
 		),

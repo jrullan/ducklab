@@ -41,6 +41,10 @@ func TestCLIImportsOnlyClientPackages(t *testing.T) {
 		// model and engineclt to the engine, and touches the domain no more
 		// than the desktop does.
 		"internal/mcp": true,
+		// Version constants are a leaf: reporting who you are is not
+		// server machinery. B-033 made it the single source of truth,
+		// and every binary — CLI included — must be able to say it.
+		"internal/build": true,
 	}
 	for pkg := range deps(t, modulePath+"/internal/cli") {
 		if !allowed[pkg] {

@@ -82,7 +82,7 @@ func main() {
 		PID:       os.Getpid(),
 		Port:      port,
 		Token:     token,
-		Version:    build.Version,
+		Version:    build.Semver(),
 		Provenance: build.Provenance(),
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		StateDir:  stateDir,
@@ -101,7 +101,7 @@ func main() {
 	}
 
 	// Create server
-	server := engineapi.New(svc, b, token, build.Version, build.Provenance())
+	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance())
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,
