@@ -713,4 +713,88 @@ The extra indentation is an isolated, actionable formatting defect in internal/m
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-037 — Make release guidance count only accepted work included in the latest release
+
+Fixes B-034.
+
+## Reported
+
+What happened: after cutting v0.5.0 (tag created, notes promoted, main merged), the guide still says "Cut a release — 8 accepted task(s) await shipping". acceptedUnreleased() counts accepted tasks whose recorded Branch is non-empty and not main — a test of branch-name persistence, not of release reachability. Deleting all 22 merged ducklab/* branches changed nothing: the names live in the task/run records. The step is immortal — it will offer a release forever, and its count (8) bears no relation to what v0.5.0 actually shipped (22 tasks).
+
+Expected: released work stops counting. Either the cut records the released task set (or tag) and the counter excludes tasks whose accept commit is an ancestor of the latest release tag (git merge-base --is-ancestor), or the accept record gains a released_in field stamped at cut. The guide's numbers must come from the same truth the release itself computed.
+
+## Triage
+
+**Component:** release tracking
+**Suspected files:** internal/service/guide.go, internal/mcp/tools.go, internal/service/release.go, internal/release/release.go
+
+The guide and MCP status derive unreleased work from persistent branch names instead of the release inventory or commit ancestry, so released tasks remain permanently actionable.
+
+**Verification (triage recommends):** test-first — After cutting a release, accepted tasks included in its shipped inventory must no longer appear in guide or MCP unreleased counts.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-038 — Skip human-only guide steps and start the first lawful mechanical task
+
+Fixes B-037.
+
+## Reported
+
+What happened: yolo autonomy, autopilot on, 3 tasks sitting in Todo — started: 0, last_action "needs you: Promote B-034 to a task, or park it". The autopilot follows the guide's first step; when that step is a human decision it idles entirely, even though startable mechanical steps (the Todo tasks) sit right below. One unpromoted bug becomes head-of-line blocking for a whole unattended session — under yolo, the mode built for overnight autonomy, a single human gate turns the autopilot into a decoration.
+
+Expected: idling at a human gate means idling ON THAT DECISION, not on the world — the autopilot scans past human-only steps (bug promotions, verifications, release cuts) to the first MECHANICAL step it may lawfully start, and its status names both: "waiting on you for B-034; meanwhile started T-025". The human queue and the machine queue are different queues.
+
+## Triage
+
+**Component:** autopilot
+**Suspected files:** internal/service/autopilot.go, internal/service/guide.go, internal/service/autopilot_test.go
+
+A single human-gated first guide step blocks unattended mechanical work despite startable Todo tasks, defeating yolo autonomy.
+
+**Verification (triage recommends):** test-first — Enable yolo autopilot with a human-only promotion step followed by Todo mechanical tasks and assert it starts the mechanical task while retaining the human wait status.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-039 — Resolve launcher seats from the roster and display seat provenance
+
+Fixes B-035.
+
+## Reported
+
+What happened: T-024's TDD launch started its test stage with glm52 as implementer although the project roster pins implementer = luna. The TddLaunch chips prefill from the Settings mode line-up (a glm52 pick saved from some earlier run), and launching without touching the chips sent that prefill as an EXPLICIT per-run ducklings override — which outranks the roster by design. The person believed the roster would decide; the form had already decided from a different memory, with no indication on the chip of where its value came from. Two seat memories (Settings mode defaults, project roster), silent precedence, invisible provenance. The chained build carried ['luna','glm52'] while the test ran glm52 — same launch, two different seat sources.
+
+Expected: the launcher prefills from the RESOLVED roster (project pins first, then global), and Settings mode line-ups apply only where explicitly saved; an untouched chip should mean \"the roster decides\", not \"repeat my last override\". At minimum each chip shows its provenance (roster / Settings / picked now) so a silent decision becomes a visible one. Small-operator corollary: the same precedence applies to MCP launches with omitted ducklings — omitted must mean roster, and the record should say which source seated each role.
+
+## Triage
+
+**Component:** launcher roster resolution
+**Suspected files:** frontend/src, internal/config, internal/service
+
+Untouched launcher chips silently turn stale Settings defaults into explicit overrides that outrank the project roster, causing the wrong duckling to execute a role.
+
+**Verification (triage recommends):** test-first — Launch a TDD run with a project implementer pin and a conflicting saved Settings lineup, then verify the untouched chip and submitted seats use the roster and expose provenance.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-040 — Prioritize Verify guidance over Reopen for fixed bugs awaiting verification
+
+Fixes B-038.
+
+## Reported
+
+What happened: with B-004, B-007 and B-018 sitting in fixed (awaiting the human's fixed→verified judgement), the guide's next steps read "Reopen B-004 — send it back for more work", three in a row. Reopen is the exception path — for a fix that missed expectations — yet it is offered as the day's plan while the ordinary next step for a fixed bug, Verify, appears nowhere. A literal operator (the autopilot follows this list; so would Elena) is being advised to unwind good work three times.
+
+Expected: a fixed bug's guide step is "Verify B-004 — confirm the fix answers the report" (the I2 judgement, human-only), with Reopen mentioned as the alternative inside that decision, not as the headline. Reopen earns the headline only when something signals dissatisfaction — a reopened sibling, a failed verification, a human note.
+
+## Triage
+
+**Component:** guide guidance
+**Suspected files:** internal/service/guide.go, internal/service/guide_test.go
+
+The guide deterministically recommends the exceptional Reopen action for ordinary fixed bugs instead of the required human-only Verify decision.
+
+**Verification (triage recommends):** test-first — Build a guide snapshot with fixed bugs and assert each presents Verify as the headline while Reopen is only an alternative.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -50,6 +51,61 @@ func TestTheAutopilotIdlesAtAHumanGate(t *testing.T) {
 // One failure earns one retry; the second consecutive failure is a pattern,
 // and patterns are handed to a person: the loop switches off wearing the
 // reason.
+// A human-only guide step must not block an independent mechanical task.
+// The status keeps both queues visible: the person still has to decide about
+// the bug, while yolo autonomy starts the ready task below it.
+func TestAutopilotSkipsHumanGateToStartMechanicalWork(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(entry.Path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for kind, body := range map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Build it\n\nThe project must build.\n",
+		artifact.KindSpec:         "## SPEC-001 — Build it\n\nThe project builds.\n",
+		artifact.KindPlan:         "## M-01 — Work\n\n### T-001 — Mechanical work\n\nDo the work.\n",
+	} {
+		if err := os.WriteFile(artifact.Path(entry.Path, kind), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.BugAdd(context.Background(), projectID, BugRequest{Title: "Needs a decision"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugMove(context.Background(), projectID, "B-001", "triaged", "human"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.AutopilotSet(context.Background(), projectID, true, 5); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		st := s.AutopilotStatus(projectID)
+		if st.Started > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	st := s.AutopilotStatus(projectID)
+	if !st.On {
+		t.Fatalf("autopilot stopped instead of idling at the human gate: %+v", st)
+	}
+	if st.Started != 1 {
+		t.Fatalf("started %d tasks, want the first independent mechanical task", st.Started)
+	}
+	if !strings.Contains(st.LastAction, "needs you") || !strings.Contains(st.LastAction, "B-001") {
+		t.Errorf("last action = %q, want the human decision named", st.LastAction)
+	}
+	if !strings.Contains(st.LastAction, "started") || !strings.Contains(st.LastAction, "T-001") {
+		t.Errorf("last action = %q, want the mechanical task named too", st.LastAction)
+	}
+}
+
 func TestTwoConsecutiveFailuresStopTheLoop(t *testing.T) {
 	s := newTestService(t)
 	projectID := newTestProject(t, s, "proj")
