@@ -13,8 +13,8 @@ TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 all: vet test frontend
 
 build:
-	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab ./cmd/ducklab
-	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab-engine ./cmd/ducklab-engine
+	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab ./cmd/ducklab
+	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab-engine ./cmd/ducklab-engine
 
 vet:
 	$(GO) vet ./...
@@ -60,7 +60,7 @@ desktop:
 	cd frontend && npm run build
 	rm -rf cmd/ducklab-desktop/frontend/dist
 	cp -r frontend/dist cmd/ducklab-desktop/frontend/dist
-	$(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab-desktop ./cmd/ducklab-desktop
+	$(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)" -o bin/ducklab-desktop ./cmd/ducklab-desktop
 
 cross:
 	@for t in $(TARGETS); do \

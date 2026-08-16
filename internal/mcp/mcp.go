@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/jrullan/ducklab/internal/build"
 )
 
 // Engine is the slice of the engine client the operator surface needs.
@@ -125,7 +127,7 @@ func (s *Server) dispatch(req *rpcRequest) (interface{}, *rpcError) {
 		}
 		return map[string]interface{}{
 			"protocolVersion": "2024-11-05",
-			"serverInfo":      map[string]string{"name": "ducklab", "version": "0.4.0"},
+			"serverInfo":      map[string]string{"name": "ducklab", "version": build.Version, "commit": build.Commit, "provenance": build.Provenance()},
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 		}, nil
 	case "notifications/initialized", "initialized":
