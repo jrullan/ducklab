@@ -1119,6 +1119,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             accepting={acceptState.kind === "pending"}
             onAccept={onAccept}
             onReject={() => void client.reject(runId).catch(() => {})}
+            onAbort={() => void client.abort(runId).catch(() => {})}
             onRequestChanges={stageToRevise ? requestChanges : undefined}
             onResume={() => void client.runResume(runId).catch(() => {})}
             revisionRun={revisionRun}

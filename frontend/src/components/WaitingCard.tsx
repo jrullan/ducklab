@@ -14,12 +14,14 @@ export function WaitingCard({
   accepting,
   onAccept,
   onReject,
+  onAbort,
   acceptError,
 }: {
   run: Run;
   accepting: boolean;
   onAccept: () => void;
   onReject: () => void;
+  onAbort: () => void;
   acceptError?: string;
 }) {
   // From the engine's list, never this card's opinion of the state
@@ -68,6 +70,16 @@ export function WaitingCard({
             className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
           >
             {accepting ? "Accepting…" : "Accept"}
+          </button>
+        )}
+        {next.includes("abort") && (
+          <button
+            type="button"
+            data-testid="now-abort"
+            onClick={onAbort}
+            className="rounded border border-hairline px-2 py-1 text-xs"
+          >
+            Abort
           </button>
         )}
         {next.includes("reject") && (

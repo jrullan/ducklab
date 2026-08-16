@@ -26,6 +26,7 @@ export function DecisionCard({
   onReject,
   onRequestChanges,
   onResume,
+  onAbort,
   accepting,
   extraAction,
   revisionRun,
@@ -44,6 +45,7 @@ export function DecisionCard({
   onReject: () => void;
   onRequestChanges?: (note: string) => Promise<void>;
   onResume?: () => void;
+  onAbort?: () => void;
   accepting?: boolean;
   /** A view-specific control, like the Cycle view's read/diff toggle. */
   extraAction?: React.ReactNode;
@@ -75,6 +77,16 @@ export function DecisionCard({
         </div>
         <div className="flex items-center gap-2">
           {extraAction}
+          {offers("abort") && onAbort && (
+            <button
+              type="button"
+              onClick={onAbort}
+              data-testid="abort-button"
+              className="rounded border border-hairline px-3 py-1 text-sm"
+            >
+              Abort
+            </button>
+          )}
           {offers("resume") && onResume && (
             <button
               type="button"

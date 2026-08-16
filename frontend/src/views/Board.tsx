@@ -1007,6 +1007,12 @@ function TaskRunner({
                 .then(() => onDone())
                 .catch(() => {})
             }
+            onAbort={() =>
+              void client
+                .abort(pausedRun.id)
+                .then(() => onDone())
+                .catch(() => {})
+            }
             acceptError={acceptSt?.kind === "error" ? acceptSt.message : undefined}
           />
         </ul>

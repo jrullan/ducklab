@@ -170,6 +170,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     );
                 }}
                 onReject={() => void client.reject(r.id).catch(() => {})}
+                onAbort={() => void client.abort(r.id).catch(() => {})}
                 acceptError={(() => {
                   const st = acceptState[r.id];
                   return st?.kind === "error" ? st.message : undefined;
