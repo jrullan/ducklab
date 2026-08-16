@@ -166,6 +166,12 @@ export const useRuns = create<RunsState>((set) => ({
           runs = { ...runs, [runId]: { ...run, status: "running" } };
         } else if (e.type === "human_needed") {
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
+        } else if (e.type === "human" && run.status === "paused") {
+          // Answering a human gate resumes the run. Remove every pending
+          // field, not just the kind, so the inbox cannot retain stale data
+          // from the question after the engine has moved on.
+          const { pending_kind: _pendingKind, pending_since: _pendingSince, pending_data: _pendingData, ...resumed } = run;
+          runs = { ...runs, [runId]: { ...resumed, status: "running" } };
         } else if (e.type === "error") {
           // The engine emits `error` only on the fatal paths, with the reason.
           // The store used to drop it — so a run watched LIVE failed with
