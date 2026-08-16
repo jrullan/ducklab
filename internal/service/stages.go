@@ -748,10 +748,9 @@ type TaskView struct {
 	// check for this fix is eyes, not an automated test — the front door is
 	// a plain build. Recommended, never imposed.
 	BuildOnly bool `json:"build_only,omitempty"`
-	// SpecDebt marks a task no spec section covers — the toll of the plan
-	// amendment's light path. Legal, and never invisible: the scribe settles
-	// it by teaching the spec what was built. Bug-promoted tasks trace to
-	// their report and owe the spec nothing.
+	// SpecDebt marks a task no spec section covers. This includes promoted bug
+	// tasks: their bug edge justifies them, but does not document the behavior
+	// in the spec. The scribe settles the debt by teaching the spec what was built.
 	SpecDebt bool `json:"spec_debt,omitempty"`
 }
 
@@ -792,8 +791,9 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 		}
 	}
 
-	// The spec's sections, for the debt check — and the bug-born tasks,
-	// which trace to their report rather than to the spec.
+	// The spec's sections for the debt check. Every accepted task without an
+	// Implements edge is debt, regardless of whether it came from an amendment
+	// or a promoted bug; bug provenance is a separate traceability edge.
 	specIDs := map[string]bool{}
 	if spec, sErr := artifact.Load(entry.Path, artifact.KindSpec); sErr == nil {
 		for _, sp := range spec.Sections {
@@ -1320,10 +1320,15 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 	return status, blocked, testReady, failedStage, pinned
 }
 
-// taskSpecDebt: covered by no existing spec section, and not a bug's task.
-// A project with no spec at all owes none — there is nothing to be behind.
+// taskSpecDebt reports an uncovered task. Bug provenance does not exempt a
+// task: the bug→task edge explains why it exists, while spec-debt records that
+// the approved spec has not caught up. A project with no spec at all owes none.
+// bugTasks is retained in the signature for callers that already gather bug
+// provenance for other task-list projections.
 func taskSpecDebt(taskID string, implements []string, specIDs, bugTasks map[string]bool) bool {
-	if len(specIDs) == 0 || bugTasks[taskID] {
+	_ = taskID
+	_ = bugTasks
+	if len(specIDs) == 0 {
 		return false
 	}
 	for _, im := range implements {

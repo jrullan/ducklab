@@ -667,9 +667,9 @@ func TestPlanExtendNeedsAPlanToAmend(t *testing.T) {
 	}
 }
 
-// The amendment's toll, computed: a task no spec section covers wears the
-// marker; wired tasks and bug-born tasks do not; a spec-less project owes
-// nothing because there is nothing to be behind.
+// The spec-debt toll: a task no spec section covers wears the marker,
+// regardless of whether it was amended or promoted from a bug; a spec-less
+// project owes nothing because there is nothing to be behind.
 func TestSpecDebtMarksOnlyTheUncovered(t *testing.T) {
 	spec := map[string]bool{"SPEC-001": true}
 	bugs := map[string]bool{"T-003": true}
@@ -682,8 +682,8 @@ func TestSpecDebtMarksOnlyTheUncovered(t *testing.T) {
 	if taskSpecDebt("T-002", []string{"SPEC-999"}, spec, bugs) == false {
 		t.Error("an invented section id is not coverage")
 	}
-	if taskSpecDebt("T-003", nil, spec, bugs) {
-		t.Error("a bug's task traces to its report, not the spec")
+	if !taskSpecDebt("T-003", nil, spec, bugs) {
+		t.Error("a promoted task without Implements must wear spec-debt")
 	}
 	if taskSpecDebt("T-004", nil, map[string]bool{}, bugs) {
 		t.Error("a project with no spec owes none")
