@@ -194,7 +194,8 @@ func (s *Service) autopilotOnFail(run *runlog.Run) {
 	go s.autopilotAdvance(run.ProjectID)
 }
 
-// autopilotAdvance takes the guide's first step, if it is mechanical.
+// autopilotAdvance takes the first lawful mechanical step in the guide. Human
+// gates remain visible, but do not block independent work listed below them.
 func (s *Service) autopilotAdvance(projectID string) {
 	// Let the settling run finish its writes before reading project state.
 	time.Sleep(200 * time.Millisecond)
@@ -217,6 +218,24 @@ func (s *Service) autopilotAdvance(projectID string) {
 		return
 	}
 	first := steps[0]
+	human := ""
+	for _, step := range steps {
+		if s.autopilotMechanical(projectID, step) {
+			first = step
+			break
+		}
+		if human == "" && step.ID != "brief" {
+			human = "needs you: " + step.Action
+		}
+	}
+	if !s.autopilotMechanical(projectID, first) {
+		if human != "" {
+			s.autopilotNote(projectID, human)
+		} else {
+			s.autopilotStop(projectID, "every task is done — nothing left to drive")
+		}
+		return
+	}
 
 	s.apMu.Lock()
 	st := s.autopilots[projectID]
@@ -248,19 +267,17 @@ func (s *Service) autopilotAdvance(projectID string) {
 	s.apMu.Unlock()
 
 	switch first.ID {
-	case "brief":
-		s.autopilotStop(projectID, "every task is done — nothing left to drive")
 	case "build":
 		_, err := s.RunStart(ctx, projectID, RunRequest{
 			TaskID: first.Ref, Autonomy: "yolo", Origin: "autopilot", Note: note,
 		})
-		s.autopilotResult(projectID, "build "+first.Ref, err)
+		s.autopilotResult(projectID, "build "+first.Ref, err, human)
 	case "test-first":
 		_, err := s.TestStart(ctx, projectID, TestFirstRequest{
 			TaskID: first.Ref, ThenBuild: true, Origin: "autopilot", Note: note,
 			Build: RunRequest{Autonomy: "yolo", Origin: "autopilot"},
 		})
-		s.autopilotResult(projectID, "test-first "+first.Ref, err)
+		s.autopilotResult(projectID, "test-first "+first.Ref, err, human)
 	case "triage":
 		// Only when the project's own autonomy lets the classifications
 		// apply themselves — under guarded the run would pause at its gate
@@ -270,7 +287,7 @@ func (s *Service) autopilotAdvance(projectID string) {
 		if entry, eerr := s.registry.Get(projectID); eerr == nil {
 			if a := s.triageAutonomy(entry.Path); a == "auto" || a == "yolo" {
 				_, err := s.BugTriage(ctx, projectID, "")
-				s.autopilotResult(projectID, "triage the open bugs", err)
+				s.autopilotResult(projectID, "triage the open bugs", err, human)
 				return
 			}
 		}
@@ -291,12 +308,36 @@ func (s *Service) autopilotNote(projectID, note string) {
 	}
 }
 
-func (s *Service) autopilotResult(projectID, action string, err error) {
+func (s *Service) autopilotResult(projectID, action string, err error, human string) {
 	if err != nil {
+		if human != "" {
+			s.autopilotNote(projectID, fmt.Sprintf("%s; meanwhile started %s, but could not complete launch: %v", human, action, err))
+			return
+		}
 		s.autopilotStop(projectID, fmt.Sprintf("could not start %s: %v", action, err))
 		return
 	}
-	s.autopilotNote(projectID, "started "+action)
+	note := "started " + action
+	if human != "" {
+		note = human + "; meanwhile " + note
+	}
+	s.autopilotNote(projectID, note)
+}
+
+func (s *Service) autopilotMechanical(projectID string, step NextStep) bool {
+	switch step.ID {
+	case "build", "test-first":
+		return true
+	case "triage":
+		entry, err := s.registry.Get(projectID)
+		if err != nil {
+			return false
+		}
+		a := s.triageAutonomy(entry.Path)
+		return a == "auto" || a == "yolo"
+	default:
+		return false
+	}
 }
 
 // projectBusy reports whether any run for the project is still in motion.
