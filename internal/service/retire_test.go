@@ -22,6 +22,18 @@ func TestRetiringATestRevertsItsCommitAndFreesTheTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Rewinds must not conflict with append-only records written after the
+	// original run. Project initialization is the one reliable place to ship
+	// the union merge policy for every new project.
+	attrs, err := os.ReadFile(filepath.Join(dir, ".gitattributes"))
+	if err != nil {
+		t.Fatalf("project init did not ship .gitattributes: %v", err)
+	}
+	for _, want := range []string{".ducklab/bugs/audit.jsonl merge=union", ".ducklab/app.log merge=union"} {
+		if !strings.Contains(string(attrs), want) {
+			t.Errorf(".gitattributes missing %q:\n%s", want, attrs)
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
 		t.Fatal(err)
 	}

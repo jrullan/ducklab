@@ -57,3 +57,5 @@
 {"ts":"2026-08-16T02:10:46Z","bug":"B-020","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
 {"ts":"2026-08-16T02:31:24Z","bug":"B-005","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-014"}
 {"ts":"2026-08-16T02:33:12Z","bug":"B-005","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-014"}
+{"ts":"2026-08-16T03:01:00Z","bug":"B-005","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
+{"ts":"2026-08-16T03:08:13Z","bug":"B-006","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-015"}
