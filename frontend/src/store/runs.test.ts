@@ -97,6 +97,16 @@ describe("event application", () => {
     expect(run.status).toBe("paused");
     expect(run.pending_kind).toBe("gate");
   });
+
+  it("resumes a paused run and clears its pending kind when a human answers", () => {
+    const s = useRuns.getState();
+    s.setRun({ ...baseRun, status: "paused", pending_kind: "question" });
+    s.applyEvent({ type: "human", run_id: "r-1", seq: 2, data: { answer: "yes" } });
+
+    const run = useRuns.getState().runs["r-1"]!;
+    expect(run.status).toBe("running");
+    expect(run.pending_kind).toBeUndefined();
+  });
 });
 
 describe("accept flow", () => {

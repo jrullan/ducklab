@@ -484,4 +484,66 @@ Hardcoded or independently defaulted version values cause released binaries and 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-027 — Map human answer events to running status and clear pending state
+
+Fixes B-030.
+
+## Reported
+
+What happened: T-018's test paused on a question; the human answered from the desktop; the engine resumed the run (state.json: running, pending none, work progressing) — but Now kept listing it as waiting for answer. The engine emits a "human" event on answer, and the frontend store's applyEvent does not map it: the only status-changing events it hears are run_queued, run_started (queued only), human_needed, error and run_end. The paused→running transition caused by an answer has no event the store acts on, so the stale card survives until a refetch.
+
+Expected: the same cure the triage ending got — either the store maps the human/answer event to status running + pending cleared, or the engine emits an explicit run_resumed on answer and resume alike. Every status transition must have a stream event the store believes; the pattern (two occurrences now: triage run_end, answer resume) suggests auditing all transitions against the store's event map once, rather than patching them one stale card at a time.
+
+## Triage
+
+**Component:** frontend run store
+**Suspected files:** frontend/src/store/runs.ts, frontend/src/store/runs.test.ts
+
+The frontend receives the human answer event but does not update the paused run, leaving Now stale until refetch.
+
+**Verification (triage recommends):** test-first — Apply a human event to a paused run and expect status running with pending_kind cleared.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-028 — Cover frontend tests in the gate and diagnose uncovered test-first paths
+
+Fixes B-032.
+
+## Reported
+
+What happened: T-020 (a frontend task — Clean/Commit recovery controls on the failure card) failed test-first three times. On the last attempt luna wrote the CORRECT specification — a vitest test in frontend/src/views/views.test.tsx asserting the recovery control exists, plus the negative case — and the run still died: the project gate is `go test ./...`, which never runs vitest, so the red test could not turn it red. The engine then reported "the gate is still green, so the new test asserts nothing that is not already true" — a false diagnosis that blames the test, poisons any redo note drafted from it (B-031's advisor would inherit the lie), and makes every frontend task ungateable: no test-first can land red, no build can prove green, for anything in frontend/.
+
+Expected, two layers: (a) the project gate must cover every language the plan's tasks touch — for ducklab that means the frontend suite joins the command; and (b) when a test-first lands green, the engine should check WHERE the new test lives before claiming it asserts nothing: a new test file outside the gate's reach is a gate-coverage error, not a specification error, and the message should say so ("the new test lives in frontend/, which the gate never runs — widen the gate or move the test"). The internal RunRequest.verify override exists but has no MCP or launcher surface; per-task gate override would let UI tasks gate on vitest without taxing every Go run.
+
+## Triage
+
+**Component:** verification gate
+**Suspected files:** internal/verify/verify.go, internal/service/testfirst.go, internal/service/service.go, internal/service/gate.go, internal/config/config.go, internal/engineapi/engineapi.go
+
+The configured Go-only gate skips the frontend suite, making frontend test-first runs ungateable and producing a false diagnosis when new tests pass outside the gate.
+
+**Verification (triage recommends):** test-first — A mixed Go/frontend project should execute vitest and report a frontend test outside the configured gate as a coverage error rather than a vacuous specification.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-029 — Resolve sibling paused triage runs when accepting a newer triage
+
+Fixes B-008.
+
+## Reported
+
+What happened: a triage run aborted mid-batch (generation loop) still paused at its gate holding its partial proposals — reasonable, no error discards work. But after a SECOND complete triage of the same bugs was accepted, the partial sibling stayed decidable, offering accept on classifications already applied by the newer run. The human had to notice and order the reject; an unattended operator could have double-applied B-004.
+
+Expected: the same courtesy artifact stages already have — accepting a triage resolves sibling paused triage runs whose bugs it covered, recorded as superseded. The stage machinery (resolveSuperseded) exists; triage accept does not use it.
+
+## Triage
+
+**Component:** triage lifecycle
+
+A paused sibling can reapply classifications already accepted by a newer triage, creating a preventable double-decision hazard.
+
+**Verification (triage recommends):** test-first — Accept a complete triage covering the same bugs and assert that an older paused sibling is marked superseded and no longer decidable.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
