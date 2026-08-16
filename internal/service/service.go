@@ -1256,6 +1256,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		GlobalSkillsDir: globalSkillsDir(),
 	}
 
+	// Tool-level brakes are not persisted run-log events; bridge them to the
+	// operator notification bus for the webhook subscriber.
+	ectx.OnDistress = func(reason string, data map[string]interface{}) {
+		payload := map[string]interface{}{"reason": reason}
+		for key, value := range data {
+			payload[key] = value
+		}
+		s.publishTransition(rs, "distress", payload)
+	}
+
 	// The line-up this run will use: what it asked for, else the one configured
 	// for its mode. Filled onto the request itself so every consumer sees it —
 	// tournament and split read req.Ducklings directly, and a preference that

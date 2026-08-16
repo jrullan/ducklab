@@ -94,6 +94,9 @@ const GateFailLimit = 10
 
 func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	if ectx.ConsecGateFails >= GateFailLimit {
+		if ectx.OnDistress != nil {
+			ectx.OnDistress("failure_streak", map[string]interface{}{"count": ectx.ConsecGateFails})
+		}
 		return &Result{IsError: true, Content: fmt.Sprintf(
 			"REFUSED: the gate has failed %d times in a row in this run. Running it again will "+
 				"not change the answer — this approach is not converging. Stop patching. State "+
@@ -115,6 +118,9 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	result := fmt.Sprintf("gate: %s\ncmd: %s\nexit: %d\n%s", res.Gate, res.Command, exitCode, CapResult(res.Output, MaxToolResultBytes))
 	if exitCode != 0 {
 		ectx.ConsecGateFails++
+		if ectx.ConsecGateFails >= GateFailLimit && ectx.OnDistress != nil {
+			ectx.OnDistress("failure_streak", map[string]interface{}{"count": ectx.ConsecGateFails})
+		}
 		if left := GateFailLimit - ectx.ConsecGateFails; left >= 0 && left <= 3 {
 			result += fmt.Sprintf("\n\n[gate brake: %d consecutive failure(s); %d attempt(s) left "+
 				"before verify_run refuses — if the cause is not clear yet, stop and say so]",

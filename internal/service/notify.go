@@ -27,9 +27,18 @@ func (s *Service) startNotifier() {
 	}
 	secret := s.cfg.Notify.Secret
 	interesting := map[string]bool{
-		"human_needed": true,
-		"run_end":      true,
-		"autopilot":    true,
+		"human_needed":    true,
+		"run_end":         true,
+		"autopilot":       true,
+		"run_paused":      true,
+		"question_asked":  true,
+		"distress":        true,
+		"failure_streak":  true,
+		"repetition_loop": true,
+		"budget_pause":    true,
+	}
+	if s.bus == nil {
+		return
 	}
 	sub, _ := s.bus.Subscribe("notify-webhook", func(e bus.Event) bool {
 		return interesting[e.Type]

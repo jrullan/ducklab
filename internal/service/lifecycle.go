@@ -36,6 +36,32 @@ func (s *Service) publishEvent(projectID string, e *runlog.Event) {
 		TS:        time.Now(),
 		Data:      e.Data,
 	})
+	// Persisted human-needed records are the canonical transition. Emit the
+	// operator vocabulary as derived doorbells so every pause path is covered.
+	if e.Type == "human_needed" {
+		kind, _ := e.Data["kind"].(string)
+		s.bus.Publish(bus.Event{Type: "run_paused", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: map[string]interface{}{"pending_kind": kind}})
+		if kind == "question" {
+			s.bus.Publish(bus.Event{Type: "question_asked", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: e.Data})
+		}
+		if kind == "budget" {
+			s.bus.Publish(bus.Event{Type: "budget_pause", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: e.Data})
+			s.bus.Publish(bus.Event{Type: "distress", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: map[string]interface{}{"reason": "budget_pause", "detail": e.Data["detail"]}})
+		}
+	}
+	if e.Type == "repetition_loop" {
+		s.bus.Publish(bus.Event{Type: "distress", RunID: e.RunID, ProjectID: projectID, TS: time.Now(), Data: map[string]interface{}{"reason": "repetition_loop", "detail": e.Data}})
+	}
+}
+
+// publishTransition emits a derived, operator-facing transition. These are
+// deliberately not persisted: the durable human_needed/run_end records remain
+// the source of truth, while the derived events are webhook doorbells.
+func (s *Service) publishTransition(rs *runState, typ string, data map[string]interface{}) {
+	if s.bus == nil || rs == nil || rs.run == nil {
+		return
+	}
+	s.bus.Publish(bus.Event{Type: typ, RunID: rs.run.ID, ProjectID: rs.run.ProjectID, TS: time.Now(), Data: data})
 }
 
 // attachWriter wires a writer's event hook to the bus for this run.

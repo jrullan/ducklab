@@ -88,6 +88,8 @@ type ExecContext struct {
 	// ConsecGateFails counts verify_run reds with no green between them,
 	// across the whole run — the loop's own I3, at gate level.
 	ConsecGateFails int
+	// OnDistress reports operator-relevant brakes without coupling tools to the bus.
+	OnDistress func(reason string, data map[string]interface{})
 	// lastFailSig and lastFailCount track the most recent FAILING call's
 	// tool+args, for the repetition brake: a small model that gets its
 	// arguments wrong retries the identical call — six artifact_reads of
