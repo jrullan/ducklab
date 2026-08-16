@@ -299,24 +299,4 @@ The MCP schemas and handlers omit per-run seat, mode, and turn-cap controls that
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-### T-015 — Add a discoverable Reopen workflow for revising and relaunching accepted work safely
-
-Fixes B-006.
-
-## Reported
-
-The B-047/T-110 case from the dogfood project (excercise-tracker, 2026-08-13), finally filed where it belongs: redoing accepted work that missed expectations — the normal move of iterative development — requires knowing that (1) BugEdit fixes the report but not the already-promoted task body; (2) the bug must be hand-moved fixed→in_progress; (3) relaunch lives on old runs, and only non-accepted ones; (4) the relaunch note field is the only channel for new expectations; (5) UNVERIFIED-test semantics decide whether the redo means anything. Later addendum (T-132 rescue, 2026-08-14): the sanctioned rewind — retire-test — EXISTS but is not discoverable from the UI, and its revert can collide with append-only .ducklab records (fixed in the dogfood repo with a merge=union gitattribute ducklab should ship at project init) and with plan.md edits swept into the test commit by git add -A (run commits should be scoped).
-
-Expected: one \"Reopen\" action on a fixed bug or accepted task that orchestrates reopen + report revision + test-first relaunch with note + redo consent; retire-test offered where the person is looking; run commits scoped to the run's own footprint; union merge attributes shipped with .ducklab. The recorded verdict from the human: \"el flujo no es intuitivo.\"
-
-## Triage
-
-**Component:** task rework workflow
-
-The accepted-work redo flow is reproducibly confusing and unsafe because essential recovery actions are hidden and run/git behavior can lose or conflict with edits.
-
-**Verification (triage recommends):** test-first — Reopen a fixed bug or accepted task and verify report revision, status rewind, test-first relaunch note, redo consent, scoped run commit, and union merge attributes.
-
-This section is the triager's reading, not the reporter's. Check it rather than assume it.
-
 

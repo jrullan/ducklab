@@ -70,58 +70,6 @@ func TestPausedRunsOutrankEverything(t *testing.T) {
 // Accepted work is not shipped merely because its gate is green. The guide must
 // make the release obligation visible and put it ahead of the quiet-project
 // doors, so an operator cannot mistake accepted for released.
-// Accepted work remains auditable, but it must have a visible, contextual way
-// back into iteration. The guide is the shared surface used by the desktop and
-// other clients; hiding this behind a run-level redo button recreates B-006.
-func TestTheGuideSurfacesReopenForAcceptedTask(t *testing.T) {
-	steps := nextSteps(projectSnapshot{
-		HasRequirements: true, HasSpec: true, HasPlan: true,
-		Tasks: []TaskView{{ID: "T-001", Status: "accepted"}},
-	})
-	var reopen *NextStep
-	for i := range steps {
-		if steps[i].ID == "reopen" {
-			reopen = &steps[i]
-			break
-		}
-	}
-	if reopen == nil {
-		t.Fatalf("guide = %v, want a Reopen action for accepted task", ids(steps))
-	}
-	if reopen.Ref != "T-001" || reopen.Kind != "task" {
-		t.Errorf("reopen = %+v, want task T-001", *reopen)
-	}
-	if !strings.Contains(strings.ToLower(reopen.Action), "reopen") {
-		t.Errorf("action = %q, want discoverable Reopen wording", reopen.Action)
-	}
-	if reopen.Reason == "" {
-		t.Error("reopen action has no explanation of its safe redo workflow")
-	}
-}
-
-// Fixed bugs get the same contextual entry point: reopening must be offered
-// beside the report, rather than requiring a separate status edit followed by
-// a search through old runs.
-func TestTheGuideSurfacesReopenForFixedBug(t *testing.T) {
-	steps := nextSteps(projectSnapshot{
-		HasRequirements: true, HasSpec: true, HasPlan: true,
-		Bugs: []bug.Bug{{ID: "B-006", Status: bug.Fixed, TaskID: "T-001"}},
-	})
-	var reopen *NextStep
-	for i := range steps {
-		if steps[i].ID == "reopen" && steps[i].Ref == "B-006" {
-			reopen = &steps[i]
-			break
-		}
-	}
-	if reopen == nil {
-		t.Fatalf("guide = %v, want Reopen B-006 beside the fixed report", steps)
-	}
-	if reopen.Kind != "bug" || !strings.Contains(strings.ToLower(reopen.Action), "reopen") {
-		t.Errorf("reopen = %+v, want bug action with visible wording", *reopen)
-	}
-}
-
 func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
