@@ -82,6 +82,41 @@ describe("RunView", () => {
     expect(screen.queryByTestId("run-failure")).toBeNull();
   });
 
+  it("offers Clean or Commit recovery from a dirty-tree retire refusal", () => {
+    useRuns.getState().setRun({
+      ...run,
+      stage: "test",
+      status: "failed",
+      verdict: "FAILED",
+      pending_kind: undefined,
+      failure: "retire-test refused: working tree is dirty; commit or clean them",
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+
+    const failure = screen.getByTestId("run-failure");
+    expect(failure.textContent).toContain("commit or clean them");
+    expect(
+      failure.querySelectorAll("button, a").length,
+      "the recovery instruction must have an actionable Clean or Commit control",
+    ).toBeGreaterThan(0);
+    expect(failure.textContent).toMatch(/clean|commit/i);
+  });
+
+  it("does not offer Clean or Commit recovery for unrelated failures", () => {
+    useRuns.getState().setRun({
+      ...run,
+      status: "failed",
+      verdict: "FAILED",
+      pending_kind: undefined,
+      failure: '"index.html" is claimed by both "Solver" and "Renderer"',
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+
+    const failure = screen.getByTestId("run-failure");
+    expect(failure.textContent).not.toMatch(/\b(clean|commit)\b/i);
+    expect(failure.querySelectorAll("button, a")).toHaveLength(0);
+  });
+
   it("renders the conversation, gate and budget", async () => {
     useRuns.getState().setRun(run);
     useRuns.getState().applyEvent({ type: "turn_start", run_id: "r-1", seq: 1, data: { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" } });

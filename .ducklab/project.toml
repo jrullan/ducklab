@@ -10,7 +10,7 @@ autonomy = "guarded"
 
 [verify]
   mode = "tests"
-  tests = "go test ./..."
+  tests = "go test ./... && cd frontend && npx tsc --noEmit && npx vitest run"
   build = ""
   lint = ""
   custom = ""
