@@ -1,0 +1,98 @@
+package service
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/runlog"
+)
+
+// Redo is one safe door for an accepted test-first task: consent must explain
+// the reason, the new run must remain a test-first chain, and the old
+// acceptance must be attributable rather than silently overwritten.
+func TestRedoAcceptedTestFirstRequiresNoteAndAuditsPriorAcceptance(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"add", "-A"}, {"commit", "-q", "-m", "seed", "--allow-empty"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\\n%s", args, err, out)
+		}
+	}
+
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"verify.mode": "tests", "verify.tests": "true"}); err != nil {
+		t.Fatal(err)
+	}
+
+	prior := &runlog.Run{
+		ID: "r-accepted-test", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "done", Verdict: "PASSED", Accepted: true,
+		CommitSHA: "prior-test-sha-123", StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	if _, err := s.TestStart(context.Background(), id, TestFirstRequest{TaskID: "T-001", Redo: true}); err == nil {
+		t.Fatal("redo of an accepted test-first task without a note was allowed")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "note") {
+		t.Fatalf("missing-note refusal does not name the required reason: %v", err)
+	}
+
+	run, err := s.TestStart(context.Background(), id, TestFirstRequest{
+		TaskID: "T-001", Redo: true, Note: "the accepted test covered the wrong boundary",
+		ThenBuild: true, Build: RunRequest{Mode: "solo"},
+	})
+	if err != nil {
+		t.Fatalf("redo with a reason was refused: %v", err)
+	}
+	t.Cleanup(func() {
+		s.RunAbort(context.Background(), run.ID)
+		s.waitForRun(context.Background(), run.ID)
+	})
+
+	if run.Stage != "test" {
+		t.Fatalf("redo started as %q, want a fresh test phase", run.Stage)
+	}
+	if run.Note != "the accepted test covered the wrong boundary" {
+		t.Errorf("run note = %q, want the human redo reason", run.Note)
+	}
+	if run.ChainBuild == nil {
+		t.Fatal("redo lost the chained build configuration")
+	}
+
+	// Use the persisted record as the compatibility surface for the new
+	// provenance fields: older clients can still inspect the run JSON.
+	state, err := os.ReadFile(dir + "/.ducklab/runs/" + run.ID + "/state.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"prior-test-sha-123", "the accepted test covered the wrong boundary"} {
+		if !strings.Contains(string(state), want) {
+			t.Errorf("run state does not record %q: %s", want, state)
+		}
+	}
+
+	audit, err := os.ReadFile(dir + "/.ducklab/bugs/audit.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := string(audit)
+	for _, want := range []string{"T-001", "prior-test-sha-123", "the accepted test covered the wrong boundary", "human"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("redo audit lacks %q: %s", want, line)
+		}
+	}
+	if !strings.Contains(line, "redo") {
+		t.Errorf("redo audit does not name its door: %s", line)
+	}
+}
