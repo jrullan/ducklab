@@ -82,3 +82,5 @@
 {"ts":"2026-08-16T18:27:28Z","bug":"B-027","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-023"}
 {"ts":"2026-08-16T18:36:01Z","bug":"B-027","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-023"}
 {"ts":"2026-08-16T18:36:10Z","bug":"B-028","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-024"}
+{"ts":"2026-08-16T18:48:30Z","bug":"B-028","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-024"}
+{"ts":"2026-08-16T18:49:14Z","bug":"B-029","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-025"}

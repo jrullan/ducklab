@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -123,5 +124,98 @@ func TestAnAmbiguousSearchIsStillRefused(t *testing.T) {
 	}
 	if after != "x\nx\n" {
 		t.Errorf("the file was touched: %q", after)
+	}
+}
+
+func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "target.go")
+	if err := os.WriteFile(path, []byte("package target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.go"), []byte("package other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var reports []struct {
+		reason string
+		data   map[string]interface{}
+	}
+	ectx := &ExecContext{
+		ProjectRoot: root,
+		OnDistress: func(reason string, data map[string]interface{}) {
+			reports = append(reports, struct {
+				reason string
+				data   map[string]interface{}
+			}{reason: reason, data: data})
+		},
+	}
+	registry := NewRegistry()
+	failingPatch := func(search string) *Result {
+		args, err := json.Marshal(map[string]interface{}{
+			"path": "target.go",
+			"edits": []map[string]string{{"search": search, "replace": "replacement"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := registry.Execute(context.Background(), ectx, "fs_patch", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	// Different bad searches must still form one per-file streak.
+	for i := 1; i <= 4; i++ {
+		if result := failingPatch("missing-" + strconv.Itoa(i)); !result.IsError {
+			t.Fatalf("failure %d unexpectedly succeeded: %q", i, result.Content)
+		}
+	}
+	if result := failingPatch("missing-5"); !result.IsError {
+		t.Fatalf("the fifth failure unexpectedly succeeded: %q", result.Content)
+	}
+	// The fifth failure is permitted; the next attempt is the one refused.
+	refused := failingPatch("a sixth, different bad search")
+	if !refused.IsError {
+		t.Fatalf("sixth failure was not refused: %q", refused.Content)
+	}
+	if !strings.Contains(refused.Content, "fs_patch has failed 5 times on this file") ||
+		!strings.Contains(refused.Content, "read the full section") ||
+		!strings.Contains(refused.Content, "fs_write") {
+		t.Errorf("refusal lacks the read-and-rewrite remedy: %q", refused.Content)
+	}
+
+	if len(reports) == 0 {
+		t.Fatal("failure streak was not reported to the health surface")
+	}
+	foundCount := false
+	foundFile := false
+	for _, report := range reports {
+		if count, ok := report.data["count"].(int); ok && count == 5 {
+			foundCount = true
+		}
+		if path, ok := report.data["path"].(string); ok && path == "target.go" {
+			foundFile = true
+		}
+	}
+	if !foundCount || !foundFile {
+		t.Errorf("health reports = %#v; want count 5 and target.go", reports)
+	}
+
+	// A streak belongs to one file, not to the whole fs_patch tool.
+	otherArgs, err := json.Marshal(map[string]interface{}{
+		"path": "other.go",
+		"edits": []map[string]string{{"search": "also-missing", "replace": "replacement"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := registry.Execute(context.Background(), ectx, "fs_patch", otherArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !other.IsError || strings.Contains(other.Content, "REFUSED") {
+		t.Fatalf("a different file inherited the target.go brake: %#v", other)
 	}
 }

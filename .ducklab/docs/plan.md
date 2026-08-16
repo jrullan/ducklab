@@ -442,4 +442,25 @@ The test-first gate treats any nonzero test exit as a valid failing specificatio
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-025 — Add a per-file consecutive fs_patch failure brake with health reporting and fs_write guidance
+
+Fixes B-029.
+
+## Reported
+
+What happened, three times: T-002's first build — 83 failed fs_patch on internal/agent/agent.go; T-015's rounds — the fs_patch/backtick fight k3 tabulated; T-018's build — 55 failed fs_patch plus 11 red verify_runs across 43 minutes. In each case the implementer varied the search string slightly on every attempt, so the identical-repeat brake (which requires byte-identical calls) never fired, and the run burned its budget fighting the patch tool instead of the problem. The known-good remedy — read the whole function with fs_read and replace it with fs_write — was applied only when a human put it in a redo note.
+
+Expected: a fuzzy streak brake at the tool layer — same tool + same file + failing, N consecutive (say 5) — that REFUSES the next attempt with the remedy named: "fs_patch has failed 5 times on this file; read the full section and rewrite it with fs_write instead of patching". Same family as the repeat brake and the gate brake: deterministic, teaches the exit, costs nothing when healthy. The streak counter belongs in the health surface too, so an operator sees the fight before the budget is gone.
+
+## Triage
+
+**Component:** tool dispatch
+**Suspected files:** internal/agent/agent.go
+
+Repeated fs_patch failures can exhaust a run's budget without intervention, and no existing open bug covers this per-file fuzzy failure brake.
+
+**Verification (triage recommends):** test-first — Simulate five failing fs_patch calls against one file, then assert the next call is refused with the read-and-rewrite remedy and streak state is exposed.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
