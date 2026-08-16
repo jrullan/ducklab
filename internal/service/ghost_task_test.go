@@ -125,6 +125,35 @@ func TestProjectInitIgnoresTheOperationalState(t *testing.T) {
 	}
 }
 
+func TestProjectInitWritesUnionGitattributesIdempotently(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	dir := t.TempDir()
+	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(dir, ".gitattributes")
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no .gitattributes written: %v", err)
+	}
+	const rule = ".ducklab/bugs/audit.jsonl merge=union"
+	if strings.Count(string(first), rule) != 1 {
+		t.Fatalf("audit ledger rule appears %d times, want 1:\n%s", strings.Count(string(first), rule), first)
+	}
+
+	if _, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(second) != string(first) {
+		t.Fatalf("second init modified .gitattributes:\nfirst: %q\nsecond: %q", first, second)
+	}
+}
+
 // T-023 depended on T-022, T-022 had never been accepted — and T-023 ran
 // three times and got ACCEPTED. The plan's dependency was display only: the
 // board said "waiting on T-022" and offered Run anyway, and RunStart never

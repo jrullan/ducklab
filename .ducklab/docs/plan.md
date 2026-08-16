@@ -327,3 +327,60 @@ Third tranche of B-006 (orchestration; depends on the previous two). Redoing an 
 
 Fourth tranche of B-006 (cleanup and limits), kept separate per the change. Two bounded pieces: (a) a cleanup path that, when a redo supersedes a still-unbuilt committed test, retires that stale test through the existing deterministic `TestRetire` inverse-patch machinery rather than leaving the suite red — refusing with the verdict first when the build already landed, exactly as SPEC-047 requires; (b) a per-task bound on redo commits so an accepted task cannot accumulate unbounded redo/relaunch commits without a person noticing — the cap names itself in the refusal when reached. **Assumption:** the architect confirmed retire-test/cleanup belongs in its own tranche, as the change allows; if it should fold into the orchestration tranche instead, drop (a) here and widen that task. Done when a test redoes a task whose prior test never built and asserts the stale test is retired (revert SHA recorded, queue hold released), and a separate test drives a task to the redo-commit cap and asserts the next redo is refused with the limit named.
 
+### T-019 — Restore the working tree when aborting a paused or failed build
+
+Fixes B-023.
+
+## Reported
+
+What happened: a build run was aborted while paused, but the working tree was not restored. The retire-test action then rejected because the tree was dirty, even though the abort path was expected to clean up its own changes. Expected: aborting a paused/failed build restores the working tree according to the documented promise "restores working tree on rejection/failure", or explicitly records and exposes any unclean residue so the operator can recover it.
+
+## Triage
+
+**Component:** build run lifecycle
+**Suspected files:** internal/service/service.go, internal/vcs/vcs.go
+
+Aborting a paused build leaves model changes behind, violating the cleanup promise and blocking the documented recovery workflow.
+
+**Verification (triage recommends):** test-first — Abort a paused run after it modifies a tracked and untracked file, then assert the tree matches the pre-run snapshot and retire-test can proceed.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-020 — Add actionable Clean or Commit recovery controls to the retire-test error state
+
+Fixes B-024.
+
+## Reported
+
+What happened: retire-test reported the recovery instruction "commit or clean them" when the working tree was dirty, but the UI offered neither a Clean action nor a Commit action from that error/card. This leaves the operator at a click-distance dead end: the error names the required remedies, but the product exposes no path to execute either one. Expected: provide actionable Clean and/or Commit controls in the relevant UI state, or route the operator directly to the existing recovery action.
+
+## Triage
+
+**Component:** retire-test UI
+
+The reported recovery error is reproducible and leaves operators without an in-product way to perform either required remedy.
+
+**Verification (triage recommends):** test-first — Run retire-test with a dirty working tree and verify the resulting error state exposes or routes to a Clean or Commit action.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-021 — Expose every legal abort and reject action on paused run cards
+
+Fixes B-025.
+
+## Reported
+
+What happened: a paused run card exposed only Resume, while Abort/Reject was not available on the pause card. To stop the run, the operator had to navigate up to the task level and find Abort elsewhere. Expected: the pause card should expose every legal decision for that paused run, including Abort/Reject where applicable, so the operator can act at the point where the decision is presented.
+
+## Triage
+
+**Component:** paused run decision UI
+**Suspected files:** internal/service/next.go, frontend/src/components/DecisionCard.tsx, frontend/src/components/WaitingCard.tsx, frontend/src/views/Board.tsx, frontend/src/views/RunView.tsx
+
+Paused gate cards omit a legal stop/decision action, forcing operators to leave the card and increasing the risk of unintended continuation.
+
+**Verification (triage recommends):** test-first — Render a paused run card with legal abort/reject actions and verify both controls appear and invoke their respective endpoints.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
