@@ -73,6 +73,8 @@ type TestFirstRequest struct {
 	Redo bool `json:"redo,omitempty"`
 }
 
+const maxRedoCommitsPerTask = 10
+
 // TestStart writes the failing test for a task.
 func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirstRequest) (*runlog.Run, error) {
 	if strings.TrimSpace(req.TaskID) == "" {
@@ -106,6 +108,21 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		return nil, fmt.Errorf("%s is already accepted; its work is committed. A new run would redo finished work — pass redo (and say why in a note) if that is truly the intent", req.TaskID)
 	}
 	if accepted && req.Redo {
+		// Redo is a bounded escape hatch, not a way to accumulate an
+		// unreviewed second history forever. Count accepted test commits, which
+		// includes the original accepted test and every committed redo.
+		redoCommits := 0
+		s.runsMu.RLock()
+		for _, candidate := range s.runs {
+			r := candidate.run
+			if r.ProjectID == projectID && r.TaskID == req.TaskID && r.Accepted && r.Stage == "test" && r.CommitSHA != "" && r.RevertSHA == "" {
+				redoCommits++
+			}
+		}
+		s.runsMu.RUnlock()
+		if redoCommits >= maxRedoCommitsPerTask {
+			return nil, fmt.Errorf("cannot redo %s: redo commit limit reached (%d per task)", req.TaskID, maxRedoCommitsPerTask)
+		}
 		if strings.TrimSpace(req.Note) == "" {
 			return nil, fmt.Errorf("redo of accepted task %s requires a note explaining why", req.TaskID)
 		}
@@ -139,6 +156,18 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 			for _, path := range git.DirtyPaths() {
 				if !strings.HasPrefix(path, ".ducklab/" ) && path != ".ducklab" {
 					return nil, fmt.Errorf("cannot redo %s: the working tree is dirty; commit or clean it first", req.TaskID)
+				}
+			}
+		}
+		// A redo supersedes an accepted test that has not yet been built. Remove
+		// that promise first, using the same deterministic inverse-patch path as
+		// the explicit retire action. Ignore synthetic/legacy ledger SHAs that no
+		// longer exist in git; they cannot describe a committed test in this tree.
+		if priorAcceptedSHA != "" {
+			git := vcs.New(entry.Path)
+			if _, showErr := git.ShowCommit(priorAcceptedSHA); showErr == nil {
+				if _, retireErr := s.TestRetire(ctx, projectID, req.TaskID); retireErr != nil {
+					return nil, retireErr
 				}
 			}
 		}
@@ -278,11 +307,20 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 	git := vcs.New(entry.Path)
 	if clean, cerr := git.IsClean(); cerr != nil || !clean {
 		dirty := git.DirtyPaths()
-		sample := strings.Join(dirty[:min(10, len(dirty))], ", ")
-		if len(dirty) > 10 {
-			sample += fmt.Sprintf(" and %d more", len(dirty)-10)
+		filtered := dirty[:0]
+		for _, path := range dirty {
+			if !strings.HasPrefix(path, ".ducklab/") && path != ".ducklab" {
+				filtered = append(filtered, path)
+			}
 		}
-		return nil, fmt.Errorf("not retired — the working tree has uncommitted changes (%s); commit or clean them, then retire", sample)
+		dirty = filtered
+		if len(dirty) > 0 {
+			sample := strings.Join(dirty[:min(10, len(dirty))], ", ")
+			if len(dirty) > 10 {
+				sample += fmt.Sprintf(" and %d more", len(dirty)-10)
+			}
+			return nil, fmt.Errorf("not retired — the working tree has uncommitted changes (%s); commit or clean them, then retire", sample)
+		}
 	}
 	sha, err := git.Revert(target.run.CommitSHA)
 	if err != nil {

@@ -107,6 +107,8 @@ func TestRedoRetiresAnUnbuiltAcceptedTest(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 	git := vcs.New(dir)
+	if err := git.Init(); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(dir, "baseline.txt"), []byte("baseline\n"), 0o644); err != nil { t.Fatal(err) }
 	if err := git.AddAll(); err != nil { t.Fatal(err) }
 	if _, err := git.Commit("baseline"); err != nil { t.Fatal(err) }
 	stale := filepath.Join(dir, "stale_test.py")
