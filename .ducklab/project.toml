@@ -20,7 +20,6 @@ autonomy = "guarded"
   scribe = "beelink-local"
   triager = "luna"
   implementer = "luna"
-  advisor = "luna"
 
 [modes]
 
