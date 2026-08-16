@@ -69,6 +69,91 @@ func TestTaskListReadsThePlan(t *testing.T) {
 	}
 }
 
+// Reusing an ID for a semantically new task must not inherit the old task's
+// failed-run state. The old run remains in the audit log, but only runs from
+// the current body revision may derive status and next actions.
+func TestTaskBodyRevisionIgnoresHistoricalRuns(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.mode": "tests", "verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	old := &runlog.Run{
+		ID: "r-old-task-meaning", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "failed", Verdict: "FAILED", StartedAt: "2020-01-01T00:00:00Z",
+	}
+	w, err := runlog.NewWriter(dir, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The ID is deliberately recycled, but the body now describes different
+	// work. This is the revision boundary: the failed run above predates it.
+	revised := "## M-01 — Auth\n\n### T-001 — Rotate signing keys\n\nUse a new key at initialization.\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(revised), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want one revised task", len(tasks))
+	}
+	if tasks[0].Title != "Rotate signing keys" {
+		t.Fatalf("title = %q, want revised task body", tasks[0].Title)
+	}
+	if tasks[0].Status != "todo" {
+		t.Errorf("status = %q, want todo; historical failure contaminated revised task", tasks[0].Status)
+	}
+	if tasks[0].Blocked != "" {
+		t.Errorf("blocked = %q, want no historical blockage", tasks[0].Blocked)
+	}
+	if len(tasks[0].Next) == 0 || tasks[0].Next[0] != "test_first" {
+		t.Errorf("next = %v, want test_first for the fresh task", tasks[0].Next)
+	}
+
+	// Revision filtering changes derived state only; historical runs remain
+	// available for audit.
+	runs, err := s.RunList(context.Background(), RunFilter{ProjectID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != old.ID {
+		t.Errorf("historical runs = %+v, want %s retained", runs, old.ID)
+	}
+
+	// The boundary is exclusive: a run created after the revision is current
+	// evidence and must still derive state normally.
+	current := &runlog.Run{
+		ID: "r-current-task-meaning", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "failed", Verdict: "FAILED", StartedAt: "2099-01-01T00:00:00Z",
+	}
+	cw, err := runlog.NewWriter(dir, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cw.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err = s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tasks[0].Status != "blocked" {
+		t.Errorf("status after current failed run = %q, want blocked", tasks[0].Status)
+	}
+}
+
 // The plan says what tasks ARE; run records say what has happened to them.
 // Keeping status in the document would let a model rewriting the plan mark its
 // own work accepted.

@@ -79,3 +79,4 @@
 {"ts":"2026-08-16T18:13:59Z","bug":"B-029","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-16T18:14:00Z","bug":"B-032","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-16T18:14:00Z","bug":"B-031","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-16T18:27:28Z","bug":"B-027","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-023"}

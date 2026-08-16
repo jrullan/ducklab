@@ -402,4 +402,23 @@ The engine already derives a blocked explanation, but MCP task_list drops it whi
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-023 — Prevent historical runs from affecting recycled task IDs after body revisions
+
+Fixes B-027.
+
+## Reported
+
+What happened: recycling a task ID after rewriting its body allowed historical runs from the previous meaning of that ID to influence the current derived state. The new T-015 tranche was marked with a blocked/last-run-failed state inherited from the older failed Reopen task, even though it was a new .gitattributes-at-init task and the engine offered test_first. Expected: rewriting a task body must either mint a new task ID, or derived state must ignore runs created before the latest task-body revision. Historical runs should remain auditable but must not contaminate the status of a semantically different task.
+
+## Triage
+
+**Component:** task state
+**Suspected files:** internal/service/bugs.go, internal/runlog/runlog.go
+
+Reusing a task ID causes stale failed-run state to misclassify a semantically new task and can drive incorrect execution decisions.
+
+**Verification (triage recommends):** test-first — Rewrite a task body under the same ID after a failed historical run and verify the derived state ignores that run.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
