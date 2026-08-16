@@ -1106,7 +1106,7 @@ func outputCap(declared *int) *int {
 }
 
 func outputCapForContract(declared *int, contract string) *int {
-	if strings.HasPrefix(contract, "json:") {
+	if contract == "json:triage" {
 		n := 2048
 		if declared != nil && *declared > 0 && *declared < n {
 			n = *declared
