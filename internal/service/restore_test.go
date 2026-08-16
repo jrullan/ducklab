@@ -87,3 +87,59 @@ func TestAcceptDoesNotRestore(t *testing.T) {
 	// Must be a no-op — reaching for git with a fake path would error loudly.
 	restoreAfterUnaccepted(rs)
 }
+
+// Aborting is the cleanup path for a build that stopped before acceptance. It
+// must restore both kinds of model residue, including when no run goroutine is
+// left to unwind (the paused case), so the next test-first/retire action sees
+// the same tree the build started with.
+func TestAbortRestoresPausedBuildTreeAndAllowsCleanRecovery(t *testing.T) {
+	for _, status := range []string{"paused", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			id, dir := projectWithDocs(t, s, nil)
+			g := gitProject(t, dir)
+
+			snap, err := g.SnapshotTree()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := &runlog.Run{
+				ID: "r-abort-" + status, ProjectID: id, TaskID: "T-001", Stage: "build",
+				Status: status, Verdict: "PASSED", PendingKind: "gate",
+				TreeSnapshot: snap, StartedAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			w, err := runlog.NewWriter(dir, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			s.RecoverRuns(context.Background())
+
+			if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("model edit\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			created := filepath.Join(dir, "created-by-model.txt")
+			if err := os.WriteFile(created, []byte("model file\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := s.RunAbort(context.Background(), run.ID); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.ReadFile(filepath.Join(dir, "index.html")); err != nil || string(got) != "original\n" {
+				t.Errorf("tracked model edit survived abort: %q, %v", got, err)
+			}
+			if _, err := os.Stat(created); !os.IsNotExist(err) {
+				t.Errorf("untracked model file survived abort: %v", err)
+			}
+			if dirty := g.DirtyPaths(); len(dirty) != 0 {
+				for _, path := range dirty {
+					if path != ".ducklab" && !strings.HasPrefix(path, ".ducklab/") {
+						t.Errorf("abort left task files dirty: %v", dirty)
+						break
+					}
+				}
+			}
+		})
+	}
+}

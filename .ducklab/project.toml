@@ -17,9 +17,10 @@ autonomy = "guarded"
   timeout_s = 900
 
 [roster]
+  advisor = "luna"
+  implementer = "luna"
   scribe = "beelink-local"
   triager = "luna"
-  implementer = "luna"
 
 [modes]
 
