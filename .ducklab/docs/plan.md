@@ -463,4 +463,25 @@ Repeated fs_patch failures can exhaust a run's budget without intervention, and 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-026 — Use git-derived build version and provenance across CLI, engine, and MCP
+
+Fixes B-033.
+
+## Reported
+
+What happened: preparing the first release cut, the draft proposed v0.1.0 while every running surface announced 0.4.0 — a number that exists only as hand-maintained strings: internal/mcp/mcp.go:128 hardcodes serverInfo version "0.4.0", the engine reports 0.4.0 into engine.json, and internal/cli/cli.go carries Version = "dev". No git tag existed at all. The moment v0.5.0 is cut, the MCP handshake will still tell every client "0.4.0" — an instant lie of the B-002 family (a surface promising what the record contradicts). This also cost real time earlier: the two-day "unknown tool budget_lift" hunt would have ended in seconds if hermes tools could show WHICH ducklab version sat across the pipe.
+
+Expected: one source of truth — the git tag. The Makefile already injects build.Branch and build.Commit via ldflags (B-018's provenance work); add build.Version from `git describe --tags --always`, and have the CLI Version, the engine's reported version, and the MCP serverInfo all read it. Hardcoded version strings are deleted, and `ducklab mcp serve` announces its provenance (version+commit) in serverInfo so an operator can identify a stale process without /proc archaeology.
+
+## Triage
+
+**Component:** build/version provenance
+**Suspected files:** internal/build/build.go, Makefile, internal/cli/cli.go, internal/mcp/mcp.go, cmd/ducklab/main.go, cmd/ducklab-engine/main.go
+
+Hardcoded or independently defaulted version values cause released binaries and MCP handshakes to advertise stale or inconsistent provenance.
+
+**Verification (triage recommends):** test-first — Build with a tagged commit and verify CLI output, engine.json/API version, and MCP initialize serverInfo report the same version and commit.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

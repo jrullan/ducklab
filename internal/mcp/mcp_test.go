@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jrullan/ducklab/internal/build"
 )
 
 // fakeEngine records what the operator did and answers from fixtures.
@@ -185,6 +187,16 @@ func TestInitializeAndToolListSpeakMCP(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 	)
+	// Initialize must identify the exact running server, not merely its product.
+	initResult, _ := resps[0]["result"].(map[string]interface{})
+	serverInfo, _ := initResult["serverInfo"].(map[string]interface{})
+	if got := serverInfo["version"]; got != build.Version {
+		t.Fatalf("serverInfo.version = %v, want build.Version %q", got, build.Version)
+	}
+	if got := serverInfo["commit"]; got != build.Commit {
+		t.Fatalf("serverInfo.commit = %v, want build.Commit %q", got, build.Commit)
+	}
+
 	// The notification gets no reply: two responses for three frames.
 	if len(resps) != 2 {
 		t.Fatalf("%d responses, want 2", len(resps))
