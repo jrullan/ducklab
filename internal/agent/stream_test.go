@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -258,6 +259,19 @@ func TestStreamingRepetitionIsCanceledAndRetriedWithDiagnosis(t *testing.T) {
 	}
 	if len(p.requests[1].Messages) == 0 || !strings.Contains(strings.ToLower(p.requests[1].Messages[len(p.requests[1].Messages)-1].Content), "repetition") {
 		t.Fatal("retry prompt did not name the repetition loop")
+	}
+}
+
+// Unsupported streaming must still inspect the assembled fallback response.
+func TestUnsupportedStreamingDetectsRepetition(t *testing.T) {
+	p := &streamingProvider{chunks: []string{"alpha beta gamma alpha beta gamma alpha beta gamma "}, unsupported: true}
+	loop := testLoop(p, 0)
+	loop.OnDelta = func(_ *Turn, _ string) {}
+	turn := &Turn{Role: config.RoleImplementer, Prompt: "x", Contract: "freeform", MaxTurns: 1}
+
+	_, err := chatMaybeStreaming(context.Background(), loop, turn, provider.ChatRequest{})
+	if !errors.Is(err, ErrRepetitionLoop) {
+		t.Fatalf("error = %v, want repetition loop", err)
 	}
 }
 

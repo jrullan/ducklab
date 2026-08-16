@@ -815,4 +815,44 @@ A plan regeneration falsely reverts accepted work and causes the board, launch g
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-042 — Reject acceptance when the committed checkout omits required ignored files
+
+Fixes B-040.
+
+## Reported
+
+What happened: the unanchored pattern "build/" in .gitignore matched internal/build/ — the very package B-033's task created. The accept's git add -A respects gitignore, so the accepted commit shipped WITHOUT its core package; the gate stayed green because the untracked files still sat on disk. Three lies at once: a fresh clone would not compile, a git clean would have deleted the version system, and the accepted diff on record was not the work reviewed as running. Found only because a later explicit git add refused the path. Hand-fixed in 8c11234 (pattern anchored to /build/, package committed, arch whitelist updated).
+
+Expected: an accept must not leave referenced work untracked in silence — after committing, check for untracked files under paths the committed code imports or touches and refuse naming them ("internal/build/ is ignored by .gitignore:10 but the committed code imports it"). Cheapest honest form: the gate must pass from a clean checkout of the accept commit, not from the working tree — the tree can hide what the commit lacks.
+
+## Triage
+
+**Component:** acceptance gate
+**Suspected files:** internal/service/service.go
+
+Acceptance can record a green run while its commit silently omits ignored source files, producing an unreproducible and uncompilable fresh checkout.
+
+**Verification (triage recommends):** test-first — Accept a change importing an ignored package and verify the gate detects the missing file or fails from a clean checkout.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-043 — Add a safe engine version command and prevent live engine identity overwrite
+
+Fixes B-041.
+
+## Reported
+
+What happened: running ducklab-engine --version (or version) does not print-and-exit — the flag is unrecognized and the binary starts a full engine, which listened on a fresh port and OVERWROTE engine.json with its own pid/port/token before being killed. The real engine kept running but became unreachable to every new client: the file that names it now named a corpse. One curious human (or agent) asking \"which version are you?\" can decapitate the discovery mechanism.\n\nExpected: ducklab-engine --version / version prints build.Semver() + Provenance() and exits without binding a port or touching engine.json — and, independently, an engine should refuse to overwrite an engine.json whose recorded pid is still alive, so a second engine can never silently steal the identity of a live one.
+
+## Triage
+
+**Component:** engine startup and daemon discovery
+**Suspected files:** cmd/ducklab-engine/main.go, internal/daemon/daemon.go
+
+The unrecognized version command starts a second engine and unconditionally replaces engine.json, making the live engine undiscoverable.
+
+**Verification (triage recommends):** test-first — Run ducklab-engine version and --version with an existing live engine.json, asserting version output, no listener or file mutation, and refusal to overwrite the live record.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
