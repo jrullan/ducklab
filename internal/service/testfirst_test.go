@@ -38,6 +38,22 @@ func TestAStillGreenGateFailsTheRun(t *testing.T) {
 	}
 }
 
+// A passing frontend test is not a vacuous specification when the configured
+// gate never executes frontend/. Diagnose the coverage boundary explicitly so
+// a redo note does not falsely blame the assertion.
+func TestGreenFrontendTestOutsideGateIsCoverageError(t *testing.T) {
+	diff := "diff --git a/frontend/src/recovery.test.tsx b/frontend/src/recovery.test.tsx\n--- /dev/null\n+++ b/frontend/src/recovery.test.tsx\n@@ -0,0 +1 @@\n+test('recovery control', () => {})\n"
+	verdict, detail := judgeTestFirst(green(), green(), diff, nil)
+	if verdict != "FAILED" {
+		t.Fatalf("verdict = %s, want FAILED while diagnosing uncovered test", verdict)
+	}
+	for _, want := range []string{"frontend/", "gate never runs", "widen the gate or move the test"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("coverage diagnosis lacks %q: %q", want, detail)
+		}
+	}
+}
+
 // "It is red now" proves nothing when it was red before (05 §5.2). Saying so
 // beats claiming a result the run cannot support.
 func TestAnAlreadyRedGateIsUnverifiedNotPassed(t *testing.T) {

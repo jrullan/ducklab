@@ -51,6 +51,31 @@ func TestDetectGoProject(t *testing.T) {
 	}
 }
 
+// A repository with both the Go service and the desktop must not silently
+// measure only one language. The detected tests gate is the project's shared
+// verification contract, so it must execute the frontend typecheck and Vitest
+// suite as well as Go tests.
+func TestDetectMixedGoFrontendProjectCoversFrontend(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "go.mod", "module example.com/x\n\ngo 1.24\n")
+	write(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+	write(t, dir, "frontend/package.json", `{"scripts":{"test":"vitest run","typecheck":"tsc --noEmit"}}`)
+	write(t, dir, "frontend/tsconfig.json", `{}`)
+
+	gate, cmd, err := Detect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate != GateTests {
+		t.Fatalf("gate = %q, want tests", gate)
+	}
+	for _, want := range []string{"go test ./...", "frontend", "tsc --noEmit", "vitest run"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("mixed-project gate %q does not include %q", cmd, want)
+		}
+	}
+}
+
 // P3: a gate that could not run anything must never report success.
 func TestVerdictNoneIsUnverifiedNotPassed(t *testing.T) {
 	got := Verdict(&Result{Gate: GateNone, ExitCode: 0})
