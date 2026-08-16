@@ -519,6 +519,14 @@ func (s *Server) handleRunLLM(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": calls, "total": len(calls)})
 }
 
+func (s *Server) handleProjectRecover(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.ProjectRecover(r.Context(), r.PathValue("id"), r.PathValue("action")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {
 	st, err := s.svc.ProjectStatus(r.Context(), r.PathValue("id"))
 	if err != nil {

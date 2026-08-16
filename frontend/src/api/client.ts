@@ -756,6 +756,9 @@ export class EngineClient {
   projectStatus(id: string) {
     return this.request<Record<string, unknown>>("GET", `/v1/projects/${id}/status`);
   }
+  projectRecover(id: string, action: "clean" | "commit") {
+    return this.request<void>("POST", `/v1/projects/${id}/recover/${action}`);
+  }
   /** Configured providers. Carries the *name* of the key's environment
    * variable and whether it is set — never a key (I10). */
   providers() {

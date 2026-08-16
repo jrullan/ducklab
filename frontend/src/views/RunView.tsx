@@ -54,6 +54,20 @@ function cycleStation(stage: string): string | null {
   return (CYCLE as readonly string[]).includes(stage) ? stage : null;
 }
 
+function RecoveryControls({ client, projectId }: { client: EngineClient; projectId: string }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const recover = (action: "clean" | "commit") => {
+    setBusy(action); setError(null);
+    void client.projectRecover(projectId, action).catch((e) => setError(e instanceof Error ? e.message : String(e))).finally(() => setBusy(null));
+  };
+  return <div className="mt-2 flex gap-2 text-sm" data-testid="retire-recovery">
+    <button type="button" disabled={busy !== null} onClick={() => recover("clean")} className="rounded border border-hairline px-2 py-1">{busy === "clean" ? "Cleaning…" : "Clean working tree"}</button>
+    <button type="button" disabled={busy !== null} onClick={() => recover("commit")} className="rounded border border-hairline px-2 py-1">{busy === "commit" ? "Committing…" : "Commit changes"}</button>
+    {error && <span className="text-critical" role="alert">{error}</span>}
+  </div>;
+}
+
 function CycleMap({ stage }: { stage: string }) {
   const at = cycleStation(stage);
   if (!at) return null;
@@ -987,6 +1001,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {run.status === "failed" ? "Why it failed" : "Why it stopped"}
           </h2>
           <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
+          {run.stage === "test" && /retire-test|working tree is dirty|commit or clean/i.test(run.failure) && (
+            <RecoveryControls client={client} projectId={run.project_id} />
+          )}
         </section>
       )}
 

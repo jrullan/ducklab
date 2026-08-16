@@ -187,6 +187,9 @@ func routeTable() []Route {
 		{Method: "GET", Path: "/v1/projects/{id}/status", Auth: true,
 			Response: service.Status{}, Summary: "Project status", ClientMethod: "ProjectStatus",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectStatus }},
+		{Method: "POST", Path: "/v1/projects/{id}/recover/{action}", Auth: true,
+			Summary: "Clean or commit the working tree", ClientMethod: "ProjectRecover",
+			handler: func(s *Server) http.HandlerFunc { return s.handleProjectRecover }},
 
 		// Ducklings
 		{Method: "GET", Path: "/v1/ducklings", Auth: true,

@@ -362,6 +362,7 @@ type Project struct {
 // Status is the project status.
 type Status struct {
 	StageProgress map[string]string `json:"stage_progress"`
+	WorkingTreeDirty bool `json:"working_tree_dirty,omitempty"`
 	TaskCounts    map[string]int    `json:"task_counts"`
 	BudgetSpent   float64           `json:"budget_spent_today"`
 	ActiveRuns    int               `json:"active_runs"`
@@ -653,6 +654,21 @@ func (s *Service) ProjectForget(ctx context.Context, id string) error {
 	delete(s.projects, id)
 	s.projMu.Unlock()
 	return s.registry.Unregister(id)
+}
+
+// ProjectRecover performs an explicit working-tree recovery action.
+func (s *Service) ProjectRecover(ctx context.Context, id, action string) error {
+	entry, err := s.registry.Get(id)
+	if err != nil { return err }
+	git := vcs.New(entry.Path)
+	switch action {
+	case "clean": return git.Clean()
+	case "commit":
+		if err := git.AddAll(); err != nil { return err }
+		_, err := git.Commit("ducklab: recover working tree")
+		return err
+	default: return fmt.Errorf("unknown recovery action %q", action)
+	}
 }
 
 // ProjectStatus returns project status.

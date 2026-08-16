@@ -150,6 +150,15 @@ func (g *Git) AddAll() error {
 	return err
 }
 
+// Clean discards tracked and untracked working-tree changes.
+func (g *Git) Clean() error {
+	if _, err := g.run("reset", "--hard", "HEAD"); err != nil {
+		return err
+	}
+	_, err := g.run("clean", "-fd")
+	return err
+}
+
 // Commit creates a commit.
 //
 // The message is escaped because run joins its arguments into one shell
