@@ -31,6 +31,8 @@ type fakeEngine struct {
 	attached     string
 	attachedName string
 	revised    []string
+	lastStageReq  map[string]interface{}
+	lastTriageReq map[string]interface{}
 	budgetLifted string
 	resumeCount int
 }
@@ -100,6 +102,7 @@ func (f *fakeEngine) RunStart(_ string, req map[string]interface{}) (map[string]
 	return map[string]interface{}{"id": "r-new"}, nil
 }
 func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.lastStageReq = req
 	f.revised = append(f.revised, fmt.Sprint(req["revise"]))
 	if ext, ok := req["extend"].(string); ok && ext != "" {
 		f.extended = append(f.extended, ext)
@@ -534,7 +537,8 @@ func (f *fakeEngine) BugAttach(projectID, bugID, filename, dataB64 string) (map[
 	return map[string]interface{}{"items": []string{filename}}, nil
 }
 
-func (f *fakeEngine) BugTriage(projectID, bugID string) (map[string]interface{}, error) {
+func (f *fakeEngine) BugTriage(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.lastTriageReq = req
 	return map[string]interface{}{"id": "r-triage"}, nil
 }
 
@@ -568,6 +572,42 @@ func (f *fakeEngine) AppStop(projectID string) error { return nil }
 func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
 	f.testThenBuild, f.testNote = thenBuild, note
 	return map[string]interface{}{"id": "r-test"}, nil
+}
+
+func TestStageStartCarriesPerRunOverrides(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "stage_start", `{"project_id":"p","stage":"spec","ducklings":["architect-fast","critic-careful"],"mode":"council","agent_turns":19}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatalf("stage_start failed: %v", resps[1])
+	}
+	if got := fmt.Sprint(eng.lastStageReq["ducklings"]); got != "[architect-fast critic-careful]" {
+		t.Errorf("ducklings = %q, want selected seats", got)
+	}
+	if eng.lastStageReq["mode"] != "council" {
+		t.Errorf("mode = %#v, want council", eng.lastStageReq["mode"])
+	}
+	if eng.lastStageReq["agent_turns"] != float64(19) {
+		t.Errorf("agent_turns = %#v, want 19", eng.lastStageReq["agent_turns"])
+	}
+}
+
+func TestBugTriageCarriesPerRunOverrides(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "bug_triage", `{"project_id":"p","bug_id":"B-001","ducklings":["triager"],"mode":"sectioned","agent_turns":7}`))
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatalf("bug_triage failed: %v", resps[1])
+	}
+	if got := fmt.Sprint(eng.lastTriageReq["ducklings"]); got != "[triager]" {
+		t.Errorf("ducklings = %q, want selected seat", got)
+	}
+	if eng.lastTriageReq["mode"] != "sectioned" {
+		t.Errorf("mode = %#v, want sectioned", eng.lastTriageReq["mode"])
+	}
+	if eng.lastTriageReq["agent_turns"] != float64(7) {
+		t.Errorf("agent_turns = %#v, want 7", eng.lastTriageReq["agent_turns"])
+	}
 }
 
 // The remote operator's full loop: file with severity, attach the screenshot,

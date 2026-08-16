@@ -54,3 +54,5 @@
 {"ts":"2026-08-16T01:53:01Z","bug":"B-017","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
 {"ts":"2026-08-16T01:55:41Z","bug":"B-020","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-013"}
 {"ts":"2026-08-16T01:57:23Z","bug":"B-020","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-013"}
+{"ts":"2026-08-16T02:10:46Z","bug":"B-020","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
+{"ts":"2026-08-16T02:31:24Z","bug":"B-005","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-014"}

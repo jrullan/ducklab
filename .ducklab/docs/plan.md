@@ -278,4 +278,25 @@ The MCP surface is poll-only, so operators receive no outbound signal when runs 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-014 — Add ducklings, mode, and agent_turns overrides to stage_start and bug_triage
+
+Fixes B-005.
+
+## Reported
+
+What happened: driving the adopt over MCP, the triager was seated on a slow duckling — the only remedy was abort, hand-edit project.toml, relaunch (three steps and a file a remote operator cannot touch). Later the spec architect underdelivered its 19-section assignment; the levers that exist for exactly this — per-run seat picks, mode (solo/council/sectioned), agent turn caps, all present in StageRequest and the desktop's chips — have no MCP parameters. stage_start takes only project_id/stage/brief/adopt; bug_triage only project_id/bug_id.
+
+Expected: stage_start and bug_triage accept the same per-run overrides the desktop offers (ducklings, mode, agent_turns), so an agent operator can act on a report-card's SUGGESTION without leaving the MCP surface. Recommend, never route — the operator picks, the record says so.
+
+## Triage
+
+**Component:** MCP tools
+**Suspected files:** internal/mcp/tools.go, internal/mcp/mcp_test.go
+
+The MCP schemas and handlers omit per-run seat, mode, and turn-cap controls that the underlying stage request already supports.
+
+**Verification (triage recommends):** test-first — Call both MCP tools with ducklings, mode, and agent_turns and verify the options reach the per-run engine request.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
