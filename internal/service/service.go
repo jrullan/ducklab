@@ -1203,6 +1203,12 @@ func callTokens(usage map[string]interface{}) int64 {
 }
 
 // executeRun executes a run in the background.
+func verifyOverride(cfg config.Verify, command string) config.Verify {
+	cfg.Mode = string(verify.GateCustom)
+	cfg.Custom = command
+	return cfg
+}
+
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
 	defer close(rs.done)
 	defer rs.writer.Close()
@@ -1214,6 +1220,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("load project config: %w", err))
 		return
+	}
+	if req.Verify != "" {
+		// A task may select a narrower gate (for example Vitest for a UI
+		// task) without changing the project's durable verification contract.
+		projCfg.Verify = verifyOverride(projCfg.Verify, req.Verify)
 	}
 
 	// The tree as it stands, before the run touches it. What "reject" and

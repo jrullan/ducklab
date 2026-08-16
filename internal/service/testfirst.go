@@ -68,6 +68,9 @@ type TestFirstRequest struct {
 	// Note rides the test prompt — what only the launcher knows now, which
 	// for an autopilot retry is why the previous attempt failed.
 	Note string `json:"note,omitempty"`
+	// Verify overrides the project's gate for this task only (for example,
+	// `cd frontend && npx vitest run`), without changing project config.
+	Verify string `json:"verify,omitempty"`
 	// Redo is the explicit consent to redo a task that was already accepted;
 	// without it, launching finished work is refused (see RunRequest.Redo).
 	Redo bool `json:"redo,omitempty"`
@@ -181,6 +184,9 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	}
 	if err := checkTestGate(projCfg.Verify.Mode); err != nil {
 		return nil, err
+	}
+	if req.Verify != "" {
+		projCfg.Verify = verifyOverride(projCfg.Verify, req.Verify)
 	}
 
 	run := &runlog.Run{
@@ -483,7 +489,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.writer.WriteDiff(diff)
 	rs.writer.WriteVerify(after.Output)
 
-	verdict, detail := judgeTestFirst(before, after, diff, projCfg.Verify.TestGlobs)
+	verdict, detail := judgeTestFirstWithGate(before, after, diff, projCfg.Verify.TestGlobs, after.Command)
 	rs.run.Verdict = verdict
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict, "detail": detail})
 
@@ -529,11 +535,23 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 // this test actually fail" is a fact, and a fact a model could influence would
 // not be a fact (I2).
 func judgeTestFirst(before, after *verify.Result, diff string, globs []string) (verdict, detail string) {
+	return judgeTestFirstWithGate(before, after, diff, globs, "")
+}
+
+func judgeTestFirstWithGate(before, after *verify.Result, diff string, globs []string, gateCommand string) (verdict, detail string) {
 	touched := verify.CheckTampering(diff, "write the failing test", globs)
 	if len(touched.Files) == 0 {
 		return "FAILED", "no test file was written, so nothing was specified"
 	}
 	if after.ExitCode == 0 {
+		// A green result is only meaningful for files the command actually
+		// reaches. The old Go-only gate made a correct frontend test look
+		// vacuous because it never ran Vitest.
+		for _, file := range touched.Files {
+			if strings.HasPrefix(filepath.ToSlash(file), "frontend/") && !gateCoversFrontend(gateCommand) {
+				return "FAILED", "the new test lives in frontend/, which the gate never runs — widen the gate or move the test"
+			}
+		}
 		// The trap this whole flow exists to avoid. A green gate here means
 		// the test asserts something already true, and accepting it would
 		// install a permanent false green.
@@ -560,6 +578,11 @@ func judgeTestFirst(before, after *verify.Result, diff string, globs []string) (
 // compileFailure reports the compiler/build diagnostics emitted by a test gate.
 // Keep this deliberately conservative: ordinary assertion failures remain valid
 // red specifications, while the common Go compile diagnostics are rejected.
+func gateCoversFrontend(command string) bool {
+	lower := strings.ToLower(command)
+	return strings.Contains(lower, "frontend") || strings.Contains(lower, "vitest")
+}
+
 func compileFailure(output string) bool {
 	lower := strings.ToLower(output)
 	for _, marker := range []string{

@@ -40,7 +40,15 @@ func Detect(root string) (Gate, string, error) {
 	// Rung 1: Go tests
 	if fileExists(filepath.Join(root, "go.mod")) {
 		if commandSucceeds(root, "go test ./... -run XXX -count=1") {
-			return GateTests, "go test ./...", nil
+			cmd := "go test ./..."
+			// A repository may contain more than one independently runnable
+			// suite. Do not let the first language found become the whole gate:
+			// the frontend is part of this project when it has its own package,
+			// typecheck and Vitest suite.
+			if frontendGate(root) != "" {
+				cmd += " && " + frontendGate(root)
+			}
+			return GateTests, cmd, nil
 		}
 		// Fall through to build
 	}
@@ -218,6 +226,18 @@ func commandSucceeds(root, cmd string) bool {
 	shellCmd := xplat.Shell(root, nil, cmd)
 	err := shellCmd.Run()
 	return err == nil
+}
+
+func frontendGate(root string) string {
+	frontend := filepath.Join(root, "frontend")
+	packageJSON := filepath.Join(frontend, "package.json")
+	if !fileExists(packageJSON) || !hasTestScript(packageJSON) {
+		return ""
+	}
+	if !fileExists(filepath.Join(frontend, "tsconfig.json")) {
+		return "cd frontend && npx vitest run"
+	}
+	return "cd frontend && npx tsc --noEmit && npx vitest run"
 }
 
 func hasTestScript(packageJSONPath string) bool {

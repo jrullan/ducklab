@@ -325,9 +325,17 @@ func (c *Client) DucklingRemove(id string) error {
 
 // TestStart writes the failing test for a task.
 func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
+	return c.TestStartWithVerify(projectID, taskID, duckling, thenBuild, redo, note, "")
+}
+
+// TestStartWithVerify starts test-first with an optional per-task gate command.
+func (c *Client) TestStartWithVerify(projectID, taskID, duckling string, thenBuild, redo bool, note, verify string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/projects/"+projectID+"/tests",
-		map[string]interface{}{"task_id": taskID, "duckling": duckling, "then_build": thenBuild, "redo": redo, "note": note}, &result)
+	body := map[string]interface{}{"task_id": taskID, "duckling": duckling, "then_build": thenBuild, "redo": redo, "note": note}
+	if verify != "" {
+		body["verify"] = verify
+	}
+	err := c.post("/v1/projects/"+projectID+"/tests", body, &result)
 	return result, err
 }
 

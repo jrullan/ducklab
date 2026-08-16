@@ -104,6 +104,7 @@ func toolList() []map[string]interface{} {
 				"task_id":    str("a task whose next includes run"),
 				"mode":       str("optional mode"),
 				"note":       noteProp(),
+				"verify":     str("optional per-task verification command override"),
 				"redo":       redoProp(),
 			}, "project_id", "task_id"),
 		},
@@ -372,6 +373,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		// redo) had no way to say it. test_build carried one all along.
 		if n := a.str("note"); n != "" {
 			req["note"] = n
+		}
+		if v := a.str("verify"); v != "" {
+			req["verify"] = v
 		}
 		if redo, _ := a["redo"].(bool); redo {
 			req["redo"] = true
