@@ -893,6 +893,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		Stage:     "build",
 		Mode:      req.Mode,
 		TaskID:    req.TaskID,
+		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
 		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		// Streaming on unless a caller opts out.

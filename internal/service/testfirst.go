@@ -93,17 +93,13 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	// itself is the mistake worth catching — before any model is paid.
 	tv := s.findTask(ctx, projectID, req.TaskID)
 	var priorAcceptedSHA string
-	accepted := tv != nil && tv.Status == "accepted"
-	// TaskList intentionally hides accepted tasks from the actionable board;
-	// the run ledger remains authoritative for the redo guard.
+	accepted := tv != nil && (tv.Status == "accepted" || tv.TestReady)
+	// Raw history supplies redo provenance only; it never changes accepted.
 	s.runsMu.RLock()
 	for _, candidate := range s.runs {
 		r := candidate.run
-		if r.ProjectID == projectID && r.TaskID == req.TaskID && r.Accepted {
-			accepted = true
-			if r.Stage == "test" && r.CommitSHA != "" && priorAcceptedSHA == "" {
-				priorAcceptedSHA = r.CommitSHA
-			}
+		if r.ProjectID == projectID && r.TaskID == req.TaskID && r.Accepted && r.Stage == "test" && r.CommitSHA != "" && priorAcceptedSHA == "" {
+			priorAcceptedSHA = r.CommitSHA
 		}
 	}
 	s.runsMu.RUnlock()
@@ -199,6 +195,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		Stage:     "test",
 		Mode:      testMode(s.testModeDefault(req.Mode)),
 		TaskID:    req.TaskID,
+		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
 		Status:    "running",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		Stream:    true,

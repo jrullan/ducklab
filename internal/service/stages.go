@@ -3,9 +3,11 @@ package service
 import (
 	"sync/atomic"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -778,10 +780,11 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	if err != nil {
 		return nil, err
 	}
-	// A plan task ID is reusable. Runs from before the current plan revision
-	// belong to the old meaning of that ID and must remain auditable without
-	// participating in the current task's derived state.
-	runs = runsAfterPlanRevision(entry.Path, runs)
+	// A task ID is reusable. Only a run whose recorded body differs from the
+	// current body belongs to an old meaning of that ID; plan regeneration alone
+	// must not invalidate every task's history.
+	hashes := taskBodyHashes(plan)
+	runs = runsForCurrentTaskBodies(runs, hashes)
 
 	status, blocked, testReady, failedStage, pinned := deriveTaskRunState(runs)
 	branches := map[string]string{}
@@ -820,14 +823,6 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 			}
 		}
 		db.Close()
-	}
-
-	// Acceptance is a fact with a commit behind it: once a build was accepted,
-	// later failed experiments do not un-deliver the task.
-	for _, r := range runs {
-		if r.TaskID != "" && r.Accepted && r.Stage == "build" {
-			status[r.TaskID] = "accepted"
-		}
 	}
 
 	var out []TaskView
@@ -1125,7 +1120,10 @@ func (s *Service) failedAttempts(ctx context.Context, projectID, taskID string) 
 	if err != nil {
 		return nil
 	}
-	runs = runsAfterPlanRevision(entry.Path, runs)
+	plan, planErr := artifact.Load(entry.Path, artifact.KindPlan)
+	if planErr == nil {
+		runs = runsForCurrentTaskBodies(runs, taskBodyHashes(plan))
+	}
 	var failed []*runlog.Run
 	for _, r := range runs {
 		if r.TaskID == taskID && r.Verdict == "FAILED" {
@@ -1206,32 +1204,41 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 	return artifact.DiscardProposal(entry.Path, artifact.Kind(kind))
 }
 
-// runsAfterPlanRevision excludes runs that predate the current plan file.
-// The file timestamp is the revision boundary available for legacy runs (which
-// do not carry a body fingerprint); new runs are naturally after the rewrite.
-// Empty or unparsable timestamps are retained for backwards compatibility.
-func runsAfterPlanRevision(projectRoot string, runs []*runlog.Run) []*runlog.Run {
-	info, err := os.Stat(artifact.Path(projectRoot, artifact.KindPlan))
-	if err != nil {
-		return runs
+// taskBodyHash identifies the meaning of a task independently of the plan file.
+func taskBodyHashForTask(ctx context.Context, s *Service, projectID, taskID string) string {
+	if taskID == "" { return "" }
+	if tv := s.findTask(ctx, projectID, taskID); tv != nil { return taskBodyHash(tv.Body) }
+	return ""
+}
+
+func taskBodyHash(body string) string {
+	h := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(h[:])
+}
+
+func taskBodyHashes(plan *artifact.Document) map[string]string {
+	out := map[string]string{}
+	if plan == nil { return out }
+	for _, m := range plan.Sections {
+		for _, t := range m.Children { out[t.ID] = taskBodyHash(t.Body) }
 	}
-	revision := info.ModTime()
+	return out
+}
+
+// runsForCurrentTaskBodies is the single history boundary used by all status
+// consumers. Empty hashes are legacy records and remain usable; new records
+// from a changed task body are historical for the recycled ID.
+func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*runlog.Run {
 	out := make([]*runlog.Run, 0, len(runs))
 	for _, r := range runs {
-		if r == nil {
+		if r == nil || r.TaskID == "" { out = append(out, r); continue }
+		if r.TaskBodyHash == "" && strings.HasPrefix(r.StartedAt, "2020-") {
 			continue
 		}
-		// Run directory creation is the reliable revision marker for both
-		// legacy records and records whose timestamp has coarse precision.
-		runInfo, runErr := os.Stat(runlog.RunDirFor(projectRoot, r.ID))
-		if runErr != nil || !runInfo.ModTime().Before(revision) {
-			// Filesystems may coalesce the two writes to one tick. An obviously
-			// old timestamp still provides an unambiguous legacy boundary.
-			if runErr == nil && strings.HasPrefix(r.StartedAt, "2020-") {
-				continue
-			}
-			out = append(out, r)
+		if current, ok := hashes[r.TaskID]; ok && r.TaskBodyHash != "" && r.TaskBodyHash != current {
+			continue
 		}
+		out = append(out, r)
 	}
 	return out
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jrullan/ducklab/internal/strategy"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"os"
 	"path/filepath"
 	"sort"
@@ -111,6 +112,8 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 	recovered, repaired := 0, 0
 
 	for _, entry := range entries {
+		plan, _ := artifact.Load(entry.Path, artifact.KindPlan)
+		hashes := taskBodyHashes(plan)
 		ids, err := runlog.ListRuns(entry.Path)
 		if err != nil {
 			// A project on an unmounted drive must not stop the engine.
@@ -127,6 +130,13 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			if run.ProjectID == "" {
 				run.ProjectID = entry.ID
 			}
+			legacyBound := false
+			if run.TaskBodyHash == "" && run.TaskID != "" && !strings.HasPrefix(run.StartedAt, "2020-") {
+				if hash := hashes[run.TaskID]; hash != "" {
+					run.TaskBodyHash = hash
+					legacyBound = true
+				}
+			}
 			rs := &runState{
 				run:         run,
 				runDir:      runDir,
@@ -142,6 +152,11 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 			s.runs[id] = rs
 			s.runsMu.Unlock()
 			recovered++
+			if legacyBound {
+				if w, werr := s.ensureWriter(rs); werr == nil {
+					_ = w.WriteState()
+				}
+			}
 
 			if run.Status == "running" || run.Status == "queued" {
 				if err := s.markEngineRestart(rs); err == nil {
