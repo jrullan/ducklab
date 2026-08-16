@@ -50,3 +50,4 @@
 {"ts":"2026-08-15T23:36:49Z","bug":"B-016","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-011"}
 {"ts":"2026-08-16T00:21:48Z","bug":"B-016","from":"fixed","to":"fixed","actor":"mcp:mcp","via":"move"}
 {"ts":"2026-08-16T01:45:14Z","bug":"B-017","from":"triaged","to":"in_progress","actor":"mcp:mcp","via":"promote","note":"T-012"}
+{"ts":"2026-08-16T01:46:59Z","bug":"B-017","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-012"}

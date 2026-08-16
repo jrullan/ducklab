@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -114,6 +115,19 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 		}
 		b.WriteString("## The work the asking model was doing\n\n" + taskPrompt + "\n\n")
 	}
+	// Advisors must receive the project documents even when the question was
+	// asked outside a task turn. Without this, the system prompt's promise to
+	// cite the project's spec is not actionable.
+	for _, kind := range []artifact.Kind{artifact.KindRequirements, artifact.KindSpec, artifact.KindPlan} {
+		doc, loadErr := artifact.Load(rs.projectPath, kind)
+		if loadErr == nil && strings.TrimSpace(doc.Raw) != "" {
+			raw := doc.Raw
+			if len(raw) > 16000 {
+				raw = raw[:16000] + "\n…(truncated)"
+			}
+			b.WriteString("## Project " + string(kind) + " document\n\n" + raw + "\n\n")
+		}
+	}
 	b.WriteString("## The question the human was asked\n\n" + q.Question + "\n")
 	if len(q.Options) > 0 {
 		b.WriteString("\nOffered options:\n")
@@ -174,11 +188,21 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 	return strings.TrimSpace(answer), string(advisorID), nil
 }
 
-// pickAdvisor prefers the run's recorded architect — decorrelated from the
-// implementer that asked — then any duckling at all.
+// pickAdvisor uses the run's dedicated advisor seat. Older runs may not have
+// recorded one, so fall back to the resolved roster's advisor seat rather than
+// silently borrowing the architect.
 func (s *Service) pickAdvisor(rs *runState) config.DucklingID {
-	if id := rs.run.Roster["architect"]; id != "" {
+	if id := rs.run.Roster[string(config.RoleAdvisor)]; id != "" {
 		return config.DucklingID(id)
+	}
+	if id := rs.run.Roster[string(config.RoleArchitect)]; id != "" {
+		// Compatibility for runs created before the advisor seat existed.
+		return config.DucklingID(id)
+	}
+	if proj, err := s.projectConfig(rs.run.ProjectID); err == nil {
+		if id := proj.Roster[config.RoleAdvisor]; id != "" {
+			return id
+		}
 	}
 	for id := range s.cfg.Ducklings {
 		return id

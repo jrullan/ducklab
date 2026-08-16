@@ -36,6 +36,7 @@ const (
 	RoleReviewer    Role = "reviewer"
 	RoleJudge       Role = "judge"
 	RoleTriager     Role = "triager"
+	RoleAdvisor     Role = "advisor"
 	RoleScribe      Role = "scribe"
 	RoleHuman       Role = "human"
 )
@@ -44,7 +45,7 @@ const (
 func ValidRoles() []Role {
 	return []Role{
 		RoleArchitect, RoleImplementer, RoleReviewer,
-		RoleJudge, RoleTriager, RoleScribe, RoleHuman,
+		RoleJudge, RoleTriager, RoleAdvisor, RoleScribe, RoleHuman,
 	}
 }
 

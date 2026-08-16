@@ -141,7 +141,7 @@ func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config
 			return ""
 		}
 		switch role {
-		case config.RoleReviewer, config.RoleJudge:
+		case config.RoleReviewer, config.RoleJudge, config.RoleAdvisor:
 			if len(available) > 1 {
 				return available[1]
 			}

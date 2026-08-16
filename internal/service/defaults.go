@@ -150,7 +150,7 @@ type ModeDefaultsView struct {
 // finished candidates and has nothing to explore.
 var ScriptRoleTurns = map[string]int{
 	"implementer": 24, "reviewer": 8, "architect": 12,
-	"judge": 1, "triager": 6, "scribe": 12,
+	"judge": 1, "triager": 6, "advisor": 1, "scribe": 12,
 }
 
 // ModeRounds are the counts the scripts themselves carry. Reported so a client
