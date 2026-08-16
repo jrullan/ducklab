@@ -421,4 +421,25 @@ Reusing a task ID causes stale failed-run state to misclassify a semantically ne
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-024 — Reject compile-red test specifications unless the package builds and the new test fails by assertion
+
+Fixes B-028.
+
+## Reported
+
+What happened: T-018's test-first run wrote redo_cleanup_cap_test.go referencing an undefined type (RunView). go test failed with a COMPILE error, the gate read red, Until gate==red was satisfied, and auto:tdd committed it as the landed specification. But compile-red is not assertion-red: it breaks the entire service package, every other test in it stops running, and the chained build's job silently changes from "turn one red assertion green" into "make the tree compile again" — luna spent 43 minutes and 55 failed patches there and the run died FAILED.
+
+Expected: the test stage's success criterion distinguishes the two reds — the package must BUILD (go vet or go build on the touched packages green) and the new test must fail on an ASSERTION. A compile error is a malformed specification and should bounce back to the test-writer with the compiler's message, exactly like a contract repair.
+
+## Triage
+
+**Component:** test-first gate
+**Suspected files:** internal/service/testfirst.go, internal/verify/verify.go, internal/strategy
+
+The test-first gate treats any nonzero test exit as a valid failing specification, allowing compile errors to land and derail the subsequent build.
+
+**Verification (triage recommends):** test-first — Run test-first with an undefined test type and verify it is rejected as malformed while a compiling assertion failure is accepted as red.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
