@@ -588,4 +588,29 @@ Failed runs currently expose the failure but do not carry the bounded, editable 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-032 — Raise or remove the 2048-token cap for json:decomposition contracts
+
+Fixes B-012.
+
+## Reported
+
+outputCapForContract caps ALL json:* contracts at 2048, including json:decomposition, whose 2–5 subtasks each carry a body that may legitimately exceed 2k tokens.
+
+Where: internal/agent/agent.go:1109
+
+Suggested fix: Either restrict the 2k cap to known classification contracts (json:triage) or raise the cap for json:decomposition, and add a test for the decomposition case.
+
+Found by glm52 reviewing T-002 in run r-20260815-130948-qka6 (verdict: approve).
+
+## Triage
+
+**Component:** agent output caps
+**Suspected files:** internal/agent/agent.go
+
+The shared json:* cap can truncate legitimate decomposition responses containing subtasks with bodies longer than 2048 tokens.
+
+**Verification (triage recommends):** test-first — Exercise outputCapForContract with json:decomposition and a larger declared limit, expecting a cap that accommodates decomposition bodies.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

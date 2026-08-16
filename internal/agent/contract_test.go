@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+func TestDecompositionContractAllowsLongBodies(t *testing.T) {
+	declared := 12000
+	got := outputCapForContract(&declared, "json:decomposition")
+	if got == nil {
+		t.Fatal("decomposition output cap is nil")
+	}
+	if *got <= 2048 {
+		t.Fatalf("decomposition cap = %d, want more than the classification cap", *got)
+	}
+
+	// A caller's smaller declared limit remains an upper bound even for a
+	// contract whose responses may legitimately be long.
+	small := 1024
+	got = outputCapForContract(&small, "json:decomposition")
+	if got == nil || *got != small {
+		t.Fatalf("decomposition cap for declared %d = %v, want declared limit", small, got)
+	}
+}
+
 func TestVerdictContractParsesFindings(t *testing.T) {
 	text := `{"verdict":"request-changes","findings":[
 		{"severity":"major","file":"auth.go","line":88,"issue":"nil deref when the token is expired","fix":"guard before deref"},

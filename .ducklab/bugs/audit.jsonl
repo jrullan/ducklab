@@ -100,3 +100,5 @@
 {"ts":"2026-08-16T19:34:56Z","bug":"B-036","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-030"}
 {"ts":"2026-08-16T19:40:58Z","bug":"B-008","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-029"}
 {"ts":"2026-08-16T19:43:39Z","bug":"B-031","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-031"}
+{"ts":"2026-08-16T20:22:39Z","bug":"B-031","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-031"}
+{"ts":"2026-08-16T20:25:02Z","bug":"B-012","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-032"}
