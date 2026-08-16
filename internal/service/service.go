@@ -2070,9 +2070,19 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "ABORTED"})
-	// No restore here, deliberately: the goroutine is still dying and may have
-	// a write in flight. The cancel lands, it unwinds through failRun, and
-	// failRun restores — after the last writer has stopped.
+	// A paused or already-failed run has no goroutine left to unwind, so its
+	// cancellation cannot reach failRun. Restore those runs here. For an active
+	// run, leave restoration to failRun after its last write; restoring while it
+	// is still running would race the model's final filesystem operation.
+	if rs.done == nil {
+		restoreAfterUnaccepted(rs)
+	} else {
+		select {
+		case <-rs.done:
+			restoreAfterUnaccepted(rs)
+		default:
+		}
+	}
 	// The run stays in the map: it is still inspectable through RunGet and
 	// still on disk. Deleting it made an aborted run vanish from run list.
 	werr := w.WriteState()
