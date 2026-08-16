@@ -218,9 +218,9 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 	git := vcs.New(entry.Path)
 	if clean, cerr := git.IsClean(); cerr != nil || !clean {
 		dirty := git.DirtyPaths()
-		sample := strings.Join(dirty[:min(3, len(dirty))], ", ")
-		if len(dirty) > 3 {
-			sample += fmt.Sprintf(" and %d more", len(dirty)-3)
+		sample := strings.Join(dirty[:min(10, len(dirty))], ", ")
+		if len(dirty) > 10 {
+			sample += fmt.Sprintf(" and %d more", len(dirty)-10)
 		}
 		return nil, fmt.Errorf("not retired — the working tree has uncommitted changes (%s); commit or clean them, then retire", sample)
 	}

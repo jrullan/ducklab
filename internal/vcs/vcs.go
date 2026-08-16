@@ -274,6 +274,30 @@ func EnsureGitignore(root string, entries []string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// EnsureGitattributes ensures .gitattributes contains the given entries.
+func EnsureGitattributes(root string, entries []string) error {
+	path := filepath.Join(root, ".gitattributes")
+	existing := ""
+	if data, err := os.ReadFile(path); err == nil {
+		existing = string(data)
+	}
+	var toAdd []string
+	for _, e := range entries {
+		if !strings.Contains(existing, e) {
+			toAdd = append(toAdd, e)
+		}
+	}
+	if len(toAdd) == 0 {
+		return nil
+	}
+	content := existing
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += strings.Join(toAdd, "\n") + "\n"
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
 // ApplyPatch applies a unified diff to the working tree.
 //
 // This is how a tournament winner is applied: the candidate's patch is written

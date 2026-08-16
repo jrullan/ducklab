@@ -533,6 +533,11 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	if err := vcs.EnsureGitignore(absPath, gitignoreEntries); err != nil {
 		return nil, err
 	}
+	if err := vcs.EnsureGitattributes(absPath, []string{
+		".ducklab/bugs/audit.jsonl merge=union",
+	}); err != nil {
+		return nil, err
+	}
 	// Register
 	regID, err := s.registry.Register(absPath, name)
 	if err != nil {
