@@ -1676,6 +1676,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 			return err
 		}
 		rs.writer.AppendEvent("triage_applied", map[string]interface{}{"bugs": n})
+		s.resolveTriageSiblings(rs)
 		clearPending(rs.run)
 		rs.run.Accepted = true
 		rs.run.Status = "done"
@@ -2341,6 +2342,35 @@ func (s *Service) continueChain(ctx context.Context, rs *runState) {
 		w.AppendEvent("tdd_build_started", map[string]interface{}{"run": run.ID})
 		_ = w.WriteState()
 	}
+}
+
+func (s *Service) resolveTriageSiblings(accepted *runState) {
+	covered := triageBugIDs(accepted.run.PendingData)
+	if len(covered) == 0 {
+		return
+	}
+	s.runsMu.RLock()
+	var moot []string
+	for id, other := range s.runs {
+		if id == accepted.run.ID || other.run.ProjectID != accepted.run.ProjectID || other.run.Stage != "triage" || other.run.Status != "paused" || other.run.PendingKind != "gate" {
+			continue
+		}
+		for bugID := range triageBugIDs(other.run.PendingData) {
+			if _, ok := covered[bugID]; ok { moot = append(moot, id); break }
+		}
+	}
+	s.runsMu.RUnlock()
+	for _, id := range moot { s.resolveSuperseded(id, "superseded: "+accepted.run.ID+" covered the same bug") }
+}
+
+func triageBugIDs(data map[string]interface{}) map[string]struct{} {
+	ids := make(map[string]struct{})
+	if raw, ok := data["proposals"].([]map[string]interface{}); ok {
+		for _, p := range raw { if id, ok := p["bug"].(string); ok && id != "" { ids[id] = struct{}{} } }
+	} else if raw, ok := data["proposals"].([]interface{}); ok {
+		for _, item := range raw { if p, ok := item.(map[string]interface{}); ok { if id, ok := p["bug"].(string); ok && id != "" { ids[id] = struct{}{} } } }
+	}
+	return ids
 }
 
 // resolveSuperseded closes a run whose gate was answered by another act — a
