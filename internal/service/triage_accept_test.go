@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -82,6 +83,56 @@ func TestAcceptingATriageDoesNotCreateATask(t *testing.T) {
 // state file and returned without a word, so the rail showed the triage
 // "running" forever and the Bugs board never refetched the verdicts it had
 // just applied. Ending a run and saying so are the same act.
+// Accepting a newer complete triage makes an older paused triage of the same
+// bugs stale. It must be resolved rather than left offering a second decision.
+func TestAcceptingATriageSupersedesPausedSibling(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{
+		Title: "vertex drag never starts", Severity: "normal",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	older, err := s.BugTriage(context.Background(), id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), older.ID)
+	before, err := s.RunGet(context.Background(), older.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Run.Status != "paused" || before.Run.PendingKind != "gate" {
+		t.Fatalf("setup: older triage is %s/%s, want paused/gate",
+			before.Run.Status, before.Run.PendingKind)
+	}
+
+	newer, err := s.BugTriage(context.Background(), id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), newer.ID)
+	if _, err := s.RunAccept(context.Background(), newer.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := s.RunGet(context.Background(), older.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Run.Status != "done" {
+		t.Errorf("older sibling status = %q, want done", after.Run.Status)
+	}
+	if !strings.Contains(after.Run.Resolution, "superseded") {
+		t.Errorf("older sibling resolution = %q, want superseded", after.Run.Resolution)
+	}
+	if after.Run.PendingKind != "" {
+		t.Errorf("older sibling pending kind = %q, want empty", after.Run.PendingKind)
+	}
+}
+
 func TestAcceptingATriageSaysRunEndOnTheStream(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
