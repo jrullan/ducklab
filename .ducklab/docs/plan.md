@@ -237,4 +237,25 @@ The one-shot advisor path stores raw model output and silently drops failed or t
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-012 — Add a configurable advisor seat and pass relevant project documents to advisor prompts
+
+Fixes B-017.
+
+## Reported
+
+What happened: pickAdvisor falls back to the run's architect seat — in this project that resolved to atom-local, the slowest and weakest duckling, advising by accident of roster resolution while luna sat idle one seat over. And the advisor's own monologue confessed "We don't have actual spec": REQ-053 promises the advisor "cites the project's own spec when that decides the matter", but the advise() prompt carries only the question and options — none of the documents the asker had.
+
+Expected: an advisor role in the roster (configurable like scribe/triager, defaulting to a fast seat), and the advise prompt carrying the same document context the asking run holds — or at least the spec outline plus the sections the question touches. A promise the prompt makes ("cite the spec") must be a capability the prompt delivers.
+
+## Triage
+
+**Component:** advisor roster and prompt context
+**Suspected files:** internal/service/advisor.go, internal/config/config.go, internal/service/defaults.go
+
+pickAdvisor hardcodes the architect fallback and advise only includes task text, question, and options, so the advisor can use an unintended slow seat without the documents its prompt requires.
+
+**Verification (triage recommends):** test-first — Exercise advisor selection and assert its request includes the asking run's relevant spec/document context.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

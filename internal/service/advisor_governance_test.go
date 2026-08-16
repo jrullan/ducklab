@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -77,6 +79,71 @@ func TestAdvisorRepairsAndStripsDeliberation(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(p.calls[1].Messages[len(p.calls[1].Messages)-1].Content), "violation") {
 		t.Error("repair prompt did not name the contract violation")
+	}
+}
+
+func TestAdvisorUsesDedicatedConfigurableRosterSeat(t *testing.T) {
+	s := serviceWithDucklings(t, "slow-architect", "fast-advisor")
+	p := &advisorTestProvider{replies: []string{"Use the documented option. It is the project contract."}}
+	s.ducklings.RegisterProvider(p)
+
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-advisor-seat", ProjectID: "p", Status: "paused", PendingKind: "question", Roster: map[string]string{
+		"architect": "slow-architect",
+		"advisor":   "fast-advisor",
+	}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+
+	_, advisor, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which option?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advisor != "fast-advisor" {
+		t.Fatalf("advisor seat = %q, want configured advisor fast-advisor (not architect)", advisor)
+	}
+}
+
+func TestAdvisorPromptIncludesProjectDocumentContext(t *testing.T) {
+	s := serviceWithDucklings(t, "fast-advisor")
+	p := &advisorTestProvider{replies: []string{"Use the documented option. It is the project contract."}}
+	s.ducklings.RegisterProvider(p)
+
+	dir := t.TempDir()
+	docs := filepath.Join(dir, ".ducklab", "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "spec.md"), []byte("## SPEC-ADVISOR\nThe canonical decision is FAST_PATH.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "requirements.md"), []byte("## REQ-ADVISOR\nThe advisor must cite project decisions.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{ID: "r-advisor-context", ProjectID: "p", Status: "paused", PendingKind: "question", Roster: map[string]string{"advisor": "fast-advisor"}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which project decision applies?"}); err != nil {
+		t.Fatal(err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.calls) == 0 {
+		t.Fatal("advisor made no provider call")
+	}
+	prompt := p.calls[0].Messages[len(p.calls[0].Messages)-1].Content
+	for _, want := range []string{"SPEC-ADVISOR", "FAST_PATH", "REQ-ADVISOR"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("advisor prompt lacks project document context %q: %s", want, prompt)
+		}
 	}
 }
 
