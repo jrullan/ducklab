@@ -23,6 +23,7 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
     modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
     accept: vi.fn(() => Promise.resolve({ commit_sha: "abc1234" })),
     reject: vi.fn(() => Promise.resolve({})),
+    abort: vi.fn(() => Promise.resolve({})),
     runStart: vi.fn(() => Promise.resolve({ id: "r-9" })),
     ...over,
   }) as unknown as EngineClient;
@@ -57,6 +58,21 @@ describe("Now — the inbox", () => {
     render(<Now client={client} projectId="p" />);
     fireEvent.click(await screen.findByTestId("now-accept"));
     await waitFor(() => expect(client.accept).toHaveBeenCalledWith("r-1"));
+  });
+
+  it("exposes and invokes every legal stop decision on a paused run card", async () => {
+    seed([{ ...base, next: ["reject", "abort"] }]);
+    const client = clientWith();
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-waiting-card");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abort" }));
+
+    await waitFor(() => {
+      expect(client.reject).toHaveBeenCalledWith("r-1");
+      expect(client.abort).toHaveBeenCalledWith("r-1");
+    });
   });
 
   it("routes a question to the answer, not to Accept/Reject", async () => {
