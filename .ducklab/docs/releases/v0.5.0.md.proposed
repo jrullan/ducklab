@@ -1,32 +1,35 @@
 ---
 kind: release
-version: v0.1.0
-tasks: 22
+version: v0.5.0
+since: v0.4.0
+tasks: 21
 ---
 
-# v0.1.0
+# v0.5.0
 
-# Release v0.1.0
+# Release v0.5.0
 
-- Generation reliability improved with loop detection and contract-aware caps
-- Installed binaries now include branch and commit provenance for traceability
-- Project budget caps (max_tokens and other named limits) are enforced on runs
-- Chat retains an uncapped wallclock budget even after project settings are merged
-- Advisor is configurable and receives relevant project documents for better context
-- Webhook notifications for important run state changes
-- Overrides for ducklings, mode, and agent_turns available in stage_start and bug_triage
-- Reopen action surfaced for fixed bugs and accepted tasks
-- Test redo/relaunch requires a note and creates an audit entry for traceability
-- Working tree is restored when aborting paused or failed builds
-- Recovery controls (Clean or Commit) available when retire-test errors occur
-- All valid abort and reject actions are visible on paused run cards
-- Bugs are only marked as fixed after an accepted BUILD run, improving status reliability
+- Generation loops are now detected and capped to prevent infinite repetition
+- Project budget caps (max_tokens and named limits) are enforced on runs
+- Chat wallclock budget is preserved when merging project settings
+- Advisor can be configured with a custom seat and receives relevant project documents
+- Advisor replies are validated against contracts, with failures and timeouts recorded
+- Webhook notifications are sent for important run state changes
+- Stage start and bug triage now support overrides for ducklings, mode, and agent_turns
+- Fixed bugs and accepted tasks can now be reopened
+- Bugs are only marked as fixed after a successful BUILD run
+- Redo and relaunch operations require a note and are logged for audit
+- Retired tests have a cleanup path, with a limit on redo commits per task
+- Aborting a paused or failed build restores the working tree
+- Retire-test errors now offer Clean or Commit recovery options
+- Paused run cards display all available abort and reject actions
+- Installed binaries include branch and commit provenance
+- Accepted but unreleased work is now visible
 
 ## What shipped
 
 ### M-001
 
-- **T-001** Expose budget lifting through MCP and identify the invalid kind field in lift errors (`b28cc5a`)
 - **T-002** Detect token repetition loops and apply contract-aware generation caps (`55cae85`)
 - **T-003** Always include next_steps in MCP status response, even when empty (`02d8bdd`)
 - **T-004** Add per-project document lifecycle state to MCP status response (`432adc4`)
