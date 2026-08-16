@@ -32,6 +32,9 @@ type Run struct {
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
 	Note string `json:"note,omitempty"`
+	// PriorAcceptedSHA identifies the accepted test commit this redo is reopening.
+	// The acceptance remains in the ledger; this provenance belongs to the fresh run.
+	PriorAcceptedSHA string `json:"prior_accepted_sha,omitempty"`
 	// AgentTurns is the run's own cap on model calls per reply: zero means
 	// the configured defaults, negative means lifted — at launch or, via the
 	// calls lift, while the run was in flight. On the record so a resume

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/bug"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -85,10 +86,62 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	// does not run tests" is noise when the real answer is "T-001 was done
 	// days ago". Launched test-first by an overnight operator, the launch
 	// itself is the mistake worth catching — before any model is paid.
-	if tv := s.findTask(ctx, projectID, req.TaskID); tv != nil && tv.Status == "accepted" && !req.Redo {
-		return nil, fmt.Errorf("%s is already accepted; its work is committed. "+
-			"A new run would redo finished work — pass redo (and say why in a note) "+
-			"if that is truly the intent", req.TaskID)
+	tv := s.findTask(ctx, projectID, req.TaskID)
+	var priorAcceptedSHA string
+	accepted := tv != nil && tv.Status == "accepted"
+	// TaskList intentionally hides accepted tasks from the actionable board;
+	// the run ledger remains authoritative for the redo guard.
+	s.runsMu.RLock()
+	for _, candidate := range s.runs {
+		r := candidate.run
+		if r.ProjectID == projectID && r.TaskID == req.TaskID && r.Accepted {
+			accepted = true
+			if r.Stage == "test" && r.CommitSHA != "" && priorAcceptedSHA == "" {
+				priorAcceptedSHA = r.CommitSHA
+			}
+		}
+	}
+	s.runsMu.RUnlock()
+	if accepted && !req.Redo {
+		return nil, fmt.Errorf("%s is already accepted; its work is committed. A new run would redo finished work — pass redo (and say why in a note) if that is truly the intent", req.TaskID)
+	}
+	if accepted && req.Redo {
+		if strings.TrimSpace(req.Note) == "" {
+			return nil, fmt.Errorf("redo of accepted task %s requires a note explaining why", req.TaskID)
+		}
+		var open string
+		s.runsMu.RLock()
+		for _, candidate := range s.runs {
+			r := candidate.run
+			if r.ProjectID != projectID || r.TaskID != req.TaskID {
+				continue
+			}
+			if r.Accepted && r.Stage == "test" && r.CommitSHA != "" && priorAcceptedSHA == "" {
+				priorAcceptedSHA = r.CommitSHA
+			}
+			switch r.Status {
+			case "running", "queued", "paused":
+				open = r.ID + " (" + r.Status + ")"
+			}
+		}
+		s.runsMu.RUnlock()
+		if open != "" {
+			return nil, fmt.Errorf("cannot redo %s while its run is still open (%s); decide or abort it first", req.TaskID, open)
+		}
+		git := vcs.New(entry.Path)
+		clean, cleanErr := git.IsClean()
+		if cleanErr != nil {
+			return nil, fmt.Errorf("cannot redo %s: could not inspect the working tree: %w", req.TaskID, cleanErr)
+		}
+		if !clean {
+			// Engine metadata is written under .ducklab and is not task work;
+			// it must not make an otherwise clean source tree un-relaunchable.
+			for _, path := range git.DirtyPaths() {
+				if !strings.HasPrefix(path, ".ducklab/" ) && path != ".ducklab" {
+					return nil, fmt.Errorf("cannot redo %s: the working tree is dirty; commit or clean it first", req.TaskID)
+				}
+			}
+		}
 	}
 	if err := checkRunnable(entry.Path); err != nil {
 		return nil, err
@@ -117,6 +170,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		Gate:      string(verify.Gate(projCfg.Verify.Mode)),
 		Origin:    req.Origin,
 		Note:      req.Note,
+		PriorAcceptedSHA: priorAcceptedSHA,
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
@@ -149,6 +203,12 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"stage": "test", "mode": run.Mode, "task_id": req.TaskID,
 	})
+	if priorAcceptedSHA != "" {
+		appendBugAudit(entry.Path, bug.AuditEntry{
+			Bug: req.TaskID, Actor: "human", Via: "redo",
+			Note: req.Note + " (prior accepted SHA: " + priorAcceptedSHA + ")",
+		})
+	}
 
 	// Through the queue, like every run that writes the tree. This path used
 	// to spawn its goroutine directly — test-first arrived after the queue
