@@ -209,6 +209,14 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "bug_id", "status"),
 		},
 		{
+			"name": "bug_reopen",
+			"description": "Reopen a fixed bug when human verification finds the problem remains. This sends fixed→in_progress; only do this with the human's explicit consent, and do not change any run.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"bug_id": str("the fixed bug, B-..."),
+			}, "project_id", "bug_id"),
+		},
+		{
 			"name": "app",
 			"description": "The application under development: status shows its run command and " +
 				"whether it is up; start launches it as an engine-managed process; stop kills it. " +
@@ -473,6 +481,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolJSON(out), nil
 	case "bug_move":
 		out, err := s.eng.BugMove(a.str("project_id"), a.str("bug_id"), a.str("status"), "mcp:"+s.client)
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
+	case "bug_reopen":
+		out, err := s.eng.BugMove(a.str("project_id"), a.str("bug_id"), "in_progress", "mcp:"+s.client)
 		if err != nil {
 			return nil, err
 		}

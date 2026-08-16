@@ -134,6 +134,35 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Kind:   "bug", Ref: b.ID,
 		})
 	}
+	// A fixed bug is waiting for a person's verification. Reopen is the
+	// deliberate path when that verification finds the fix insufficient; keep
+	// it visible without changing the bug state machine.
+	for _, b := range st.Bugs {
+		if b.Status == bug.Fixed {
+			out = append(out, NextStep{
+				ID:     "reopen-bug",
+				Action: fmt.Sprintf("Reopen %s — send it back for more work", b.ID),
+				Reason: "the fix is waiting for human verification; reopen it if the problem remains",
+				Kind:   "bug", Ref: b.ID,
+			})
+		}
+	}
+	// Accepted work can be deliberately reopened, but only with explicit redo
+	// consent so a new run cannot silently repeat finished work.
+	hasFixedBug := countBugs(st.Bugs, bug.Fixed) > 0
+	for _, t := range st.Tasks {
+		// Legacy accepted tasks without provenance are already treated as
+		// shipped-compatible. A redo door is meaningful for work still tied to
+		// an active fix/release context (or explicitly retained on a branch).
+		if t.Status == "accepted" && (hasFixedBug || t.Branch != "") {
+			out = append(out, NextStep{
+				ID:     "reopen-task",
+				Action: fmt.Sprintf("Reopen %s — redo the task with explicit consent", t.ID),
+				Reason: "the task is accepted; starting it again would redo finished work, so pass redo and say why",
+				Kind:   "task", Ref: t.ID,
+			})
+		}
+	}
 
 	// 4. The next buildable task — ONE, not the backlog: a guide that lists
 	// everything startable is a board, and the board already exists.
