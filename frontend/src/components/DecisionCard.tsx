@@ -30,6 +30,8 @@ export function DecisionCard({
   accepting,
   extraAction,
   revisionRun,
+  redoNote,
+  onRetry,
 }: {
   /** The engine's list of legal actions. Buttons render from this and only
    * this. */
@@ -51,8 +53,12 @@ export function DecisionCard({
   extraAction?: React.ReactNode;
   /** The run started by the last Request changes, so it can be watched. */
   revisionRun?: string | null;
+  /** An advisor recommendation shown as an editable retry draft. */
+  redoNote?: { draft: string; advisor: string; editable: boolean };
+  onRetry?: (note: string) => void;
 }) {
   const [note, setNote] = useState("");
+  const [redoDraft, setRedoDraft] = useState(redoNote?.draft ?? "");
   const [asking, setAsking] = useState(false);
 
   const offers = (verb: string) => next.includes(verb);
@@ -120,6 +126,18 @@ export function DecisionCard({
           )}
         </div>
       </div>
+
+      {redoNote && redoNote.editable && (
+        <div className="mb-3 border-b border-hairline pb-3" data-testid="redo-note">
+          <div className="text-xs text-ink-muted">Retry with this note · advisor-drafted by {redoNote.advisor}</div>
+          <textarea aria-label="retry note" rows={5} value={redoDraft} onChange={(e) => setRedoDraft(e.target.value)}
+            className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
+          <div className="mt-1 flex items-center gap-2 text-xs text-ink-muted">
+            {onRetry && <button type="button" onClick={() => onRetry(redoDraft)} disabled={!redoDraft.trim()} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Retry with this note</button>}
+            <span>Edit before retrying; the advisor recommends, never decides.</span>
+          </div>
+        </div>
+      )}
 
       {/* Stated before the click, in the frame, where every gate kind carries
           it the same way. */}

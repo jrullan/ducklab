@@ -541,6 +541,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               thenBuild: !!chain,
               testMode: opts.mode,
               testDucklings: opts.ducklings,
+              note: opts.note,
               mode: chain?.mode || "solo",
               ducklings: chain?.ducklings ?? [],
               maxTokens: chain?.budget?.max_tokens,
@@ -1123,6 +1124,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             onRequestChanges={stageToRevise ? requestChanges : undefined}
             onResume={() => void client.runResume(runId).catch(() => {})}
             revisionRun={revisionRun}
+            redoNote={run.redo_note}
+            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
           />
           {/* The declared-fallback door: provider weather, a stand-in named
               in Settings, one click to swap the seats and go — recorded as

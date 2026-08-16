@@ -116,6 +116,10 @@ type Run struct {
 	// rather than only in the event stream, because a run listed a week later
 	// should still be able to say why it died.
 	Failure string `json:"failure,omitempty"`
+	// RedoNote is an advisor-authored, editable retry instruction. It is a
+	// recommendation only; accepting or discarding it remains a human/operator
+	// decision (except for the explicit yolo autopilot path).
+	RedoNote *RedoNote `json:"redo_note,omitempty"`
 	// TreeSnapshot is the working tree as it stood when the run started, as a
 	// git tree object. A run that ends without acceptance is restored to it:
 	// runs edit the shared tree live and commit only on accept, so a failed or
@@ -128,6 +132,13 @@ type Run struct {
 	// overwritten if a stale copy was persisted — clients render buttons from
 	// this list and never encode the loop's rules themselves.
 	Next []string `json:"next,omitempty"`
+}
+
+// RedoNote is the bounded retry recommendation attached to a failed run.
+type RedoNote struct {
+	Draft    string `json:"draft"`
+	Advisor  string `json:"advisor"`
+	Editable bool   `json:"editable"`
 }
 
 // DucklingSpend is one model's share of a run.

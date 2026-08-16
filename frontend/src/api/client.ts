@@ -88,6 +88,8 @@ export interface Run {
   /** Why the run failed, in the engine's words. Some of these are written to be
    * acted on — split names the file two subtasks both claimed. */
   failure?: string;
+  /** Advisor-authored, editable retry recommendation for failed runs. */
+  redo_note?: { draft: string; advisor: string; editable: boolean };
   /** The actions a person may legally take on this run, in the order to offer
    * them. Stated by the engine; clients render buttons from this list and never
    * encode the loop's rules themselves (docs/ux-evaluation.md §5.4). */
@@ -628,6 +630,8 @@ export class EngineClient {
       ducklings?: string[];
       maxTokens?: number;
       agentTurns?: number;
+      /** A run-specific instruction carried into the build retry. */
+      note?: string;
       /** Explicit consent to redo a task that was already accepted. */
       redo?: boolean;
     },
@@ -638,6 +642,7 @@ export class EngineClient {
       mode: chain?.testMode ?? "",
       ducklings: chain?.testDucklings ?? [],
       then_build: chain?.thenBuild ?? false,
+      note: chain?.note || undefined,
       redo: chain?.redo || undefined,
       build: chain?.thenBuild
         ? {

@@ -11,6 +11,7 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/provider"
+	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -208,6 +209,42 @@ func (s *Service) pickAdvisor(rs *runState) config.DucklingID {
 		return id
 	}
 	return ""
+}
+
+// draftRedoNote creates a bounded, editable recommendation from facts already
+// recorded for the run. It deliberately never changes run state or starts a
+// retry; the note is an advisor recommendation, not a decision.
+func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoNote {
+	if rs == nil || rs.run == nil || !redoNoteEligible(rs.run) {
+		return nil
+	}
+	parts := make([]string, 0, 4)
+	if rs.run.TaskID != "" {
+		if task := s.buildTaskPrompt(ctx, rs.run.ProjectID, rs.projectPath, rs.run.TaskID); strings.TrimSpace(task) != "" {
+			parts = append(parts, "Task: "+firstN(strings.TrimSpace(task), 2400))
+		}
+	}
+	if strings.TrimSpace(rs.run.Failure) != "" {
+		parts = append(parts, "Failure: "+firstN(strings.TrimSpace(rs.run.Failure), 1600))
+	}
+	if gate, err := s.RunVerify(ctx, rs.run.ID, 20); err == nil && strings.TrimSpace(gate) != "" {
+		parts = append(parts, "Gate tail:\n"+firstN(strings.TrimSpace(gate), 4000))
+	}
+	if diff, err := s.RunDiff(ctx, rs.run.ID); err == nil && strings.TrimSpace(diff) != "" {
+		parts = append(parts, "Diff summary:\n"+firstN(strings.TrimSpace(diff), 4000))
+	}
+	if len(parts) == 0 { return nil }
+	advisor := s.pickAdvisor(rs)
+	note := "Retry the task after addressing the failure.\n\n" + strings.Join(parts, "\n\n")
+	return &runlog.RedoNote{Draft: firstN(note, 12000), Advisor: string(advisor), Editable: true}
+}
+
+func redoNoteEligible(r *runlog.Run) bool {
+	if r == nil { return false }
+	if r.Status == "failed" || r.Verdict == "FAILED" { return true }
+	// A green test-first run is actionable: its test is the input to the
+	// chained build, even though the test gate itself passed.
+	return r.Stage == "test" && r.Status == "paused" && r.PendingKind == "gate" && r.Verdict != "FAILED"
 }
 
 func adviceError(err error) string {

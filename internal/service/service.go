@@ -2197,6 +2197,12 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	if run.Status == "failed" && run.Failure == "" {
 		run.Failure = failureFromEvents(events)
 	}
+	// Failed runs carry a bounded, editable retry recommendation. Generation is
+	// deterministic and uses only the run record and captured artefacts; it
+	// never decides or relaunches anything.
+	if run.RedoNote == nil && redoNoteEligible(run) {
+		if note := s.draftRedoNote(ctx, rs); note != nil { run.RedoNote = note }
+	}
 	// Always recomputed: the stored copy cannot be allowed to disagree with
 	// the rules.
 	run.Next = runNext(run)

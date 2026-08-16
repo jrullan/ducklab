@@ -627,7 +627,7 @@ func (s *Server) runGet(id string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	view := pick(run, "id", "project_id", "stage", "mode", "task_id", "status", "verdict",
-		"failure", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings")
+		"failure", "redo_note", "resolution", "pending_kind", "pending_data", "next", "budget", "warning", "findings")
 	if diff, _, _, dErr := s.eng.RunDiff(id); dErr == nil && diff != "" {
 		view["diff"] = diff
 	}
