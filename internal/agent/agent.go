@@ -721,6 +721,10 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		// silently showing nothing for the whole turn.
 		resp, err = loop.Provider.Chat(ctx, req)
 		if err == nil && len(resp.Choices) > 0 {
+			d := newRepetitionDetector()
+			if d.Add(resp.Choices[0].Message.Content) {
+				return provider.ChatResponse{}, &repetitionError{text: d.Repeated()}
+			}
 			if r := resp.Choices[0].Message.Reasoning; r != "" && loop.OnReasoning != nil {
 				loop.OnReasoning(turn, r)
 			}
