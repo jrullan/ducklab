@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bug"
+	"github.com/jrullan/ducklab/internal/release"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 func ids(steps []NextStep) []string {
@@ -135,6 +138,119 @@ func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	}
 	if !strings.Contains(steps[0].Action, "1") || !strings.Contains(steps[0].Reason, "accepted") {
 		t.Errorf("release step does not surface the accepted count: %+v", steps[0])
+	}
+}
+
+// Cutting a release marks precisely the accepted commits reachable from its tag
+// as shipped. Persisted branch names are provenance, not release state: they
+// survive merging and deleting a worktree, so they cannot keep a release door
+// open. A later accepted commit remains actionable.
+func TestReleaseGuidanceCountsOnlyWorkAfterTheLatestRelease(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Ship it\n",
+		artifact.KindSpec:         "## SPEC-001 — Work\n\n**Implements:** REQ-001\n",
+		artifact.KindPlan: `## M-001 — Release
+
+### T-001 — Shipped work
+
+**Implements:** SPEC-001
+
+### T-002 — New work
+
+**Implements:** SPEC-001
+`,
+	})
+	git := gitProject(t, dir)
+
+	commit := func(name string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := git.Add(path); err != nil {
+			t.Fatal(err)
+		}
+		sha, err := git.Commit("build " + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sha
+	}
+	writeAccepted := func(id, task, sha string) {
+		t.Helper()
+		run := &runlog.Run{ID: id, ProjectID: projectID, TaskID: task, Stage: "build",
+			Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: sha,
+			// Deliberately retain a branch that no longer exists. Its name must not
+			// decide whether this accepted commit shipped.
+			Branch: "ducklab/" + task,
+		}
+		w, err := runlog.NewWriter(dir, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
+	}
+
+	shipped := commit("shipped.txt")
+	writeAccepted("r-shipped", "T-001", shipped)
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	v := release.Version{Major: 0, Minor: 1, Patch: 0}
+	draft := release.Path(dir, v) + ".proposed"
+	if err := os.MkdirAll(filepath.Dir(draft), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// This is the inventory the release actually computed and presented for
+	// approval. The subsequent tag includes the accepted T-001 commit.
+	if err := os.WriteFile(draft, []byte(release.Render(release.Notes{Version: v,
+		Milestones: release.Group([]release.Item{{TaskID: "T-001", CommitSHA: shipped}}),
+	}, "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReleaseCut(context.Background(), projectID, v.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	newCommit := commit("new.txt")
+	writeAccepted("r-new", "T-002", newCommit)
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := s.ProjectStatus(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.AcceptedUnreleased != 1 || status.UnreleasedBranches != 1 {
+		t.Errorf("status counts = accepted %d / branches %d, want only T-002 after v0.1.0", status.AcceptedUnreleased, status.UnreleasedBranches)
+	}
+
+	steps, err := s.ProjectNext(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releaseStep *NextStep
+	for i := range steps {
+		if steps[i].ID == "release" {
+			releaseStep = &steps[i]
+			break
+		}
+	}
+	if releaseStep == nil {
+		t.Fatalf("guide = %v, want a release step for T-002", ids(steps))
+	}
+	if !strings.Contains(releaseStep.Action, "1 accepted task(s)") || strings.Contains(releaseStep.Action, "2 accepted task(s)") {
+		t.Errorf("release step = %+v, want it to count only the post-tag task", *releaseStep)
+	}
+
+	// The tag is the release boundary, not branch deletion. Prove the fixture
+	// really retained the stale branch names while the release exists.
+	if vcs.New(dir).HasTag(v.String()) == false {
+		t.Fatal("setup did not create the release tag")
 	}
 }
 
