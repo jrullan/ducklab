@@ -1,7 +1,11 @@
 ---
 kind: plan
-version: 0
-approved_by: 
+version: 1
+updated_at: 2026-08-16T12:40:41Z
+run_id: r-20260816-123325-wfkc
+ducklings: [luna, beelink-local, k3]
+based_on: 121a37a792e74f09
+approved_by: human
 ---
 
 ## M-001 — Reported bugs
@@ -299,4 +303,27 @@ The MCP schemas and handlers omit per-run seat, mode, and turn-cap controls that
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-015 — Write .gitattributes with union merge rules at project init
+
+**Implements:** SPEC-008
+
+First tranche of B-006. In `ProjectInit` (internal/service/service.go), beside the existing `vcs.EnsureGitignore` call, write a `.gitattributes` at the project root declaring `merge=union` for the append-only operational files that concurrent task branches both touch: `.ducklab/bugs/audit.jsonl` and any other engine-owned JSONL ledgers (but NOT `project.toml`, the lifecycle docs, or the SQLite db, which stays gitignored). Add an `EnsureGitattributes` helper in `internal/vcs` mirroring `EnsureGitignore` (idempotent, preserves existing content, creates the file when absent). Done when a focused test initializes a project and asserts `.gitattributes` exists with a `merge=union` line for the audit ledger, and a second init leaves the file unmodified (no duplicate lines). Scope is small: file creation and one test only — no merge behavior change, no UI.
+
+### T-016 — Surface a discoverable Reopen action for fixed bugs and accepted tasks
+
+**Implements:** SPEC-017, SPEC-051
+
+Second tranche of B-006 (surface/UI only; no orchestration). Make the already-legal "reopen" move discoverable instead of insider knowledge: `ProjectNext`/`nextSteps` in internal/service/guide.go gains a computed step when a project has bugs in `fixed` awaiting verification or an accepted task whose redo is permitted, each carrying a stable id, outcome-language action, reason, and the object ref a client links to its own button. Expose the matching door on the MCP surface (a `bug_reopen` / reopen affordance consistent with the existing `bug_move` and the redo guard's consent language) so an agent operator sees the same path the desktop shows. Do not change any transition table or run behavior here. Done when a test drives a project into the fixed-bug / accepted-task state and asserts the guide step appears with the correct ref, and the MCP tool list/schema exposes the reopen affordance.
+
+### T-017 — Orchestrate safe test-first redo/relaunch with a required note and an audit entry
+
+**Implements:** SPEC-020, SPEC-048, SPEC-008
+
+Third tranche of B-006 (orchestration; depends on the previous two). Redoing an accepted task currently needs five pieces of insider knowledge; make the redo/relaunch of a test-first chain a single safe, attributable door. When a redo targets an accepted test-first task, the engine must: require a human-supplied `note` saying why (the consent the redo guard already names), refuse a dirty tree and any open run for the task, land the redo as a fresh chained test→build rather than fresh work against committed code, and append a signed audit entry (who, through which door, the note, the prior accepted SHA) to the append-only ledger beside the acceptance it does not erase — reusing the `appendBugAudit`/audit pattern. Reuse the existing `Redo` consent in `RunRequest`/`TestFirstRequest`; do not weaken the accepted-task refusal. Done when a test redoes an accepted test-first task with a note and asserts the chained test relaunches, the note and prior SHA are recorded on the run, and a signed audit line is appended; and a redo without a note is refused with the reason named.
+
+### T-018 — Retire-test cleanup path and a cap on redo commits per task
+
+**Implements:** SPEC-047, SPEC-032
+
+Fourth tranche of B-006 (cleanup and limits), kept separate per the change. Two bounded pieces: (a) a cleanup path that, when a redo supersedes a still-unbuilt committed test, retires that stale test through the existing deterministic `TestRetire` inverse-patch machinery rather than leaving the suite red — refusing with the verdict first when the build already landed, exactly as SPEC-047 requires; (b) a per-task bound on redo commits so an accepted task cannot accumulate unbounded redo/relaunch commits without a person noticing — the cap names itself in the refusal when reached. **Assumption:** the architect confirmed retire-test/cleanup belongs in its own tranche, as the change allows; if it should fold into the orchestration tranche instead, drop (a) here and widen that task. Done when a test redoes a task whose prior test never built and asserts the stale test is retired (revert SHA recorded, queue hold released), and a separate test drives a task to the redo-commit cap and asserts the next redo is refused with the limit named.
 
