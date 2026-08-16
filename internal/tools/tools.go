@@ -98,6 +98,10 @@ type ExecContext struct {
 	// change something.
 	lastFailSig   string
 	lastFailCount int
+	// fsPatchFailStreak tracks fuzzy, consecutive fs_patch failures by file.
+	// Unlike the exact-call brake above, changing the search text does not
+	// disguise a model fighting the same file.
+	fsPatchFailStreak map[string]int
 	// Verify is the project's gate. verify_run runs this and nothing else:
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
@@ -219,6 +223,13 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		return ErrorResult("unknown tool %q", name), nil
 	}
 	sig := name + "\x00" + string(args)
+	if name == "fs_patch" {
+		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
+			count := ectx.fsPatchFailStreak[path]
+			return &Result{IsError: true, Content: fmt.Sprintf(
+				"REFUSED: fs_patch has failed %d times on this file; read the full section and rewrite it with fs_write instead of patching", count)}, nil
+		}
+	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
 		return &Result{IsError: true, Content: fmt.Sprintf(
 			"REFUSED: you have made this exact failing call %d times — %s with the same "+
@@ -226,6 +237,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
 	}
 	res, err := t.Execute(ctx, ectx, args)
+	if name == "fs_patch" {
+		trackFSPatchFailure(ectx, args, res)
+	}
 	if res != nil && res.IsError {
 		if ectx.lastFailSig == sig {
 			ectx.lastFailCount++
@@ -246,6 +260,39 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+const FSPatchFailLimit = 5
+
+func fsPatchPath(root string, args json.RawMessage) string {
+	var a struct{ Path string `json:"path"` }
+	if json.Unmarshal(args, &a) != nil || a.Path == "" {
+		return ""
+	}
+	if _, err := PathJail(root, a.Path); err != nil {
+		return filepath.Clean(a.Path)
+	}
+	return filepath.Clean(a.Path)
+}
+
+func trackFSPatchFailure(ectx *ExecContext, args json.RawMessage, res *Result) {
+	path := fsPatchPath(ectx.ProjectRoot, args)
+	if path == "" {
+		return
+	}
+	if ectx.fsPatchFailStreak == nil {
+		ectx.fsPatchFailStreak = make(map[string]int)
+	}
+	if res != nil && res.IsError {
+		ectx.fsPatchFailStreak[path]++
+		if ectx.OnDistress != nil {
+			ectx.OnDistress("fs_patch_failure_streak", map[string]interface{}{
+				"tool": "fs_patch", "path": path, "count": ectx.fsPatchFailStreak[path],
+			})
+		}
+	} else {
+		delete(ectx.fsPatchFailStreak, path)
+	}
 }
 
 // resultCapFor scales the tool-result bound to the seat reading it: an
