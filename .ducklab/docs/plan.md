@@ -258,4 +258,24 @@ pickAdvisor hardcodes the architect fallback and advise only includes task text,
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-013 — Emit webhook notifications for operator-relevant run transitions
+
+Fixes B-020.
+
+## Reported
+
+What happened: across every run this session, the MCP operator learned that a run finished, paused, or asked a question only by polling status/run_get on a guessed cadence. There is no completion or distress signal on the MCP surface: a run that pauses on a question at minute 2 waits silently until the next poll; a run burning GPU in a failure streak announces nothing. The human gets the desktop's live view; the agent gets whatever it thinks to ask for, whenever it thinks to ask. This is the observability asymmetry named in tonight's design conversation — the agent sees problems only after hitting the tree.
+
+Expected: outbound notifications (the SPEC-055 webhook machinery already exists end to end, and Hermes already listens on a webhook) fire on the operator-relevant transitions — run ended (with verdict), paused (with pending_kind), question asked, distress (failure streaks, repetition_loop, budget pause). The operator subscribes; the engine interrupts. Polling stays as fallback, not as the only sense.
+
+## Triage
+
+**Component:** MCP notifications
+
+The MCP surface is poll-only, so operators receive no outbound signal when runs finish, pause, ask questions, or enter distress states.
+
+**Verification (triage recommends):** test-first — Trigger run ended, paused, question, and distress transitions and assert the subscribed webhook receives the expected event payloads.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
