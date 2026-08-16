@@ -42,7 +42,7 @@ type Engine interface {
 	BugAdd(projectID string, req map[string]string) (map[string]interface{}, error)
 	BugList(projectID string, openOnly bool) ([]map[string]interface{}, error)
 	BugAttach(projectID, bugID, filename, dataB64 string) (map[string]interface{}, error)
-	BugTriage(projectID, bugID string) (map[string]interface{}, error)
+	BugTriage(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error)
 	BugPromote(projectID, bugID, actor string) (map[string]interface{}, error)
 	BugMove(projectID, bugID, status, actor string) (map[string]interface{}, error)
 	TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error)

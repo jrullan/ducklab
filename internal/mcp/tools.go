@@ -115,7 +115,10 @@ func toolList() []map[string]interface{} {
 				"project_id": str("the project id"),
 				"stage":      str("intake | spec | plan"),
 				"brief":      str("intake only: what to build, or context for adopt"),
-				"adopt":      map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
+				"ducklings":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+					"mode":       str("optional mode: solo | council | sectioned"),
+					"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+					"adopt":      map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
 			}, "project_id", "stage"),
 		},
 		{
@@ -181,6 +184,9 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
 				"bug_id":     str("optional: triage exactly this bug"),
+					"ducklings":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+					"mode":       str("optional mode: solo | council | sectioned"),
+					"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 			}, "project_id"),
 		},
 		{
@@ -395,7 +401,8 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		if adopt, _ := a["adopt"].(bool); adopt {
 			req["adopt"] = true
 		}
-		run, err := s.eng.StageStart(a.str("project_id"), a.str("stage"), req)
+		copyRunOverrides(req, a)
+			run, err := s.eng.StageStart(a.str("project_id"), a.str("stage"), req)
 		if err != nil {
 			return nil, err
 		}
@@ -451,7 +458,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		return toolJSON(items), nil
 	case "bug_triage":
-		run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"))
+		req := map[string]interface{}{}
+			copyRunOverrides(req, a)
+			run, err := s.eng.BugTriage(a.str("project_id"), a.str("bug_id"), req)
 		if err != nil {
 			return nil, err
 		}

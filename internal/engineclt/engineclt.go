@@ -494,13 +494,15 @@ func (c *Client) BugList(projectID string, openOnly bool) ([]map[string]interfac
 
 // BugTriage classifies bugs: every open one when bugID is empty, exactly
 // that one otherwise.
-func (c *Client) BugTriage(projectID, bugID string) (map[string]interface{}, error) {
+func (c *Client) BugTriage(projectID, bugID string, req map[string]interface{}) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	var body interface{}
-	if bugID != "" {
-		body = map[string]string{"bug_id": bugID}
+	if req == nil {
+		req = map[string]interface{}{}
 	}
-	err := c.post("/v1/projects/"+projectID+"/bugs/triage", body, &result)
+	if bugID != "" {
+		req["bug_id"] = bugID
+	}
+	err := c.post("/v1/projects/"+projectID+"/bugs/triage", req, &result)
 	return result, err
 }
 
