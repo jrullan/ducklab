@@ -6,7 +6,7 @@ id = "ducklab"
 name = "ducklab"
 describe = ""
 created = "2026-08-03T13:35:24Z"
-autonomy = "guarded"
+autonomy = "yolo"
 
 [verify]
   mode = "tests"

@@ -1300,7 +1300,7 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 			Model:    loop.Duckling.Model,
 			Messages: conv,
 		}
-		applySampling(&req, loop.Duckling)
+		applySampling(&req, loop.Duckling, turn.Contract)
 
 		resp, err := loop.Provider.Chat(ctx, req)
 		if err != nil {
@@ -1336,14 +1336,14 @@ Reply again with ONLY the required format. No prose before or after it.`, contra
 
 // applySampling copies the duckling's sampling parameters onto a request, so a
 // repair uses the same settings as the turn it is repairing.
-func applySampling(req *provider.ChatRequest, d *DucklingConfig) {
+func applySampling(req *provider.ChatRequest, d *DucklingConfig, contract string) {
 	if d == nil {
 		return
 	}
 	if d.Params.Temperature != nil {
 		req.Temperature = d.Params.Temperature
 	}
-	req.MaxTokens = outputCap(d.Params.MaxTokens)
+	req.MaxTokens = outputCapForContract(d.Params.MaxTokens, contract)
 }
 
 // triagerPrompt is 04 §6.6, verbatim.
