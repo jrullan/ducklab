@@ -797,4 +797,22 @@ The guide deterministically recommends the exceptional Reopen action for ordinar
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-041 — Unify task status derivation and scope recycled-ID history to per-task body changes
+
+Fixes B-039.
+
+## Reported
+
+What happened: after the engine restart with T-023's fix (historical runs must not contaminate recycled task IDs) active, the board shows 39 todo / 1 accepted — every legitimately accepted task (T-001..T-038) reverted to todo, presumably because adding T-039/T-040 regenerated the plan and re-stamped every task body, making the status derivation discount ALL prior runs as \"historical\". Meanwhile the launch guard still derives from the raw run records: the autopilot (T-038's skip working correctly) picked falsely-todo T-001 and the launch refused with \"T-001 is already accepted; its work is committed\". Two derivations of the same fact now disagree, the board lies about 38 tasks, and the autopilot starves between them.\n\nExpected: the recycled-ID discount keys on a per-task identity change (its own body edit), never on a whole-plan regeneration; and there is exactly ONE status derivation shared by the board, the guard, and the autopilot. When two rules must read the same history, they must be the same rule.
+
+## Triage
+
+**Component:** task status derivation
+
+A plan regeneration falsely reverts accepted work and causes the board, launch guard, and autopilot to disagree, blocking reliable operation.
+
+**Verification (triage recommends):** test-first — Regenerate a plan after accepting tasks, then add tasks with recycled IDs and verify the board, launch guard, and autopilot all report the same accepted state.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
