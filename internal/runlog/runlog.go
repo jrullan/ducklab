@@ -21,6 +21,9 @@ type Run struct {
 	Stage         string                 `json:"stage"`
 	Mode          string                 `json:"mode"`
 	TaskID        string                 `json:"task_id"`
+	// TaskBodyHash binds derived task state to the meaning run at launch.
+	// Historical runs remain readable but cannot contaminate a recycled ID.
+	TaskBodyHash   string                 `json:"task_body_hash,omitempty"`
 	Roster        map[string]string      `json:"roster"`
 	Gate          string                 `json:"gate"`
 	Status        string                 `json:"status"` // running|paused|done|failed|queued
