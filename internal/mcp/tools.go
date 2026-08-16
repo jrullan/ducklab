@@ -85,7 +85,7 @@ func toolList() []map[string]interface{} {
 		{
 			"name": "task_list",
 			"description": "The project's tasks: a status summary first, then one compact line per " +
-				"task (id, status, title, next). Answer \"anything pending?\" from the summary. " +
+				"task (id, status, title, blocked reason when blocked, next). Answer \"anything pending?\" from the summary. " +
 				"Bodies are omitted — read one task's brief via the run you start, or artifact_get " +
 				"the plan.",
 			"inputSchema": obj(map[string]interface{}{
@@ -337,6 +337,15 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			id, _ := t["id"].(string)
 			title, _ := t["title"].(string)
 			line := fmt.Sprintf("%s  %s  %s", id, st, title)
+			if st == "blocked" {
+				reason, _ := t["blocked_reason"].(string)
+				if reason == "" {
+					reason, _ = t["blocked"].(string)
+				}
+				if reason != "" {
+					line += "  (blocked: " + reason + ")"
+				}
+			}
 			if next, ok := t["next"].([]interface{}); ok && len(next) > 0 {
 				parts := make([]string, 0, len(next))
 				for _, n := range next {
