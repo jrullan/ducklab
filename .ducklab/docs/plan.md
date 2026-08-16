@@ -613,4 +613,104 @@ The shared json:* cap can truncate legitimate decomposition responses containing
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-033 — Thread the contract through applySampling and enforce its output cap
+
+Fixes B-011.
+
+## Reported
+
+applySampling (used by contract repair calls) still uses outputCap without the contract, so a repair of a json:triage turn runs with the full declared cap (e.g. 20000) instead of 2048.
+
+Where: internal/agent/agent.go:1346
+
+Suggested fix: Thread turn.Contract into applySampling and call outputCapForContract there too.
+
+Found by glm52 reviewing T-002 in run r-20260815-130948-qka6 (verdict: approve).
+
+## Triage
+
+**Component:** agent contract repair sampling
+**Suspected files:** internal/agent/agent.go
+
+Contract repair requests ignore the turn contract when setting MaxTokens, allowing JSON triage repairs to use an excessive output cap.
+
+**Verification (triage recommends):** test-first — Trigger a JSON contract repair with a large configured max_tokens and assert the repair request uses the contract-specific cap.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-034 — Run repetition detection in the unsupported-streaming fallback
+
+Fixes B-013.
+
+## Reported
+
+The unsupported-streaming fallback path (ChatStream returns ErrUnsupported) does not run the repetition detector on the assembled Chat response, so a loop is only caught there if OnDelta/OnReasoning are both nil.
+
+Where: internal/agent/agent.go:718
+
+Suggested fix: Run a repetitionDetector over resp.Choices[0].Message.Content in the ErrUnsupported fallback before returning.
+
+Found by glm52 reviewing T-002 in run r-20260815-130948-qka6 (verdict: approve).
+
+## Triage
+
+**Component:** LLM generation streaming
+**Suspected files:** internal/agent/agent.go
+
+The ErrUnsupported fallback emits assembled content without applying the repetition detector, allowing repetitive responses to pass undetected.
+
+**Verification (triage recommends):** test-first — Make ChatStream return ErrUnsupported with repetitive assembled content and verify chatMaybeStreaming returns a repetition error.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-035 — Remove unused accumulated response storage from the repetition detector
+
+Fixes B-014.
+
+## Reported
+
+The text field accumulates the full response (d.text += s) but is never read; it is dead storage that grows unboundedly for long replies.
+
+Where: internal/agent/repetition.go:15
+
+Suggested fix: Remove the text field since Repeated() returns d.repeated, not d.text.
+
+Found by glm52 reviewing T-002 in run r-20260815-130948-qka6 (verdict: approve).
+
+## Triage
+
+**Component:** agent
+**Suspected files:** internal/agent/repetition.go
+
+The detector retains the entire streamed response unnecessarily, causing avoidable unbounded memory growth during long replies.
+
+**Verification (triage recommends):** build-only — The issue is dead internal state with no externally observable behavior; compilation verifies removal does not break references.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-036 — Align the ProjectNext if statement with the preceding assignment
+
+Fixes B-015.
+
+## Reported
+
+The if statement has an extra leading tab (over-indented relative to the assignment above it), a gofmt violation.
+
+Where: internal/mcp/tools.go:534
+
+Suggested fix: Remove the extra tab so the if aligns with the preceding entry assignment.
+
+Found by glm52 reviewing T-003 in run r-20260815-132712-vggm (verdict: approve).
+
+## Triage
+
+**Component:** MCP tools
+**Suspected files:** internal/mcp/tools.go
+
+The extra indentation is an isolated, actionable formatting defect in internal/mcp/tools.go.
+
+**Verification (triage recommends):** build-only — This is a formatting-only gofmt violation with no runtime behavior to test.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

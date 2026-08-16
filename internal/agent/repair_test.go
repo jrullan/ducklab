@@ -138,6 +138,34 @@ func TestRepairSucceedsAndReturnsTheParsedValue(t *testing.T) {
 	}
 }
 
+// Contract repair requests must use the same bounded output budget as the
+// original structured turn, rather than the duckling's large declared cap.
+func TestJSONTriageRepairUsesTheContractOutputCap(t *testing.T) {
+	p := &countingProvider{replies: []string{
+			"not json",
+			`{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`,
+		}}
+	loop := testLoop(p, 1)
+	loop.Duckling.Params.MaxTokens = func() *int { n := 20000; return &n }()
+	turn := &Turn{Role: config.RoleTriager, Prompt: "classify", Contract: "json:triage", MaxTurns: 1}
+
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatalf("repair failed: %v", err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) != 2 {
+		t.Fatalf("recorded %d requests, want original plus repair", len(p.requests))
+	}
+	if p.requests[1].MaxTokens == nil {
+		t.Fatal("repair request has no MaxTokens")
+	}
+	if got := *p.requests[1].MaxTokens; got > 2048 {
+		t.Fatalf("triage repair cap = %d, want no larger than 2048", got)
+	}
+}
+
 // The repair conversation must include what the model actually said, or it is
 // being asked to fix something it cannot see.
 func TestRepairPromptIncludesTheOriginalExchange(t *testing.T) {
