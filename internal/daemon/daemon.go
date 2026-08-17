@@ -16,13 +16,13 @@ import (
 
 // EngineInfo is the engine.json content.
 type EngineInfo struct {
-	PID       int    `json:"pid"`
-	Port      int    `json:"port"`
-	Token     string `json:"token"`
-	Version   string `json:"version"`
+	PID        int    `json:"pid"`
+	Port       int    `json:"port"`
+	Token      string `json:"token"`
+	Version    string `json:"version"`
 	Provenance string `json:"provenance,omitempty"`
-	StartedAt string `json:"started_at"`
-	StateDir  string `json:"state_dir"`
+	StartedAt  string `json:"started_at"`
+	StateDir   string `json:"state_dir"`
 }
 
 // StateDir returns the engine state directory.
@@ -56,11 +56,20 @@ func ReadEngineJSON() (*EngineInfo, error) {
 	return &info, nil
 }
 
-// WriteEngineJSON writes engine.json atomically with mode 0600.
+// WriteEngineJSON writes engine.json atomically with mode 0600. It refuses to
+// replace a record belonging to a process that is still alive.
 func WriteEngineJSON(info *EngineInfo) error {
 	path, err := EngineJSONPath()
 	if err != nil {
 		return err
+	}
+	existing, err := ReadEngineJSON()
+	if err == nil {
+		if processAlive(existing.PID) {
+			return fmt.Errorf("engine.json belongs to live process %d", existing.PID)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read existing engine.json: %w", err)
 	}
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {

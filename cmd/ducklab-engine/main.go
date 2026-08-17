@@ -21,9 +21,9 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("ducklab-engine %s (%s, go1.24+, %s/%s)\n", build.Version, build.Provenance(), "linux", "amd64")
-		os.Exit(0)
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Printf("ducklab-engine %s (%s)\n", build.Semver(), build.Provenance())
+		return
 	}
 
 	// Load config
@@ -79,13 +79,13 @@ func main() {
 	// Write engine.json
 	stateDir, _ := daemon.StateDir()
 	info := &daemon.EngineInfo{
-		PID:       os.Getpid(),
-		Port:      port,
-		Token:     token,
+		PID:        os.Getpid(),
+		Port:       port,
+		Token:      token,
 		Version:    build.Semver(),
 		Provenance: build.Provenance(),
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		StateDir:  stateDir,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		StateDir:   stateDir,
 	}
 	if err := daemon.WriteEngineJSON(info); err != nil {
 		fmt.Fprintf(os.Stderr, "error: write engine.json: %v\n", err)
