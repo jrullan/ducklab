@@ -725,3 +725,37 @@ A conversation with a chosen duckling about a subject is itself a run (`internal
 
 The engine announces run-settled moments to one configured webhook: `startNotifier` in `internal/service/notify.go` subscribes to the bus for `human_needed`, `run_end`, and autopilot stops, and POSTs a JSON envelope (event, run id, project id, RFC3339 timestamp, data) to the URL from config (`Notify.WebhookURL`); no URL configured means no notifier. Payloads are signed GitHub-style — `X-Hub-Signature-256: sha256=<hmac>` against the configured secret — because that is what receivers already verify. Delivery is best-effort by construction: a five-second HTTP timeout, exactly one retry on transport errors or 5xx, failures dropped silently — a dead receiver must never block or slow a run, since the run record on disk is the source of truth and the webhook is a doorbell. No credential appears in the record; the secret stays in config.
 
+## SPEC-056 — Ranged writes: `fs_write_lines`
+
+**Implements:** REQ-056
+**As-built:** yes
+
+`FSWriteLines` in `internal/tools/fs.go` takes `path, start, end, first_line, content`: 1-based inclusive lines matching `fs_read`'s numbering (`numberedWithin`), `first_line` compared to the current content of line `start` — a mismatch refuses with the actual line quoted ("line 302 is …, not …; re-read around line 302"), a range past EOF names the file's real length, a missing file points at `fs_write`. Empty content deletes the range; a file without a trailing newline keeps that shape. The result passes `WriteGuard` like every mutation and reports the new line count with the shifted-numbers warning. Registered in the implementer belt (`internal/tools/roles.go`); the fs_patch brake refusal (`internal/tools/tools.go`) now reads "use fs_read to see current line numbers, then fs_write_lines to replace the exact range". Pinned by `fswritelines_test.go`, including the read-then-edit round trip against `fs_read`'s numbers.
+
+## SPEC-057 — The rubber duck: a positioned advisor turn with three answers
+
+**Implements:** REQ-057
+**As-built:** yes
+
+`internal/strategy/rubberduck.go` measures a finished implementer turn structurally (`measureDistress`: `REFUSED:`-prefixed tool results, the longest consecutive-failure streak of one tool ≥ 5, `verify_run` reds ≥ 3, plus the deliverables report's undelivered ids) and, only when distressed, `consultAdvisor` runs a `RoleAdvisor` turn (contract `json:advice`, belt read-only) whose prompt carries the seats, the signals as JSON, the tool trace, the reasoning tail, the final text and the deliverables report with notes. `parseAdvice` degrades anything malformed to `none`. In `execute.go` the consult runs after the implementer's `turn_end` is emitted (never nested — T-119 showed the two as parallel), before the reviewer; a `note` appends to the corrective notes and re-runs the implementer turn at once with `retry: n` on its `turn_start`, at most `maxConsultRetries = 2` per round (`advisor_retry` event); `stop` returns `*AdvisorStop`, which the service maps to `Resolution: stopped by advisor <seat>`, an `advisor_stop` event and `failRun` (work in place), and `redoNoteEligible` admits the paused-error run so the redo note is born with the reshuffle. The reviewer prompt receives `operationalSummary` — the signals JSON — as data. No advisor seat → `advisor_consult {outcome: skipped}`; a failed consult → `outcome: failed`, run continues. `getRolePrompt(RoleAdvisor)` returns the rubber-duck system prompt. Pinned by `pair_test.go` (ordering, no-summon on a rough turn, bounded loop, stop before reviewer, skip without seat).
+
+## SPEC-058 — `ask_advisor`: the mid-turn consult
+
+**Implements:** REQ-058
+**As-built:** yes
+
+`AskAdvisor` in `internal/tools/exec.go` (non-mutating, implementer belt) calls `ExecContext.OnAskAdvisor(ctx, question)`; the service wires that hook in `runTask` only when `pickAdvisor` yields a seat, to `adviseInline` (`internal/service/advisor.go`) — `adviseWith` under `rubberDuckSystemPrompt` with the task prompt and project documents, three-minute timeout, cost recorded on the run's tracker and `llm.jsonl`, `advice {kind: inline}` / `advice_failed` events. Nil hook → an error result naming the self-help path; provider failure → "proceed with your best judgement". The implementer prompt's method step 5 says when to call it. Pinned by `askadvisor_test.go`.
+
+## SPEC-059 — The deliverables checklist
+
+**Implements:** REQ-059
+**As-built:** yes
+
+`internal/strategy/deliverables.go`: `ExtractDeliverables(title, body)` numbers top-level bullets (`-`, `*`, `•`, `N.`), stops at an out-of-scope marker, skips indented sub-bullets and label-only bullets, and falls back to the title. `dispatchMode` sets `ExecuteParams.Deliverables` from the task (`taskDeliverables`, `internal/service/modes.go`); stage, chat and test-first runs carry none. `buildPrompt` appends `deliverablesContract` to the implementer's prompt and `deliverablesForReviewer` (numbered list + `{"reported":[{id,status}],"not_reported":[…]}`, no notes) to the reviewer's. After each implementer turn `ParseDeliverablesReport` (tolerant: last `"deliverables"` object, brace-matched, statuses normalised, unknown ids dropped) emits `deliverables_report {round, retry?, total, deliverables, items, undelivered, unreported}`; undelivered ids enter `distressSignals.Undelivered`; a reviewer `approve` over undelivered ids emits `deliverables_gap`. Desktop: `splitDeliverablesReport` (`frontend/src/lib/runview.ts`) separates the report from the prose and `DeliverablesInline` (`DeliverablesCard.tsx`) renders it in the implementer's turn — marks with titles, never colour alone; `buildTurns` attaches `deliverables_gap` to the round's reviewer block and `VerdictBlock` shows it. Pinned by `deliverables_test.go` (Go) and `deliverables.test.tsx`.
+
+## SPEC-060 — Clean-checkout acceptance: borrowed dependencies, honest failure
+
+**Implements:** REQ-060
+**As-built:** yes
+
+`linkInstalledDeps(root, checkout)` in `internal/service/service.go` is a table of `{rel, markers}`: `node_modules` and `frontend/node_modules` justified by `package.json`; `.venv` justified by any of `pyproject.toml, requirements.txt, setup.py, setup.cfg, pytest.ini, tox.ini, Pipfile` — symlinked into the detached worktree before `verify.Run`. In `runTask`'s yolo branch a non-nil `acceptRun` error no longer vanishes: the run pauses `pending_kind: gate` with `PendingData.detail = "auto-accept failed: … — decide it yourself"` and a `human_needed` event, the same shape as reviewer dissent. Pinned by `clean_checkout_deps_test.go` (including the pytest.ini-only layout that stranded T-119).

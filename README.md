@@ -149,7 +149,7 @@ immediately: no engine restart.
 | Mode | What it does |
 |---|---|
 | `solo` | One duckling. The yardstick everything else is measured against. |
-| `pair` | Implementer and reviewer, decorrelated — a different model reviews. |
+| `pair` | Implementer and reviewer, decorrelated — a different model reviews. Between them sits the advisor, the rubber duck: silent unless the harness measured distress in the implementer's turn, then one of `none` / a note that sends the implementer straight back to work / `stop`. The implementer works to a numbered deliverables checklist and reports on it by number. |
 | `tournament` | Contestants build the same task in isolated worktrees; a judge picks, blind to who wrote what. |
 | `split` | An architect decomposes; subtasks run in parallel; integration is file copies with no model involved. |
 | `council` | Several models on one document, for intake, spec, plan and review. |

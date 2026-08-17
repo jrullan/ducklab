@@ -21,3 +21,4 @@ engineer.
 | [0005](0005-canonical-tasks-do-not-discriminate.md) | Canonical problems do not discriminate between models |
 | [0006](0006-test-first.md) | The test is written first, by a different model, and read by a person |
 | [0007](0007-artifact-modes.md) | An artifact stage may run solo, and says which ducklings it will use |
+| [0008](0008-rubber-duck.md) | The advisor is a positioned turn with three answers, not a background consult |

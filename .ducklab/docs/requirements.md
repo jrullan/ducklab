@@ -449,3 +449,42 @@ The engine announces run-settled moments to one configured webhook URL: `human_n
 
 **Assumption:** From `internal/service/notify.go` startNotifier.
 
+## REQ-056 — A ranged write between patching and rewriting
+
+**Priority:** must
+
+The implementer can replace an exact line range of an existing file, addressed by the line numbers `fs_read` already shows, without re-typing anchor text and without re-emitting the whole file. The write proves the model read what it replaces (the current content of the first line must be supplied and, on mismatch, the actual line is taught back), and the tool warns that numbers below the edit have shifted. The fs_patch brake's remedy names this path first.
+
+**Assumption:** From `internal/tools/fs.go` FSWriteLines; born of B-059 (T-058's implementers failed fs_patch 28 times on a backtick-dense file and feared whole-file fs_write).
+
+## REQ-057 — The advisor as a positioned turn: the rubber duck
+
+**Priority:** must
+
+In pair mode the advisor takes a turn at one deterministic moment — after the implementer's turn is closed on the record and before the reviewer speaks — and only when the harness measured distress in that turn (brake refusals, a streak of failures of one tool, red gates, or an item the implementer itself reports undelivered); never inferred from prose, never on a merely rough turn, and never at all when no advisor is seated. It reads what the reviewer must not (the implementer's reasoning, its tool trace, its report with notes) and answers `none`, a `note` that sends the implementer back to work at once (bounded to two retries per round) before any reviewer turn is spent, or `stop` — the run pauses with its work in place, the record names the advisor, the reason and the reshuffle for the re-run, and the redo note carries them. The reviewer receives the measured telemetry as data only.
+
+**Assumption:** From `internal/strategy/rubberduck.go`, `execute.go`; supersedes the asynchronous consult of REQ-053 for the in-run case (B-058).
+
+## REQ-058 — The implementer may consult the advisor mid-turn
+
+**Priority:** should
+
+An implementer that knows it is stuck — the same tool failing repeatedly, a gate that stays red after several attempts, a choice it cannot make from the code — can call `ask_advisor` and receive the advisor's reply inline, in the same turn, without pausing the run and without a human. Its role prompt says when to use it; with no advisor seated the tool says so and points at the self-help path.
+
+**Assumption:** From `internal/tools/exec.go` AskAdvisor and `ExecContext.OnAskAdvisor`.
+
+## REQ-059 — The deliverables checklist as the implementer's work contract
+
+**Priority:** must
+
+The task's top-level bullets — the plan's or the promotion's words, numbered — are what the implementer must deliver; how is its own. It closes its turn by reporting each by number (`done | partial | not_done | blocked`, with a note for anything short). Anything not done is a distress signal that summons the advisor with the exact question; the reviewer receives ids and statuses as data and the numbered list as a rubric, never the implementer's notes; an approve over items the implementer itself reported undelivered is recorded as a gap; a missing report is data for the reviewer, not distress, and the parse never fails a turn. The desktop renders the report as a checklist at the end of the implementer's own turn — an unreviewed progress report, never a rail card that would read as the result — and flags the gap on the reviewer's verdict.
+
+**Assumption:** From `internal/strategy/deliverables.go`, `frontend/src/components/DeliverablesCard.tsx`, `ConversationLane.tsx`.
+
+## REQ-060 — Acceptance from a clean checkout borrows the tools of the trade
+
+**Priority:** must
+
+The clean-checkout reproduction of an accepted commit links the live tree's installed dependency trees into the checkout — `node_modules` where the commit carries a `package.json`, `.venv` where it carries a Python marker (`pyproject.toml`, `requirements.txt`, `setup.py`, `setup.cfg`, `pytest.ini`, `tox.ini`, `Pipfile`) — never build products. An auto-accept whose reproduction fails pauses at the human gate wearing the error instead of stranding the run as running.
+
+**Assumption:** From `internal/service/service.go` linkInstalledDeps and the yolo accept path; the declared general form is B-061.
