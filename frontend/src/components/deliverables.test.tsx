@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { buildDeliverables } from "../lib/runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -96,8 +96,14 @@ describe("a folded implementer turn", () => {
     ];
     const block = buildTurns(events)[0]!;
     render(<ConversationTurn block={block} roster={["luna"]} collapsed deliverableTexts={["A", "B"]} />);
-    expect(screen.getByTestId("deliverables-fold-count").textContent).toContain("1/2");
+    // Compact by default: the count, no rows.
+    const toggle = screen.getByTestId("deliverables-fold-count");
+    expect(toggle.textContent).toContain("1/2");
+    expect(screen.queryAllByTestId("deliverable-inline")).toHaveLength(0);
+    // One click opens the checklist by itself, without unfolding the turn.
+    fireEvent.click(toggle);
     expect(screen.getAllByTestId("deliverable-inline")).toHaveLength(2);
+    expect(screen.queryByTestId("tool-call")).toBeNull();
     // The summary line shows the prose, not the JSON.
     expect(screen.getByTestId("turn-summary").textContent).not.toContain('"deliverables"');
   });

@@ -137,16 +137,6 @@ export function ConversationTurn({
         {collapsed && failedTools > 0 && (
           <span className="text-xs text-critical">✕ {failedTools} failed</span>
         )}
-        {/* Nor the answer to "did it finish?": the report survives the fold. */}
-        {collapsed && report && (
-          <span
-            className="text-xs tabular-nums"
-            data-testid="deliverables-fold-count"
-            style={{ color: statusVar(reportDone === report.items.length ? "good" : "warning") }}
-          >
-            ☑ {reportDone}/{report.items.length}
-          </span>
-        )}
       </header>
 
       {collapsed && (
@@ -156,9 +146,12 @@ export function ConversationTurn({
           {preview}
         </p>
       )}
-      {/* The checklist stays visible when the turn folds: whether the
-          implementer could finish must not be buried under forty tool calls. */}
-      {collapsed && report && <DeliverablesInline items={report.items} texts={deliverableTexts} />}
+      {/* Nor the answer to "did it finish?": the report survives the fold as
+          its own compact toggle — n/m at a glance, the checklist on click,
+          without unfolding forty tool calls. */}
+      {collapsed && report && (
+        <FoldedReport items={report.items} done={reportDone} texts={deliverableTexts} />
+      )}
 
       {!collapsed && block.toolCalls.length > 0 && (
         <ul className="mt-1">
@@ -235,6 +228,36 @@ export function ConversationTurn({
         )
       ))}
     </article>
+  );
+}
+
+/** The report on a folded turn: a count that opens the checklist by itself. */
+function FoldedReport({
+  items,
+  done,
+  texts,
+}: {
+  items: { id: number; status: string; note?: string }[];
+  done: number;
+  texts?: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const complete = done === items.length;
+  return (
+    <div className="mt-1" data-testid="deliverables-fold">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-sm tabular-nums"
+        data-testid="deliverables-fold-count"
+        aria-expanded={open}
+        title={open ? "hide the checklist" : "show the checklist"}
+        style={{ color: statusVar(complete ? "good" : "warning") }}
+      >
+        {complete ? "☑" : "◐"} {done}/{items.length} <span className="text-ink-muted">{open ? "⌄" : "›"}</span>
+      </button>
+      {open && <DeliverablesInline items={items} texts={texts} />}
+    </div>
   );
 }
 
