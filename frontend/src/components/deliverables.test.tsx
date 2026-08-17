@@ -78,3 +78,36 @@ describe("DeliverablesCard", () => {
     expect(screen.getByTestId("deliverables-gap").textContent).toMatch(/approved over undelivered/);
   });
 });
+
+import { splitDeliverablesReport } from "../lib/runview";
+import { ConversationTurn } from "./ConversationLane";
+import { buildTurns } from "../lib/runview";
+
+describe("the implementer's closing report in the lane", () => {
+  const reply =
+    "Implemented favorites and CRUD forms. Ran the gate.\n\n" +
+    '{"deliverables":[{"id":1,"status":"done"},{"id":2,"status":"blocked","note":"no fixture"}]}';
+
+  it("splits prose from the report", () => {
+    const s = splitDeliverablesReport(reply)!;
+    expect(s.prose).toBe("Implemented favorites and CRUD forms. Ran the gate.");
+    expect(s.items.map((i) => i.status)).toEqual(["done", "blocked"]);
+    expect(splitDeliverablesReport("just prose")).toBeNull();
+  });
+
+  it("renders the report as a checklist instead of a JSON blob", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "luna", content: reply }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    render(<ConversationTurn block={block} roster={["luna"]} deliverableTexts={["Star toggle", "Add form"]} />);
+    const rows = screen.getAllByTestId("deliverable-inline");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.getAttribute("data-status")).toBe("blocked");
+    expect(screen.getByText("Add form")).toBeTruthy();
+    expect(screen.getByText(/no fixture/)).toBeTruthy();
+    expect(screen.getByTestId("turn-text").textContent).not.toContain('"deliverables"');
+  });
+});

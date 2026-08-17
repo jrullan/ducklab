@@ -1288,6 +1288,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
                   reasoning={t.messageOnly ? undefined : (reasoning[`${t.round}:${t.turn}`] ?? t.reasoning)}
                   collapsed={isCollapsed}
+                  deliverableTexts={deliverables?.lines.map((l) => l.text)}
                   onToggle={
                     foldable
                       ? () => setTurnChoice((c) => ({ ...c, [key]: isCollapsed }))

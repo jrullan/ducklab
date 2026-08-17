@@ -4,6 +4,8 @@ import { ducklingColor } from "../lib/colors";
 import { DuckAvatar } from "./DuckAvatar";
 import { StatusChip } from "./StatusChip";
 import { Prose } from "./Prose";
+import { DeliverablesInline } from "./DeliverablesCard";
+import { splitDeliverablesReport } from "../lib/runview";
 
 /**
  * One turn in the conversation.
@@ -24,6 +26,7 @@ export function ConversationTurn({
   color,
   collapsed = false,
   onToggle,
+  deliverableTexts,
 }: {
   block: TurnBlock;
   roster: readonly string[];
@@ -41,6 +44,9 @@ export function ConversationTurn({
    * verdict, the tool count, the failures. The header is the toggle. */
   collapsed?: boolean;
   onToggle?: () => void;
+  /** The task's deliverable texts, when the run's report event carried them,
+   * so the implementer's closing report renders as a readable checklist. */
+  deliverableTexts?: string[];
 }) {
   const anonymous = !!block.label;
   const isGate = block.role === "gate";
@@ -186,7 +192,20 @@ export function ConversationTurn({
           rendered once the turn has settled. */}
       {!collapsed && (block.done && block.text && !block.verdict ? (
         <div data-testid="turn-text">
-          <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+          {(() => {
+            // The implementer's closing report is a contract, not prose: the
+            // JSON it ends with becomes the checklist a person can read.
+            const split = block.role === "implementer" ? splitDeliverablesReport(block.text) : null;
+            if (!split) {
+              return <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />;
+            }
+            return (
+              <>
+                {split.prose && <Prose body={split.prose} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
+                <DeliverablesInline items={split.items} texts={deliverableTexts} />
+              </>
+            );
+          })()}
         </div>
       ) : streamed ? (
         <pre

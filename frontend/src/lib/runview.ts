@@ -171,6 +171,54 @@ export function buildDeliverables(events: DucklabEvent[]): DeliverablesState | n
   };
 }
 
+/** Splits an implementer's reply into its prose and the deliverables report
+ * object it ends with, so the lane can render the report as a checklist
+ * instead of a JSON blob. Same tolerant walk as the engine's parser: the last
+ * object containing "deliverables", brace-matched. */
+export function splitDeliverablesReport(text: string): {
+  prose: string;
+  items: { id: number; status: string; note?: string }[];
+} | null {
+  const idx = text.lastIndexOf('"deliverables"');
+  if (idx < 0) return null;
+  const start = text.lastIndexOf("{", idx);
+  if (start < 0) return null;
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+  if (end < 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end));
+  } catch {
+    return null;
+  }
+  const raw = (parsed as { deliverables?: unknown })?.deliverables;
+  if (!Array.isArray(raw)) return null;
+  const items = raw
+    .map((it) => ({
+      id: Number((it as { id?: unknown })?.id),
+      status: String((it as { status?: unknown })?.status ?? "").toLowerCase().replace(/[-\s]/g, "_"),
+      note: (it as { note?: unknown })?.note ? String((it as { note?: unknown }).note) : undefined,
+    }))
+    .filter((it) => it.id >= 1 && ["done", "partial", "not_done", "blocked"].includes(it.status));
+  if (items.length === 0) return null;
+  // Drop the object and any code fence that wrapped it.
+  let prose = text.slice(0, start) + text.slice(end);
+  prose = prose.replace(/```(?:json)?\s*```/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return { prose, items };
+}
+
 export interface GateState {
   gate: string;
   exitCode?: number;
