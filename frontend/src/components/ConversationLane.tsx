@@ -54,7 +54,11 @@ export function ConversationTurn({
   const who = anonymous ? block.label! : block.duckling;
   const tint = anonymous || isGate ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
   const failedTools = block.toolCalls.filter((c) => !c.ok).length;
-  const preview = (block.text ?? "").split("\n").find((l) => l.trim() !== "") ?? "";
+  // The implementer's closing report is a contract, not prose: split it out
+  // once so both the folded and the open turn can show it as a checklist.
+  const report = block.done && block.role === "implementer" && block.text ? splitDeliverablesReport(block.text) : null;
+  const preview = ((report ? report.prose : block.text) ?? "").split("\n").find((l) => l.trim() !== "") ?? "";
+  const reportDone = report ? report.items.filter((i) => i.status === "done").length : 0;
 
   return (
     <article
@@ -133,6 +137,16 @@ export function ConversationTurn({
         {collapsed && failedTools > 0 && (
           <span className="text-xs text-critical">✕ {failedTools} failed</span>
         )}
+        {/* Nor the answer to "did it finish?": the report survives the fold. */}
+        {collapsed && report && (
+          <span
+            className="text-xs tabular-nums"
+            data-testid="deliverables-fold-count"
+            style={{ color: statusVar(reportDone === report.items.length ? "good" : "warning") }}
+          >
+            ☑ {reportDone}/{report.items.length}
+          </span>
+        )}
       </header>
 
       {collapsed && (
@@ -142,6 +156,9 @@ export function ConversationTurn({
           {preview}
         </p>
       )}
+      {/* The checklist stays visible when the turn folds: whether the
+          implementer could finish must not be buried under forty tool calls. */}
+      {collapsed && report && <DeliverablesInline items={report.items} texts={deliverableTexts} />}
 
       {!collapsed && block.toolCalls.length > 0 && (
         <ul className="mt-1">
@@ -193,20 +210,14 @@ export function ConversationTurn({
           rendered once the turn has settled. */}
       {!collapsed && (block.done && block.text && !block.verdict ? (
         <div data-testid="turn-text">
-          {(() => {
-            // The implementer's closing report is a contract, not prose: the
-            // JSON it ends with becomes the checklist a person can read.
-            const split = block.role === "implementer" ? splitDeliverablesReport(block.text) : null;
-            if (!split) {
-              return <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />;
-            }
-            return (
-              <>
-                {split.prose && <Prose body={split.prose} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
-                <DeliverablesInline items={split.items} texts={deliverableTexts} />
-              </>
-            );
-          })()}
+          {!report ? (
+            <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+          ) : (
+            <>
+              {report.prose && <Prose body={report.prose} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
+              <DeliverablesInline items={report.items} texts={deliverableTexts} />
+            </>
+          )}
         </div>
       ) : streamed ? (
         <pre

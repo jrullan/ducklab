@@ -86,6 +86,23 @@ describe("the implementer's closing report in the lane", () => {
   });
 });
 
+describe("a folded implementer turn", () => {
+  it("still shows the checklist and the count", () => {
+    const reply = "Done.\n\n" + '{"deliverables":[{"id":1,"status":"done"},{"id":2,"status":"not_done"}]}';
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("message", 2, { round: 1, turn: 0, role: "implementer", duckling: "luna", content: reply }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer" }),
+    ];
+    const block = buildTurns(events)[0]!;
+    render(<ConversationTurn block={block} roster={["luna"]} collapsed deliverableTexts={["A", "B"]} />);
+    expect(screen.getByTestId("deliverables-fold-count").textContent).toContain("1/2");
+    expect(screen.getAllByTestId("deliverable-inline")).toHaveLength(2);
+    // The summary line shows the prose, not the JSON.
+    expect(screen.getByTestId("turn-summary").textContent).not.toContain('"deliverables"');
+  });
+});
+
 describe("an approve over undelivered items", () => {
   it("is flagged on the reviewer's verdict, not in a rail", () => {
     const events: DucklabEvent[] = [
