@@ -84,6 +84,23 @@ describe("relaunching from the run view", () => {
     );
   });
 
+  // Abort is the other irreversible action on this screen. A dead desktop
+  // binding used to swallow its rejected promise, leaving the run alive while
+  // the person believed it had stopped.
+  it("reports a failed abort beside the abort control", async () => {
+    const abortable = { ...failed, status: "paused" as const, next: ["abort"] };
+    useRuns.setState({ runs: { "r-1": abortable }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: abortable, events: [] })),
+      abort: vi.fn(() => Promise.reject(new Error("connection refused: stale engine binding"))),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    fireEvent.click(await screen.findByTestId("abort-button"));
+    await waitFor(() =>
+      expect(screen.getByTestId("abort-error").textContent).toContain("stale engine binding"),
+    );
+  });
+
   // Nothing to learn from yet, and starting a second run against a task already
   // being worked on is how two runs end up fighting over the same tree.
   it("offers nothing while the run is still going", async () => {
