@@ -2,9 +2,11 @@ package verify
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -204,6 +206,80 @@ func TestTheGateStopsAtItsTimeout(t *testing.T) {
 	// would blame the code for our limit (05 §5.2).
 	if got := Verdict(res); got != "UNVERIFIED" {
 		t.Errorf("verdict = %s, want UNVERIFIED", got)
+	}
+}
+
+// This is the binary a gate spawns below. Keeping it in the test binary makes
+// the assertion exercise the real child process environment, rather than a
+// value passed through an in-process helper.
+func TestVerifyRunStateEnvironmentHelper(t *testing.T) {
+	if os.Getenv("VERIFY_CHILD") != "1" {
+		t.Skip("helper")
+	}
+	for _, key := range []string{
+		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+		"HOME", "AppData", "LocalAppData",
+	} {
+		fmt.Printf("VERIFY_STATE_ENV:%s=%s\n", key, os.Getenv(key))
+	}
+}
+
+// Every process in a verification gate tree must see throwaway state paths.
+// In particular, setting the harness paths in the parent must not let a gate
+// child discover or mutate the live registry. Two invocations also need
+// distinct paths: isolation is per verify_run, not merely per process tree.
+func TestRunScrubsStateEnvironmentForSpawnedChildren(t *testing.T) {
+	master := t.TempDir()
+	keys := []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "HOME", "AppData", "LocalAppData"}
+	for _, key := range keys {
+		t.Setenv(key, filepath.Join(master, key))
+	}
+
+	binary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := fmt.Sprintf("VERIFY_CHILD=1 %q -test.v -test.run=TestVerifyRunStateEnvironmentHelper", binary)
+	cfg := config.Verify{Mode: "custom", Custom: command, TimeoutS: 30}
+
+	read := func() map[string]string {
+		res, err := Run(context.Background(), t.TempDir(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.ExitCode != 0 {
+			t.Fatalf("state helper gate failed: %s", res.Output)
+		}
+		got := make(map[string]string)
+		for _, line := range strings.Split(res.Output, "\n") {
+			if strings.HasPrefix(line, "VERIFY_STATE_ENV:") {
+				parts := strings.SplitN(strings.TrimPrefix(line, "VERIFY_STATE_ENV:"), "=", 2)
+				if len(parts) == 2 {
+					got[parts[0]] = parts[1]
+				}
+			}
+		}
+		return got
+	}
+	first, second := read(), read()
+
+	wantKeys := []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"}
+	if runtime.GOOS == "darwin" {
+		wantKeys = append(wantKeys, "HOME")
+	} else if runtime.GOOS == "windows" {
+		wantKeys = append(wantKeys, "AppData", "LocalAppData")
+	}
+	for _, key := range wantKeys {
+		for name, got := range map[string]string{"first": first[key], "second": second[key]} {
+			if got == "" {
+				t.Errorf("%s %s was empty", name, key)
+			} else if strings.HasPrefix(got, master) {
+				t.Errorf("%s %s leaked harness state path %q", name, key, got)
+			}
+		}
+		if first[key] == second[key] {
+			t.Errorf("%s was reused across verify_run calls: %q", key, first[key])
+		}
 	}
 }
 
