@@ -247,8 +247,16 @@ func isolatedStateEnvironment() ([]string, func(), error) {
 				values[envKey] = def
 			}
 		}
-		cache("GOPATH", filepath.Join(home, "go"))
-		cache("GOMODCACHE", filepath.Join(home, "go", "pkg", "mod"))
+		// An explicit GOPATH outranks the HOME-derived default, and the
+		// module cache follows whichever GOPATH won — T-050's spec: a
+		// custom GOPATH with a hardcoded HOME-derived GOMODCACHE splits
+		// the toolchain across two worlds.
+		gopath := os.Getenv("GOPATH")
+		if gopath == "" {
+			gopath = filepath.Join(home, "go")
+		}
+		cache("GOPATH", gopath)
+		cache("GOMODCACHE", filepath.Join(gopath, "pkg", "mod"))
 		cache("GOCACHE", filepath.Join(home, ".cache", "go-build"))
 		cache("npm_config_cache", filepath.Join(home, ".npm"))
 	}
