@@ -231,6 +231,10 @@ export function App() {
         useRuns.getState().applyEvent(e);
       },
       onState: (s) => useRuns.getState().setConnection(s),
+      // A reconnect can miss a run_start that happened on the dead stream;
+      // replace the run list from HTTP after the new stream is open.
+      onReconnect: () => refresh(),
+      staleAfterMs: 30_000,
       // Overflow means we fell behind and the engine dropped us. Refetching
       // the run LIST is not enough: the conversation lives in the run detail,
       // so without this the transcript stays permanently truncated at the
@@ -306,6 +310,9 @@ export function App() {
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).
   const degraded = connection === "reconnecting" || connection === "closed";
+  const streamBadge = connection === "open"
+    ? "engine ✓"
+    : `engine ✓ · stream ${connection}`;
   const waitingCount = pendingForHuman(runs).length;
 
   // The attention surface. The store sees every state change; this is the one
@@ -580,7 +587,7 @@ export function App() {
                 ? "critical"
                 : "warning"
           }
-          label={connection === "open" ? "engine" : connection}
+          label={streamBadge}
         />
         {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}
       </footer>

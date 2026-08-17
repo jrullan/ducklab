@@ -32,6 +32,11 @@ export interface SubscriberOptions {
   onState?: (s: ConnectionState) => void;
   /** Called when the server drops us for overflow; the caller must resync. */
   onOverflow?: () => void;
+  /** Called after a reconnect succeeds, so callers can refresh snapshots that
+   * may have changed while the stream was unavailable. */
+  onReconnect?: () => void;
+  /** How long a quiet stream may remain open before it is considered stale. */
+  staleAfterMs?: number;
   /** Injected for tests. Defaults to the global EventSource. */
   eventSourceFactory?: (url: string) => EventSourceLike;
   /** Injected for tests so backoff does not make suites slow. */
@@ -51,6 +56,7 @@ export interface EventSourceLike {
 
 const BASE_DELAY_MS = 500;
 const MAX_DELAY_MS = 8000;
+const DEFAULT_STALE_AFTER_MS = 30_000;
 
 /** Exponential backoff with jitter, capped (07 §7.2). */
 export function backoffDelay(attempt: number, random: () => number = Math.random): number {
@@ -85,6 +91,8 @@ export class EventSubscriber {
   private attempt = 0;
   private stopped = false;
   private timer: unknown = null;
+  private staleTimer: unknown = null;
+  private streamOpen = false;
 
   constructor(opts: SubscriberOptions) {
     this.opts = opts;
@@ -104,8 +112,10 @@ export class EventSubscriber {
   stop(): void {
     this.stopped = true;
     this.clearTimer();
+    this.clearStaleTimer();
     this.source?.close();
     this.source = null;
+    this.streamOpen = false;
     this.opts.onState?.("closed");
   }
 
@@ -114,6 +124,33 @@ export class EventSubscriber {
       (this.opts.clearTimeoutFn ?? clearTimeout)(this.timer as never);
       this.timer = null;
     }
+  }
+
+  private clearStaleTimer(): void {
+    if (this.staleTimer !== null) {
+      (this.opts.clearTimeoutFn ?? clearTimeout)(this.staleTimer as never);
+      this.staleTimer = null;
+    }
+  }
+
+  private armStaleTimer(): void {
+    this.clearStaleTimer();
+    // Keep the low-level subscriber compatible with callers that only want
+    // EventSource's native reconnect; the desktop opts into liveness polling.
+    if (this.opts.staleAfterMs === undefined) return;
+    const timeout = this.opts.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+    this.staleTimer = (this.opts.setTimeoutFn ?? setTimeout)(() => {
+      if (this.stopped || !this.source) return;
+      // EventSource can remain open after its underlying connection has died.
+      // Close it ourselves so its normal bounded reconnect path is used.
+      this.source.close();
+      this.source = null;
+      this.streamOpen = false;
+      this.opts.onState?.("reconnecting");
+      const delay = backoffDelay(this.attempt, this.opts.random);
+      this.attempt += 1;
+      this.timer = (this.opts.setTimeoutFn ?? setTimeout)(() => this.connect(), delay);
+    }, timeout);
   }
 
   private connect(): void {
@@ -126,10 +163,15 @@ export class EventSubscriber {
       ((u: string) => new EventSource(u) as unknown as EventSourceLike);
     const src = factory(url);
     this.source = src;
+    this.streamOpen = false;
 
     src.onopen = () => {
+      const wasReconnect = this.attempt > 0;
       this.attempt = 0;
+      this.streamOpen = true;
       this.opts.onState?.("open");
+      this.armStaleTimer();
+      if (wasReconnect) this.opts.onReconnect?.();
     };
 
     src.addEventListener("message", (e) => this.handle(e));
@@ -139,8 +181,10 @@ export class EventSubscriber {
 
     src.onerror = () => {
       if (this.stopped) return;
+      this.clearStaleTimer();
       src.close();
       this.source = null;
+      this.streamOpen = false;
       // Do NOT clear caller state: the UI keeps rendering what it has and
       // only the indicator changes (AC-30).
       this.opts.onState?.("reconnecting");
@@ -157,6 +201,11 @@ export class EventSubscriber {
     } catch {
       return; // a malformed frame is dropped, never guessed at
     }
+
+    // Heartbeats and all other valid frames prove the socket is alive. Reset
+    // the watchdog before dispatching so a quiet period is measured from the
+    // last event, not merely from connection establishment.
+    if (this.streamOpen) this.armStaleTimer();
 
     if (parsed.type === "overflow") {
       // The server dropped us because we fell behind. This is a resync
