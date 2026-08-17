@@ -855,4 +855,43 @@ The unrecognized version command starts a second engine and unconditionally repl
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-044 — Count accepted no_changes builds as settled and block their automatic relaunch
+
+Fixes B-042.
+
+## Reported
+
+What happened: T-036's fix was already in the tree (landed incidentally in an earlier commit). Under yolo, the autopilot launched it; the build found nothing to do (no_changes), passed, was accepted — and because a no_changes run does not count as built in the status derivation, T-036 stayed todo, so the autopilot relaunched it. Three identical empty runs in four minutes (23:35, 23:38, 23:39), and it would have burned all of max_tasks on air. A task whose work already exists can NEVER be settled by building it: the loop's own success condition is unreachable.
+
+Expected: an ACCEPTED no_changes build settles the task — the acceptance is precisely the judgement that the work already exists, and the record carries it; the derivation should count it. Belt and suspenders: the autopilot refuses to relaunch a task whose previous run ended no_changes without a human note in between — repeating a question the tree already answered is the machine version of asking until you like the answer.
+
+## Triage
+
+**Component:** autopilot and task status derivation
+**Suspected files:** internal/service/autopilot.go, internal/service/guide.go, internal/service/runs.go
+
+An accepted no_changes build currently leaves its task todo, making autopilot repeatedly spend task slots launching an already-complete task.
+
+**Verification (triage recommends):** test-first — Accept a no_changes build and verify the task becomes settled and autopilot does not launch it again without an intervening human note.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-045 — Isolate state environment variables for every verify_run process tree
+
+Fixes B-047.
+
+## Reported
+
+What happened: T-043's red test (for B-041) executed ducklab-engine version; the missing subcommand booted a full engine that inherited the gate's environment — the ENGINE'S OWN env — so its startup recovery read the real registry, found the running T-043 "orphaned", and checkpointed it: the run killed itself, identically on two attempts, and the spawned engine lingered as an orphan process for five minutes. The gate's child processes hold the keys to the harness that runs them: real XDG state, real registry, real engine.json. Any test or tool that spawns a product binary — or any binary that reads state on boot — can mutate the live system from inside a gate.\n\nExpected: verify_run scrubs the state environment for the gate process tree — XDG_CONFIG_HOME/XDG_DATA_HOME/XDG_STATE_HOME (and platform equivalents) pointed at a per-run throwaway — so a spawned binary sees an empty world; plus B-041's guard on the other side (an engine refuses recovery/engine.json when the recorded pid is alive). Defense on both doors: the gate must not hand out the master keys, and the engine must not accept a stranger claiming its house.
+
+## Triage
+
+**Component:** gate execution
+
+A gate child can recover and mutate the live engine registry, causing self-termination and orphaned processes.
+
+**Verification (triage recommends):** test-first — Run a gate-spawned state-reading binary and assert it receives per-run XDG state paths rather than the harness paths.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
