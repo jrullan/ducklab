@@ -278,7 +278,10 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// re-asks them in new words forever.
 		Prompt: s.buildTaskPrompt(ctx, mc.rs.run.ProjectID, mc.entry.Path, mc.req.TaskID) +
 			humanNote(mc.req.Note) + mc.rs.answeredDecisions(),
-		ExecContext: mc.ectx,
+		// The task's bullets, numbered: the implementer's work contract
+		// (strategy/deliverables.go). The plan's words, never the model's.
+		Deliverables: s.taskDeliverables(ctx, mc.rs.run.ProjectID, mc.req.TaskID),
+		ExecContext:  mc.ectx,
 		// The request, then the configured default for this mode, then the
 		// script's own count. The counts lived only in the scripts, so changing
 		// how many times a reviewer got to push back meant editing Go.
@@ -605,4 +608,17 @@ func assignChosenDucklings(roster map[config.Role]config.DucklingID, mode string
 		}
 		roster[role] = config.DucklingID(chosen[i])
 	}
+}
+
+// taskDeliverables numbers a task's bullets for the implementer's contract.
+// No task, no contract: stage runs and chat carry none.
+func (s *Service) taskDeliverables(ctx context.Context, projectID, taskID string) []string {
+	if taskID == "" {
+		return nil
+	}
+	task := s.findTask(ctx, projectID, taskID)
+	if task == nil {
+		return nil
+	}
+	return strategy.ExtractDeliverables(task.Title, task.Body)
 }

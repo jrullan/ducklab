@@ -46,6 +46,13 @@ type distressSignals struct {
 	GateReds int `json:"gate_reds"`
 	// Failures is the per-tool count of failed calls, for the record.
 	Failures map[string]int `json:"failures,omitempty"`
+	// Undelivered lists deliverable ids the implementer ITSELF reported as
+	// not done — the one self-reported signal, and structured: ids, not
+	// prose. It catches what telemetry cannot: the model that gave up
+	// quietly without fighting any tool.
+	Undelivered []int `json:"undelivered,omitempty"`
+	// Unreported: a deliverables contract was asked for and no report came.
+	Unreported bool `json:"unreported,omitempty"`
 }
 
 const (
@@ -56,7 +63,31 @@ const (
 // Distressed is the trigger. Conservative on purpose: the duck must not cost
 // a turn on a run that is merely working.
 func (d distressSignals) Distressed() bool {
-	return d.Refusals > 0 || d.Streak >= distressStreak || d.GateReds >= distressGateReds
+	return d.Refusals > 0 || d.Streak >= distressStreak || d.GateReds >= distressGateReds || len(d.Undelivered) > 0
+}
+
+// measureDistressWithReport folds the implementer's own report into the
+// telemetry. Absence of a report is recorded, not treated as distress: a
+// seat learning the contract must not summon the duck on every turn.
+func measureDistressWithReport(outcome *agent.Outcome, rep *DeliverablesReport) distressSignals {
+	d := measureDistress(outcome)
+	if rep != nil {
+		d.Undelivered = rep.Undelivered()
+		d.Unreported = rep.Unreported
+	}
+	return d
+}
+
+func operationalSummaryWithReport(outcome *agent.Outcome, rep *DeliverablesReport) (string, bool) {
+	d := measureDistressWithReport(outcome, rep)
+	if !d.Distressed() {
+		return "", false
+	}
+	data, err := json.Marshal(d)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 func measureDistress(outcome *agent.Outcome) distressSignals {
@@ -247,6 +278,20 @@ func rubberDuckPrompt(params *ExecuteParams, implementer config.DucklingID, outc
 	if data, err := json.Marshal(signals); err == nil {
 		b.WriteString("### What the harness measured\n\n```json\n" + string(data) + "\n```\n\n")
 	}
+	if len(params.Deliverables) > 0 {
+		b.WriteString("### The deliverables and what the implementer reports\n\n" + renderDeliverables(params.Deliverables))
+		if rep := ParseDeliverablesReport(outcomeText(outcome), len(params.Deliverables)); rep != nil && !rep.Unreported {
+			if data, err := json.Marshal(rep.Items); err == nil {
+				b.WriteString("\nReported: " + string(data) + "\n")
+			}
+			if gap := rep.Undelivered(); len(gap) > 0 {
+				fmt.Fprintf(&b, "\nThe implementer itself reports %v undelivered — ask why, and what would unblock it.\n", gap)
+			}
+		} else {
+			b.WriteString("\nThe implementer filed no report on these.\n")
+		}
+		b.WriteString("\n")
+	}
 	if trace := toolTrace(outcome, 40); trace != "" {
 		b.WriteString("### What the implementer tried (tool trace, oldest first)\n\n" + trace + "\n")
 	}
@@ -322,6 +367,13 @@ func argDigest(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+func outcomeText(o *agent.Outcome) string {
+	if o == nil {
+		return ""
+	}
+	return o.Text
 }
 
 func firstNStr(s string, n int) string {

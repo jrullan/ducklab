@@ -311,7 +311,7 @@ func TestTheReviewerPromptBoundsAGiantFileDiff(t *testing.T) {
 		Diff:   func() (string, error) { return source + bundle, nil },
 	}
 	turn := &Turn{Role: config.RoleReviewer}
-	prompt, err := buildPrompt(turn, params, &conv.Transcript{}, nil, nil, "")
+	prompt, err := buildPrompt(turn, params, &conv.Transcript{}, nil, nil, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -43,9 +43,12 @@ type ExecuteParams struct {
 	ProjectRoot string
 	TaskID      string
 	Prompt      string
-	AgentLoop   *agent.Loop
-	ExecContext *tools.ExecContext
-	Rounds      int
+	// Deliverables is the task's numbered checklist — the implementer's work
+	// contract (deliverables.go). Empty means no contract is asked for.
+	Deliverables []string
+	AgentLoop    *agent.Loop
+	ExecContext  *tools.ExecContext
+	Rounds       int
 
 	// Runner executes a turn. Defaults to agent.RunTurn via AgentLoop.
 	Runner TurnRunner
@@ -164,6 +167,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// round. Bounded: the duck is a counselor, not a judge, and only the
 		// reviewer and the gate are the independent check.
 		consultRetries := 0
+		// The implementer's latest deliverables report this round: data for
+		// the reviewer, evidence for the duck, a gap to flag on approve.
+		var lastReport *DeliverablesReport
 
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
@@ -180,7 +186,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			duckling := resolveDuckling(params, turn)
 
-			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational)
+			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport)
 			if err != nil {
 				result.Error = err
 				return result, err
@@ -245,6 +251,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// Fold the turn's parsed contract value into the round state.
 			switch v := outcome.Parsed.(type) {
 			case *agent.Verdict:
+				// An approve over items the implementer itself reports
+				// undelivered is a contradiction the record must show — the
+				// T-119 ambiguity ("all already in the tree"?) made visible.
+				if v.Verdict == "approve" && lastReport != nil {
+					if gap := lastReport.Undelivered(); len(gap) > 0 {
+						emit(params, "deliverables_gap", map[string]interface{}{
+							"round": round, "undelivered": gap,
+							"detail": "the reviewer approved while the implementer reports these deliverables undelivered",
+						})
+					}
+				}
 				// The WORST verdict of the round, not the last: a council seats
 				// several critics now, and one request-changes among approvals
 				// is a request for changes. Overwriting meant the last critic
@@ -274,8 +291,19 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// record, before the reviewer speaks, and only on measured
 			// distress. See rubberduck.go.
 			if turn.Role == config.RoleImplementer {
-				if signals := measureDistress(outcome); signals.Distressed() {
-					if summary, ok := operationalSummary(outcome); ok {
+				if len(params.Deliverables) > 0 {
+					lastReport = ParseDeliverablesReport(outcome.Text, len(params.Deliverables))
+					reportData := map[string]interface{}{
+						"round": round, "items": lastReport.Items, "unreported": lastReport.Unreported,
+						"total": len(params.Deliverables), "undelivered": lastReport.Undelivered(),
+					}
+					if consultRetries > 0 {
+						reportData["retry"] = consultRetries
+					}
+					emit(params, "deliverables_report", reportData)
+				}
+				if signals := measureDistressWithReport(outcome, lastReport); signals.Distressed() {
+					if summary, ok := operationalSummaryWithReport(outcome, lastReport); ok {
 						operational = summary
 					}
 					note, stop, cerr := consultAdvisor(ctx, params, runner, registry, round, script.TurnIndexBase+i, duckling, outcome, signals)
@@ -375,7 +403,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 
@@ -394,9 +422,15 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		if len(correctiveNotes) > 0 {
 			b.WriteString("\n\n## Advisor corrective note\n\n" + strings.Join(correctiveNotes, "\n\n"))
 		}
+		if len(params.Deliverables) > 0 {
+			b.WriteString("\n\n" + deliverablesContract(params.Deliverables))
+		}
 	case config.RoleReviewer:
 		if operational != "" {
 			b.WriteString("\n\n## Operational summary\n\n```json\n" + operational + "\n```\n")
+		}
+		if section := deliverablesForReviewer(params.Deliverables, report); section != "" {
+			b.WriteString("\n\n" + section)
 		}
 		// A document critic gets the draft under its own heading, with the
 		// mechanism spelled out. Presented only as "Conversation so far", the
