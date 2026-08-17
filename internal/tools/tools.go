@@ -165,6 +165,7 @@ func (r *Registry) registerBuiltins() {
 	r.Register(&FSRead{})
 	r.Register(&FSSearch{})
 	r.Register(&FSWrite{})
+	r.Register(&FSWriteLines{})
 	r.Register(&FSPatch{})
 	r.Register(&FSDelete{})
 	// Execution
@@ -227,7 +228,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
 			count := ectx.fsPatchFailStreak[path]
 			return &Result{IsError: true, Content: fmt.Sprintf(
-				"REFUSED: fs_patch has failed %d times on this file; read the full section and rewrite it with fs_write instead of patching", count)}, nil
+				"REFUSED: fs_patch has failed %d times on this file; stop patching. Use fs_read to see current line numbers, then fs_write_lines to replace the exact range (or fs_write for a full rewrite)", count)}, nil
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {

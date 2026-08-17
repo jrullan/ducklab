@@ -181,9 +181,9 @@ func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 		t.Fatalf("sixth failure was not refused: %q", refused.Content)
 	}
 	if !strings.Contains(refused.Content, "fs_patch has failed 5 times on this file") ||
-		!strings.Contains(refused.Content, "read the full section") ||
+		!strings.Contains(refused.Content, "fs_write_lines") ||
 		!strings.Contains(refused.Content, "fs_write") {
-		t.Errorf("refusal lacks the read-and-rewrite remedy: %q", refused.Content)
+		t.Errorf("refusal lacks the ranged-rewrite remedy: %q", refused.Content)
 	}
 
 	if len(reports) == 0 {

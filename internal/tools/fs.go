@@ -346,6 +346,93 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	return SuccessResult("%s", msg), nil
 }
 
+// FSWriteLines replaces an exact line range — the middle ground B-059 named:
+// fs_patch re-types anchor bytes (and mismatches on quote-dense files),
+// fs_write re-emits whole files (and small seats rightly fear it). Line
+// numbers are addresses the model already SEES in fs_read's output; an edit
+// addressed by line re-types nothing but the new content. What a model never
+// re-types, a model cannot mangle — the fragment lesson, at file level.
+type FSWriteLines struct{}
+
+func (t *FSWriteLines) Name() string   { return "fs_write_lines" }
+func (t *FSWriteLines) Mutating() bool { return true }
+
+func (t *FSWriteLines) Description() string {
+	return "Replace an exact line range of an existing file (1-based, inclusive — the numbers " +
+		"fs_read shows). Safer than fs_patch on files dense with quotes or backticks: no search " +
+		"string to mismatch. first_line must be the CURRENT content of line start, exactly, " +
+		"without fs_read's number prefix — it proves you read what you are replacing. Empty " +
+		"content deletes the range. Line numbers below the edit SHIFT: re-read before another ranged edit."
+}
+
+func (t *FSWriteLines) Schema() interface{} {
+	return NewSchema().
+		AddString("path", "File path to edit (must exist)", true).
+		AddInt("start", "First line to replace, 1-based, as shown by fs_read", true).
+		AddInt("end", "Last line to replace, inclusive; equal to start for one line", true).
+		AddString("first_line", "The exact current content of line start (no number prefix)", true).
+		AddString("content", "Replacement for the range; empty string deletes the lines", true)
+}
+
+type fsWriteLinesArgs struct {
+	Path      string `json:"path"`
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	FirstLine string `json:"first_line"`
+	Content   string `json:"content"`
+}
+
+func (t *FSWriteLines) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	var a fsWriteLinesArgs
+	if err := ParseArgs(args, &a); err != nil {
+		return ErrorResult("invalid args: %v", err), nil
+	}
+	if a.Start < 1 || a.End < a.Start {
+		return ErrorResult("start must be >= 1 and end >= start (got %d-%d)", a.Start, a.End), nil
+	}
+	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
+	if err != nil {
+		return ErrorResult("jail: %v", err), nil
+	}
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return ErrorResult("read %s: %v — fs_write creates files; fs_write_lines edits existing ones", a.Path, err), nil
+	}
+	text := string(data)
+	trailingNewline := strings.HasSuffix(text, "\n")
+	lines := strings.Split(text, "\n")
+	if trailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+	if a.End > len(lines) {
+		return ErrorResult("the file has %d lines; you asked to replace through line %d — re-read it, the numbers may have shifted", len(lines), a.End), nil
+	}
+	if lines[a.Start-1] != a.FirstLine {
+		// The mismatch TEACHES: the actual line is the whole repair.
+		return ErrorResult("line %d is %q, not %q — your numbers are off or the file changed; re-read around line %d and retry", a.Start, lines[a.Start-1], a.FirstLine, a.Start), nil
+	}
+	var replacement []string
+	if a.Content != "" {
+		replacement = strings.Split(strings.TrimSuffix(a.Content, "\n"), "\n")
+	}
+	out := make([]string, 0, len(lines)-(a.End-a.Start+1)+len(replacement))
+	out = append(out, lines[:a.Start-1]...)
+	out = append(out, replacement...)
+	out = append(out, lines[a.End:]...)
+	final := strings.Join(out, "\n")
+	if trailingNewline {
+		final += "\n"
+	}
+	if guard := WriteGuard(ectx, a.Path, []byte(final), true); guard != nil {
+		return guard, nil
+	}
+	if err := os.WriteFile(absPath, []byte(final), 0o644); err != nil {
+		return ErrorResult("write: %v", err), nil
+	}
+	return SuccessResult("replaced lines %d-%d of %s (%d lines in, %d out); the file now has %d lines — numbers below the edit have shifted, re-read before another ranged edit",
+		a.Start, a.End, a.Path, a.End-a.Start+1, len(replacement), len(out)), nil
+}
+
 // skillManifestNote validates a SKILL.md as it is written.
 //
 // Validation already ran at the human gate, which is too late for the model:
