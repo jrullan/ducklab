@@ -12,6 +12,54 @@ const clientAnswering = (status: number, body: string, type = "text/plain") =>
 // A bench launch against an engine started before the route existed failed
 // with "POST /v1/bench/start failed" — the client had everything it needed to
 // say what was wrong and what to do, and said neither.
+describe("summary board requests", () => {
+  it("requests summary task and bug lists, but leaves existing list callers unchanged", async () => {
+    const paths: string[] = [];
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string) => {
+        paths.push(String(url).replace("http://engine", ""));
+        return new Response(JSON.stringify({ items: [], total: 0 }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    // The boolean is deliberately an API option rather than a different route:
+    // regular callers retain their complete-list contract.
+    await c.tasks("p");
+    await c.bugs("p");
+    await (c.tasks as unknown as (id: string, summary: boolean) => Promise<unknown>)("p", true);
+    await (c.bugs as unknown as (id: string, openOnly: boolean, summary: boolean) => Promise<unknown>)("p", false, true);
+
+    expect(paths).toEqual([
+      "/v1/projects/p/tasks",
+      "/v1/projects/p/bugs",
+      "/v1/projects/p/tasks?summary=true",
+      "/v1/projects/p/bugs?summary=true",
+    ]);
+  });
+
+  it("fetches a selected bug's full detail from its item URL", async () => {
+    let path = "";
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string) => {
+        path = String(url).replace("http://engine", "");
+        return new Response(JSON.stringify({ id: "B-7", title: "detail", body: "full body", history: [] }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    const bug = await (c as unknown as { bug: (projectId: string, bugId: string) => Promise<{ id: string; body: string }> }).bug("p", "B-7");
+    expect(path).toBe("/v1/projects/p/bugs/B-7");
+    expect(bug.body).toBe("full body");
+  });
+});
+
 describe("what an error names", () => {
   it("names the stale engine when a route is unknown, and the fix", async () => {
     const c = clientAnswering(404, "404 page not found");

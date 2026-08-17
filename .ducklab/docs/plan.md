@@ -894,4 +894,25 @@ A gate child can recover and mutate the live engine registry, causing self-termi
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-046 — Bound streamed run state and debounce summary-only board refreshes
+
+Fixes B-044.
+
+## Reported
+
+What happened, twice in one day: after hours of heavy runs the desktop turns sluggish (275MB app RSS + 672MB webkit, low CPU — drowning in data, not compute). Two mechanisms compound: (a) the runs store keeps every streamed delta and reasoning string per run per turn for the life of the window — display-only state that is never trimmed, and a single 7M-token build streams megabytes into it (the B-014 disease, frontend edition); (b) the board refetches its entire payload — tasks, bugs WITH full histories and bodies, reports, gate — on every run status transition, a design sized for human-paced clicks that becomes a refetch storm when the autopilot chains runs every couple of minutes with 41 bugs on the board.
+
+Expected: (a) finished turns drop their delta/reasoning strings (the message event already carries the durable content) and live ones carry a length cap; (b) the board's transition-triggered reload fetches summaries (the bug LIST needs no histories — detail on selection), debounced under bursts. A desktop that watches an autonomous night must be sized for the night, not for the click.
+
+## Triage
+
+**Component:** desktop runs/board state
+**Suspected files:** frontend/src/App.tsx, frontend/src/api/client.ts
+
+Unbounded client-side streamed content and repeated full-board fetches predictably exhaust memory during autonomous long-running sessions.
+
+**Verification (triage recommends):** test-first — Simulate long streams and burst run transitions; assert completed payloads are discarded, live buffers cap, and reloads coalesce to summary requests.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

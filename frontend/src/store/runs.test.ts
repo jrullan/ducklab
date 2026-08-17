@@ -8,7 +8,7 @@ const baseRun: Run = {
 };
 
 beforeEach(() => {
-  useRuns.setState({ runs: {}, events: {}, deltas: {}, acceptState: {}, needsResync: false, connection: "connecting" });
+  useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, acceptState: {}, needsResync: false, connection: "connecting" });
 });
 
 describe("event application", () => {
@@ -47,6 +47,38 @@ describe("event application", () => {
     const d = useRuns.getState().deltas["r-1"]!;
     expect(d["1:0"]).toBe("one");
     expect(d["1:1"]).toBe("two");
+  });
+
+  it("keeps only the newest 64 KiB of UTF-8 streamed text for a live turn", () => {
+    const s = useRuns.getState();
+    // Four-byte code points prove this is a byte bound, not a JS-character bound.
+    const old = "old-" + "🦆".repeat(20_000);
+    const newest = "newest suffix";
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { round: 1, turn: 0, text: old } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { round: 1, turn: 0, text: newest } });
+    s.applyEvent({ type: "reasoning_delta", run_id: "r-1", data: { round: 1, turn: 0, text: old + newest } });
+
+    const state = useRuns.getState();
+    const delta = state.deltas["r-1"]!["1:0"]!;
+    const reasoning = state.reasoning["r-1"]!["1:0"]!;
+    expect(new TextEncoder().encode(delta).byteLength).toBeLessThanOrEqual(64 * 1024);
+    expect(new TextEncoder().encode(reasoning).byteLength).toBeLessThanOrEqual(64 * 1024);
+    expect(delta.endsWith(newest)).toBe(true);
+    expect(reasoning.endsWith(newest)).toBe(true);
+  });
+
+  it("discards a completed turn's streamed display buffers while retaining other live turns", () => {
+    const s = useRuns.getState();
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { round: 1, turn: 0, text: "durable message is elsewhere" } });
+    s.applyEvent({ type: "reasoning_delta", run_id: "r-1", data: { round: 1, turn: 0, text: "private display state" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { round: 1, turn: 1, text: "still live" } });
+
+    s.applyEvent({ type: "turn_end", run_id: "r-1", seq: 1, data: { round: 1, turn: 0 } });
+
+    const state = useRuns.getState();
+    expect(state.deltas["r-1"]?.["1:0"]).toBeUndefined();
+    expect(state.reasoning["r-1"]?.["1:0"]).toBeUndefined();
+    expect(state.deltas["r-1"]?.["1:1"]).toBe("still live");
   });
 
   // The same duckling speaking twice — a council's architect drafts and then
