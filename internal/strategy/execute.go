@@ -2,9 +2,7 @@ package strategy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -223,33 +221,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
 
-			if turn.Role == config.RoleImplementer {
-				if summary, distressed := operationalSummary(outcome); distressed {
-					operational = summary
-					advisorTurn := Turn{Role: config.RoleAdvisor, Toolbelt: "full", Contract: "freeform", MaxTurns: 8}
-					advisorBelt, beltErr := advisorTurn.ResolveToolbelt(registry)
-					if beltErr != nil {
-						result.Error = beltErr
-						return result, beltErr
-					}
-					advisor := resolveDuckling(params, advisorTurn)
-					advisorPrompt := params.Prompt + "\n\n## Corrective-note request\n\nDraft a concise, actionable corrective note for the next implementer. Base it only on this operational telemetry.\n\n```json\n" + summary + "\n```"
-					emit(params, "turn_start", map[string]interface{}{"round": round, "turn": i, "role": string(config.RoleAdvisor), "duckling": string(advisor)})
-					advice, adviceErr := runner(ctx, &advisorTurn, advisor, advisorPrompt, advisorBelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
-					if advice != nil {
-						emitMessage(params, round, i, config.RoleAdvisor, advisor, advice)
-						if note := strings.TrimSpace(advice.Text); note != "" {
-							correctiveNotes = append(correctiveNotes, note)
-						}
-					}
-					emit(params, "turn_end", map[string]interface{}{"round": round, "turn": i, "role": string(config.RoleAdvisor), "incomplete": adviceErr != nil})
-					if adviceErr != nil {
-						result.Error = adviceErr
-						return result, adviceErr
-					}
-				}
-			}
-
 			// What the model actually said, and what it did.
 			//
 			// turn_start and turn_end bracketed a turn whose content was never
@@ -287,6 +258,29 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			emit(params, "turn_end", map[string]interface{}{
 				"round": round, "turn": i, "role": string(turn.Role),
 			})
+
+			// The rubber duck: after the implementer's turn is closed on the
+			// record, before the reviewer speaks, and only on measured
+			// distress. See rubberduck.go.
+			if turn.Role == config.RoleImplementer {
+				if signals := measureDistress(outcome); signals.Distressed() {
+					if summary, ok := operationalSummary(outcome); ok {
+						operational = summary
+					}
+					note, stop, cerr := consultAdvisor(ctx, params, runner, registry, round, script.TurnIndexBase+i, duckling, outcome, signals)
+					if cerr != nil {
+						result.Error = cerr
+						return result, cerr
+					}
+					if stop != nil {
+						result.Error = stop
+						return result, stop
+					}
+					if note != "" {
+						correctiveNotes = append(correctiveNotes, note)
+					}
+				}
+			}
 		}
 
 		// The gate runs after the round's turns, and it — not any model —
@@ -412,48 +406,6 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		}
 	}
 	return b.String(), nil
-}
-
-// operationalSummary makes tool telemetry safe for review by excluding all model prose.
-func operationalSummary(outcome *agent.Outcome) (string, bool) {
-	if outcome == nil {
-		return "", false
-	}
-	failures, brakes := map[string]int{}, map[string]bool{}
-	for _, call := range outcome.ToolCalls {
-		if call.Result == nil || !call.Result.IsError {
-			continue
-		}
-		failures[call.Name]++
-		content := strings.ToLower(call.Result.Content)
-		if strings.Contains(content, "refused") || strings.Contains(content, "brake") {
-			brakes[call.Name] = true
-		}
-	}
-	var names []string
-	for name, n := range failures {
-		if brakes[name] || n >= 3 {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	admission := strings.Contains(strings.ToLower(outcome.Text), "fighting ") || strings.Contains(strings.ToLower(outcome.Text), "stuck")
-	if len(names) == 0 && !admission {
-		return "", false
-	}
-	if len(names) == 0 {
-		names = []string{"unknown"}
-	}
-	data, err := json.Marshal(struct {
-		Tool         string `json:"tool"`
-		Failures     int    `json:"failures"`
-		BrakeTripped bool   `json:"brake_tripped"`
-		DiffPartial  bool   `json:"diff_partial"`
-	}{names[0], failures[names[0]], brakes[names[0]], true})
-	if err != nil {
-		return "", false
-	}
-	return string(data), true
 }
 
 // transcriptText renders a turn for the next reader.

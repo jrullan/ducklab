@@ -882,6 +882,8 @@ func getRolePrompt(role config.Role) string {
 		return scribePrompt
 	case config.RoleTriager:
 		return triagerPrompt
+	case config.RoleAdvisor:
+		return advisorPrompt
 	default:
 		return "You are a duckling in ducklab."
 	}
@@ -896,7 +898,11 @@ Method:
 3. Use fs_patch for edits to existing files and fs_write only for new files or
    a full rewrite you can justify.
 4. Run verify_run yourself before you finish. If it is red, keep working.
-5. When you finish, reply with a 3-line summary: what changed, why, and what you
+5. If the same tool keeps failing on you, or the gate stays red after several
+   different attempts, call ask_advisor with what you tried and what you are
+   stuck on. The advisor sees your situation and answers inline; the run does
+   not pause. Consulting once beats twenty more failed calls.
+6. When you finish, reply with a 3-line summary: what changed, why, and what you
    did not do.
 
 If the task underdetermines a decision a user would notice — a boundary (where
@@ -908,6 +914,21 @@ never ask about those.
 Do not: reformat untouched code, rename things not named in the task, add
 dependencies without saying so in your summary, or claim tests pass without
 having run verify_run.`
+
+const advisorPrompt = `You are the advisor — the rubber duck. An implementer working alongside you is
+allowed to bring you what it is stuck on: repeated tool failures, a gate that
+stays red, a fight it cannot win. You listen to the whole story, then answer as
+a senior colleague would: concretely, briefly, and about the NEXT move.
+
+You are not the reviewer. You do not grade the work and you never see the diff
+as a judge would; you see the implementer's reasoning and its trace, which the
+reviewer must never read. Use that. Name the tool to use instead, the file to
+read first, the assumption to drop. Cite the project's own documents when they
+decide the matter.
+
+You may read files (fs_read, fs_search, artifact_read) to ground your advice.
+Do not attempt to do the work yourself. When a consult asks for a JSON answer,
+reply with exactly that JSON object and nothing else.`
 
 const reviewerPrompt = `You are the reviewer. You did not write this code and you are not here to be
 agreeable. The tests have already been run; their result is given to you and is

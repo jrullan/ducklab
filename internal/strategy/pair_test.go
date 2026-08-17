@@ -142,17 +142,17 @@ func TestReviewerPromptHasDiffButNotAuthorIdentityOrReasoning(t *testing.T) {
 // The reviewer's toolbelt must stay read-only even though the script says
 // "full" — the role's ceiling applies.
 // Distress is a request for operational help, not an excuse the reviewer may
-// read. A tool-failure brake and an implementer's final admission must summon
-// the advisor to draft a corrective note, while the reviewer receives only the
-// measured facts needed to judge a partial diff.
+// read. A tool-failure brake must summon the advisor — the rubber duck — AFTER
+// the implementer's turn closes and BEFORE the reviewer speaks; the duck reads
+// the implementer's story, the reviewer receives only measured facts.
 func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer(t *testing.T) {
 	rec := &recorder{}
 	const admission = "I am fighting fs_patch; 28 failures, brake tripped, diff partial."
 	calls := make([]agent.ToolCallRecord, 28)
 	for i := range calls {
 		calls[i] = agent.ToolCallRecord{
-			Name: "fs_patch",
-			Args: []byte(`{"path":"widget.go"}`),
+			Name:   "fs_patch",
+			Args:   []byte(`{"path":"widget.go"}`),
 			Result: &tools.Result{IsError: true, Content: "patch did not apply"},
 		}
 	}
@@ -161,12 +161,18 @@ func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer
 	calls[len(calls)-1].Result.Content = "REFUSED: fs_patch has failed 28 times on this file; stop patching"
 
 	params := pairParams(rec, "green",
-		&agent.Outcome{Text: admission, ToolCalls: calls},
-		// The advisor's response is deliberately unstructured prose: it belongs
-		// to the next implementer attempt, never to the reviewer.
-		editsOutcome("Use fs_write for widget.go after reading the current file."),
+		&agent.Outcome{Text: admission, Reasoning: "maybe I should try fs_write but it might truncate", ToolCalls: calls},
+		// The duck answers with the advice contract: a note for the next round.
+		&agent.Outcome{Parsed: map[string]interface{}{"action": "note", "note": "Use fs_write_lines on widget.go after reading the current lines."}},
 		verdictOutcome("approve"),
 	)
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	var kinds []string
+	params.OnEvent = func(kind string, data map[string]interface{}) {
+		if kind == "turn_start" || kind == "turn_end" {
+			kinds = append(kinds, kind+":"+data["role"].(string))
+		}
+	}
 	if _, err := ExecutePair(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
@@ -183,29 +189,128 @@ func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer
 		}
 	}
 	if advisorAt < 0 {
-		t.Fatal("tool-failure distress did not request a corrective note from the advisor")
+		t.Fatal("tool-failure distress did not summon the advisor")
 	}
 	if reviewerAt < 0 {
 		t.Fatal("reviewer turn did not run")
 	}
+	if advisorAt > reviewerAt {
+		t.Errorf("the duck spoke after the reviewer; it must speak before: %v", rec.roles)
+	}
+	// The events must close the implementer's turn BEFORE the duck's opens —
+	// T-059 nested them and the desktop showed the two running in parallel.
+	want := []string{"turn_start:implementer", "turn_end:implementer", "turn_start:advisor", "turn_end:advisor", "turn_start:reviewer", "turn_end:reviewer"}
+	if strings.Join(kinds, " ") != strings.Join(want, " ") {
+		t.Errorf("turn events out of order:\n got %v\nwant %v", kinds, want)
+	}
+
+	// The duck hears what the reviewer must not: the story, the reasoning, the trace.
 	advisorPrompt := rec.prompts[advisorAt]
-	for _, want := range []string{"fs_patch", "28", "brake"} {
+	for _, want := range []string{"fs_patch", "REFUSED", admission, "might truncate", `"failure_streak":28`} {
 		if !strings.Contains(advisorPrompt, want) {
-			t.Errorf("advisor corrective-note request lacks operational fact %q:\n%s", want, advisorPrompt)
+			t.Errorf("rubber-duck prompt lacks %q:\n%s", want, advisorPrompt)
 		}
 	}
 
 	reviewerPrompt := rec.prompts[reviewerAt]
-	if strings.Contains(reviewerPrompt, admission) || strings.Contains(reviewerPrompt, "fighting fs_patch") {
+	if strings.Contains(reviewerPrompt, admission) || strings.Contains(reviewerPrompt, "fighting fs_patch") || strings.Contains(reviewerPrompt, "might truncate") {
 		t.Errorf("reviewer received the implementer's rationalization instead of blind operational data:\n%s", reviewerPrompt)
 	}
-	// The exact wire representation is intentionally not prescribed, but the
-	// reviewer must receive machine-readable facts, including the brake, count,
-	// and partial-diff state — not a narrative summary.
-	for _, want := range []string{`"tool":"fs_patch"`, `"failures":28`, `"brake_tripped":true`, `"diff_partial":true`} {
+	// Machine-readable facts only: what the harness counted.
+	for _, want := range []string{`"failure_streak_tool":"fs_patch"`, `"failure_streak":28`, `"refusals":1`} {
 		if !strings.Contains(reviewerPrompt, want) {
 			t.Errorf("reviewer operational summary lacks %s:\n%s", want, reviewerPrompt)
 		}
+	}
+}
+
+// A working turn costs no duck: four fs_read misses are not distress, and no
+// advisor seat is consulted for them (T-119 burned k3's turn on exactly this).
+func TestPairDoesNotSummonTheDuckForAMerelyRoughTurn(t *testing.T) {
+	rec := &recorder{}
+	calls := []agent.ToolCallRecord{
+		{Name: "fs_read", Args: []byte(`{"path":"a.go"}`), Result: &tools.Result{IsError: true, Content: "no such file"}},
+		{Name: "fs_read", Args: []byte(`{"path":"b.go"}`), Result: &tools.Result{IsError: true, Content: "no such file"}},
+		{Name: "fs_read", Args: []byte(`{"path":"c.go"}`), Result: &tools.Result{IsError: true, Content: "no such file"}},
+		{Name: "fs_read", Args: []byte(`{"path":"d.go"}`), Result: &tools.Result{IsError: true, Content: "no such file"}},
+		{Name: "fs_write", Args: []byte(`{"path":"d.go"}`), Result: &tools.Result{Content: "wrote"}},
+	}
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: "done", ToolCalls: calls},
+		verdictOutcome("approve"),
+	)
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range rec.roles {
+		if role == config.RoleAdvisor {
+			t.Fatalf("the duck was summoned for a turn that was merely rough: %v", rec.roles)
+		}
+	}
+}
+
+// The duck's third answer: stop. The run ends with the reason and the
+// reshuffle suggestion on the record, before the reviewer spends a turn.
+func TestPairAdvisorStopEndsTheRunBeforeTheReviewer(t *testing.T) {
+	rec := &recorder{}
+	calls := make([]agent.ToolCallRecord, 6)
+	for i := range calls {
+		calls[i] = agent.ToolCallRecord{Name: "verify_run", Result: &tools.Result{IsError: true, Content: "FAIL"}}
+	}
+	params := pairParams(rec, "red",
+		&agent.Outcome{Text: "still red", ToolCalls: calls},
+		&agent.Outcome{Parsed: map[string]interface{}{"action": "stop", "reason": "six red gates, no new approach", "reshuffle": "reseat the implementer to a stronger duckling"}},
+		verdictOutcome("approve"),
+	)
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	var consult map[string]interface{}
+	params.OnEvent = func(kind string, data map[string]interface{}) {
+		if kind == "advisor_consult" {
+			consult = data
+		}
+	}
+	_, err := ExecutePair(context.Background(), params)
+	stop, ok := StoppedByAdvisor(err)
+	if !ok {
+		t.Fatalf("expected an advisor stop, got %v", err)
+	}
+	if stop.Advisor != "pato-duck" || !strings.Contains(stop.Reason, "six red gates") || !strings.Contains(stop.Reshuffle, "stronger") {
+		t.Errorf("stop lost its content: %+v", stop)
+	}
+	for _, role := range rec.roles {
+		if role == config.RoleReviewer {
+			t.Error("the reviewer ran after the duck said stop")
+		}
+	}
+	if consult == nil || consult["outcome"] != "stop" {
+		t.Errorf("advisor_consult event does not record the stop: %v", consult)
+	}
+}
+
+// No advisor seated: the consult is skipped on the record and the run goes on
+// to the reviewer — a missing seat must never fail a run.
+func TestPairWithoutAnAdvisorSeatSkipsTheConsult(t *testing.T) {
+	rec := &recorder{}
+	calls := []agent.ToolCallRecord{{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: brake"}}}
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: "hmm", ToolCalls: calls},
+		verdictOutcome("approve"),
+	)
+	var consult map[string]interface{}
+	params.OnEvent = func(kind string, data map[string]interface{}) {
+		if kind == "advisor_consult" {
+			consult = data
+		}
+	}
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if consult == nil || consult["outcome"] != "skipped" {
+		t.Errorf("skipped consult not recorded: %v", consult)
+	}
+	if len(rec.roles) != 2 {
+		t.Errorf("expected implementer+reviewer only, got %v", rec.roles)
 	}
 }
 

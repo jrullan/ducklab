@@ -321,6 +321,54 @@ func (t *AskHuman) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	return nil, ErrHumanNeeded
 }
 
+// AskAdvisor is the implementer's door to the rubber duck. ask_human pauses
+// the run and waits for a person; ask_advisor asks the advisor seat and
+// returns its reply inline, in the same turn. Built for the small seat that
+// knows it is stuck but not what to do about it: one consult in place of
+// twenty more failed calls.
+type AskAdvisor struct{}
+
+func (t *AskAdvisor) Name() string   { return "ask_advisor" }
+func (t *AskAdvisor) Mutating() bool { return false }
+
+func (t *AskAdvisor) Description() string {
+	return "Consult the advisor duckling when you are stuck: the same tool keeps failing, the gate " +
+		"stays red after several attempts, or you cannot decide between approaches. Say what you " +
+		"tried and what you are stuck on. The advisor answers inline — the run does NOT pause and " +
+		"no human is involved. Use it once when stuck rather than retrying the same thing."
+}
+
+func (t *AskAdvisor) Schema() interface{} {
+	return NewSchema().
+		AddString("question", "What you are stuck on and what you have tried so far", true)
+}
+
+type askAdvisorArgs struct {
+	Question string `json:"question"`
+}
+
+func (t *AskAdvisor) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	var a askAdvisorArgs
+	if err := ParseArgs(args, &a); err != nil {
+		return ErrorResult("invalid args: %v", err), nil
+	}
+	if strings.TrimSpace(a.Question) == "" {
+		return ErrorResult("question is required: say what you tried and what you are stuck on"), nil
+	}
+	if ectx.OnAskAdvisor == nil {
+		return ErrorResult("no advisor is seated for this run; proceed with your best judgement — " +
+			"if you are stuck on a tool, read the whole section with fs_read and rewrite it with fs_write_lines"), nil
+	}
+	answer, err := ectx.OnAskAdvisor(ctx, a.Question)
+	if err != nil {
+		return ErrorResult("the advisor could not answer (%v); proceed with your best judgement", err), nil
+	}
+	if strings.TrimSpace(answer) == "" {
+		return ErrorResult("the advisor had nothing to add; proceed with your best judgement"), nil
+	}
+	return SuccessResult("advisor: %s", strings.TrimSpace(answer)), nil
+}
+
 // QuestionID is a stable identifier for a question, so a resumed run can match
 // an answer to the question that produced it without persisting message state.
 func QuestionID(question string) string {

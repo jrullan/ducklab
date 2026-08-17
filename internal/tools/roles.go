@@ -28,6 +28,7 @@ var roleToolbelts = map[config.Role][]string{
 		"fs_list", "fs_read", "fs_search", "fs_write", "fs_write_lines", "fs_patch", "fs_delete",
 		"shell", "verify_run", "git_status", "git_diff", "artifact_read",
 		"task_read", "skill_list", "skill_read", "skill_run", "mcp_call", "ask_human",
+		"ask_advisor",
 	},
 	config.RoleReviewer: {
 		"fs_read", "fs_search", "git_diff", "verify_run", "artifact_read",

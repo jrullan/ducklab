@@ -95,6 +95,44 @@ func (s *Service) adviseQuestion(rs *runState, q *tools.PendingQuestion) {
 // advise picks the advisor, assembles the context, and asks once — a one-shot
 // chat, no tools: the advisor reasons from the same documents the asker had.
 func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQuestion) (string, string, error) {
+	return s.adviseWith(ctx, rs, advisorSystemPrompt, "## The question the human was asked", q)
+}
+
+// The rubber duck's framing for a mid-turn consult: no human is in the loop,
+// the run is not paused, and the asker is the one who will act on the reply.
+const rubberDuckSystemPrompt = `You are the advisor duckling in ducklab — the rubber duck. An implementer
+working on a task is stuck and has asked you mid-turn: the run is NOT paused,
+no human is involved, and your reply goes straight back to the implementer,
+which will act on it in its very next tool call.
+
+Answer as a senior colleague would: concretely, briefly, about the NEXT move.
+Name the tool to use instead, the file to read first, the assumption to drop.
+If it describes fighting a tool, prefer the tool that re-types the least
+(fs_write_lines over fs_patch, fs_read of the exact range first). Cite the
+project's own documents when they decide the matter.
+
+Reply with ONLY the advice, 2-8 sentences, imperative voice. No preamble.`
+
+// adviseInline answers an implementer's ask_advisor call. Same seat, same
+// documents, same cost accounting as a paused-question consult; different
+// framing, because the reader is the model, not the person.
+func (s *Service) adviseInline(ctx context.Context, rs *runState, question string) (string, error) {
+	answer, advisor, err := s.adviseWith(ctx, rs, rubberDuckSystemPrompt,
+		"## The implementer's question (asked mid-turn; the run is not paused)",
+		&tools.PendingQuestion{ID: tools.QuestionID(question), Question: question})
+	if err != nil {
+		rs.writer.AppendEvent("advice_failed", map[string]interface{}{
+			"advisor": advisor, "kind": "inline", "cause": adviceError(err),
+		})
+		return "", err
+	}
+	rs.writer.AppendEvent("advice", map[string]interface{}{
+		"advisor": advisor, "kind": "inline", "question": firstN(question, 2000), "answer": firstN(answer, 4000),
+	})
+	return answer, nil
+}
+
+func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, header string, q *tools.PendingQuestion) (string, string, error) {
 	advisorID := s.pickAdvisor(rs)
 	if advisorID == "" {
 		return "", "", fmt.Errorf("no advisor available")
@@ -129,7 +167,7 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 			b.WriteString("## Project " + string(kind) + " document\n\n" + raw + "\n\n")
 		}
 	}
-	b.WriteString("## The question the human was asked\n\n" + q.Question + "\n")
+	b.WriteString(header + "\n\n" + q.Question + "\n")
 	if len(q.Options) > 0 {
 		b.WriteString("\nOffered options:\n")
 		for _, o := range q.Options {
@@ -141,7 +179,7 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 	resp, err := p.Chat(ctx, provider.ChatRequest{
 		Model: d.Model,
 		Messages: []provider.Message{
-			{Role: "system", Content: advisorSystemPrompt},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: b.String()},
 		},
 		MaxTokens: &maxTok,
@@ -156,7 +194,7 @@ func (s *Service) advise(ctx context.Context, rs *runState, q *tools.PendingQues
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
 		repair, repairErr := p.Chat(ctx, provider.ChatRequest{Model: d.Model, Messages: []provider.Message{
-			{Role: "system", Content: advisorSystemPrompt}, {Role: "user", Content: repairPrompt},
+			{Role: "system", Content: systemPrompt}, {Role: "user", Content: repairPrompt},
 		}, MaxTokens: &maxTok})
 		if repairErr != nil { return "", string(advisorID), repairErr }
 		answer = stripAdvisorThinking(answerText(repair))
@@ -242,6 +280,10 @@ func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoN
 func redoNoteEligible(r *runlog.Run) bool {
 	if r == nil { return false }
 	if r.Status == "failed" || r.Verdict == "FAILED" { return true }
+	// A run the advisor stopped pauses with its work in place (the no-error-
+	// discards-work rule) and its Failure names the reason and the reshuffle;
+	// that IS the redo material.
+	if r.Status == "paused" && r.PendingKind == "error" && strings.HasPrefix(r.Failure, "stopped by advisor") { return true }
 	// A green test-first run is actionable: its test is the input to the
 	// chained build, even though the test gate itself passed.
 	return r.Stage == "test" && r.Status == "paused" && r.PendingKind == "gate" && r.Verdict != "FAILED"

@@ -1381,6 +1381,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 		s.publishTransition(rs, "distress", payload)
 	}
+	// The rubber duck on demand: an implementer's ask_advisor reaches the
+	// advisor seat without pausing the run. Only wired when a seat exists,
+	// so the tool can tell the model plainly when there is nobody to ask.
+	if s.pickAdvisor(rs) != "" {
+		ectx.OnAskAdvisor = func(ctx context.Context, question string) (string, error) {
+			cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			defer cancel()
+			return s.adviseInline(cctx, rs, question)
+		}
+	}
 
 	// The line-up this run will use: what it asked for, else the one configured
 	// for its mode. Filled onto the request itself so every consumer sees it —
@@ -1436,6 +1446,18 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		if errors.As(dispatchErr, &pending) {
 			s.pauseForQuestion(rs, pending.q)
 			return
+		}
+		// The rubber duck said stop: not converging, reseat before spending
+		// more. The record names who stopped it and what to change; failRun
+		// keeps the work in place and the redo note carries the reshuffle.
+		if stop, ok := strategy.StoppedByAdvisor(dispatchErr); ok {
+			rs.run.Resolution = "stopped by advisor " + string(stop.Advisor)
+			rs.writer.AppendEvent("advisor_stop", map[string]interface{}{
+				"advisor": string(stop.Advisor), "reason": stop.Reason, "reshuffle": stop.Reshuffle,
+			})
+			s.publishTransition(rs, "advisor_stop", map[string]interface{}{
+				"advisor": string(stop.Advisor), "reason": stop.Reason, "reshuffle": stop.Reshuffle,
+			})
 		}
 		s.failRun(rs, dispatchErr)
 		return

@@ -90,6 +90,10 @@ type ExecContext struct {
 	ConsecGateFails int
 	// OnDistress reports operator-relevant brakes without coupling tools to the bus.
 	OnDistress func(reason string, data map[string]interface{})
+	// OnAskAdvisor answers an implementer's mid-turn consult (ask_advisor)
+	// with the advisor seat's reply. Nil means no advisor is seated: the tool
+	// says so and the model carries on with its own judgement.
+	OnAskAdvisor func(ctx context.Context, question string) (string, error)
 	// lastFailSig and lastFailCount track the most recent FAILING call's
 	// tool+args, for the repetition brake: a small model that gets its
 	// arguments wrong retries the identical call — six artifact_reads of
@@ -173,6 +177,8 @@ func (r *Registry) registerBuiltins() {
 	r.Register(&VerifyRun{})
 	// Human
 	r.Register(&AskHuman{})
+	// The rubber duck, on demand: a consult that never pauses the run.
+	r.Register(&AskAdvisor{})
 	// Lifecycle documents (read-only: a model proposes, it does not write)
 	r.Register(&ArtifactRead{})
 	r.Register(&TaskRead{})
