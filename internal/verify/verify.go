@@ -239,6 +239,24 @@ func isolatedStateEnvironment() ([]string, func(), error) {
 		"AppData":      filepath.Join(stateRoot, "appdata"),
 		"LocalAppData": filepath.Join(stateRoot, "localappdata"),
 	}
+	// Isolation is of ENGINE STATE, not of build caches. Scrubbing HOME on
+	// Linux silently moves GOPATH/GOMODCACHE/GOCACHE into the throwaway, so
+	// every gate downloaded the toolchain and every module and compiled the
+	// world cold — minutes per verify, a network dependency, and download
+	// chatter misread as compile errors. Content-addressed build caches
+	// carry no engine identity: pin them to their real locations unless the
+	// caller already did.
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		cache := func(envKey, def string) {
+			if os.Getenv(envKey) == "" {
+				values[envKey] = def
+			}
+		}
+		cache("GOPATH", filepath.Join(home, "go"))
+		cache("GOMODCACHE", filepath.Join(home, "go", "pkg", "mod"))
+		cache("GOCACHE", filepath.Join(home, ".cache", "go-build"))
+		cache("npm_config_cache", filepath.Join(home, ".npm"))
+	}
 
 	// Remove inherited values first. Windows environment variable names are
 	// case-insensitive, so use EqualFold on every platform to avoid duplicates.
