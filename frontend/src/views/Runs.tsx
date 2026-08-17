@@ -22,6 +22,11 @@ type Filter = (typeof FILTERS)[number];
 
 /** A run's wall time, compact: the tracker's own wallclock when recorded,
  * else the started→ended span, else started→now for one still going. */
+function verdictText(r: Run): string {
+  if (r.verdict && r.acceptance_gate?.green) return `${verdictLabel(r.verdict as Verdict)} · reproduced green at accept`;
+  return r.verdict ? verdictLabel(r.verdict as Verdict) : "—";
+}
+
 function took(r: Run): string {
   let secs = r.budget?.wallclock_s ?? 0;
   if (secs <= 0 && r.started_at) {
@@ -125,7 +130,7 @@ export function Runs({ runs }: { runs: Run[] }) {
                     as successes when the one word that says otherwise is the
                     quietest thing in the row. */}
                 {r.verdict ? (
-                  <StatusChip role={verdictStatus(r.verdict as Verdict)} label={verdictLabel(r.verdict as Verdict)} />
+                  <StatusChip role={verdictStatus(r.verdict as Verdict)} label={verdictText(r)} />
                 ) : (
                   <span className="text-ink-secondary">—</span>
                 )}

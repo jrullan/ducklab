@@ -70,6 +70,8 @@ export interface Run {
   task_id: string;
   status: "running" | "queued" | "paused" | "done" | "failed";
   verdict: string;
+  /** Clean-checkout gate result recorded when the accepted commit was proven. */
+  acceptance_gate?: GateResult;
   accepted?: boolean;
   commit_sha?: string;
   /** Set when an accepted test-first's commit was later retired (reverted). */

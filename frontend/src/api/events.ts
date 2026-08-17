@@ -259,6 +259,7 @@ export const KNOWN_EVENT_TYPES = [
   "reply_call",
   "seat_failover",
   "gate_resolved",
+  "gate_reproduced",
   "message",
   "proposal",
   "verdict",

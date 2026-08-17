@@ -33,9 +33,11 @@ type Run struct {
 	Gate          string            `json:"gate"`
 	Status        string            `json:"status"` // running|paused|done|failed|queued
 	Verdict       string            `json:"verdict"`
-	Accepted      bool              `json:"accepted"`
-	CommitSHA     string            `json:"commit_sha"`
-	Branch        string            `json:"branch,omitempty"`
+	// GateReproduced records acceptance-time clean-checkout verification.
+	GateReproduced *GateReproduction `json:"acceptance_gate,omitempty"`
+	Accepted       bool              `json:"accepted"`
+	CommitSHA      string            `json:"commit_sha"`
+	Branch         string            `json:"branch,omitempty"`
 	// Note is what the person told this run beyond the task body — typically
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
@@ -141,6 +143,16 @@ type Run struct {
 	// overwritten if a stale copy was persisted — clients render buttons from
 	// this list and never encode the loop's rules themselves.
 	Next []string `json:"next,omitempty"`
+}
+
+// GateReproduction is the result of proving the accepted commit in a clean checkout.
+type GateReproduction struct {
+	Gate     string  `json:"gate"`
+	Command  string  `json:"command"`
+	ExitCode int     `json:"exit_code"`
+	Output   string  `json:"output"`
+	Duration float64 `json:"duration_s"`
+	Green    bool    `json:"green"`
 }
 
 // RedoNote is the bounded retry recommendation attached to a failed run.
@@ -455,6 +467,11 @@ func ReadEvents(runDir string) ([]*Event, error) {
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			// Torn tail: stop reading
 			break
+		}
+		// Event consumers use exit codes as integers, unlike the generic JSON
+		// decoder's default float64 representation.
+		if code, ok := e.Data["exit_code"].(float64); ok {
+			e.Data["exit_code"] = int(code)
 		}
 		events = append(events, &e)
 	}

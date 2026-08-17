@@ -628,7 +628,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         {run.no_changes ? (
           <StatusChip role="muted" label="no changes — already in the tree" />
         ) : (
-          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={verdictLabel(run.verdict as Verdict)} />
+          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${verdictLabel(run.verdict as Verdict)} · reproduced green at accept` : verdictLabel(run.verdict as Verdict)} />
         )}
         <div className="ml-auto flex items-center gap-2">
           {/* A decision that has been made is not still open. These used to be

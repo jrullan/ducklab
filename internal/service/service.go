@@ -1855,9 +1855,12 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// wrong and the run did nothing wrong.
 	if clean, cerr := git.IsClean(); cerr == nil && clean {
 		head, _ := git.HeadSHA()
-		if err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage); err != nil {
+		reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage)
+		if err != nil {
 			return err
 		}
+		rs.run.GateReproduced = reproduction
+		rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
 		defer s.continueChain(ctx, rs)
 		rs.run.Accepted = true
 		rs.run.CommitSHA = head
@@ -1890,9 +1893,12 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
-	if err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage); err != nil {
+	reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage)
+	if err != nil {
 		return err
 	}
+	rs.run.GateReproduced = reproduction
+	rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
 	defer s.continueChain(ctx, rs)
 	rs.run.Accepted = true
 	rs.run.CommitSHA = sha
@@ -1925,21 +1931,21 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 // verifyAcceptedCommit runs the configured gate from a detached worktree at
 // sha. The working tree may contain ignored files that git add deliberately
 // omitted; only this checkout can prove the recorded commit is reproducible.
-func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string) error {
+func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string) (*runlog.GateReproduction, error) {
 	cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml"))
 	if err != nil {
-		return fmt.Errorf("load gate config for accepted commit: %w", err)
+		return nil, fmt.Errorf("load gate config for accepted commit: %w", err)
 	}
 	checkout, err := os.MkdirTemp("", "ducklab-accept-")
 	if err != nil {
-		return fmt.Errorf("create clean checkout for acceptance: %w", err)
+		return nil, fmt.Errorf("create clean checkout for acceptance: %w", err)
 	}
 	if err := os.Remove(checkout); err != nil {
-		return fmt.Errorf("prepare clean checkout for acceptance: %w", err)
+		return nil, fmt.Errorf("prepare clean checkout for acceptance: %w", err)
 	}
 	defer os.RemoveAll(checkout)
 	if err := git.WorktreeAddDetached(checkout, sha); err != nil {
-		return fmt.Errorf("create clean checkout for acceptance: %w", err)
+		return nil, fmt.Errorf("create clean checkout for acceptance: %w", err)
 	}
 	defer git.WorktreeRemove(checkout)
 
@@ -1953,13 +1959,14 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 
 	result, err := verify.Run(ctx, checkout, cfg.Verify)
 	if err != nil {
-		return fmt.Errorf("run gate from clean checkout: %w", err)
+		return nil, fmt.Errorf("run gate from clean checkout: %w", err)
 	}
 	// A project with no configured executable gate retains its existing
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
 	// command to reject; executable gates must be green in the clean checkout.
+	reproduction := &runlog.GateReproduction{Gate: string(result.Gate), Command: result.Command, ExitCode: result.ExitCode, Output: result.Output, Duration: result.Duration, Green: verify.IsGreen(result)}
 	if result.Gate == verify.GateNone {
-		return nil
+		return reproduction, nil
 	}
 	// Polarity follows the stage. A test-first commit is red BY DESIGN — the
 	// committed failing test IS the deliverable — and demanding green here
@@ -1969,17 +1976,17 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 	// by a compile error. Green from the checkout is the test-stage failure.
 	if stage == "test" {
 		if verify.IsGreen(result) {
-			return fmt.Errorf("the committed test passes from a clean checkout — it asserts nothing that is not already true")
+			return reproduction, fmt.Errorf("the committed test passes from a clean checkout — it asserts nothing that is not already true")
 		}
 		if compileFailure(result.Output) {
-			return fmt.Errorf("the committed test does not compile from a clean checkout:\n%s", result.Output)
+			return reproduction, fmt.Errorf("the committed test does not compile from a clean checkout:\n%s", result.Output)
 		}
-		return nil
+		return reproduction, nil
 	}
 	if !verify.IsGreen(result) {
-		return fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
+		return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
-	return nil
+	return reproduction, nil
 }
 
 // linkInstalledDeps symlinks installed dependency trees from the live
