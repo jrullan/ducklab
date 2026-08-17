@@ -885,6 +885,23 @@ func checkRunnable(path string) error {
 	return nil
 }
 
+// resolveBuildMode is the one omitted-mode rule shared by every launch surface.
+// Settings win, then the project's learned phase habit, then solo.
+func (s *Service) resolveBuildMode(projectPath string) (string, string) {
+	s.cfgMu.RLock()
+	settings := s.cfg.Defaults.BuildMode
+	s.cfgMu.RUnlock()
+	if settings != "" {
+		return settings, "settings"
+	}
+	if projCfg, err := config.LoadProject(filepath.Join(projectPath, ".ducklab", "project.toml")); err == nil {
+		if mode := projCfg.Modes[config.StageBuild]; mode != "" {
+			return string(mode), "project"
+		}
+	}
+	return "solo", "fallback"
+}
+
 // RunStart starts a run. Returns immediately with the run in running status.
 func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest) (*runlog.Run, error) {
 	entry, err := s.registry.Get(projectID)
@@ -941,6 +958,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		ProjectID:    projectID,
 		Stage:        "build",
 		Mode:         req.Mode,
+		ModeSource:   "request",
 		TaskID:       req.TaskID,
 		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
 		Status:       "running",
@@ -966,16 +984,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		AgentTurns:   req.AgentTurns,
 	}
 	if run.Mode == "" {
-		// The configured default build mode, not a hardcoded solo. The UI
-		// launcher pre-fills it client-side, so this gap only showed when a
-		// run started WITHOUT a launcher — the autopilot's first production
-		// build ran solo past a config that said pair.
-		s.cfgMu.RLock()
-		run.Mode = s.cfg.Defaults.BuildMode
-		s.cfgMu.RUnlock()
-	}
-	if run.Mode == "" {
-		run.Mode = "solo"
+		run.Mode, run.ModeSource = s.resolveBuildMode(entry.Path)
 	}
 	if run.Autonomy == "" {
 		// The project's configured autonomy is the default the plan promised
@@ -1015,8 +1024,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 
 	// Emit run_start event
 	writer.AppendEvent("run_start", map[string]interface{}{
-		"mode":    run.Mode,
-		"task_id": run.TaskID,
+		"mode": run.Mode, "mode_source": run.ModeSource, "task_id": run.TaskID,
 	})
 
 	// Dry-run is synchronous: render prompts, no model calls, exit immediately

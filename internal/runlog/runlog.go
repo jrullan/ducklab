@@ -20,6 +20,9 @@ type Run struct {
 	ProjectID     string                 `json:"project_id"`
 	Stage         string                 `json:"stage"`
 	Mode          string                 `json:"mode"`
+	// ModeSource records how an omitted mode was resolved: settings, project,
+	// or fallback. An explicit request is recorded as request.
+	ModeSource    string                 `json:"mode_source,omitempty"`
 	TaskID        string                 `json:"task_id"`
 	// TaskBodyHash binds derived task state to the meaning run at launch.
 	// Historical runs remain readable but cannot contaminate a recycled ID.
