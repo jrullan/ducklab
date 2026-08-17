@@ -33,10 +33,10 @@ import (
 // feature — an unattended loop should not survive the process nobody is
 // watching restart.
 type autopilotState struct {
-	On               bool   `json:"on"`
-	MaxTasks         int    `json:"max_tasks"`
-	Started          int    `json:"started"`
-	ConsecutiveFails int    `json:"consecutive_fails"`
+	On               bool `json:"on"`
+	MaxTasks         int  `json:"max_tasks"`
+	Started          int  `json:"started"`
+	ConsecutiveFails int  `json:"consecutive_fails"`
 	// LastAction is what the autopilot last did or why it is idle — the
 	// rail renders this verbatim.
 	LastAction string `json:"last_action,omitempty"`
@@ -236,6 +236,14 @@ func (s *Service) autopilotAdvance(projectID string) {
 		}
 		return
 	}
+	// A no-changes run is the tree answering the task's question. Do not ask
+	// again automatically: a person may relaunch with a note, but the loop
+	// must not spend another task slot trying to get a different answer.
+	if (first.ID == "build" || first.ID == "test-first") &&
+		s.autopilotNoChangesNeedsHumanNote(ctx, projectID, first.Ref) {
+		s.autopilotNote(projectID, "needs you: "+first.Ref+"'s previous run made no changes — add a note before trying it again")
+		return
+	}
 
 	s.apMu.Lock()
 	st := s.autopilots[projectID]
@@ -322,6 +330,29 @@ func (s *Service) autopilotResult(projectID, action string, err error, human str
 		note = human + "; meanwhile " + note
 	}
 	s.autopilotNote(projectID, note)
+}
+
+// autopilotNoChangesNeedsHumanNote reports whether the latest relevant attempt
+// already found the task's work in the tree. A note on a later human-started
+// run is explicit new context and lifts this rail; autopilot-generated retry
+// notes do not.
+func (s *Service) autopilotNoChangesNeedsHumanNote(ctx context.Context, projectID, taskID string) bool {
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
+	if err != nil {
+		return false
+	}
+	for _, run := range runs { // RunList is newest first.
+		if run.TaskID != taskID {
+			continue
+		}
+		if run.Origin != "autopilot" && strings.TrimSpace(run.Note) != "" {
+			return false
+		}
+		if run.NoChanges && (run.Status == "done" || run.Status == "failed") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) autopilotMechanical(projectID string, step NextStep) bool {

@@ -254,6 +254,37 @@ func TestProjectAutonomyRoundTrip(t *testing.T) {
 // A blind relaunch of a deterministic failure reproduces it exactly. The
 // autopilot's retry carries the previous attempt's failure as a note, and
 // the note is consumed once — a note for one task must not haunt another.
+// A no-changes outcome is evidence about the tree, not a transient failure to
+// retry. The autopilot must wait for new human context before asking again.
+func TestAutopilotDoesNotRetryNoChangesWithoutHumanNote(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+
+	s.runsMu.Lock()
+	s.runs["r-empty"] = &runState{run: &runlog.Run{
+		ID: "r-empty", ProjectID: projectID, TaskID: "T-044", Stage: "build",
+		Status: "done", NoChanges: true, Origin: "autopilot",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
+	s.runsMu.Unlock()
+	if !s.autopilotNoChangesNeedsHumanNote(context.Background(), projectID, "T-044") {
+		t.Fatal("autopilot would retry an unchanged task without human context")
+	}
+
+	// A later human launch note is the explicit new context that permits another
+	// attempt; an autopilot's generated retry note is deliberately not enough.
+	s.runsMu.Lock()
+	s.runs["r-note"] = &runState{run: &runlog.Run{
+		ID: "r-note", ProjectID: projectID, TaskID: "T-044", Stage: "build",
+		Status: "failed", Note: "The implementation moved to the new package.",
+		StartedAt: time.Now().Add(time.Second).UTC().Format(time.RFC3339),
+	}}
+	s.runsMu.Unlock()
+	if s.autopilotNoChangesNeedsHumanNote(context.Background(), projectID, "T-044") {
+		t.Fatal("a later human note did not permit a fresh attempt")
+	}
+}
+
 func TestTheRetryCarriesTheFailureAsANote(t *testing.T) {
 	s := newTestService(t)
 	projectID := newTestProject(t, s, "proj")

@@ -1296,7 +1296,7 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 		// done — retry" on a delivered task. And a run that changed nothing
 		// says nothing either: it wears FAILED for honest pass-rates, but
 		// "the work was already in the tree" is not a verdict on the task.
-		if r.Stage == "chat" || r.NoChanges {
+		if r.Stage == "chat" || (r.NoChanges && !(r.Accepted && r.Stage == "build")) {
 			continue
 		}
 		if r.Accepted || r.Status == "running" || r.Status == "queued" || r.Status == "paused" {
