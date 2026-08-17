@@ -18,7 +18,6 @@ autonomy = "yolo"
 
 [roster]
   advisor = "luna"
-  implementer = "luna"
   scribe = "beelink-local"
   triager = "terra"
 

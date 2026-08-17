@@ -82,7 +82,85 @@ func TestRejectPutsTheTreeBack(t *testing.T) {
 	}
 }
 
-// An accepted run's work is the point of the run. Restore must never touch it.
+// A reject cleans up a live shared tree, but it is never allowed to make the
+// worktree older than HEAD. In particular, work landed after this run started
+// may include the run's legitimate work manually committed before its gate was
+// answered.
+func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	g := gitProject(t, dir)
+
+	snap, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-head-advanced", ProjectID: id, TaskID: "T-001", Stage: "build",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		TreeSnapshot: snap, StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// These are the three commits landed while this run was awaiting a decision.
+	// The first represents its legitimate work being landed by hand; the other
+	// two make the reported commit count observable to the operator.
+	landed := map[string]string{
+		"index.html":                  "legitimate run work landed by hand\n",
+		"committed-after-run-test.go": "package project\n",
+		"classifier-fix.go":           "package project\n",
+	}
+	for path, contents := range landed {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Add(path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.Commit("land " + path); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err = s.RunReject(context.Background(), run.ID, "not what I asked for")
+	if err == nil {
+		t.Fatal("reject succeeded after HEAD advanced past the run snapshot")
+	}
+	if !strings.Contains(err.Error(), "3 commits landed since this run began") {
+		t.Errorf("reject error does not name the landed commit count: %v", err)
+	}
+	for path, want := range landed {
+		got, readErr := os.ReadFile(filepath.Join(dir, path))
+		if readErr != nil || string(got) != want {
+			t.Errorf("reject changed committed %s: got %q, err %v; want %q", path, got, readErr, want)
+		}
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != "paused" || detail.Run.PendingKind != "gate" {
+		t.Errorf("refused reject closed the run: status=%q pending=%q", detail.Run.Status, detail.Run.PendingKind)
+	}
+	canReject := false
+	for _, action := range detail.Run.Next {
+		if action == "reject" {
+			canReject = true
+		}
+	}
+	if !canReject {
+		t.Errorf("refused reject is not still available: next=%v", detail.Run.Next)
+	}
+}
+
 func TestAcceptDoesNotRestore(t *testing.T) {
 	rs := &runState{run: &runlog.Run{ID: "r-2", TreeSnapshot: "abc", Accepted: true}}
 	// Must be a no-op — reaching for git with a fake path would error loudly.

@@ -992,4 +992,41 @@ The gate's state-isolation change makes every verification slow, network-depende
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-051 — Prevent reject cleanup from restoring paths over commits landed after the run snapshot
+
+Fixes B-050.
+
+## Reported
+
+What happened: T-050's test run was rejected AFTER its legitimate work had been landed by hand in three commits (b3ed87c, 926e462, 6acc1d4). The reject restored the working tree to the run's snapshot — which predates those commits — so the tree silently rewound past HEAD: a committed test file showed as deleted, the classifier fix reverted in-tree, and the suites went green against the OLD world while HEAD held the new one. Recovered with git checkout -- . — but only because someone knew to look. The restore answers \"what did the RUN change?\" with \"whatever differs from my snapshot\", and everything committed since the snapshot becomes collateral.\n\nExpected: restore-on-reject reconciles against HEAD, not the raw snapshot — it reverts only paths the RUN touched beyond their state in HEAD, or refuses with a named reason when HEAD has advanced past the snapshot (\"3 commits landed since this run began; restoring would rewind them in the tree\"). A cleanup must never be able to un-apply history it did not create — the tree-custody rule, now for the engine's own janitor.
+
+## Triage
+
+**Component:** run cleanup
+**Suspected files:** internal/run/run.go, internal/engineapi/engineapi.go
+
+Reject cleanup can silently make the working tree diverge from HEAD by reverting history created after its snapshot.
+
+**Verification (triage recommends):** test-first — Start a run, commit intervening changes to HEAD, reject it, and assert the committed files remain unchanged in the worktree.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-052 — Expose every project roster pin in Settings and label overridden defaults
+
+Fixes B-052.
+
+## Reported
+
+What happened: the desktop Settings page reads as THE configuration — and it showed "solo implementer: terra" while every solo run seated luna, because a hand-edited project.toml [roster] pin (implementer = luna) silently outranks it. The Settings UI has a "this project" section for exactly three roles (triager, advisor, scribe); the engine honors project pins for MORE roles than the UI can display or edit, so file-level edits create a government no screen admits exists. The person's stated assumption — all configuration the engine honors is exposed in the desktop — is the correct design contract, and it is broken.\n\nExpected, two layers: (a) parity — every project.toml key the engine reads has a place in Settings (the "this project" roster section grows implementer/reviewer/architect pins, showing current file values including hand-made ones); (b) effective-value honesty — where an "all projects" default is overridden by a project pin, the default's own row says so ("solo implementer: terra — overridden for ducklab: luna (project)"), so the two truths are never shown as one. Config without a surface is state without a witness.
+
+## Triage
+
+**Component:** Settings roster
+
+Settings omits engine-honored project roster state, causing users to see and edit configuration that does not govern runs.
+
+**Verification (triage recommends):** test-first — Seed project.toml roster pins and assert Settings shows every pin plus project-overridden effective values.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

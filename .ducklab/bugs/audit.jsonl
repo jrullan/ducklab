@@ -149,3 +149,9 @@
 {"ts":"2026-08-17T01:47:04Z","bug":"B-045","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-048"}
 {"ts":"2026-08-17T08:27:28Z","bug":"B-046","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-17T08:55:24Z","bug":"B-048","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-17T09:08:46Z","bug":"B-050","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-17T09:08:46Z","bug":"B-052","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-17T09:08:46Z","bug":"B-049","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-17T09:08:46Z","bug":"B-051","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-17T09:09:03Z","bug":"B-050","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-051"}
+{"ts":"2026-08-17T09:09:06Z","bug":"B-052","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-052"}
