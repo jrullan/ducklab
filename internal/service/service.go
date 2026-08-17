@@ -1814,8 +1814,11 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// and whose reviewer approved was marked FAILED. The person did nothing
 	// wrong and the run did nothing wrong.
 	if clean, cerr := git.IsClean(); cerr == nil && clean {
-		defer s.continueChain(ctx, rs)
 		head, _ := git.HeadSHA()
+		if err := verifyAcceptedCommit(ctx, git, entry.Path, head); err != nil {
+			return err
+		}
+		defer s.continueChain(ctx, rs)
 		rs.run.Accepted = true
 		rs.run.CommitSHA = head
 		rs.run.Status = "done"
@@ -1847,6 +1850,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
+	if err := verifyAcceptedCommit(ctx, git, entry.Path, sha); err != nil {
+		return err
+	}
 	defer s.continueChain(ctx, rs)
 	rs.run.Accepted = true
 	rs.run.CommitSHA = sha
@@ -1872,6 +1878,40 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// went on offering Accept on a run it had already committed.
 	if err := s.logResolution(rs, "accept"); err != nil {
 		return err
+	}
+	return nil
+}
+
+// verifyAcceptedCommit runs the configured gate from a detached worktree at
+// sha. The working tree may contain ignored files that git add deliberately
+// omitted; only this checkout can prove the recorded commit is reproducible.
+func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) error {
+	cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml"))
+	if err != nil {
+		return fmt.Errorf("load gate config for accepted commit: %w", err)
+	}
+	checkout, err := os.MkdirTemp("", "ducklab-accept-")
+	if err != nil {
+		return fmt.Errorf("create clean checkout for acceptance: %w", err)
+	}
+	if err := os.Remove(checkout); err != nil {
+		return fmt.Errorf("prepare clean checkout for acceptance: %w", err)
+	}
+	defer os.RemoveAll(checkout)
+	if err := git.WorktreeAddDetached(checkout, sha); err != nil {
+		return fmt.Errorf("create clean checkout for acceptance: %w", err)
+	}
+	defer git.WorktreeRemove(checkout)
+
+	result, err := verify.Run(ctx, checkout, cfg.Verify)
+	if err != nil {
+		return fmt.Errorf("run gate from clean checkout: %w", err)
+	}
+	// A project with no configured executable gate retains its existing
+	// UNVERIFIED semantics. There is no command to reproduce, not a failed
+	// command to reject; executable gates must be green in the clean checkout.
+	if result.Gate != verify.GateNone && !verify.IsGreen(result) {
+		return fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return nil
 }

@@ -225,6 +225,14 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	return err
 }
 
+// WorktreeAddDetached checks out a commit without changing a branch. It is
+// used when a caller must verify precisely what a commit contains, rather than
+// the potentially dirtier working tree that produced it.
+func (g *Git) WorktreeAddDetached(path, rev string) error {
+	_, err := g.run("worktree", "add", "--detach", path, rev)
+	return err
+}
+
 // WorktreeRemove removes a worktree.
 func (g *Git) WorktreeRemove(path string) error {
 	_, err := g.run("worktree", "remove", "--force", path)
