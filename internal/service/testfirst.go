@@ -608,6 +608,13 @@ func compileFailure(output string) bool {
 		if strings.Contains(trimmed, "): error TS") {
 			return true
 		}
+		// Vitest/esbuild reports syntax and transform failures without a Go-style
+		// package marker. These failures happen before any assertion runs, so they
+		// are structural compile failures rather than valid test-first red.
+		if strings.Contains(trimmed, "Transform failed with ") ||
+			strings.Contains(trimmed, "Failed to parse source") {
+			return true
+		}
 	}
 	return false
 }
