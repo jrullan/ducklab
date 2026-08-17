@@ -180,6 +180,20 @@ export function App() {
       token: cfg.token,
       version: VERSION,
       onStale: (kind) => setStale((cur) => cur || kind),
+      onRecovered: () => setStale(false),
+      reconnect: async () => {
+        const fqn = window.ducklab?.reconnectEngine;
+        const call = window.wails?.Call?.ByName;
+        if (!fqn || !call) throw new Error("engine binding is stale; reconnect is only available in the desktop app");
+        const fresh = (await call(fqn)) as { baseUrl: string; token: string };
+        if (window.ducklab) {
+          window.ducklab.baseUrl = fresh.baseUrl;
+          window.ducklab.token = fresh.token;
+        }
+        setStale(false);
+        setConn({ baseUrl: fresh.baseUrl, token: fresh.token });
+        return fresh;
+      },
     });
     setClient(c);
 
@@ -443,7 +457,7 @@ export function App() {
           className="flex items-center gap-3 border-b border-hairline bg-surface2 px-4 py-2 text-sm"
           data-testid="stale-banner"
         >
-          <span className="text-serious">
+          <span className="text-serious" role="status">
             {stale === "restarted"
               ? "The engine was restarted outside the app — this window's session died with it."
               : "The engine is older than this app — some features will fail until it restarts."}
@@ -483,8 +497,12 @@ export function App() {
             room is not a thread. */}
         {client && projectId && <GuideRail client={client} projectId={projectId} />}
         <main
+          aria-readonly={stale ? "true" : undefined}
+          data-testid={stale ? "stale-read-only" : undefined}
           className={
-            "min-h-0 flex-1 overflow-y-auto" + (degraded ? " opacity-60 transition-opacity" : "")
+            "min-h-0 flex-1 overflow-y-auto" +
+            (degraded ? " opacity-60 transition-opacity" : "") +
+            (stale ? " pointer-events-none opacity-60" : "")
           }
           data-degraded={String(degraded)}
         >

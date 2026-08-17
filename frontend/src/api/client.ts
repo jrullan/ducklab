@@ -485,12 +485,24 @@ export interface ClientOptions {
    * banner listens for, with which remedy applies. The error still throws;
    * this is how the shell learns without every call site reporting upward. */
   onStale?: (kind: StaleKind) => void;
+  reconnect?: () => Promise<{ baseUrl: string; token: string }>;
+  /** Called after a previously stale binding has been repaired. */
+  onRecovered?: () => void;
 }
 
 export class EngineClient {
+  private stale: StaleKind | false = false;
+
   constructor(private opts: ClientOptions) {}
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /** Mutating requests must never be accepted while the binding is known dead.
+   * A failed click is retried only as part of the recovery that detected it;
+   * later clicks are rejected locally until the shell has re-injected a live
+   * binding. */
+  private async request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+    if (this.stale === "restarted" && method !== "GET") {
+      throw new ApiError("action unavailable: the engine connection is stale; reconnect first", 0);
+    }
     const f = this.opts.fetchFn ?? fetch;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.opts.token}`,
@@ -498,11 +510,43 @@ export class EngineClient {
     if (this.opts.version) headers["X-Ducklab-Client"] = this.opts.version;
     if (body !== undefined) headers["Content-Type"] = "application/json";
 
-    const res = await f(`${this.opts.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await f(`${this.opts.baseUrl}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (firstError) {
+      if (!this.opts.reconnect) {
+        this.stale = "restarted";
+        this.opts.onStale?.("restarted");
+        throw firstError;
+      }
+      try {
+        const fresh = await this.opts.reconnect();
+        this.opts.baseUrl = fresh.baseUrl;
+        this.opts.token = fresh.token;
+        this.stale = false;
+        this.opts.onRecovered?.();
+        headers.Authorization = `Bearer ${fresh.token}`;
+      } catch (reconnectError) {
+        this.stale = "restarted";
+        this.opts.onStale?.("restarted");
+        throw reconnectError;
+      }
+      try {
+        res = await f(`${this.opts.baseUrl}${path}`, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch (retryError) {
+        this.stale = "restarted";
+        this.opts.onStale?.("restarted");
+        throw retryError;
+      }
+    }
 
     if (res.status === 204) return undefined as T;
     const text = await res.text();
@@ -523,6 +567,7 @@ export class EngineClient {
       // ("POST /v1/bench/start failed") reported that state without naming it,
       // and the one action that fixes it — restart the engine — went unsaid.
       if (err?.message === undefined && (res.status === 404 || res.status === 405)) {
+        this.stale = "older";
         this.opts.onStale?.("older");
         throw new ApiError(
           `the engine does not know ${method} ${path} — it is older than this app. Restart the engine.`,
@@ -536,6 +581,25 @@ export class EngineClient {
       // remedy: reconnect (re-read the daemon's connection file), no restart
       // needed.
       if (res.status === 401) {
+        // A rotated token means the engine was replaced, not that the action was
+        // rejected. Re-read the binding and retry once so an already-open
+        // desktop heals without making the person repeat the click. If the
+        // repair fails, retain the stale guard and surface the original action.
+        if (!retried && method !== "GET" && this.opts.reconnect) {
+          try {
+            const fresh = await this.opts.reconnect();
+            this.opts.baseUrl = fresh.baseUrl;
+            this.opts.token = fresh.token;
+            this.stale = false;
+            this.opts.onRecovered?.();
+            return this.request<T>(method, path, body, true);
+          } catch (reconnectError) {
+            this.stale = "restarted";
+            this.opts.onStale?.("restarted");
+            throw reconnectError;
+          }
+        }
+        this.stale = "restarted";
         this.opts.onStale?.("restarted");
         throw new ApiError(
           "the engine no longer recognizes this window's session — it was restarted outside the app. Reconnect.",

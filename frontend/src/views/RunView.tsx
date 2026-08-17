@@ -106,6 +106,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // and jumped to the final number at exactly the moment it stopped mattering.
   const live = useRuns((s) => s.spend[runId]);
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Fetch the run's history on open.
   //
@@ -532,6 +533,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const relaunchDucklings = seatsFromRoster(run.mode, run.roster);
 
   const relaunch = async (opts: LaunchOpts) => {
+    setActionError(null);
     setRelaunchBusy(true);
     setRelaunchError(null);
     try {
@@ -568,6 +570,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   };
 
   const requestChanges = async (text: string) => {
+    setActionError(null);
     try {
       const started = await client.stageStart(run.project_id, stageToRevise, { revise: text });
       setRevisionRun(started.id);
@@ -577,6 +580,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   };
 
   const onAccept = async () => {
+    setActionError(null);
     const store = useRuns.getState();
     store.beginAccept(runId);
     try {
@@ -638,7 +642,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {next.includes("abort") && (
             <button
               type="button"
-              onClick={() => client.abort(runId).catch(() => {})}
+              onClick={() => {
+                setActionError(null);
+                void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+              }}
               data-testid="abort-button"
               className="rounded border border-hairline px-2 py-1 text-sm"
             >
@@ -1126,10 +1133,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
             accepting={acceptState.kind === "pending"}
             onAccept={onAccept}
-            onReject={() => void client.reject(runId).catch(() => {})}
-            onAbort={() => void client.abort(runId).catch(() => {})}
+            onReject={() => {
+              setActionError(null);
+              void client.reject(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+            }}
+            onAbort={() => {
+              setActionError(null);
+              void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+            }}
             onRequestChanges={stageToRevise ? requestChanges : undefined}
-            onResume={() => void client.runResume(runId).catch(() => {})}
+            onResume={() => {
+              setActionError(null);
+              void client.runResume(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+            }}
             revisionRun={revisionRun}
             redoNote={run.redo_note}
             onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
@@ -1151,7 +1167,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                     <button
                       type="button"
                       data-testid="reseat-button"
-                      onClick={() => void client.runReseat(runId, from, to).catch(() => {})}
+                      onClick={() => {
+                        setActionError(null);
+                        void client.runReseat(runId, from, to).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+                      }}
                       className="rounded border border-hairline px-2 py-1 text-sm"
                     >
                       Reseat to {to} & resume
@@ -1168,6 +1187,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
+      {(actionError || relaunchError) && (
+        <p className="m-2 text-critical" role="alert" data-testid={actionError ? "abort-error" : "action-error"}>
+          action failed: {actionError ?? relaunchError}
+        </p>
+      )}
       {acceptState.kind === "error" && (
         <p className="m-2 text-critical" data-testid="accept-error">
           accept failed: {acceptState.message}
