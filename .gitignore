@@ -6,7 +6,8 @@ node_modules/
 *.test
 *.out
 coverage.*
-dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
 /build/
 bin/
 .DS_Store
