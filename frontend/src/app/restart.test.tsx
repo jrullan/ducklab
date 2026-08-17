@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { App } from "./App";
 import { useRuns } from "../store/runs";
 
@@ -90,6 +90,79 @@ describe("the engine restart banner", () => {
 // load — sometimes after the bundle. Reading it once turned that race into a
 // permanent "no engine connection details" that a relaunch usually won:
 // red on some starts, fine on the next. The app now waits for the injection.
+// B-053: HTTP health alone must not conceal a stream that went silent after
+// an engine restart. Heartbeats count as stream activity; no frame at all for
+// 30 seconds makes it stale, starts a reconnect, and resyncs the run snapshot.
+describe("a silently stale desktop event stream", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    window.ducklab = { baseUrl: "http://engine", token: "tok" };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    delete window.ducklab;
+  });
+
+  it("reconnects and resyncs a run missed during 30 seconds of stream silence", async () => {
+    const sources: Array<{ onopen: ((e: unknown) => void) | null; close: ReturnType<typeof vi.fn> }> = [];
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      onopen: ((e: unknown) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      close = vi.fn();
+      constructor(_url: string) { sources.push(this); }
+      addEventListener() {}
+    };
+
+    let runLists = 0;
+    const fetchFn = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes("/v1/health")) {
+        // HTTP remains healthy throughout; it must not make the stream badge green.
+        return Promise.resolve(new Response(JSON.stringify({ version: "x" }), { status: 200 }));
+      }
+      if (u.includes("/v1/runs")) {
+        runLists += 1;
+        return Promise.resolve(new Response(JSON.stringify({ items: runLists === 1 ? [
+          { id: "queued", project_id: "p", stage: "build", mode: "solo", task_id: "T-1", status: "queued", verdict: "", started_at: "" },
+        ] : [
+          { id: "queued", project_id: "p", stage: "build", mode: "solo", task_id: "T-1", status: "queued", verdict: "", started_at: "" },
+          // This run began after the engine restart. Its run_start was on the
+          // silent old stream, so only the post-reconnect snapshot can reveal it.
+          { id: "running", project_id: "p", stage: "build", mode: "solo", task_id: "T-2", status: "running", verdict: "", started_at: "" },
+        ] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchFn as unknown as typeof fetch);
+
+    render(<App />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(useRuns.getState().runs.running).toBeUndefined();
+    expect(sources).toHaveLength(1);
+    sources[0]!.onopen?.(null);
+
+    // Silence just below the declared boundary is still a live stream.
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(sources).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(sources[0]!.close).toHaveBeenCalled();
+    expect(screen.getByText("engine ✓ · stream reconnecting")).toBeTruthy();
+
+    // Allow the subscriber's bounded reconnect backoff, then accept the new stream.
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+    expect(sources.length).toBeGreaterThanOrEqual(2);
+    sources.at(-1)!.onopen?.(null);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+    expect(useRuns.getState().runs.running?.status).toBe("running");
+    expect(runLists).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("the connection-details race at startup", () => {
   beforeEach(() => {
     useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
