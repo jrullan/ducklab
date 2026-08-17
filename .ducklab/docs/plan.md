@@ -1029,4 +1029,43 @@ Settings omits engine-honored project roster state, causing users to see and edi
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-053 — Record and expose provenance for each seated role
+
+Fixes B-051.
+
+## Reported
+
+What happened: T-050's closure ran solo with luna implementing, while Settings' solo line-up says terra — and the human had to ask an assistant to learn why: the project roster pins implementer=luna (project.toml), which outranks Settings after T-039's unification. The run record proves the WHAT (roster: implementer luna) and, since T-048, the mode's WHY (mode_source: request) — but no seat says where it came from. The exact question the person asked ("cómo llegó luna ahí") has its answer in config archaeology instead of on the card.\n\nExpected: each seated role carries its source like the mode does — roster entries annotated project | settings | request | spread (e.g. implementer: luna (project)) in state.json, run_get and the run view's seat chips. B-035's other half: a silent decision made visible, now on the record instead of only in the launcher.
+
+## Triage
+
+**Component:** run records
+
+This is a distinct observability gap: resolved roster seats lack the source metadata already recorded for mode.
+
+**Verification (triage recommends):** test-first — Launch with project, settings, request, and spread seat sources and assert state/run_get provenance.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-054 — Record and expose clean-checkout acceptance gate results on accepted runs
+
+Fixes B-049.
+
+## Reported
+
+What happened: T-049's build was aborted before its own gate ran, so the run's verdict honestly reads UNVERIFIED — and it was then accepted, with B-040's acceptance machinery running the FULL gate from a clean checkout of the resulting commit and passing (it had rejected two earlier attempts, so the green is meaningful). The record has one verdict slot and it belongs to the run's own gate: the strongest verification the work ever received — reproduction from a fresh worktree — is invisible, and the runs list shows "UNVERIFIED · accepted" for work more proven than any pre-B-040 PASSED.
+
+Expected: the acceptance verification lands on the record — a gate_reproduced event with its result, surfaced beside the verdict (e.g. "UNVERIFIED · reproduced green at accept") in run_get and the runs list. Two different questions deserve two visible answers: did THIS run prove its work, and was the ACCEPTED COMMIT proven. Today the second answer, the one that matters most, is the one the record swallows.
+
+## Triage
+
+**Component:** run acceptance verification
+**Suspected files:** internal/engineapi/engineapi.go, internal/engineapi/routes_table.go, frontend/src
+
+The clean-checkout acceptance result is successfully produced but lost from the run record and operator-facing status.
+
+**Verification (triage recommends):** test-first — Accept a run whose own gate is UNVERIFIED after a passing clean-checkout gate, then assert run_get and the runs list report reproduced green.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

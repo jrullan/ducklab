@@ -66,6 +66,91 @@ func TestOmittedBuildModeHasOneResolutionAndProvenanceAcrossEntrances(t *testing
 	}
 }
 
+// Every resolved seat is an audit fact: the record must say whether it was
+// pinned in project.toml, supplied by Settings, chosen in this request, or
+// spread by the resolver. Otherwise a reader can see who ran but not answer
+// why that duckling won over the other available choices.
+func TestRunRosterSourcesRecordEverySeatDecision(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configure  func(*testing.T, *Service, string)
+		req        RunRequest
+		wantSource string
+	}{
+		{
+			name: "project",
+			configure: func(t *testing.T, s *Service, dir string) {
+				cfg, err := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg.Roster[config.RoleImplementer] = "luna"
+				if err := writeProjectTOML(filepath.Join(dir, ".ducklab", "project.toml"), cfg); err != nil {
+					t.Fatal(err)
+				}
+			},
+			req: RunRequest{Mode: "solo"}, wantSource: "project",
+		},
+		{
+			name: "settings",
+			configure: func(_ *testing.T, s *Service, _ string) {
+				s.cfg.Defaults.ModeDucklings = map[string][]string{"solo": {"terra"}}
+			},
+			req: RunRequest{Mode: "solo"}, wantSource: "settings",
+		},
+		{
+			name:      "request",
+			configure: func(_ *testing.T, _ *Service, _ string) {},
+			req:       RunRequest{Mode: "solo", Ducklings: []string{"terra"}}, wantSource: "request",
+		},
+		{
+			name:      "spread",
+			configure: func(_ *testing.T, _ *Service, _ string) {},
+			req:       RunRequest{Mode: "solo"}, wantSource: "spread",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := serviceWithDucklings(t, "luna", "terra")
+			projectID, dir := omittedModeProject(t, s, "")
+			tc.configure(t, s, dir)
+			tc.req.TaskID = "T-001"
+
+			run, err := s.RunStart(context.Background(), projectID, tc.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.waitForRun(context.Background(), run.ID); err != nil {
+				t.Fatal(err)
+			}
+
+			// state.json is the durable answer, including after the engine restarts.
+			stateBytes, err := os.ReadFile(filepath.Join(dir, ".ducklab", "runs", run.ID, "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var state struct {
+				RosterSources map[string]string `json:"roster_sources"`
+			}
+			if err := json.Unmarshal(stateBytes, &state); err != nil {
+				t.Fatal(err)
+			}
+			if got := state.RosterSources["implementer"]; got != tc.wantSource {
+				t.Errorf("state.json implementer source = %q, want %q", got, tc.wantSource)
+			}
+
+			// run_get must expose the same provenance rather than making clients
+			// read the run directory themselves.
+			detail, err := s.RunGet(context.Background(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := detail.Run.RosterSources["implementer"]; got != tc.wantSource {
+				t.Errorf("run_get implementer source = %q, want %q", got, tc.wantSource)
+			}
+		})
+	}
+}
+
 func omittedModeProject(t *testing.T, s *Service, mode config.Mode) (string, string) {
 	t.Helper()
 	projectID, dir := projectWithConfig(t, s, "omitted-mode")
