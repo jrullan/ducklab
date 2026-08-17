@@ -278,6 +278,8 @@ export type RosterEntry = {
   /** "project" when project.toml declares it, "default" when the engine chose.
    * A person needs to know which assignments are theirs. */
   source: string;
+  /** Global fallback when this project overrides the role. */
+  default?: string;
 };
 
 /** A configured endpoint. Mirrors service.ProviderView.

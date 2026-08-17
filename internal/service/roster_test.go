@@ -77,6 +77,33 @@ func TestRosterGetShowsResolvedAssignmentsAndSource(t *testing.T) {
 	}
 }
 
+func TestRosterGetReportsGlobalFallbackForProjectPin(t *testing.T) {
+	s := serviceWithDucklings(t, "terra", "z-luna")
+	projectID, dir := projectWithConfig(t, s, "ducklab")
+	cfg, err := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Roster[config.RoleImplementer] = "z-luna"
+	if err := writeProjectTOML(filepath.Join(dir, ".ducklab", "project.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := s.RosterGet(context.Background(), projectID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range view.Entries {
+		if entry.Role == "implementer" {
+			if entry.Duckling != "z-luna" || entry.Source != "project" || entry.Default != "terra" {
+				t.Fatalf("implementer entry = %+v, want luna/project with terra default", entry)
+			}
+			return
+		}
+	}
+	t.Fatal("implementer missing from roster")
+}
+
 func TestRosterSetPersistsAndIsReportedAsProjectSource(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
 	projectID, dir := projectWithConfig(t, s, "proj")

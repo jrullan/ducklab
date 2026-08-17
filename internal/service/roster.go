@@ -14,6 +14,10 @@ import (
 type RosterEntry struct {
 	Role     string `json:"role"`
 	Duckling string `json:"duckling"`
+	// Default is the all-projects choice when this project overrides the role.
+	// It lets clients explain both values instead of presenting the project value
+	// as if it were the global default.
+	Default  string `json:"default,omitempty"`
 	// Source is "project" when project.toml declares it, "default" when the
 	// engine picked it. A user needs to know which assignments are theirs.
 	Source string `json:"source"`
@@ -78,9 +82,18 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 			}
 			continue
 		}
-		view.Entries = append(view.Entries, RosterEntry{
-			Role: string(role), Duckling: string(resolved[role]), Source: source,
-		})
+		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Source: source}
+		if source == "project" {
+			// Resolve once with this pin removed to expose the global fallback.
+			withoutPin := *projCfg
+			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
+			for r, id := range projCfg.Roster {
+				if r != role { withoutPin.Roster[r] = id }
+			}
+			defaults, _ := s.resolveRoster(&withoutPin)
+			entry.Default = string(defaults[role])
+		}
+		view.Entries = append(view.Entries, entry)
 	}
 	sort.SliceStable(view.Entries, func(i, j int) bool { return view.Entries[i].Role < view.Entries[j].Role })
 	return view, nil

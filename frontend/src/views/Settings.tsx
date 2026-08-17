@@ -7,10 +7,10 @@ import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
 import type { BudgetView, EngineClient, ModeDefaultsView, RosterEntry } from "../api/client";
 
-/** The workflow stages served by a single function role. Only these roles
- * appear as rows — implementer and reviewer are covered by the task modes,
- * and repeating them here would re-create the two-widget confusion. */
-const FUNCTION_ORDER = ["triager", "advisor", "scribe"];
+/** Every engine-honored roster role appears here, so project.toml pins never
+ * become invisible state. The task-mode selectors describe launch shape; these
+ * rows describe the role defaults those launches resolve to. */
+const FUNCTION_ORDER = ["architect", "implementer", "reviewer", "judge", "triager", "advisor", "scribe"];
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -30,6 +30,10 @@ function ScopeChip({ scope }: { scope: "all projects" | "this project" | "engine
 }
 
 const WORKFLOW_ROWS: Record<string, { stage: string; help: string }> = {
+  architect: { stage: "documents — architecture", help: "shapes the project's technical direction" },
+  implementer: { stage: "tasks — implementation", help: "writes and verifies the change" },
+  reviewer: { stage: "tasks — review", help: "checks the implementation" },
+  judge: { stage: "tasks — verdict", help: "adjudicates between implementer and reviewer" },
   triager: { stage: "bugs — triage", help: "classifies reports: severity, duplicates, promotability" },
   advisor: { stage: "gates — advice", help: "drafts an answer while a paused run waits for you" },
   scribe: { stage: "releases — notes", help: "writes the release notes from the accepted work" },
@@ -618,6 +622,11 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
                     <span className="w-24 shrink-0" title={row.help}>{e.role}</span>
+                    <span data-testid={`roster-value-${e.role}`}>
+                      {e.source === "project" && e.default && e.default !== e.duckling
+                        ? `${e.default} — overridden for ${projectId}: ${e.duckling} (project)`
+                        : e.duckling}
+                    </span>
                     <select
                       aria-label={`duckling for ${e.role}`}
                       data-testid={`roster-select-${e.role}`}
@@ -643,7 +652,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
           <p className="mt-3 text-xs text-ink-muted">
             Seat pickers ride the Save button below; the this-project pickers
-            (triager, advisor, scribe) apply the moment you choose.
+            (all function roles) apply the moment you choose.
           </p>
         </SettingsCard>
       )}
