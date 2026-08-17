@@ -30,3 +30,15 @@ describe("seatsFromRoster", () => {
     expect(seatsFromRoster("pair", undefined)).toEqual([]);
   });
 });
+
+import { rolesForMode } from "./seats";
+describe("rolesForMode", () => {
+  it("seats only the roles a mode uses, duck included", () => {
+    expect(rolesForMode("pair")).toEqual(["implementer", "advisor", "reviewer"]);
+    expect(rolesForMode("solo")).toEqual(["implementer", "advisor"]);
+    expect(rolesForMode("triage")).toEqual(["triager"]);
+  });
+  it("shows everything for a mode it does not know", () => {
+    expect(rolesForMode("something-new")).toBeNull();
+  });
+});

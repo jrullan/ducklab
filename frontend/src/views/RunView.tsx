@@ -19,7 +19,7 @@ import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
-import { seatsFromRoster } from "../lib/seats";
+import { seatsFromRoster, rolesForMode } from "../lib/seats";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
 
@@ -374,7 +374,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
   const roster = Object.values(run.roster ?? {});
   const ducklingColors = assignDucklingColors(fleet);
-  const rosterEntries = Object.entries(run.roster ?? {}).map(([role, duckling]) => ({
+  // Only the seats this mode actually uses, in speaking order; the record's
+  // roster names every role, and a pair run showing seven chips read as
+  // "my whole team is on this run".
+  const seatRoles = rolesForMode(run.stage === "build" || run.stage === "test" ? run.mode : run.stage);
+  const rosterEntries = Object.entries(run.roster ?? {})
+    .filter(([role]) => !seatRoles || seatRoles.includes(role))
+    .sort(([a], [b]) => (seatRoles ? seatRoles.indexOf(a) - seatRoles.indexOf(b) : 0))
+    .map(([role, duckling]) => ({
     role,
     // Tournament identities are intentionally hidden in the run view, including
     // the seat summary; exposing them here would defeat lane anonymisation.

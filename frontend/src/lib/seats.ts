@@ -62,3 +62,30 @@ export function seatLabel(mode: string, i: number): string {
   }
   return `#${i + 1}`;
 }
+
+/** The roles a mode actually seats, in the order they speak. The run record's
+ * roster names EVERY role (the engine resolves them all so a seat can be
+ * found by role), but a pair run does not seat a judge, a scribe or a triager
+ * — showing them read as "my whole team is on this run". The advisor is a real
+ * seat of every task mode now (the rubber duck). Unknown modes show all. */
+export function rolesForMode(mode: string): string[] | null {
+  switch (mode) {
+    case "solo":
+      return ["implementer", "advisor"];
+    case "pair":
+      return ["implementer", "advisor", "reviewer"];
+    case "tournament":
+      return ["implementer", "advisor", "judge"];
+    case "split":
+      return ["architect", "implementer", "advisor", "reviewer"];
+    case "council":
+      return ["architect", "reviewer", "advisor"];
+    case "triage":
+      return ["triager"];
+    case "release":
+      return ["scribe"];
+    case "chat":
+      return null;
+  }
+  return null;
+}
