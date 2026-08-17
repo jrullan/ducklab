@@ -134,14 +134,13 @@ func nextSteps(st projectSnapshot) []NextStep {
 		})
 	}
 	// A fixed bug is waiting for a person's verification. Reopen is the
-	// deliberate path when that verification finds the fix insufficient; keep
-	// it visible without changing the bug state machine.
-	for _, b := range st.Bugs {
+	// deliberate alternative when that verification finds the fix insufficient.
+		for _, b := range st.Bugs {
 		if b.Status == bug.Fixed {
 			out = append(out, NextStep{
-				ID:     "reopen-bug",
-				Action: fmt.Sprintf("Reopen %s — send it back for more work", b.ID),
-				Reason: "the fix is waiting for human verification; reopen it if the problem remains",
+				ID:     "verify-bug",
+				Action: fmt.Sprintf("Verify %s — confirm the fix answers the report; reopen it if the problem remains", b.ID),
+				Reason: "the fix is waiting for human verification",
 				Kind:   "bug", Ref: b.ID,
 			})
 		}
