@@ -404,10 +404,12 @@ export function buildTimeline(events: readonly DucklabEvent[]): ToolCall[] {
 
 /** Groups tools into families so the timeline can colour them. */
 export function toolFamily(tool: string): "read" | "write" | "exec" | "vcs" | "other" {
-  if (tool.startsWith("fs_read") || tool === "fs_list" || tool === "fs_search") return "read";
-  if (tool.startsWith("fs_write") || tool === "fs_patch" || tool === "fs_delete") return "write";
-  if (tool === "shell" || tool === "verify_run") return "exec";
   if (tool.startsWith("git_")) return "vcs";
+  // Suffix rules, not name lists: artifact_read, bug_read, run_list and
+  // whatever read surface arrives next classify themselves.
+  if (tool.endsWith("_read") || tool.endsWith("_list") || tool === "fs_search") return "read";
+  if (tool.startsWith("fs_write") || tool === "fs_patch" || tool === "fs_delete") return "write";
+  if (tool === "shell" || tool === "verify_run" || tool === "skill_run") return "exec";
   return "other";
 }
 

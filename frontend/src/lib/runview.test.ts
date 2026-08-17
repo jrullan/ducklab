@@ -99,7 +99,14 @@ describe("timeline", () => {
 
   it("groups tools into families", () => {
     expect(toolFamily("fs_read")).toBe("read");
+    expect(toolFamily("fs_list")).toBe("read");
     expect(toolFamily("fs_search")).toBe("read");
+    expect(toolFamily("artifact_read")).toBe("read");
+    expect(toolFamily("task_read")).toBe("read");
+    expect(toolFamily("bug_read")).toBe("read");
+    expect(toolFamily("skill_read")).toBe("read");
+    expect(toolFamily("run_list")).toBe("read");
+    expect(toolFamily("skill_run")).toBe("exec");
     expect(toolFamily("fs_patch")).toBe("write");
     expect(toolFamily("fs_write")).toBe("write");
     expect(toolFamily("fs_write_lines")).toBe("write");
