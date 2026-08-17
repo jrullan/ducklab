@@ -51,6 +51,21 @@ func TestCleanCheckoutLinksVirtualenv(t *testing.T) {
 	}
 }
 
+// A project of loose .py files with only a pytest.ini at root is still a
+// Python project — excercise-tracker's exact layout, which the original
+// marker list missed and stranded a yolo accept.
+func TestCleanCheckoutLinksVenvForPytestIniOnlyProjects(t *testing.T) {
+	root, checkout := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
+	os.WriteFile(filepath.Join(checkout, "pytest.ini"), []byte("[pytest]\n"), 0o644)
+
+	linkInstalledDeps(root, checkout)
+
+	if _, err := os.Readlink(filepath.Join(checkout, ".venv")); err != nil {
+		t.Fatalf(".venv is not linked for a pytest.ini-marked checkout: %v", err)
+	}
+}
+
 // A checkout with no Python markers gets no .venv link even when the live
 // tree has one.
 func TestCleanCheckoutSkipsVenvWithoutPythonMarkers(t *testing.T) {

@@ -1564,7 +1564,28 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			})
 			return
 		}
-		s.acceptRun(ctx, rs, entry, "", "")
+		// An auto-accept that fails is a decision returned to the person, not
+		// a run left in limbo: T-119 committed its work, the clean-checkout
+		// reproduction failed, the error was discarded and the run read
+		// "running" forever with nothing left alive. The work already passed
+		// its own gate, so the honest state is paused-at-gate wearing the
+		// acceptance failure, exactly like reviewer dissent.
+		if aerr := s.acceptRun(ctx, rs, entry, "", ""); aerr != nil {
+			detail := fmt.Sprintf("auto-accept failed: %v — decide it yourself", aerr)
+			rs.run.Status = "paused"
+			rs.run.PendingKind = "gate"
+			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
+			rs.writer.AppendEvent("human_needed", map[string]interface{}{
+				"kind": "gate", "verdict": verdict, "detail": detail,
+			})
+			rs.writer.WriteState()
+			s.bus.Publish(bus.Event{
+				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
+				TS:   time.Now(),
+				Data: map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail},
+			})
+		}
 		return
 	}
 	// UNVERIFIED never auto-accepts; yolo still reaches human gate
@@ -2001,8 +2022,11 @@ func linkInstalledDeps(root, checkout string) {
 		{"node_modules", []string{"package.json"}},
 		{filepath.Join("frontend", "node_modules"), []string{"package.json"}},
 		// Python's node_modules: gitignored, referenced by relative gate
-		// commands like .venv/bin/pytest.
-		{".venv", []string{"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"}},
+		// commands like .venv/bin/pytest. pytest.ini earns its place in the
+		// marker list the hard way: a real project carried loose .py files
+		// and pytest.ini at root, nothing else, and the missing link
+		// stranded a yolo accept.
+		{".venv", []string{"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "pytest.ini", "tox.ini", "Pipfile"}},
 	}
 	for _, d := range deps {
 		src := filepath.Join(root, d.rel)
