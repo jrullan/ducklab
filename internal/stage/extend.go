@@ -150,7 +150,8 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change strin
 		"**Milestone:** <an existing M-id from the outline; omit to use the last>\n" +
 		"**Implements:** <existing SPEC ids that genuinely cover this, comma-separated; omit " +
 		"if none — the task will wear spec-debt until the spec catches up>\n" +
-		"<what to do, and how \"done\" is verified>\n\n" +
+		"<the body, in the shape below>\n\n" +
+		TaskBodyContract +
 		"- Use the literal id T-900 for EVERY task (repeat it) — real ids are assigned by the engine.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
 		"- If the change alters what the product IS — its requirements — return NO sections: " +

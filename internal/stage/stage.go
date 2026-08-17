@@ -411,6 +411,28 @@ func approvedSections(doc *artifact.Document) []artifact.Section {
 	return out
 }
 
+// TaskBodyContract is the shape every task body must take, told to every
+// architect that writes tasks (plan, extend/amend, gap-fill). The top-level
+// bullets under **Deliverables:** become the implementer's numbered work
+// contract (strategy/deliverables.go): it reports on each by number, the
+// reviewer verifies each against the diff, and an item the implementer
+// cannot deliver summons the advisor. A body written as one paragraph gives
+// the implementer a single deliverable — the task itself — and loses all of
+// that; T-136 was born that way, which is why this is dictated rather than
+// hoped for.
+const TaskBodyContract = "Write each task body in this shape:\n\n" +
+	"<one or two sentences: what the task achieves and why>\n\n" +
+	"**Deliverables:**\n" +
+	"- <one concrete, verifiable outcome — WHAT is delivered, in the words a reviewer can check against the diff>\n" +
+	"  - <indented sub-bullets carry the how: files, conventions, edge cases; they are not deliverables>\n" +
+	"- <the next outcome; 3-8 top-level bullets, each independently checkable>\n" +
+	"- <tests are a deliverable when the task needs them: name what they must assert>\n\n" +
+	"**Out of scope:** <what a diligent implementer might reasonably do and must not>\n\n" +
+	"**Assumption:** <optional — what you took as given>\n\n" +
+	"Top-level bullets are the implementer's numbered contract; it reports on each by number when it " +
+	"finishes, and anything it cannot deliver brings it help. Keep each bullet one outcome, not a " +
+	"paragraph; put detail in the sub-bullets.\n\n"
+
 // planInstruction is what the architect is told at the plan stage.
 //
 // It asked for **Implements:** and said nothing about **Depends on:**, so no
@@ -424,7 +446,8 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"that task writes, not merely code in the same area — add a **Depends on:** line " +
 	"naming those task ids. Write it only where it is true: a plan where every task " +
 	"depends on the one before it is a plan that can only ever run one task at a " +
-	"time, and a task with no real prerequisite should have no line at all.\n\n"
+	"time, and a task with no real prerequisite should have no line at all.\n\n" +
+	TaskBodyContract
 
 // hasAsBuilt reports whether any section carries the as-built marker.
 func hasAsBuilt(doc *artifact.Document) bool {

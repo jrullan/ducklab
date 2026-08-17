@@ -356,7 +356,8 @@ func planGapsHint(projectRoot string, kind artifact.Kind) string {
 		"the plan against the code; unlisted work is covered or already built. Take them one " +
 		"at a time: read THAT spec section (artifact_read), then emit the task(s) delivering " +
 		"it — **Implements:** naming the section, **Milestone:** naming where it belongs (or " +
-		"declare a new milestone heading above its tasks):\n" + strings.Join(gaps, "\n") + "\n\n"
+		"declare a new milestone heading above its tasks):\n" + strings.Join(gaps, "\n") + "\n\n" +
+		TaskBodyContract
 }
 
 // drafts unwraps p.Drafts for the stand-pat fallback: nil-safe, empty when
