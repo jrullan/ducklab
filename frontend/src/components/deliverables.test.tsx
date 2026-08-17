@@ -138,3 +138,20 @@ describe("an ask_advisor consult", () => {
     expect(screen.getByTestId("tool-advice").textContent).toContain("T-120's rule");
   });
 });
+
+describe("a harness pause in the middle of a run", () => {
+  it("renders as a divider, marked resumed after the checkpoint", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 2, turn: 1, role: "reviewer", duckling: "qwen38-max" }),
+      ev("turn_end", 2, { round: 2, turn: 1, role: "reviewer", incomplete: true }),
+      ev("human_needed", 3, { kind: "budget", detail: "budget exceeded: wallclock budget exceeded: 1840s >= 1800s" }),
+      ev("checkpoint", 4, { reason: "resume", status: "running" }),
+      ev("turn_start", 5, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+    ];
+    const blocks = buildTurns(events);
+    const pause = blocks.find((b) => b.role === "pause")!;
+    expect(pause.pause?.resumed).toBe(true);
+    render(<ConversationTurn block={pause} roster={[]} />);
+    expect(screen.getByTestId("pause-divider").textContent).toMatch(/wallclock.*resumed/);
+  });
+});

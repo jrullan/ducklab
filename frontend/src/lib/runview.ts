@@ -107,6 +107,11 @@ export interface TurnBlock {
   /** Deliverable ids the implementer reported undelivered when this
    * reviewer approved anyway — the contradiction the record flagged. */
   deliverablesGap?: number[];
+  /** A harness pause/resume rendered as its own divider in the lane. A run
+   * that paused on its wallclock budget and was resumed replays the strategy
+   * from round 1; without a marker the lane read imp → rev → imp → rev and
+   * looked broken. */
+  pause?: { reason: string; resumed: boolean };
 }
 
 /** One thing a reviewer objected to. */
@@ -407,6 +412,39 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
               ? String(d.result ?? "").replace(/^advisor:\s*/, "") || undefined
               : undefined,
         });
+        break;
+      }
+      case "human_needed": {
+        // Only harness pauses that break the conversation's flow get a
+        // divider; a question pauses in place and renders as its own input.
+        const kind = String(d.kind ?? "");
+        if (kind === "budget" || kind === "error" || kind === "provider" || kind === "engine_restart") {
+          blocks.push({
+            key: `pause:${e.seq ?? blocks.length}`,
+            round: Number(d.round ?? 0),
+            turn: -1,
+            role: "pause",
+            duckling: "",
+            toolCalls: [],
+            text: "",
+            done: true,
+            messageOnly: true,
+            pause: { reason: String(d.detail ?? kind), resumed: false },
+          });
+        }
+        break;
+      }
+      case "checkpoint": {
+        if (String(d.reason ?? "") === "resume") {
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const pb = blocks[i]!;
+            if (pb.role === "pause") {
+              if (pb.pause) pb.pause.resumed = true;
+              break;
+            }
+            if (pb.role !== "pause" && !pb.messageOnly) break;
+          }
+        }
         break;
       }
       case "gate_started": {

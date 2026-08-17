@@ -51,6 +51,22 @@ export function ConversationTurn({
 }) {
   const anonymous = !!block.label;
   const isGate = block.role === "gate";
+  if (block.role === "pause" && block.pause) {
+    return (
+      <div
+        data-testid="pause-divider"
+        className="my-2 flex items-center gap-2 text-xs text-ink-muted"
+        role="separator"
+      >
+        <span className="h-px flex-1 bg-hairline" />
+        <span>
+          ⏸ paused — {block.pause.reason}
+          {block.pause.resumed ? " · resumed: the strategy replays from round 1 over the work already in the tree" : ""}
+        </span>
+        <span className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
   const who = anonymous ? block.label! : block.duckling;
   const tint = anonymous || isGate ? "var(--text-secondary)" : (color ?? ducklingColor(block.duckling, roster));
   const failedTools = block.toolCalls.filter((c) => !c.ok).length;
