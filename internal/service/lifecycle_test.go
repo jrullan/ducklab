@@ -471,6 +471,62 @@ func TestAcceptIsWrittenToTheRunLog(t *testing.T) {
 }
 
 // A writer that has been closed must say so rather than swallowing writes.
+// Acceptance must prove the commit it records, not the working tree that
+// happened to be available while it was made. In particular, git add -A obeys
+// .gitignore: an ignored package can make the local gate green while the
+// committed importer cannot compile in a fresh checkout.
+func TestAcceptRejectsAnIgnoredPackageRequiredByCommittedCode(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	for path, contents := range map[string]string{
+		"go.mod":     "module example.com/ignored-package\n\ngo 1.24\n",
+		"add.go":     "package fixture\n",
+		".gitignore": "build/\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "ignored-package", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The importer is staged and committed by acceptance, while build/ remains
+	// on disk but is omitted because the unanchored ignore pattern matches it.
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n\nimport _ \"example.com/ignored-package/internal/build\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "build", "build.go"), []byte("package build\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-ignored-import", ProjectID: p.ID, TaskID: "T-042", Stage: "build",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.RunAccept(context.Background(), run.ID, "")
+	if err == nil {
+		t.Fatal("accepted a commit whose importer relies on ignored internal/build/")
+	}
+	if !strings.Contains(err.Error(), "internal/build") {
+		t.Errorf("rejection does not name the omitted required path: %v", err)
+	}
+}
+
 func TestAppendToAClosedLogFails(t *testing.T) {
 	dir := t.TempDir()
 	w, err := runlog.NewWriter(dir, &runlog.Run{ID: "r-x", StartedAt: "now"})
