@@ -30,3 +30,36 @@ func TestCleanCheckoutLinksInstalledDeps(t *testing.T) {
 		t.Error("root node_modules linked without a package.json to justify it")
 	}
 }
+
+// A Python project's gate says .venv/bin/pytest — a relative path into a
+// gitignored virtualenv the clean checkout does not carry. Same custody rule
+// as node_modules: installed dependencies are the tools of the trade, not
+// engine state, and the checkout borrows them from the live tree.
+func TestCleanCheckoutLinksVirtualenv(t *testing.T) {
+	root, checkout := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
+	os.WriteFile(filepath.Join(checkout, "requirements.txt"), []byte("pytest\n"), 0o644)
+
+	linkInstalledDeps(root, checkout)
+
+	target, err := os.Readlink(filepath.Join(checkout, ".venv"))
+	if err != nil {
+		t.Fatalf(".venv is not linked into the checkout: %v", err)
+	}
+	if target != filepath.Join(root, ".venv") {
+		t.Errorf("link points at %s", target)
+	}
+}
+
+// A checkout with no Python markers gets no .venv link even when the live
+// tree has one.
+func TestCleanCheckoutSkipsVenvWithoutPythonMarkers(t *testing.T) {
+	root, checkout := t.TempDir(), t.TempDir()
+	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
+
+	linkInstalledDeps(root, checkout)
+
+	if _, err := os.Lstat(filepath.Join(checkout, ".venv")); err == nil {
+		t.Error(".venv linked without a Python marker to justify it")
+	}
+}

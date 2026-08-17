@@ -1994,13 +1994,30 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 // means the gate pays the install, and a gate that cannot install fails with
 // the package manager's own words.
 func linkInstalledDeps(root, checkout string) {
-	for _, rel := range []string{"node_modules", filepath.Join("frontend", "node_modules")} {
-		src := filepath.Join(root, rel)
-		dst := filepath.Join(checkout, rel)
+	deps := []struct {
+		rel     string
+		markers []string
+	}{
+		{"node_modules", []string{"package.json"}},
+		{filepath.Join("frontend", "node_modules"), []string{"package.json"}},
+		// Python's node_modules: gitignored, referenced by relative gate
+		// commands like .venv/bin/pytest.
+		{".venv", []string{"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"}},
+	}
+	for _, d := range deps {
+		src := filepath.Join(root, d.rel)
+		dst := filepath.Join(checkout, d.rel)
 		if _, err := os.Stat(src); err != nil {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "package.json")); err != nil {
+		marked := false
+		for _, m := range d.markers {
+			if _, err := os.Stat(filepath.Join(filepath.Dir(dst), m)); err == nil {
+				marked = true
+				break
+			}
+		}
+		if !marked {
 			continue
 		}
 		if _, err := os.Lstat(dst); err == nil {
