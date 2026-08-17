@@ -22,6 +22,14 @@ func TestCheckoutPolarityFollowsTheStage(t *testing.T) {
 	if !compileFailure(redCompile) {
 		t.Error("compile red not recognized")
 	}
+	// Vitest reports a test-file syntax/type transform failure differently from
+	// tsc and go test. It is still a compile failure: no assertion ran, so a
+	// TEST-FIRST clean-checkout accept must reject it rather than commit a
+	// malformed specification as an honest red.
+	redVitestTransform := "FAIL  frontend/src/new_behavior.test.ts [ frontend/src/new_behavior.test.ts ]\nError: Transform failed with 1 error:\nfrontend/src/new_behavior.test.ts:7:1: ERROR: Expected \\\";\\\" but found \\\"it\\\""
+	if !compileFailure(redVitestTransform) {
+		t.Error("Vitest transform failure judged as an assertion-red test failure")
+	}
 	if strings.Contains(greenOut, "FAIL") {
 		t.Error("fixture sanity")
 	}
