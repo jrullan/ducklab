@@ -4,6 +4,7 @@ import { ducklingColor } from "../lib/colors";
 import { DuckAvatar } from "./DuckAvatar";
 import { StatusChip } from "./StatusChip";
 import { Prose } from "./Prose";
+import { statusVar } from "../lib/colors";
 import { DeliverablesInline } from "./DeliverablesCard";
 import { splitDeliverablesReport } from "../lib/runview";
 
@@ -235,6 +236,11 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
         role={approved ? "good" : "serious"}
         label={approved ? "approve" : String(block.verdict)}
       />
+      {block.deliverablesGap && block.deliverablesGap.length > 0 && (
+        <span className="ml-2 text-sm" data-testid="deliverables-gap" style={{ color: statusVar("critical") }}>
+          ⚠ approved over deliverables the implementer reported undelivered: {block.deliverablesGap.join(", ")}
+        </span>
+      )}
       {findings.length === 0 ? (
         approved ? null : (
           <span className="ml-2 text-sm text-ink-muted">no findings given</span>

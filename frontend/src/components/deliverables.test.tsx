@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { DeliverablesCard } from "./DeliverablesCard";
 import { buildDeliverables } from "../lib/runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -54,31 +53,6 @@ describe("buildDeliverables", () => {
   });
 });
 
-describe("DeliverablesCard", () => {
-  it("renders nothing without a report", () => {
-    const { container } = render(<DeliverablesCard report={null} />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it("shows the checklist with count, marks and the note", () => {
-    render(<DeliverablesCard report={buildDeliverables([report(5)])} />);
-    expect(screen.getByTestId("deliverables-count").textContent).toContain("2/4");
-    const rows = screen.getAllByTestId("deliverable");
-    expect(rows).toHaveLength(4);
-    expect(rows[3]!.getAttribute("data-status")).toBe("blocked");
-    expect(rows[2]!.getAttribute("data-status")).toBe("unreported");
-    expect(screen.getByText(/template not found/)).toBeTruthy();
-    // Status is never colour alone: each mark carries its title.
-    expect(screen.getByTitle("blocked")).toBeTruthy();
-    expect(screen.queryByTestId("deliverables-gap")).toBeNull();
-  });
-
-  it("flags a reviewer approve over undelivered items", () => {
-    render(<DeliverablesCard report={buildDeliverables([report(5), ev("deliverables_gap", 7, {})])} />);
-    expect(screen.getByTestId("deliverables-gap").textContent).toMatch(/approved over undelivered/);
-  });
-});
-
 import { splitDeliverablesReport } from "../lib/runview";
 import { ConversationTurn } from "./ConversationLane";
 import { buildTurns } from "../lib/runview";
@@ -109,5 +83,20 @@ describe("the implementer's closing report in the lane", () => {
     expect(screen.getByText("Add form")).toBeTruthy();
     expect(screen.getByText(/no fixture/)).toBeTruthy();
     expect(screen.getByTestId("turn-text").textContent).not.toContain('"deliverables"');
+  });
+});
+
+describe("an approve over undelivered items", () => {
+  it("is flagged on the reviewer's verdict, not in a rail", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 1, role: "reviewer", duckling: "glm52" }),
+      ev("message", 2, { round: 1, turn: 1, role: "reviewer", duckling: "glm52", content: "{}", verdict: "approve", findings: [] }),
+      ev("turn_end", 3, { round: 1, turn: 1, role: "reviewer" }),
+      ev("deliverables_gap", 4, { round: 1, undelivered: [4] }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.deliverablesGap).toEqual([4]);
+    render(<ConversationTurn block={block} roster={["glm52"]} />);
+    expect(screen.getByTestId("deliverables-gap").textContent).toMatch(/undelivered: 4/);
   });
 });

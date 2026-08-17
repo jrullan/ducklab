@@ -7,7 +7,6 @@ import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
-import { DeliverablesCard } from "../components/DeliverablesCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -1615,7 +1614,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
-          <DeliverablesCard report={deliverables} />
           <GateCard gate={gate} stage={run.stage} />
         </aside>
         ) : (

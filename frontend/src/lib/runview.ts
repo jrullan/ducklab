@@ -100,6 +100,9 @@ export interface TurnBlock {
    * parsed one, so the lane can render findings instead of a JSON blob. */
   verdict?: string;
   findings?: Finding[];
+  /** Deliverable ids the implementer reported undelivered when this
+   * reviewer approved anyway — the contradiction the record flagged. */
+  deliverablesGap?: number[];
 }
 
 /** One thing a reviewer objected to. */
@@ -360,6 +363,20 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
             verdict,
             findings,
           });
+        }
+        break;
+      }
+      case "deliverables_gap": {
+        // Belongs to the reviewer's verdict of that round, not to a rail
+        // card: an unreviewed progress report must not read as a result.
+        const round = Number(d.round ?? 0);
+        const ids = Array.isArray(d.undelivered) ? d.undelivered.map(Number) : [];
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const rb = blocks[i]!;
+          if (rb.role === "reviewer" && (round === 0 || rb.round === round)) {
+            rb.deliverablesGap = ids;
+            break;
+          }
         }
         break;
       }
