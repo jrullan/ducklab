@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -525,6 +526,105 @@ func TestAcceptRejectsAnIgnoredPackageRequiredByCommittedCode(t *testing.T) {
 	if !strings.Contains(err.Error(), "internal/build") {
 		t.Errorf("rejection does not name the omitted required path: %v", err)
 	}
+}
+
+// An accepted run has two independent verification answers: its own verdict
+// and the FULL gate result from the clean checkout acceptance check. The latter
+// must survive onto both read surfaces and its durable event, including when the
+// run itself never reached a gate.
+func TestAcceptRecordsCleanCheckoutGateSeparatelyFromUnverifiedRunVerdict(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "reproduced", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{
+		"verify.mode":  "tests",
+		"verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	run := &runlog.Run{
+		ID: "r-reproduced", ProjectID: p.ID, TaskID: "T-054", Stage: "build",
+		Status: "paused", Verdict: "UNVERIFIED", PendingKind: "gate",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendEvent("human_needed", map[string]interface{}{"kind": "gate"}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	assertReproducedGreen := func(where string, value interface{}) {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var record map[string]interface{}
+		if err := json.Unmarshal(encoded, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["verdict"] != "UNVERIFIED" {
+			t.Errorf("%s verdict = %#v, want the run's own UNVERIFIED verdict", where, record["verdict"])
+		}
+		gate, ok := record["acceptance_gate"].(map[string]interface{})
+		if !ok {
+			t.Errorf("%s omitted acceptance_gate: %s", where, encoded)
+			return
+		}
+		if gate["green"] != true || gate["exit_code"] != float64(0) || gate["gate"] != "tests" || gate["command"] != "true" {
+			t.Errorf("%s acceptance_gate = %#v, want complete passing clean-checkout result", where, gate)
+		}
+		if _, ok := gate["output"]; !ok {
+			t.Errorf("%s acceptance_gate lost gate output: %#v", where, gate)
+		}
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReproducedGreen("run_get", detail.Run)
+	foundReproduced := false
+	for _, event := range detail.Events {
+		if event.Type != "gate_reproduced" {
+			continue
+		}
+		foundReproduced = true
+		if event.Data["green"] != true || event.Data["exit_code"] != 0 || event.Data["gate"] != "tests" || event.Data["command"] != "true" {
+			t.Errorf("gate_reproduced event = %#v, want the passing acceptance gate result", event.Data)
+		}
+		if _, ok := event.Data["output"]; !ok {
+			t.Errorf("gate_reproduced event lost gate output: %#v", event.Data)
+		}
+	}
+	if !foundReproduced {
+		t.Error("acceptance did not record a gate_reproduced event")
+	}
+
+	runs, err := s.RunList(context.Background(), RunFilter{ProjectID: p.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs list has %d records, want 1", len(runs))
+	}
+	assertReproducedGreen("runs list", runs[0])
 }
 
 func TestAppendToAClosedLogFails(t *testing.T) {
