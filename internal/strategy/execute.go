@@ -120,6 +120,9 @@ func ExecutePair(ctx context.Context, params *ExecuteParams) (*ExecuteResult, er
 // The loop is: for each round, run every turn in order, then evaluate the
 // script's Until expression against the round's state. Turn order and round
 // count are data; no model influences either (05 §3.1).
+// maxConsultRetries bounds the [implementer ↔ advisor] inner loop per round.
+const maxConsultRetries = 2
+
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{Transcript: &conv.Transcript{}}
 
@@ -157,8 +160,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
+		// Consults that sent the implementer straight back to work this
+		// round. Bounded: the duck is a counselor, not a judge, and only the
+		// reviewer and the gate are the independent check.
+		consultRetries := 0
 
-		for i := range script.Turns {
+		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
 
 			if turn.Role == config.RoleHuman {
@@ -179,9 +186,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				return result, err
 			}
 
-			emit(params, "turn_start", map[string]interface{}{
+			startData := map[string]interface{}{
 				"round": round, "turn": i, "role": string(turn.Role), "duckling": string(duckling),
-			})
+			}
+			if turn.Role == config.RoleImplementer && consultRetries > 0 {
+				startData["retry"] = consultRetries
+			}
+			emit(params, "turn_start", startData)
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
 			if outcome != nil {
@@ -278,6 +289,19 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 					if note != "" {
 						correctiveNotes = append(correctiveNotes, note)
+						// [imp ↔ adv] before the reviewer: advice applied
+						// while the atasco is still warm costs one implementer
+						// turn; sending wounded work to the reviewer costs a
+						// reviewer turn AND the next round. Bounded, and the
+						// note also stays for later rounds.
+						if consultRetries < maxConsultRetries {
+							consultRetries++
+							emit(params, "advisor_retry", map[string]interface{}{
+								"round": round, "retry": consultRetries, "of": maxConsultRetries,
+							})
+							i-- // run the implementer turn again, note in hand
+							continue
+						}
 					}
 				}
 			}

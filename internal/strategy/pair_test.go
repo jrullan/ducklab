@@ -162,8 +162,10 @@ func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer
 
 	params := pairParams(rec, "green",
 		&agent.Outcome{Text: admission, Reasoning: "maybe I should try fs_write but it might truncate", ToolCalls: calls},
-		// The duck answers with the advice contract: a note for the next round.
+		// The duck answers with the advice contract: a note — which sends the
+		// implementer straight back to work, note in hand, before any reviewer.
 		&agent.Outcome{Parsed: map[string]interface{}{"action": "note", "note": "Use fs_write_lines on widget.go after reading the current lines."}},
+		editsOutcome("Rewrote widget.go lines 12-40 with fs_write_lines."),
 		verdictOutcome("approve"),
 	)
 	params.Roster[config.RoleAdvisor] = "pato-duck"
@@ -199,9 +201,23 @@ func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer
 	}
 	// The events must close the implementer's turn BEFORE the duck's opens —
 	// T-059 nested them and the desktop showed the two running in parallel.
-	want := []string{"turn_start:implementer", "turn_end:implementer", "turn_start:advisor", "turn_end:advisor", "turn_start:reviewer", "turn_end:reviewer"}
+	// And the note loops back to the implementer BEFORE the reviewer: advice
+	// applied warm costs one implementer turn; wounded work sent to review
+	// costs a reviewer turn and the next round.
+	want := []string{"turn_start:implementer", "turn_end:implementer", "turn_start:advisor", "turn_end:advisor",
+		"turn_start:implementer", "turn_end:implementer", "turn_start:reviewer", "turn_end:reviewer"}
 	if strings.Join(kinds, " ") != strings.Join(want, " ") {
 		t.Errorf("turn events out of order:\n got %v\nwant %v", kinds, want)
+	}
+	// The retried implementer turn carries the note in its prompt.
+	retryAt := -1
+	for i, role := range rec.roles {
+		if role == config.RoleImplementer && i > advisorAt {
+			retryAt = i
+		}
+	}
+	if retryAt < 0 || !strings.Contains(rec.prompts[retryAt], "fs_write_lines on widget.go") {
+		t.Errorf("the retried implementer turn did not receive the duck's note")
 	}
 
 	// The duck hears what the reviewer must not: the story, the reasoning, the trace.
@@ -285,6 +301,45 @@ func TestPairAdvisorStopEndsTheRunBeforeTheReviewer(t *testing.T) {
 	}
 	if consult == nil || consult["outcome"] != "stop" {
 		t.Errorf("advisor_consult event does not record the stop: %v", consult)
+	}
+}
+
+// The inner loop is bounded: after maxConsultRetries the round proceeds to
+// the reviewer even if the duck keeps handing out notes — the reviewer and
+// the gate are the independent check, the duck is not.
+func TestPairInnerLoopIsBounded(t *testing.T) {
+	rec := &recorder{}
+	distressed := func() *agent.Outcome {
+		return &agent.Outcome{Text: "still stuck", ToolCalls: []agent.ToolCallRecord{
+			{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: brake"}},
+		}}
+	}
+	note := func() *agent.Outcome {
+		return &agent.Outcome{Parsed: map[string]interface{}{"action": "note", "note": "try again differently"}}
+	}
+	params := pairParams(rec, "green",
+		distressed(), note(), // consult 1 → retry 1
+		distressed(), note(), // consult 2 → retry 2
+		distressed(), note(), // consult 3 → cap reached, on to the reviewer
+		verdictOutcome("approve"),
+	)
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	impl, adv, rev := 0, 0, 0
+	for _, role := range rec.roles {
+		switch role {
+		case config.RoleImplementer:
+			impl++
+		case config.RoleAdvisor:
+			adv++
+		case config.RoleReviewer:
+			rev++
+		}
+	}
+	if impl != 1+maxConsultRetries || adv != 1+maxConsultRetries || rev != 1 {
+		t.Errorf("got implementer=%d advisor=%d reviewer=%d, want %d/%d/1: %v", impl, adv, rev, 1+maxConsultRetries, 1+maxConsultRetries, rec.roles)
 	}
 }
 
