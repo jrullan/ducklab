@@ -101,6 +101,8 @@ describe("timeline", () => {
     expect(toolFamily("fs_read")).toBe("read");
     expect(toolFamily("fs_search")).toBe("read");
     expect(toolFamily("fs_patch")).toBe("write");
+    expect(toolFamily("fs_write")).toBe("write");
+    expect(toolFamily("fs_write_lines")).toBe("write");
     expect(toolFamily("shell")).toBe("exec");
     expect(toolFamily("verify_run")).toBe("exec");
     expect(toolFamily("git_diff")).toBe("vcs");
