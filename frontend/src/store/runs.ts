@@ -68,6 +68,39 @@ export interface RunsState {
 }
 
 const MAX_EVENTS_PER_RUN = 20000;
+/** Display-only stream buffers must stay bounded during long live turns. */
+export const MAX_STREAM_BUFFER_BYTES = 64 * 1024;
+
+function appendBounded(existing: string, text: string): string {
+  const combined = existing + text;
+  const bytes = new TextEncoder().encode(combined);
+  if (bytes.byteLength <= MAX_STREAM_BUFFER_BYTES) return combined;
+  let start = bytes.byteLength - MAX_STREAM_BUFFER_BYTES;
+  const decoder = new TextDecoder();
+  // Start on a UTF-8 boundary: decoding from inside a multibyte code point
+  // inserts U+FFFD, which can itself push the reconstructed string past cap.
+  while (start < bytes.length) {
+    const value = decoder.decode(bytes.slice(start));
+    if (new TextEncoder().encode(value).byteLength <= MAX_STREAM_BUFFER_BYTES) return value;
+    start += 1;
+  }
+  return "";
+}
+
+function discardTurn(
+  buffers: Record<string, Record<string, string>>,
+  runId: string,
+  key: string,
+): Record<string, Record<string, string>> {
+  const forRun = buffers[runId];
+  if (!forRun || !(key in forRun)) return buffers;
+  const { [key]: _discarded, ...remaining } = forRun;
+  if (Object.keys(remaining).length === 0) {
+    const { [runId]: _run, ...otherRuns } = buffers;
+    return otherRuns;
+  }
+  return { ...buffers, [runId]: remaining };
+}
 
 export const useRuns = create<RunsState>((set) => ({
   runs: {},
@@ -93,14 +126,14 @@ export const useRuns = create<RunsState>((set) => ({
         const key = deltaKey(e.data);
         const text = String(e.data?.text ?? "");
         const forRun = { ...(state.deltas[runId] ?? {}) };
-        forRun[key] = (forRun[key] ?? "") + text;
+        forRun[key] = appendBounded(forRun[key] ?? "", text);
         return { ...state, deltas: { ...state.deltas, [runId]: forRun } };
       }
       if (e.type === "reasoning_delta") {
         const key = deltaKey(e.data);
         const text = String(e.data?.text ?? "");
         const forRun = { ...(state.reasoning[runId] ?? {}) };
-        forRun[key] = (forRun[key] ?? "") + text;
+        forRun[key] = appendBounded(forRun[key] ?? "", text);
         return { ...state, reasoning: { ...state.reasoning, [runId]: forRun } };
       }
       if (e.type === "budget") {
@@ -191,7 +224,16 @@ export const useRuns = create<RunsState>((set) => ({
         }
       }
 
-      return { ...state, events: { ...state.events, [runId]: trimmed }, runs };
+      const key = e.type === "turn_end" ? deltaKey(e.data) : "";
+      return {
+        ...state,
+        events: { ...state.events, [runId]: trimmed },
+        runs,
+        // The durable message event is in events; streamed answer/thinking are
+        // only live display buffers and must not survive a completed turn.
+        deltas: key ? discardTurn(state.deltas, runId, key) : state.deltas,
+        reasoning: key ? discardTurn(state.reasoning, runId, key) : state.reasoning,
+      };
     }),
 
   // One store update per frame regardless of how many tokens arrived in it.
@@ -202,7 +244,7 @@ export const useRuns = create<RunsState>((set) => ({
       for (const [runId, perDuckling] of byRun) {
         const forRun = { ...(deltas[runId] ?? {}) };
         for (const [duckling, text] of perDuckling) {
-          forRun[duckling] = (forRun[duckling] ?? "") + text;
+          forRun[duckling] = appendBounded(forRun[duckling] ?? "", text);
         }
         deltas[runId] = forRun;
       }
@@ -257,7 +299,7 @@ export const useRuns = create<RunsState>((set) => ({
 
   reset: () =>
     set({
-      runs: {}, events: {}, deltas: {}, connection: "connecting",
+      runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {}, connection: "connecting",
       acceptState: {}, needsResync: false,
       applyEvent: useRuns.getState().applyEvent,
       applyDeltaBatch: useRuns.getState().applyDeltaBatch,

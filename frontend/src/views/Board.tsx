@@ -8,7 +8,7 @@
  * running the task, so `Run` is the action the rail offers.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
@@ -124,7 +124,7 @@ export function Board({
   const [severity, setSeverity] = useState("");
   const [query, setQuery] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (summary = false) => {
     setLoading(true);
     setFailure(null);
 
@@ -169,7 +169,7 @@ export function Board({
         setGateCommand(g.command);
       })
       .catch(() => {});
-    const [t, b] = await Promise.allSettled([client.tasks(projectId), client.bugs(projectId)]);
+    const [t, b] = await Promise.allSettled([client.tasks(projectId, summary), client.bugs(projectId, false, summary)]);
     const problems: string[] = [];
     if (t.status === "fulfilled") setTasks(t.value);
     else problems.push(`tasks: ${String(t.reason?.message ?? t.reason)}`);
@@ -198,10 +198,28 @@ export function Board({
       .sort()
       .join(","),
   );
+  // Chained runs can emit several transitions together. Board lists are only
+  // snapshots, so one trailing summary refresh is enough for the whole burst.
+  const transitionRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRunKey]);
+    if (transitionRefresh.current) clearTimeout(transitionRefresh.current);
+    transitionRefresh.current = setTimeout(() => {
+      transitionRefresh.current = null;
+      void load(true);
+    }, 250);
+    return () => {
+      if (transitionRefresh.current) clearTimeout(transitionRefresh.current);
+    };
+  }, [activeRunKey, load]);
+
+  // Summary lists deliberately omit bulky report bodies and audit trails. Read
+  // the selected bug in full; the card list never needs that payload.
+  useEffect(() => {
+    if (!selected || board !== "bugs" || typeof client.bug !== "function") return;
+    void client.bug(projectId, selected).then((detail) => {
+      setBugs((current) => current.map((bug) => (bug.id === detail.id ? detail : bug)));
+    }).catch(() => {});
+  }, [board, client, projectId, selected]);
 
   const milestones = useMemo(
     () => [...new Set(tasks.map((t) => t.milestone).filter(Boolean))].sort(),

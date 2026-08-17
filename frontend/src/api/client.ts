@@ -963,12 +963,19 @@ export class EngineClient {
       `/v1/projects/${projectId}/tasks/next`,
     ).then((t) => ("id" in t && t.id ? (t as Task) : null));
   }
-  bugs(projectId: string, openOnly = false) {
-    const q = openOnly ? "?open=true" : "";
+  bugs(projectId: string, openOnly = false, summary = false) {
+    const q = new URLSearchParams();
+    if (openOnly) q.set("open", "true");
+    if (summary) q.set("summary", "true");
+    const suffix = q.size ? `?${q}` : "";
     return this.request<{ items: Bug[] | null; total: number }>(
       "GET",
-      `/v1/projects/${projectId}/bugs${q}`,
+      `/v1/projects/${projectId}/bugs${suffix}`,
     ).then((r) => r.items ?? []);
+  }
+  /** Full report detail is loaded only after its summary card is selected. */
+  bug(projectId: string, bugId: string) {
+    return this.request<Bug>("GET", `/v1/projects/${projectId}/bugs/${encodeURIComponent(bugId)}`);
   }
   /** File a report. Severity is taken as given: a reporter saying "critical"
    * may be wrong, but a tool that quietly downgrades what it was told is a tool
@@ -1148,11 +1155,12 @@ export class EngineClient {
       `/v1/projects/${projectId}/releases/${version}`,
     ).then((r) => r.markdown ?? "");
   }
-  tasks(projectId: string) {
+  tasks(projectId: string, summary = false) {
     // items is null, not [], when a project has no plan yet.
+    const suffix = summary ? "?summary=true" : "";
     return this.request<{ items: Task[] | null; total: number }>(
       "GET",
-      `/v1/projects/${projectId}/tasks`,
+      `/v1/projects/${projectId}/tasks${suffix}`,
     ).then((r) => r.items ?? []);
   }
 

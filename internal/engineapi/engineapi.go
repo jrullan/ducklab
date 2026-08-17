@@ -919,7 +919,29 @@ func (s *Server) handleBugList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if r.URL.Query().Get("summary") == "true" {
+		for i := range bugs {
+			bugs[i].Body = ""
+			bugs[i].History = nil
+			bugs[i].Attachments = nil
+		}
+	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": bugs, "total": len(bugs)})
+}
+
+func (s *Server) handleBugGet(w http.ResponseWriter, r *http.Request) {
+	bugs, err := s.svc.BugList(r.Context(), r.PathValue("id"), false)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	for _, b := range bugs {
+		if b.ID == r.PathValue("bug") {
+			s.json(w, http.StatusOK, b)
+			return
+		}
+	}
+	s.error(w, http.StatusNotFound, "not_found", "bug not found")
 }
 
 func (s *Server) handleBugEdit(w http.ResponseWriter, r *http.Request) {
@@ -1503,6 +1525,11 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
+	}
+	if r.URL.Query().Get("summary") == "true" {
+		for i := range tasks {
+			tasks[i].Body = ""
+		}
 	}
 	s.json(w, http.StatusOK, map[string]interface{}{"items": tasks, "total": len(tasks)})
 }
