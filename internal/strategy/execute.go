@@ -2,7 +2,9 @@ package strategy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -150,11 +152,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// findings carry the previous round's review into this round's implementer
 	// prompt; this is what makes pair an iteration rather than two monologues.
 	var findings []conv.Finding
+	var correctiveNotes []string
 
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
+		operational := ""
 
 		for i := range script.Turns {
 			turn := script.Turns[i]
@@ -171,7 +175,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			duckling := resolveDuckling(params, turn)
 
-			prompt, err := buildPrompt(&turn, params, result.Transcript, findings)
+			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational)
 			if err != nil {
 				result.Error = err
 				return result, err
@@ -218,6 +222,33 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				Round: round, Index: script.TurnIndexBase + i, Role: turn.Role,
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
+
+			if turn.Role == config.RoleImplementer {
+				if summary, distressed := operationalSummary(outcome); distressed {
+					operational = summary
+					advisorTurn := Turn{Role: config.RoleAdvisor, Toolbelt: "full", Contract: "freeform", MaxTurns: 8}
+					advisorBelt, beltErr := advisorTurn.ResolveToolbelt(registry)
+					if beltErr != nil {
+						result.Error = beltErr
+						return result, beltErr
+					}
+					advisor := resolveDuckling(params, advisorTurn)
+					advisorPrompt := params.Prompt + "\n\n## Corrective-note request\n\nDraft a concise, actionable corrective note for the next implementer. Base it only on this operational telemetry.\n\n```json\n" + summary + "\n```"
+					emit(params, "turn_start", map[string]interface{}{"round": round, "turn": i, "role": string(config.RoleAdvisor), "duckling": string(advisor)})
+					advice, adviceErr := runner(ctx, &advisorTurn, advisor, advisorPrompt, advisorBelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
+					if advice != nil {
+						emitMessage(params, round, i, config.RoleAdvisor, advisor, advice)
+						if note := strings.TrimSpace(advice.Text); note != "" {
+							correctiveNotes = append(correctiveNotes, note)
+						}
+					}
+					emit(params, "turn_end", map[string]interface{}{"round": round, "turn": i, "role": string(config.RoleAdvisor), "incomplete": adviceErr != nil})
+					if adviceErr != nil {
+						result.Error = adviceErr
+						return result, adviceErr
+					}
+				}
+			}
 
 			// What the model actually said, and what it did.
 			//
@@ -326,7 +357,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 
@@ -342,7 +373,13 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString("\n\n")
 			b.WriteString(rendered)
 		}
+		if len(correctiveNotes) > 0 {
+			b.WriteString("\n\n## Advisor corrective note\n\n" + strings.Join(correctiveNotes, "\n\n"))
+		}
 	case config.RoleReviewer:
+		if operational != "" {
+			b.WriteString("\n\n## Operational summary\n\n```json\n" + operational + "\n```\n")
+		}
 		// A document critic gets the draft under its own heading, with the
 		// mechanism spelled out. Presented only as "Conversation so far", the
 		// draft read as chat history and the reviewer went looking for the
@@ -375,6 +412,48 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		}
 	}
 	return b.String(), nil
+}
+
+// operationalSummary makes tool telemetry safe for review by excluding all model prose.
+func operationalSummary(outcome *agent.Outcome) (string, bool) {
+	if outcome == nil {
+		return "", false
+	}
+	failures, brakes := map[string]int{}, map[string]bool{}
+	for _, call := range outcome.ToolCalls {
+		if call.Result == nil || !call.Result.IsError {
+			continue
+		}
+		failures[call.Name]++
+		content := strings.ToLower(call.Result.Content)
+		if strings.Contains(content, "refused") || strings.Contains(content, "brake") {
+			brakes[call.Name] = true
+		}
+	}
+	var names []string
+	for name, n := range failures {
+		if brakes[name] || n >= 3 {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	admission := strings.Contains(strings.ToLower(outcome.Text), "fighting ") || strings.Contains(strings.ToLower(outcome.Text), "stuck")
+	if len(names) == 0 && !admission {
+		return "", false
+	}
+	if len(names) == 0 {
+		names = []string{"unknown"}
+	}
+	data, err := json.Marshal(struct {
+		Tool         string `json:"tool"`
+		Failures     int    `json:"failures"`
+		BrakeTripped bool   `json:"brake_tripped"`
+		DiffPartial  bool   `json:"diff_partial"`
+	}{names[0], failures[names[0]], brakes[names[0]], true})
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 // transcriptText renders a turn for the next reader.
