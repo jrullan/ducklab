@@ -33,19 +33,16 @@ export function TddLaunch({
   onBuildOnly: (build: PhaseConfig) => void;
   measured?: MeasuredSpend;
 }) {
-  const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({
-    mode: phaseDefaults.test,
-    ducklings: [...(preferred[phaseDefaults.test] ?? [])],
-  }));
-  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({
-    mode: phaseDefaults.build,
-    ducklings: [...(preferred[phaseDefaults.build] ?? [])],
-  }));
+  // Opening seats are empty: omitted ducklings leave the resolved roster in charge.
+  const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.test, ducklings: [] }));
+  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.build, ducklings: [] }));
   // Changing a mode re-seats from that mode's saved line-up.
   const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, prevMode: string) => {
     if (next.mode !== prevMode) {
       const saved = preferred[next.mode];
-      set({ ...next, ducklings: saved && saved.length > 0 ? [...saved] : next.ducklings });
+      set(saved && saved.length > 0
+        ? { ...next, ducklings: [...saved], seatProvenance: saved.map(() => "Settings") }
+        : next);
       return;
     }
     set(next);
@@ -60,6 +57,7 @@ export function TddLaunch({
           value={testCfg}
           onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
           modes={["solo", "pair"]}
+          defaultProvenance="roster"
         />
       </div>
       <div>
@@ -71,6 +69,7 @@ export function TddLaunch({
           onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
           estimates={estimates}
           showTokens
+          defaultProvenance="roster"
         />
       </div>
       <button

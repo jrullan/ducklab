@@ -479,6 +479,25 @@ func rosterStrings(r map[config.Role]config.DucklingID) map[string]string {
 	return out
 }
 
+func rosterSources(projCfg *config.Project, mode string, chosen []string) map[string]string {
+	out := map[string]string{}
+	for _, role := range config.ValidRoles() {
+		if role == config.RoleHuman {
+			continue
+		}
+		out[string(role)] = "global"
+		if projCfg.Roster[role] != "" {
+			out[string(role)] = "project roster"
+		}
+	}
+	for i, role := range []config.Role{config.RoleImplementer, config.RoleReviewer} {
+		if (mode == "" || mode == "solo" || mode == "pair") && i < len(chosen) && chosen[i] != "" {
+			out[string(role)] = "picked now"
+		}
+	}
+	return out
+}
+
 // Report aggregates this project's runs into the solo-baseline comparison.
 func (s *Service) Report(ctx context.Context, projectID string, opts report.Options) (*report.Report, error) {
 	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})

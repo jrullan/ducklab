@@ -153,7 +153,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 			// Engine metadata is written under .ducklab and is not task work;
 			// it must not make an otherwise clean source tree un-relaunchable.
 			for _, path := range git.DirtyPaths() {
-				if !strings.HasPrefix(path, ".ducklab/" ) && path != ".ducklab" {
+				if !strings.HasPrefix(path, ".ducklab/") && path != ".ducklab" {
 					return nil, fmt.Errorf("cannot redo %s: the working tree is dirty; commit or clean it first", req.TaskID)
 				}
 			}
@@ -192,16 +192,16 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		// commits a FAILING test, not the work. Labelled "build", the board
 		// read an accepted test-first as a finished task and offered
 		// "build again" for work that had never been built once.
-		Stage:     "test",
-		Mode:      testMode(s.testModeDefault(req.Mode)),
-		TaskID:    req.TaskID,
-		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-		Stream:    true,
-		Gate:      string(verify.Gate(projCfg.Verify.Mode)),
-		Origin:    req.Origin,
-		Note:      req.Note,
+		Stage:            "test",
+		Mode:             testMode(s.testModeDefault(req.Mode)),
+		TaskID:           req.TaskID,
+		TaskBodyHash:     taskBodyHashForTask(ctx, s, projectID, req.TaskID),
+		Status:           "running",
+		StartedAt:        time.Now().UTC().Format(time.RFC3339),
+		Stream:           true,
+		Gate:             string(verify.Gate(projCfg.Verify.Mode)),
+		Origin:           req.Origin,
+		Note:             req.Note,
 		PriorAcceptedSHA: priorAcceptedSHA,
 	}
 	writer, err := runlog.NewWriter(entry.Path, run)
@@ -394,6 +394,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
 	}
 	rs.run.Roster = rosterStrings(roster)
+	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	if req.Duckling != "" {
+		rs.run.RosterSources[string(config.RoleImplementer)] = "picked now"
+	}
 	if warning != "" {
 		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})

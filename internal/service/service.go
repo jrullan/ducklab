@@ -21,9 +21,9 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
-	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/registry"
@@ -362,14 +362,14 @@ type Project struct {
 
 // Status is the project status.
 type Status struct {
-	StageProgress map[string]string `json:"stage_progress"`
-	WorkingTreeDirty bool `json:"working_tree_dirty,omitempty"`
-	TaskCounts    map[string]int    `json:"task_counts"`
-	BudgetSpent   float64           `json:"budget_spent_today"`
-	ActiveRuns    int               `json:"active_runs"`
-	AcceptedUnreleased int            `json:"accepted_unreleased"`
-	UnreleasedBranches int            `json:"unreleased_branches"`
-	Provenance         string         `json:"provenance,omitempty"`
+	StageProgress      map[string]string `json:"stage_progress"`
+	WorkingTreeDirty   bool              `json:"working_tree_dirty,omitempty"`
+	TaskCounts         map[string]int    `json:"task_counts"`
+	BudgetSpent        float64           `json:"budget_spent_today"`
+	ActiveRuns         int               `json:"active_runs"`
+	AcceptedUnreleased int               `json:"accepted_unreleased"`
+	UnreleasedBranches int               `json:"unreleased_branches"`
+	Provenance         string            `json:"provenance,omitempty"`
 }
 
 // resolveProjectPath turns a path a person typed into one the engine can use.
@@ -660,15 +660,21 @@ func (s *Service) ProjectForget(ctx context.Context, id string) error {
 // ProjectRecover performs an explicit working-tree recovery action.
 func (s *Service) ProjectRecover(ctx context.Context, id, action string) error {
 	entry, err := s.registry.Get(id)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	git := vcs.New(entry.Path)
 	switch action {
-	case "clean": return git.Clean()
+	case "clean":
+		return git.Clean()
 	case "commit":
-		if err := git.AddAll(); err != nil { return err }
+		if err := git.AddAll(); err != nil {
+			return err
+		}
 		_, err := git.Commit("ducklab: recover working tree")
 		return err
-	default: return fmt.Errorf("unknown recovery action %q", action)
+	default:
+		return fmt.Errorf("unknown recovery action %q", action)
 	}
 }
 
@@ -931,14 +937,14 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// Create run
 	runID := runlog.GenerateRunID()
 	run := &runlog.Run{
-		ID:        runID,
-		ProjectID: projectID,
-		Stage:     "build",
-		Mode:      req.Mode,
-		TaskID:    req.TaskID,
+		ID:           runID,
+		ProjectID:    projectID,
+		Stage:        "build",
+		Mode:         req.Mode,
+		TaskID:       req.TaskID,
 		TaskBodyHash: taskBodyHashForTask(ctx, s, projectID, req.TaskID),
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		Status:       "running",
+		StartedAt:    time.Now().UTC().Format(time.RFC3339),
 		// Streaming on unless a caller opts out.
 		//
 		// It used to be off unless a client asked, and no client ever asked —
@@ -1362,6 +1368,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// which case the warning must go.
 	rosterWarning = bothSidesWarning(roster)
 	rs.run.Roster = rosterStrings(roster)
+	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
 		// legitimate experiment, but reports must be able to segment it.
@@ -2245,7 +2252,9 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// deterministic and uses only the run record and captured artefacts; it
 	// never decides or relaunches anything.
 	if run.RedoNote == nil && redoNoteEligible(run) {
-		if note := s.draftRedoNote(ctx, rs); note != nil { run.RedoNote = note }
+		if note := s.draftRedoNote(ctx, rs); note != nil {
+			run.RedoNote = note
+		}
 	}
 	// Always recomputed: the stored copy cannot be allowed to disagree with
 	// the rules.
@@ -2406,19 +2415,34 @@ func (s *Service) resolveTriageSiblings(accepted *runState) {
 			continue
 		}
 		for bugID := range triageBugIDs(other.run.PendingData) {
-			if _, ok := covered[bugID]; ok { moot = append(moot, id); break }
+			if _, ok := covered[bugID]; ok {
+				moot = append(moot, id)
+				break
+			}
 		}
 	}
 	s.runsMu.RUnlock()
-	for _, id := range moot { s.resolveSuperseded(id, "superseded: "+accepted.run.ID+" covered the same bug") }
+	for _, id := range moot {
+		s.resolveSuperseded(id, "superseded: "+accepted.run.ID+" covered the same bug")
+	}
 }
 
 func triageBugIDs(data map[string]interface{}) map[string]struct{} {
 	ids := make(map[string]struct{})
 	if raw, ok := data["proposals"].([]map[string]interface{}); ok {
-		for _, p := range raw { if id, ok := p["bug"].(string); ok && id != "" { ids[id] = struct{}{} } }
+		for _, p := range raw {
+			if id, ok := p["bug"].(string); ok && id != "" {
+				ids[id] = struct{}{}
+			}
+		}
 	} else if raw, ok := data["proposals"].([]interface{}); ok {
-		for _, item := range raw { if p, ok := item.(map[string]interface{}); ok { if id, ok := p["bug"].(string); ok && id != "" { ids[id] = struct{}{} } } }
+		for _, item := range raw {
+			if p, ok := item.(map[string]interface{}); ok {
+				if id, ok := p["bug"].(string); ok && id != "" {
+					ids[id] = struct{}{}
+				}
+			}
+		}
 	}
 	return ids
 }
@@ -2839,7 +2863,9 @@ func (s *Service) criticsFrom(mode string, lineup []string) []config.DucklingID 
 // line-up meant saving a new architect there changed nothing the amendment
 // used: the person edited the right seat and the engine looked at another.
 func (s *Service) stageLineupFor(mode string) []string {
-	lineup := s.ducklingsFor("council", nil)
+	s.cfgMu.RLock()
+	lineup := append([]string{}, s.cfg.Defaults.ModeDucklings["council"]...)
+	s.cfgMu.RUnlock()
 	if mode == "solo" && len(lineup) > 1 {
 		lineup = lineup[:1]
 	}

@@ -5,7 +5,12 @@ import { tokens } from "../lib/format";
 import { useChipFacts } from "../lib/chipfacts";
 
 /** One seat for the chips row: the role's name and who sits in it. */
-export type SeatEntry = { role: string; duckling: string };
+export type SeatEntry = {
+  role: string;
+  duckling: string;
+  /** Why this seat has its current value (roster, Settings, or picked now). */
+  provenance?: string;
+};
 
 /** Measured spend per duckling — this project's own report, not a price
  * list: cost_usd and runs from report(project, "duckling"). */
@@ -95,6 +100,7 @@ export function SeatChips({
             ) : (
               <span className="text-ink-muted">default</span>
             )}
+            {e.provenance && <span className="text-ink-muted">{e.provenance}</span>}
             {facts.includes("context") && d?.caps?.context_tokens ? (
               <span className="text-ink-muted" title="context window">
                 {tokens(d.caps.context_tokens)}

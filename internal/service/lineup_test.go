@@ -2,9 +2,8 @@ package service
 
 import "testing"
 
-// A combination of models that works is a finding, and re-ticking the same boxes
-// on every run is how a finding gets lost.
-func TestAModesLineUpIsUsedWhenARunNamesNone(t *testing.T) {
+// A Settings line-up is a saved choice, not an implicit override of the roster.
+func TestAModesLineUpRequiresAnExplicitRunChoice(t *testing.T) {
 	s := writableService(t, "pato-atom", "pato-sonnet")
 
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
@@ -14,19 +13,14 @@ func TestAModesLineUpIsUsedWhenARunNamesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Order is the whole point: pair takes the first as implementer and the
-	// second as reviewer, and tournament and split assign positionally.
-	got := s.ducklingsFor("pair", nil)
-	if len(got) != 2 || got[0] != "pato-sonnet" || got[1] != "pato-atom" {
-		t.Errorf("line-up = %v", got)
+	// Omitted seats leave the resolved roster in charge, even when Settings
+	// remembers a different line-up for the mode.
+	if got := s.ducklingsFor("pair", nil); len(got) != 0 {
+		t.Errorf("omitted seats = %v, want roster", got)
 	}
-	// A run that named its own outranks the preference.
-	if got := s.ducklingsFor("pair", []string{"pato-atom"}); len(got) != 1 || got[0] != "pato-atom" {
-		t.Errorf("the run's own choice was overridden: %v", got)
-	}
-	// And a mode with no preference leaves the roster to decide.
-	if got := s.ducklingsFor("solo", nil); len(got) != 0 {
-		t.Errorf("solo = %v, want nothing", got)
+	// A Settings line-up becomes an override only when a caller explicitly sends it.
+	if got := s.ducklingsFor("pair", []string{"pato-sonnet", "pato-atom"}); len(got) != 2 || got[0] != "pato-sonnet" || got[1] != "pato-atom" {
+		t.Errorf("explicit line-up = %v", got)
 	}
 }
 
@@ -55,10 +49,10 @@ func TestTheLineUpIsCopiedOut(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := s.ducklingsFor("split", nil)
+	got := s.ducklingsFor("split", []string{"pato-atom", "pato-sonnet"})
 	got[0] = "tampered"
-	if again := s.ducklingsFor("split", nil); again[0] != "pato-atom" {
-		t.Errorf("the stored line-up was mutated through a returned slice: %v", again)
+	if again := s.ducklingsFor("split", []string{"pato-atom", "pato-sonnet"}); again[0] != "pato-atom" {
+		t.Errorf("the explicit line-up was mutated through a returned slice: %v", again)
 	}
 }
 

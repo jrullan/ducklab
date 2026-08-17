@@ -14,7 +14,7 @@ export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
-export type PhaseConfig = { mode: string; ducklings: string[]; maxTokens?: number; agentTurns?: number };
+export type PhaseConfig = { mode: string; ducklings: string[]; seatProvenance?: string[]; maxTokens?: number; agentTurns?: number };
 
 /**
  * A controlled mode-and-seats configurator: one dropdown per seat, labelled
@@ -30,6 +30,7 @@ export function LaunchConfig({
   estimates,
   showTokens = false,
   measured,
+  defaultProvenance,
 }: {
   ducklings: readonly Duckling[];
   value: PhaseConfig;
@@ -38,6 +39,8 @@ export function LaunchConfig({
   estimates?: ModeEstimates;
   showTokens?: boolean;
   measured?: MeasuredSpend;
+  /** Provenance for untouched empty seats; a pick is always per-run. */
+  defaultProvenance?: string;
 }) {
   const [extraSeats, setExtraSeats] = useState(0);
   const seats = fixedSeats(value.mode);
@@ -46,7 +49,9 @@ export function LaunchConfig({
     const next = [...value.ducklings];
     while (next.length <= i) next.push("");
     next[i] = id;
-    onChange({ ...value, ducklings: next });
+    const provenance = [...(value.seatProvenance ?? [])];
+    provenance[i] = id ? "picked now" : defaultProvenance ?? "roster";
+    onChange({ ...value, ducklings: next, seatProvenance: provenance });
   };
   return (
     <div className="flex flex-wrap items-end gap-2" data-testid="launch-config">
@@ -77,6 +82,7 @@ export function LaunchConfig({
           entries={Array.from({ length: cols }, (_, i) => ({
             role: seatLabel(value.mode, i),
             duckling: value.ducklings[i] ?? "",
+            provenance: value.seatProvenance?.[i] ?? (value.ducklings[i] ? "picked now" : defaultProvenance),
           }))}
           fleet={[...ducklings]}
           measured={measured}

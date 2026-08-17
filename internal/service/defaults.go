@@ -373,15 +373,11 @@ func (s *Service) AutopilotDefaultsSet(v AutopilotDefaultsView) error {
 	return nil
 }
 
-// ducklingsFor returns the line-up a run should use: the one it named, else the
-// one configured for its mode, else none — which leaves the roster to decide.
-func (s *Service) ducklingsFor(mode string, requested []string) []string {
-	if len(requested) > 0 {
-		return requested
-	}
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	return append([]string{}, s.cfg.Defaults.ModeDucklings[mode]...)
+// ducklingsFor returns only explicit per-run seats. An omitted field means the
+// resolved project/global roster decides; Settings line-ups remain preferences
+// available to an operator who explicitly supplies them.
+func (s *Service) ducklingsFor(_ string, requested []string) []string {
+	return append([]string{}, requested...)
 }
 
 // roundsFor returns how many rounds a mode should run: what the request asked

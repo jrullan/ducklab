@@ -775,10 +775,9 @@ describe("the rail follows the contract's order", () => {
     expect(screen.getByTestId("build-only").textContent).toBe("build only");
   });
 
-  // The habit, pre-seated: Settings' defaults open the block with each
-  // phase's mode AND its saved line-up already in the seats — the habitual
-  // launch is zero touches.
-  it("opens on the Settings defaults with the saved seats filled", async () => {
+  // Mode defaults choose the opening modes, but seats remain omitted until
+  // picked so the project roster decides the untouched launch.
+  it("opens on the Settings defaults with roster-owned seats", async () => {
     const client = railClient({
       tasks: vi.fn(() =>
         Promise.resolve([
@@ -801,10 +800,12 @@ describe("the rail follows the contract's order", () => {
     // Seats read from the chips now — the picker and the glance are one UI.
     const chipText = (el: Element, i: number) =>
       el.querySelectorAll('[data-testid="seat-chip"]')[i]!.textContent ?? "";
-    expect(chipText(testCfg!, 0)).toContain("pato-local");
+    expect(chipText(testCfg!, 0)).toContain("default");
+    expect(chipText(testCfg!, 0)).toContain("roster");
     expect((buildCfg!.querySelector("[data-testid=cfg-mode]") as HTMLSelectElement).value).toBe("pair");
-    expect(chipText(buildCfg!, 0)).toContain("pato-sonnet");
-    expect(chipText(buildCfg!, 1)).toContain("pato-local");
+    expect(chipText(buildCfg!, 0)).toContain("default");
+    expect(chipText(buildCfg!, 0)).toContain("roster");
+    expect(chipText(buildCfg!, 1)).toContain("default");
   });
 
   // The plain launcher — a test-ready task where run is primary — opens on

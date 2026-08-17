@@ -25,6 +25,8 @@ type Run struct {
 	// Historical runs remain readable but cannot contaminate a recycled ID.
 	TaskBodyHash   string                 `json:"task_body_hash,omitempty"`
 	Roster        map[string]string      `json:"roster"`
+	// RosterSources records whether each role came from the roster or a per-run pick.
+	RosterSources map[string]string      `json:"roster_sources,omitempty"`
 	Gate          string                 `json:"gate"`
 	Status        string                 `json:"status"` // running|paused|done|failed|queued
 	Verdict       string                 `json:"verdict"`

@@ -1,17 +1,17 @@
 package service
 
 import (
-	"sync/atomic"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"os"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"errors"
@@ -300,9 +300,17 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	} else if rs.run.Mode == "solo" && len(lineup) > 1 {
 		lineup = lineup[:1]
 	}
-	applyStageLineup(roster, lineup)
+	filled := applyStageLineup(roster, lineup)
 	critics := s.criticsFrom(rs.run.Mode, lineup)
 	rs.run.Roster = rosterStrings(roster)
+	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	for _, role := range filled {
+		if len(req.Ducklings) == 0 {
+			rs.run.RosterSources[string(role)] = "Settings"
+		} else {
+			rs.run.RosterSources[string(role)] = "picked now"
+		}
+	}
 	if warning != "" {
 		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
@@ -394,8 +402,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			d, derr := s.ducklings.Get(roster[config.RoleArchitect])
 			return derr == nil && d.Caps.ContextTokens > 0 && d.Caps.ContextTokens < 65536
 		}(),
-		Ducklings:   ducklingList(roster),
-		Critics:     critics,
+		Ducklings: ducklingList(roster),
+		Critics:   critics,
 		// The architect's earlier replies from the latest Execute, newest
 		// first, without the final one: the stand-pat fallback's memory.
 		Drafts: func() []string {
@@ -1206,8 +1214,12 @@ func (s *Service) ArtifactDiscard(ctx context.Context, projectID, kind string) e
 
 // taskBodyHash identifies the meaning of a task independently of the plan file.
 func taskBodyHashForTask(ctx context.Context, s *Service, projectID, taskID string) string {
-	if taskID == "" { return "" }
-	if tv := s.findTask(ctx, projectID, taskID); tv != nil { return taskBodyHash(tv.Body) }
+	if taskID == "" {
+		return ""
+	}
+	if tv := s.findTask(ctx, projectID, taskID); tv != nil {
+		return taskBodyHash(tv.Body)
+	}
 	return ""
 }
 
@@ -1218,9 +1230,13 @@ func taskBodyHash(body string) string {
 
 func taskBodyHashes(plan *artifact.Document) map[string]string {
 	out := map[string]string{}
-	if plan == nil { return out }
+	if plan == nil {
+		return out
+	}
 	for _, m := range plan.Sections {
-		for _, t := range m.Children { out[t.ID] = taskBodyHash(t.Body) }
+		for _, t := range m.Children {
+			out[t.ID] = taskBodyHash(t.Body)
+		}
 	}
 	return out
 }
@@ -1231,7 +1247,10 @@ func taskBodyHashes(plan *artifact.Document) map[string]string {
 func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*runlog.Run {
 	out := make([]*runlog.Run, 0, len(runs))
 	for _, r := range runs {
-		if r == nil || r.TaskID == "" { out = append(out, r); continue }
+		if r == nil || r.TaskID == "" {
+			out = append(out, r)
+			continue
+		}
 		if r.TaskBodyHash == "" && strings.HasPrefix(r.StartedAt, "2020-") {
 			continue
 		}
