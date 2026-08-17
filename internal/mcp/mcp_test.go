@@ -634,6 +634,69 @@ func TestStageStartCarriesPerRunOverrides(t *testing.T) {
 	}
 }
 
+// Every task-launching door must expose the same seating contract as stages.
+// test_build and test_only create a TestFirstRequest; run_start creates a
+// RunRequest directly.  The schemas are the MCP operator's contract, while
+// the direct run assertion ensures the supplied values are not merely
+// advertised and then discarded.
+func TestTaskLaunchersCarryPerRunSeatingOverrides(t *testing.T) {
+	launchers := map[string]bool{"test_build": true, "test_only": true, "run_start": true}
+	for _, tool := range toolList() {
+		name, _ := tool["name"].(string)
+		if !launchers[name] {
+			continue
+		}
+		props := tool["inputSchema"].(map[string]interface{})["properties"].(map[string]interface{})
+		for _, field := range []string{"ducklings", "mode", "agent_turns"} {
+			if _, ok := props[field]; !ok {
+				t.Errorf("%s schema omits per-run override %q", name, field)
+			}
+		}
+		delete(launchers, name)
+	}
+	for name := range launchers {
+		t.Errorf("task launcher %q is not listed", name)
+	}
+
+	for _, tc := range []struct {
+		tool string
+		then bool
+	}{
+		{tool: "test_build", then: true},
+		{tool: "test_only", then: false},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			eng := &fakeEngine{}
+			resps := drive(t, eng, initFrame,
+				callFrame(2, tc.tool, `{"project_id":"p","task_id":"T-052","ducklings":["terra","reviewer"],"mode":"pair","agent_turns":13}`),
+			)
+			if _, isErr := toolResultText(t, resps[1]); isErr {
+				t.Fatalf("%s failed: %v", tc.tool, resps[1])
+			}
+			if eng.testThenBuild != tc.then {
+				t.Errorf("then_build = %v, want %v", eng.testThenBuild, tc.then)
+			}
+		})
+	}
+
+	eng := &fakeEngine{}
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "run_start", `{"project_id":"p","task_id":"T-052","ducklings":["terra","reviewer"],"mode":"pair","agent_turns":13}`),
+	)
+	if _, isErr := toolResultText(t, resps[1]); isErr {
+		t.Fatalf("run_start failed: %v", resps[1])
+	}
+	if got := fmt.Sprint(eng.lastRunReq["ducklings"]); got != "[terra reviewer]" {
+		t.Errorf("run_start ducklings = %q, want selected seats", got)
+	}
+	if got := eng.lastRunReq["agent_turns"]; got != float64(13) {
+		t.Errorf("run_start agent_turns = %#v, want 13", got)
+	}
+	if got := eng.lastRunReq["mode"]; got != "pair" {
+		t.Errorf("run_start mode = %#v, want pair", got)
+	}
+}
+
 func TestBugTriageCarriesPerRunOverrides(t *testing.T) {
 	eng := &fakeEngine{}
 	resps := drive(t, eng, initFrame,
