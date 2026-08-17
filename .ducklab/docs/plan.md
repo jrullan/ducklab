@@ -1140,4 +1140,22 @@ The MCP task launchers lack the per-run override contract already available on s
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-059 — Route implementer distress to the advisor and expose reviewer-safe operational summaries
+
+Fixes B-058.
+
+## Reported
+
+What happened: T-058's implementer ended her turn admitting she was fighting fs_patch (28 failures, brake tripped) — and the reviewer, correctly blind to her transcript (SPEC-004's decorrelation: judge the work, not the rationalization), evaluated the partial diff with no idea why it was partial. The distress signal existed, structured and honest, and no organ consumed it: the next round refights the same tool. The human's instinct — someone should help — is right; making the REVIEWER that someone would break I2 (a coaching reviewer becomes co-author, then reviews its own advice).\n\nExpected, two clean channels: (a) distress signals — brake refusals, per-tool failure streaks, an end-of-turn admission — trigger the ADVISOR's B-031 craft: draft the corrective note (\"rewrite with fs_write; fs_patch chokes on this file\") that rides the next round or the redo, help from the organ built for helping; (b) the reviewer receives an operational summary as DATA, never prose — \"28 patch fails, brake tripped, diff partial\" — so its verdict can distinguish wrong-design from wounded-execution without ever reading a rationalization. The judge stays a judge; the counselor gets a pager.
+
+## Triage
+
+**Component:** run orchestration
+
+Distress telemetry is produced but not routed to either the advisor or the reviewer-safe operational summary channel.
+
+**Verification (triage recommends):** test-first — Simulate tool-failure brake and end-of-turn distress; assert advisor receives a corrective-note request while reviewer receives only structured metrics.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

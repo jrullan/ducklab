@@ -7,6 +7,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/tools"
 )
 
 // recorder captures every prompt the scheduler builds, which is how the
@@ -140,6 +141,74 @@ func TestReviewerPromptHasDiffButNotAuthorIdentityOrReasoning(t *testing.T) {
 
 // The reviewer's toolbelt must stay read-only even though the script says
 // "full" — the role's ceiling applies.
+// Distress is a request for operational help, not an excuse the reviewer may
+// read. A tool-failure brake and an implementer's final admission must summon
+// the advisor to draft a corrective note, while the reviewer receives only the
+// measured facts needed to judge a partial diff.
+func TestPairRoutesImplementerDistressToAdvisorWithoutLeakingAdmissionToReviewer(t *testing.T) {
+	rec := &recorder{}
+	const admission = "I am fighting fs_patch; 28 failures, brake tripped, diff partial."
+	calls := make([]agent.ToolCallRecord, 28)
+	for i := range calls {
+		calls[i] = agent.ToolCallRecord{
+			Name: "fs_patch",
+			Args: []byte(`{"path":"widget.go"}`),
+			Result: &tools.Result{IsError: true, Content: "patch did not apply"},
+		}
+	}
+	// The final refused call is the tool's brake, rather than merely another
+	// failed patch attempt.
+	calls[len(calls)-1].Result.Content = "REFUSED: fs_patch has failed 28 times on this file; stop patching"
+
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: admission, ToolCalls: calls},
+		// The advisor's response is deliberately unstructured prose: it belongs
+		// to the next implementer attempt, never to the reviewer.
+		editsOutcome("Use fs_write for widget.go after reading the current file."),
+		verdictOutcome("approve"),
+	)
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+
+	advisorAt, reviewerAt := -1, -1
+	for i, role := range rec.roles {
+		switch role {
+		case config.RoleAdvisor:
+			advisorAt = i
+		case config.RoleReviewer:
+			if reviewerAt < 0 {
+				reviewerAt = i
+			}
+		}
+	}
+	if advisorAt < 0 {
+		t.Fatal("tool-failure distress did not request a corrective note from the advisor")
+	}
+	if reviewerAt < 0 {
+		t.Fatal("reviewer turn did not run")
+	}
+	advisorPrompt := rec.prompts[advisorAt]
+	for _, want := range []string{"fs_patch", "28", "brake"} {
+		if !strings.Contains(advisorPrompt, want) {
+			t.Errorf("advisor corrective-note request lacks operational fact %q:\n%s", want, advisorPrompt)
+		}
+	}
+
+	reviewerPrompt := rec.prompts[reviewerAt]
+	if strings.Contains(reviewerPrompt, admission) || strings.Contains(reviewerPrompt, "fighting fs_patch") {
+		t.Errorf("reviewer received the implementer's rationalization instead of blind operational data:\n%s", reviewerPrompt)
+	}
+	// The exact wire representation is intentionally not prescribed, but the
+	// reviewer must receive machine-readable facts, including the brake, count,
+	// and partial-diff state — not a narrative summary.
+	for _, want := range []string{`"tool":"fs_patch"`, `"failures":28`, `"brake_tripped":true`, `"diff_partial":true`} {
+		if !strings.Contains(reviewerPrompt, want) {
+			t.Errorf("reviewer operational summary lacks %s:\n%s", want, reviewerPrompt)
+		}
+	}
+}
+
 func TestPairReviewerBeltIsReadOnly(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green", editsOutcome("x"), verdictOutcome("approve"))
