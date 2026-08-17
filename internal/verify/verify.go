@@ -151,7 +151,16 @@ func Run(ctx context.Context, root string, cfg config.Verify) (*Result, error) {
 	defer cancel()
 	started := time.Now()
 
-	shellCmd := xplat.ShellContext(ctx, root, nil, cmd)
+	// A gate can start product binaries, which must not inherit the engine's
+	// registry or configuration. Give the entire gate process tree a fresh,
+	// disposable state home instead.
+	env, cleanup, err := isolatedStateEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	shellCmd := xplat.ShellContext(ctx, root, env, cmd)
 	output, err := shellCmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
@@ -210,6 +219,50 @@ func IsGreen(result *Result) bool {
 // IsRed returns whether the gate result is red.
 func IsRed(result *Result) bool {
 	return result.ExitCode != 0 && result.Gate != GateNone
+}
+
+// isolatedStateEnvironment returns an environment whose state locations all
+// live under a new temporary directory. The directory remains available for the
+// full child process tree and is removed once the gate has exited.
+func isolatedStateEnvironment() ([]string, func(), error) {
+	stateRoot, err := os.MkdirTemp("", "ducklab-verify-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create isolated gate state: %w", err)
+	}
+
+	values := map[string]string{
+		"XDG_CONFIG_HOME": filepath.Join(stateRoot, "config"),
+		"XDG_DATA_HOME":   filepath.Join(stateRoot, "data"),
+		"XDG_STATE_HOME":  filepath.Join(stateRoot, "state"),
+		"HOME":            filepath.Join(stateRoot, "home"),
+		"USERPROFILE":     filepath.Join(stateRoot, "home"),
+		"AppData":      filepath.Join(stateRoot, "appdata"),
+		"LocalAppData": filepath.Join(stateRoot, "localappdata"),
+	}
+
+	// Remove inherited values first. Windows environment variable names are
+	// case-insensitive, so use EqualFold on every platform to avoid duplicates.
+	env := make([]string, 0, len(os.Environ())+len(values))
+	for _, entry := range os.Environ() {
+		key, _, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		isolated := false
+		for stateKey := range values {
+			if strings.EqualFold(key, stateKey) {
+				isolated = true
+				break
+			}
+		}
+		if !isolated {
+			env = append(env, entry)
+		}
+	}
+	for key, value := range values {
+		env = append(env, key+"="+value)
+	}
+	return env, func() { _ = os.RemoveAll(stateRoot) }, nil
 }
 
 func fileExists(path string) bool {
