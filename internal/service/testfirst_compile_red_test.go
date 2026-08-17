@@ -91,6 +91,24 @@ func TestARedGateWithNoCompileMarkersIsAssertionRed(t *testing.T) {
 	}
 }
 
+// A cold Go toolchain emits download status before it can run the gate. That
+// status is infrastructure chatter, not a diagnostic from the test that was
+// just written. In particular, matching a build-failure phrase embedded in a
+// download line must not turn a valid red specification into a compile-red.
+func TestGoDownloadChatterIsNotACompileFailure(t *testing.T) {
+	after := &verify.Result{
+		ExitCode: 1,
+		Output: "go: downloading example.com/build failed v1.2.3\n" +
+			"--- FAIL: TestWantedBehavior (0.00s)\n" +
+			"    wanted_behavior_test.go:12: expected 1, got 0\n" +
+			"FAIL\n",
+	}
+	verdict, detail := judgeTestFirst(green(), after, testDiff, nil)
+	if verdict != "PASSED" {
+		t.Fatalf("download chatter was classified as a compiler failure: %s", detail)
+	}
+}
+
 // A compile error is malformed regardless of whether the suite was already
 // red. "It was red before" does not make a test that does not compile into a
 // valid specification — the compile error still breaks the package and still

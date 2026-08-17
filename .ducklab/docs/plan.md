@@ -974,4 +974,22 @@ A failed restart can indefinitely park active work and discard progress because 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-050 — Preserve shared Go caches while isolating gate state and ignore download chatter in compile-red detection
+
+Fixes B-048.
+
+## Reported
+
+What happened: T-045 (B-047's fix) isolates the gate's process tree by pointing XDG_* AND HOME at a fresh TempDir removed after the gate exits. On Linux HOME determines GOPATH, GOMODCACHE and GOCACHE — so every verify_run now downloads the go toolchain (go.mod pins 1.25.0) plus every module and rebuilds every package cold, per gate, with the cache deleted afterward: minutes per verify, a hard network dependency, and download noise that T-024's compile-red detector misreads as \"the test specification does not compile\" (T-049's test-first died to exactly that false verdict).\n\nExpected: isolation of ENGINE STATE, not of build caches — the scrub keeps XDG/HOME pointed at the throwaway but explicitly sets GOPATH/GOMODCACHE/GOCACHE (and GOTOOLCHAIN's cache) to the real shared locations: content-addressed build caches carry no engine identity and are exactly what makes a gate fast and offline-capable. And the compile-red detector must ignore go's download chatter when classifying output.
+
+## Triage
+
+**Component:** gate execution
+
+The gate's state-isolation change makes every verification slow, network-dependent, and capable of falsely rejecting valid test specifications.
+
+**Verification (triage recommends):** test-first — Run verify with isolated XDG/HOME and assert Go cache paths remain shared and download output is not classified as a compile failure.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
