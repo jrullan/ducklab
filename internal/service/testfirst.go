@@ -585,17 +585,20 @@ func gateCoversFrontend(command string) bool {
 }
 
 func compileFailure(output string) bool {
-	lower := strings.ToLower(output)
-	for _, marker := range []string{
-		"[build failed]",
-		"build failed",
-		"undefined:",
-		"syntax error",
-		"cannot find package",
-		"could not import",
-		"does not compile",
-	} {
-		if strings.Contains(lower, marker) {
+	// Structural, not lexical. Grepping the whole output for compiler
+	// vocabulary misfired the moment a TEST carried those words as fixture
+	// data — T-050's detector test contained "does not compile" and was
+	// itself judged uncompilable, an assertion-red refused as broken. Go
+	// stamps an unbuildable package on its FAIL line — [build failed] or
+	// [setup failed] — and tsc names its errors "error TS1234:"; assertion
+	// failures produce neither.
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "FAIL") &&
+			(strings.HasSuffix(trimmed, "[build failed]") || strings.HasSuffix(trimmed, "[setup failed]")) {
+			return true
+		}
+		if strings.Contains(trimmed, "): error TS") {
 			return true
 		}
 	}
