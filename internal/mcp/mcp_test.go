@@ -15,28 +15,28 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
-	lastRunReq map[string]interface{}
-	images []string
-	settled []string
-	extended []string
+	lastRunReq    map[string]interface{}
+	images        []string
+	settled       []string
+	extended      []string
 	testThenBuild bool
 	testNote      string
-	tasks []map[string]interface{}
-	artifacts map[string]map[string]interface{}
-	bugs []map[string]interface{}
-	nextSteps []map[string]interface{}
-	runs       map[string]map[string]interface{}
-	accepted   []string
-	acceptedAs string
-	rejected   []string
-	filed      []map[string]string
-	attached     string
-	attachedName string
-	revised    []string
+	tasks         []map[string]interface{}
+	artifacts     map[string]map[string]interface{}
+	bugs          []map[string]interface{}
+	nextSteps     []map[string]interface{}
+	runs          map[string]map[string]interface{}
+	accepted      []string
+	acceptedAs    string
+	rejected      []string
+	filed         []map[string]string
+	attached      string
+	attachedName  string
+	revised       []string
 	lastStageReq  map[string]interface{}
 	lastTriageReq map[string]interface{}
-	budgetLifted string
-	resumeCount int
+	budgetLifted  string
+	resumeCount   int
 	projectStatus map[string]interface{}
 }
 
@@ -70,7 +70,7 @@ func (f *fakeEngine) RunReject(id, reason string) error {
 	f.rejected = append(f.rejected, id+": "+reason)
 	return nil
 }
-func (f *fakeEngine) RunAbort(string) error                          { return nil }
+func (f *fakeEngine) RunAbort(string) error { return nil }
 func (f *fakeEngine) RunResume(id string) (map[string]interface{}, error) {
 	f.resumeCount++
 	if f.budgetLifted == "" {
@@ -86,7 +86,7 @@ func (f *fakeEngine) RunBudgetLift(id, kind, actor string) (map[string]interface
 	f.budgetLifted = kind + " by " + actor
 	return map[string]interface{}{"id": id, "kind": kind, "lifted_by": actor}, nil
 }
-func (f *fakeEngine) RunAnswer(string, string, string) error          { return nil }
+func (f *fakeEngine) RunAnswer(string, string, string) error { return nil }
 func (f *fakeEngine) RunFileFindings(id string) ([]map[string]interface{}, error) {
 	run, ok := f.runs[id]
 	if !ok {
@@ -287,14 +287,20 @@ func TestBudgetLiftThroughMCPAllowsResume(t *testing.T) {
 		callFrame(2, "budget_lift", `{"run_id":"r-cap","kind":"tokens"}`),
 		callFrame(3, "decide", `{"run_id":"r-cap","action":"resume","reason":"lift the cap"}`),
 	)
-	if _, err := toolResultText(t, resps[1]); err || eng.budgetLifted != "tokens by mcp:elena" { t.Fatalf("lift failed: %q %q", eng.budgetLifted, resps[1]) }
-	if text, err := toolResultText(t, resps[2]); err || !strings.Contains(text, "running") { t.Fatalf("resume failed: %q", text) }
+	if _, err := toolResultText(t, resps[1]); err || eng.budgetLifted != "tokens by mcp:elena" {
+		t.Fatalf("lift failed: %q %q", eng.budgetLifted, resps[1])
+	}
+	if text, err := toolResultText(t, resps[2]); err || !strings.Contains(text, "running") {
+		t.Fatalf("resume failed: %q", text)
+	}
 }
 
 func TestBudgetLiftInvalidKindNamesTheField(t *testing.T) {
 	resps := drive(t, &fakeEngine{}, initFrame, callFrame(2, "budget_lift", `{"run_id":"r-cap","kind":"widgets"}`))
 	text, err := toolResultText(t, resps[1])
-	if !err || !strings.Contains(strings.ToLower(text), "kind") { t.Fatalf("error does not identify kind: %q", text) }
+	if !err || !strings.Contains(strings.ToLower(text), "kind") {
+		t.Fatalf("error does not identify kind: %q", text)
+	}
 }
 
 // A decision without a reason is a decision nobody can audit.
@@ -329,7 +335,7 @@ func TestStatusIncludesDocumentLifecycleState(t *testing.T) {
 	eng := &fakeEngine{
 		artifacts: map[string]map[string]interface{}{
 			"requirements": {"approved": true, "markdown": "FULL REQUIREMENTS BODY"},
-			"spec":        {"approved": false, "markdown": "FULL SPEC BODY", "proposal": map[string]interface{}{"run_id": "r-spec"}},
+			"spec":         {"approved": false, "markdown": "FULL SPEC BODY", "proposal": map[string]interface{}{"run_id": "r-spec"}},
 		},
 		tasks: []map[string]interface{}{
 			{"id": "T-001", "status": "todo"},
@@ -611,8 +617,10 @@ func (f *fakeEngine) AppStart(projectID string) (map[string]interface{}, error) 
 
 func (f *fakeEngine) AppStop(projectID string) error { return nil }
 
-func (f *fakeEngine) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
-	f.testThenBuild, f.testNote = thenBuild, note
+func (f *fakeEngine) TestStart(projectID string, req map[string]interface{}) (map[string]interface{}, error) {
+	f.lastRunReq = req
+	f.testThenBuild, _ = req["then_build"].(bool)
+	f.testNote, _ = req["note"].(string)
 	return map[string]interface{}{"id": "r-test"}, nil
 }
 
@@ -675,6 +683,16 @@ func TestTaskLaunchersCarryPerRunSeatingOverrides(t *testing.T) {
 			}
 			if eng.testThenBuild != tc.then {
 				t.Errorf("then_build = %v, want %v", eng.testThenBuild, tc.then)
+			}
+			if got := fmt.Sprint(eng.lastRunReq["ducklings"]); got != "[terra reviewer]" {
+				t.Errorf("test ducklings = %q, want selected seats", got)
+			}
+			if got := eng.lastRunReq["agent_turns"]; got != float64(13) {
+				t.Errorf("test agent_turns = %#v, want 13", got)
+			}
+			build, _ := eng.lastRunReq["build"].(map[string]interface{})
+			if tc.then && (fmt.Sprint(build["ducklings"]) != "[terra reviewer]" || build["agent_turns"] != float64(13) || build["mode"] != "pair") {
+				t.Errorf("chained build overrides = %#v, want selected overrides", build)
 			}
 		})
 	}
@@ -925,7 +943,6 @@ func TestPlanExtendCarriesAScreenshotByPath(t *testing.T) {
 		t.Errorf("no data URL reached the engine: %v", eng.images)
 	}
 }
-
 
 // Elena's blocker, live from the T-002 redo: the failed build's lesson had
 // no channel — run_start's schema omitted the note the engine always

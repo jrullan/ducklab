@@ -42,7 +42,7 @@ func toolList() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{"run_id": str("the run id, r-...")}, "run_id"),
 		},
 		{
-			"name": "file_findings",
+			"name":        "file_findings",
 			"description": "File the run's final structured reviewer findings as bugs, exactly like the desktop action. Bugs retain review provenance and are attributed to this MCP operator.",
 			"inputSchema": obj(map[string]interface{}{"run_id": str("the completed run id, r-...")}, "run_id"),
 		},
@@ -58,11 +58,11 @@ func toolList() []map[string]interface{} {
 			}, "run_id", "action", "reason"),
 		},
 		{
-			"name": "budget_lift",
+			"name":        "budget_lift",
 			"description": "Remove one budget cap from a live or paused run so resume can proceed. One-way, per-cap, and attributed to this MCP operator; use kind tokens | usd | turns | wallclock | calls.",
 			"inputSchema": obj(map[string]interface{}{
 				"run_id": str("the run id, r-..."),
-				"kind": str("the cap to remove: tokens | usd | turns | wallclock | calls"),
+				"kind":   str("the cap to remove: tokens | usd | turns | wallclock | calls"),
 			}, "run_id", "kind"),
 		},
 		{
@@ -100,12 +100,14 @@ func toolList() []map[string]interface{} {
 				"test_build (the TDD chain); use run_start only when they explicitly ask to skip " +
 				"the test. Mode defaults to the project's habit; solo|pair|tournament|split.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id": str("the project id"),
-				"task_id":    str("a task whose next includes run"),
-				"mode":       str("optional mode"),
-				"note":       noteProp(),
-				"verify":     str("optional per-task verification command override"),
-				"redo":       redoProp(),
+				"project_id":  str("the project id"),
+				"task_id":     str("a task whose next includes run"),
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":        str("optional mode"),
+				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"note":        noteProp(),
+				"verify":      str("optional per-task verification command override"),
+				"redo":        redoProp(),
 			}, "project_id", "task_id"),
 		},
 		{
@@ -113,13 +115,13 @@ func toolList() []map[string]interface{} {
 			"description": "Run a document stage: intake (brief or adopt), spec, plan. adopt=true " +
 				"surveys an existing codebase into the requirements it already satisfies.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id": str("the project id"),
-				"stage":      str("intake | spec | plan"),
-				"brief":      str("intake only: what to build, or context for adopt"),
-				"ducklings":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
-					"mode":       str("optional mode: solo | council | sectioned"),
-					"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
-					"adopt":      map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
+				"project_id":  str("the project id"),
+				"stage":       str("intake | spec | plan"),
+				"brief":       str("intake only: what to build, or context for adopt"),
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":        str("optional mode: solo | council | sectioned"),
+				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
 			}, "project_id", "stage"),
 		},
 		{
@@ -183,11 +185,11 @@ func toolList() []map[string]interface{} {
 				"given, every open one otherwise. The classifications are proposals on a run that may " +
 				"wait at its gate — check status and decide it like any other.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id": str("the project id"),
-				"bug_id":     str("optional: triage exactly this bug"),
-					"ducklings":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
-					"mode":       str("optional mode: solo | council | sectioned"),
-					"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"project_id":  str("the project id"),
+				"bug_id":      str("optional: triage exactly this bug"),
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":        str("optional mode: solo | council | sectioned"),
+				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 			}, "project_id"),
 		},
 		{
@@ -210,11 +212,11 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "bug_id", "status"),
 		},
 		{
-			"name": "bug_reopen",
+			"name":        "bug_reopen",
 			"description": "Reopen a fixed bug when human verification finds the problem remains. This sends fixed→in_progress; only do this with the human's explicit consent, and do not change any run.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
-				"bug_id": str("the fixed bug, B-..."),
+				"bug_id":     str("the fixed bug, B-..."),
 			}, "project_id", "bug_id"),
 		},
 		{
@@ -234,10 +236,13 @@ func toolList() []map[string]interface{} {
 				"the build's gate with the committed test in the diff. When the human says to run, start " +
 				"or build a task, they mean this.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id": str("the project id"),
-				"task_id":    str("a startable task, T-..."),
-				"note":       noteProp(),
-				"redo":       redoProp(),
+				"project_id":  str("the project id"),
+				"task_id":     str("a startable task, T-..."),
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":        str("optional mode"),
+				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"note":        noteProp(),
+				"redo":        redoProp(),
 			}, "project_id", "task_id"),
 		},
 		{
@@ -246,10 +251,13 @@ func toolList() []map[string]interface{} {
 				"pauses for the human's accept; the build is launched separately later. Use only when " +
 				"the human asked for the test alone; test_build is the ordinary path.",
 			"inputSchema": obj(map[string]interface{}{
-				"project_id": str("the project id"),
-				"task_id":    str("a startable task, T-..."),
-				"note":       noteProp(),
-				"redo":       redoProp(),
+				"project_id":  str("the project id"),
+				"task_id":     str("a startable task, T-..."),
+				"ducklings":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "optional per-run seat picks"},
+				"mode":        str("optional mode"),
+				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
+				"note":        noteProp(),
+				"redo":        redoProp(),
 			}, "project_id", "task_id"),
 		},
 	}
@@ -364,9 +372,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		return toolText(b.String(), false), nil
 	case "run_start":
 		req := map[string]interface{}{"task_id": a.str("task_id")}
-		if m := a.str("mode"); m != "" {
-			req["mode"] = m
-		}
+		copyRunOverrides(req, a)
 		// The redo-after-failure channel. The engine always accepted a note;
 		// only this schema forgot it — so an operator relaunching a build
 		// with the LESSON from the failed attempt (the whole point of a
@@ -423,7 +429,7 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			req["adopt"] = true
 		}
 		copyRunOverrides(req, a)
-			run, err := s.eng.StageStart(a.str("project_id"), a.str("stage"), req)
+		run, err := s.eng.StageStart(a.str("project_id"), a.str("stage"), req)
 		if err != nil {
 			return nil, err
 		}
@@ -534,7 +540,17 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			then = v
 		}
 		redo, _ := a["redo"].(bool)
-		run, err := s.eng.TestStart(a.str("project_id"), a.str("task_id"), "", then, redo, a.str("note"))
+		req := map[string]interface{}{
+			"task_id": a.str("task_id"), "then_build": then,
+			"redo": redo, "note": a.str("note"),
+		}
+		copyRunOverrides(req, a)
+		build := map[string]interface{}{}
+		copyRunOverrides(build, a)
+		if len(build) > 0 {
+			req["build"] = build
+		}
+		run, err := s.eng.TestStart(a.str("project_id"), req)
 		if err != nil {
 			return nil, err
 		}
@@ -578,7 +594,7 @@ func (s *Server) status() (map[string]interface{}, error) {
 		// raw status transitions and answers "in_progress, duplicate or
 		// wontfix" to a human whose actual next move was "promote it".
 		entry["next_steps"] = []map[string]interface{}{}
-			if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
+		if steps, err := s.eng.ProjectNext(id); err == nil && len(steps) > 0 {
 			entry["next_steps"] = steps
 		}
 		// Cheap lifecycle orientation: never include document bodies in status.

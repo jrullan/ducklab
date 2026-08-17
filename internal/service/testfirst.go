@@ -61,6 +61,8 @@ type TestFirstRequest struct {
 	// the diff. A test that does NOT land red stops the chain and waits for a
 	// person, exactly as an unchained run would.
 	ThenBuild bool `json:"then_build,omitempty"`
+	// AgentTurns overrides model calls per reply for every test-phase seat.
+	AgentTurns int `json:"agent_turns,omitempty"`
 	// Build configures the chained run: mode, ducklings, token ceiling.
 	Build RunRequest `json:"build,omitempty"`
 	// Origin marks a chain started by the autopilot rather than a person.
@@ -194,6 +196,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		// "build again" for work that had never been built once.
 		Stage:            "test",
 		Mode:             testMode(s.testModeDefault(req.Mode)),
+		AgentTurns:       req.AgentTurns,
 		TaskID:           req.TaskID,
 		TaskBodyHash:     taskBodyHashForTask(ctx, s, projectID, req.TaskID),
 		Status:           "running",
@@ -455,6 +458,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		ExecContext: ectx,
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
+		TurnCaps:    s.roleTurnCapsFor(req.AgentTurns),
 		Gate: func(ctx context.Context) (string, string, error) {
 			res, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 			if err != nil {

@@ -17,7 +17,7 @@ autonomy = "yolo"
   timeout_s = 900
 
 [roster]
-  advisor = "luna"
+  advisor = "glm52"
   scribe = "beelink-local"
   triager = "terra"
 

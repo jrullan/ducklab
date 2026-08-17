@@ -33,7 +33,9 @@ func testFirstCmd(args []string, repo string) int {
 	if code != 0 {
 		return code
 	}
-	run, err := client.TestStart(projectID, taskID, duckling, false, false, "")
+	run, err := client.TestStart(projectID, map[string]interface{}{
+		"task_id": taskID, "duckling": duckling,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

@@ -324,8 +324,10 @@ func (c *Client) DucklingRemove(id string) error {
 }
 
 // TestStart writes the failing test for a task.
-func (c *Client) TestStart(projectID, taskID, duckling string, thenBuild, redo bool, note string) (map[string]interface{}, error) {
-	return c.TestStartWithVerify(projectID, taskID, duckling, thenBuild, redo, note, "")
+func (c *Client) TestStart(projectID string, req map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/tests", req, &result)
+	return result, err
 }
 
 // TestStartWithVerify starts test-first with an optional per-task gate command.
