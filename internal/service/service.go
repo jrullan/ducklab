@@ -1707,7 +1707,11 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		}
 	}()
 	if actor == "" {
-		actor = "human"
+		if rs.run.Autonomy == "yolo" {
+			actor = "auto:yolo"
+		} else {
+			actor = "human"
+		}
 	}
 	// A stage run's human gate is the decision to promote its document. There
 	// is one decision, so there is one action: accepting the run accepts the
@@ -1789,7 +1793,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		rs.run.Resolution = "accepted by " + actor
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
-		return s.logResolution(rs, "accept")
+		return s.logResolution(rs, "accept", actor)
 	}
 	if message == "" {
 		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
@@ -1834,7 +1838,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 			}
 		}
 
-		if err := s.logResolution(rs, "accept"); err != nil {
+		if err := s.logResolution(rs, "accept", actor); err != nil {
 			return err
 		}
 		return nil
@@ -1876,7 +1880,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// the log never recorded that a person accepted anything. Every client
 	// derives "is this still waiting for me" from those events, so the desktop
 	// went on offering Accept on a run it had already committed.
-	if err := s.logResolution(rs, "accept"); err != nil {
+	if err := s.logResolution(rs, "accept", actor); err != nil {
 		return err
 	}
 	return nil
@@ -1916,13 +1920,17 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) e
 	return nil
 }
 
-// logResolution records a human decision and closes the run out.
-func (s *Service) logResolution(rs *runState, action string) error {
+// logResolution records a decision and closes the run out.
+func (s *Service) logResolution(rs *runState, action, actor string) error {
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return fmt.Errorf("open run log: %w", err)
 	}
-	if err := w.AppendEvent("human", map[string]interface{}{"action": action}); err != nil {
+	data := map[string]interface{}{"action": action}
+	if actor == "auto:yolo" {
+		data["autonomy"] = rs.run.Autonomy
+	}
+	if err := w.AppendEvent(actor, data); err != nil {
 		return err
 	}
 	if err := w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict}); err != nil {
