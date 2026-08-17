@@ -236,16 +236,11 @@ func isolatedStateEnvironment() ([]string, func(), error) {
 		"XDG_STATE_HOME":  filepath.Join(stateRoot, "state"),
 		"HOME":            filepath.Join(stateRoot, "home"),
 		"USERPROFILE":     filepath.Join(stateRoot, "home"),
-		"AppData":      filepath.Join(stateRoot, "appdata"),
-		"LocalAppData": filepath.Join(stateRoot, "localappdata"),
+		"AppData":         filepath.Join(stateRoot, "appdata"),
+		"LocalAppData":    filepath.Join(stateRoot, "localappdata"),
 	}
-	// Isolation is of ENGINE STATE, not of build caches. Scrubbing HOME on
-	// Linux silently moves GOPATH/GOMODCACHE/GOCACHE into the throwaway, so
-	// every gate downloaded the toolchain and every module and compiled the
-	// world cold — minutes per verify, a network dependency, and download
-	// chatter misread as compile errors. Content-addressed build caches
-	// carry no engine identity: pin them to their real locations unless the
-	// caller already did.
+	// Isolate engine state, not content-addressed build caches. Scrubbing HOME
+	// otherwise makes every gate redownload and rebuild its toolchain.
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		cache := func(envKey, def string) {
 			if os.Getenv(envKey) == "" {
@@ -256,6 +251,21 @@ func isolatedStateEnvironment() ([]string, func(), error) {
 		cache("GOMODCACHE", filepath.Join(home, "go", "pkg", "mod"))
 		cache("GOCACHE", filepath.Join(home, ".cache", "go-build"))
 		cache("npm_config_cache", filepath.Join(home, ".npm"))
+	}
+	// A scrubbed HOME has no .gitconfig, and the service tests commit in
+	// their temp repos: without an identity every one of them dies at
+	// "please tell me who you are". The gate signs as itself — a fixed,
+	// obviously-synthetic identity, so no test commit ever wears the
+	// person's name.
+	for k, v := range map[string]string{
+		"GIT_AUTHOR_NAME":     "ducklab gate",
+		"GIT_AUTHOR_EMAIL":    "gate@ducklab.invalid",
+		"GIT_COMMITTER_NAME":  "ducklab gate",
+		"GIT_COMMITTER_EMAIL": "gate@ducklab.invalid",
+	} {
+		if os.Getenv(k) == "" {
+			values[k] = v
+		}
 	}
 
 	// Remove inherited values first. Windows environment variable names are

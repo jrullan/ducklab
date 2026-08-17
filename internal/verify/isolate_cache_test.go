@@ -32,6 +32,12 @@ func TestIsolatedGateKeepsTheBuildCaches(t *testing.T) {
 			isolatedHome = v
 		}
 	}
+	// And the gate must be able to SIGN: scrubbed HOME means no .gitconfig,
+	// so the environment itself carries a synthetic git identity.
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_AUTHOR_EMAIL=gate@ducklab.invalid") {
+		t.Error("the gate environment carries no git identity — every test commit dies unnamed")
+	}
 	for k := range want {
 		if got[k] == "" {
 			t.Errorf("%s missing from the gate environment — the cache died with HOME", k)
