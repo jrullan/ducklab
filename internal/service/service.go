@@ -1848,7 +1848,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// wrong and the run did nothing wrong.
 	if clean, cerr := git.IsClean(); cerr == nil && clean {
 		head, _ := git.HeadSHA()
-		if err := verifyAcceptedCommit(ctx, git, entry.Path, head); err != nil {
+		if err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage); err != nil {
 			return err
 		}
 		defer s.continueChain(ctx, rs)
@@ -1883,7 +1883,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
-	if err := verifyAcceptedCommit(ctx, git, entry.Path, sha); err != nil {
+	if err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage); err != nil {
 		return err
 	}
 	defer s.continueChain(ctx, rs)
@@ -1918,7 +1918,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 // verifyAcceptedCommit runs the configured gate from a detached worktree at
 // sha. The working tree may contain ignored files that git add deliberately
 // omitted; only this checkout can prove the recorded commit is reproducible.
-func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) error {
+func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string) error {
 	cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml"))
 	if err != nil {
 		return fmt.Errorf("load gate config for accepted commit: %w", err)
@@ -1951,7 +1951,25 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) e
 	// A project with no configured executable gate retains its existing
 	// UNVERIFIED semantics. There is no command to reproduce, not a failed
 	// command to reject; executable gates must be green in the clean checkout.
-	if result.Gate != verify.GateNone && !verify.IsGreen(result) {
+	if result.Gate == verify.GateNone {
+		return nil
+	}
+	// Polarity follows the stage. A test-first commit is red BY DESIGN — the
+	// committed failing test IS the deliverable — and demanding green here
+	// made every TDD accept impossible (B-056): the human clicked Accept,
+	// the checkout reproduced the intended red, and the accept refused,
+	// forever. A test accept must reproduce an honest red: failing, and not
+	// by a compile error. Green from the checkout is the test-stage failure.
+	if stage == "test" {
+		if verify.IsGreen(result) {
+			return fmt.Errorf("the committed test passes from a clean checkout — it asserts nothing that is not already true")
+		}
+		if compileFailure(result.Output) {
+			return fmt.Errorf("the committed test does not compile from a clean checkout:\n%s", result.Output)
+		}
+		return nil
+	}
+	if !verify.IsGreen(result) {
 		return fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return nil
