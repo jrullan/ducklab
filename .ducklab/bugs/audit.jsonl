@@ -147,3 +147,4 @@
 {"ts":"2026-08-17T01:23:25Z","bug":"B-046","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-049"}
 {"ts":"2026-08-17T01:31:09Z","bug":"B-043","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-047"}
 {"ts":"2026-08-17T01:47:04Z","bug":"B-045","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-048"}
+{"ts":"2026-08-17T08:27:28Z","bug":"B-046","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
