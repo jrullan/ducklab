@@ -191,6 +191,8 @@ export const KNOWN_EVENT_TYPES = [
   "run_end",
   "run_queued",
   "run_started",
+  "restart_request",
+  "restart_abandoned",
   "round_start",
   "turn_start",
   "turn_end",

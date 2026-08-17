@@ -738,6 +738,17 @@
         ],
         "type": "object"
       },
+      "EngineapirestartRequest": {
+        "properties": {
+          "requester": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requester"
+        ],
+        "type": "object"
+      },
       "EngineapirosterSetRequest": {
         "properties": {
           "duckling": {
@@ -1065,6 +1076,25 @@
         ],
         "type": "object"
       },
+      "RunlogRedoNote": {
+        "properties": {
+          "advisor": {
+            "type": "string"
+          },
+          "draft": {
+            "type": "string"
+          },
+          "editable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "advisor",
+          "draft",
+          "editable"
+        ],
+        "type": "object"
+      },
       "RunlogRun": {
         "properties": {
           "accepted": {
@@ -1107,6 +1137,9 @@
           "mode": {
             "type": "string"
           },
+          "mode_source": {
+            "type": "string"
+          },
           "next": {
             "items": {
               "type": "string"
@@ -1132,8 +1165,14 @@
           "pending_since": {
             "type": "string"
           },
+          "prior_accepted_sha": {
+            "type": "string"
+          },
           "project_id": {
             "type": "string"
+          },
+          "redo_note": {
+            "$ref": "#/components/schemas/RunlogRedoNote"
           },
           "resolution": {
             "type": "string"
@@ -1142,6 +1181,12 @@
             "type": "string"
           },
           "roster": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "roster_sources": {
             "additionalProperties": {
               "type": "string"
             },
@@ -1166,6 +1211,9 @@
             "type": "boolean"
           },
           "subject": {
+            "type": "string"
+          },
+          "task_body_hash": {
             "type": "string"
           },
           "task_id": {
@@ -1982,6 +2030,9 @@
           },
           "unreleased_branches": {
             "type": "integer"
+          },
+          "working_tree_dirty": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -2118,6 +2169,9 @@
           },
           "then_build": {
             "type": "boolean"
+          },
+          "verify": {
+            "type": "string"
           }
         },
         "required": [
@@ -3306,6 +3360,41 @@
       }
     },
     "/v1/projects/{id}/bugs/{bug}": {
+      "get": {
+        "operationId": "BugGet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one bug's full report"
+      },
       "put": {
         "operationId": "BugEdit",
         "parameters": [
@@ -3719,6 +3808,43 @@
           }
         ],
         "summary": "The project's suggested next steps"
+      }
+    },
+    "/v1/projects/{id}/recover/{action}": {
+      "post": {
+        "operationId": "ProjectRecover",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Clean or commit the working tree"
       }
     },
     "/v1/projects/{id}/releases": {
@@ -4922,6 +5048,35 @@
           }
         ],
         "summary": "Add or replace a provider"
+      }
+    },
+    "/v1/restart": {
+      "post": {
+        "operationId": "Restart",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirestartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Checkpoint active runs for an attributed restart request"
       }
     },
     "/v1/runs": {

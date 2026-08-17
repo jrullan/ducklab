@@ -860,6 +860,23 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	var req restartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Requester) == "" {
+		s.error(w, http.StatusBadRequest, "invalid_request", "restart requester is required")
+		return
+	}
+	if err := s.svc.RequestRestart(r.Context(), req.Requester); err != nil {
+		s.error(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	s.json(w, http.StatusAccepted, map[string]string{"status": "restart requested"})
+}
+
 func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	projects, err := s.svc.ProjectList(r.Context())
 	if err != nil {

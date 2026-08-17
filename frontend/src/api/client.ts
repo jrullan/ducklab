@@ -817,6 +817,10 @@ export class EngineClient {
   run(id: string) {
     return this.request<{ run: Run; events: unknown[] }>("GET", `/v1/runs/${id}`);
   }
+  /** Ask the live engine to checkpoint work before its caller replaces it. */
+  restart(requester: string) {
+    return this.request<{ status: string }>("POST", "/v1/restart", { requester });
+  }
   /** Every model call this run made: what was sent, what came back, what it
    * cost. The one place that shows what a model was actually given — a prompt
    * is assembled from a task, a spec, a transcript and a toolbelt, and when the

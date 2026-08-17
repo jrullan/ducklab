@@ -837,6 +837,15 @@ func (c *Client) Shutdown() error {
 	return c.post("/v1/shutdown", nil, nil)
 }
 
+// RequestRestart asks the live engine to checkpoint its active runs for an
+// attributed restart, before the caller stops the process. Unlike Shutdown's
+// unattributed engine_shutdown checkpoints, each run's record then carries the
+// requester and a recovery deadline: if the caller never stops the engine, it
+// un-checkpoints and resumes its own runs when the deadline passes (B-046).
+func (c *Client) RequestRestart(requester string) error {
+	return c.post("/v1/restart", map[string]string{"requester": requester}, nil)
+}
+
 // ActiveRuns returns the ids of runs that are running or queued — the work a
 // restart would cut off mid-call. Paused runs do not count: a run waiting at
 // a gate survives a restart by design (I9) and resumes from where it stood.

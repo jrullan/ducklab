@@ -56,7 +56,11 @@ type Service struct {
 	// shuttingDown makes an in-flight run's cancellation read as a deliberate
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool
-	queue        *runQueue
+	// now and restartRecoveryDeadline make the bounded restart checkpoint
+	// recoverable without tying tests or recovery logic to wall-clock sleeps.
+	now                     func() time.Time
+	restartRecoveryDeadline time.Duration
+	queue                   *runQueue
 	// The autopilot's per-project state; in-memory on purpose — an engine
 	// restart lands every loop OFF (autopilot.go).
 	autopilots map[string]*autopilotState
@@ -110,6 +114,11 @@ type runState struct {
 // Options are service options.
 type Options struct {
 	Bus *bus.Bus
+	// Now is a clock seam for bounded restart recovery. Nil uses time.Now.
+	Now func() time.Time
+	// RestartRecoveryDeadline bounds an uncompleted restart request. Zero uses
+	// the production default.
+	RestartRecoveryDeadline time.Duration
 	// ConfigPath is the file the global config was loaded from, so changes to
 	// ducklings and providers can be written back. Empty makes those
 	// operations fail with a clear message rather than appear to work.
@@ -123,17 +132,27 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		return nil, fmt.Errorf("load registry: %w", err)
 	}
 
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	restartRecoveryDeadline := opts.RestartRecoveryDeadline
+	if restartRecoveryDeadline <= 0 {
+		restartRecoveryDeadline = 30 * time.Second
+	}
 	s := &Service{
-		cfg:        cfg,
-		configPath: opts.ConfigPath,
-		registry:   reg,
-		ducklings:  duckling.NewRegistry(),
-		bus:        opts.Bus,
-		runs:       make(map[string]*runState),
-		providers:  make(map[config.ProviderID]provider.Provider),
-		projects:   make(map[string]*projectState),
-		queue:      newRunQueue(cfg.Engine.MaxConcurrentRuns),
-		apps:       make(map[string]*appState),
+		cfg:                     cfg,
+		now:                     now,
+		restartRecoveryDeadline: restartRecoveryDeadline,
+		configPath:              opts.ConfigPath,
+		registry:                reg,
+		ducklings:               duckling.NewRegistry(),
+		bus:                     opts.Bus,
+		runs:                    make(map[string]*runState),
+		providers:               make(map[config.ProviderID]provider.Provider),
+		projects:                make(map[string]*projectState),
+		queue:                   newRunQueue(cfg.Engine.MaxConcurrentRuns),
+		apps:                    make(map[string]*appState),
 	}
 	s.queue.held = s.projectHeld
 
@@ -1680,18 +1699,20 @@ func (s *Service) failRun(rs *runState, err error) {
 		}
 		return
 	}
-	// A cancellation during graceful shutdown is a pause, not a failure.
-	// Without this check, stopping the engine marks every in-flight run
-	// FAILED and the work is lost.
-	if s.shuttingDown.Load() && errors.Is(err, context.Canceled) {
-		rs.run.Status = "paused"
-		rs.run.PendingKind = "engine_shutdown"
-		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-		rs.writer.AppendEvent("checkpoint", map[string]interface{}{
-			"reason": "engine_shutdown",
-			"status": "paused",
-		})
-		rs.writer.WriteState()
+	// A cancellation during shutdown or an attributed restart is a pause, not
+	// a failure. RequestRestart writes its checkpoint before cancelling the
+	// goroutine, so preserve that durable restart reason.
+	if errors.Is(err, context.Canceled) && (s.shuttingDown.Load() || rs.run.PendingKind == "engine_restart") {
+		if rs.run.PendingKind != "engine_restart" {
+			rs.run.Status = "paused"
+			rs.run.PendingKind = "engine_shutdown"
+			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+			rs.writer.AppendEvent("checkpoint", map[string]interface{}{
+				"reason": "engine_shutdown",
+				"status": "paused",
+			})
+			rs.writer.WriteState()
+		}
 		return
 	}
 	rs.run.Status = "failed"
@@ -1993,8 +2014,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
-		rs.run.PendingKind = ""
-		rs.run.PendingSince = ""
+		clearPending(rs.run)
 		rs.run.Failure = ""
 		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
 		w.WriteState()
@@ -2030,8 +2050,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
-		rs.run.PendingKind = ""
-		rs.run.PendingSince = ""
+		clearPending(rs.run)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
 		rs.run.Failure = ""
@@ -2053,8 +2072,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// and a run still wearing "paused" would hold the project against its own
 	// resume — queued forever behind itself.
 	rs.run.Status = "running"
-	rs.run.PendingKind = ""
-	rs.run.PendingSince = ""
+	clearPending(rs.run)
 	// The failure text was the pause's reason (a budget pause records it);
 	// resuming answers it. Left in place, a resumed, working run went on
 	// wearing "Why it failed" over a live conversation.

@@ -3,17 +3,17 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/jrullan/ducklab/internal/strategy"
-	"github.com/jrullan/ducklab/internal/artifact"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -199,13 +199,168 @@ func (s *Service) markEngineRestart(rs *runState) error {
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "engine_restart"
 	if rs.run.PendingSince == "" {
-		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.PendingSince = s.now().UTC().Format(time.RFC3339Nano)
 	}
 	w.AppendEvent("checkpoint", map[string]interface{}{
 		"reason": "engine_restart",
 		"status": "paused",
 	})
 	return w.WriteState()
+}
+
+// RequestRestart checkpoints active runs while a replacement engine is
+// requested. Unlike shutdown, this engine remains alive until its caller stops
+// it, so each checkpoint carries the requester for deadline recovery.
+func (s *Service) RequestRestart(ctx context.Context, requester string) error {
+	if strings.TrimSpace(requester) == "" {
+		return fmt.Errorf("restart requester is required")
+	}
+	s.runsMu.RLock()
+	var active []*runState
+	for _, rs := range s.runs {
+		if rs.run.Status == "running" || rs.run.Status == "queued" {
+			active = append(active, rs)
+		}
+	}
+	s.runsMu.RUnlock()
+	for _, rs := range active {
+		w, err := s.ensureWriter(rs)
+		if err != nil {
+			return err
+		}
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "engine_restart"
+		now := s.now().UTC()
+		rs.run.PendingSince = now.Format(time.RFC3339Nano)
+		rs.run.PendingData = map[string]interface{}{
+			"requester": requester,
+			"deadline":  now.Add(s.restartRecoveryDeadline).Format(time.RFC3339Nano),
+		}
+		if err := w.AppendEvent("restart_request", map[string]interface{}{"requester": requester}); err != nil {
+			return err
+		}
+		if err := w.AppendEvent("checkpoint", map[string]interface{}{"reason": "engine_restart", "status": "paused"}); err != nil {
+			return err
+		}
+		if err := w.WriteState(); err != nil {
+			return err
+		}
+		// A checkpoint without cancellation is only a label: the old goroutine
+		// can keep changing the tree after its successor resumes it.
+		if rs.cancel != nil {
+			rs.cancel()
+		}
+		// A queued run still has a live waiting-line entry. Left there, the queue
+		// can promote and start it before the deadline — and a later resume would
+		// then enqueue the same run a second time. Withdraw it here so the only
+		// path back into execution is resume.
+		s.queue.remove(rs)
+	}
+	// Arm deadline recovery the instant the checkpoints are recorded, not after
+	// the bounded worker drain below. A restart with slow-to-cancel runs must
+	// still recover on schedule: the drain is a courtesy wait for tidy writer
+	// close, while the timer is the durable promise that a stalled restart is
+	// undone at its recorded deadline. If the caller never stops this engine, it
+	// remains responsible for undoing its own checkpoints; a replacement process
+	// never reaches this timer.
+	if len(active) > 0 {
+		s.scheduleRestartRecovery(s.restartRecoveryDeadline)
+	}
+	// Let the cancelled workers finish closing their writers before recovery can
+	// re-enter them. The bounded wait matches graceful shutdown: a worker that
+	// misses its safe point still has a durable checkpoint to resume from.
+	for _, rs := range active {
+		if rs.done == nil {
+			continue
+		}
+		select {
+		case <-rs.done:
+		case <-time.After(pauseWaitPerRun):
+		case <-ctx.Done():
+		}
+	}
+	return nil
+}
+
+// restartRecoveryRetry bounds how long deadline recovery waits between passes
+// when a checkpointed worker has not finished unwinding. A worker that overruns
+// one pass is retried on the next rather than resumed alongside its still-live
+// self, so no expired checkpoint is left parked forever.
+const restartRecoveryRetry = pauseWaitPerRun
+
+// scheduleRestartRecovery arms a one-shot timer that runs a recovery pass after
+// d. RecoverAbandonedRestarts reschedules itself while any expired checkpoint
+// still has a draining worker, so recovery never abandons a run it could not
+// resume on the first attempt.
+func (s *Service) scheduleRestartRecovery(d time.Duration) {
+	time.AfterFunc(d, func() {
+		_ = s.RecoverAbandonedRestarts(context.Background())
+	})
+}
+
+// RecoverAbandonedRestarts resumes checkpoints whose requesting engine never
+// stopped. The restart request and abandonment remain durable run events.
+func (s *Service) RecoverAbandonedRestarts(ctx context.Context) error {
+	now := s.now()
+	s.runsMu.RLock()
+	var abandoned []*runState
+	for _, rs := range s.runs {
+		if rs.run.Status != "paused" || rs.run.PendingKind != "engine_restart" {
+			continue
+		}
+		deadline, err := time.Parse(time.RFC3339Nano, stringValue(rs.run.PendingData, "deadline"))
+		if err != nil {
+			since, sinceErr := time.Parse(time.RFC3339Nano, rs.run.PendingSince)
+			if sinceErr != nil {
+				since, sinceErr = time.Parse(time.RFC3339, rs.run.PendingSince)
+			}
+			if sinceErr != nil {
+				continue
+			}
+			deadline = since.Add(s.restartRecoveryDeadline)
+		}
+		if !now.Before(deadline) {
+			abandoned = append(abandoned, rs)
+		}
+	}
+	s.runsMu.RUnlock()
+	deferred := false
+	for _, rs := range abandoned {
+		requester, _ := rs.run.PendingData["requester"].(string)
+		// Two workers must never touch one project at once. The checkpoint
+		// cancelled the original worker, but cancellation only asks it to stop —
+		// it may still be unwinding. Only resume once its done channel has closed;
+		// a worker still draining is left for a later pass, which is rescheduled
+		// below, rather than resumed alongside its still-live self or skipped and
+		// forgotten.
+		if prior := rs.done; prior != nil {
+			select {
+			case <-prior:
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				deferred = true
+				continue
+			}
+		}
+		w, err := s.ensureWriter(rs)
+		if err != nil {
+			return err
+		}
+		if err := w.AppendEvent("restart_abandoned", map[string]interface{}{"requester": requester}); err != nil {
+			return err
+		}
+		if _, err := s.RunResume(ctx, rs.run.ID); err != nil {
+			return err
+		}
+	}
+	// An expired checkpoint whose worker had not finished unwinding was left
+	// untouched above. Schedule another pass so it is resumed as soon as the
+	// worker exits, instead of parking forever on the first missed drain.
+	if deferred {
+		s.scheduleRestartRecovery(restartRecoveryRetry)
+	}
+	return nil
 }
 
 // PauseAllRuns checkpoints every in-flight run as paused. Called on SIGTERM
@@ -271,6 +426,11 @@ func (s *Service) entryFor(rs *runState) (*registry.ProjectEntry, error) {
 		return &registry.ProjectEntry{ID: rs.run.ProjectID, Path: rs.projectPath}, nil
 	}
 	return nil, fmt.Errorf("project %q not found for run %q", rs.run.ProjectID, rs.run.ID)
+}
+
+func stringValue(data map[string]interface{}, key string) string {
+	value, _ := data[key].(string)
+	return value
 }
 
 func closedChan() chan struct{} {

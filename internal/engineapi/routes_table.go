@@ -41,15 +41,19 @@ type listOf struct {
 }
 
 type healthResponse struct {
-	OK         bool   `json:"ok"`
-	Version    string `json:"version"`
-	Provenance string `json:"provenance,omitempty"`
-	UptimeS    int    `json:"uptime_s"`
+	OK         bool           `json:"ok"`
+	Version    string         `json:"version"`
+	Provenance string         `json:"provenance,omitempty"`
+	UptimeS    int            `json:"uptime_s"`
 	Queue      map[string]int `json:"queue"`
 }
 
 type acceptRequest struct {
 	Message string `json:"message"`
+}
+
+type restartRequest struct {
+	Requester string `json:"requester"`
 }
 
 type rejectRequest struct {
@@ -136,6 +140,9 @@ func routeTable() []Route {
 		{Method: "POST", Path: "/v1/shutdown", Auth: true,
 			Summary: "Request a graceful stop",
 			handler: func(s *Server) http.HandlerFunc { return s.handleShutdown }},
+		{Method: "POST", Path: "/v1/restart", Auth: true,
+			Request: restartRequest{}, Summary: "Checkpoint active runs for an attributed restart request", ClientMethod: "Restart",
+			handler: func(s *Server) http.HandlerFunc { return s.handleRestart }},
 
 		// Projects
 		{Method: "GET", Path: "/v1/projects", Auth: true,
@@ -367,7 +374,7 @@ func routeTable() []Route {
 			Summary: "Read one bug's full report", ClientMethod: "BugGet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleBugGet }},
 		{Method: "PUT", Path: "/v1/projects/{id}/bugs/{bug}", Auth: true,
-			Request: service.BugRequest{},
+			Request:      service.BugRequest{},
 			Summary:      "Correct what a report says. A bug could be moved, triaged and promoted but never edited.",
 			ClientMethod: "BugEdit",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBugEdit }},
@@ -443,8 +450,8 @@ func routeTable() []Route {
 			ClientMethod: "TestStart",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleTestStart }},
 		{Method: "POST", Path: "/v1/projects/{id}/bugs/{bug}/attachments", Auth: true,
-			Request: attachRequest{},
-			Summary: "Attach a file (base64) to a bug — the screenshot that says what a paragraph cannot",
+			Request:      attachRequest{},
+			Summary:      "Attach a file (base64) to a bug — the screenshot that says what a paragraph cannot",
 			ClientMethod: "BugAttach",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBugAttach }},
 		{Method: "GET", Path: "/v1/projects/{id}/bugs/{bug}/attachments/{name}", Auth: true,
@@ -488,8 +495,8 @@ func routeTable() []Route {
 			ClientMethod: "TraceCheck",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleTraceCheck }},
 		{Method: "GET", Path: "/v1/projects/{id}/trace/report", Auth: true,
-			Response: renderedResponse{},
-			Summary:  "The development report: narrative from the approved requirements, the requirement→spec→task matrix with statuses, bug fixes, releases, spine health. Deterministic — no model writes the record.",
+			Response:     renderedResponse{},
+			Summary:      "The development report: narrative from the approved requirements, the requirement→spec→task matrix with statuses, bug fixes, releases, spine health. Deterministic — no model writes the record.",
 			ClientMethod: "TraceReport",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleTraceReport }},
 

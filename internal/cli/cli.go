@@ -264,6 +264,15 @@ func engineCmd(verb string, args []string) int {
 					}
 				}
 			}
+			// A forced restart with active runs must checkpoint them as an
+			// attributed restart request, not as an unattributed engine_shutdown:
+			// the record must say who asked, and each checkpoint carries a
+			// recovery deadline so a restart that never completes un-parks its
+			// runs instead of stranding them (B-046). Best-effort: an engine that
+			// cannot take the request is still stopped below.
+			if verb == "restart" {
+				_ = client.RequestRestart("cli")
+			}
 			if sErr := client.Shutdown(); sErr == nil {
 				if wErr := daemon.WaitGone(15 * time.Second); wErr != nil {
 					fmt.Fprintf(os.Stderr, "error: %v\n", wErr)

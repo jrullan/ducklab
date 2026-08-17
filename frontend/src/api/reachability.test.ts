@@ -24,6 +24,8 @@ const knownUnwired: Record<string, string> = {
     "per-stage progress and task counts — the natural feed for a richer Work header, unbuilt",
   traceShow:
     "the spine walk from one id; the Cycle rail renders the whole check instead",
+  restart:
+    "an attributed restart REQUEST that checkpoints live runs; issued by the supervising Go shell through engineclt, not by this webview — the window cannot restart the engine it stands in, only resume the runs a restart left checkpointed",
 };
 
 function collect(dir: string, out: string[] = []): string[] {

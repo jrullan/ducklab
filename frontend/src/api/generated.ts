@@ -218,6 +218,10 @@ export interface EngineapirenderedResponse {
   rendered?: string;
 }
 
+export interface EngineapirestartRequest {
+  requester?: string;
+}
+
 export interface EngineapirosterSetRequest {
   duckling?: string;
   role?: string;
@@ -315,6 +319,12 @@ export interface RunlogEvent {
   type?: string;
 }
 
+export interface RunlogRedoNote {
+  advisor?: string;
+  draft?: string;
+  editable?: boolean;
+}
+
 export interface RunlogRun {
   accepted?: boolean;
   agent_turns?: number;
@@ -329,6 +339,7 @@ export interface RunlogRun {
   gate?: string;
   id?: string;
   mode?: string;
+  mode_source?: string;
   next?: string[];
   no_changes?: boolean;
   note?: string;
@@ -336,16 +347,20 @@ export interface RunlogRun {
   pending_data?: Record<string, unknown>;
   pending_kind?: string;
   pending_since?: string;
+  prior_accepted_sha?: string;
   project_id?: string;
+  redo_note?: RunlogRedoNote;
   resolution?: string;
   revert_sha?: string;
   roster?: Record<string, string>;
+  roster_sources?: Record<string, string>;
   spend?: Record<string, RunlogDucklingSpend>;
   stage?: string;
   started_at?: string;
   status?: string;
   stream?: boolean;
   subject?: string;
+  task_body_hash?: string;
   task_id?: string;
   tests_modified?: boolean;
   tokens_estimated?: boolean;
@@ -575,6 +590,7 @@ export interface ServiceStatus {
   stage_progress?: Record<string, string>;
   task_counts?: Record<string, number>;
   unreleased_branches?: number;
+  working_tree_dirty?: boolean;
 }
 
 export interface ServiceSuggestion {
@@ -613,6 +629,7 @@ export interface ServiceTestFirstRequest {
   redo?: boolean;
   task_id?: string;
   then_build?: boolean;
+  verify?: string;
 }
 
 export interface SkillArg {
@@ -660,6 +677,7 @@ export const OPERATIONS = [
   { id: "BugList", method: "GET", path: "/v1/projects/{id}/bugs" },
   { id: "BugAdd", method: "POST", path: "/v1/projects/{id}/bugs" },
   { id: "BugTriage", method: "POST", path: "/v1/projects/{id}/bugs/triage" },
+  { id: "BugGet", method: "GET", path: "/v1/projects/{id}/bugs/{bug}" },
   { id: "BugEdit", method: "PUT", path: "/v1/projects/{id}/bugs/{bug}" },
   { id: "BugAttach", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/attachments" },
   { id: "BugAttachment", method: "GET", path: "/v1/projects/{id}/bugs/{bug}/attachments/{name}" },
@@ -670,6 +688,7 @@ export const OPERATIONS = [
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
   { id: "ProjectNext", method: "GET", path: "/v1/projects/{id}/next" },
+  { id: "ProjectRecover", method: "POST", path: "/v1/projects/{id}/recover/{action}" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
   { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
   { id: "ReleaseGet", method: "GET", path: "/v1/projects/{id}/releases/{version}" },
@@ -700,6 +719,7 @@ export const OPERATIONS = [
   { id: "ProviderList", method: "GET", path: "/v1/providers" },
   { id: "ProviderRemove", method: "DELETE", path: "/v1/providers/{id}" },
   { id: "ProviderSet", method: "PUT", path: "/v1/providers/{id}" },
+  { id: "Restart", method: "POST", path: "/v1/restart" },
   { id: "RunList", method: "GET", path: "/v1/runs" },
   { id: "RunGet", method: "GET", path: "/v1/runs/{id}" },
   { id: "RunAbort", method: "POST", path: "/v1/runs/{id}/abort" },
