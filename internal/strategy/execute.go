@@ -293,9 +293,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if turn.Role == config.RoleImplementer {
 				if len(params.Deliverables) > 0 {
 					lastReport = ParseDeliverablesReport(outcome.Text, len(params.Deliverables))
+					// Self-contained: the texts ride along so a client can
+					// render the checklist without re-deriving it from the task.
 					reportData := map[string]interface{}{
 						"round": round, "items": lastReport.Items, "unreported": lastReport.Unreported,
 						"total": len(params.Deliverables), "undelivered": lastReport.Undelivered(),
+						"deliverables": params.Deliverables,
 					}
 					if consultRetries > 0 {
 						reportData["retry"] = consultRetries

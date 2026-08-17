@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
-import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId } from "../lib/runview";
+import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
 import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
+import { DeliverablesCard } from "../components/DeliverablesCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -419,6 +420,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     return Math.round(chars / 4);
   })();
   const gate = buildGate(events);
+  const deliverables = buildDeliverables(events);
   const pending = buildPending(events);
   // A green gate over an unconvinced reviewer must not be silent (T-028:
   // three straight request-changes verdicts under "tests passed").
@@ -1612,6 +1614,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+          <DeliverablesCard report={deliverables} />
           <GateCard gate={gate} stage={run.stage} />
         </aside>
         ) : (

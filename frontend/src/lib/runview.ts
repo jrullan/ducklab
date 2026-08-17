@@ -111,6 +111,66 @@ export interface Finding {
   fix?: string;
 }
 
+/** The implementer's deliverables report — the work contract, as filed. */
+export interface DeliverableLine {
+  id: number;
+  text: string;
+  status: "done" | "partial" | "not_done" | "blocked" | "unreported";
+  note?: string;
+}
+export interface DeliverablesState {
+  round: number;
+  retry?: number;
+  unreported: boolean;
+  lines: DeliverableLine[];
+  done: number;
+  total: number;
+  /** True when a reviewer approved over items the implementer reported undelivered. */
+  gap: boolean;
+}
+
+/** The LATEST deliverables_report wins: a retried implementer turn re-files. */
+export function buildDeliverables(events: DucklabEvent[]): DeliverablesState | null {
+  let report: DucklabEvent | null = null;
+  let gap = false;
+  for (const e of events) {
+    if (e.type === "deliverables_report") {
+      report = e;
+      gap = false;
+    } else if (e.type === "deliverables_gap") {
+      gap = true;
+    }
+  }
+  if (!report) return null;
+  const d = report.data ?? {};
+  const texts = Array.isArray(d.deliverables) ? d.deliverables.map(String) : [];
+  const total = Number(d.total ?? texts.length) || texts.length;
+  const byId = new Map<number, { status: string; note?: string }>();
+  if (Array.isArray(d.items)) {
+    for (const it of d.items) {
+      const id = Number(it?.id);
+      if (id >= 1) byId.set(id, { status: String(it.status ?? ""), note: it.note ? String(it.note) : undefined });
+    }
+  }
+  const lines: DeliverableLine[] = [];
+  for (let id = 1; id <= Math.max(total, texts.length); id++) {
+    const r = byId.get(id);
+    const status = (r && ["done", "partial", "not_done", "blocked"].includes(r.status)
+      ? r.status
+      : "unreported") as DeliverableLine["status"];
+    lines.push({ id, text: texts[id - 1] ?? `deliverable ${id}`, status, note: r?.note });
+  }
+  return {
+    round: Number(d.round ?? 0),
+    retry: d.retry != null ? Number(d.retry) : undefined,
+    unreported: Boolean(d.unreported),
+    lines,
+    done: lines.filter((l) => l.status === "done").length,
+    total: lines.length,
+    gap,
+  };
+}
+
 export interface GateState {
   gate: string;
   exitCode?: number;
