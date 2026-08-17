@@ -89,13 +89,13 @@ func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 	}
 	bugStep, ok := byRef["B-017"]
 	if !ok {
-		t.Fatalf("guide = %v, want a reopen step for fixed bug B-017", ids(steps))
+		t.Fatalf("guide = %v, want a verification step for fixed bug B-017", ids(steps))
 	}
-	if bugStep.ID != "reopen-bug" || bugStep.Kind != "bug" {
-		t.Errorf("fixed bug step = %+v, want id reopen-bug and kind bug", bugStep)
+	if bugStep.ID != "verify-bug" || bugStep.Kind != "bug" {
+		t.Errorf("fixed bug step = %+v, want id verify-bug and kind bug", bugStep)
 	}
-	if !strings.Contains(strings.ToLower(bugStep.Action), "reopen") || bugStep.Reason == "" {
-		t.Errorf("fixed bug step must explain the reopen outcome and reason: %+v", bugStep)
+	if !strings.HasPrefix(bugStep.Action, "Verify B-017") || !strings.Contains(strings.ToLower(bugStep.Action), "reopen") || bugStep.Reason == "" {
+		t.Errorf("fixed bug step must lead with verification and explain the reopen alternative: %+v", bugStep)
 	}
 
 	taskStep, ok := byRef["T-016"]
@@ -121,6 +121,41 @@ func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 	for _, step := range quiet {
 		if step.ID == "reopen-bug" || step.ID == "reopen-task" {
 			t.Errorf("ineligible object received reopen step: %+v", step)
+		}
+	}
+}
+
+// Ordinary fixed bugs await the human-only I2 judgement: verification is the
+// headline, while reopening is only the alternative if the fix missed the report.
+func TestTheGuidePrioritizesVerificationForFixedBugs(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Bugs: []bug.Bug{
+			{ID: "B-004", Status: bug.Fixed},
+			{ID: "B-007", Status: bug.Fixed},
+			{ID: "B-018", Status: bug.Fixed},
+		},
+	})
+
+	for _, id := range []string{"B-004", "B-007", "B-018"} {
+		var found *NextStep
+		for i := range steps {
+			if steps[i].Ref == id {
+				found = &steps[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("guide = %v, want a step for fixed bug %s", ids(steps), id)
+		}
+		if found.ID != "verify-bug" || found.Kind != "bug" {
+			t.Errorf("fixed bug %s step = %+v, want verify-bug bug step", id, *found)
+		}
+		if !strings.HasPrefix(found.Action, "Verify "+id+" — confirm the fix answers the report") {
+			t.Errorf("fixed bug %s action = %q, want Verify as the headline", id, found.Action)
+		}
+		if !strings.Contains(strings.ToLower(found.Action), "reopen") {
+			t.Errorf("fixed bug %s action = %q, want reopen as the decision alternative", id, found.Action)
 		}
 	}
 }
