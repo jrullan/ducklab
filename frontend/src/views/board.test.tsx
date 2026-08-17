@@ -231,6 +231,26 @@ describe("Board — starting the work", () => {
     return screen.findByTestId("task-runner");
   };
 
+  // A summary reload empties task bodies; the rail must read the selected
+  // task in full rather than show a title over nothing.
+  it("refills a body-less selected task from the full list", async () => {
+    const summaryTask = { ...task, body: "" };
+    const fullTask = { ...task, body: "- Add the file input\n- Post multipart" };
+    // The list on screen came from a summary reload (bodies stripped); only
+    // an explicit full fetch carries the body.
+    let calls = 0;
+    const tasks = vi.fn((_p: string, summary?: boolean) => {
+      calls++;
+      return Promise.resolve([calls === 1 || summary ? summaryTask : fullTask]);
+    });
+    const client = runClient({ tasks });
+    render(<Board client={client} projectId="p" />);
+    await openRail();
+    expect(await screen.findByTestId("task-body")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("task-body").textContent).toContain("Add the file input"));
+    expect(tasks).toHaveBeenCalledWith("p", false);
+  });
+
   it("starts a build run in the chosen mode", async () => {
     const client = runClient();
     render(<Board client={client} projectId="p" />);

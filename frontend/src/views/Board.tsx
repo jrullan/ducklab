@@ -221,6 +221,22 @@ export function Board({
     }).catch(() => {});
   }, [board, client, projectId, selected]);
 
+  // The same courtesy for tasks. A summary reload after a run transition
+  // empties every task body, and the detail rail reads the body from that
+  // list — a task selected right after a plan-amend showed a title and no
+  // words. There is no single-task endpoint, so the full list is fetched
+  // once, only when the selected task's body is missing.
+  useEffect(() => {
+    if (!selected || board !== "tasks") return;
+    const cur = tasks.find((t) => t.id === selected);
+    if (!cur || cur.body) return;
+    void client.tasks(projectId, false).then((full) => {
+      setTasks((current) => current.map((t) => full.find((f) => f.id === t.id) ?? t));
+    }).catch(() => {});
+    // tasks is read, not depended on: refilling must not re-trigger itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board, client, projectId, selected]);
+
   const milestones = useMemo(
     () => [...new Set(tasks.map((t) => t.milestone).filter(Boolean))].sort(),
     [tasks],
