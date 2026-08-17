@@ -1936,6 +1936,14 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) e
 	}
 	defer git.WorktreeRemove(checkout)
 
+	// Installed dependencies are build caches, not repository truth — the
+	// same lesson B-048 taught the environment scrub. A fresh checkout has
+	// no node_modules, so the frontend half of a gate died at "this is not
+	// the tsc command you are looking for" — or would pay a full npm
+	// install per accept. Link the project's own installed trees wherever
+	// the commit carries the matching package.json.
+	linkInstalledDeps(root, checkout)
+
 	result, err := verify.Run(ctx, checkout, cfg.Verify)
 	if err != nil {
 		return fmt.Errorf("run gate from clean checkout: %w", err)
@@ -1947,6 +1955,27 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha string) e
 		return fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return nil
+}
+
+// linkInstalledDeps symlinks installed dependency trees from the live
+// project into a clean checkout. Best effort by design: a missing link just
+// means the gate pays the install, and a gate that cannot install fails with
+// the package manager's own words.
+func linkInstalledDeps(root, checkout string) {
+	for _, rel := range []string{"node_modules", filepath.Join("frontend", "node_modules")} {
+		src := filepath.Join(root, rel)
+		dst := filepath.Join(checkout, rel)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(dst), "package.json")); err != nil {
+			continue
+		}
+		if _, err := os.Lstat(dst); err == nil {
+			continue
+		}
+		_ = os.Symlink(src, dst)
+	}
 }
 
 // logResolution records a decision and closes the run out.
