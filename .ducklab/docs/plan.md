@@ -915,4 +915,63 @@ Unbounded client-side streamed content and repeated full-board fetches predictab
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-047 — Attribute yolo auto-accept decisions to the autopilot instead of human
+
+Fixes B-043.
+
+## Reported
+
+What happened: under yolo autonomy, T-036's three auto-accepted builds each recorded the event human {action: accept} in the same second as run_end — the record swears the person decided three times in three seconds while they were doing nothing of the kind. The whole audit design (REQ-021: decisions attributed as mcp:client, never human; signed bug moves; decide reasons on the record) rests on actor honesty, and the autopilot's own accepts break it. Attribution precedent exists everywhere else: auto:tdd, auto-triage, mcp:claude-code — the yolo accept is the one liar left.
+
+Expected: an accept the autopilot makes under yolo records auto:yolo (or autopilot) as the actor, with the autonomy level noted — human is reserved for a human. An audit trail is only as good as its worst signature.
+
+## Triage
+
+**Component:** audit attribution
+**Suspected files:** internal/service, internal/engine
+
+Yolo acceptance corrupts the audit trail by attributing automated decisions to a human, violating the system's actor-attribution invariant.
+
+**Verification (triage recommends):** test-first — Run an auto-accept under yolo autonomy and assert its recorded actor is auto:yolo with the autonomy level, never human.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-048 — Unify omitted-mode resolution across desktop, autopilot, and MCP launches
+
+Fixes B-045.
+
+## Reported
+
+What happened: reviewing tonight's builds, T-039 and T-040 (origin: autopilot) ran pair while T-042 (launched over MCP/desktop without an explicit mode) ran solo — same project, same phase, same settings. Three surfaces resolve an omitted mode from three sources: the desktop launcher prefills from Settings phase defaults (build=pair), the autopilot's empty-mode requests resolve to the project's habit, and an MCP test_build with mode omitted falls to the engine's hard default (solo). The person reads the run list and concludes the autopilot changed behavior; the truth is the doors disagree. Sibling of B-035 (seats): every omitted parameter needs ONE resolution rule shared by every entrance.
+
+Expected: omitted mode resolves identically everywhere — Settings phase default, else project habit, else solo — and the run records which source decided it (mode: pair (settings)), so a mixed night of human, agent and autopilot launches reads as one system, not three.
+
+## Triage
+
+**Component:** launcher mode resolution
+
+Each launch surface applies a different defaulting rule, causing identical omitted-mode runs to execute differently and misleading operators.
+
+**Verification (triage recommends):** test-first — Launch equivalent omitted-mode requests through each entrance and assert settings, project-habit, and solo fallback precedence plus recorded provenance.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-049 — Recover orphaned restart checkpoints after a deadline and expose operator resume
+
+Fixes B-046.
+
+## Reported
+
+What happened: T-043's test run checkpointed at 00:15:39 with pending engine_restart — but the engine (started 00:05:26) never restarted; some restart request checkpointed the runs and then did not complete. The run sat parked mid-gate for 8+ minutes reading as \"very slow\" (the human's actual report), no notification fired (B-020), and when found, its only legal action was abort: resume is reserved for the engine's own startup recovery, so a minute of good work died to an orphan checkpoint. The record never says who requested the restart.\n\nExpected: a checkpoint-for-restart carries a deadline — if the engine is still alive N seconds later, it un-checkpoints its runs and resumes them itself, recording restart_abandoned; the restart REQUEST lands in the record with its requester; and a checkpointed run offers resume to operators, not only to the reborn engine — the recovery path should not care who walks it.
+
+## Triage
+
+**Component:** engine restart recovery
+
+A failed restart can indefinitely park active work and discard progress because neither timeout recovery nor operator resume is available.
+
+**Verification (triage recommends):** test-first — Request a restart without stopping the live engine, advance the deadline, and assert runs resume with requester and restart_abandoned recorded.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

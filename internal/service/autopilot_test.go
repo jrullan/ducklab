@@ -143,6 +143,71 @@ func TestTwoConsecutiveFailuresStopTheLoop(t *testing.T) {
 // Off is the default and off means OFF: with the autopilot never enabled,
 // the settle hooks are no-ops — guarded behavior is byte-identical with the
 // autopilot compiled in.
+// An automatic acceptance is a decision by the autopilot, not a person who
+// happened to be nearby. The event stream is the audit record, so it must name
+// both the automated actor and the autonomy under which it was authorized.
+// Conversely, the ordinary accept API remains a human decision.
+func TestYoloAutoAcceptAttributesItsDecisionToTheAutopilot(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addRun := func(id, autonomy, origin string) *runState {
+		t.Helper()
+		run := &runlog.Run{
+			ID: id, ProjectID: projectID, Stage: "test", TaskID: "T-047",
+			Status: "running", Verdict: "PASSED", Autonomy: autonomy, Origin: origin,
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		writer, err := runlog.NewWriter(entry.Path, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rs := &runState{run: run, writer: writer, runDir: writer.RunDir(), projectPath: entry.Path, done: make(chan struct{})}
+		s.runsMu.Lock()
+		s.runs[id] = rs
+		s.runsMu.Unlock()
+		return rs
+	}
+	decision := func(id string) *runlog.Event {
+		t.Helper()
+		detail, err := s.RunGet(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range detail.Events {
+			if event.Data["action"] == "accept" {
+				return event
+			}
+		}
+		t.Fatalf("run %s has no accept decision: %+v", id, detail.Events)
+		return nil
+	}
+
+	yolo := addRun("r-yolo", "yolo", "autopilot")
+	// This is the same empty-actor path used by settleRun when a yolo run passes.
+	if err := s.acceptRun(context.Background(), yolo, entry, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := decision("r-yolo"); got.Type != "auto:yolo" || got.Data["autonomy"] != "yolo" {
+		t.Errorf("yolo accept event = type %q data %+v, want auto:yolo with autonomy yolo", got.Type, got.Data)
+	}
+	if yolo.run.Resolution != "accepted by auto:yolo" {
+		t.Errorf("yolo resolution = %q, want autopilot attribution", yolo.run.Resolution)
+	}
+
+	addRun("r-human", "guarded", "")
+	if _, err := s.RunAccept(context.Background(), "r-human", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := decision("r-human"); got.Type != "human" {
+		t.Errorf("human accept event type = %q, want human", got.Type)
+	}
+}
+
 func TestTheHooksAreInertWhenOff(t *testing.T) {
 	s := newTestService(t)
 	projectID := newTestProject(t, s, "proj")
