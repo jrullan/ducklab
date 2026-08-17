@@ -1313,6 +1313,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if git := vcs.New(entry.Path); rs.run.TreeSnapshot == "" && git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
 			rs.run.TreeSnapshot = snap
+			if head, herr := git.HeadSHA(); herr == nil {
+				rs.run.TreeSnapshotHead = head
+			} else {
+				rs.writer.AppendEvent("warning", map[string]interface{}{
+					"detail": "could not record HEAD with the tree snapshot; cleanup will refuse unless the snapshot matches HEAD: " + herr.Error(),
+				})
+			}
 			rs.writer.WriteState()
 		} else {
 			rs.writer.AppendEvent("warning", map[string]interface{}{
@@ -2602,17 +2609,17 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
+	// Reject means no. Restore before changing the run record: a refusal to
+	// clean up must leave the gate decision available for the operator.
+	if err := restoreAfterUnaccepted(rs); err != nil {
+		return err
+	}
 	rs.run.Status = "done"
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
-	// Reject means no. It used to mean "no, but keep everything anyway": the
-	// record said FAILED while the half-made edits stayed in the tree, and the
-	// next attempt of the task found them and reasoned about work nobody had
-	// accepted as though it were the project's.
-	restoreAfterUnaccepted(rs)
 	err = w.WriteState()
 	// The rejection restored the tree; whatever queued behind its hold can go.
 	s.queue.poke(s)
@@ -2897,12 +2904,12 @@ func runHasUnsavedWork(rs *runState) bool {
 // restoreAfterUnaccepted puts the tree back to the run's start when the run
 // ended without its work being accepted. Quietly a no-op when there is nothing
 // recorded — stage runs and pre-git projects take no snapshot.
-func restoreAfterUnaccepted(rs *runState) {
+func restoreAfterUnaccepted(rs *runState) error {
 	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.run.Accepted {
-		return
+		return nil
 	}
 	git := vcs.New(rs.projectPath)
-	if err := git.RestoreTree(rs.run.TreeSnapshot); err != nil {
+	if err := git.RestoreTreeAtHead(rs.run.TreeSnapshot, rs.run.TreeSnapshotHead); err != nil {
 		// Said, not swallowed: a person who believes the tree is clean will
 		// trust the next run's diff.
 		if rs.writer != nil {
@@ -2910,13 +2917,14 @@ func restoreAfterUnaccepted(rs *runState) {
 				"detail": "the tree could not be restored to the run's start: " + err.Error(),
 			})
 		}
-		return
+		return err
 	}
 	if rs.writer != nil {
 		rs.writer.AppendEvent("tree_restored", map[string]interface{}{
 			"snapshot": rs.run.TreeSnapshot,
 		})
 	}
+	return nil
 }
 
 // llmWriter builds the adapter every run kind must use.

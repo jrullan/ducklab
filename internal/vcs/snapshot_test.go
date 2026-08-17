@@ -81,6 +81,33 @@ func TestARestoredTreeIsThePreRunTree(t *testing.T) {
 
 // A person's uncommitted work from BEFORE the run is part of the snapshot, so
 // restoring a failed run must give it back, not reset to HEAD.
+func TestRestoreAtHeadRefusesAfterCommitsLanded(t *testing.T) {
+	g := repo(t)
+	snap, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := g.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, g.Root, "landed.go", "package project\n")
+	if err := g.Add("landed.go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("land work"); err != nil {
+		t.Fatal(err)
+	}
+
+	err = g.RestoreTreeAtHead(snap, head)
+	if err == nil || !strings.Contains(err.Error(), "1 commits landed since this run began") {
+		t.Fatalf("RestoreTreeAtHead error = %v, want landed-commit refusal", err)
+	}
+	if got := read(t, g.Root, "landed.go"); got != "package project\n" {
+		t.Errorf("restore changed committed file: %q", got)
+	}
+}
+
 func TestRestoreKeepsPreRunUncommittedWork(t *testing.T) {
 	g := repo(t)
 	write(t, g.Root, "notes.md", "uncommitted but mine\n")

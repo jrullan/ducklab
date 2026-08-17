@@ -98,7 +98,7 @@ func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
 	run := &runlog.Run{
 		ID: "r-head-advanced", ProjectID: id, TaskID: "T-001", Stage: "build",
 		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
-		TreeSnapshot: snap, StartedAt: time.Now().UTC().Format(time.RFC3339),
+		TreeSnapshot: snap, TreeSnapshotHead: mustHead(t, g), StartedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	w, err := runlog.NewWriter(dir, run)
 	if err != nil {
@@ -159,6 +159,15 @@ func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
 	if !canReject {
 		t.Errorf("refused reject is not still available: next=%v", detail.Run.Next)
 	}
+}
+
+func mustHead(t *testing.T, g *vcs.Git) string {
+	t.Helper()
+	head, err := g.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head
 }
 
 func TestAcceptDoesNotRestore(t *testing.T) {

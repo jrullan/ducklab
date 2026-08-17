@@ -359,6 +359,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	if git := vcs.New(projectRoot); git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
 			rs.run.TreeSnapshot = snap
+			if head, herr := git.HeadSHA(); herr == nil {
+				rs.run.TreeSnapshotHead = head
+			} else {
+				rs.writer.AppendEvent("warning", map[string]interface{}{
+					"detail": "could not record HEAD with the tree snapshot; cleanup will refuse unless the snapshot matches HEAD: " + herr.Error(),
+				})
+			}
 			rs.writer.WriteState()
 		} else {
 			rs.writer.AppendEvent("warning", map[string]interface{}{

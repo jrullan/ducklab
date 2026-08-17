@@ -494,14 +494,40 @@ func (g *Git) SnapshotTree() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// RestoreTree puts the working tree back to a snapshot: files the run changed
-// are rewritten, files it created are removed. Everything under .ducklab is
-// left alone, as is anything .gitignore hides.
-//
-// A person's own edits made WHILE the run was going are rolled back with it —
-// unavoidable in a shared tree, and the reason to keep hands off a project
-// while a run is working in it.
+// RestoreTree puts the working tree back to a snapshot. New callers should
+// prefer RestoreTreeAtHead so cleanup cannot overwrite commits made after the
+// snapshot.
 func (g *Git) RestoreTree(snapshot string) error {
+	return g.restoreTree(snapshot)
+}
+
+// RestoreTreeAtHead restores a snapshot only if HEAD remains the commit that
+// was current when it was captured. This prevents cleanup from making the
+// working tree older than history that landed while a run was paused.
+func (g *Git) RestoreTreeAtHead(snapshot, expectedHead string) error {
+	if strings.TrimSpace(expectedHead) == "" {
+		// Runs recorded before TreeSnapshotHead existed cannot distinguish their
+		// own changes from later history. Preserve their established cleanup
+		// behavior; every newly captured snapshot records expectedHead above.
+		return g.restoreTree(snapshot)
+	}
+	head, err := g.HeadSHA()
+	if err != nil {
+		return fmt.Errorf("read HEAD before restore: %w", err)
+	}
+	if head != expectedHead {
+		commits, err := g.RevListAfter(expectedHead)
+		if err != nil {
+			return fmt.Errorf("cannot safely restore: HEAD changed since the run began: %w", err)
+		}
+		return fmt.Errorf("%d commits landed since this run began; restoring would rewind them in the tree", len(commits))
+	}
+	return g.restoreTree(snapshot)
+}
+
+// restoreTree performs the destructive restore after its caller has established
+// that doing so cannot overwrite newer history.
+func (g *Git) restoreTree(snapshot string) error {
 	if strings.TrimSpace(snapshot) == "" {
 		return fmt.Errorf("no snapshot to restore")
 	}

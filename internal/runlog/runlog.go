@@ -16,26 +16,26 @@ import (
 
 // Run represents a run's persistent state.
 type Run struct {
-	ID            string                 `json:"id"`
-	ProjectID     string                 `json:"project_id"`
-	Stage         string                 `json:"stage"`
-	Mode          string                 `json:"mode"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Stage     string `json:"stage"`
+	Mode      string `json:"mode"`
 	// ModeSource records how an omitted mode was resolved: settings, project,
 	// or fallback. An explicit request is recorded as request.
-	ModeSource    string                 `json:"mode_source,omitempty"`
-	TaskID        string                 `json:"task_id"`
+	ModeSource string `json:"mode_source,omitempty"`
+	TaskID     string `json:"task_id"`
 	// TaskBodyHash binds derived task state to the meaning run at launch.
 	// Historical runs remain readable but cannot contaminate a recycled ID.
-	TaskBodyHash   string                 `json:"task_body_hash,omitempty"`
-	Roster        map[string]string      `json:"roster"`
+	TaskBodyHash string            `json:"task_body_hash,omitempty"`
+	Roster       map[string]string `json:"roster"`
 	// RosterSources records whether each role came from the roster or a per-run pick.
-	RosterSources map[string]string      `json:"roster_sources,omitempty"`
-	Gate          string                 `json:"gate"`
-	Status        string                 `json:"status"` // running|paused|done|failed|queued
-	Verdict       string                 `json:"verdict"`
-	Accepted      bool                   `json:"accepted"`
-	CommitSHA     string                 `json:"commit_sha"`
-	Branch        string                 `json:"branch,omitempty"`
+	RosterSources map[string]string `json:"roster_sources,omitempty"`
+	Gate          string            `json:"gate"`
+	Status        string            `json:"status"` // running|paused|done|failed|queued
+	Verdict       string            `json:"verdict"`
+	Accepted      bool              `json:"accepted"`
+	CommitSHA     string            `json:"commit_sha"`
+	Branch        string            `json:"branch,omitempty"`
 	// Note is what the person told this run beyond the task body — typically
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.
@@ -53,28 +53,28 @@ type Run struct {
 	// an accepted test-first whose test was retired before its build landed.
 	// The acceptance stays in the record (it happened); this says the promise
 	// it made was withdrawn, and by which commit.
-	RevertSHA     string                 `json:"revert_sha,omitempty"`
+	RevertSHA string `json:"revert_sha,omitempty"`
 	// Subject names what a taskless run was about — the bug a triage read,
 	// where a build would name its task. Without it a triage row said
 	// "triage" and nothing else, and telling two triages apart meant opening
 	// both.
-	Subject       string                 `json:"subject,omitempty"`
-	StartedAt     string                 `json:"started_at"`
-	EndedAt       string                 `json:"ended_at"`
-	WallclockMs   int64                  `json:"wallclock_ms"`
-	PendingSince  string                 `json:"pending_since,omitempty"`
-	PendingKind   string                 `json:"pending_kind,omitempty"` // gate|question
-	PendingData   map[string]interface{} `json:"pending_data,omitempty"`
-	UnsafeWrites  bool                   `json:"unsafe_writes"`
-	Stream        bool                   `json:"stream"`
-	DryRun        bool                   `json:"dry_run"`
-	Autonomy      string                 `json:"autonomy"`
+	Subject      string                 `json:"subject,omitempty"`
+	StartedAt    string                 `json:"started_at"`
+	EndedAt      string                 `json:"ended_at"`
+	WallclockMs  int64                  `json:"wallclock_ms"`
+	PendingSince string                 `json:"pending_since,omitempty"`
+	PendingKind  string                 `json:"pending_kind,omitempty"` // gate|question
+	PendingData  map[string]interface{} `json:"pending_data,omitempty"`
+	UnsafeWrites bool                   `json:"unsafe_writes"`
+	Stream       bool                   `json:"stream"`
+	DryRun       bool                   `json:"dry_run"`
+	Autonomy     string                 `json:"autonomy"`
 	// Origin says who started the run when it was not a person at a button:
 	// "autopilot" today. Empty means human-initiated.
-	Origin string `json:"origin,omitempty"`
-	Budget        BudgetState            `json:"budget"`
-	Resolution    string                 `json:"resolution,omitempty"` // tournament resolution
-	TestsModified bool                   `json:"tests_modified"`
+	Origin        string      `json:"origin,omitempty"`
+	Budget        BudgetState `json:"budget"`
+	Resolution    string      `json:"resolution,omitempty"` // tournament resolution
+	TestsModified bool        `json:"tests_modified"`
 	// NoChanges is true when the run finished without touching a file.
 	//
 	// It happens when the work was already in the tree — usually because an
@@ -132,6 +132,10 @@ type Run struct {
 	// attempt of the same task found them and concluded somebody had already
 	// fixed it.
 	TreeSnapshot string `json:"tree_snapshot,omitempty"`
+	// TreeSnapshotHead is HEAD when TreeSnapshot was captured. Cleanup may only
+	// restore while HEAD is still this commit; otherwise it could overwrite work
+	// that was committed while the run was awaiting a decision.
+	TreeSnapshotHead string `json:"tree_snapshot_head,omitempty"`
 	// Next are the actions a person may legally take on this run, in the order
 	// a client should offer them. Derived by the engine on every read and
 	// overwritten if a stale copy was persisted — clients render buttons from
@@ -195,10 +199,10 @@ type Event struct {
 
 // LLMCall is a single LLM call record in llm.jsonl.
 type LLMCall struct {
-	TS           string                 `json:"ts"`
-	Seq          int                    `json:"seq"`
-	Duckling     string                 `json:"duckling"`
-	Provider     string                 `json:"provider"`
+	TS       string `json:"ts"`
+	Seq      int    `json:"seq"`
+	Duckling string `json:"duckling"`
+	Provider string `json:"provider"`
 	// Upstream is the pool member OpenRouter routed the call to. One night a
 	// pool member accepted requests and never streamed a byte, and without
 	// this field the diagnosis read "the task is cursed".
