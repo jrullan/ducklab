@@ -18,6 +18,10 @@ export interface ToolCall {
   detail?: string;
   /** Policy violations are always expanded; they are never routine. */
   violation?: boolean;
+  /** An ask_advisor consult's answer: the rubber duck spoke inline, in the
+   * middle of the turn. Rendered open — a consult is never routine, and the
+   * advice the implementer acted on next must not be buried in the calls. */
+  advice?: string;
   /** The call's salient argument — the path it read, the pattern it searched,
    * the command it ran. A live list of bare "fs_read fs_read fs_read" says a
    * model is busy without saying WITH WHAT. */
@@ -398,6 +402,10 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           // "path is not a test file" — and it was recorded and never shown:
           // the ✕ expanded to nothing.
           detail: d.ok === false ? String(d.result ?? "") || undefined : undefined,
+          advice:
+            d.tool === "ask_advisor" && d.ok !== false
+              ? String(d.result ?? "").replace(/^advisor:\s*/, "") || undefined
+              : undefined,
         });
         break;
       }

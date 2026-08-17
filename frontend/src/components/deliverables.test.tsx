@@ -117,3 +117,18 @@ describe("an approve over undelivered items", () => {
     expect(screen.getByTestId("deliverables-gap").textContent).toMatch(/undelivered: 4/);
   });
 });
+
+describe("an ask_advisor consult", () => {
+  it("renders the duck's answer open, in the middle of the turn", () => {
+    const events: DucklabEvent[] = [
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "luna" }),
+      ev("tool_call", 2, { round: 1, turn: 0, tool: "fs_read", ok: true, args: '{"path":"a.py"}' }),
+      ev("tool_call", 3, { round: 1, turn: 0, tool: "ask_advisor", ok: true, args: '{"question":"the PUT test expects null"}', result: "advisor: Modify the test — T-120's rule decides this." }),
+      ev("tool_call", 4, { round: 1, turn: 0, tool: "fs_patch", ok: true, args: '{"path":"tests/t.py"}' }),
+    ];
+    const block = buildTurns(events)[0]!;
+    expect(block.toolCalls[1]!.advice).toBe("Modify the test — T-120's rule decides this.");
+    render(<ConversationTurn block={block} roster={["luna"]} />);
+    expect(screen.getByTestId("tool-advice").textContent).toContain("T-120's rule");
+  });
+});

@@ -278,8 +278,10 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
 }
 
 function ToolCallLine({ call }: { call: ToolCall }) {
-  // A violation starts expanded: it is the one thing a user must not scroll past.
-  const [open, setOpen] = useState(!!call.violation);
+  // A violation starts expanded: it is the one thing a user must not scroll
+  // past. So does a consult: the duck spoke, and what it said is the reason
+  // for whatever the implementer does next.
+  const [open, setOpen] = useState(!!call.violation || !!call.advice);
   const failed = !call.ok;
   return (
     <li data-testid="tool-call" data-ok={String(call.ok)} data-violation={String(!!call.violation)}>
@@ -299,6 +301,15 @@ function ToolCallLine({ call }: { call: ToolCall }) {
       </button>
       {open && call.detail && (
         <pre className="ml-4 whitespace-pre-wrap font-mono text-xs text-critical">{call.detail}</pre>
+      )}
+      {open && call.advice && (
+        <blockquote
+          data-testid="tool-advice"
+          className="ml-4 mt-0.5 border-l-2 border-hairline pl-2 text-sm text-ink-secondary"
+        >
+          <span className="text-xs text-ink-muted">advisor · </span>
+          {call.advice}
+        </blockquote>
       )}
     </li>
   );
