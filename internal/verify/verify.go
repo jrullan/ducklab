@@ -256,7 +256,13 @@ func isolatedStateEnvironment() ([]string, func(), error) {
 			gopath = filepath.Join(home, "go")
 		}
 		cache("GOPATH", gopath)
-		cache("GOMODCACHE", filepath.Join(gopath, "pkg", "mod"))
+		moduleRoot := gopath
+		if i := strings.IndexAny(moduleRoot, string(os.PathListSeparator)); i >= 0 {
+			moduleRoot = moduleRoot[:i]
+		}
+		// GOMODCACHE is also where Go stores downloaded toolchains selected by
+		// GOTOOLCHAIN, so preserving it preserves both download caches.
+		cache("GOMODCACHE", filepath.Join(moduleRoot, "pkg", "mod"))
 		cache("GOCACHE", filepath.Join(home, ".cache", "go-build"))
 		cache("npm_config_cache", filepath.Join(home, ".npm"))
 	}
