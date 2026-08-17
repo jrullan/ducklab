@@ -157,6 +157,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// prompt; this is what makes pair an iteration rather than two monologues.
 	var findings []conv.Finding
 	var correctiveNotes []string
+	// What the reviewer may remember of its own previous round (reviewmemory.go).
+	var lastReview *reviewMemory
 
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
@@ -186,7 +188,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			duckling := resolveDuckling(params, turn)
 
-			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport)
+			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview)
 			if err != nil {
 				result.Error = err
 				return result, err
@@ -237,6 +239,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				Round: round, Index: script.TurnIndexBase + i, Role: turn.Role,
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
+
+			if turn.Role == config.RoleReviewer && params.Diff != nil {
+				if diff, derr := params.Diff(); derr == nil {
+					lastReview = rememberReview(diff, outcome)
+				}
+			}
 
 			// What the model actually said, and what it did.
 			//
@@ -406,7 +414,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 
@@ -456,6 +464,9 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			diff, err := params.Diff()
 			if err != nil {
 				return "", fmt.Errorf("diff for reviewer: %w", err)
+			}
+			if memo := sinceLastReview(lastReview, diff); memo != "" {
+				b.WriteString("\n\n" + memo)
 			}
 			b.WriteString("\n\n## The change under review\n\n```diff\n")
 			b.WriteString(strings.TrimSpace(conv.CompactDiff(diff)))
