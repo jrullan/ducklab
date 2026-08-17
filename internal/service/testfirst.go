@@ -401,9 +401,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
 	}
 	rs.run.Roster = rosterStrings(roster)
-	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	if req.Duckling != "" {
-		rs.run.RosterSources[string(config.RoleImplementer)] = "picked now"
+		rs.run.RosterSources[string(config.RoleImplementer)] = "request"
 	}
 	if warning != "" {
 		rs.run.Warning = warning

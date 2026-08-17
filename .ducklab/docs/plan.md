@@ -1068,4 +1068,76 @@ The clean-checkout acceptance result is successfully produced but lost from the 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-055 — Make clean-checkout acceptance verification enforce stage-appropriate red or green results
+
+Fixes B-056.
+
+## Reported
+
+What happened: T-051's test-first landed a correct assertion-red test; the human clicked Accept twice and both times the card returned to Waiting — because B-040's acceptance verification runs the full gate from a clean checkout and refuses anything red, while a test-first commit is red BY DESIGN (the committed failing test IS the deliverable). The two honesty mechanisms are mutually exclusive as implemented: TDD requires the accepted commit to be red by exactly the new test; the checkout gate requires it green. Since the checkout gate landed, no test-first can be accepted — by human or auto:tdd — and the only offered escape, reject, discards correct work.\n\nExpected: the acceptance verification is stage-aware. A build or stage accept must be green from the clean checkout, as today. A TEST-FIRST accept must be RED from the clean checkout — and structurally red: not a compile failure (compileFailure on the output), the red reproducing the specification. A test commit that comes back GREEN from the checkout is the failure ("the committed test passes from a clean checkout — it asserts nothing that is not already true"). Same rigor, correct polarity per stage.
+
+## Triage
+
+**Component:** acceptance verification
+
+The clean-checkout gate currently makes every valid test-first acceptance impossible by requiring green instead of structurally valid assertion-red.
+
+**Verification (triage recommends):** test-first — Accept a TEST-FIRST commit with an assertion failure, a compile failure, and a passing test from clean checkouts; only the assertion-red case should pass.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-056 — Reconnect stale desktop event streams and expose stream health
+
+Fixes B-053.
+
+## Reported
+
+What happened: after an engine restart, the desktop kept a working HTTP channel but its SSE subscription died silently. Result: two queued runs showed (fetched over HTTP) while the actually RUNNING run — started after the restart, announced only via the stream's run_start — did not exist for the store: Now said nothing is running while the engine ran. The ✓ engine badge stayed green throughout, because it vouches for HTTP health while saying nothing about the stream. Two channels, one indicator, and the one that died is the one every live view depends on.\n\nExpected: the stream's liveness is first-class — the desktop tracks last-event age (heartbeats exist), resubscribes automatically when the stream goes quiet past a threshold with a full run resync after reconnect, and the engine badge reflects BOTH channels (\"engine ✓ · stream reconnecting\") so a dead stream is never invisible. A view that watches live work must know when it went deaf.
+
+## Triage
+
+**Component:** desktop event stream
+
+A silently dead live-event channel makes running work invisible while falsely reporting the engine as healthy.
+
+**Verification (triage recommends):** test-first — Simulate a silent SSE disconnect after engine restart, then verify reconnect, full run resync, and degraded badge state.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-057 — Recover stale desktop engine bindings and surface failed actions
+
+Fixes B-054.
+
+## Reported
+
+What happened: after an engine restart rotated port and token, an already-open desktop kept its launch-time binding (window.ducklab is injected once, at startup; the frontend cannot re-read engine.json and nothing re-injects it). The person aborted a run and configured a terra relaunch; both actions died against the dead binding — no error surfaced, no toast, nothing — and the engine carries no trace of either. They discovered it only because an assistant checked the record. Silent action loss is the worst UI failure class: the person believes they acted.\n\nExpected: (a) every failed action surfaces its failure where the click happened; (b) the desktop heals its binding — Wails re-reads engine.json and re-injects (or proxies) when requests start failing, with the reconnect logic engineclt already has (reconnect_test.go) extended to the frontend's channel; (c) until healed, the UI declares itself read-only stale rather than accepting clicks it cannot deliver. Related: B-053 (the stream half of the same split-brain).
+
+## Triage
+
+**Component:** desktop binding
+
+Desktop commands can be silently lost after an engine restart, causing users to believe actions succeeded when the engine never received them.
+
+**Verification (triage recommends):** test-first — Simulate rotated engine credentials and verify abort/relaunch report failure, enter stale read-only state, then recover after reinjection.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-058 — Add per-run seating and turn overrides to MCP task launchers
+
+Fixes B-055.
+
+## Reported
+
+What happened: executing the human's explicit choice — relaunch T-052's test with terra — was impossible over MCP: stage_start and bug_triage gained ducklings/mode/agent_turns overrides (T-014), but the task launchers (test_build, test_only, run_start) still accept none of them (run_start got mode and note only). The operator had to hand the seating back to the desktop, the exact dependency B-005 exists to remove.\n\nExpected: the task launchers accept the same per-run overrides as the stages — ducklings (implementer first, reviewer after), agent_turns — flowing into TestFirstRequest and the chained build's RunRequest, recorded with their provenance like mode already is. One override contract across every door, finally including the doors used most.
+
+## Triage
+
+**Component:** MCP tools
+
+The MCP task launchers lack the per-run override contract already available on stage and triage tools, preventing remote operators from seating runs.
+
+**Verification (triage recommends):** test-first — Invoke test_build, test_only, and run_start with ducklings and agent_turns and assert requests, chained builds, and provenance retain them.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -479,20 +479,23 @@ func rosterStrings(r map[config.Role]config.DucklingID) map[string]string {
 	return out
 }
 
-func rosterSources(projCfg *config.Project, mode string, chosen []string) map[string]string {
+func (s *Service) rosterSources(projCfg *config.Project, mode string, chosen []string) map[string]string {
 	out := map[string]string{}
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
 		}
-		out[string(role)] = "global"
+		source := "spread"
 		if projCfg.Roster[role] != "" {
-			out[string(role)] = "project roster"
+			source = "project"
+		} else if len(s.cfg.Defaults.ModeDucklings[mode]) > 0 {
+			source = "settings"
 		}
+		out[string(role)] = source
 	}
 	for i, role := range []config.Role{config.RoleImplementer, config.RoleReviewer} {
 		if (mode == "" || mode == "solo" || mode == "pair") && i < len(chosen) && chosen[i] != "" {
-			out[string(role)] = "picked now"
+			out[string(role)] = "request"
 		}
 	}
 	return out

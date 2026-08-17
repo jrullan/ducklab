@@ -303,12 +303,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	filled := applyStageLineup(roster, lineup)
 	critics := s.criticsFrom(rs.run.Mode, lineup)
 	rs.run.Roster = rosterStrings(roster)
-	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	for _, role := range filled {
 		if len(req.Ducklings) == 0 {
-			rs.run.RosterSources[string(role)] = "Settings"
+			rs.run.RosterSources[string(role)] = "settings"
 		} else {
-			rs.run.RosterSources[string(role)] = "picked now"
+			rs.run.RosterSources[string(role)] = "request"
 		}
 	}
 	if warning != "" {

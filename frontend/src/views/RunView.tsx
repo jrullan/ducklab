@@ -16,7 +16,7 @@ import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
-import type { MeasuredSpend } from "../components/SeatChips";
+import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
 import { seatsFromRoster } from "../lib/seats";
@@ -373,6 +373,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
 
   const roster = Object.values(run.roster ?? {});
   const ducklingColors = assignDucklingColors(fleet);
+  const rosterEntries = Object.entries(run.roster ?? {}).map(([role, duckling]) => ({
+    role,
+    // Tournament identities are intentionally hidden in the run view, including
+    // the seat summary; exposing them here would defeat lane anonymisation.
+    duckling: run.mode === "tournament" ? "" : duckling,
+    provenance: run.roster_sources?.[role] ? `(${run.roster_sources[role]})` : undefined,
+  }));
   // Everyone with a seat in this run, from the first frame. Rows used to
   // appear only as each model's first call landed, so a pair run opened
   // showing nobody and the line-up assembled itself over minutes. Spenders
@@ -612,7 +619,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             — {task.title}
           </span>
         )}
-        <span className="text-ink-secondary">{run.mode}</span>
+        <span className="text-ink-secondary" title={run.mode_source ? `mode source: ${run.mode_source}` : undefined}>{run.mode}{run.mode_source ? ` (${run.mode_source})` : ""}</span>
         <CycleMap stage={run.stage} />
         {run.no_changes ? (
           <StatusChip role="muted" label="no changes — already in the tree" />
@@ -1231,6 +1238,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             without it, so one long unbroken thinking line forced the column
             wide and shoved the rail off the window's edge on resize. */}
         <section data-testid="conversation" className="min-w-0">
+          {rosterEntries.length > 0 && (
+            <div className="mb-3" data-testid="run-seat-chips">
+              <SeatChips entries={rosterEntries} fleet={fleet} measured={measured} />
+            </div>
+          )}
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
           <VirtualList items={turns} height="60vh" followTail={liveNow}>

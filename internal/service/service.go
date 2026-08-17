@@ -1402,7 +1402,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// which case the warning must go.
 	rosterWarning = bothSidesWarning(roster)
 	rs.run.Roster = rosterStrings(roster)
-	rs.run.RosterSources = rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
 		// legitimate experiment, but reports must be able to segment it.

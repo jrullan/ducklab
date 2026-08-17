@@ -65,6 +65,8 @@ export interface Run {
   project_id: string;
   stage: string;
   mode: string;
+  /** How the mode was resolved: request, settings, project, or fallback. */
+  mode_source?: string;
   task_id: string;
   status: "running" | "queued" | "paused" | "done" | "failed";
   verdict: string;
@@ -80,6 +82,8 @@ export interface Run {
   started_at: string;
   ended_at?: string;
   roster?: Record<string, string>;
+  /** Where each seated role came from: project, settings, request, or spread. */
+  roster_sources?: Record<string, string>;
   pending_kind?: string;
   pending_since?: string;
   pending_data?: Record<string, unknown>;
