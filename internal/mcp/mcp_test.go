@@ -35,6 +35,8 @@ type fakeEngine struct {
 	revised             []string
 	lastStageReq        map[string]interface{}
 	lastTriageReq       map[string]interface{}
+	removedProject      string
+	removedTask         string
 	budgetLifted        string
 	resumeCount         int
 	projectStatus       map[string]interface{}
@@ -177,6 +179,10 @@ func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 	}
 	return nil, nil
 }
+func (f *fakeEngine) TaskRemove(projectID, taskID string) (map[string]interface{}, error) {
+	f.removedProject, f.removedTask = projectID, taskID
+	return map[string]interface{}{"removed": taskID}, nil
+}
 func (f *fakeEngine) BugAdd(_ string, req map[string]string) (map[string]interface{}, error) {
 	f.filed = append(f.filed, req)
 	return map[string]interface{}{"id": fmt.Sprintf("B-%03d", len(f.filed))}, nil
@@ -224,6 +230,39 @@ func toolResultText(t *testing.T, resp map[string]interface{}) (string, bool) {
 	text, _ := first["text"].(string)
 	isErr, _ := res["isError"].(bool)
 	return text, isErr
+}
+
+func TestTaskRemoveIsAnOperatorTool(t *testing.T) {
+	eng := &fakeEngine{}
+	resps := drive(t, eng,
+		initFrame,
+		callFrame(2, "task_remove", `{"project_id":"calc","task_id":"T-061"}`),
+	)
+	if got := eng.removedProject; got != "calc" {
+		t.Errorf("TaskRemove project = %q, want calc", got)
+	}
+	if got := eng.removedTask; got != "T-061" {
+		t.Errorf("TaskRemove task = %q, want T-061", got)
+	}
+	if text, isErr := toolResultText(t, resps[1]); isErr {
+		t.Errorf("task_remove failed: %s", text)
+	}
+
+	found := false
+	for _, tool := range toolList() {
+		if tool["name"] != "task_remove" {
+			continue
+		}
+		found = true
+		schema := tool["inputSchema"].(map[string]interface{})
+		required := schema["required"].([]string)
+		if len(required) != 2 || required[0] != "project_id" || required[1] != "task_id" {
+			t.Errorf("task_remove required = %v, want project_id and task_id", required)
+		}
+	}
+	if !found {
+		t.Error("task_remove missing from tool list")
+	}
 }
 
 func TestInitializeAndToolListSpeakMCP(t *testing.T) {

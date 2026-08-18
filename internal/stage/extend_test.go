@@ -12,6 +12,24 @@ import (
 // A cosmetic two-task amendment carried the whole plan in every prompt — 30k
 // tokens a call on a hundred-task project — because it ran as a full-document
 // revision. The amendment prompt is an OUTLINE: ids and titles, no bodies.
+func TestExtendPromptDirectsRetiringSupersededTasksToTaskRemove(t *testing.T) {
+	plan := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}}
+	plan.Sections = []artifact.Section{{ID: "M-001", Title: "Core", Children: []artifact.Section{{ID: "T-061", Title: "Old approach"}}}}
+	prompt, err := buildExtendPrompt(t.TempDir(), plan, "replace the old approach", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, instruction := range []string{
+		"cannot remove tasks",
+		"superseded",
+		"task_remove",
+	} {
+		if !strings.Contains(prompt, instruction) {
+			t.Errorf("extend prompt must explain retirement: missing %q", instruction)
+		}
+	}
+}
+
 func TestTheExtendPromptIsAnOutlineNotTheDocument(t *testing.T) {
 	root := t.TempDir()
 	huge := strings.Repeat("Reported details and triage analysis and acceptance criteria. ", 100)

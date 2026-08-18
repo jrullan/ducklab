@@ -23,7 +23,17 @@ body {
 }
 .duck-bob { animation: duck-bob 1.1s ease-in-out infinite; }
 
+/* The gate's cog turns while the suite runs — the ducks bob when they work,
+ * and stillness during activity had come to read as a hang. Slow on
+ * purpose: a gate is patient machinery, not an alarm. */
+@keyframes cog-turn {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.cog-turn { display: inline-block; animation: cog-turn 3s linear infinite; }
+
 /* Anyone who asked the system not to animate gets a static duck. */
 @media (prefers-reduced-motion: reduce) {
   .duck-bob { animation: none; }
+  .cog-turn { animation: none; }
 }

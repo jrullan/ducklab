@@ -1413,4 +1413,32 @@ request_changes on an amendment discards the original Extend request and relaunc
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-073 — Expose TaskRemove as MCP task_remove and CLI `ducklab task remove`, and teach plan_extend the retire path
+
+Fixes B-064.
+
+## Reported
+
+What happened: a plan amendment split the accepted-but-unstarted T-061 into T-063..T-065 and named T-061 superseded; the amendment door cannot remove a task, so the operator had to retire it. The engine has the right door — TaskRemove (refuses tasks with accepted or open runs, cleans plan + DB + dependency references) — but it is exposed only to the desktop ("remove from plan"): `ducklab task remove` does not exist and there is no MCP tool. I called DELETE /v1/projects/{id}/tasks/{task} by hand with the bearer token; an MCP operator (Elena) could not.
+
+Expected: `task_remove` on the MCP surface and `ducklab task remove <id>` on the CLI, both over the same TaskRemove with its refusals, attributed like every other MCP action; and plan_extend's contract should say "the amendment cannot remove tasks — retire superseded ones with task_remove", so the architect stops writing that instruction into an Assumption. B-005 parity: whatever the desktop can do to the plan, the operator can.
+
+**Deliverables:**
+- MCP `task_remove` tool in toolList with project_id/task_id schema, dispatched in the tools/call switch, attributed to the MCP operator like every other action
+- `Engine` interface gains TaskRemove and the fake in mcp_test implements it; a test calls task_remove and asserts the engine saw project+task id
+- CLI `taskCmd` gains a `remove` verb calling the DELETE route via the engine client, printing the refusal reason verbatim on error
+- plan_extend prompt (buildExtendPrompt rules) states the amendment cannot remove tasks and that superseded tasks are retired with task_remove
+- Refusals from Service.TaskRemove (accepted run, open run) surface unchanged through both new paths
+
+## Triage
+
+**Component:** MCP + CLI surface parity (task lifecycle)
+**Suspected files:** internal/mcp/tools.go, internal/mcp/mcp.go, internal/cli/cycle.go, internal/engineclt/engineclt.go, internal/stage/extend.go, internal/service/bugs.go
+
+TaskRemove exists engine-side with refusals and an HTTP route but is reachable only from the desktop, leaving MCP operators and CLI users unable to retire superseded tasks — a B-005-style surface parity gap, not covered by any open bug.
+
+**Verification (triage recommends):** test-first — MCP tools/call task_remove against fake engine expects TaskRemove invoked with attribution; `ducklab task remove T-061` expects DELETE /v1/projects/{id}/tasks/T-061; extend prompt asserts the retire-superseded instruction text
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

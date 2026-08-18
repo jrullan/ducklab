@@ -1,10 +1,85 @@
 package cli
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jrullan/ducklab/internal/daemon"
 )
+
+func TestTaskRemoveUsesTheTaskDeleteRouteAndPrintsItsRefusal(t *testing.T) {
+	repo := t.TempDir()
+	var deleteCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects":
+			if r.Method != http.MethodGet {
+				t.Fatalf("project lookup method = %s, want GET", r.Method)
+			}
+			_, _ = w.Write([]byte(`{"items":[{"id":"calc","path":"` + filepath.ToSlash(repo) + `"}]}`))
+		case "/v1/projects/calc/tasks/T-061":
+			deleteCalled = r.Method == http.MethodDelete
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error":{"message":"task T-061 has committed work"}}`))
+		default:
+			t.Fatalf("unexpected engine request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(endpoint.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state := t.TempDir()
+	oldState := os.Getenv("XDG_STATE_HOME")
+	t.Setenv("XDG_STATE_HOME", state)
+	defer os.Setenv("XDG_STATE_HOME", oldState)
+	enginePath, err := daemon.EngineJSONPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(enginePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine, _ := json.Marshal(daemon.EngineInfo{Port: port, Token: "test"})
+	if err := os.WriteFile(enginePath, engine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldErr := os.Stderr
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = write
+	code := taskCmd("remove", []string{"T-061"}, repo)
+	write.Close()
+	os.Stderr = oldErr
+	out, _ := io.ReadAll(read)
+	read.Close()
+	if code != 1 {
+		t.Errorf("task remove exit code = %d, want 1 for engine refusal", code)
+	}
+	if !deleteCalled {
+		t.Error("task remove did not DELETE /v1/projects/calc/tasks/T-061")
+	}
+	if !strings.Contains(string(out), "task T-061 has committed work") {
+		t.Errorf("refusal was not printed verbatim: %q", out)
+	}
+}
 
 func TestVersionPrintsInstalledProvenance(t *testing.T) {
 	oldArgs, oldVersion := os.Args, Version
@@ -12,10 +87,14 @@ func TestVersionPrintsInstalledProvenance(t *testing.T) {
 	os.Args = []string{"ducklab", "--version"}
 	Version = "0.4.0"
 	read, write, err := os.Pipe()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	oldStdout := os.Stdout
 	os.Stdout = write
-	if code := Run([]string{"--version"}); code != 0 { t.Fatalf("exit code = %d", code) }
+	if code := Run([]string{"--version"}); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
 	write.Close()
 	os.Stdout = oldStdout
 	// The exact values are build-time data; the operator-facing contract is that

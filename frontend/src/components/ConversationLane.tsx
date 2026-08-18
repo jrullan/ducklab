@@ -102,7 +102,10 @@ export function ConversationTurn({
           </span>
         )}
         {isGate ? (
-          <span aria-hidden="true" title="the harness's deterministic gate — no model decides this">
+          /* Turning while the suite runs, for the same reason the ducks bob:
+             movement is how this UI says "working", and a still cog under a
+             minutes-long gate read as a hang. */
+          <span aria-hidden="true" title="the harness's deterministic gate — no model decides this" className={block.gate === "running" ? "cog-turn" : undefined} data-testid="gate-cog" data-turning={block.gate === "running" ? "true" : "false"}>
             ⚙
           </span>
         ) : anonymous ? (
