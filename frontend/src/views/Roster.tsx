@@ -126,6 +126,26 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   });
   const [chosenSeat, setChosenSeat] = useState<{ mode: string; role: string } | null>(null);
   const dragging = useRef(false);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  // The drag image. Left to the browser, WebKitGTK renders the whole card
+  // as the ghost, anchored far from the pointer — it looked like the drop
+  // was landing on the next column. A small chip with the duckling's name,
+  // held at the cursor, says exactly what is in hand and where it is.
+  const startDrag = (id: string, event: React.DragEvent) => {
+    dragging.current = true;
+    event.dataTransfer.setData("text/plain", id);
+    event.dataTransfer.effectAllowed = "copy";
+    if (typeof event.dataTransfer.setDragImage !== "function") return;
+    const ghost = document.createElement("div");
+    ghost.textContent = id;
+    ghost.setAttribute("data-testid", "roster-drag-ghost");
+    ghost.style.cssText = "position:fixed;top:-100px;left:-100px;padding:4px 10px;border-radius:9999px;font:600 13px system-ui,sans-serif;background:var(--surface,#222);color:var(--text,#eee);border:1px solid var(--border,#666);box-shadow:0 2px 8px rgba(0,0,0,.35);white-space:nowrap;pointer-events:none;";
+    document.body.appendChild(ghost);
+    // Anchor the chip so the pointer sits at its left-middle: the name
+    // trails the cursor and the drop point is the cursor, not the card.
+    event.dataTransfer.setDragImage(ghost, 12, ghost.offsetHeight / 2 || 12);
+    setTimeout(() => ghost.remove(), 0);
+  };
   const editable = typeof client.RosterSetManyMode === "function" && typeof client.GlobalRosterSet === "function";
 
   const reload = () => Promise.all(MODES.map(async (mode) => {
@@ -242,7 +262,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
           it is dragged across. Name, locality and the sort value on the
           first; the evidence line on the second. Model and list price ride
           the tooltip. */}
-      {flock.shown.map((s) => { const d = ducks.find((x) => x.id === s.id)!; const candidate = flock.candidates.find((c) => c.id === s.id); const local = s.locality ?? ""; const v = flock.value(s); const price = s.cost ? `$${s.cost.input_per_mtok} / $${s.cost.output_per_mtok} per Mtok` : "price unknown"; return <div key={s.id} draggable data-testid={`roster-flock-card-${s.id}`} title={`${s.model} · ${price}${s.index?.source ? `\ncoding index: ${s.index.source} · as of ${s.index.as_of ?? "?"}` : ""}`} onDragStart={(event) => { dragging.current = true; event.dataTransfer.setData("text/plain", s.id); }} onDragEnd={() => { dragging.current = false; }} className={`rounded border px-2 py-1.5 bg-surface ${candidate ? "border-ink-muted" : "border-hairline"}`}>
+      {flock.shown.map((s) => { const d = ducks.find((x) => x.id === s.id)!; const candidate = flock.candidates.find((c) => c.id === s.id); const local = s.locality ?? ""; const v = flock.value(s); const price = s.cost ? `$${s.cost.input_per_mtok} / $${s.cost.output_per_mtok} per Mtok` : "price unknown"; return <div key={s.id} draggable data-testid={`roster-flock-card-${s.id}`} title={`${s.model} · ${price}${s.index?.source ? `\ncoding index: ${s.index.source} · as of ${s.index.as_of ?? "?"}` : ""}`} onDragStart={(event) => startDrag(s.id, event)} onDragEnd={() => { dragging.current = false; setDragOver(null); }} className={`rounded border px-2 py-1.5 bg-surface ${candidate ? "border-ink-muted" : "border-hairline"}`}>
         <div className="flex items-center gap-2"><DuckAvatar id={s.id} roster={roster} /><span className="font-medium truncate">{s.id}</span><span className="text-xs text-ink-muted"><StatusChip role="muted" label={local || (isLocal(d, providers) ? "local" : "remote")} /></span><span data-testid={`roster-flock-value-${s.id}`} className="ml-auto text-sm tabular-nums" title={flock.sortLabel}>{v === undefined ? "—" : flock.format(v)}</span></div>
         <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-flock-evidence-${s.id}`}>{evidenceLine(s)}</div>
         {candidate && <div className="mt-0.5 text-xs"><span data-testid={`roster-suggested-${s.id}`} className="font-medium">suggested for {flock.forRole}</span> <span data-testid={`roster-suggested-why-${s.id}`} className="text-ink-muted">· {candidate.why}</span></div>}
@@ -261,7 +281,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       {mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p className="text-xs text-ink-muted">no pins</p>}
       <div className="mt-2 flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
       const ids = names(entry); const isPinned = pinned(entry); const ghost = scope === "project" && !isPinned; const open = chosenSeat?.mode === mode && chosenSeat.role === entry.role; const top = entry.candidates?.[0]; const suggestion = top && !ids.includes(top.id) ? top : undefined;
-      return <div key={entry.role} className="w-56 shrink-0" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(mode, entry.role, event)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
+      return <div key={entry.role} className={`w-56 shrink-0 rounded transition-colors ${dragOver === `${mode}/${entry.role}` ? "bg-surface2 outline outline-1 outline-ink-muted" : ""}`} tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (dragOver !== `${mode}/${entry.role}`) setDragOver(`${mode}/${entry.role}`); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver((cur) => (cur === `${mode}/${entry.role}` ? null : cur)); }} onDrop={(event) => { setDragOver(null); drop(mode, entry.role, event); }} data-dragover={dragOver === `${mode}/${entry.role}` ? "true" : undefined} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
         {/* Column header: the role, and — when the seat is occupied — one
             small "+" to add or change. The dashed drop zone is for empty
             seats only; an occupied seat with a big "+ assign" over it was
