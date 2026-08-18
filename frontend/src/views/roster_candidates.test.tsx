@@ -14,8 +14,19 @@ const scorecards = [
   { id: "no-runs", provider: "cloud", model: "unknown", locality: "remote", measured: { runs: 0 } },
 ];
 
-const seats: Record<string, { role: string; ducklings: string[]; source: string }[]> = {
-  council: [{ role: "architect", ducklings: ["bench-best"], source: "global mode seat" }, { role: "reviewer", ducklings: ["pass-cheap"], source: "global mode seat" }],
+// Candidates come from the engine (service.RankCandidates) on each seat; the
+// desktop shows them and never re-ranks. The why lines are the engine's.
+const why = (id: string) => ({
+  "bench-best": "pass rate 92% over 14 runs · $0.31/run",
+  "pass-cheap": "pass rate 92% over 14 runs · $0.20/run",
+  "pass-slow": "pass rate 88% over 9 runs · $0.10/run",
+})[id] ?? "";
+const cand = (...ids: string[]) => ids.map((id) => ({ id, why: why(id) }));
+const seats: Record<string, { role: string; ducklings: string[]; source: string; candidates?: { id: string; why: string }[] }[]> = {
+  council: [
+    { role: "architect", ducklings: ["bench-best"], source: "global mode seat", candidates: [{ id: "bench-best", why: "bench 91 · $0.31/run" }, { id: "pass-cheap", why: "bench 80 · $0.20/run" }, ...cand("pass-slow")] },
+    { role: "reviewer", ducklings: ["pass-cheap"], source: "global mode seat", candidates: cand("pass-cheap", "bench-best", "pass-slow") },
+  ],
   solo: [{ role: "implementer", ducklings: ["pass-third"], source: "global mode seat" }, { role: "advisor", ducklings: ["pass-slow"], source: "global mode seat" }],
   common: [{ role: "triager", ducklings: ["local-cheap"], source: "global role fallback" }, { role: "scribe", ducklings: ["no-runs"], source: "global role fallback" }],
 };

@@ -22,7 +22,7 @@ type RosterEntry struct {
 	Default string `json:"default,omitempty"`
 	// Source is "project" when project.toml declares it, "default" when the
 	// engine picked it. A user needs to know which assignments are theirs.
-	Source string `json:"source"`
+	Source     string      `json:"source"`
 	Candidates []Candidate `json:"candidates,omitempty"`
 }
 
