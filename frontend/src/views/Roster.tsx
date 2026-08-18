@@ -68,7 +68,9 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
-  useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch(() => {}); }, [client]);
+  // Evidence failing to load is said, not swallowed: a Flock that shows "no
+  // runs yet" for a duckling with 264 runs is a lie the operator will act on.
+  useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch((e) => setError("", `evidence unavailable: ${e instanceof Error ? e.message : String(e)}`)); }, [client]);
   useEffect(() => {
     if (typeof client.providers !== "function") return;
     client.providers().then(setProviders).catch(() => {});

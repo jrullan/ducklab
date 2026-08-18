@@ -83,3 +83,27 @@ describe("what an error names", () => {
     expect(err.message).toContain("bad gateway");
   });
 });
+
+// The Flock showed "no runs yet" for a duckling with 264 runs: the hand-written
+// Scorecards() asked /v1/scorecards, the engine serves /v1/ducklings/scorecards,
+// and the 404 was swallowed. The generated route table is the truth.
+describe("scorecards request", () => {
+  it("asks the path the engine registers for Scorecards", async () => {
+    const { OPERATIONS } = await import("./generated");
+    const declared = OPERATIONS.find((o) => o.id === "Scorecards")!.path;
+    const paths: string[] = [];
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string) => {
+        paths.push(String(url).replace("http://engine", ""));
+        return new Response(JSON.stringify({ items: [{ id: "glm52", measured: { runs: 264 } }], total: 1 }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+    const cards = await c.Scorecards();
+    expect(paths).toEqual([declared]);
+    expect(cards[0]?.measured?.runs).toBe(264);
+  });
+});

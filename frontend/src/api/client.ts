@@ -923,7 +923,7 @@ export class EngineClient {
   }
   /** Evidence assembled by the scorecard service; the roster never infers it. */
   Scorecards() {
-    return this.request<{ items: Scorecard[] }>("GET", "/v1/scorecards").then((r) => r.items ?? []);
+    return this.request<{ items: Scorecard[] }>("GET", "/v1/ducklings/scorecards").then((r) => r.items ?? []);
   }
   runs(projectId?: string) {
     const q = projectId ? `?project=${encodeURIComponent(projectId)}` : "";
