@@ -47,6 +47,10 @@ declare global {
       /** Wails binding name for opening a URL in the system browser — the
        * webview swallows target=_blank anchors. Absent outside the desktop. */
       openURL?: string;
+      /** Provider key variables the running engine LACKS that this app has —
+       *  names only, computed by the shell at bind time. Non-empty opens the
+       *  Restart-engine banner with the reason. */
+      engineMissingKeys?: string[];
     };
   }
 }
@@ -128,7 +132,12 @@ export function App() {
   );
   // A response revealed the engine predates this app. The one action that
   // fixes it gets a button, not a sentence telling someone to open a terminal.
-  const [stale, setStale] = useState<false | "older" | "restarted">(false);
+  const [stale, setStale] = useState<false | "older" | "restarted" | "env">(
+    // The shell computed this at bind time: the adopted engine lacks a
+    // provider key this app has, so every run on that provider will 401
+    // while the UI otherwise looks healthy. Same door as a stale binary.
+    (window.ducklab?.engineMissingKeys?.length ?? 0) > 0 ? "env" : false,
+  );
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
 
@@ -463,7 +472,9 @@ export function App() {
           <span className="text-serious" role="status">
             {stale === "restarted"
               ? "The engine was restarted outside the app — this window's session died with it."
-              : "The engine is older than this app — some features will fail until it restarts."}
+              : stale === "env"
+                ? `The engine is missing ${(window.ducklab?.engineMissingKeys ?? []).join(", ")} — this app has it, the engine started without it; runs on that provider will fail until the engine restarts.`
+                : "The engine is older than this app — some features will fail until it restarts."}
           </span>
           {stale === "restarted" ? (
             <button

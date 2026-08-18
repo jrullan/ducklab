@@ -190,3 +190,41 @@ describe("the connection-details race at startup", () => {
     });
   });
 });
+
+// The engine is a daemon by design, so a desktop with a freshly unlocked
+// keyring can adopt an engine started WITHOUT a provider key — every
+// OpenRouter run 401s while the UI looks healthy. The shell reports the
+// drifted key names at bind time; the same banner that owns stale binaries
+// opens with the reason and the Restart-engine door.
+describe("the env-drift banner", () => {
+  beforeEach(() => {
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    (window as unknown as { EventSource: unknown }).EventSource = class {
+      onopen: unknown; onerror: unknown;
+      addEventListener() {}
+      close() {}
+    };
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }))) as unknown as typeof fetch);
+  });
+  afterEach(() => {
+    delete window.ducklab;
+  });
+  it("opens the restart banner when the engine lacks a key this app has", async () => {
+    window.ducklab = {
+      baseUrl: "http://e1", token: "t1",
+      restartEngine: "shell.RestartEngine", reconnectEngine: "shell.ReconnectEngine",
+      engineMissingKeys: ["OPENROUTER_API_KEY"],
+    };
+    render(<App />);
+    const banner = await screen.findByTestId("stale-banner");
+    expect(banner.textContent).toContain("missing OPENROUTER_API_KEY");
+    expect(banner.textContent).toContain("the engine started without it");
+    expect(screen.getByTestId("restart-engine")).toBeTruthy();
+  });
+  it("stays closed when nothing drifted", async () => {
+    window.ducklab = { baseUrl: "http://e1", token: "t1", engineMissingKeys: [] };
+    render(<App />);
+    await waitFor(() => expect(document.querySelector("main")).toBeTruthy());
+    expect(screen.queryByTestId("stale-banner")).toBeNull();
+  });
+});

@@ -11,6 +11,7 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -46,6 +47,15 @@ func main() {
 
 	notifier := notifications.New()
 	shell := &Shell{notifier: notifier, enginePath: enginePath, conn: engineclt.New(info)}
+	// Env drift: an adopted engine may lack a provider key THIS process has
+	// (the engine is a daemon by design; it may predate the unlocked
+	// keyring). Names only — never values — so the frontend can open the
+	// Restart-engine door with the reason on it.
+	missingKeys := []string{}
+	if providers, perr := shell.conn.ProviderList(); perr == nil {
+		missingKeys = desktop.MissingKeys(providers, os.Getenv)
+	}
+	missingJSON, _ := json.Marshal(missingKeys)
 	app := application.New(application.Options{
 		Name:        "ducklab",
 		Description: "a multi-model software development harness",
@@ -81,10 +91,10 @@ func main() {
 		MinWidth:  1024,
 		MinHeight: 700,
 		JS: fmt.Sprintf(
-			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q, restartEngine: %q, reconnectEngine: %q, openURL: %q };`+
+			`window.ducklab = { baseUrl: %q, token: %q, version: %q, chooseDirectory: %q, notify: %q, setBadge: %q, restartEngine: %q, reconnectEngine: %q, openURL: %q, engineMissingKeys: %s };`+
 				`if (%q) location.hash = %q;`,
 			fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, build.Semver(),
-			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(), RestartEngineFQN(), ReconnectEngineFQN(), OpenURLFQN(),
+			ChooseDirectoryFQN(), NotifyFQN(), SetBadgeFQN(), RestartEngineFQN(), ReconnectEngineFQN(), OpenURLFQN(), missingJSON,
 			route, route,
 		),
 	})
