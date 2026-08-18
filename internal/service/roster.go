@@ -23,6 +23,7 @@ type RosterEntry struct {
 	// Source is "project" when project.toml declares it, "default" when the
 	// engine picked it. A user needs to know which assignments are theirs.
 	Source string `json:"source"`
+	Candidates []Candidate `json:"candidates,omitempty"`
 }
 
 // RosterView is the resolved roster for a project.
@@ -67,13 +68,14 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 		}
 	}
 	view := &RosterView{Warning: warning}
+	scorecards, _ := s.Scorecards(ctx)
 
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
 		}
 		canonicalSource := sources[role]
-		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource}
+		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource, Candidates: RankCandidates(string(role), scorecards)}
 		if canonicalSource == "project pin" || canonicalSource == "project mode seat" {
 			withoutPin := *projCfg
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
@@ -110,6 +112,7 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 func (s *Service) GlobalRosterGet(ctx context.Context, mode string) (*RosterView, error) {
 	resolved, sources := s.resolveCanonicalRoster(&config.Project{}, mode)
 	view := &RosterView{Warning: bothSidesWarning(resolved)}
+	scorecards, _ := s.Scorecards(ctx)
 	// The same per-mode note the project board gets: what a launch of this
 	// mode would refuse today, from the global seats alone.
 	if mode != "" {
@@ -134,7 +137,7 @@ func (s *Service) GlobalRosterGet(ctx context.Context, mode string) (*RosterView
 			ids = append(ids, s.cfg.Defaults.RolePins[string(role)]...)
 		}
 		s.cfgMu.RUnlock()
-		view.Entries = append(view.Entries, RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: ids, Source: sources[role]})
+		view.Entries = append(view.Entries, RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: ids, Source: sources[role], Candidates: RankCandidates(string(role), scorecards)})
 	}
 	return view, nil
 }

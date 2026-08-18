@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -33,12 +34,13 @@ type Scorecard struct {
 type MeasuredEvidence struct {
 	Runs          int     `json:"runs"`
 	PassRate      float64 `json:"pass_rate"`
-	AvgCostPerRun float64 `json:"avg_cost_per_run"`
-	AvgWallclock  float64 `json:"avg_wallclock"`
+	AvgCostPerRun float64 `json:"avg_cost_usd"`
+	AvgWallclock  float64 `json:"avg_wallclock_s"`
 	Tokens        int64   `json:"tokens"`
 	Estimated     bool    `json:"estimated"`
 }
 type BenchEvidence struct {
+	Score        float64 `json:"score,omitempty"`
 	Suite        string  `json:"suite"`
 	SuiteVersion int     `json:"suite_version"`
 	StartedAt    string  `json:"started_at"`
@@ -65,6 +67,38 @@ func IsLocalHost(base string) bool {
 	}
 	return strings.HasSuffix(strings.ToLower(h), ".local")
 }
+// Candidate is a non-binding recommendation for a roster seat.
+type Candidate struct {
+	ID  string `json:"id"`
+	Why string `json:"why"`
+}
+
+// RankCandidates is the single seat-aware ordering rule shared by clients.
+func RankCandidates(role string, scorecards []Scorecard) []Candidate {
+	type ranked struct { c Candidate; primary, secondary float64; bench bool; evidence bool }
+	rows := make([]ranked, 0, len(scorecards))
+	for _, s := range scorecards {
+		if s.Measured == nil || s.Measured.Runs <= 0 || s.Locality == "local" { continue }
+		cost, wall := s.Measured.AvgCostPerRun, s.Measured.AvgWallclock
+		pass := s.Measured.PassRate
+		bench, hasBench := 0.0, false
+		for _, b := range s.Bench { if !hasBench || b.Score > bench { bench, hasBench = b.Score, true } }
+		primary := pass
+		secondary := cost
+		benchRank := false
+		why := fmt.Sprintf("pass rate %.0f%% over %d runs · $%.2f/run", pass*100, s.Measured.Runs, cost)
+		if (role == "implementer" || role == "architect") && hasBench { primary = bench; benchRank = true; why = fmt.Sprintf("bench %.0f · $%.2f/run", bench*100, cost) }
+		if role == "advisor" { primary, secondary = cost, wall; why = fmt.Sprintf("$%.2f/run · %.0fs avg", cost, wall)
+		} else if role == "implementer" || role == "architect" { secondary = cost
+		} else if role == "reviewer" || role == "judge" { secondary = cost }
+		rows = append(rows, ranked{Candidate{ID:s.ID, Why:why}, primary, secondary, benchRank, true})
+	}
+	if role == "triager" || role == "scribe" || role == "human" { return []Candidate{} }
+	sort.SliceStable(rows, func(i,j int) bool { if rows[i].bench != rows[j].bench && (role == "implementer" || role == "architect") { return rows[i].bench }; if rows[i].primary != rows[j].primary { if role == "advisor" { return rows[i].primary < rows[j].primary }; return rows[i].primary > rows[j].primary }; if rows[i].secondary != rows[j].secondary { return rows[i].secondary < rows[j].secondary }; return rows[i].c.ID < rows[j].c.ID })
+	if len(rows) > 3 { rows = rows[:3] }
+	out := make([]Candidate, len(rows)); for i := range rows { out[i] = rows[i].c }; return out
+}
+
 func (s *Service) Scorecards(ctx context.Context) ([]Scorecard, error) {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
@@ -135,7 +169,7 @@ func loadLatestBench() map[string]map[string]BenchEvidence {
 					if out[cell.Duckling] == nil {
 						out[cell.Duckling] = map[string]BenchEvidence{}
 					}
-					out[cell.Duckling][r.Suite] = BenchEvidence{Suite: r.Suite, SuiteVersion: r.SuiteVersion, StartedAt: r.StartedAt, Verdict: cell.Verdict, Tokens: cell.Tokens, Cost: cell.CostUSD, Wallclock: float64(cell.WallMs) / 1000, Estimated: cell.Estimated}
+					out[cell.Duckling][r.Suite] = BenchEvidence{Score: func() float64 { if cell.Verdict == "PASSED" { return 1 }; return 0 }(), Suite: r.Suite, SuiteVersion: r.SuiteVersion, StartedAt: r.StartedAt, Verdict: cell.Verdict, Tokens: cell.Tokens, Cost: cell.CostUSD, Wallclock: float64(cell.WallMs) / 1000, Estimated: cell.Estimated}
 				}
 			}
 		}

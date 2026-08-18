@@ -28,7 +28,9 @@ func TestRosterMCPGetIncludesSeatCandidatesFromScorecards(t *testing.T) {
 		candidates, ok := entry["candidates"].([]interface{})
 		if !ok || len(candidates) == 0 { t.Fatalf("%s candidates missing: %#v", entry["role"], entry) }
 		first := candidates[0].(map[string]interface{})
-		if first["id"] != "bench-best" { t.Errorf("%s first candidate = %#v, want bench-best", entry["role"], first) }
+		want := "bench-best"
+		if entry["role"] == "advisor" { want = "pass-cheap" }
+		if first["id"] != want { t.Errorf("%s first candidate = %#v, want %s", entry["role"], first, want) }
 		if why, _ := first["why"].(string); why == "" { t.Errorf("candidate needs desktop-parity why: %#v", first) }
 	}
 }

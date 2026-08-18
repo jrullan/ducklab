@@ -346,6 +346,8 @@ Tools exposed to MCP clients:
 
 Attribution: decisions recorded as `mcp:<client-name>`, never `human`. Server implementation: `internal/mcp/mcp.go`, CLI: `internal/cli/mcp.go`.
 
+Roster `get` responses include each seat's non-binding `candidates` (up to three duckling ids and concise `why` evidence), computed by the engine's shared scorecard ranking rule.
+
 The engine also exposes `GET /v1/ducklings/scorecards`, returning one configured duckling per row with declared provider/model/cost/capabilities/roles/notes and explicitly sourced measured, latest-per-suite bench, and declared external-index evidence. Missing evidence is null/absent.
 
 The `roster` MCP tool accepts `action` (`get | set | unpin`), `scope` (`global | project`), `project_id`, `mode`, `role`, and ordered `ducklings`. `get` returns every board-addressable seat with `role`, ordered `ducklings`, effective `duckling`, and `source` provenance (`global mode seat`, `project pin`, or `global role fallback`); project pins also return the overridden global `default`. Project `set` replaces the complete ordered pin and `unpin` removes it to restore Global inheritance. Global `set` writes mode seats (or mode-independent triager/scribe role pins) and never changes project files. Invalid action/scope, role, duckling, and mode cardinality return field-named actionable errors with `next` guidance. MCP dispatch delegates to the canonical service roster resolver and records operator actions as `mcp:<client-name>`.
@@ -797,3 +799,5 @@ truth. Engine validation errors and warnings are rendered beside the boards;
 the pair board also reports implementer/reviewer overlap from effective seats.
 
 Pinned by `roster_assign.test.tsx` and `roster.test.tsx`.
+
+When a seat is selected, the board reorders eligible Flock cards and labels up to three informational candidates with their evidence reason. Selection never writes an assignment; local roles retain the operator's ordering. The board consumes the same `candidates` ids and `why` text exposed by the MCP roster view.

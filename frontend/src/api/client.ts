@@ -287,6 +287,7 @@ export type RosterEntry = {
   source: string;
   /** Global fallback when this project overrides the role. */
   default?: string;
+  candidates?: { id: string; why: string }[];
 };
 
 /** A configured endpoint. Mirrors service.ProviderView.
@@ -300,7 +301,7 @@ export type Scorecard = {
   locality?: string;
   cost?: { input_per_mtok?: number; output_per_mtok?: number };
   caps?: { context_tokens?: number; vision?: boolean; native_tools?: boolean };
-  measured?: { runs?: number; pass_rate?: number; avg_cost_usd?: number };
+  measured?: { runs?: number; pass_rate?: number; avg_cost_usd?: number; avg_wallclock_s?: number };
   bench?: Record<string, { score?: number }>;
   index?: { coding?: number; source?: string; as_of?: string };
 };

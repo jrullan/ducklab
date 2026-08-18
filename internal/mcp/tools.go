@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/service"
 )
 
 // toolList declares the operator surface. Every description tells the model
@@ -309,7 +311,18 @@ func (s *Server) roster(a args) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if action == "get" {
+		if provider, ok := s.eng.(interface { Scorecards() ([]map[string]interface{}, error) }); ok {
+			if raw, e := provider.Scorecards(); e == nil { addRosterCandidates(view, raw) }
+		}
+	}
 	return toolJSON(view), nil
+}
+
+func addRosterCandidates(view map[string]interface{}, raw []map[string]interface{}) {
+	entries, _ := view["entries"].([]interface{}); cards := make([]service.Scorecard, 0, len(raw))
+	for _, r := range raw { b, _ := json.Marshal(r); var c service.Scorecard; if json.Unmarshal(b, &c) == nil { cards = append(cards, c) } }
+	for _, x := range entries { e, ok := x.(map[string]interface{}); if !ok { continue }; if _, exists := e["candidates"]; exists { continue }; role, _ := e["role"].(string); ids, _ := e["ducklings"].([]interface{}); hasEvidence := len(ids) == 0; for _, id := range ids { for _, c := range cards { if c.ID == fmt.Sprint(id) && c.Measured != nil && c.Measured.Runs > 0 { hasEvidence = true } } }; if !hasEvidence { continue }; cs := service.RankCandidates(role, cards); if len(cs) > 0 { out := make([]interface{}, len(cs)); for i := range cs { out[i] = map[string]interface{}{"id":cs[i].ID, "why":cs[i].Why} }; e["candidates"] = out } }
 }
 
 func rosterDucklings(a args) []string {
