@@ -1215,7 +1215,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             onRequestChanges={stageToRevise ? requestChanges : undefined}
             onResume={() => {
               setActionError(null);
-              void client.runResume(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+              void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
             }}
             revisionRun={revisionRun}
             redoNote={run.redo_note}

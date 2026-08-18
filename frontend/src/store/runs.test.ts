@@ -292,3 +292,25 @@ describe("a run born on the bus", () => {
     expect(r.task_id).toBe("T-092");
   });
 });
+
+// A lifted-and-resumed run kept its "Waiting for your decision" card and the
+// inbox count: the engine cleared ITS record on resume (checkpoint reason
+// "resume"), but the store's copy stayed paused with next=[resume, abort].
+it("a resume checkpoint clears the pause, its pendings, its stale failure and the offered actions", () => {
+  useRuns.setState({
+    runs: {
+      "r-1": { id: "r-1", project_id: "p", stage: "build", mode: "pair", status: "paused",
+        pending_kind: "error", failure: "unknown key", next: ["resume", "abort"] } as never,
+    },
+    events: {}, deltas: {}, reasoning: {}, spend: {},
+  });
+  useRuns.getState().applyEvent({ type: "checkpoint", run_id: "r-1", seq: 9, data: { reason: "resume", status: "running" } } as never);
+  const run = useRuns.getState().runs["r-1"]! as unknown as Record<string, unknown>;
+  expect(run.status).toBe("running");
+  expect(run.pending_kind).toBeUndefined();
+  expect(run.next).toBeUndefined();
+  expect(run.failure).toBeUndefined();
+  // A checkpoint on a run that is not paused (a restart replay) changes nothing.
+  useRuns.getState().applyEvent({ type: "checkpoint", run_id: "r-1", seq: 10, data: { reason: "resume" } } as never);
+  expect((useRuns.getState().runs["r-1"] as unknown as Record<string, unknown>).status).toBe("running");
+});

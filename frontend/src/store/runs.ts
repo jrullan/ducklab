@@ -201,9 +201,17 @@ export const useRuns = create<RunsState>((set) => ({
           runs = { ...runs, [runId]: { ...run, status: "paused", pending_kind: String(e.data?.kind ?? "") } };
         } else if (e.type === "human" && run.status === "paused") {
           // Answering a human gate resumes the run. Remove every pending
-          // field, not just the kind, so the inbox cannot retain stale data
-          // from the question after the engine has moved on.
-          const { pending_kind: _pendingKind, pending_since: _pendingSince, pending_data: _pendingData, ...resumed } = run;
+          // field, not just the kind — and the offered actions: next
+          // [resume, abort] kept the decision card open over a run that was
+          // already working again.
+          const { pending_kind: _pendingKind, pending_since: _pendingSince, pending_data: _pendingData, next: _next, ...resumed } = run;
+          runs = { ...runs, [runId]: { ...resumed, status: "running" } };
+        } else if (e.type === "checkpoint" && String((e.data as { reason?: string })?.reason ?? "") === "resume" && run.status === "paused") {
+          // Resume's own checkpoint. The engine clears the record it holds;
+          // without this branch the store's copy stayed paused with
+          // next=[resume, abort], and the "Waiting for your decision" card —
+          // and Now's inbox count — outlived the click that answered them.
+          const { pending_kind: _pk, pending_since: _ps, pending_data: _pd, next: _n, failure: _f, ...resumed } = run;
           runs = { ...runs, [runId]: { ...resumed, status: "running" } };
         } else if (e.type === "error") {
           // The engine emits `error` only on the fatal paths, with the reason.
