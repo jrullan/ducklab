@@ -581,7 +581,7 @@ func (s *Server) handleRosterSet(w http.ResponseWriter, r *http.Request) {
 	if len(ids) == 0 {
 		ids = []string{body.Duckling}
 	}
-	view, err := s.svc.RosterSetManyMode(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"), body.Role, ids)
+	view, err := s.svc.RosterSetManyMode(r.Context(), r.PathValue("id"), requestMode(r, body.Mode), body.Role, ids)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -592,13 +592,14 @@ func (s *Server) handleRosterSet(w http.ResponseWriter, r *http.Request) {
 // handleRosterUnpin is an MCP/service route; desktop roster UI remains out of scope.
 func (s *Server) handleRosterUnpin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Mode string `json:"mode"`
 		Role string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	view, err := s.svc.RosterUnpin(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"), body.Role)
+	view, err := s.svc.RosterUnpin(r.Context(), r.PathValue("id"), requestMode(r, body.Mode), body.Role)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -1641,4 +1642,16 @@ func (s *Server) handleRunReseat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, run)
+}
+
+// requestMode reads a roster write's mode from the query (?mode=, the CLI's
+// habit) or the body ({"mode": …}, the desktop's). Reading only the query
+// turned every pin made on a mode's board column into a mode-independent
+// role pin — assign an implementer for Solo, and Pair, Split and Tournament
+// changed with it.
+func requestMode(r *http.Request, bodyMode string) string {
+	if q := r.URL.Query().Get("mode"); q != "" {
+		return q
+	}
+	return bodyMode
 }
