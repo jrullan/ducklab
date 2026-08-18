@@ -18,6 +18,9 @@ autonomy = "yolo"
 
 [roster]
   advisor = "k3"
+  architect = "k3"
+  implementer = "luna"
+  reviewer = "glm52"
   scribe = "beelink-local"
   triager = "terra"
 
