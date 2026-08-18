@@ -164,3 +164,32 @@ func TestABlankInstallStillRunsButNeverInventsAnAdvisor(t *testing.T) {
 		t.Errorf("a duck nobody asked for must stay empty: %+v", adv)
 	}
 }
+
+// The Common board seats the mode-independent roles: a triager or scribe
+// picked there is a role pin on either scope, never a "common" mode.
+func TestCommonBoardWritesRolePinsOnBothScopes(t *testing.T) {
+	s := writableService(t, "terra", "luna", "beelink-local")
+	projectID, dir := projectWithConfig(t, s, "common")
+	if _, err := s.GlobalRosterSet(context.Background(), "common", "triager", []string{"terra"}); err != nil {
+		t.Fatalf("global triager from the Common board: %v", err)
+	}
+	if e := seatOf(t, s, projectID, "solo", "triager"); e.Duckling != "terra" || e.Source != "global role fallback" {
+		t.Errorf("global triager not applied: %+v", e)
+	}
+	if _, err := s.RosterSetManyMode(context.Background(), projectID, "common", "scribe", []string{"beelink-local"}); err != nil {
+		t.Fatalf("project scribe from the Common board: %v", err)
+	}
+	proj, _ := config.LoadProject(filepath.Join(dir, ".ducklab", "project.toml"))
+	if _, ok := proj.ModeSeats["common"]; ok {
+		t.Error("\"common\" must never become a mode in project.toml")
+	}
+	if e := seatOf(t, s, projectID, "pair", "scribe"); e.Duckling != "beelink-local" || e.Source != "project pin" {
+		t.Errorf("project scribe must be a role pin visible from any mode: %+v", e)
+	}
+	if _, err := s.RosterUnpin(context.Background(), projectID, "common", "scribe"); err != nil {
+		t.Fatal(err)
+	}
+	if e := seatOf(t, s, projectID, "pair", "scribe"); e.Source == "project pin" {
+		t.Errorf("unpin from the Common board must remove the role pin: %+v", e)
+	}
+}

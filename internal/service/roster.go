@@ -156,15 +156,20 @@ func (s *Service) GlobalRosterSet(ctx context.Context, mode, role string, ids []
 	if v.ModeSeats == nil {
 		v.ModeSeats = map[string]map[string][]string{}
 	}
-	if v.ModeSeats[mode] == nil {
-		v.ModeSeats[mode] = map[string][]string{}
-	}
-	if role == "triager" || role == "scribe" {
+	if isCommonRole(role) || mode == "" || mode == "common" {
+		// The Common board's roles are mode-independent role pins; the
+		// board's "common" is a heading, not a mode. Creating an empty
+		// mode_seats["common"] here made ModeDefaultsSet refuse the write
+		// with "unknown mode common" — silently, from where the person
+		// stood: the triager they picked never saved.
 		if v.RolePins == nil {
 			v.RolePins = map[string][]string{}
 		}
 		v.RolePins[role] = append([]string{}, ids...)
 	} else {
+		if v.ModeSeats[mode] == nil {
+			v.ModeSeats[mode] = map[string][]string{}
+		}
 		v.ModeSeats[mode][role] = append([]string{}, ids...)
 	}
 	if err := s.ModeDefaultsSet(v); err != nil {
@@ -249,6 +254,9 @@ func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role s
 	for i, id := range ducklingIDs {
 		ids[i] = config.DucklingID(id)
 	}
+	if mode == "common" {
+		mode = "" // the Common board's roles are role pins, not a mode
+	}
 	if mode != "" {
 		// A pin made for ONE mode lands in the project's per-mode seats —
 		// the same shape as the global defaults — and touches no other mode.
@@ -329,6 +337,9 @@ func (s *Service) RosterUnpin(ctx context.Context, projectID, mode, role string)
 	projCfg, err := s.projectConfig(projectID)
 	if err != nil {
 		return nil, err
+	}
+	if mode == "common" {
+		mode = ""
 	}
 	// Unpinning on a mode's column removes that mode's seat; when the only
 	// pin behind the card is a role pin (mode-independent), that is what
@@ -528,3 +539,6 @@ func joinComma(s []string) string {
 	}
 	return out
 }
+
+// isCommonRole names the mode-independent roles the Common board seats.
+func isCommonRole(role string) bool { return role == "triager" || role == "scribe" }
