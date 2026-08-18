@@ -152,14 +152,17 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const implementers = new Set((pair.find((e) => e.role === "implementer") ? names(pair.find((e) => e.role === "implementer")!) : []));
   const reviewers = new Set((pair.find((e) => e.role === "reviewer") ? names(pair.find((e) => e.role === "reviewer")!) : []));
   const overlap = [...implementers].some((id) => reviewers.has(id));
-  return <div className="space-y-6" data-testid="roster-view">
+  // The Flock and the boards scroll on their own: the flock is as long as the
+  // roster of ducklings, the boards as long as the modes, and scrolling one
+  // to reach its tail must not hide the other's head (Council, Solo).
+  return <div className="flex h-full min-h-0 flex-col gap-4" data-testid="roster-view">
     <div className="flex items-center gap-2" data-testid="roster-scope">
       <button type="button" className={scope === "global" ? "text-ink font-semibold" : "text-ink-muted"} onClick={() => setScope("global")}>Global</button>
       <span>|</span>
       <button type="button" className={scope === "project" ? "text-ink font-semibold" : "text-ink-muted"} onClick={() => setScope("project")}>Project · {projectName ?? projectId}</button>
     </div>
-    <div className="flex gap-6 items-start">
-    <aside className="w-72 shrink-0" data-testid="roster-flock">
+    <div className="flex min-h-0 flex-1 gap-6 items-stretch">
+    <aside className="flex w-72 shrink-0 flex-col min-h-0" data-testid="roster-flock">
       <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">Flock</h2>
         <span data-testid="roster-flock-count" className="text-xs text-ink-muted">{flock.shown.length === flock.all.length ? `${flock.all.length} ducklings` : `${flock.shown.length} of ${flock.all.length}`}{flock.filtering && <> · <button type="button" className="underline" data-testid="roster-flock-clear" onClick={clearFlockFilters}>clear</button></>}</span></div>
       <input data-testid="roster-flock-filter-text" value={flockText} onChange={(e) => setFlockText(e.target.value)} placeholder="search id or model" aria-label="search the flock" className="mt-2 w-full rounded border border-hairline bg-surface px-2 py-1 text-sm" />
@@ -174,7 +177,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         <select data-testid="roster-flock-sort" aria-label="sort the flock by" value={flockSort} onChange={(e) => setFlockSort(e.target.value)} className="rounded border border-hairline bg-surface px-1 py-0.5 text-xs text-ink">{SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select>
         <button type="button" data-testid="roster-flock-sort-dir" aria-label={flockDir === "desc" ? "highest first — switch to lowest first" : "lowest first — switch to highest first"} title={flockDir === "desc" ? "highest first" : "lowest first"} onClick={() => setFlockDir(flockDir === "desc" ? "asc" : "desc")} className="rounded border border-hairline px-1.5 py-0.5">{flockDir === "desc" ? "↓" : "↑"}</button>
       </div>
-      <div className="mt-2 space-y-2">
+      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="roster-flock-list">
       {flock.shown.length === 0 && <p className="text-sm text-ink-muted" data-testid="roster-flock-empty">no duckling matches these filters.</p>}
       {flock.shown.map((s) => { const d = ducks.find((x) => x.id === s.id)!; const candidate = flock.candidates.find((c) => c.id === s.id); const local = s.locality ?? ""; const v = flock.value(s); return <div key={s.id} draggable data-testid={`roster-flock-card-${s.id}`} onDragStart={(event) => { dragging.current = true; event.dataTransfer.setData("text/plain", s.id); }} onDragEnd={() => { dragging.current = false; }} className={`rounded border p-2 bg-surface ${candidate ? "border-ink-muted" : "border-hairline"}`}>
         <div className="flex items-center gap-2"><DuckAvatar id={s.id} roster={roster} /><span className="font-medium truncate" title={`${s.id} · ${s.model}`}>{s.id}</span><span className="ml-auto text-xs text-ink-muted"><StatusChip role="muted" label={local || (isLocal(d, providers) ? "local" : "remote")} /></span></div>
@@ -184,7 +187,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         {candidate && <div className="mt-1 text-xs"><span data-testid={`roster-suggested-${s.id}`} className="font-medium">suggested for {flock.forRole}</span> <span data-testid={`roster-suggested-why-${s.id}`} className="text-ink-muted">· {candidate.why}</span></div>}
       </div>; })}
     </div></aside>
-    <div className="flex-1 min-w-0">
+    <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1" data-testid="roster-boards">
     {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
     <div className="space-y-5">{MODES.map((mode) => <section key={mode} data-testid={`roster-board-${mode}`} className="border-l-4 pl-3" style={{ borderLeftColor: seriesVar(MODES.indexOf(mode)) }}><h2 className="text-lg font-semibold capitalize">{mode}</h2>{warnings[mode] && <p className="text-sm text-ink-muted" data-testid={`roster-warning-${mode}`}>{warnings[mode]}</p>}{errors[mode] && <p role="alert" className="text-sm" data-testid={`roster-error-${mode}`} style={{ color: "var(--status-critical)" }}>{errors[mode]}</p>}{mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p>no pins</p>}<div className="flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {

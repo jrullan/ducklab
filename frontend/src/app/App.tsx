@@ -592,7 +592,7 @@ export function App() {
         )}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
         {route.name === "roster" && client && projectId && (
-          <div className="p-4"><Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} /></div>
+          <div className="h-full p-4"><Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} /></div>
         )}
         {route.name === "settings" && (
           <Settings
