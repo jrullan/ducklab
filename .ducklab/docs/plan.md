@@ -1363,4 +1363,27 @@ The brake check at Execute never clears fsPatchFailStreak except via a successfu
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-071 — Add [verify] link_deps and setup keys to project.toml so checkout preparation is declared, and make gate failures name the missing path
+
+Fixes B-061.
+
+## Reported
+
+What happened: the acceptance gate runs from a clean checkout (B-040), and twice now it died because the checkout lacked an in-tree, gitignored artifact the gate command references: frontend/node_modules ("npx tsc not found") and then .venv ("/bin/sh: .venv/bin/pytest: not found", excercise-tracker's plan-extend accept). Both were cured by growing a hard-coded table in linkInstalledDeps (node_modules justified by package.json, .venv by Python markers). The table covers exactly the two ecosystems in use today; the next stack fails in a new costume — a CMake project's gate says `cmake --build build && ctest` and build/ is gitignored; Meson has builddir/, vcpkg has vcpkg_installed/. The engine cannot enumerate every ecosystem's costume in advance.
+
+Two distinct remedies hide in the class, and the table conflates them: DEPENDENCIES (node_modules, .venv) are safe to borrow from the live tree — they carry no product code; BUILD PRODUCTS (CMake's build/) must NOT be borrowed — linking them would hand the gate binaries compiled from the old code, and the honest move is to regenerate them in the checkout.
+
+Expected: the project declares its checkout preparation instead of the engine guessing — [verify] in project.toml gains link_deps = [".venv"] (borrow: for installed dependency trees) and setup = "cmake -B build" (prepare: run in the checkout before the gate, for compiled stacks). The hard-coded table stays as the zero-config default for the common costumes. Per B-052's contract, both keys surface in the desktop Settings alongside the gate command. And the gate's failure should teach the door: when the gate command references a path the commit does not carry, say "the gate references build/, which the commit does not include — declare it in setup or link_deps" instead of the raw shell error.
+
+## Triage
+
+**Component:** clean-checkout gate / project config
+**Suspected files:** internal/service/service.go, internal/config/config.go, frontend/src/views/Settings.tsx
+
+linkInstalledDeps (service.go:2086) is a hard-coded two-ecosystem table with no config surface in config.Verify (config.go:295), so any other stack's gitignored artifact fails the accept gate with a raw shell error — confirmed by two real accept failures.
+
+**Verification (triage recommends):** test-first — Set link_deps=[".venv"] in project.toml, accept a commit whose gate calls .venv/bin/pytest, and assert the clean checkout symlinks it; a setup="cmake -B build" run must execute in the checkout before the gate; a gate referencing unlinked build/ must fail with the 'declare it in setup or link_deps' message
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +78,86 @@ func TestCleanCheckoutSkipsVenvWithoutPythonMarkers(t *testing.T) {
 
 	if _, err := os.Lstat(filepath.Join(checkout, ".venv")); err == nil {
 		t.Error(".venv linked without a Python marker to justify it")
+	}
+}
+
+// Checkout preparation belongs to the project, not to an ever-growing list of
+// ecosystems in the engine. A declared dependency is linked even when it has no
+// marker the engine happens to recognize, and the gate runs against that link.
+func TestAcceptedCheckoutLinksDeclaredDependency(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, root := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, root, `link_deps = ["tools/pytest"]
+mode = "custom"
+custom = "test -f tools/pytest/bin/runner"`)
+	g := gitProject(t, root)
+	sha := mustHead(t, g)
+	// This installed tool is deliberately untracked: only link_deps can make it
+	// available in the detached checkout.
+	if err := os.MkdirAll(filepath.Join(root, "tools", "pytest", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools", "pytest", "bin", "runner"), []byte("tool\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := verifyAcceptedCommit(context.Background(), g, root, sha, "build"); err != nil {
+		t.Fatalf("declared dependency was not available to the clean-checkout gate: %v", err)
+	}
+}
+
+// Setup creates build products inside the detached checkout. It must precede
+// the gate and must not borrow build/ from the live tree.
+func TestAcceptedCheckoutRunsDeclaredSetupBeforeGate(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, root := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, root, `setup = "mkdir -p build && touch build/generated"
+mode = "custom"
+custom = "test -f build/generated"`)
+	g := gitProject(t, root)
+	sha := mustHead(t, g)
+
+	if _, err := verifyAcceptedCommit(context.Background(), g, root, sha, "build"); err != nil {
+		t.Fatalf("declared setup did not prepare the clean checkout before its gate: %v", err)
+	}
+}
+
+// A path absent from the commit is actionable configuration feedback, not a
+// shell-specific "not found" error. build/ intentionally is neither linked
+// nor set up here.
+func TestAcceptedCheckoutNamesUndeclaredMissingGatePath(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, root := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, root, `mode = "custom"
+custom = "test -f build/generated"`)
+	g := gitProject(t, root)
+	sha := mustHead(t, g)
+
+	_, err := verifyAcceptedCommit(context.Background(), g, root, sha, "build")
+	if err == nil {
+		t.Fatal("gate unexpectedly passed without its uncommitted build/ path")
+	}
+	want := "the gate references build/, which the commit does not include — declare it in setup or link_deps"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("gate error = %q, want actionable missing-path guidance %q", err, want)
+	}
+}
+
+func appendVerifyPreparation(t *testing.T, root, preparation string) {
+	t.Helper()
+	path := filepath.Join(root, ".ducklab", "project.toml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const verifyHeader = "[verify]\n"
+	at := strings.Index(string(body), verifyHeader)
+	if at < 0 {
+		t.Fatal("project fixture lacks [verify]")
+	}
+	insert := at + len(verifyHeader)
+	updated := string(body[:insert]) + preparation + "\n" + string(body[insert:])
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
