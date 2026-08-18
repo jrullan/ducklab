@@ -239,7 +239,10 @@ func ReleaseScript() *Script {
 			Role:     config.RoleScribe,
 			Toolbelt: "full", // narrowed to the scribe's read-only ceiling
 			Contract: "freeform",
-			MaxTurns: 4,
+			// Room to glance at a task or two, not to read the inventory
+			// one call at a time — the prompt carries each task's summary
+			// so the scribe need not.
+			MaxTurns: 8,
 		}},
 		Until:     "round == 1",
 		MaxRounds: 1,

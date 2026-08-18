@@ -134,7 +134,7 @@ func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag s
 		seen[r.TaskID] = true
 		t := titles[r.TaskID]
 		items = append(items, release.Item{
-			TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: r.CommitSHA,
+			TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: r.CommitSHA, Summary: t.summary,
 		})
 		if r.Verdict == "UNVERIFIED" {
 			unverified++
@@ -143,7 +143,7 @@ func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag s
 	return items, unverified, nil
 }
 
-type taskFacts struct{ title, milestone string }
+type taskFacts struct{ title, milestone, summary string }
 
 func (s *Service) taskTitles(ctx context.Context, projectID string) map[string]taskFacts {
 	out := map[string]taskFacts{}
@@ -154,9 +154,38 @@ func (s *Service) taskTitles(ctx context.Context, projectID string) map[string]t
 		return out
 	}
 	for _, t := range tasks {
-		out[t.ID] = taskFacts{title: t.Title, milestone: t.Milestone}
+		out[t.ID] = taskFacts{title: t.Title, milestone: t.Milestone, summary: firstParagraph(t.Body, 280)}
 	}
 	return out
+}
+
+// firstParagraph is a task body's opening, trimmed to a line: enough for a
+// scribe to know what the work was for, short enough for forty of them to
+// fit one prompt. Bullet lists (the deliverables) are not the opening.
+func firstParagraph(body string, max int) string {
+	for _, para := range strings.Split(strings.ReplaceAll(strings.TrimSpace(body), "\r\n", "\n"), "\n\n") {
+		var kept []string
+		for _, l := range strings.Split(para, "\n") {
+			l = strings.TrimSpace(l)
+			if l == "" || strings.HasPrefix(l, "#") || strings.HasPrefix(l, "- ") || strings.HasPrefix(l, "* ") || strings.HasSuffix(l, ":") {
+				continue
+			}
+			kept = append(kept, l)
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		out := strings.Join(kept, " ")
+		if len(out) > max {
+			cut := out[:max]
+			if i := strings.LastIndex(cut, " "); i > max/2 {
+				cut = cut[:i]
+			}
+			out = cut + "…"
+		}
+		return out
+	}
+	return ""
 }
 
 // commitsAfter returns the commits since a tag, or nil when there is no tag
@@ -285,13 +314,20 @@ func scribePrompt(n release.Notes) string {
 			if title == "" {
 				title = it.TaskID
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", it.TaskID, title)
+			if it.Summary != "" {
+				fmt.Fprintf(&b, "- %s: %s — %s\n", it.TaskID, title, it.Summary)
+			} else {
+				fmt.Fprintf(&b, "- %s: %s\n", it.TaskID, title)
+			}
 		}
 		b.WriteString("\n")
 	}
 	b.WriteString("Write the release notes for the people who use this software. " +
 		"The inventory above is recorded separately and does not need repeating; " +
-		"write only what changed for them and why it matters.\n")
+		"write only what changed for them and why it matters.\n\n" +
+		"Everything you need is in this message: each item carries the task's own summary. " +
+		"Do not read the tasks one by one — your tool budget here is small and reading them all will spend it before you write a word. " +
+		"Answer with the notes as your reply, in prose, grouped by what a user would notice.\n")
 	return b.String()
 }
 

@@ -85,6 +85,11 @@ type Item struct {
 	Title     string
 	Milestone string
 	CommitSHA string
+	// Summary is the task's own first paragraph: what it was for, in the
+	// planner's words. Handed to the scribe so it can write about the work
+	// without reading forty-five tasks one call at a time — which is what a
+	// diligent model did with titles alone, and ran out of calls doing.
+	Summary string
 }
 
 // Notes is a release's contents, grouped as the document will present them.
