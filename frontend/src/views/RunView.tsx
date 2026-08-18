@@ -150,6 +150,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // tab shows it again. Not persisted — a diff hidden by yesterday's fold
   // is a diff unread before an accept.
   const [tabsFolded, setTabsFolded] = useState(false);
+  // The task's own words live in the pinned header, folded by default: what
+  // was ASKED must be reachable from anywhere in a long transcript without
+  // scrolling back, and must not spend the viewport on itself when it is not
+  // being read.
+  const [taskOpen, setTaskOpen] = useState(false);
   const tabPanelRef = useRef<HTMLDivElement | null>(null);
   // Explicit expand/collapse choices per turn, keyed round:turn. Held HERE
   // because the virtualiser unmounts off-screen turns — state inside the turn
@@ -614,7 +619,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           a wall of tool calls with no way to tell WHOSE they were, or to
           abort without scrolling back up. Opaque so the lanes pass under
           it, not through it. */}
-      <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b border-hairline bg-page px-4 py-3">
+      <header className="sticky top-0 z-20 border-b border-hairline bg-page px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3">
         {/* A run with no task showed nothing at all: the header of a triage or
             a stage opened with an empty space where its name should be. The
             same fallback the runs list uses — task, else stage, else id. */}
@@ -623,13 +629,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             built" without a trip down to the card. Truncated; the card and
             the hover carry the whole of it. */}
         {task?.title && (
-          <span
-            className="max-w-md truncate text-sm text-ink-muted"
-            data-testid="run-task-title"
-            title={task.title}
+          <button
+            type="button"
+            className="flex max-w-md items-center gap-1 text-sm text-ink-muted hover:text-ink"
+            data-testid="run-task-toggle"
+            aria-expanded={taskOpen}
+            aria-controls="run-task-card"
+            title={taskOpen ? "fold the task" : "read the task"}
+            onClick={() => setTaskOpen((v) => !v)}
           >
-            — {task.title}
-          </span>
+            <span aria-hidden="true" className="text-xs">{taskOpen ? "▾" : "▸"}</span>
+            <span className="truncate" data-testid="run-task-title" title={task.title}>— {task.title}</span>
+          </button>
         )}
         <span className="text-ink-secondary" title={run.mode_source ? `mode source: ${run.mode_source}` : undefined}>{run.mode}{run.mode_source ? ` (${run.mode_source})` : ""}</span>
         <CycleMap stage={run.stage} />
@@ -674,26 +685,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </span>
           )}
         </div>
-      </header>
-
-      {/* The rail is metadata of the WHOLE run — budget, spend, gate — so it
-          docks at the right edge for the whole read, not just the stretch of
-          page its old grid column happened to span. The wrapper holds every
-          scrolling region (cards, transcript, dock, diff), which is what
-          lets the aside's sticky keep its grip from the first card to the
-          last hunk of the diff instead of drowning when the grid ended. */}
-      <div className="md:flex md:items-start">
-        <div className="min-w-0 flex-1">
-
-      {/* The task's own words, fixed beneath the title: judging a run means
-          reading what it did against what was ASKED, and the ask lived at
-          the bottom of a rail that scrolled away mid-read. Bounded: a long
-          body scrolls inside its own box, never the page. */}
-      {task && (
-        <section
-          data-testid="run-task-card"
-          className="mx-4 mt-2 rounded-card border border-hairline p-3"
-        >
+        </div>
+        {/* The task's own words, unfolded from the pinned title: judging a
+            run means reading what it did against what was ASKED, and the ask
+            used to sit in a card that the transcript scrolled away. Bounded:
+            a long body scrolls inside its own box, never the page. */}
+        {task && taskOpen && (
+          <section
+            id="run-task-card"
+            data-testid="run-task-card"
+            className="mt-3 rounded-card border border-hairline p-3"
+          >
           <div className="text-sm text-ink">
             <span className="text-ink-muted">the task · </span>
             {task.id} — {task.title}
@@ -736,9 +738,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <div className="mt-2">
             <ChatAbout client={client} projectId={run.project_id} aboutKind="task" aboutId={task.id} ducklings={fleet} />
           </div>
-        </section>
-      )}
+          </section>
+        )}
+      </header>
 
+      {/* The rail is metadata of the WHOLE run — budget, spend, gate — so it
+          docks at the right edge for the whole read, not just the stretch of
+          page its old grid column happened to span. The wrapper holds every
+          scrolling region (cards, transcript, dock, diff), which is what
+          lets the aside's sticky keep its grip from the first card to the
+          last hunk of the diff instead of drowning when the grid ended. */}
+      <div className="md:flex md:items-start">
+        <div className="min-w-0 flex-1">
 
       {/* The moment you most want to change a setting and go again is while
           looking at the run that just failed. Doing it meant leaving for the

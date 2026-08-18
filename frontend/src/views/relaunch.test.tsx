@@ -38,6 +38,14 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
 // the run that just failed. Doing it meant leaving for the board and finding the
 // task by hand, which is enough friction that a re-run tends to carry the same
 // settings that just failed.
+
+// The task lives in the pinned header, folded by default; reading it is one
+// click on its title. Tests that read the card open it first.
+async function openTask() {
+  fireEvent.click(await screen.findByTestId("run-task-toggle"));
+  return screen.findByTestId("run-task-card");
+}
+
 describe("relaunching from the run view", () => {
   beforeEach(() => {
     useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
@@ -223,7 +231,12 @@ describe("the task's description in the run view", () => {
       ),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
-    const card = await screen.findByTestId("run-task-card");
+    // Folded by default: the title is in the header, the body is not on
+    // screen until asked for.
+    await screen.findByTestId("run-task-toggle");
+    expect(screen.queryByTestId("run-task-card")).toBeNull();
+    const card = await openTask();
+    expect(card.closest("header")?.className).toContain("sticky");
     expect(card.textContent).toContain("T-015 — Handle angle input");
     expect(card.textContent).toContain("Parse numeric value in degrees");
   });
@@ -252,9 +265,10 @@ describe("the task's description in the run view", () => {
       events: {}, deltas: {}, reasoning: {}, spend: {},
     });
     const { rerender } = render(<RunView runId="r-1" client={client} />);
-    await screen.findByTestId("run-task-card");
+    await openTask();
     rerender(<RunView runId="r-c" client={client} />);
-    await waitFor(() => expect(screen.queryByTestId("run-task-card")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId("run-task-toggle")).toBeNull());
+    expect(screen.queryByTestId("run-task-card")).toBeNull();
   });
 
   // Reversed on purpose: hiding the card on an empty body hid it for exactly
@@ -262,7 +276,7 @@ describe("the task's description in the run view", () => {
   // with a title and nothing else. An empty brief is a fact worth stating.
   it("says so when the task has no body, instead of hiding the card", async () => {
     render(<RunView runId="r-1" client={clientWith()} />);
-    await waitFor(() => screen.getByTestId("run-task-card"));
+    await openTask();
     expect(screen.getByTestId("task-empty-body").textContent).toContain("no body");
   });
 });
@@ -561,6 +575,7 @@ describe("the task's coverage on the run view card", () => {
       ),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
+    await openTask();
     const cov = await screen.findByTestId("task-coverage");
     expect(cov.textContent).toContain("covered by SPEC-007, SPEC-008");
   });
@@ -574,6 +589,7 @@ describe("the task's coverage on the run view card", () => {
       ),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
+    await openTask();
     const debt = await screen.findByTestId("task-spec-debt");
     expect(debt.textContent).toContain("spec-debt");
     expect(screen.queryByTestId("task-coverage")).toBeNull();
@@ -597,6 +613,7 @@ describe("task actions on the run view card", () => {
       }),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
+    await openTask();
     await waitFor(() => screen.getByTestId("task-empty-body"));
     fireEvent.click(await screen.findByTestId("task-remove"));
     fireEvent.click(await screen.findByTestId("task-remove-yes"));
@@ -612,7 +629,7 @@ describe("task actions on the run view card", () => {
       ),
     } as Partial<EngineClient>);
     render(<RunView runId="r-1" client={client} />);
-    await waitFor(() => screen.getByTestId("run-task-card"));
+    await openTask();
     expect(screen.queryByTestId("task-remove")).toBeNull();
   });
 });
