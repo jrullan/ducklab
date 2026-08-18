@@ -19,18 +19,52 @@ func TestMatchIndexPicksTheNewestReleaseOfTheModel(t *testing.T) {
 		{Permaslug: "deepseek/deepseek-v4-pro-max-20260901", Coding: 90},
 		{Permaslug: "openai/gpt-5.6-luna", Coding: 71.4},
 	}
-	got, ok := matchIndex(items, "deepseek/deepseek-v4-pro")
+	got, ok := matchIndex(items, nil, "deepseek/deepseek-v4-pro")
 	if !ok || got.Coding != 68.8 {
 		t.Fatalf("got %+v ok=%v, want the 20260813 release", got, ok)
 	}
-	if got, ok := matchIndex(items, "openai/gpt-5.6-luna"); !ok || got.Coding != 71.4 {
+	if got, ok := matchIndex(items, nil, "openai/gpt-5.6-luna"); !ok || got.Coding != 71.4 {
 		t.Fatalf("exact permaslug: %+v ok=%v", got, ok)
 	}
-	if _, ok := matchIndex(items, "deepseek/deepseek-v4"); ok {
+	if _, ok := matchIndex(items, nil, "deepseek/deepseek-v4"); ok {
 		t.Fatal("a shorter model name matched a longer model's permaslug")
 	}
-	if _, ok := matchIndex(items, "qwen/qwen3.8-max"); ok {
+	if _, ok := matchIndex(items, nil, "qwen/qwen3.8-max"); ok {
 		t.Fatal("an absent model matched")
+	}
+}
+
+// The permaslug OpenRouter serves for an id is the truth about which release
+// the duckling calls — and it is spelled differently from the id for whole
+// vendors. Anthropic's "claude-opus-4.8" serves "claude-4.8-opus-20260528";
+// DeepSeek's "-0731" variant serves "-20260731"; and the id "deepseek-v4-pro"
+// serves the April release even though an August one is listed. The map
+// from /models decides; the dated-suffix guess is only the fallback.
+func TestMatchIndexFollowsTheServedPermaslug(t *testing.T) {
+	items := []indexItem{
+		{Permaslug: "anthropic/claude-4.8-opus-20260528", Coding: 74.3},
+		{Permaslug: "deepseek/deepseek-v4-flash-20260731", Coding: 69.1},
+		{Permaslug: "deepseek/deepseek-v4-pro-20260423", Coding: 59.4},
+		{Permaslug: "deepseek/deepseek-v4-pro-20260813", Coding: 68.8},
+	}
+	canonical := map[string]string{
+		"anthropic/claude-opus-4.8":       "anthropic/claude-4.8-opus-20260528",
+		"deepseek/deepseek-v4-flash-0731": "deepseek/deepseek-v4-flash-20260731",
+		"deepseek/deepseek-v4-pro":        "deepseek/deepseek-v4-pro-20260423",
+	}
+	for model, want := range map[string]float64{"anthropic/claude-opus-4.8": 74.3, "deepseek/deepseek-v4-flash-0731": 69.1, "deepseek/deepseek-v4-pro": 59.4} {
+		got, ok := matchIndex(items, canonical, model)
+		if !ok || got.Coding != want {
+			t.Errorf("%s: got %+v ok=%v, want %v", model, got, ok, want)
+		}
+	}
+	// Without the map, opus and the -0731 variant are unfindable, and pro
+	// falls back to the newest dated release.
+	if _, ok := matchIndex(items, nil, "anthropic/claude-opus-4.8"); ok {
+		t.Error("opus matched without the served-permaslug map — by what?")
+	}
+	if got, _ := matchIndex(items, nil, "deepseek/deepseek-v4-pro"); got.Coding != 68.8 {
+		t.Errorf("fallback = %+v, want newest dated release", got)
 	}
 }
 

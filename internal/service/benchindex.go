@@ -42,6 +42,11 @@ type indexCache struct {
 	AsOf      string      `json:"as_of"`
 	Source    string      `json:"source"`
 	Items     []indexItem `json:"items"`
+	// Canonical maps an OpenRouter model id ("anthropic/claude-opus-4.8") to
+	// the permaslug it actually serves ("anthropic/claude-4.8-opus-20260528"),
+	// from GET /models. Benchmark items are keyed by permaslug, and the two
+	// spellings differ for whole vendors; a prefix guess would miss them.
+	Canonical map[string]string `json:"canonical,omitempty"`
 }
 
 type indexItem struct {
@@ -159,28 +164,34 @@ var fetchIndexFn = fetchIndex
 
 func fetchIndex(p config.Provider) (*indexCache, error) {
 	base := strings.TrimSuffix(p.BaseURL, "/")
-	req, err := http.NewRequest("GET", base+"/benchmarks?source="+indexSourceParam, nil)
-	if err != nil {
-		return nil, err
-	}
-	if p.APIKeyEnv != "" {
-		req.Header.Set("Authorization", "Bearer "+os.Getenv(p.APIKeyEnv))
-	}
-	for k, v := range p.Headers {
-		req.Header.Set(k, v)
-	}
 	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("benchmarks: HTTP %d", resp.StatusCode)
+	get := func(path string, into interface{}) error {
+		req, err := http.NewRequest("GET", base+path, nil)
+		if err != nil {
+			return err
+		}
+		if p.APIKeyEnv != "" {
+			req.Header.Set("Authorization", "Bearer "+os.Getenv(p.APIKeyEnv))
+		}
+		for k, v := range p.Headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s: HTTP %d", path, resp.StatusCode)
+		}
+		if err := json.Unmarshal(body, into); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		return nil
 	}
 	var payload struct {
 		Data []indexItem `json:"data"`
@@ -189,22 +200,50 @@ func fetchIndex(p config.Provider) (*indexCache, error) {
 			Source string `json:"source"`
 		} `json:"meta"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("benchmarks: %w", err)
+	if err := get("/benchmarks?source="+indexSourceParam, &payload); err != nil {
+		return nil, err
 	}
 	asOf := payload.Meta.AsOf
 	if len(asOf) >= 10 {
 		asOf = asOf[:10]
 	}
-	return &indexCache{FetchedAt: time.Now().UTC().Format(time.RFC3339), AsOf: asOf, Source: payload.Meta.Source, Items: payload.Data}, nil
+	c := &indexCache{FetchedAt: time.Now().UTC().Format(time.RFC3339), AsOf: asOf, Source: payload.Meta.Source, Items: payload.Data}
+	// The id→permaslug map. Not fatal when it fails: the dated-suffix
+	// heuristic below still finds most models, and the miss is visible as
+	// an absent index rather than a wrong one.
+	var models struct {
+		Data []struct {
+			ID            string `json:"id"`
+			CanonicalSlug string `json:"canonical_slug"`
+		} `json:"data"`
+	}
+	if err := get("/models", &models); err == nil {
+		c.Canonical = make(map[string]string, len(models.Data))
+		for _, m := range models.Data {
+			if m.ID != "" && m.CanonicalSlug != "" {
+				c.Canonical[m.ID] = m.CanonicalSlug
+			}
+		}
+	}
+	return c, nil
 }
 
 var permaslugDate = regexp.MustCompile(`-(\d{8})$`)
 
-// matchIndex finds the item for a model. Permaslugs carry a release date
-// suffix ("openai/gpt-5.6-terra-20260709") and one model may appear under
-// several; the newest wins. An exact match wins over a dated one.
-func matchIndex(items []indexItem, model string) (indexItem, bool) {
+// matchIndex finds the item for a model. The permaslug OpenRouter serves for
+// the id (from /models) is the truth: it names the exact release the
+// duckling is calling, and it is spelled differently from the id for whole
+// vendors ("anthropic/claude-opus-4.8" serves "anthropic/claude-4.8-opus-
+// 20260528"). Without it, an exact permaslug match, else the newest dated
+// release under the id ("openai/gpt-5.6-terra-20260709").
+func matchIndex(items []indexItem, canonical map[string]string, model string) (indexItem, bool) {
+	if slug, ok := canonical[model]; ok {
+		for _, it := range items {
+			if it.Permaslug == slug {
+				return it, true
+			}
+		}
+	}
 	var best indexItem
 	bestDate, found := "", false
 	for _, it := range items {
@@ -230,7 +269,7 @@ func externalIndexFor(cache *indexCache, model string) *config.ExternalIndex {
 	if cache == nil {
 		return nil
 	}
-	it, ok := matchIndex(cache.Items, model)
+	it, ok := matchIndex(cache.Items, cache.Canonical, model)
 	if !ok {
 		return nil
 	}
