@@ -551,7 +551,7 @@ func (s *Server) handleGlobalRosterSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := body.Ducklings
-	if len(ids) == 0 {
+	if len(ids) == 0 && body.Duckling != "" {
 		ids = []string{body.Duckling}
 	}
 	view, err := s.svc.GlobalRosterSet(r.Context(), body.Mode, body.Role, ids)
@@ -578,7 +578,7 @@ func (s *Server) handleRosterSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := body.Ducklings
-	if len(ids) == 0 {
+	if len(ids) == 0 && body.Duckling != "" {
 		ids = []string{body.Duckling}
 	}
 	view, err := s.svc.RosterSetManyMode(r.Context(), r.PathValue("id"), requestMode(r, body.Mode), body.Role, ids)

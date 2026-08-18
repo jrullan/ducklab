@@ -144,15 +144,30 @@ func (s *Service) GlobalRosterSet(ctx context.Context, mode, role string, ids []
 	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
 		return nil, fmt.Errorf("field role invalid for roster: %q; next: choose a board role", role)
 	}
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("field ducklings must be a non-empty ordered list; next: provide duckling IDs")
-	}
 	for _, id := range ids {
 		if _, err := s.ducklings.Get(config.DucklingID(id)); err != nil {
 			return nil, fmt.Errorf("no duckling %q — registered: %s; next: choose a registered duckling", id, registeredDucklings(s))
 		}
 	}
 	v := s.ModeDefaults()
+	if len(ids) == 0 {
+		// An empty list empties the seat: Global has no unpin, "remove" on
+		// the last card is how a person clears it. It used to be refused
+		// ("must be a non-empty list"), and the HTTP layer turned the empty
+		// list into [""] first — "no duckling \"\"".
+		if isCommonRole(role) || mode == "" || mode == "common" {
+			delete(v.RolePins, role)
+		} else if v.ModeSeats[mode] != nil {
+			delete(v.ModeSeats[mode], role)
+			if len(v.ModeSeats[mode]) == 0 {
+				delete(v.ModeSeats, mode)
+			}
+		}
+		if err := s.ModeDefaultsSet(v); err != nil {
+			return nil, fmt.Errorf("field mode/ducklings: %v; next: provide a valid complete roster", err)
+		}
+		return s.GlobalRosterGet(ctx, mode)
+	}
 	if v.ModeSeats == nil {
 		v.ModeSeats = map[string]map[string][]string{}
 	}
@@ -231,7 +246,8 @@ func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role s
 		return nil, fmt.Errorf("field role invalid for roster: %q (valid: %s); next: choose a board role", role, rolesList())
 	}
 	if len(ducklingIDs) == 0 {
-		return nil, fmt.Errorf("field ducklings must be a non-empty ordered list; next: provide duckling IDs")
+		// Removing the last card from a pinned seat is an unpin.
+		return s.RosterUnpin(ctx, projectID, mode, role)
 	}
 	for _, ducklingID := range ducklingIDs {
 		if _, err := s.ducklings.Get(config.DucklingID(ducklingID)); err != nil {

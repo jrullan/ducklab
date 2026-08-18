@@ -218,3 +218,28 @@ func TestGlobalWritesSurviveAPairWithAnAdvisor(t *testing.T) {
 		t.Errorf("split architect not saved: %v", got)
 	}
 }
+
+// Removing the last card empties the seat on either scope: Global has no
+// unpin, so an empty list clears the seat; on a project it is an unpin.
+func TestRemovingTheLastCardEmptiesTheSeat(t *testing.T) {
+	s := writableService(t, "glm52", "luna", "terra")
+	projectID, _ := projectWithConfig(t, s, "empty-seat")
+	if _, err := s.GlobalRosterSet(context.Background(), "tournament", "advisor", []string{"glm52"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GlobalRosterSet(context.Background(), "tournament", "advisor", nil); err != nil {
+		t.Fatalf("emptying a global seat: %v", err)
+	}
+	if e := seatOf(t, s, projectID, "tournament", "advisor"); e.Duckling != "" {
+		t.Errorf("tournament advisor should be empty after removing its only card: %+v", e)
+	}
+	if _, err := s.RosterSetManyMode(context.Background(), projectID, "pair", "reviewer", []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RosterSetManyMode(context.Background(), projectID, "pair", "reviewer", nil); err != nil {
+		t.Fatalf("emptying a project seat: %v", err)
+	}
+	if e := seatOf(t, s, projectID, "pair", "reviewer"); e.Source == "project mode seat" {
+		t.Errorf("project reviewer should be unpinned after removing its only card: %+v", e)
+	}
+}
