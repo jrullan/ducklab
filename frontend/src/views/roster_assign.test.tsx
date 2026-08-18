@@ -158,7 +158,10 @@ describe("Roster assignment", () => {
     const client = await renderRoster({ rejectSet: true });
     await projectScope();
     fireEvent.drop(screen.getByTestId("roster-column-split-implementer"), { dataTransfer: dataTransfer("worker-b") });
-    expect(await screen.findByText(/field ducklings: split requires at least two workers/i)).toBeTruthy();
+    // Beside the board that produced it — an error at the top of the view
+    // was invisible from the lower boards.
+    const err = await screen.findByTestId("roster-error-split");
+    expect(err.textContent).toMatch(/field ducklings: split requires at least two workers/i);
     expect(client.RosterSetManyMode).toHaveBeenCalled();
   });
 

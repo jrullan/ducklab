@@ -34,7 +34,15 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [boards, setBoards] = useState<Record<string, Entry[]>>({});
   const [warnings, setWarnings] = useState<Record<string, string | undefined>>({});
-  const [error, setError] = useState("");
+  // Errors live with the board that produced them: an error rendered at
+  // the top of the view was invisible from Tournament and Common, and two
+  // real bugs hid behind that. Key "" is the view itself (a failed re-read).
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const setError = (mode: string, message: string) => setErrors((cur) => {
+    const next = { ...cur };
+    if (message) next[mode] = message; else delete next[mode];
+    return next;
+  });
   const [chosenSeat, setChosenSeat] = useState<{ mode: string; role: string } | null>(null);
   const dragging = useRef(false);
   const editable = typeof client.RosterSetManyMode === "function" && typeof client.GlobalRosterSet === "function";
@@ -47,7 +55,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     setWarnings(Object.fromEntries(items.map(([mode, , warning]) => [mode, warning])));
   }).catch((e: unknown) => {
     // A failed re-read must not leave stale seats standing as if current.
-    setError(`could not re-read the roster: ${e instanceof Error ? e.message : String(e)}`);
+    setError("", `could not re-read the roster: ${e instanceof Error ? e.message : String(e)}`);
   });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
@@ -58,12 +66,12 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   useEffect(() => { reload(); }, [client, projectId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const write = async (mode: string, role: string, ids: string[]) => {
-    setError("");
+    setError(mode, "");
     try {
       if (scope === "global") await client.GlobalRosterSet(mode, role, ids);
       else await client.RosterSetManyMode(projectId, mode, role, ids);
       await reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(mode, e instanceof Error ? e.message : String(e)); }
   };
   const assign = (mode: string, role: string, id: string) => {
     const entry = (boards[mode] ?? []).find((candidate) => candidate.role === role);
@@ -104,12 +112,12 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       {ducks.map((d) => { const local = isLocal(d, providers); return <div key={d.id} draggable data-testid={`roster-flock-card-${d.id}`} onDragStart={(event) => { dragging.current = true; event.dataTransfer.setData("text/plain", d.id); }} onDragEnd={() => { dragging.current = false; }} className="rounded border border-hairline bg-surface p-2"><DuckAvatar id={d.id} roster={roster} /><span className="ml-2 font-medium">{`${d.id}${d.model ? ` · ${d.model}` : ""}`}</span><div className="text-sm text-ink-muted"><StatusChip role="muted" label={local ? "local" : "remote"} /> <span title="cost per million tokens, in / out">{d.cost ? `$${d.cost.input_per_mtok} / $${d.cost.output_per_mtok} per Mtok` : "cost unknown"}</span></div></div>; })}
     </div></aside>
     <div className="flex-1 min-w-0">
-    {error && <p role="alert">{error}</p>}
+    {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
-    <div className="space-y-5">{MODES.map((mode) => <section key={mode} data-testid={`roster-board-${mode}`} className="border-l-4 pl-3" style={{ borderLeftColor: seriesVar(MODES.indexOf(mode)) }}><h2 className="text-lg font-semibold capitalize">{mode}</h2>{warnings[mode] && <p>{warnings[mode]}</p>}{mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p>no pins</p>}<div className="flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
+    <div className="space-y-5">{MODES.map((mode) => <section key={mode} data-testid={`roster-board-${mode}`} className="border-l-4 pl-3" style={{ borderLeftColor: seriesVar(MODES.indexOf(mode)) }}><h2 className="text-lg font-semibold capitalize">{mode}</h2>{warnings[mode] && <p className="text-sm text-ink-muted" data-testid={`roster-warning-${mode}`}>{warnings[mode]}</p>}{errors[mode] && <p role="alert" className="text-sm" data-testid={`roster-error-${mode}`} style={{ color: "var(--status-critical)" }}>{errors[mode]}</p>}{mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p>no pins</p>}<div className="flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
       const ids = names(entry); const isPinned = pinned(entry); const ghost = scope === "project" && !isPinned;
       return <div key={entry.role} className="min-w-40" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(mode, entry.role, event)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}><h3 className="mb-2">{entry.role}</h3>{editable && !(chosenSeat?.mode === mode && chosenSeat.role === entry.role) && <button type="button" data-testid={`roster-drop-${mode}-${entry.role}`} aria-label={`assign to ${entry.role} in ${mode}`} onClick={() => setChosenSeat({ mode, role: entry.role })} className={`mb-2 w-full rounded border border-dashed border-hairline px-2 py-2 text-xs text-ink-muted ${ids.length === 0 ? "min-h-12" : ""}`}>{ids.length === 0 ? "drop here · assign" : "+ assign"}</button>}
-        {ids.map((id) => <div key={id} data-testid={`roster-card-${mode}-${entry.role}-${id}`} data-ghost={ghost ? "true" : undefined} title={isPinned && (entry.global_ducklings ?? entry.default) ? `Global: ${Array.isArray(entry.global_ducklings) ? entry.global_ducklings.join(", ") : entry.default}` : undefined} className={`flex items-center gap-2 rounded border p-2 mb-2 ${ghost ? "border-dashed text-ink-muted" : "border-hairline"}`}><DuckAvatar id={id} roster={roster} /><span className="font-medium">{id}</span>{(ghost || isPinned) && <small className="rounded border border-hairline px-1 text-ink-muted">{ghost ? "global" : "pinned"}</small>}<span className="ml-auto flex gap-2 text-xs">{editable && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`remove ${id} from ${entry.role}`} onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>remove</button>}{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(e instanceof Error ? e.message : String(e))); }}>unpin</button>}</span></div>)}
+        {ids.map((id) => <div key={id} data-testid={`roster-card-${mode}-${entry.role}-${id}`} data-ghost={ghost ? "true" : undefined} title={isPinned && (entry.global_ducklings ?? entry.default) ? `Global: ${Array.isArray(entry.global_ducklings) ? entry.global_ducklings.join(", ") : entry.default}` : undefined} className={`flex items-center gap-2 rounded border p-2 mb-2 ${ghost ? "border-dashed text-ink-muted" : "border-hairline"}`}><DuckAvatar id={id} roster={roster} /><span className="font-medium">{id}</span>{(ghost || isPinned) && <small className="rounded border border-hairline px-1 text-ink-muted">{ghost ? "global" : "pinned"}</small>}<span className="ml-auto flex gap-2 text-xs">{editable && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`remove ${id} from ${entry.role}`} onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>remove</button>}{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(mode, ""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(mode, e instanceof Error ? e.message : String(e))); }}>unpin</button>}</span></div>)}
         {editable && chosenSeat?.mode === mode && chosenSeat.role === entry.role && <div className="mb-2 rounded border border-hairline bg-surface2 p-2" role="listbox" aria-label={`choose a duckling for ${entry.role}`}><div className="mb-1 flex items-center justify-between text-xs text-ink-muted"><span>assign to {entry.role}</span><button type="button" className="underline" onClick={() => setChosenSeat(null)}>cancel</button></div><div className="max-h-56 space-y-1 overflow-y-auto">{ducks.filter((duck) => !ids.includes(duck.id)).map((duck) => <button key={duck.id} type="button" className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface" aria-label={`assign ${duck.id} to ${entry.role}`} onClick={() => assign(mode, entry.role, duck.id)}><DuckAvatar id={duck.id} roster={roster} /> <span className="ml-1">{duck.id}</span></button>)}</div></div>}
       </div>;
     })}</div></section>)}</div>
