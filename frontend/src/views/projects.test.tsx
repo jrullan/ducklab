@@ -215,6 +215,19 @@ describe("Projects — the gate", () => {
     expect(screen.queryByTestId("gate-none")).toBeNull();
   });
 
+  it("shows declared checkout preparation with the gate", async () => {
+    const client = clientWithGate(
+      gate({
+        mode: "tests", command: "cmake --build build && ctest", setup: "cmake -B build", link_deps: [".venv"],
+        best_verdict: "PASSED",
+      }),
+    );
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    const preparation = await screen.findByTestId("gate-preparation");
+    expect(preparation.textContent).toContain("cmake -B build");
+    expect(preparation.textContent).toContain(".venv");
+  });
+
   // The person's exact flow: a CONFIGURED gate, edit, append && chains, Set —
   // the row must show the refetched command, not the one it had.
   it("edits a configured gate and the row follows", async () => {

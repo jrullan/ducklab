@@ -2039,13 +2039,18 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 	}
 	defer git.WorktreeRemove(checkout)
 
-	// Installed dependencies are build caches, not repository truth — the
-	// same lesson B-048 taught the environment scrub. A fresh checkout has
-	// no node_modules, so the frontend half of a gate died at "this is not
-	// the tsc command you are looking for" — or would pay a full npm
-	// install per accept. Link the project's own installed trees wherever
-	// the commit carries the matching package.json.
-	linkInstalledDeps(root, checkout)
+	// Installed dependencies are build caches, not repository truth. Projects
+	// may declare additional trees; the established common cases remain the
+	// zero-config default.
+	linkInstalledDeps(root, checkout, cfg.Verify.LinkDeps)
+	if cfg.Verify.Setup != "" {
+		setup := config.Verify{Mode: string(verify.GateCustom), Custom: cfg.Verify.Setup, TimeoutS: cfg.Verify.TimeoutS}
+		if result, err := verify.Run(ctx, checkout, setup); err != nil {
+			return nil, fmt.Errorf("prepare clean checkout for acceptance: %w", err)
+		} else if !verify.IsGreen(result) {
+			return nil, fmt.Errorf("prepare clean checkout for acceptance failed:\n%s", result.Output)
+		}
+	}
 
 	result, err := verify.Run(ctx, checkout, cfg.Verify)
 	if err != nil {
@@ -2074,6 +2079,9 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 		return reproduction, nil
 	}
 	if !verify.IsGreen(result) {
+		if missing := missingGatePath(checkout, result.Command); missing != "" {
+			return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout: the gate references %s/, which the commit does not include — declare it in setup or link_deps\n%s", short(sha), missing, result.Output)
+		}
 		return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return reproduction, nil
@@ -2083,7 +2091,7 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 // project into a clean checkout. Best effort by design: a missing link just
 // means the gate pays the install, and a gate that cannot install fails with
 // the package manager's own words.
-func linkInstalledDeps(root, checkout string) {
+func linkInstalledDeps(root, checkout string, declared []string) {
 	deps := []struct {
 		rel     string
 		markers []string
@@ -2097,13 +2105,19 @@ func linkInstalledDeps(root, checkout string) {
 		// stranded a yolo accept.
 		{".venv", []string{"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg", "pytest.ini", "tox.ini", "Pipfile"}},
 	}
+	for _, rel := range declared {
+		deps = append(deps, struct {
+			rel     string
+			markers []string
+		}{rel: rel})
+	}
 	for _, d := range deps {
 		src := filepath.Join(root, d.rel)
 		dst := filepath.Join(checkout, d.rel)
 		if _, err := os.Stat(src); err != nil {
 			continue
 		}
-		marked := false
+		marked := len(d.markers) == 0
 		for _, m := range d.markers {
 			if _, err := os.Stat(filepath.Join(filepath.Dir(dst), m)); err == nil {
 				marked = true
@@ -2116,8 +2130,40 @@ func linkInstalledDeps(root, checkout string) {
 		if _, err := os.Lstat(dst); err == nil {
 			continue
 		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			continue
+		}
 		_ = os.Symlink(src, dst)
 	}
+}
+
+// missingGatePath returns the first relative path named by a gate that is not
+// present in the checkout. Shell syntax is deliberately not parsed: path-like
+// command tokens are enough to turn the common missing-artifact failure into
+// useful configuration advice.
+func missingGatePath(checkout, command string) string {
+	tokens := strings.Fields(command)
+	for i, token := range tokens {
+		token = strings.Trim(strings.TrimPrefix(token, "./"), "\"'`;,()")
+		// CMake's conventional build product is named as a bare --build
+		// operand, rather than a path containing a slash.
+		if i > 0 && tokens[i-1] == "--build" && token != "" && !filepath.IsAbs(token) && !strings.HasPrefix(token, "-") {
+			if _, err := os.Lstat(filepath.Join(checkout, token)); os.IsNotExist(err) {
+				return token
+			}
+		}
+		if token == "" || filepath.IsAbs(token) || strings.HasPrefix(token, "-") || !strings.Contains(token, "/") {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(token), "/")
+		if len(parts) < 2 || parts[0] == ".." || parts[0] == "." {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(checkout, filepath.FromSlash(parts[0]))); os.IsNotExist(err) {
+			return parts[0]
+		}
+	}
+	return ""
 }
 
 // logResolution records a decision and closes the run out.

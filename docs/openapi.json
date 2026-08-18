@@ -474,10 +474,19 @@
           "custom": {
             "type": "string"
           },
+          "link_deps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "lint": {
             "type": "string"
           },
           "mode": {
+            "type": "string"
+          },
+          "setup": {
             "type": "string"
           },
           "test_globs": {
@@ -496,8 +505,10 @@
         "required": [
           "build",
           "custom",
+          "link_deps",
           "lint",
           "mode",
+          "setup",
           "test_globs",
           "tests",
           "timeout_s"
@@ -1788,7 +1799,16 @@
           "detected_command": {
             "type": "string"
           },
+          "link_deps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "mode": {
+            "type": "string"
+          },
+          "setup": {
             "type": "string"
           }
         },
@@ -1797,7 +1817,9 @@
           "best_verdict",
           "command",
           "detected",
-          "mode"
+          "link_deps",
+          "mode",
+          "setup"
         ],
         "type": "object"
       },
@@ -1954,6 +1976,12 @@
           },
           "ref": {
             "type": "string"
+          },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -2484,6 +2512,9 @@
             "type": "boolean"
           },
           "title": {
+            "type": "string"
+          },
+          "waiting": {
             "type": "string"
           }
         },

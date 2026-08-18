@@ -24,8 +24,10 @@ import (
 // GateStatus is what a project's gate is, and what it could be.
 type GateStatus struct {
 	// Mode and Command are what the project is configured with now.
-	Mode    string `json:"mode"`
-	Command string `json:"command"`
+	Mode     string   `json:"mode"`
+	Command  string   `json:"command"`
+	LinkDeps []string `json:"link_deps"`
+	Setup    string   `json:"setup"`
 	// Detected and DetectedCommand are what detection finds in the tree today.
 	Detected        string `json:"detected"`
 	DetectedCommand string `json:"detected_command,omitempty"`
@@ -57,6 +59,8 @@ func (s *Service) ProjectGate(ctx context.Context, projectID string) (*GateStatu
 	st := &GateStatus{
 		Mode:            string(current),
 		Command:         gateCommandFor(projCfg.Verify),
+		LinkDeps:        projCfg.Verify.LinkDeps,
+		Setup:           projCfg.Verify.Setup,
 		Detected:        string(detected),
 		DetectedCommand: detectedCmd,
 		BestVerdict:     "PASSED",

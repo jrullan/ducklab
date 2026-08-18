@@ -293,11 +293,16 @@ type ShellPolicy struct {
 
 // Verify holds verification configuration.
 type Verify struct {
-	Mode     string `toml:"mode" json:"mode"`
-	Tests    string `toml:"tests" json:"tests"`
-	Build    string `toml:"build" json:"build"`
-	Lint     string `toml:"lint" json:"lint"`
-	Custom   string `toml:"custom" json:"custom"`
+	Mode   string `toml:"mode" json:"mode"`
+	Tests  string `toml:"tests" json:"tests"`
+	Build  string `toml:"build" json:"build"`
+	Lint   string `toml:"lint" json:"lint"`
+	Custom string `toml:"custom" json:"custom"`
+	// LinkDeps are installed dependency trees borrowed from the live project
+	// into an acceptance checkout. They must not be build products.
+	LinkDeps []string `toml:"link_deps" json:"link_deps"`
+	// Setup prepares build products in the acceptance checkout before its gate.
+	Setup    string `toml:"setup" json:"setup"`
 	TimeoutS int    `toml:"timeout_s" json:"timeout_s"`
 	// TestGlobs says where this project's tests live, for the tampering
 	// guard (05 §5.3). Empty means verify.DefaultTestGlobs, which covers the
@@ -658,6 +663,11 @@ func (p *Project) Validate(path string) error {
 		p.Verify.Mode != "build" && p.Verify.Mode != "lint" && p.Verify.Mode != "none" &&
 		p.Verify.Mode != "custom" {
 		return &Error{File: path, Key: "verify.mode", Msg: fmt.Sprintf("invalid mode %q", p.Verify.Mode)}
+	}
+	for _, dep := range p.Verify.LinkDeps {
+		if dep == "" || filepath.IsAbs(dep) || filepath.Clean(dep) != dep || dep == "." || strings.HasPrefix(dep, ".."+string(filepath.Separator)) || dep == ".." {
+			return &Error{File: path, Key: "verify.link_deps", Msg: fmt.Sprintf("must contain clean relative paths, got %q", dep)}
+		}
 	}
 	for role, ducklingID := range p.Roster {
 		if err := ValidateRole(role); err != nil {

@@ -505,6 +505,12 @@ function GateChip({
           </button>
         )}
       </div>
+      {(status.setup || status.link_deps?.length) && (
+        <div className="ml-12 mt-1 space-y-1 text-xs text-ink-muted" data-testid="gate-preparation">
+          {status.setup && <ShellCmd cmd={status.setup} className="block font-mono" />}
+          {status.link_deps?.length ? <span>link dependencies: {status.link_deps.join(", ")}</span> : null}
+        </div>
+      )}
       {editor}
       </div>
     );

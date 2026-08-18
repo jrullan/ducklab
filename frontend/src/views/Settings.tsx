@@ -4,7 +4,7 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
-import type { BudgetView, EngineClient, ModeDefaultsView, RosterEntry } from "../api/client";
+import type { BudgetView, EngineClient, GateStatus, ModeDefaultsView, RosterEntry } from "../api/client";
 
 /** Every engine-honored roster role appears here, so project.toml pins never
  * become invisible state. The task-mode selectors describe launch shape; these
@@ -281,6 +281,15 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   // The project's own autonomy — the level runs and triage consult FIRST.
   // It had no control anywhere; the guidance was "edit the TOML".
   const [projAutonomy, setProjAutonomy] = useState<string | null>(null);
+  // Checkout preparation is part of the gate contract, not an engine guess;
+  // show it next to the project settings that name the gate.
+  const [gate, setGate] = useState<GateStatus | null>(null);
+  useEffect(() => {
+    // Older engine clients (and focused settings test doubles) may not expose
+    // the gate endpoint; the rest of Settings remains usable without it.
+    if (!projectId || typeof client.projectGate !== "function") return;
+    void client.projectGate(projectId).then(setGate).catch(() => {});
+  }, [client, projectId]);
   useEffect(() => {
     if (!projectId) return;
     Promise.resolve()
@@ -427,6 +436,19 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   return (
     <div data-testid="config-settings">
       <div className={section === "team" ? "" : "hidden"}>
+      {gate && (
+        <SettingsCard
+          title="verification"
+          desc="the gate and its clean-checkout preparation"
+          testid="gate-preparation"
+        >
+          <p className="font-mono text-sm text-ink-secondary">gate: {gate.command || "none"}</p>
+          {gate.setup && <p className="mt-1 font-mono text-sm text-ink-secondary">setup: {gate.setup}</p>}
+          {gate.link_deps?.length ? (
+            <p className="mt-1 text-sm text-ink-secondary">link dependencies: {gate.link_deps.join(", ")}</p>
+          ) : null}
+        </SettingsCard>
+      )}
       {fleet.length > 1 && (
         <SettingsCard
           title="your team"

@@ -35,6 +35,8 @@ export type GateResult = {
 export type GateStatus = {
   mode: string;
   command: string;
+  link_deps?: string[];
+  setup?: string;
   detected: string;
   detected_command?: string;
   /** Detection found something the project is not using — the only case worth

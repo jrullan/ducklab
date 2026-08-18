@@ -134,8 +134,10 @@ export interface ConfigShellPolicy {
 export interface ConfigVerify {
   build?: string;
   custom?: string;
+  link_deps?: string[];
   lint?: string;
   mode?: string;
+  setup?: string;
   test_globs?: string[];
   tests?: string;
   timeout_s?: number;
@@ -520,7 +522,9 @@ export interface ServiceGateStatus {
   command?: string;
   detected?: string;
   detected_command?: string;
+  link_deps?: string[];
   mode?: string;
+  setup?: string;
 }
 
 export interface ServiceInitRequest {
@@ -559,6 +563,7 @@ export interface ServiceNextStep {
   kind?: string;
   reason?: string;
   ref?: string;
+  refs?: string[];
 }
 
 export interface ServiceProject {
@@ -705,6 +710,7 @@ export interface ServiceTaskView {
   status?: string;
   test_ready?: boolean;
   title?: string;
+  waiting?: string;
 }
 
 export interface ServiceTestFirstRequest {

@@ -17,7 +17,7 @@ func TestCleanCheckoutLinksInstalledDeps(t *testing.T) {
 	os.MkdirAll(filepath.Join(checkout, "frontend"), 0o755)
 	os.WriteFile(filepath.Join(checkout, "frontend", "package.json"), []byte("{}"), 0o644)
 
-	linkInstalledDeps(root, checkout)
+	linkInstalledDeps(root, checkout, nil)
 
 	link := filepath.Join(checkout, "frontend", "node_modules")
 	target, err := os.Readlink(link)
@@ -42,7 +42,7 @@ func TestCleanCheckoutLinksVirtualenv(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
 	os.WriteFile(filepath.Join(checkout, "requirements.txt"), []byte("pytest\n"), 0o644)
 
-	linkInstalledDeps(root, checkout)
+	linkInstalledDeps(root, checkout, nil)
 
 	target, err := os.Readlink(filepath.Join(checkout, ".venv"))
 	if err != nil {
@@ -61,7 +61,7 @@ func TestCleanCheckoutLinksVenvForPytestIniOnlyProjects(t *testing.T) {
 	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
 	os.WriteFile(filepath.Join(checkout, "pytest.ini"), []byte("[pytest]\n"), 0o644)
 
-	linkInstalledDeps(root, checkout)
+	linkInstalledDeps(root, checkout, nil)
 
 	if _, err := os.Readlink(filepath.Join(checkout, ".venv")); err != nil {
 		t.Fatalf(".venv is not linked for a pytest.ini-marked checkout: %v", err)
@@ -74,7 +74,7 @@ func TestCleanCheckoutSkipsVenvWithoutPythonMarkers(t *testing.T) {
 	root, checkout := t.TempDir(), t.TempDir()
 	os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755)
 
-	linkInstalledDeps(root, checkout)
+	linkInstalledDeps(root, checkout, nil)
 
 	if _, err := os.Lstat(filepath.Join(checkout, ".venv")); err == nil {
 		t.Error(".venv linked without a Python marker to justify it")
@@ -125,6 +125,19 @@ custom = "test -f build/generated"`)
 // A path absent from the commit is actionable configuration feedback, not a
 // shell-specific "not found" error. build/ intentionally is neither linked
 // nor set up here.
+func TestAcceptedCheckoutNamesCMakeBuildDirectory(t *testing.T) {
+	checkout := t.TempDir()
+	if got := missingGatePath(checkout, "cmake --build build && ctest"); got != "build" {
+		t.Fatalf("missing gate path = %q, want build", got)
+	}
+	if err := os.Mkdir(filepath.Join(checkout, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := missingGatePath(checkout, "cmake --build build && ctest"); got != "" {
+		t.Fatalf("existing build path reported as missing: %q", got)
+	}
+}
+
 func TestAcceptedCheckoutNamesUndeclaredMissingGatePath(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	_, root := projectWithDocs(t, s, nil)
