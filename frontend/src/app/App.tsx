@@ -326,9 +326,10 @@ export function App() {
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).
   const degraded = connection === "reconnecting" || connection === "closed";
+  // The chip already carries the ✓; "engine ✓ ✓" said it twice.
   const streamBadge = connection === "open"
-    ? "engine ✓"
-    : `engine ✓ · stream ${connection}`;
+    ? "engine"
+    : `engine · stream ${connection}`;
   const waitingCount = pendingForHuman(runs).length;
 
   // The attention surface. The store sees every state change; this is the one

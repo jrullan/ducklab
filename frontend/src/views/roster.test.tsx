@@ -95,7 +95,9 @@ describe("Roster", () => {
     expect(flock.textContent).toMatch(/local/i);
     expect(flock.textContent).toContain("critic-a");
     expect(flock.textContent).toMatch(/remote/i);
-    expect(flock.textContent).toContain("15");
+    // List price rides the card's tooltip (compact cards; the value column
+    // shows whatever the sort is by).
+    expect(screen.getByTestId("roster-flock-card-critic-a").getAttribute("title")).toContain("$3 / $15 per Mtok");
 
     for (const mode of ["council", "solo", "pair", "split", "tournament", "common"]) {
       expect(screen.getByTestId(`roster-board-${mode}`)).toBeTruthy();

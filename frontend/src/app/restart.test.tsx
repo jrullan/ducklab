@@ -150,7 +150,7 @@ describe("a silently stale desktop event stream", () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(sources[0]!.close).toHaveBeenCalled();
-    expect(screen.getByText("engine ✓ · stream reconnecting")).toBeTruthy();
+    expect(screen.getByText("engine · stream reconnecting")).toBeTruthy();
 
     // Allow the subscriber's bounded reconnect backoff, then accept the new stream.
     await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });

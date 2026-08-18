@@ -302,6 +302,8 @@ export type Scorecard = {
   cost?: { input_per_mtok?: number; output_per_mtok?: number };
   caps?: { context_tokens?: number; vision?: boolean; native_tools?: boolean };
   measured?: { runs?: number; pass_rate?: number; avg_cost_usd?: number; avg_wallclock_s?: number };
+  /** The same evidence split by the seat the duckling held. */
+  measured_by_role?: Record<string, { runs?: number; pass_rate?: number; avg_cost_usd?: number; avg_wallclock_s?: number }>;
   bench?: Record<string, { score?: number }>;
   /** Mirrors config.ExternalIndex: coding_score (declared by hand or fetched
    *  from OpenRouter's benchmarks endpoint), with source and as_of. */
