@@ -81,7 +81,10 @@ func TestARestoredTreeIsThePreRunTree(t *testing.T) {
 
 // A person's uncommitted work from BEFORE the run is part of the snapshot, so
 // restoring a failed run must give it back, not reset to HEAD.
-func TestRestoreAtHeadRefusesAfterCommitsLanded(t *testing.T) {
+// Reversed by B-074: a landed commit used to make the restore refuse
+// outright; now it restores AROUND the commit — the committed file keeps
+// its content and the restore succeeds, because the run left nothing else.
+func TestRestoreAtHeadRestoresAroundLandedCommits(t *testing.T) {
 	g := repo(t)
 	snap, err := g.SnapshotTree()
 	if err != nil {
@@ -99,9 +102,8 @@ func TestRestoreAtHeadRefusesAfterCommitsLanded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = g.RestoreTreeAtHead(snap, head)
-	if err == nil || !strings.Contains(err.Error(), "1 commits landed since this run began") {
-		t.Fatalf("RestoreTreeAtHead error = %v, want landed-commit refusal", err)
+	if err := g.RestoreTreeAtHead(snap, head); err != nil {
+		t.Fatalf("RestoreTreeAtHead = %v, want a surgical restore around the commit", err)
 	}
 	if got := read(t, g.Root, "landed.go"); got != "package project\n" {
 		t.Errorf("restore changed committed file: %q", got)
@@ -183,5 +185,115 @@ func TestRestoreClearsIntentToAddGhosts(t *testing.T) {
 	if !clean {
 		out, _ := g.run("status", "--porcelain")
 		t.Errorf("the restore left ghost index entries:\n%s", out)
+	}
+}
+
+// repoWith is repo() plus named starting files, handing back the root too.
+func repoWith(t *testing.T, files map[string]string) (*Git, string) {
+	t.Helper()
+	g := repo(t)
+	for name, body := range files {
+		write(t, g.Root, name, body)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("seed"); err != nil {
+		t.Fatal(err)
+	}
+	return g, g.Root
+}
+
+func mustHeadSHA(t *testing.T, g *Git) string {
+	t.Helper()
+	head, err := g.HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head
+}
+
+// B-074: three unrelated commits landed while a run waited at its gate, and
+// reject died on "restoring would rewind them". The restore is surgical now:
+// the run's own edits are undone, files it created are removed, and the
+// landed commits' files keep their committed content.
+func TestRestoreAroundLandedCommits(t *testing.T) {
+	g, dir := repoWith(t, map[string]string{
+		"run-edits.txt": "original\n",
+		"landed.txt":    "before\n",
+	})
+	snap, err := g.SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := mustHeadSHA(t, g)
+	// The run's work: edit one file, create another.
+	os.WriteFile(filepath.Join(dir, "run-edits.txt"), []byte("the run's change\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "run-created.txt"), []byte("new\n"), 0o644)
+	// A foreign commit lands.
+	os.WriteFile(filepath.Join(dir, "landed.txt"), []byte("committed after\n"), 0o644)
+	if err := g.Add("landed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("landed"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.RestoreTreeAtHead(snap, head); err != nil {
+		t.Fatalf("surgical restore refused: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "run-edits.txt")); string(got) != "original\n" {
+		t.Errorf("run edit not undone: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "run-created.txt")); !os.IsNotExist(err) {
+		t.Errorf("run-created file survived")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "landed.txt")); string(got) != "committed after\n" {
+		t.Errorf("landed commit rewound: %q", got)
+	}
+}
+
+// A run whose work was committed by hand leaves nothing of its own: the
+// restore succeeds restoring nothing, instead of refusing forever.
+func TestRestoreAroundCommitsWithNothingLeftIsANoOp(t *testing.T) {
+	g, dir := repoWith(t, map[string]string{"a.txt": "one\n"})
+	snap, _ := g.SnapshotTree()
+	head := mustHeadSHA(t, g)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o644)
+	if err := g.Add("a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("landed the run's own work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.RestoreTreeAtHead(snap, head); err != nil {
+		t.Fatalf("no-op restore refused: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "a.txt")); string(got) != "two\n" {
+		t.Errorf("committed content rewound: %q", got)
+	}
+}
+
+// A path both the run and a landed commit touched cannot be settled by a
+// machine picking a side; the refusal names it.
+func TestRestoreAroundCommitsRefusesAGenuineOverlap(t *testing.T) {
+	g, dir := repoWith(t, map[string]string{"shared.txt": "base\n"})
+	snap, _ := g.SnapshotTree()
+	head := mustHeadSHA(t, g)
+	os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("committed\n"), 0o644)
+	if err := g.Add("shared.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Commit("landed"); err != nil {
+		t.Fatal(err)
+	}
+	// The run's residue on top of the committed content.
+	os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("run residue\n"), 0o644)
+	err := g.RestoreTreeAtHead(snap, head)
+	if err == nil || !strings.Contains(err.Error(), "shared.txt") || !strings.Contains(err.Error(), "resolve by hand") {
+		t.Fatalf("overlap not refused by name: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "shared.txt")); string(got) != "run residue\n" {
+		t.Errorf("refusal was not read-only: %q", got)
 	}
 }

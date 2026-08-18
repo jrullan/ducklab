@@ -537,9 +537,118 @@ func (g *Git) RestoreTreeAtHead(snapshot, expectedHead string) error {
 		if err != nil {
 			return fmt.Errorf("cannot safely restore: HEAD changed since the run began: %w", err)
 		}
-		return fmt.Errorf("%d commits landed since this run began; restoring would rewind them in the tree", len(commits))
+		return g.restoreAroundCommits(snapshot, expectedHead, len(commits))
 	}
 	return g.restoreTree(snapshot)
+}
+
+// restoreAroundCommits undoes a run's own edits while commits that landed
+// after its snapshot stand untouched.
+//
+// The full restore writes EVERY snapshot file over the worktree, so it must
+// refuse whenever HEAD has advanced — which made a run at its gate
+// reject-undecidable the moment anyone else committed (B-074: three
+// unrelated commits landed while T-071 waited, and Retry-with-note died on
+// the guard). Surgical instead: the paths that differ between the snapshot
+// and the tree now, minus the paths the landed commits touched. A landed
+// path whose worktree matches HEAD holds no run residue and is skipped; one
+// that differs from HEAD was edited by both, and picking a side silently
+// would destroy somebody's work — refused, naming the paths.
+func (g *Git) restoreAroundCommits(snapshot, expectedHead string, commits int) error {
+	landedOut, err := g.run("diff", "--name-only", expectedHead, "HEAD")
+	if err != nil {
+		return fmt.Errorf("cannot safely restore: %w", err)
+	}
+	landed := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimSpace(landedOut), "\n") {
+		if name != "" {
+			landed[name] = true
+		}
+	}
+	now, err := g.SnapshotTree()
+	if err != nil {
+		return fmt.Errorf("cannot safely restore: %w", err)
+	}
+	dirtyOut, err := g.run("diff-tree", "-r", "--name-only", snapshot, now)
+	if err != nil {
+		return fmt.Errorf("cannot safely restore: %w", err)
+	}
+	unstagedOut, _ := g.run("diff", "--name-only", "HEAD")
+	unstaged := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimSpace(unstagedOut), "\n") {
+		if name != "" {
+			unstaged[name] = true
+		}
+	}
+	var restore, overlap []string
+	for _, name := range strings.Split(strings.TrimSpace(dirtyOut), "\n") {
+		if name == "" {
+			continue
+		}
+		if !landed[name] {
+			restore = append(restore, name)
+			continue
+		}
+		if unstaged[name] {
+			overlap = append(overlap, name)
+		}
+	}
+	if len(overlap) > 0 {
+		return fmt.Errorf("%d commits landed since this run began and both the run and those commits touched %s; resolve by hand",
+			commits, strings.Join(overlap, ", "))
+	}
+	if len(restore) == 0 {
+		return nil // the run left nothing of its own in the tree
+	}
+	return g.restorePaths(snapshot, restore)
+}
+
+// restorePaths is restoreTree limited to the named paths: snapshot content
+// written back where the file existed, the file removed where it did not.
+func (g *Git) restorePaths(snapshot string, paths []string) error {
+	idx, err := os.CreateTemp("", "ducklab-restore-index-*")
+	if err != nil {
+		return err
+	}
+	idx.Close()
+	os.Remove(idx.Name())
+	defer os.Remove(idx.Name())
+	if _, err := g.runWithIndex(idx.Name(), "read-tree", snapshot); err != nil {
+		return err
+	}
+	inSnapOut, err := g.run("ls-tree", "-r", "--name-only", snapshot)
+	if err != nil {
+		return err
+	}
+	inSnapshot := map[string]bool{}
+	for _, name := range strings.Split(strings.TrimSpace(inSnapOut), "\n") {
+		if name != "" {
+			inSnapshot[name] = true
+		}
+	}
+	var removed []string
+	for _, name := range paths {
+		if inSnapshot[name] {
+			if _, err := g.runWithIndex(idx.Name(), "checkout-index", "-f", "--", shellEscape(name)); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.Remove(filepath.Join(g.Root, filepath.FromSlash(name))); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
+		removed = append(removed, name)
+	}
+	if len(removed) > 0 {
+		args := []string{"reset", "-q", "--"}
+		for _, name := range removed {
+			args = append(args, shellEscape(name))
+		}
+		if _, err := g.run(args...); err != nil {
+			return fmt.Errorf("clear index entries for removed files: %w", err)
+		}
+	}
+	return nil
 }
 
 // restoreTree performs the destructive restore after its caller has established

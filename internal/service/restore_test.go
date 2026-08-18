@@ -83,10 +83,10 @@ func TestRejectPutsTheTreeBack(t *testing.T) {
 }
 
 // A reject cleans up a live shared tree, but it is never allowed to make the
-// worktree older than HEAD. In particular, work landed after this run started
-// may include the run's legitimate work manually committed before its gate was
-// answered.
-func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
+// worktree older than HEAD. Landed commits stand; the run's own residue is
+// what gets undone (B-074 made this surgical — the old outright refusal left
+// a gated run reject-undecidable the moment anyone else committed).
+func TestRejectRestoresAroundCommitsLandedSinceSnapshot(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
 	g := gitProject(t, dir)
@@ -129,12 +129,8 @@ func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
 		}
 	}
 
-	err = s.RunReject(context.Background(), run.ID, "not what I asked for")
-	if err == nil {
-		t.Fatal("reject succeeded after HEAD advanced past the run snapshot")
-	}
-	if !strings.Contains(err.Error(), "3 commits landed since this run began") {
-		t.Errorf("reject error does not name the landed commit count: %v", err)
+	if err := s.RunReject(context.Background(), run.ID, "not what I asked for"); err != nil {
+		t.Fatalf("reject refused despite nothing of the run's left to rewind: %v", err)
 	}
 	for path, want := range landed {
 		got, readErr := os.ReadFile(filepath.Join(dir, path))
@@ -147,17 +143,8 @@ func TestRejectRefusesWhenCommitsLandedSinceSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Run.Status != "paused" || detail.Run.PendingKind != "gate" {
-		t.Errorf("refused reject closed the run: status=%q pending=%q", detail.Run.Status, detail.Run.PendingKind)
-	}
-	canReject := false
-	for _, action := range detail.Run.Next {
-		if action == "reject" {
-			canReject = true
-		}
-	}
-	if !canReject {
-		t.Errorf("refused reject is not still available: next=%v", detail.Run.Next)
+	if detail.Run.Status != "done" || detail.Run.Verdict != "FAILED" {
+		t.Errorf("reject did not close the run: status=%q verdict=%q", detail.Run.Status, detail.Run.Verdict)
 	}
 }
 
