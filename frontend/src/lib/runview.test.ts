@@ -571,6 +571,18 @@ describe("the announced test-first gate", () => {
     expect(turns[0]!.done).toBe(true);
     expect(turns[0]!.gate).toBe("green");
   });
+  it("announces the accept's clean-checkout reproduction and closes it on gate_reproduced", () => {
+    const turns = buildTurns([
+      ev("gate_started", { phase: "accept", detail: "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce" }, 1),
+      ev("gate_reproduced", { green: true }, 2),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.subject).toBe("gate accept");
+    expect(turns[0]!.text).toContain("clean checkout");
+    expect(turns[0]!.done).toBe(true);
+    expect(turns[0]!.gate).toBe("green");
+  });
+
   it("labels the rail's baseline as a baseline, not a verdict", () => {
     const g = buildGate([ev("gate", { gate: "tests", cmd: "x", exit: 0, phase: "before" }, 1)]);
     expect(g!.label).toBe("baseline tests passed");

@@ -1930,6 +1930,13 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// wrong and the run did nothing wrong.
 	if clean, cerr := git.IsClean(); cerr == nil && clean {
 		head, _ := git.HeadSHA()
+		// Announced: this is the slow tail of every accept — a full suite
+		// from a fresh checkout — and after the round gate's green it read
+		// as minutes of nothing.
+		rs.writer.AppendEvent("gate_started", map[string]interface{}{
+			"phase":  "accept",
+			"detail": "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce",
+		})
 		reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage)
 		if err != nil {
 			return err
@@ -1968,6 +1975,10 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "accept",
+		"detail": "committed " + short(sha) + "; reproducing the gate from a clean checkout — nothing lands that did not reproduce",
+	})
 	reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage)
 	if err != nil {
 		// Nothing lands that did not reproduce. The commit above was ours and

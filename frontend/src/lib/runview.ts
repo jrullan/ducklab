@@ -479,6 +479,16 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         }
         break;
       }
+      case "gate_reproduced": {
+        // The accept's clean-checkout reproduction, announced as phase
+        // "accept"; its settled event closes the turn.
+        if (openGate && !openGate.done) {
+          openGate.done = true;
+          openGate.gate = d.green === false ? "red" : "green";
+          openGate = null;
+        }
+        break;
+      }
       case "round_gate": {
         // Closes the announced gate turn; runs recorded before gate_started
         // existed still get their gate in the lane, already settled.
