@@ -771,3 +771,23 @@ The engine announces run-settled moments to one configured webhook: `startNotifi
 **As-built:** yes
 
 `linkInstalledDeps(root, checkout)` in `internal/service/service.go` is a table of `{rel, markers}`: `node_modules` and `frontend/node_modules` justified by `package.json`; `.venv` justified by any of `pyproject.toml, requirements.txt, setup.py, setup.cfg, pytest.ini, tox.ini, Pipfile` — symlinked into the detached worktree before `verify.Run`. In `runTask`'s yolo branch a non-nil `acceptRun` error no longer vanishes: the run pauses `pending_kind: gate` with `PendingData.detail = "auto-accept failed: … — decide it yourself"` and a `human_needed` event, the same shape as reviewer dissent. Pinned by `clean_checkout_deps_test.go` (including the pytest.ini-only layout that stranded T-119).
+
+## SPEC-026 — Editable roster board
+
+**Implements:** REQ-024
+**As-built:** yes
+
+The desktop Roster board displays the effective Global or Project roster and
+supports equivalent HTML5 drag/drop and keyboard flows. Flock cards carry their
+IDs in `dataTransfer`; selecting a seat with Enter or Space exposes accessible
+`assign <duckling> to <role>` buttons. Seat cards can be removed, ordered
+multi-slot seats append assignments in display order, and project pins can be
+un pinned to restore the inherited ghost presentation.
+
+Global edits use only the canonical global mode-seat/role-pin mutation. Project
+edits use only the project ordered-list mutation and never alter Global. Every
+successful mutation re-reads the roster so displayed provenance remains engine
+truth. Engine validation errors and warnings are rendered beside the boards;
+the pair board also reports implementer/reviewer overlap from effective seats.
+
+Pinned by `roster_assign.test.tsx` and `roster.test.tsx`.

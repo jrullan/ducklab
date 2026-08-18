@@ -813,6 +813,19 @@ export class EngineClient {
     return this.request<unknown>("PUT", `/v1/projects/${projectId}/roster`, { role, duckling });
   }
 
+  /** Replace the ordered duckling list for one project mode seat. */
+  RosterSetManyMode(projectId: string, mode: string, role: string, ducklings: string[]) {
+    return this.request<unknown>("PUT", `/v1/projects/${projectId}/roster`, { mode, role, ducklings });
+  }
+  /** Replace one canonical global mode seat (or role pin). */
+  GlobalRosterSet(mode: string, role: string, ducklings: string[]) {
+    return this.request<unknown>("PUT", "/v1/defaults/roster", { mode, role, ducklings });
+  }
+  /** Remove a project pin, restoring the inherited global seat. */
+  RosterUnpin(projectId: string, mode: string, role: string) {
+    return this.request<unknown>("DELETE", `/v1/projects/${projectId}/roster`, { mode, role });
+  }
+
   /** Ask a duckling to say something, to find out whether it answers at all. */
   ducklingProbe(id: string) {
     return this.request<Record<string, unknown>>("POST", `/v1/ducklings/${id}/probe`);
