@@ -106,6 +106,9 @@ type ExecContext struct {
 	// Unlike the exact-call brake above, changing the search text does not
 	// disguise a model fighting the same file.
 	fsPatchFailStreak map[string]int
+	// fsPatchRefusalStreak tracks repeated attempts after the per-file patch
+	// brake has already named a rewrite as the remedy.
+	fsPatchRefusalStreak map[string]int
 	// Verify is the project's gate. verify_run runs this and nothing else:
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
@@ -232,9 +235,17 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
+			if ectx.fsPatchRefusalStreak == nil {
+				ectx.fsPatchRefusalStreak = make(map[string]int)
+			}
+			ectx.fsPatchRefusalStreak[path]++
+			refusals := ectx.fsPatchRefusalStreak[path]
 			count := ectx.fsPatchFailStreak[path]
-			return &Result{IsError: true, Content: fmt.Sprintf(
-				"REFUSED: fs_patch has failed %d times on this file; stop patching. Use fs_read to see current line numbers, then fs_write_lines to replace the exact range (or fs_write for a full rewrite)", count)}, nil
+			message := fmt.Sprintf("REFUSED: fs_patch has failed %d times on this file; stop patching. Use fs_read to see current line numbers, then fs_write_lines to replace the exact range (or fs_write for a full rewrite)", count)
+			if refusals >= FSPatchRefusalLimit {
+				message += "; end your reply so the next turn can use the rewrite remedy."
+			}
+			return &Result{IsError: true, Content: message}, nil
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
@@ -270,6 +281,10 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 }
 
 const FSPatchFailLimit = 5
+
+// FSPatchRefusalLimit is the number of attempts allowed after fs_patch's
+// per-file brake has named fs_write_lines or fs_write as the remedy.
+const FSPatchRefusalLimit = 5
 
 func fsPatchPath(root string, args json.RawMessage) string {
 	var a struct{ Path string `json:"path"` }
