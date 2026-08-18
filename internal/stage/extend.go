@@ -3,6 +3,7 @@ package stage
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -152,7 +153,10 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change strin
 		"if none — the task will wear spec-debt until the spec catches up>\n" +
 		"<the body, in the shape below>\n\n" +
 		TaskBodyContract +
-		"- Use the literal id T-900 for EVERY task (repeat it) — real ids are assigned by the engine.\n" +
+		"- Use placeholder ids in order: T-900 for the first task, T-901 for the second, T-902 for the third — " +
+		"real ids are assigned by the engine. When one of these tasks consumes what another delivers, say so " +
+		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
+		"the real id. Never depend on a task that comes later in your own list.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
 		"- If the change alters what the product IS — its requirements — return NO sections: " +
 		"one sentence saying why, and the person will write a feature brief instead.\n")
@@ -194,6 +198,14 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 		return id
 	}
 
+	// Placeholder task ids (T-900, T-901, …) map to the real ids assigned
+	// below, in emission order, so a fragment's own **Depends on:** survives
+	// the merge. An architect that repeats T-900 for every task (the old
+	// contract) still gets a sane answer: the FIRST task wearing it — the one
+	// later tasks mean when they say "the one before".
+	placeholder := map[string]string{}
+	var placedIDs []string
+
 	for _, t := range tasks {
 		if looksLikeMilestoneDecl(t) {
 			real := resolveMilestone(t)
@@ -202,6 +214,12 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 			continue
 		}
 		id := fmt.Sprintf("T-%03d", NextFree(existing, "T"))
+		if key := strings.ToUpper(strings.TrimSpace(t.ID)); key != "" {
+			if _, seen := placeholder[key]; !seen {
+				placeholder[key] = id
+			}
+		}
+		placedIDs = append(placedIDs, id)
 		milestone := strings.TrimSpace(t.Field("milestone"))
 		if real, ok := alias[strings.ToUpper(milestone)]; ok {
 			milestone = real
@@ -238,7 +256,69 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 			out.Sections[last].Children = append(out.Sections[last].Children, task)
 		}
 	}
+	rewriteDependsOn(&out, placedIDs, placeholder)
 	return &out
+}
+
+var placeholderRef = regexp.MustCompile(`\bT-9\d\d\b`)
+
+// rewriteDependsOn replaces placeholder ids inside the new tasks'
+// **Depends on:** lines with the real ids they became. A dependency on a
+// task's own id is dropped; a placeholder nobody wore is left as written,
+// where the person will see it.
+func rewriteDependsOn(doc *artifact.Document, newIDs []string, placeholder map[string]string) {
+	isNew := map[string]bool{}
+	for _, id := range newIDs {
+		isNew[id] = true
+	}
+	for mi := range doc.Sections {
+		for ti := range doc.Sections[mi].Children {
+			t := &doc.Sections[mi].Children[ti]
+			if !isNew[t.ID] || !strings.Contains(t.Body, "**Depends on:**") {
+				continue
+			}
+			lines := strings.Split(t.Body, "\n")
+			for li, line := range lines {
+				if !strings.HasPrefix(strings.TrimSpace(line), "**Depends on:**") {
+					continue
+				}
+				rewritten := placeholderRef.ReplaceAllStringFunc(line, func(ref string) string {
+					if real, ok := placeholder[strings.ToUpper(ref)]; ok {
+						return real
+					}
+					return ref
+				})
+				// Drop a self-reference the rewrite may have produced.
+				parts := strings.SplitN(rewritten, ":**", 2)
+				if len(parts) == 2 {
+					var keep []string
+					for _, ref := range strings.Split(parts[1], ",") {
+						ref = strings.TrimSpace(ref)
+						if ref != "" && !strings.EqualFold(ref, t.ID) {
+							keep = append(keep, ref)
+						}
+					}
+					if len(keep) == 0 {
+						rewritten = ""
+					} else {
+						rewritten = parts[0] + ":** " + strings.Join(keep, ", ")
+					}
+				}
+				lines[li] = rewritten
+			}
+			t.Body = strings.TrimSpace(strings.Join(lines, "\n"))
+			if t.Fields != nil {
+				if v, ok := t.Fields["depends on"]; ok {
+					t.Fields["depends on"] = placeholderRef.ReplaceAllStringFunc(v, func(ref string) string {
+						if real, ok := placeholder[strings.ToUpper(ref)]; ok {
+							return real
+						}
+						return ref
+					})
+				}
+			}
+		}
+	}
 }
 
 // looksLikeMilestoneDecl separates placement from work by the evidence, not
