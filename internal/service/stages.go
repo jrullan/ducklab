@@ -747,6 +747,12 @@ type TaskView struct {
 	// that shows work stopped without saying what stopped it is a column that
 	// sends you reading run logs.
 	Blocked string `json:"blocked,omitempty"`
+	// Waiting says, in one sentence, what an in-progress task's run is
+	// paused on when it is not a gate — a question, a budget, a provider —
+	// so the card can say "test · paused: a question awaits your answer"
+	// instead of filing the task under Review as if a person had work to
+	// judge.
+	Waiting string `json:"waiting,omitempty"`
 	// TestReady says a committed failing test already defines done for this
 	// task: the natural next act is the build that makes it pass. Without
 	// this, an accepted test-first read as a finished task.
@@ -794,7 +800,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 	hashes := taskBodyHashes(plan)
 	runs = runsForCurrentTaskBodies(runs, hashes)
 
-	status, blocked, testReady, failedStage, pinned := deriveTaskRunState(runs)
+	status, blocked, waiting, testReady, failedStage, pinned := deriveTaskRunStateWaiting(runs)
 	branches := map[string]string{}
 	for _, r := range runs {
 		if r.TaskID != "" && r.Accepted && r.Stage == "build" && r.Branch != "" {
@@ -862,6 +868,7 @@ func (s *Service) TaskList(ctx context.Context, projectID string) ([]TaskView, e
 				Branch:     branches[t.ID],
 				Body:       t.Body,
 				Blocked:    blocked[t.ID],
+				Waiting:    waiting[t.ID],
 				// A committed test AWAITS its build — so the flag speaks
 				// only while building is the next move (todo, blocked). It
 				// outlived the build twice: once on an accepted task, then
@@ -1266,6 +1273,13 @@ func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*r
 // board state. Extracted so the precedence rules — newest run wins, except
 // an accepted run outranks a later failure — are pinned without a disk.
 func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, testReady map[string]bool, failedStage map[string]string, pinned map[string]bool) {
+	status, blocked, _, testReady, failedStage, pinned = deriveTaskRunStateWaiting(runs)
+	return
+}
+
+// deriveTaskRunStateWaiting is deriveTaskRunState with the waiting reasons.
+func deriveTaskRunStateWaiting(runs []*runlog.Run) (status, blocked, waiting map[string]string, testReady map[string]bool, failedStage map[string]string, pinned map[string]bool) {
+	waiting = map[string]string{}
 	// A task's status is its MOST RECENT run, and RunList answers newest
 	// first, so the first run seen for a task wins.
 	//
@@ -1330,8 +1344,15 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 			status[r.TaskID] = "accepted"
 		case r.Status == "running" || r.Status == "queued":
 			status[r.TaskID] = "in_progress"
-		case r.Status == "paused":
+		case r.Status == "paused" && r.PendingKind == "gate":
+			// A person has work to judge: the diff, the draft.
 			status[r.TaskID] = "review"
+		case r.Status == "paused":
+			// Paused on a question, a budget, a provider or a restart is not
+			// review — nothing is finished; the run is mid-work and needs a
+			// hand. The card stays in progress and says what it waits for.
+			status[r.TaskID] = "in_progress"
+			waiting[r.TaskID] = pausedTaskNote(r)
 		default:
 			// Failed and aborted used to land back in "todo", where a task that
 			// had been tried and broken looked exactly like one nobody had
@@ -1343,7 +1364,29 @@ func deriveTaskRunState(runs []*runlog.Run) (status, blocked map[string]string, 
 			failedStage[r.TaskID] = r.Stage
 		}
 	}
-	return status, blocked, testReady, failedStage, pinned
+	return status, blocked, waiting, testReady, failedStage, pinned
+}
+
+// pausedTaskNote is the one line a card wears while its run waits on
+// something other than a gate.
+func pausedTaskNote(r *runlog.Run) string {
+	stage := r.Stage
+	if stage == "" {
+		stage = "run"
+	}
+	switch r.PendingKind {
+	case "question":
+		return stage + " run paused: a question awaits your answer"
+	case "budget":
+		return stage + " run paused: it hit its budget cap — lift it and resume"
+	case "provider":
+		return stage + " run paused: the provider is unreachable — resume when it is back"
+	case "engine_restart":
+		return stage + " run paused: the engine restarted — resume it"
+	case "error":
+		return stage + " run paused on an error — read it, then resume or abort"
+	}
+	return stage + " run paused — see the run"
 }
 
 // taskSpecDebt reports an uncovered task. Bug provenance does not exempt a

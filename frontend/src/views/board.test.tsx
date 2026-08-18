@@ -1033,8 +1033,55 @@ describe("the running task links its run", () => {
     }) as unknown) as EngineClient;
     render(<Board client={client} projectId="p" />);
     fireEvent.click(await screen.findByText("Busy one"));
-    const link = await screen.findByTestId("running-link");
-    expect(link.getAttribute("href")).toBe("#/runs/r-77");
+    // The live-run block: state, stage · mode, and the link.
+    const block = await screen.findByTestId("task-live-run");
+    expect(block.getAttribute("data-state")).toBe("running");
+    expect(block.textContent).toContain("build · solo");
+    expect(screen.getByTestId("task-live-run-link").getAttribute("href")).toBe("#/runs/r-77");
+  });
+
+  // A run paused on a question is answered where the task is: the panel shows
+  // the run's state, the question, the advisor's draft, and a box — the trip
+  // to the run view is for reading, not for typing the answer.
+  it("shows the paused run's question in the task rail and answers it there", async () => {
+    useRuns.setState({
+      runs: {
+        "r-q": { id: "r-q", project_id: "p", task_id: "T-069", stage: "test", mode: "solo", status: "paused", verdict: "",
+          pending_kind: "question", roster: { implementer: "terra", advisor: "qwen38-max" },
+          pending_data: { question: "Which threshold?", question_id: "q-1", advice: "Five refusals.", advisor: "qwen38-max" } } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    const answer = vi.fn(() => Promise.resolve({}));
+    const client = (({
+      tasks: vi.fn(() =>
+        Promise.resolve([
+          { id: "T-069", title: "End the turn", milestone: "M-001", status: "in_progress", waiting: "test run paused: a question awaits your answer", next: [] },
+        ]),
+      ),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "pytest -q" })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      answer,
+    }) as unknown) as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    // The card says what it waits for, in In progress — not Review.
+    expect((await screen.findByTestId("waiting-reason")).textContent).toContain("question awaits your answer");
+    expect(screen.getByTestId("board-col-in_progress").textContent).toContain("T-069");
+    fireEvent.click(screen.getByText("End the turn"));
+    const block = await screen.findByTestId("task-live-run");
+    expect(block.textContent).toContain("paused: question");
+    expect(block.textContent).toContain("test · solo");
+    expect(block.textContent).toContain("implementer terra");
+    expect(screen.getByTestId("task-question").textContent).toContain("Which threshold?");
+    expect(screen.getByTestId("task-question").textContent).toContain("qwen38-max recommends");
+    fireEvent.click(screen.getByTestId("task-answer-advice"));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("r-q", "q-1", "Five refusals."));
+    fireEvent.change(screen.getByTestId("task-answer-input"), { target: { value: "Six." } });
+    fireEvent.click(screen.getByTestId("task-answer-button"));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("r-q", "q-1", "Six."));
   });
 });
 

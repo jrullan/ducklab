@@ -265,6 +265,8 @@ export interface Task {
   body?: string;
   /** Why the work stopped, when status is "blocked". */
   blocked?: string;
+  /** What an in-progress task's run is paused on when it is not a gate. */
+  waiting?: string;
   /** A committed failing test already defines done: the natural next act is
    * the build that makes it pass. */
   test_ready?: boolean;

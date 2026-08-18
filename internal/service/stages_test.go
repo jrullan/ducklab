@@ -953,3 +953,26 @@ func TestContextFitSpeaksAtTheDoor(t *testing.T) {
 		t.Errorf("an impossible fit was not refused: %q", f)
 	}
 }
+
+// A run paused on a QUESTION is mid-work, not finished work: nothing is there
+// for a person to judge. T-069's test-first, waiting for an answer, sat in
+// Review beside nothing; the card said "spec-debt" and the rail had to say the
+// rest. Only a gate pause is Review; every other pause keeps the task in
+// progress and puts what it waits for on the card.
+func TestAPauseThatIsNotAGateStaysInProgressAndSaysWhy(t *testing.T) {
+	runs := []*runlog.Run{
+		{ID: "r-q", TaskID: "T-069", Stage: "test", Status: "paused", PendingKind: "question", StartedAt: "2026-08-18T20:02:12Z"},
+		{ID: "r-g", TaskID: "T-070", Stage: "build", Status: "paused", PendingKind: "gate", StartedAt: "2026-08-18T20:02:12Z"},
+		{ID: "r-b", TaskID: "T-071", Stage: "build", Status: "paused", PendingKind: "budget", StartedAt: "2026-08-18T20:02:12Z"},
+	}
+	status, _, waiting, _, _, _ := deriveTaskRunStateWaiting(runs)
+	if status["T-069"] != "in_progress" || !strings.Contains(waiting["T-069"], "question awaits your answer") || !strings.HasPrefix(waiting["T-069"], "test run paused") {
+		t.Errorf("question pause: status %q waiting %q", status["T-069"], waiting["T-069"])
+	}
+	if status["T-070"] != "review" || waiting["T-070"] != "" {
+		t.Errorf("gate pause: status %q waiting %q, want review with no waiting note", status["T-070"], waiting["T-070"])
+	}
+	if status["T-071"] != "in_progress" || !strings.Contains(waiting["T-071"], "budget cap") {
+		t.Errorf("budget pause: status %q waiting %q", status["T-071"], waiting["T-071"])
+	}
+}

@@ -252,16 +252,19 @@ export function Board({
   // list — a task selected right after a plan-amend showed a title and no
   // words. There is no single-task endpoint, so the full list is fetched
   // once, only when the selected task's body is missing.
+  // Keyed on "the selected task has no body", not on the selection alone:
+  // with a run in flight, every event refreshes the summary list and empties
+  // the bodies again, and a refill that only fired on selection left the
+  // panel wordless until the person clicked another card.
+  const selectedBodyMissing = board === "tasks" && !!selected && !(tasks.find((t) => t.id === selected)?.body);
   useEffect(() => {
-    if (!selected || board !== "tasks") return;
-    const cur = tasks.find((t) => t.id === selected);
-    if (!cur || cur.body) return;
+    if (!selected || board !== "tasks" || !selectedBodyMissing) return;
     void client.tasks(projectId, false).then((full) => {
       setTasks((current) => current.map((t) => full.find((f) => f.id === t.id) ?? t));
     }).catch(() => {});
     // tasks is read, not depended on: refilling must not re-trigger itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, client, projectId, selected]);
+  }, [board, client, projectId, selected, selectedBodyMissing]);
 
   const milestones = useMemo(
     () => [...new Set(tasks.map((t) => t.milestone).filter(Boolean))].sort(),
@@ -675,6 +678,13 @@ export function Board({
                             {(it as Task).blocked}
                           </div>
                         )}
+                        {/* An in-progress card whose run waits on a hand says
+                            so, like Blocked says why. */}
+                        {!isBugs && (it as Task).waiting && (
+                          <div data-testid="waiting-reason" className="mt-1 text-xs text-serious">
+                            {(it as Task).waiting}
+                          </div>
+                        )}
                       </button>
                     </li>
                   ))}
@@ -900,6 +910,22 @@ function TaskRunner({
     );
     return active?.id ?? null;
   });
+  // The run this task is IN — running, queued, or paused on something other
+  // than a gate (a question, a budget, a provider). The gate case has its own
+  // card above; this is everything else a task in flight can be doing, shown
+  // where the task is: stage · mode · seats · state, a link, and — for a
+  // question — the answer box, advice included. Answering about T-069
+  // belongs on T-069.
+  const liveRun = useRuns((s) =>
+    Object.values(s.runs).find(
+      (r) =>
+        r.project_id === projectId &&
+        r.task_id === task.id &&
+        (r.status === "running" || r.status === "queued" || (r.status === "paused" && r.pending_kind !== "gate")),
+    ) ?? null,
+  );
+  const [answer, setAnswer] = useState("");
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   const go = async (
     what: "run" | "test" | "tdd" | "review",
@@ -1130,7 +1156,53 @@ function TaskRunner({
         {ordered.map((a, i) => renderAction(a, i === 0))}
       </div>
 
-      {running && (
+      {liveRun && (() => {
+        const pd = (liveRun.pending_data ?? {}) as Record<string, unknown>;
+        const question = typeof pd.question === "string" ? pd.question : "";
+        const advice = typeof pd.advice === "string" ? pd.advice : "";
+        const advisor = typeof pd.advisor === "string" ? pd.advisor : "";
+        const questionId = typeof pd.question_id === "string" ? pd.question_id : "";
+        const seats = Object.entries(liveRun.roster ?? {}).filter(([, d]) => d).map(([role, d]) => `${role} ${d}`).join(" · ");
+        const state = liveRun.status === "paused" ? `paused: ${liveRun.pending_kind ?? "waiting"}` : liveRun.status;
+        const send = (text: string) => {
+          if (!text.trim()) return;
+          setAnswerError(null);
+          client.answer(liveRun.id, questionId, text).then(() => { setAnswer(""); onDone(); }).catch((e) => setAnswerError(e instanceof Error ? e.message : String(e)));
+        };
+        return (
+          <section className="rounded border border-hairline p-2 text-xs" data-testid="task-live-run" data-state={liveRun.status}>
+            <div className="flex flex-wrap items-baseline gap-2">
+              <StatusChip role={liveRun.status === "paused" ? "serious" : "good"} label={state} />
+              <span className="text-ink">{liveRun.stage} · {liveRun.mode}</span>
+              {seats && <span className="truncate text-ink-muted" title={seats}>{seats}</span>}
+              <a href={`#/runs/${liveRun.id}`} data-testid="task-live-run-link" className="ml-auto text-ink underline">open {liveRun.id}</a>
+            </div>
+            {question && (
+              <div className="mt-2" data-testid="task-question">
+                <p className="text-sm text-ink">{question}</p>
+                {advice && (
+                  <div className="mt-1 rounded border border-hairline p-2">
+                    <p className="text-ink-muted">{advisor || "the advisor"} recommends:</p>
+                    <p className="mt-1 whitespace-pre-wrap text-ink">{advice}</p>
+                    <button type="button" data-testid="task-answer-advice" onClick={() => send(advice)} className="mt-1 rounded border border-good px-2 py-0.5 text-good">Answer with this</button>
+                  </div>
+                )}
+                <div className="mt-1 flex gap-2">
+                  <input aria-label="answer" data-testid="task-answer-input" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(answer); }} className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1" placeholder="your answer" />
+                  <button type="button" data-testid="task-answer-button" onClick={() => send(answer)} className="rounded border border-hairline px-2 py-1">Answer</button>
+                </div>
+                {answerError && <p className="mt-1 text-critical">{answerError}</p>}
+              </div>
+            )}
+            {liveRun.status !== "paused" && (
+              <p className="mt-1 text-ink-muted">Working now — watch it before starting another.{" "}
+                <button type="button" data-testid="abort-run" onClick={() => void client.abort(liveRun.id).then(() => onDone()).catch(() => {})} className="underline">abort</button>
+              </p>
+            )}
+          </section>
+        );
+      })()}
+      {running && !liveRun && (
         <p className="text-xs text-ink-muted" data-testid="running-note">
           A run is working on this task right now.{" "}
           {activeRunId ? (
@@ -1175,13 +1247,16 @@ function TaskRunner({
       {/* Each its own line: rendered inline these two links fused into one
           reading — "remove from planchat about this" — and an action that
           deletes should never share a sentence with one that talks. */}
-      {next.includes("remove") && (
-        <div className="mt-2">
-          <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
-        </div>
-      )}
-      <div className="mt-2">
+      {/* Chat and remove at the foot, past a hairline: talking about the
+          task and deleting it are not launch controls, and the chat used to
+          sit inside the gate's box. */}
+      <div className="mt-2 flex items-center gap-3 border-t border-hairline pt-2 text-xs">
         <ChatAbout client={client} projectId={projectId} aboutKind="task" aboutId={task.id} ducklings={ducklings} />
+        {next.includes("remove") && (
+          <span className="ml-auto">
+            <RemoveTask task={task} client={client} projectId={projectId} onDone={onDone} />
+          </span>
+        )}
       </div>
 
       {accepted && (
