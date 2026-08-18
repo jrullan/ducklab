@@ -528,7 +528,6 @@ func DefaultGlobal() *Global {
 			AgentMaxTurns:      24,
 			HTTPTimeoutS:       300,
 			TransientRetries:   3,
-			RolePins:           map[string][]string{"triager": {"fallback"}, "scribe": {"fallback"}},
 			Budget: Budget{
 				MaxUSD:        2.00,
 				MaxTokens:     400000,
@@ -789,20 +788,13 @@ func LegacyModeSeats(legacy map[string][]string) map[string]map[string][]string 
 				seats[roles[1]] = []string{ids[1]}
 			}
 		} else if mode == "tournament" {
-			if len(ids) > 1 {
-				seats[roles[0]] = append([]string{}, ids[:len(ids)-1]...)
-				seats[roles[1]] = []string{ids[len(ids)-1]}
-			} else {
-				seats[roles[0]] = append([]string{}, ids...)
-			}
-		} else { // split: architect, workers, reviewer
-			seats[roles[0]] = []string{ids[0]}
-			if len(ids) > 2 {
-				seats[roles[1]] = append([]string{}, ids[1:len(ids)-1]...)
-				seats[roles[2]] = []string{ids[len(ids)-1]}
-			} else if len(ids) > 1 {
-				seats[roles[1]] = append([]string{}, ids[1:]...)
-			}
+			// The positional tournament line-up named CONTESTANTS only; the
+			// judge always came from the roster (the desktop labelled every
+			// position "contestant N").
+			seats[roles[0]] = append([]string{}, ids...)
+		} else { // split: the positional line-up named WORKERS only; the
+			// architect and reviewer came from the roster ("worker N").
+			seats[roles[1]] = append([]string{}, ids...)
 		}
 		out[mode] = seats
 	}
