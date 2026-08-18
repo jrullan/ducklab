@@ -9,6 +9,16 @@ type Entry = { role: string; duckling?: string; ducklings?: string[]; source?: s
 // Common first: triager and scribe serve every mode, and at the bottom of a
 // long page they read as an afterthought — or a sixth mode.
 const MODES = ["common", "council", "solo", "pair", "split", "tournament"];
+// One line each, in the spec's own words (05 §4): what the mode is FOR, so a
+// person seating it knows what they are staffing.
+const MODE_BLURB: Record<string, string> = {
+  common: "shared by every mode — the triager classifies bug reports, the scribe writes release notes",
+  council: "the artifact modes — intake, spec and plan: an architect drafts, reviewers critique, no code is written",
+  solo: "the yardstick — one implementer builds until the gate passes; the advisor is a rubber duck it may consult",
+  pair: "driver and navigator — an implementer builds, a reviewer reads each round; the advisor steps in on distress",
+  split: "decompose to raise the ceiling — an architect splits the task, several implementers take a piece each",
+  tournament: "independent attempts, arbitrated — contestants build unseen by each other; a judge picks one",
+};
 const names = (entry: Entry) => entry.ducklings ?? (entry.duckling ? [entry.duckling] : []);
 const pinned = (entry: Entry) => entry.source === "project pin" || entry.source === "project mode seat" || entry.source === "project";
 // The columns a board shows: only the roles the mode seats (rolesForMode is
@@ -222,12 +232,14 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   // to reach its tail must not hide the other's head (Council, Solo).
   // Evidence for a seated duckling IN THAT SEAT, and the seat's suggestion,
   // so the board is a decision surface and not a map of names.
-  const seatEvidence = (id: string, role: string): string => {
+  // The seat line is 14rem wide: rate, runs and coding index fit; the cost
+  // per run rides the tooltip (the Flock card shows it in full).
+  const seatEvidence = (id: string, role: string): { line: string; full: string } => {
     const s = scorecards.find((c) => c.id === id);
-    if (!s) return "";
+    if (!s) return { line: "", full: "" };
     const inRole = s.measured_by_role?.[role];
     const parts = inRole?.runs ? evidenceParts(s, inRole) : evidenceParts(s, s.measured, " overall");
-    return parts.join(" · ");
+    return { line: parts.filter((p) => !p.endsWith("/run")).join(" · "), full: parts.join(" · ") };
   };
   return <div className="flex h-full min-h-0 flex-col gap-4" data-testid="roster-view">
     <div className="flex items-center gap-2" data-testid="roster-scope">
@@ -271,12 +283,17 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1" data-testid="roster-boards">
     {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
-    <div className="space-y-6">{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)} className={common ? "border-l-4 border-transparent pl-3" : "border-l-4 pl-3"} style={common ? undefined : { borderLeftColor: notRunnable ? "var(--status-warning)" : "var(--border)" }}>
-      {/* The bar's colour MEANS something: hairline when the mode runs,
-          amber when it says "not runnable yet" — the exception is the one
-          that should be seen from across the room. Common is not a mode;
-          it sits quieter, without a bar. */}
-      <div className="flex items-baseline gap-2"><h2 className={common ? "text-base font-medium capitalize text-ink-muted" : "text-lg font-semibold capitalize"}>{mode}</h2>{common && <span className="text-xs text-ink-muted">shared by every mode</span>}{warnings[mode] && <span className="text-xs" data-testid={`roster-warning-${mode}`} style={{ color: "var(--status-warning)" }}>⚠ {warnings[mode]}</span>}</div>
+    <div className="space-y-6">{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)}>
+      {/* The header is a title, one line saying what the mode is for, and a
+          rule beneath. The rule's colour MEANS something: hairline when the
+          mode runs, amber when it says "not runnable yet" — the exception
+          is the one that should be seen from across the room. Common is not
+          a mode; it sits quieter. */}
+      <div className="flex items-baseline gap-3 border-b pb-1" style={{ borderBottomColor: notRunnable ? "var(--status-warning)" : "var(--border)" }}>
+        <h2 className={common ? "text-base font-medium capitalize text-ink-muted" : "text-lg font-semibold capitalize"}>{mode}</h2>
+        <span className="min-w-0 truncate text-xs text-ink-muted" data-testid={`roster-blurb-${mode}`} title={MODE_BLURB[mode]}>{MODE_BLURB[mode]}</span>
+        {warnings[mode] && <span className="ml-auto shrink-0 text-xs" data-testid={`roster-warning-${mode}`} style={{ color: "var(--status-warning)" }}>⚠ {warnings[mode]}</span>}
+      </div>
       {errors[mode] && <p role="alert" className="text-sm" data-testid={`roster-error-${mode}`} style={{ color: "var(--status-critical)" }}>{errors[mode]}</p>}
       {mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p className="text-xs text-ink-muted">no pins</p>}
       <div className="mt-2 flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
@@ -291,7 +308,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         {ids.map((id) => { const evidence = seatEvidence(id, entry.role); const isTop = top?.id === id; return <div key={id} data-testid={`roster-card-${mode}-${entry.role}-${id}`} data-ghost={ghost ? "true" : undefined} title={isPinned && (entry.global_ducklings ?? entry.default) ? `Global: ${Array.isArray(entry.global_ducklings) ? entry.global_ducklings.join(", ") : entry.default}` : undefined} className={`group rounded border p-2 mb-2 ${ghost ? "border-dashed text-ink-muted" : "border-hairline"}`}>
           <div className="flex items-center gap-2"><DuckAvatar id={id} roster={roster} /><span className="font-medium truncate">{id}</span>{(ghost || isPinned) && <small className="rounded border border-hairline px-1 text-ink-muted">{ghost ? "global" : "pinned"}</small>}{isTop && <small className="text-xs" data-testid={`roster-seat-top-${mode}-${entry.role}-${id}`} title={top?.why} style={{ color: "var(--status-good)" }}>✓ suggested</small>}
             <span className="ml-auto flex gap-2 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(mode, ""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(mode, e instanceof Error ? e.message : String(e))); }}>unpin</button>}{editable && <button type="button" className="text-ink-muted hover:text-ink" aria-label={`remove ${id} from ${entry.role}`} title="remove" onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>×</button>}</span></div>
-          {evidence && <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-seat-evidence-${mode}-${entry.role}-${id}`}>{evidence}</div>}
+          {evidence.line && <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-seat-evidence-${mode}-${entry.role}-${id}`} title={evidence.full}>{evidence.line}</div>}
         </div>; })}
         {suggestion && !open && <div className="mb-2 text-[11px] text-ink-muted" data-testid={`roster-seat-suggestion-${mode}-${entry.role}`} title={suggestion.why}>suggested: <button type="button" className="underline hover:text-ink" aria-label={`assign suggested ${suggestion.id} to ${entry.role} in ${mode}`} onClick={() => assign(mode, entry.role, suggestion.id)}>{suggestion.id}</button></div>}
         {editable && open && <div className="mb-2 rounded border border-hairline bg-surface2 p-2" role="listbox" aria-label={`choose a duckling for ${entry.role}`}><div className="mb-1 flex items-center justify-between text-xs text-ink-muted"><span>assign to {entry.role}</span><button type="button" className="underline" onClick={() => setChosenSeat(null)}>cancel</button></div><div className="max-h-56 space-y-1 overflow-y-auto">{(() => { const candidates = entry.candidates ?? []; const rank = new Map(candidates.map((c, i) => [c.id, i])); const ordered = ducks.filter((duck) => !ids.includes(duck.id)).slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 999) - (rank.has(b.id) ? rank.get(b.id)! : 999)); return ordered.map((duck) => { const candidate = candidates.find((c) => c.id === duck.id); return <button key={duck.id} type="button" className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface" aria-label={`assign ${duck.id} to ${entry.role}`} onClick={() => assign(mode, entry.role, duck.id)} data-testid={candidate ? `roster-pick-suggested-${duck.id}` : undefined}><DuckAvatar id={duck.id} roster={roster} /> <span className="ml-1">{duck.id}</span>{candidate && <><span className="ml-2 text-xs">suggested for {entry.role}</span><span data-testid={`roster-pick-suggested-why-${duck.id}`} className="ml-2 text-xs text-ink-muted">{candidate.why}</span></>}</button>; }); })()}</div></div>}

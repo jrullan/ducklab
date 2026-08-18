@@ -70,6 +70,8 @@ describe("Roster board as a decision surface", () => {
     expect(screen.getByTestId("roster-warning-pair").textContent).toContain("not runnable yet");
     expect(screen.getByTestId("roster-board-common").getAttribute("data-runnable")).toBeNull();
     expect(screen.getByTestId("roster-board-common").textContent).toContain("shared by every mode");
+    // Every mode says what it is for, one line, beside its title.
+    expect(screen.getByTestId("roster-blurb-pair").textContent).toContain("driver and navigator");
   });
 });
 
