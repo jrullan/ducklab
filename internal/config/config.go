@@ -603,17 +603,44 @@ func LoadProject(path string) (*Project, error) {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
 	p := DefaultProject("", "")
-	md, err := toml.Decode(string(data), p)
-	if err != nil {
+	if _, err := toml.Decode(string(data), p); err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
-	if err := rejectUndecoded(path, md); err != nil {
-		return nil, err
-	}
+	// Tolerant at READ, strict at WRITE. An unknown key here used to refuse
+	// the whole project — which turned every schema-extending task into a
+	// self-deadlock: T-071's implementer declared the very key it was adding
+	// (verify.link_deps) in the live project.toml, and the running engine —
+	// one version older — could no longer load the project to finish the
+	// run (B-075). A key this binary does not know is most likely a key a
+	// NEWER tree just taught the next binary; it is preserved on disk (the
+	// engine never rewrites the file wholesale except through SaveProject,
+	// which is why writes stay strict) and reported as a warning by
+	// UnknownProjectKeys for surfaces that can say it.
 	if err := p.Validate(path); err != nil {
 		return nil, err
 	}
 	return p, nil
+}
+
+// UnknownProjectKeys names the keys in a project file this binary does not
+// know — worth a warning banner, never a refusal (see LoadProject).
+func UnknownProjectKeys(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	p := DefaultProject("", "")
+	md, err := toml.Decode(string(data), p)
+	if err != nil {
+		return nil
+	}
+	undecoded := md.Undecoded()
+	keys := make([]string, 0, len(undecoded))
+	for _, k := range undecoded {
+		keys = append(keys, k.String())
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Validate validates the project configuration.
