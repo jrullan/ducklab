@@ -126,7 +126,10 @@ func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 }
 
 // Ordinary fixed bugs await the human-only I2 judgement: verification is the
-// headline, while reopening is only the alternative if the fix missed the report.
+// headline, while reopening is only the alternative if the fix missed the
+// report. ONE step for all of them, carrying every id — three fixed bugs
+// used to be three near-identical two-line entries, and the guide grew a
+// line per bug.
 func TestTheGuidePrioritizesVerificationForFixedBugs(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
@@ -136,27 +139,48 @@ func TestTheGuidePrioritizesVerificationForFixedBugs(t *testing.T) {
 			{ID: "B-018", Status: bug.Fixed},
 		},
 	})
+	var verify []NextStep
+	for _, s := range steps {
+		if s.ID == "verify-bug" {
+			verify = append(verify, s)
+		}
+	}
+	if len(verify) != 1 {
+		t.Fatalf("guide = %v, want ONE verify step for three fixed bugs", ids(steps))
+	}
+	got := verify[0]
+	if got.Kind != "bug" || got.Ref != "B-004" || strings.Join(got.Refs, ",") != "B-004,B-007,B-018" {
+		t.Errorf("verify step = %+v, want kind bug, ref B-004, refs all three", got)
+	}
+	if !strings.HasPrefix(got.Action, "Verify 3 fixed bugs") || !strings.Contains(strings.ToLower(got.Action), "reopen") {
+		t.Errorf("action = %q, want Verify as the headline and reopen as the alternative", got.Action)
+	}
+	// One fixed bug still reads as itself.
+	one := nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true, Bugs: []bug.Bug{{ID: "B-004", Status: bug.Fixed}}})
+	if len(one) == 0 || !strings.HasPrefix(one[0].Action, "Verify B-004 — confirm the fix answers the report") || strings.Join(one[0].Refs, ",") != "B-004" {
+		t.Errorf("single fixed bug = %+v", one)
+	}
+}
 
-	for _, id := range []string{"B-004", "B-007", "B-018"} {
-		var found *NextStep
-		for i := range steps {
-			if steps[i].Ref == id {
-				found = &steps[i]
-				break
-			}
+// Likewise reopenable accepted tasks: one door, every id behind it — a
+// project with 45 accepted tasks on branches must not get 45 lines.
+func TestTheGuideGroupsReopenableTasks(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Tasks: []TaskView{
+			{ID: "T-001", Status: "accepted", Branch: "ducklab/T-001"},
+			{ID: "T-002", Status: "accepted", Branch: "ducklab/T-002"},
+			{ID: "T-003", Status: "accepted", Branch: "ducklab/T-003"},
+		},
+	})
+	var reopen []NextStep
+	for _, s := range steps {
+		if s.ID == "reopen-task" {
+			reopen = append(reopen, s)
 		}
-		if found == nil {
-			t.Fatalf("guide = %v, want a step for fixed bug %s", ids(steps), id)
-		}
-		if found.ID != "verify-bug" || found.Kind != "bug" {
-			t.Errorf("fixed bug %s step = %+v, want verify-bug bug step", id, *found)
-		}
-		if !strings.HasPrefix(found.Action, "Verify "+id+" — confirm the fix answers the report") {
-			t.Errorf("fixed bug %s action = %q, want Verify as the headline", id, found.Action)
-		}
-		if !strings.Contains(strings.ToLower(found.Action), "reopen") {
-			t.Errorf("fixed bug %s action = %q, want reopen as the decision alternative", id, found.Action)
-		}
+	}
+	if len(reopen) != 1 || strings.Join(reopen[0].Refs, ",") != "T-001,T-002,T-003" || !strings.Contains(reopen[0].Action, "3 can be redone") {
+		t.Fatalf("reopen steps = %+v, want one grouped step over three tasks", reopen)
 	}
 }
 

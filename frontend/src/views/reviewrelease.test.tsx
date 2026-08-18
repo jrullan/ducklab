@@ -153,3 +153,32 @@ describe("drafting and cutting from the desktop", () => {
     await waitFor(() => expect(releaseCut).toHaveBeenCalledWith("p", "v0.1.0"));
   });
 });
+
+// With releases on file the door to the next one is still there — and it
+// respects the one-draft-at-a-time rule.
+describe("drafting the next release beside the list", () => {
+  it("offers Draft next release with a bump choice when nothing is drafted", async () => {
+    const releasePlan = vi.fn(() => Promise.resolve({ id: "r-rel" }));
+    const client = {
+      releases: vi.fn(() => Promise.resolve([{ version: "v0.5.0", drafted: false, tagged: true, tasks: 21, since: "v0.4.0" }])),
+      release: vi.fn(() => Promise.resolve("# notes")),
+      releasePlan,
+    } as unknown as EngineClient;
+    render(<Release client={client} projectId="p" />);
+    const btn = await screen.findByTestId("release-draft");
+    fireEvent.change(screen.getByTestId("release-bump"), { target: { value: "patch" } });
+    fireEvent.click(btn);
+    await waitFor(() => expect(releasePlan).toHaveBeenCalledWith("p", "patch"));
+    await screen.findByTestId("release-planned");
+  });
+  it("says a draft is waiting instead of opening a second", async () => {
+    const client = {
+      releases: vi.fn(() => Promise.resolve([{ version: "v0.6.0", drafted: true, tagged: false, tasks: 3, since: "v0.5.0" }, { version: "v0.5.0", drafted: false, tagged: true, tasks: 21, since: "v0.4.0" }])),
+      release: vi.fn(() => Promise.resolve("# notes")),
+    } as unknown as EngineClient;
+    render(<Release client={client} projectId="p" />);
+    await screen.findByTestId("release-next");
+    expect(screen.queryByTestId("release-draft")).toBeNull();
+    expect(screen.getByTestId("release-next").textContent).toContain("a draft is waiting: cut or revise v0.6.0");
+  });
+});

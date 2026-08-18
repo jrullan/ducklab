@@ -43,6 +43,10 @@ type NextStep struct {
 	// "stage", "project") and its id, so a client can link the real button.
 	Kind string `json:"kind"`
 	Ref  string `json:"ref,omitempty"`
+	// Refs lists every object a GROUPED step covers ("Verify 3 fixed bugs"
+	// → the three ids). One step per kind, not one per object: a guide that
+	// grows a line per bug is a list, and the board already exists.
+	Refs []string `json:"refs,omitempty"`
 }
 
 // projectSnapshot is everything nextSteps reads. Gathered from disk by
@@ -62,6 +66,17 @@ type projectSnapshot struct {
 }
 
 // nextSteps is the guide's whole brain: the loop's own order, stated.
+// bugIDs lists the bugs in a status, in board order.
+func bugIDs(bugs []bug.Bug, status bug.Status) []string {
+	var out []string
+	for _, b := range bugs {
+		if b.Status == status {
+			out = append(out, b.ID)
+		}
+	}
+	return out
+}
+
 func nextSteps(st projectSnapshot) []NextStep {
 	var out []NextStep
 	if st.AcceptedUnreleased == 0 {
@@ -137,31 +152,45 @@ func nextSteps(st projectSnapshot) []NextStep {
 	}
 	// A fixed bug is waiting for a person's verification. Reopen is the
 	// deliberate alternative when that verification finds the fix insufficient.
-	for _, b := range st.Bugs {
-		if b.Status == bug.Fixed {
-			out = append(out, NextStep{
-				ID:     "verify-bug",
-				Action: fmt.Sprintf("Verify %s — confirm the fix answers the report; reopen it if the problem remains", b.ID),
-				Reason: "the fix is waiting for human verification",
-				Kind:   "bug", Ref: b.ID,
-			})
+	if fixed := bugIDs(st.Bugs, bug.Fixed); len(fixed) > 0 {
+		step := NextStep{
+			ID:     "verify-bug",
+			Action: fmt.Sprintf("Verify %s — confirm the fix answers the report; reopen it if the problem remains", fixed[0]),
+			Reason: "the fix is waiting for human verification",
+			Kind:   "bug", Ref: fixed[0], Refs: fixed,
 		}
+		if len(fixed) > 1 {
+			step.Action = fmt.Sprintf("Verify %d fixed bugs — confirm each fix answers its report; reopen any that does not", len(fixed))
+			step.Reason = fmt.Sprintf("%d fixes are waiting for human verification", len(fixed))
+		}
+		out = append(out, step)
 	}
 	// Accepted work can be deliberately reopened, but only with explicit redo
 	// consent so a new run cannot silently repeat finished work.
 	hasFixedBug := countBugs(st.Bugs, bug.Fixed) > 0
+	var reopenable []string
 	for _, t := range st.Tasks {
 		// Legacy accepted tasks without provenance are already treated as
 		// shipped-compatible. A redo door is meaningful for work still tied to
 		// an active fix/release context (or explicitly retained on a branch).
 		if t.Status == "accepted" && (hasFixedBug || t.Branch != "") {
-			out = append(out, NextStep{
-				ID:     "reopen-task",
-				Action: fmt.Sprintf("Reopen %s — redo the task with explicit consent", t.ID),
-				Reason: "the task is accepted; starting it again would redo finished work, so pass redo and say why",
-				Kind:   "task", Ref: t.ID,
-			})
+			reopenable = append(reopenable, t.ID)
 		}
+	}
+	if len(reopenable) == 1 {
+		out = append(out, NextStep{
+			ID:     "reopen-task",
+			Action: fmt.Sprintf("Reopen %s — redo the task with explicit consent", reopenable[0]),
+			Reason: "the task is accepted; starting it again would redo finished work, so pass redo and say why",
+			Kind:   "task", Ref: reopenable[0], Refs: reopenable,
+		})
+	} else if len(reopenable) > 1 {
+		out = append(out, NextStep{
+			ID:     "reopen-task",
+			Action: fmt.Sprintf("Reopen an accepted task — %d can be redone with explicit consent", len(reopenable)),
+			Reason: "starting an accepted task again would redo finished work, so pass redo and say why",
+			Kind:   "task", Ref: reopenable[0], Refs: reopenable,
+		})
 	}
 
 	// 4. The next buildable task — ONE, not the backlog: a guide that lists

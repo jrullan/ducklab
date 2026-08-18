@@ -407,6 +407,15 @@ func (s *Service) ReleaseList(ctx context.Context, projectID string) ([]ReleaseS
 			continue
 		}
 		version := strings.TrimSuffix(name, ".md")
+		// A draft of a version that is already tagged is not a release and
+		// not a decision either: the cut promoted the notes and the tag was
+		// laid; whatever left the .proposed behind (a checkout that restored
+		// it, a plan re-run) cannot be cut again — ReleaseCut refuses a
+		// tagged version. Listing it beside the cut one showed "v0.5.0
+		// tagged" and "v0.5.0 drafted" as if there were two.
+		if draft && tagged[version] {
+			continue
+		}
 		body, err := os.ReadFile(filepath.Join(release.Dir(entry.Path), n.Name()))
 		if err != nil {
 			continue

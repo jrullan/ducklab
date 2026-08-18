@@ -392,14 +392,6 @@ export function App() {
             </a>
           ))}
           <a
-            href={routeHref({ name: "roster" })}
-            data-testid="nav-roster"
-            title="Read-only roster"
-            className={route.name === "roster" ? "text-ink" : "text-ink-muted"}
-          >
-            Roster
-          </a>
-          <a
             href={routeHref({ name: "settings" })}
             data-testid="nav-config"
             title="Settings, ducklings and projects"
@@ -506,7 +498,7 @@ export function App() {
         {/* The guide rail lives beside every view, not inside one: following
             a step changes the view, and a thread you can only see from one
             room is not a thread. */}
-        {client && projectId && <GuideRail client={client} projectId={projectId} />}
+        {client && projectId && <GuideRail client={client} projectId={projectId} view={route.name} />}
         <main
           aria-readonly={stale ? "true" : undefined}
           data-testid={stale ? "stale-read-only" : undefined}

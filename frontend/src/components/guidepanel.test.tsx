@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { GuideRail } from "./GuidePanel";
+import { GuideRail, shortAction } from "./GuidePanel";
 import { useRuns } from "../store/runs";
 import { EngineClient, type NextStep } from "../api/client";
 
@@ -117,5 +117,54 @@ describe("the guide rail", () => {
     const { container } = render(<GuideRail client={clientWith([])} projectId="p" />);
     await new Promise((r) => setTimeout(r, 20));
     expect(container.innerHTML).toBe("");
+  });
+});
+
+// Less noise, same thread: the first step is the headline with its why, the
+// rest are one line each (verb and object), grouped steps show their objects
+// as chips, more than four fold behind "+N more", and beside a view where
+// nothing is acted on in place (roster, settings) the rail starts as its strip.
+describe("the guide rail, quiet", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+  });
+  const MANY: NextStep[] = [
+    { id: "release", action: "Cut a release — 45 accepted task(s) await shipping", reason: "45 accepted task(s) await a release", kind: "release" },
+    { id: "triage", action: "Triage the open bugs", reason: "5 bug(s) are open and unclassified", kind: "bug" },
+    { id: "promote", action: "Promote B-057 to a task, or park it", reason: "it is triaged and waiting for a decision", kind: "bug", ref: "B-057" },
+    { id: "verify-bug", action: "Verify 3 fixed bugs — confirm each fix answers its report; reopen any that does not", reason: "3 fixes are waiting for human verification", kind: "bug", ref: "B-063", refs: ["B-063", "B-068", "B-069"] },
+    { id: "test-first", action: "Start T-070 (test first, then build)", reason: "it is the next task whose dependencies are all accepted", kind: "task", ref: "T-070" },
+  ];
+  it("headlines the first step, shortens the rest, chips grouped refs, folds the tail", async () => {
+    render(<GuideRail client={clientWith(MANY)} projectId="p" view="board" />);
+    await waitFor(() => screen.getByTestId("guide-rail"));
+    const steps = screen.getAllByTestId("guide-step");
+    expect(steps).toHaveLength(4);
+    expect(steps[0]!.getAttribute("data-primary")).toBe("true");
+    expect(steps[0]!.textContent).toContain("45 accepted task(s) await a release"); // the why, first step only
+    expect(steps[1]!.textContent).toBe("Triage the open bugs");
+    expect(steps[3]!.querySelector("a")!.textContent).toBe("Verify 3 fixed bugs");
+    expect(steps[3]!.querySelector("a")!.getAttribute("title")).toContain("reopen any that does not");
+    const chips = Array.from(steps[3]!.querySelectorAll('[data-testid="guide-step-refs"] a')).map((a) => a.textContent);
+    expect(chips).toEqual(["B-063", "B-068", "B-069"]);
+    fireEvent.click(screen.getByTestId("guide-more"));
+    expect(screen.getAllByTestId("guide-step")).toHaveLength(5);
+    expect(screen.getAllByTestId("guide-step")[4]!.textContent).toBe("Start T-070");
+  });
+  it("starts folded beside a view where nothing is acted on in place, and remembers being opened there", async () => {
+    render(<GuideRail client={clientWith(MANY)} projectId="p" view="roster" />);
+    await waitFor(() => screen.getByTestId("guide-pill"));
+    expect(screen.queryByTestId("guide-rail")).toBeNull();
+    fireEvent.click(screen.getByTestId("guide-pill"));
+    await waitFor(() => screen.getByTestId("guide-rail"));
+    expect(localStorage.getItem("ducklab.guide.roster")).toBe("on");
+    // The global choice is untouched: an actionable view still opens.
+    expect(localStorage.getItem("ducklab.guide")).toBeNull();
+  });
+  it("shortAction keeps verb and object", () => {
+    expect(shortAction("Cut a release — 45 accepted task(s) await shipping")).toBe("Cut a release");
+    expect(shortAction("Start T-070 (test first, then build)")).toBe("Start T-070");
+    expect(shortAction("Promote B-057 to a task, or park it")).toBe("Promote B-057 to a task, or park it");
   });
 });

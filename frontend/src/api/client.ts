@@ -250,6 +250,8 @@ export interface NextStep {
   reason: string;
   kind: "run" | "task" | "bug" | "stage" | "project" | "release";
   ref?: string;
+  /** Every object a grouped step covers ("Verify 3 fixed bugs" → the ids). */
+  refs?: string[];
 }
 
 export interface Task {

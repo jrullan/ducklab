@@ -24,6 +24,24 @@ function hrefFor(step: NextStep): string {
 
 const STORE = "ducklab.guide";
 
+/** The step's headline without its instruction: "Verify 3 fixed bugs — confirm
+ *  each…" → "Verify 3 fixed bugs"; "Start T-003 (test first, then build)" →
+ *  "Start T-003". The whole sentence rides the title. */
+export function shortAction(action: string): string {
+  return action.split(" — ")[0]!.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+/** Where one of a grouped step's refs lives. */
+function hrefForRef(step: NextStep, ref: string): string {
+  return hrefFor({ ...step, ref });
+}
+
+/** Views where the guide's steps are acted on in place. Elsewhere (roster,
+ *  settings, ducklings, projects, reports, reviews, bench) the rail starts
+ *  folded to its strip: 240px of "next steps" beside a settings form is
+ *  noise, and one click brings it back — remembered per view. */
+const ACTIONABLE = new Set(["now", "board", "cycle", "runs", "run", "release"]);
+
 /**
  * The guide rail: the engine's ProjectNext, always in the left margin.
  *
@@ -44,10 +62,14 @@ const STORE = "ducklab.guide";
  * Collapsible to a thin counted strip, and the choice survives: guidance
  * for the first weeks, a pulse for after.
  */
-export function GuideRail({ client, projectId }: { client: EngineClient; projectId: string }) {
+export function GuideRail({ client, projectId, view = "now" }: { client: EngineClient; projectId: string; view?: string }) {
   const [steps, setSteps] = useState<NextStep[]>([]);
   const [fleet, setFleet] = useState<Duckling[]>([]);
-  const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off");
+  const actionable = ACTIONABLE.has(view);
+  const viewKey = `${STORE}.${view}`;
+  const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off" && (actionable || localStorage.getItem(viewKey) === "on"));
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { setOpen(localStorage.getItem(STORE) !== "off" && (actionable || localStorage.getItem(viewKey) === "on")); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   // Runs are the guide's pulse: an accept, a pause, a landed proposal all
   // change what is next.
   const runs = useRuns((s) => s.runs);
@@ -111,7 +133,8 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
         type="button"
         data-testid="guide-pill"
         onClick={() => {
-          localStorage.removeItem(STORE);
+          if (actionable) localStorage.removeItem(STORE);
+          else localStorage.setItem(viewKey, "on");
           setOpen(true);
         }}
         title="show the guide rail"
@@ -134,7 +157,8 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           type="button"
           data-testid="guide-hide"
           onClick={() => {
-            localStorage.setItem(STORE, "off");
+            if (actionable) localStorage.setItem(STORE, "off");
+            else localStorage.removeItem(viewKey);
             setOpen(false);
           }}
           title="collapse the guide (a strip stays to bring it back)"
@@ -157,9 +181,9 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
           guide's own next step whenever that step is mechanical, and idles —
           saying why — when a human gate stands. Off with a reason: the rail
           says what stopped it instead of showing a silently cleared toggle. */}
-      <section data-testid="rail-autopilot" className="mb-3 rounded-card border border-hairline p-2">
+      <section data-testid="rail-autopilot" className="mb-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-ink-muted">autopilot</span>
+          <span className="text-xs text-ink-muted">autopilot</span>
           <button
             type="button"
             data-testid="autopilot-toggle"
@@ -184,17 +208,32 @@ export function GuideRail({ client, projectId }: { client: EngineClient; project
         )}
       </section>
 
-      <h2 className="text-sm text-ink-muted">next steps</h2>
-      <ol className="mt-2 space-y-3">
-        {steps.slice(0, 6).map((s, i) => (
-          <li key={`${s.id}:${s.ref ?? i}`} data-testid="guide-step">
-            <a href={hrefFor(s)} className="text-sm text-ink underline">
-              {s.action}
+      <h2 className="text-xs text-ink-muted">next steps</h2>
+      {/* The first step is THE next step: headline and why. The rest are one
+          line each — verb and object, the sentence on hover — capped at
+          four with the remainder behind "+N more". A grouped step shows its
+          objects as chips, each a link. */}
+      <ol className="mt-1.5 space-y-1.5">
+        {(showAll ? steps : steps.slice(0, 4)).map((s, i) => (
+          <li key={`${s.id}:${s.ref ?? i}`} data-testid="guide-step" data-primary={i === 0 ? "true" : undefined}>
+            <a href={hrefFor(s)} title={`${s.action} — ${s.reason}`} className={i === 0 ? "text-sm text-ink underline" : "text-xs text-ink-muted underline hover:text-ink"}>
+              {i === 0 ? s.action : shortAction(s.action)}
             </a>
-            <p className="mt-0.5 text-xs text-ink-muted">{s.reason}</p>
+            {i === 0 && <p className="mt-0.5 text-xs text-ink-muted">{s.reason}</p>}
+            {s.refs && s.refs.length > 1 && (
+              <span className="mt-0.5 flex flex-wrap gap-1" data-testid="guide-step-refs">
+                {s.refs.slice(0, 6).map((ref) => <a key={ref} href={hrefForRef(s, ref)} className="rounded border border-hairline px-1 text-[11px] text-ink-muted hover:text-ink">{ref}</a>)}
+                {s.refs.length > 6 && <span className="text-[11px] text-ink-muted">+{s.refs.length - 6}</span>}
+              </span>
+            )}
           </li>
         ))}
       </ol>
+      {steps.length > 4 && (
+        <button type="button" data-testid="guide-more" className="mt-1.5 text-xs text-ink-muted underline" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "fewer" : `+${steps.length - 4} more`}
+        </button>
+      )}
       {/* The rail says WHAT; this chat explains WHY. The consultant gets the
           embedded harness dossier plus the live state the rail itself
           computes, so both always tell the same story. */}

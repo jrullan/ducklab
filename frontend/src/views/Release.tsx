@@ -21,6 +21,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [planned, setPlanned] = useState<string | null>(null);
+  const [bump, setBump] = useState<"patch" | "minor" | "major">("minor");
 
   // Drafting starts a release RUN — a scribe writes the prose over the
   // deterministically collected changelog — so the affordance here is
@@ -118,10 +119,29 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   }
 
   const current = items.find((r) => r.version === selected) ?? null;
+  const pendingDraft = items.find((r) => r.drafted);
 
   return (
     <div data-testid="release-view" className="flex gap-6">
       <nav className="w-64 shrink-0 space-y-1">
+        {/* The door to the NEXT release lives with the list, not only in the
+            empty state: with one release on file there was no way to draft
+            the second from the desktop. One draft at a time — while one
+            waits, the door says so instead of opening a second. */}
+        {!loading && <div className="mb-2 rounded-card border border-hairline p-2" data-testid="release-next">
+          {planned ? (
+            <p className="text-xs text-ink-secondary" data-testid="release-planned">Drafting — watch the release run in Now, then come back to cut it.</p>
+          ) : pendingDraft ? (
+            <p className="text-xs text-ink-muted">a draft is waiting: cut or revise {pendingDraft.version} before drafting another</p>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button type="button" data-testid="release-draft" disabled={busy} onClick={() => void draft(bump)} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Draft next release</button>
+              <select aria-label="version bump" data-testid="release-bump" value={bump} onChange={(e) => setBump(e.target.value as typeof bump)} className="rounded border border-hairline bg-surface px-1 py-1 text-xs text-ink">
+                <option value="patch">patch</option><option value="minor">minor</option><option value="major">major</option>
+              </select>
+            </div>
+          )}
+        </div>}
         {items.map((r) => (
           <button
             key={r.version}
