@@ -138,39 +138,94 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 		available[id] = true
 	}
 	s.cfgMu.RUnlock()
-	availableIDs := make([]config.DucklingID, 0, len(available))
-	for id := range available {
-		availableIDs = append(availableIDs, id)
+	firstAvailable := func(ids []config.DucklingID) config.DucklingID {
+		for _, id := range ids {
+			if available[id] {
+				return id
+			}
+		}
+		return ""
 	}
-	sort.Slice(availableIDs, func(i, j int) bool { return availableIDs[i] < availableIDs[j] })
+	toIDs := func(in []string) []config.DucklingID {
+		out := make([]config.DucklingID, len(in))
+		for i, id := range in {
+			out[i] = config.DucklingID(id)
+		}
+		return out
+	}
+	// Precedence per seat, and the record says which rung answered:
+	// project mode seat → project role pin → global mode seat → global role
+	// pin. A role nobody seated resolves to NOBODY. It used to resolve to the
+	// alphabetically first registered duckling ("global role fallback"), so a
+	// mode with no advisor got atom-local as its duck and a launch with no
+	// implementer got whatever sorted first (B-063). Optional roles simply
+	// stay empty — the duck skips its consult, ask_advisor says nobody is
+	// seated; required roles are checked at launch by requiredSeatsFor, which
+	// refuses with the seat named instead of guessing.
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
 		}
-		if ids := projCfg.RosterSeats[role]; len(ids) > 0 {
-			out[role], sources[role] = ids[0], "project pin"
-			continue
-		}
-		if id := projCfg.Roster[role]; id != "" {
-			out[role], sources[role] = id, "project pin"
-			continue
-		}
-		for _, id := range seats[string(role)] {
-			if available[config.DucklingID(id)] {
-				out[role], sources[role] = config.DucklingID(id), "global mode seat"
-				break
+		// A project pin is honoured as written — it is the person's own
+		// word; naming an unregistered duckling is a launch-time error with
+		// the seat named, never a silent skip to the next rung.
+		if projCfg != nil && projCfg.ModeSeats != nil {
+			if ids := projCfg.ModeSeats[mode][string(role)]; len(ids) > 0 && ids[0] != "" {
+				out[role], sources[role] = config.DucklingID(ids[0]), "project mode seat"
+				continue
 			}
 		}
-		if out[role] != "" {
-			continue
-		}
-		for _, id := range pins[string(role)] {
-			if available[config.DucklingID(id)] {
-				out[role], sources[role] = config.DucklingID(id), "global role fallback"
-				break
+		if projCfg != nil {
+			if ids := projCfg.RosterSeats[role]; len(ids) > 0 && ids[0] != "" {
+				out[role], sources[role] = ids[0], "project pin"
+				continue
+			}
+			if id := projCfg.Roster[role]; id != "" {
+				out[role], sources[role] = id, "project pin"
+				continue
 			}
 		}
-		if sources[role] == "" {
+		if id := firstAvailable(toIDs(seats[string(role)])); id != "" {
+			out[role], sources[role] = id, "global mode seat"
+			continue
+		}
+		// The documents' architect: a stage run in solo still drafts with the
+		// council's architect, not with whoever implements tasks — the seat
+		// the person configured for writing documents is that one. (This
+		// used to hold only because the alphabet happened to agree.)
+		if role == config.RoleArchitect && mode != "council" {
+			s.cfgMu.RLock()
+			council := s.cfg.Defaults.ModeSeats["council"]
+			s.cfgMu.RUnlock()
+			if id := firstAvailable(toIDs(council["architect"])); id != "" {
+				out[role], sources[role] = id, "global mode seat (council)"
+				continue
+			}
+		}
+		if id := firstAvailable(toIDs(pins[string(role)])); id != "" {
+			out[role], sources[role] = id, "global role fallback"
+			continue
+		}
+		out[role], sources[role] = "", "unseated"
+	}
+	// A blank installation — two ducklings registered, no seat configured
+	// anywhere — must still be able to run: the engine picks a distinct
+	// duckling per role and says so on the record. The moment anything is
+	// configured, it stops guessing: a configured install with no triager
+	// gets "no triager seated" at launch, not the alphabet (B-063).
+	if !s.anySeatConfigured(projCfg) {
+		availableIDs := make([]config.DucklingID, 0, len(available))
+		for id := range available {
+			availableIDs = append(availableIDs, id)
+		}
+		sort.Slice(availableIDs, func(i, j int) bool { return availableIDs[i] < availableIDs[j] })
+		for _, role := range config.ValidRoles() {
+			// Every role but the advisor: a duck nobody asked for is the one
+			// seat that must stay empty (it costs a turn and speaks into the
+			// run), and the harness already knows what an empty duck means.
+			if role == config.RoleHuman || role == config.RoleAdvisor || out[role] != "" {
+				continue
+			}
 			for _, id := range availableIDs {
 				used := false
 				for _, assigned := range out {
@@ -187,14 +242,96 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 			if out[role] == "" && len(availableIDs) > 0 {
 				out[role] = availableIDs[0]
 			}
-			sources[role] = "global role fallback"
+			if out[role] != "" {
+				sources[role] = "engine picked (no seats configured)"
+			}
 		}
 	}
 	return out, sources
 }
 
-func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config.DucklingID, string) {
-	out, _ := s.resolveCanonicalRoster(projCfg, "")
+// anySeatConfigured reports whether a person has seated anyone anywhere —
+// global mode seats or role pins, project mode seats or role pins.
+func (s *Service) anySeatConfigured(projCfg *config.Project) bool {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	for _, seats := range s.cfg.Defaults.ModeSeats {
+		for _, ids := range seats {
+			if len(ids) > 0 {
+				return true
+			}
+		}
+	}
+	for _, ids := range s.cfg.Defaults.RolePins {
+		if len(ids) > 0 {
+			return true
+		}
+	}
+	if projCfg != nil {
+		for _, seats := range projCfg.ModeSeats {
+			for _, ids := range seats {
+				if len(ids) > 0 {
+					return true
+				}
+			}
+		}
+		for _, ids := range projCfg.RosterSeats {
+			if len(ids) > 0 {
+				return true
+			}
+		}
+		for _, id := range projCfg.Roster {
+			if id != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// requiredSeatsFor names the roles a mode cannot run without. Everything
+// else — the advisor above all — is optional: absent means absent.
+func requiredSeatsFor(mode string) []config.Role {
+	switch mode {
+	case "solo", "":
+		return []config.Role{config.RoleImplementer}
+	case "pair":
+		return []config.Role{config.RoleImplementer, config.RoleReviewer}
+	case "council":
+		return []config.Role{config.RoleArchitect, config.RoleReviewer}
+	case "split":
+		return []config.Role{config.RoleArchitect, config.RoleImplementer, config.RoleReviewer}
+	case "tournament":
+		return []config.Role{config.RoleImplementer, config.RoleJudge}
+	case "triage":
+		return []config.Role{config.RoleTriager}
+	case "release":
+		return []config.Role{config.RoleScribe}
+	}
+	return nil
+}
+
+// unseatedRequired reports which required seats of a mode are empty, in a
+// message that names the seat and the door that fills it.
+func unseatedRequired(mode string, roster map[config.Role]config.DucklingID) error {
+	var missing []string
+	for _, role := range requiredSeatsFor(mode) {
+		if roster[role] == "" {
+			missing = append(missing, string(role))
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("no %s seated for %s — assign one on the Roster board (or pass ducklings on the launch)", strings.Join(missing, ", "), mode)
+}
+
+// resolveRoster resolves every seat for a run of the given mode. The mode
+// matters: it used to be resolved with mode "" at every launch, so the
+// global per-mode seats never reached a run except through the desktop
+// launcher's prefill (B-063).
+func (s *Service) resolveRoster(projCfg *config.Project, mode string) (map[config.Role]config.DucklingID, string) {
+	out, _ := s.resolveCanonicalRoster(projCfg, mode)
 	return out, bothSidesWarning(out)
 }
 

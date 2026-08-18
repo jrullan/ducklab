@@ -43,8 +43,8 @@ func TestRosterGetResolvesModeSeatsProjectPinsAndGlobalFallbackWithProvenance(t 
 	for role, want := range map[string]RosterEntry{
 		"implementer": {Duckling: "global-implementer", Source: "global mode seat"},
 		"reviewer":    {Duckling: "project-reviewer", Source: "project pin"},
-		"triager":     {Duckling: "fallback", Source: "global role fallback"},
-		"scribe":      {Duckling: "fallback", Source: "global role fallback"},
+		"triager":     {Duckling: "", Source: "unseated"},
+		"scribe":      {Duckling: "", Source: "unseated"},
 	} {
 		entry, ok := got[role]
 		if !ok {

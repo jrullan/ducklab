@@ -62,12 +62,21 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 		}
 		canonicalSource := sources[role]
 		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource}
-		if canonicalSource == "project pin" {
+		if canonicalSource == "project pin" || canonicalSource == "project mode seat" {
 			withoutPin := *projCfg
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
 			for r, id := range projCfg.Roster {
 				if r != role {
 					withoutPin.Roster[r] = id
+				}
+			}
+			withoutPin.ModeSeats = map[string]map[string][]string{}
+			for m, seats := range projCfg.ModeSeats {
+				withoutPin.ModeSeats[m] = map[string][]string{}
+				for r, ids := range seats {
+					if !(m == mode && r == string(role)) {
+						withoutPin.ModeSeats[m][r] = append([]string{}, ids...)
+					}
 				}
 			}
 			withoutPin.RosterSeats = make(map[config.Role][]config.DucklingID, len(projCfg.RosterSeats))
@@ -212,17 +221,32 @@ func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role s
 	if projCfg.Roster == nil {
 		projCfg.Roster = config.Roster{}
 	}
-	// Keep the legacy scalar mirror for readers that still understand it; the
-	// canonical ordered pin is persisted in RosterSeats below.
-	projCfg.Roster[config.Role(role)] = config.DucklingID(ducklingIDs[0])
-	if projCfg.RosterSeats == nil {
-		projCfg.RosterSeats = map[config.Role][]config.DucklingID{}
-	}
 	ids := make([]config.DucklingID, len(ducklingIDs))
 	for i, id := range ducklingIDs {
 		ids[i] = config.DucklingID(id)
 	}
-	projCfg.RosterSeats[config.Role(role)] = ids
+	if mode != "" {
+		// A pin made for ONE mode lands in the project's per-mode seats —
+		// the same shape as the global defaults — and touches no other mode.
+		// It used to become a role pin, so seating atom-local for solo's
+		// implementer seated it for pair, split and tournament too (B-068).
+		if projCfg.ModeSeats == nil {
+			projCfg.ModeSeats = map[string]map[string][]string{}
+		}
+		if projCfg.ModeSeats[mode] == nil {
+			projCfg.ModeSeats[mode] = map[string][]string{}
+		}
+		projCfg.ModeSeats[mode][role] = append([]string{}, ducklingIDs...)
+	} else {
+		// No mode: a role pin, mode-independent (triager, scribe, or a
+		// deliberate "this project always implements with X"). Keep the
+		// legacy scalar mirror for readers that still understand it.
+		projCfg.Roster[config.Role(role)] = config.DucklingID(ducklingIDs[0])
+		if projCfg.RosterSeats == nil {
+			projCfg.RosterSeats = map[config.Role][]config.DucklingID{}
+		}
+		projCfg.RosterSeats[config.Role(role)] = ids
+	}
 
 	if err := s.validateRosterMode(mode, projCfg); err != nil {
 		return nil, fmt.Errorf("field ducklings: %v; next: provide a complete valid roster", err)
@@ -248,7 +272,9 @@ func (s *Service) validateRosterMode(mode string, proj *config.Project) error {
 	default:
 		return nil
 	}
-	if ids := proj.RosterSeats[config.Role(role)]; len(ids) > 0 {
+	if proj.ModeSeats != nil && len(proj.ModeSeats[mode][role]) > 0 {
+		count = len(proj.ModeSeats[mode][role])
+	} else if ids := proj.RosterSeats[config.Role(role)]; len(ids) > 0 {
 		count = len(ids)
 	} else if id := proj.Roster[config.Role(role)]; id != "" {
 		count = 1
@@ -278,8 +304,23 @@ func (s *Service) RosterUnpin(ctx context.Context, projectID, mode, role string)
 	if err != nil {
 		return nil, err
 	}
-	delete(projCfg.Roster, config.Role(role))
-	delete(projCfg.RosterSeats, config.Role(role))
+	// Unpinning on a mode's column removes that mode's seat; when the only
+	// pin behind the card is a role pin (mode-independent), that is what
+	// goes — and it goes for every mode, because that is what it was.
+	removed := false
+	if mode != "" && projCfg.ModeSeats != nil && projCfg.ModeSeats[mode] != nil {
+		if _, ok := projCfg.ModeSeats[mode][role]; ok {
+			delete(projCfg.ModeSeats[mode], role)
+			if len(projCfg.ModeSeats[mode]) == 0 {
+				delete(projCfg.ModeSeats, mode)
+			}
+			removed = true
+		}
+	}
+	if !removed {
+		delete(projCfg.Roster, config.Role(role))
+		delete(projCfg.RosterSeats, config.Role(role))
+	}
 	if err := writeProjectTOML(filepath.Join(entry.Path, ".ducklab", "project.toml"), projCfg); err != nil {
 		return nil, fmt.Errorf("write project.toml: %w", err)
 	}
@@ -287,6 +328,9 @@ func (s *Service) RosterUnpin(ctx context.Context, projectID, mode, role string)
 }
 
 func (s *Service) rosterIDs(proj *config.Project, mode string, role config.Role) []string {
+	if proj.ModeSeats != nil && len(proj.ModeSeats[mode][string(role)]) > 0 {
+		return append([]string{}, proj.ModeSeats[mode][string(role)]...)
+	}
 	if ids := proj.RosterSeats[role]; len(ids) > 0 {
 		out := make([]string, len(ids))
 		for i, id := range ids {

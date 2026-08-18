@@ -67,12 +67,21 @@ func TestRosterGetShowsResolvedAssignmentsAndSource(t *testing.T) {
 	if len(view.Entries) == 0 {
 		t.Fatal("no roster entries")
 	}
+	// A blank installation: nobody seated anywhere. The engine picks a
+	// duckling per role and says so — except the advisor, a duck nobody
+	// asked for stays empty (B-063).
 	for _, e := range view.Entries {
+		if e.Role == "advisor" {
+			if e.Duckling != "" || e.Source != "unseated" {
+				t.Errorf("advisor must stay empty on a blank install, got %+v", e)
+			}
+			continue
+		}
 		if e.Duckling == "" {
 			t.Errorf("role %q resolved to nothing", e.Role)
 		}
-		if e.Source != "global role fallback" {
-			t.Errorf("role %q source = %q, want global role fallback", e.Role, e.Source)
+		if e.Source != "engine picked (no seats configured)" {
+			t.Errorf("role %q source = %q, want engine picked (no seats configured)", e.Role, e.Source)
 		}
 	}
 }

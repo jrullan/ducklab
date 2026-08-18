@@ -226,7 +226,7 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 	if err != nil {
 		return "", fmt.Errorf("load project config: %w", err)
 	}
-	roster, _ := s.resolveRoster(projCfg)
+	roster, _ := s.resolveRoster(projCfg, "release")
 	limitsValue := projectBudget(budget.Budget{
 		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,

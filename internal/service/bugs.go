@@ -256,7 +256,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 		s.failRun(rs, fmt.Errorf("load project config: %w", err))
 		return
 	}
-	roster, _ := s.resolveRoster(projCfg)
+	roster, _ := s.resolveRoster(projCfg, "triage")
 	limitsValue := projectBudget(budget.Budget{
 		MaxUSD: s.cfg.Defaults.Budget.MaxUSD, MaxTokens: int64(s.cfg.Defaults.Budget.MaxTokens),
 		MaxWallclockS: s.cfg.Defaults.Budget.MaxWallclockS, MaxTurns: s.cfg.Defaults.Budget.MaxTurns,

@@ -290,7 +290,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// itself: a user pasting a sentence should not have to make a file.
 	}
 
-	roster, warning := s.resolveRoster(projCfg)
+	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
 	// The mode's saved line-up, which for council is the ONLY place it can
 	// apply — council never runs as a task. First drafts, the rest critique.
 	// A request naming its own seats overrides for THIS run alone.

@@ -310,13 +310,20 @@ type Project struct {
 	Verify   Verify   `toml:"verify" json:"verify"`
 	Roster   Roster   `toml:"roster" json:"roster"`
 	// RosterSeats preserves ordered multi-slot project pins; Roster is retained for legacy scalar pins.
+	// Both are ROLE pins: they apply to every mode that seats the role.
 	RosterSeats map[Role][]DucklingID `toml:"roster_seats" json:"roster_seats,omitempty"`
-	Modes       Modes                 `toml:"modes" json:"modes"`
-	Budget      Budget                `toml:"budget" json:"budget"`
-	Git         Git                   `toml:"git" json:"git"`
-	GitHub      GitHub                `toml:"github" json:"github"`
-	Shell       ShellPolicy           `toml:"shell" json:"shell"`
-	Run         RunApp                `toml:"run" json:"run"`
+	// ModeSeats are the project's per-mode pins, the same shape as the
+	// global defaults.mode_seats: mode → real role name → ordered ids. A pin
+	// made on the board's Pair column lands here and only here; the role pins
+	// above remain the mode-independent form (triager, scribe) and the
+	// project's own fallback for a mode that pins nobody for that role.
+	ModeSeats map[string]map[string][]string `toml:"mode_seats" json:"mode_seats,omitempty"`
+	Modes     Modes                          `toml:"modes" json:"modes"`
+	Budget    Budget                         `toml:"budget" json:"budget"`
+	Git       Git                            `toml:"git" json:"git"`
+	GitHub    GitHub                         `toml:"github" json:"github"`
+	Shell     ShellPolicy                    `toml:"shell" json:"shell"`
+	Run       RunApp                         `toml:"run" json:"run"`
 }
 
 // RunApp is how the built application actually starts — the stage the gate

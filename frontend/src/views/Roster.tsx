@@ -9,7 +9,7 @@ import type { ProviderView } from "../api/client";
 type Entry = { role: string; duckling?: string; ducklings?: string[]; source?: string; default?: string; global_ducklings?: string[] };
 const MODES = ["council", "solo", "pair", "split", "tournament", "common"];
 const names = (entry: Entry) => entry.ducklings ?? (entry.duckling ? [entry.duckling] : []);
-const pinned = (entry: Entry) => entry.source === "project pin" || entry.source === "project";
+const pinned = (entry: Entry) => entry.source === "project pin" || entry.source === "project mode seat" || entry.source === "project";
 // The columns a board shows: only the roles the mode seats (rolesForMode is
 // the same table the run view uses), Common = the mode-independent roles.
 // Every board used to paint all seven roles and read as "my whole team".
@@ -45,7 +45,10 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   })).then((items) => {
     setBoards(Object.fromEntries(items.map(([mode, entries]) => [mode, entries])));
     setWarnings(Object.fromEntries(items.map(([mode, , warning]) => [mode, warning])));
-  }).catch(() => {});
+  }).catch((e: unknown) => {
+    // A failed re-read must not leave stale seats standing as if current.
+    setError(`could not re-read the roster: ${e instanceof Error ? e.message : String(e)}`);
+  });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
   useEffect(() => {

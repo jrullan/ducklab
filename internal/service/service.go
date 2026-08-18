@@ -1420,7 +1420,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// out of four.
 	req.Ducklings = s.ducklingsFor(rs.run.Mode, req.Ducklings)
 
-	roster, rosterWarning := s.resolveRoster(projCfg)
+	roster, rosterWarning := s.resolveRoster(projCfg, rs.run.Mode)
 	// Only tournament and split read req.Ducklings, so a person who picked a
 	// duckling for a solo run got the project roster's implementer instead and
 	// had no way to tell: the picker sits right there in the desktop offering a
@@ -1432,6 +1432,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// roster before the pick. It can also separate two that were the same, in
 	// which case the warning must go.
 	rosterWarning = bothSidesWarning(roster)
+	// Required seats must be SEATED, by someone: a launch with nobody in the
+	// implementer's chair is refused with the seat named, never staffed by
+	// the alphabet (B-063).
+	if err := unseatedRequired(rs.run.Mode, roster); err != nil {
+		s.failRun(rs, err)
+		return
+	}
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	if rosterWarning != "" {

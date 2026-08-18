@@ -390,7 +390,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase": "before",
 	})
 
-	roster, warning := s.resolveRoster(projCfg)
+	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
 	if req.Duckling != "" {
 		roster[config.RoleImplementer] = config.DucklingID(req.Duckling)
 	}
@@ -402,6 +402,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	}
 	if len(req.Ducklings) > 1 && req.Ducklings[1] != "" {
 		roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
+	}
+	if roster[config.RoleImplementer] == "" {
+		s.failRun(rs, fmt.Errorf("no implementer seated to write the test for %s — assign one on the Roster board (or pass ducklings on the launch)", rs.run.Mode))
+		return
 	}
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)

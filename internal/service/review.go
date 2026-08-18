@@ -116,7 +116,7 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		s.failRun(rs, fmt.Errorf("load project config: %w", err))
 		return
 	}
-	roster, warning := s.resolveRoster(projCfg)
+	roster, warning := s.resolveRoster(projCfg, "solo")
 	rs.run.Roster = rosterStrings(roster)
 	if warning != "" {
 		rs.run.Warning = warning

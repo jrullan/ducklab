@@ -106,7 +106,7 @@ func TestRunRosterSourcesRecordEverySeatDecision(t *testing.T) {
 		{
 			name:      "spread",
 			configure: func(_ *testing.T, _ *Service, _ string) {},
-			req:       RunRequest{Mode: "solo"}, wantSource: "global role fallback",
+			req:       RunRequest{Mode: "solo"}, wantSource: "engine picked (no seats configured)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
