@@ -364,19 +364,29 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 	}
 	s.cfg.Defaults.ModeDucklings = nil
-	seats := map[string]map[string][]string{}
-	for mode, roles := range v.ModeSeats {
-		seats[mode] = roles
+	// The roster is written by the Roster board (GlobalRosterSet), not by
+	// this view. A Settings save that carries no seats and no line-up is
+	// saying nothing about them — and used to be read as "replace with
+	// nothing": every Settings save wiped every global seat and pin (the
+	// board went blank the moment a role-turn cap was changed). Only a
+	// request that names seats, or the legacy line-up, replaces them.
+	if v.ModeSeats != nil || v.Ducklings != nil {
+		seats := map[string]map[string][]string{}
+		for mode, roles := range v.ModeSeats {
+			seats[mode] = roles
+		}
+		if len(seats) == 0 {
+			seats = config.LegacyModeSeats(lineups)
+		}
+		s.cfg.Defaults.ModeSeats = seats
 	}
-	if len(seats) == 0 {
-		seats = config.LegacyModeSeats(lineups)
+	if v.RolePins != nil {
+		rolePins := map[string][]string{}
+		for role, ids := range v.RolePins {
+			rolePins[role] = append([]string{}, ids...)
+		}
+		s.cfg.Defaults.RolePins = rolePins
 	}
-	s.cfg.Defaults.ModeSeats = seats
-	rolePins := map[string][]string{}
-	for role, ids := range v.RolePins {
-		rolePins[role] = append([]string{}, ids...)
-	}
-	s.cfg.Defaults.RolePins = rolePins
 	s.cfg.Defaults.RoleTurns = roleTurns
 	s.cfg.Defaults.BuildMode = v.BuildMode
 	s.cfg.Defaults.TestMode = v.TestMode

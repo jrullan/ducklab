@@ -243,3 +243,47 @@ func TestRemovingTheLastCardEmptiesTheSeat(t *testing.T) {
 		t.Errorf("project reviewer should be unpinned after removing its only card: %+v", e)
 	}
 }
+
+// Settings saves rounds, turn caps and launcher modes; it has not carried the
+// roster since the line-up chips were retired. ModeDefaultsSet read the
+// missing seats as "replace with nothing", and every Settings save wiped
+// every global seat and pin — the board went blank when a scribe's turn cap
+// was raised. A view that says nothing about seats leaves them alone.
+func TestModeDefaultsSetWithoutSeatsKeepsTheRoster(t *testing.T) {
+	s := writableService(t, "terra", "glm52", "k3", "atom-local")
+	if _, err := s.GlobalRosterSet(context.Background(), "pair", "implementer", []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GlobalRosterSet(context.Background(), "common", "triager", []string{"k3"}); err != nil {
+		t.Fatal(err)
+	}
+	// What Settings sends: no ducklings, no mode_seats, no role_pins.
+	if err := s.ModeDefaultsSet(ModeDefaultsView{AgentMaxTurns: 24, RoleTurns: map[string]int{"scribe": 40}, BuildMode: "pair", TestMode: "solo"}); err != nil {
+		t.Fatal(err)
+	}
+	view, err := s.GlobalRosterGet(context.Background(), "pair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range view.Entries {
+		if e.Role == "implementer" && strings.Join(e.Ducklings, ",") != "terra" {
+			t.Errorf("pair implementer = %v after a Settings save, want terra", e.Ducklings)
+		}
+		if e.Role == "triager" && strings.Join(e.Ducklings, ",") != "k3" {
+			t.Errorf("triager pin = %v after a Settings save, want k3", e.Ducklings)
+		}
+	}
+	// A request that DOES name seats still replaces them.
+	if err := s.ModeDefaultsSet(ModeDefaultsView{AgentMaxTurns: 24, ModeSeats: map[string]map[string][]string{"pair": {"implementer": {"glm52"}}}, RolePins: map[string][]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	view, _ = s.GlobalRosterGet(context.Background(), "pair")
+	for _, e := range view.Entries {
+		if e.Role == "implementer" && strings.Join(e.Ducklings, ",") != "glm52" {
+			t.Errorf("explicit seats not applied: %v", e.Ducklings)
+		}
+		if e.Role == "triager" && len(e.Ducklings) != 0 {
+			t.Errorf("explicit empty role_pins not applied: %v", e.Ducklings)
+		}
+	}
+}
