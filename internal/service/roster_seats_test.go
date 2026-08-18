@@ -193,3 +193,28 @@ func TestCommonBoardWritesRolePinsOnBothScopes(t *testing.T) {
 		t.Errorf("unpin from the Common board must remove the role pin: %+v", e)
 	}
 }
+
+// A pair with an advisor is three seats; the legacy positional cap says pair
+// seats two. That echo must not refuse a canonical write — it refused every
+// global write from the board while pair carried an advisor.
+func TestGlobalWritesSurviveAPairWithAnAdvisor(t *testing.T) {
+	s := writableService(t, "luna", "k3", "glm52", "terra", "qwen38-max")
+	for _, w := range []struct {
+		mode, role string
+		ids        []string
+	}{
+		{"pair", "implementer", []string{"luna"}},
+		{"pair", "advisor", []string{"k3"}},
+		{"pair", "reviewer", []string{"glm52"}},
+		{"split", "architect", []string{"terra"}},
+		{"tournament", "implementer", []string{"luna", "qwen38-max"}},
+		{"common", "triager", []string{"terra"}},
+	} {
+		if _, err := s.GlobalRosterSet(context.Background(), w.mode, w.role, w.ids); err != nil {
+			t.Fatalf("%s.%s: %v", w.mode, w.role, err)
+		}
+	}
+	if got := s.cfg.Defaults.ModeSeats["split"]["architect"]; len(got) != 1 || got[0] != "terra" {
+		t.Errorf("split architect not saved: %v", got)
+	}
+}

@@ -266,7 +266,17 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 	}
 
+	// The positional line-up (v.Ducklings) is the LEGACY form; when the
+	// canonical mode_seats are present they are the truth and the line-up is
+	// only a derived echo of them — one that now carries the advisor, so
+	// pair's echo names three and tripped the old "pair seats 2" cap,
+	// refusing EVERY global write from the board (Split, Tournament, Common
+	// alike). Validate the line-up only when it is the form being written.
+	lineupsAuthoritative := len(v.ModeSeats) == 0
 	for mode, ids := range v.Ducklings {
+		if !lineupsAuthoritative {
+			break
+		}
 		if _, ok := ModeRounds[mode]; !ok {
 			return fmt.Errorf("unknown mode %q", mode)
 		}
