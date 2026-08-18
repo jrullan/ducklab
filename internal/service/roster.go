@@ -109,7 +109,19 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 // GlobalRosterGet returns effective global seats with canonical provenance.
 func (s *Service) GlobalRosterGet(ctx context.Context, mode string) (*RosterView, error) {
 	resolved, sources := s.resolveCanonicalRoster(&config.Project{}, mode)
-	view := &RosterView{}
+	view := &RosterView{Warning: bothSidesWarning(resolved)}
+	// The same per-mode note the project board gets: what a launch of this
+	// mode would refuse today, from the global seats alone.
+	if mode != "" {
+		if err := s.validateRosterMode(mode, &config.Project{}); err != nil {
+			note := fmt.Sprintf("not runnable yet: %v", err)
+			if view.Warning == "" {
+				view.Warning = note
+			} else {
+				view.Warning += "; " + note
+			}
+		}
+	}
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue

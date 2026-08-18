@@ -308,12 +308,12 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 				count += len(ids)
 			}
 		}
-		if mode == "council" && count < 1 {
-			return fmt.Errorf("council requires at least one critic")
-		}
-		if (mode == "split" || mode == "tournament") && count < 2 {
-			return fmt.Errorf("%s requires at least two %s", mode, map[string]string{"split": "workers", "tournament": "contestants"}[mode])
-		}
+		// Cardinality is a LAUNCH rule, not a write rule — the same as for
+		// project pins: a tournament is seated one contestant at a time, and
+		// refusing the first because there is no second yet made the seat
+		// impossible to fill from the board. The launch (RunStart) keeps the
+		// hard check; GlobalRosterGet carries the "not runnable yet" note.
+		_ = count
 	}
 
 	// The default modes launchers open on. Empty clears back to solo; a mode

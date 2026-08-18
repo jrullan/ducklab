@@ -119,8 +119,18 @@ func TestRosterWritesRejectWithTheFieldNamed(t *testing.T) {
 	if !strings.Contains(view.Warning, "two workers") {
 		t.Errorf("the board must be told the launch will refuse: %q", view.Warning)
 	}
-	if _, err := s.GlobalRosterSet(context.Background(), "tournament", "implementer", []string{"luna", "terra"}); err != nil {
-		t.Errorf("a valid two-contestant tournament must be accepted: %v", err)
+	// Global writes follow the same rule: the first contestant lands, the
+	// view warns, the second one clears the note.
+	view, err = s.GlobalRosterSet(context.Background(), "tournament", "implementer", []string{"luna"})
+	if err != nil {
+		t.Fatalf("the first global contestant must be accepted at write: %v", err)
+	}
+	if !strings.Contains(view.Warning, "two contestants") {
+		t.Errorf("global view must warn about the launch rule: %q", view.Warning)
+	}
+	view, err = s.GlobalRosterSet(context.Background(), "tournament", "implementer", []string{"luna", "terra"})
+	if err != nil || strings.Contains(view.Warning, "two contestants") {
+		t.Errorf("two contestants must clear the note: %v %q", err, view.Warning)
 	}
 }
 
