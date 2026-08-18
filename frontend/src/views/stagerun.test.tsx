@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 import type { EngineClient, Run } from "../api/client";
@@ -125,5 +125,16 @@ describe("the cycle map in the run header", () => {
     await waitFor(() => screen.getByTestId("run-view"));
     expect(screen.queryByTestId("cycle-map")).toBeNull();
     expect(screen.getAllByTestId("status-chip").some((c) => /triag/i.test(c.textContent ?? ""))).toBe(true);
+  });
+
+  // A non-code run's only panel is the model-calls list — debugging
+  // material. It opened by default under every triage and chat; folded now,
+  // one click away, and the person's own choice still wins.
+  it("starts with the calls panel folded on a triage", async () => {
+    render(<RunView runId="r-x" client={clientWith(runWith("triage"))} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("calls-empty")).toBeNull();
+    fireEvent.click(screen.getByTestId("tab-calls"));
+    await waitFor(() => expect(screen.queryByTestId("calls-empty")).not.toBeNull());
   });
 });

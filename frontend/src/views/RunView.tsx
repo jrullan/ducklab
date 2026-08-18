@@ -149,7 +149,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // calls list under a long transcript is most of a screen), clicking any
   // tab shows it again. Not persisted — a diff hidden by yesterday's fold
   // is a diff unread before an accept.
-  const [tabsFolded, setTabsFolded] = useState(false);
+  const [tabsFoldedChoice, setTabsFoldedChoice] = useState<boolean | null>(null);
   // The task's own words live in the pinned header, folded by default: what
   // was ASKED must be reachable from anywhere in a long transcript without
   // scrolling back, and must not spend the viewport on itself when it is not
@@ -451,6 +451,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const codeRun = run.stage === "build" || run.stage === "test";
   // The tab a non-code run actually shows: its bar offers only calls.
   const shownTab: Tab = codeRun ? tab : "calls";
+  // A non-code run's only panel is the model-calls list — debugging
+  // material, not the content — so it starts folded; a build's diff starts
+  // open. The person's own click wins over either default.
+  const tabsFolded = tabsFoldedChoice ?? !codeRun;
+  const setTabsFolded = (v: boolean | ((cur: boolean) => boolean)) =>
+    setTabsFoldedChoice(typeof v === "function" ? v(tabsFolded) : v);
   const fileable = codeRun && lastVerdict && lastVerdict.findings.length > 0 &&
     (run.status === "paused" || run.status === "done");
   // A stage proposal whose reviewer asked for changes, waiting at its gate:
@@ -1445,7 +1451,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         className={chatLive || finished ? "border-t border-hairline" : "sticky bottom-0 z-10 border-t border-hairline bg-page"}
         data-testid="bottom-dock"
       >
-        <div className="px-4 pt-2">
+        <div className={codeRun ? "px-4 pt-2" : "flex flex-wrap items-center gap-x-4 px-4 pt-1"}>
           <ToolTimeline calls={timeline} />
         </div>
 
@@ -1453,7 +1459,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             reads as "there was none" rather than "something failed to load".
             A run with no candidates is not a broken run — solo, pair and
             split never have any. */}
-        <nav className="mt-1 flex gap-2 px-4">
+        <nav className={codeRun ? "mt-1 flex gap-2 px-4" : "flex gap-2 px-4 pb-1"}>
         {(codeRun
           ? (([
               ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
