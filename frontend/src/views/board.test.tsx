@@ -196,6 +196,52 @@ describe("Board, the bugs half", () => {
     fireEvent.click(screen.getByText("Slow export")); // in progress, has a task
     expect(screen.getByTestId("bug-next").textContent).toContain("T-009");
   });
+
+  // The board is scanned, not read: severity sits by the id, titles clamp to
+  // three lines with the whole on hover, the foot says how long and who; the
+  // verified archive folds to its count and empty columns shrink; the detail
+  // puts the actions under the title and renders MCP-escaped bodies as
+  // paragraphs.
+  it("keeps cards scannable, folds the verified archive, and reads bodies as paragraphs", async () => {
+    const many: Bug[] = [
+      ...BUGS,
+      { id: "B-010", title: "Long " + "title ".repeat(40), severity: "high", status: "open", source: "mcp", reporter: "mcp:claude-code",
+        body: "What happened: the brake refused.\\n\\nExpected: it concludes.", created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z" },
+      { id: "B-020", title: "Done one", severity: "normal", status: "verified", source: "manual", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
+      { id: "B-021", title: "Done two", severity: "normal", status: "verified", source: "manual", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
+    ];
+    const client = clientWith((p) => {
+      if (p.includes("/bugs")) return json({ items: many, total: many.length });
+      if (p.includes("/tasks")) return json({ items: TASKS, total: TASKS.length });
+      return json({}, 404);
+    });
+    render(<Board client={client} projectId="p" tab="bugs" />);
+    await waitFor(() => expect(screen.getAllByTestId("board-card").length).toBeGreaterThan(3));
+    // Verified is folded: its two cards are not on the board, its count is.
+    expect(screen.getByTestId("board-col-verified").textContent).toContain("Verified · 2");
+    expect(screen.queryByText("Done one")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-verified-toggle"));
+    await waitFor(() => expect(screen.getByText("Done one")).toBeTruthy());
+    // Empty Fixed is a strip; Open with work is wide.
+    expect(screen.getByTestId("board-col-fixed").className).toContain("w-28");
+    expect(screen.getByTestId("board-col-open").className).toContain("flex-1");
+    // The long card: clamped title with the whole on hover, severity glyph, age · reporter.
+    const long = screen.getAllByTestId("board-card").find((c) => c.dataset.task === "B-010")!;
+    expect(long.querySelector(".line-clamp-3")!.getAttribute("title")).toContain("Long title");
+    expect(long.querySelector('[data-testid="severity-chip"]')!.getAttribute("data-severity")).toBe("high");
+    expect(long.querySelector('[data-testid="bug-card-meta"]')!.textContent).toMatch(/\d+d · mcp/);
+    // Detail: actions under the title, body as paragraphs without literal \n.
+    fireEvent.click(long);
+    const rail = screen.getByTestId("bug-rail");
+    const next = rail.querySelector('[data-testid="bug-next"]')!;
+    const body = rail.querySelector('[data-testid="bug-body"]')!;
+    expect(next.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(body.querySelectorAll("p")).toHaveLength(2);
+    expect(body.textContent).not.toContain("\\n");
+    // Toolbar: triage is the primary action, filters left, count reads "all N".
+    expect(screen.getByTestId("bug-triage").className).toContain("font-medium");
+    expect(screen.getByText(/^all 6$/)).toBeTruthy();
+  });
 });
 
 describe("Board — starting the work", () => {

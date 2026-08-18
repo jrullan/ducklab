@@ -40,6 +40,29 @@ const BUG_COLUMNS = [
 ] as const;
 
 /** Severity as a status role (08 §4.3). */
+/** Severity at a glance, one glyph each — the app-wide status icons (✕ ▪ ⚠)
+ *  say "state", not "how bad"; a bug card is scanned for how bad. */
+function SeverityChip({ severity }: { severity: string }) {
+  const glyph = severity === "critical" ? "▲" : severity === "high" ? "●" : severity === "low" ? "·" : "○";
+  return (
+    <span data-testid="severity-chip" data-severity={severity} className="inline-flex items-center gap-1 text-xs" style={{ color: `var(--status-${severityRole(severity)})` }}>
+      <span aria-hidden="true">{glyph}</span>
+      <span>{severity}</span>
+    </span>
+  );
+}
+
+/** "3d", "5h", "just now": how long a report has sat where it is. */
+export function ageOf(iso: string | undefined, now = Date.now()): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 3600) return s < 120 ? "just now" : `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
 function severityRole(sev: string): "critical" | "serious" | "warning" | "good" {
   switch (sev) {
     case "critical":
@@ -90,6 +113,7 @@ export function Board({
   // state told you to go and run `ducklab bug add`. On a desktop-only setup the
   // whole loop was unreachable.
   const [filing, setFiling] = useState(false);
+  const [verifiedOpen, setVerifiedOpen] = useState(false);
   const [bugTitle, setBugTitle] = useState("");
   const [bugBody, setBugBody] = useState("");
   const [bugSeverity, setBugSeverity] = useState("normal");
@@ -312,7 +336,7 @@ export function Board({
             toggle that lived here is gone: the Work subnav switches boards,
             and two controls for one choice on one screen was the duplication
             it looked like. */}
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {isBugs ? (
             <select
               data-testid="board-severity"
@@ -342,44 +366,6 @@ export function Board({
               ))}
             </select>
           )}
-
-          {isBugs && (
-            <button
-              type="button"
-              data-testid="bug-file"
-              onClick={() => setFiling((v) => !v)}
-              className="rounded border border-hairline px-2 py-1 text-sm"
-            >
-              {filing ? "Cancel" : "File a bug"}
-            </button>
-          )}
-          {/* Triage is the step that turns a report into something a run can be
-              pointed at: severity, suspected files, whether it duplicates
-              another. It reads every open bug, so it is one action, not one per
-              report. */}
-          {isBugs && bugs.some((b) => b.status === "open") && (
-            <button
-              type="button"
-              data-testid="bug-triage"
-              onClick={() =>
-                void client
-                  .triageBugs(projectId)
-                  .then((r) => {
-                    setTriageRun(r.id);
-                    // Seed the store with the engine's own record instead of
-                    // waiting for the stream's run_start to race back: the
-                    // refetch key sees the run (and later its ending) even if
-                    // this tab's stream reconnects mid-triage.
-                    useRuns.getState().setRun(r);
-                  })
-                  .catch((e) => setBugError(e instanceof Error ? e.message : String(e)))
-              }
-              className="rounded border border-hairline px-2 py-1 text-sm"
-            >
-              Triage all open ({bugs.filter((b) => b.status === "open").length})
-            </button>
-          )}
-
           <input
             data-testid="board-search"
             className="rounded border border-hairline bg-page px-2 py-1 text-sm text-ink"
@@ -387,9 +373,49 @@ export function Board({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <span className="text-sm text-ink-muted">
-            {shownCount} of {total}
+          {/* Filters read left, actions sit right; the count belongs to the
+              filter it describes. */}
+          <span className={`text-xs ${shownCount !== total ? "font-medium text-ink" : "text-ink-muted"}`}>
+            {shownCount === total ? `all ${total}` : `${shownCount} of ${total}`}
           </span>
+          {isBugs && (
+            <span className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="bug-file"
+                onClick={() => setFiling((v) => !v)}
+                className="rounded border border-hairline px-2 py-1 text-sm text-ink-muted hover:text-ink"
+              >
+                {filing ? "Cancel" : "File a bug"}
+              </button>
+              {/* Triage is the step that turns a report into something a run can be
+                  pointed at: severity, suspected files, whether it duplicates
+                  another. It reads every open bug, so it is one action, not one per
+                  report — and it is THE action of this board, so it reads as one. */}
+              {bugs.some((b) => b.status === "open") && (
+                <button
+                  type="button"
+                  data-testid="bug-triage"
+                  onClick={() =>
+                    void client
+                      .triageBugs(projectId)
+                      .then((r) => {
+                        setTriageRun(r.id);
+                        // Seed the store with the engine's own record instead of
+                        // waiting for the stream's run_start to race back: the
+                        // refetch key sees the run (and later its ending) even if
+                        // this tab's stream reconnects mid-triage.
+                        useRuns.getState().setRun(r);
+                      })
+                      .catch((e) => setBugError(e instanceof Error ? e.message : String(e)))
+                  }
+                  className="rounded border border-ink px-3 py-1 text-sm font-medium text-ink"
+                >
+                  Triage all open ({bugs.filter((b) => b.status === "open").length})
+                </button>
+              )}
+            </span>
+          )}
         </div>
 
         {filing && (
@@ -535,16 +561,31 @@ export function Board({
           </p>
         )}
 
-        <div className="grid grid-cols-5 gap-2">
+        <div className={isBugs ? "flex items-start gap-2" : "grid grid-cols-5 gap-2"}>
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
               ? shownBugs.filter((b) => b.status === col.key)
               : shownTasks.filter((t) => t.status === col.key);
+            // Verified is the archive, not the work: 57 cards there are
+            // permanent noise. Folded to its count by default; empty columns
+            // shrink to a strip; the width goes to columns with work.
+            const folded = isBugs && col.key === "verified" && !verifiedOpen && items.length > 0;
+            const strip = isBugs && (items.length === 0 || folded);
+            if (isBugs && folded) {
+              return (
+                <section key={col.key} data-testid={`board-col-${col.key}`} className="w-28 shrink-0">
+                  <button type="button" data-testid="board-verified-toggle" onClick={() => setVerifiedOpen(true)} className="w-full rounded border border-dashed border-hairline px-2 py-2 text-left text-sm text-ink-muted hover:text-ink" title="show the verified archive">
+                    {col.label} · {items.length} ›
+                  </button>
+                </section>
+              );
+            }
             return (
-              <section key={col.key} data-testid={`board-col-${col.key}`}>
-                <h2 className="mb-2 text-sm text-ink-muted">
+              <section key={col.key} data-testid={`board-col-${col.key}`} className={isBugs ? (strip ? "w-28 shrink-0" : "min-w-0 flex-1") : undefined}>
+                <h2 className="mb-2 flex items-baseline text-sm text-ink-muted">
                   {col.label}
                   <span className="ml-1 text-ink-muted">{items.length}</span>
+                  {isBugs && col.key === "verified" && verifiedOpen && <button type="button" className="ml-auto text-xs underline" data-testid="board-verified-toggle" onClick={() => setVerifiedOpen(false)}>fold</button>}
                 </h2>
                 <ul className="space-y-2">
                   {items.map((it) => (
@@ -559,14 +600,16 @@ export function Board({
                           (selected === it.id ? "border-serious" : "border-hairline")
                         }
                       >
-                        <div className="font-mono text-xs text-ink-muted">{it.id}</div>
-                        <div className="text-sm text-ink">{it.title}</div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono text-xs text-ink-muted">{it.id}</span>
+                          {isBugs && <span className="ml-auto"><SeverityChip severity={(it as Bug).severity} /></span>}
+                        </div>
+                        {/* Scanned, not read: three lines at most, the whole title
+                            on hover and in the detail. */}
+                        <div className={"text-sm text-ink" + (isBugs ? " line-clamp-3" : "")} title={isBugs ? it.title : undefined}>{it.title}</div>
                         {isBugs ? (
-                          <div className="mt-1">
-                            <StatusChip
-                              role={severityRole((it as Bug).severity)}
-                              label={(it as Bug).severity}
-                            />
+                          <div className="mt-1 text-[11px] text-ink-muted" data-testid="bug-card-meta" title={`reported ${(it as Bug).created_at ?? ""} by ${(it as Bug).reporter ?? "?"}`}>
+                            {[ageOf((it as Bug).created_at), (it as Bug).reporter?.split(":")[0]].filter(Boolean).join(" · ")}
                           </div>
                         ) : (
                           (it as Task).complexity && (
@@ -1165,25 +1208,25 @@ function BugRail({
   onDone: () => void;
 }) {
   return (
-    <div className="space-y-2" data-testid="bug-rail">
-      <div className="font-mono text-xs text-ink-muted">{bug.id}</div>
-      <div className="text-sm font-medium text-ink">{bug.title}</div>
-      <StatusChip role={severityRole(bug.severity)} label={bug.severity} />
+    <div className="space-y-3" data-testid="bug-rail">
+      <div>
+        <div className="flex items-baseline gap-2"><span className="font-mono text-xs text-ink-muted">{bug.id}</span><SeverityChip severity={bug.severity} /><span className="ml-auto text-xs text-ink-muted">{bug.status.replace("_", " ")}</span></div>
+        <div className="mt-1 text-sm font-medium text-ink">{bug.title}</div>
+      </div>
+      {/* Actions first, together, under the title — what to do next depends
+          on where the bug is, and the loop's rules live in the engine: the
+          button acts and a refusal is what gets shown. They used to sit
+          under a long body, past the fold. */}
+      <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <dl className="space-y-1 text-xs text-ink-muted">
-        <Row label="status" value={bug.status.replace("_", " ")} />
         <Row label="reported by" value={bug.reporter} />
+        <Row label="reported" value={bug.created_at ? `${bug.created_at.slice(0, 16).replace("T", " ")} (${ageOf(bug.created_at)} ago)` : undefined} />
         <Row label="source" value={bug.source} />
         <Row label="duplicate of" value={bug.duplicate_of} />
         <Row label="task" value={bug.task_id} />
       </dl>
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugAttachments bug={bug} client={client} projectId={projectId} onChanged={onDone} />
-      {/* What to do next depends on where the bug is, and the loop's rules live
-          in the engine. This used to print the CLI command that fits — honest,
-          but it made the operate loop the one loop a desktop-only user could not
-          run. The engine refuses a transition it does not allow, so the button
-          acts and the refusal is what gets shown. */}
-      <BugNext bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugHistory bug={bug} />
       <ChatAbout client={client} projectId={projectId} aboutKind="bug" aboutId={bug.id} ducklings={ducklings} />
     </div>
@@ -1486,7 +1529,9 @@ function BugBody({
   if (!editing) {
     return (
       <div className="space-y-1">
-        {bug.body && <p className="whitespace-pre-wrap text-sm text-ink-secondary">{bug.body}</p>}
+        {/* A body filed over MCP can carry literal "\n" sequences; a report
+            that shows them is a report nobody reads. Paragraphs, not escapes. */}
+        {bug.body && <div className="space-y-2 text-sm text-ink-secondary" data-testid="bug-body">{bug.body.replace(/\\n/g, "\n").split(/\n{2,}/).map((para, i) => <p key={i} className="whitespace-pre-wrap">{para}</p>)}</div>}
         <button
           type="button"
           data-testid="bug-edit"
