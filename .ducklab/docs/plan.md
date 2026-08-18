@@ -1,11 +1,11 @@
 ---
 kind: plan
-version: 2
-updated_at: 2026-08-18T01:31:04Z
-run_id: r-20260818-013005-jqku
-ducklings: [atom-local, beelink-local, terra, k3]
-based_on: eb262b5b43f5ae9b
-approved_by: human
+version: 3
+updated_at: 2026-08-18T02:47:39Z
+run_id: r-20260818-024634-7npr
+ducklings: [atom-local, terra, k3, beelink-local, luna, glm52]
+based_on: 07add921c4295328
+approved_by: mcp:claude-code
 ---
 
 ## M-001 — Reported bugs
@@ -1228,4 +1228,67 @@ Expose Global and Project roster management through an MCP settings/roster tool 
   - Assert board/run-service parity, project pin replacement and unpin inheritance, multi-slot list edits, and validation failures.
 
 **Out of scope:** Desktop UI changes, new MCP launch override semantics, and alternate roster persistence formats.
+
+### T-063 — Render scoped roster boards
+
+**Implements:** SPEC-003, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-024  
+**Depends on:** T-060
+
+Deliver a desktop Roster view for inspecting effective Global and Project seat assignments without changing them. This makes the canonical T-060 roster resolver visible while preserving Settings and all mutation behavior.
+
+**Deliverables:**
+- A desktop navigation entry beside Settings opens a read-only Roster view.
+  - The view has a `Global | Project · <name>` scope selector and obtains each scope/mode through the existing roster/settings API and `RosterGet`.
+- A Flock column lists every registered duckling with local/remote status and known per-run cost.
+- Mode boards render the effective seats for Council, Solo, Pair, Split, Tournament, and Common.
+  - Render only real roles; preserve ordering for critics, workers, and contestants.
+  - Include Council architect/critics; Solo implementer/advisor; Pair implementer/advisor/reviewer; Split architect/workers/reviewer; Tournament contestants/judge; and Common triager/scribe.
+- Project-scope rendering distinguishes inherited and pinned assignments.
+  - Inherited Global seats are dashed, muted ghosts labelled `global`.
+  - Project pins are solid, marked `pinned`, and expose the overridden Global value on hover.
+  - A Project board with no pins states that plainly.
+- Desktop specification document 08 describes the read-only Roster view, and desktop tests cover scope switching, ghost versus pinned rendering, multi-slot ordering, and the no-pins notice.
+
+**Out of scope:** Roster mutation, drag-and-drop, keyboard assignment, and Settings changes.
+
+**Assumption:** This amendment replaces T-061; if the amendment mechanism cannot remove accepted plan items, the operator will retire T-061 after these replacement tasks are assigned.
+
+### T-064 — Assign roster seats from the board
+
+**Implements:** SPEC-003, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-024  
+**Depends on:** T-063
+
+Make the Roster board editable through equivalent pointer and keyboard flows, with all changes scoped to the selected Global or Project roster. Reuse T-060’s canonical mutation and validation behavior so board assignments resolve identically everywhere else.
+
+**Deliverables:**
+- Dragging a duckling from the Flock onto a seat assigns that duckling at the selected scope.
+  - Critics, workers, and contestants accept multiple cards and retain their displayed order.
+  - Cards can be removed from a seat.
+- A keyboard/click assignment flow covers every drag operation.
+  - A user can select a seat and choose a duckling from the Flock in accordance with desktop specification document 08 §8 accessibility.
+- Global-scope changes write only Global canonical mode seats and role pins.
+- Project-scope changes create or replace only Project pins, and an unpin control returns a seat to its inherited ghost.
+  - Project edits never mutate Global assignments.
+- Board validation renders engine-provided cardinality errors and both-sides warnings.
+  - Cover Council’s minimum one critic, Split’s minimum two workers, Tournament’s minimum two contestants, Pair implementer/reviewer overlap, and Council architect self-critique.
+- Desktop specification document 08 and desktop tests cover drag assignment, keyboard assignment, removal, multi-slot ordering, scope-correct writes, unpinning, and error/warning rendering.
+
+**Out of scope:** Retiring or otherwise redesigning Settings, launcher changes, and MCP roster management.
+
+### T-065 — Retire Settings lineup chips and prefill launchers
+
+**Implements:** SPEC-024, SPEC-044  
+**Depends on:** T-064
+
+Remove Settings’ positional mode-seat controls now that the Roster board owns roster assignment. Have desktop run launchers resolve and display canonical roster seats with provenance while preserving per-run overrides as ephemeral choices.
+
+**Deliverables:**
+- Settings no longer offers positional mode line-up chips and instead links users to the Roster board.
+- Task runner, TDD launch, and stage launchers prefill seat chips from the canonical roster resolver.
+  - Each prefilled or selected chip displays `project`, `global`, or `picked now` provenance.
+- Per-run launcher picks remain run-local overrides and never write back to Global or Project roster boards.
+- Desktop specification document 08 updates the Settings section for the Roster link and launcher-prefill behavior.
+- Desktop tests prove Settings lacks positional chips, each launcher prefills resolved seats with provenance, and a per-run pick does not persist to the roster.
+
+**Out of scope:** MCP roster management, which remains T-062.
 
