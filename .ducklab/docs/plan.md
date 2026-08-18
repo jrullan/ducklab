@@ -1,11 +1,11 @@
 ---
 kind: plan
-version: 3
-updated_at: 2026-08-18T02:47:39Z
-run_id: r-20260818-024634-7npr
-ducklings: [atom-local, terra, k3, beelink-local, luna, glm52]
-based_on: 07add921c4295328
-approved_by: mcp:claude-code
+version: 4
+updated_at: 2026-08-18T14:19:18Z
+run_id: r-20260818-141819-sdfs
+ducklings: [k3, atom-local, terra]
+based_on: 64b9f40246d1e46e
+approved_by: human
 ---
 
 ## M-001 — Reported bugs
@@ -1265,4 +1265,63 @@ Remove Settings’ positional mode-seat controls now that the Roster board owns 
 - Desktop tests prove Settings lacks positional chips, each launcher prefills resolved seats with provenance, and a per-run pick does not persist to the roster.
 
 **Out of scope:** MCP roster management, which remains T-062.
+
+### T-066 — Expose duckling scorecards from engine evidence
+
+**Implements:** SPEC-016, SPEC-021, SPEC-024, SPEC-052
+
+Provide one engine read endpoint and typed client that return a comparable scorecard for every registered duckling, combining declared configuration with explicitly sourced internal evidence. This gives the Roster a single authoritative source without inventing, fetching, or silently estimating evidence.
+
+**Deliverables:**
+- A scorecard read API and typed client return one row per registered duckling with id, provider, locality, model, configured input/output cost per Mtok, capabilities, configured roles/notes, measured evidence, latest bench evidence, and declared external index evidence.
+  - Derive locality from the provider `base_url`: loopback, LAN, and `.local` hosts are local; all other hosts are remote.
+  - Represent unavailable evidence as absent/null rather than zero.
+- Measured evidence is aggregated from ducklab’s internal report record per duckling: runs, pass rate, average cost per run, average wallclock, and tokens.
+  - Preserve whether token values are estimated; do not combine estimated and measured values without that distinction in the response.
+- Bench evidence contains the latest result per suite for each duckling using the data surfaced by the Bench view.
+- Strict duckling configuration accepts an optional external index declaration, including coding score, source, and as-of date, and round-trips those declared values with provenance.
+  - Do not fetch external rankings or synthesize an index when configuration omits it.
+- Update the as-built API/configuration specification sections for the scorecard endpoint and external-index configuration.
+- Service and API tests assert locality classification, measured aggregation, latest-per-suite bench selection, external-index provenance round-trip, and absent evidence remaining absent.
+
+**Out of scope:** Changing provider discovery, querying third-party ranking services, changing Bench execution or report collection, or adding Roster filtering and presentation.
+
+### T-067 — Filter and sort the Roster flock by scorecard evidence
+
+**Implements:** SPEC-026  
+**Depends on:** T-066
+
+Add evidence-driven filtering and ordering to the Roster board’s Flock column while retaining the existing seating behavior. Operators can narrow candidates and compare the active ordering value directly on each card.
+
+**Deliverables:**
+- The Flock column supports text filtering by duckling id or model plus provider, locality, vision, native-tools, and minimum-context filters.
+- The Flock column provides ascending and descending sorting by input cost, output cost, measured pass rate, average cost per run, bench score for a selected suite, external coding index, and context size.
+  - Sort missing evidence last in both directions.
+  - Source all displayed values from the T-900 scorecard client.
+- Each flock card displays its active sort value and applicable missing-evidence marks: “no runs yet”, “no bench”, and “no index”.
+- Filter and sort selections persist for the desktop session only, not in project configuration or roster assignment state.
+- Existing assignment, drag-and-drop, and keyboard seating flows remain functional when the flock is filtered.
+- Desktop tests assert every filter narrows the flock, each sort orders scorecards with missing values last, and a card’s displayed sort value matches its scorecard.
+
+**Out of scope:** Altering assignment resolution, persisting personal view preferences per project or across sessions, adding new scorecard evidence, or automatically seating a duckling.
+
+### T-068 — Suggest seat-aware flock candidates
+
+**Implements:** SPEC-021, SPEC-026  
+**Depends on:** T-067
+
+When an operator selects or focuses a seat, prioritize the most relevant evidence in the Flock and expose the same non-binding recommendations through MCP. Suggestions aid selection only; they never change an assignment.
+
+**Deliverables:**
+- Selecting a seat through its drop box or focus applies role-aware candidate ordering using scorecard evidence.
+  - Implementer and architect: bench score or pass rate, then cost.
+  - Reviewer and judge: pass rate, then cost.
+  - Advisor: cost, then latency.
+  - Local roles retain their existing ordering and receive no role-driven reorder.
+- The top three eligible cards for a role-aware ordering are marked “suggested for <role>” and show a concise evidence reason, such as “pass rate 92% over 14 runs · $0.31/run”.
+  - Suggestions remain informational: click, keyboard, and drag-and-drop assignment behavior is unchanged.
+- The MCP roster `get` response includes a `candidates` array for each seat containing the same suggested duckling ids and reason text used by the desktop board.
+- Tests cover each role’s ranking and tie-break rule, top-three suggestion labeling and reason text, local-role non-reordering, and MCP/desktop candidate parity.
+
+**Out of scope:** Automatic assignment, new role types, changing roster resolution, or exposing recommendations based on undeclared external or web-fetched data.
 

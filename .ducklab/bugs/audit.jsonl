@@ -236,3 +236,15 @@
 {"ts":"2026-08-17T18:46:40Z","bug":"B-058","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-059"}
 {"ts":"2026-08-18T01:21:23Z","bug":"B-059","from":"fixed","to":"verified","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-18T01:21:29Z","bug":"B-058","from":"fixed","to":"verified","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:46Z","bug":"B-063","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:47Z","bug":"B-065","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:48Z","bug":"B-067","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:48Z","bug":"B-068","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:55Z","bug":"B-063","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:56Z","bug":"B-065","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:57Z","bug":"B-067","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:26:57Z","bug":"B-068","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:27:02Z","bug":"B-063","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:27:03Z","bug":"B-065","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:27:04Z","bug":"B-067","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T11:27:04Z","bug":"B-068","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
