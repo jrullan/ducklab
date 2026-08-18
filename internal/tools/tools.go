@@ -255,6 +255,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
 	}
 	res, err := t.Execute(ctx, ectx, args)
+	if name == "fs_read" && res != nil && !res.IsError {
+		resetFSPatchFailureStreak(ectx, args)
+	}
 	if name == "fs_patch" {
 		trackFSPatchFailure(ectx, args, res)
 	}
@@ -295,6 +298,17 @@ func fsPatchPath(root string, args json.RawMessage) string {
 		return filepath.Clean(a.Path)
 	}
 	return filepath.Clean(a.Path)
+}
+
+// resetFSPatchFailureStreak reopens a braked file after fs_read provides
+// the prescribed opportunity to refresh patch anchors.
+func resetFSPatchFailureStreak(ectx *ExecContext, args json.RawMessage) {
+	path := fsPatchPath(ectx.ProjectRoot, args)
+	if path == "" || ectx.fsPatchFailStreak == nil || ectx.fsPatchFailStreak[path] < FSPatchFailLimit {
+		return
+	}
+	delete(ectx.fsPatchFailStreak, path)
+	delete(ectx.fsPatchRefusalStreak, path)
 }
 
 func trackFSPatchFailure(ectx *ExecContext, args json.RawMessage, res *Result) {
