@@ -661,6 +661,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             for what is simply a run with no gate by design. Their headers
             say what the run did instead. */}
         {run.stage !== "triage" && run.stage !== "chat" && <CycleMap stage={run.stage} />}
+        {/* WHO is working, said where it cannot scroll away: a triager's
+            forty searches took the turn header off screen and nothing else
+            named the hands. Live runs only — a finished run's header talks
+            about the outcome. */}
+        {liveNow && (() => {
+          const active = [...turns].reverse().find((t) => !t.done && t.duckling) ?? [...turns].reverse().find((t) => t.duckling);
+          return active ? (
+            <span className="flex items-center gap-1 text-sm" data-testid="run-active-duckling">
+              <span aria-hidden="true" className="animate-pulse text-xs">▸</span>
+              <span style={{ color: ducklingColors[active.duckling] }} className="font-medium">{active.duckling}</span>
+              <span className="text-ink-muted">{active.role}</span>
+            </span>
+          ) : null;
+        })()}
         {run.stage === "triage" ? (
           <StatusChip role={run.accepted ? "good" : isWorking ? "muted" : "serious"} label={run.accepted ? `triaged ${triage.length || "the"} report${triage.length === 1 ? "" : "s"} · applied` : isWorking ? "triaging" : "triage awaiting your decision"} />
         ) : run.stage === "chat" ? (
@@ -777,7 +791,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           lets the aside's sticky keep its grip from the first card to the
           last hunk of the diff instead of drowning when the grid ended. */}
       <div className="md:flex md:items-start">
-        <div className="min-w-0 flex-1">
+        {/* While the run lives the column takes the viewport's height and the
+            dock rides its bottom edge (mt-auto): a short transcript used to
+            leave the dock adrift with dead space beneath it. */}
+        <div className={finished ? "min-w-0 flex-1" : "min-w-0 flex-1 md:flex md:min-h-[calc(100vh-8rem)] md:flex-col"}>
 
       {/* The moment you most want to change a setting and go again is while
           looking at the run that just failed. Doing it meant leaving for the
@@ -1448,7 +1465,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           — verdict, findings, what changed — and a dock pinned to the
           viewport under an empty stretch read as another page's footer. */}
       <div
-        className={chatLive || finished ? "border-t border-hairline" : "sticky bottom-0 z-10 border-t border-hairline bg-page"}
+        className={chatLive || finished ? "border-t border-hairline" : "mt-auto sticky bottom-0 z-10 border-t border-hairline bg-page"}
         data-testid="bottom-dock"
       >
         <div className={codeRun ? "px-4 pt-2" : "flex flex-wrap items-center gap-x-4 px-4 pt-1"}>

@@ -91,12 +91,8 @@ export function ConversationTurn({
       className="border-l-2 py-2 pl-3"
       style={{ borderColor: tint }}
     >
-      {/* Pinned within its own turn: a triager's forty searches scrolled the
-          name off the screen, and mid-transcript there was no way to tell
-          WHO was working without scrolling back. Sticky under the run
-          header, opaque so the tool lines pass beneath it. */}
       <header
-        className={`flex items-center gap-2 text-sm ${collapsed ? "" : "sticky top-14 z-[5] -mx-1 bg-page px-1 py-0.5"} ${onToggle ? "cursor-pointer select-none" : ""}`}
+        className={`flex items-center gap-2 text-sm ${onToggle ? "cursor-pointer select-none" : ""}`}
         data-testid={onToggle ? "turn-toggle" : undefined}
         onClick={onToggle}
       >

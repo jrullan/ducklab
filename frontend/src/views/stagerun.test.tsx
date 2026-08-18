@@ -130,6 +130,23 @@ describe("the cycle map in the run header", () => {
   // A non-code run's only panel is the model-calls list — debugging
   // material. It opened by default under every triage and chat; folded now,
   // one click away, and the person's own choice still wins.
+  // WHO is working, in the run header where it cannot scroll away — the
+  // sticky turn-header attempt pinned itself mid-list instead.
+  it("names the active duckling in a live run's header", async () => {
+    const run = runWith("triage");
+    const events = [
+      { type: "turn_start", seq: 1, data: { role: "triager", duckling: "k3", round: 1, turn: 0 } },
+    ];
+    const client = ({
+      ...clientWith(run),
+      run: vi.fn(() => Promise.resolve({ run, events })),
+    }) as unknown as EngineClient;
+    render(<RunView runId="r-x" client={client} />);
+    await waitFor(() => screen.getByTestId("run-active-duckling"));
+    expect(screen.getByTestId("run-active-duckling").textContent).toContain("k3");
+    expect(screen.getByTestId("run-active-duckling").textContent).toContain("triager");
+  });
+
   it("starts with the calls panel folded on a triage", async () => {
     render(<RunView runId="r-x" client={clientWith(runWith("triage"))} />);
     await waitFor(() => screen.getByTestId("run-view"));
