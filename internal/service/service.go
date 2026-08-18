@@ -4,6 +4,7 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -3067,12 +3068,65 @@ func runHasUnsavedWork(rs *runState) bool {
 // restoreAfterUnaccepted puts the tree back to the run's start when the run
 // ended without its work being accepted. Quietly a no-op when there is nothing
 // recorded — stage runs and pre-git projects take no snapshot.
+// runWrittenPaths reads the run's own record of what it wrote — every
+// fs_write, fs_write_lines and successful fs_patch names its path in the
+// event log, and the shell policy routes mutations through those tools — so
+// a restore can undo the run's edits and nobody else's (B-077). nil when the
+// log cannot be read: unknown is not the same claim as "wrote nothing".
+func runWrittenPaths(runDir string) []string {
+	f, err := os.Open(filepath.Join(runDir, "events.jsonl"))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	seen := map[string]bool{}
+	var out []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	for sc.Scan() {
+		var e struct {
+			Type string `json:"type"`
+			Data struct {
+				Tool string          `json:"tool"`
+				OK   *bool           `json:"ok"`
+				Args json.RawMessage `json:"args"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Type != "tool_call" {
+			continue
+		}
+		switch e.Data.Tool {
+		case "fs_write", "fs_write_lines", "fs_patch":
+		default:
+			continue
+		}
+		if e.Data.OK != nil && !*e.Data.OK {
+			continue // a refused or failed call changed nothing
+		}
+		var raw string
+		var args struct {
+			Path string `json:"path"`
+		}
+		// args arrives as a JSON string holding JSON.
+		if json.Unmarshal(e.Data.Args, &raw) == nil {
+			_ = json.Unmarshal([]byte(raw), &args)
+		} else {
+			_ = json.Unmarshal(e.Data.Args, &args)
+		}
+		if args.Path != "" && !seen[args.Path] {
+			seen[args.Path] = true
+			out = append(out, args.Path)
+		}
+	}
+	return out
+}
+
 func restoreAfterUnaccepted(rs *runState) error {
 	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.run.Accepted {
 		return nil
 	}
 	git := vcs.New(rs.projectPath)
-	if err := git.RestoreTreeAtHead(rs.run.TreeSnapshot, rs.run.TreeSnapshotHead); err != nil {
+	if err := git.RestoreTreeAtHeadScoped(rs.run.TreeSnapshot, rs.run.TreeSnapshotHead, runWrittenPaths(rs.runDir)); err != nil {
 		// Said, not swallowed: a person who believes the tree is clean will
 		// trust the next run's diff.
 		if rs.writer != nil {

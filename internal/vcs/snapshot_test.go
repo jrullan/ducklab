@@ -297,3 +297,35 @@ func TestRestoreAroundCommitsRefusesAGenuineOverlap(t *testing.T) {
 		t.Errorf("refusal was not read-only: %q", got)
 	}
 }
+
+// B-077: the snapshot boundary cannot tell the run's edits from a person's
+// concurrent uncommitted ones — a reject erased engine work written while
+// the run was going. Scoped to the run's own write set, the restore undoes
+// what the run wrote and nobody else's.
+func TestScopedRestoreLeavesConcurrentUncommittedWorkAlone(t *testing.T) {
+	g, dir := repoWith(t, map[string]string{"run-file.txt": "original\n", "my-file.txt": "mine\n"})
+	snap, _ := g.SnapshotTree()
+	head := mustHeadSHA(t, g)
+	// The run edits its file and creates one; a person edits THEIRS and
+	// creates one, all after the snapshot, none committed.
+	os.WriteFile(filepath.Join(dir, "run-file.txt"), []byte("the run's change\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "run-made.txt"), []byte("run\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "my-file.txt"), []byte("my concurrent edit\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "my-new.txt"), []byte("my new file\n"), 0o644)
+
+	if err := g.RestoreTreeAtHeadScoped(snap, head, []string{"run-file.txt", "run-made.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "run-file.txt")); string(got) != "original\n" {
+		t.Errorf("run edit not undone: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "run-made.txt")); !os.IsNotExist(err) {
+		t.Errorf("run-created file survived")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "my-file.txt")); string(got) != "my concurrent edit\n" {
+		t.Errorf("a person's concurrent edit was erased: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "my-new.txt")); string(got) != "my new file\n" {
+		t.Errorf("a person's new file was erased: %q", got)
+	}
+}

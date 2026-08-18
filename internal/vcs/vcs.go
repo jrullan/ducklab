@@ -522,6 +522,20 @@ func (g *Git) RestoreTree(snapshot string) error {
 // was current when it was captured. This prevents cleanup from making the
 // working tree older than history that landed while a run was paused.
 func (g *Git) RestoreTreeAtHead(snapshot, expectedHead string) error {
+	return g.RestoreTreeAtHeadScoped(snapshot, expectedHead, nil)
+}
+
+// RestoreTreeAtHeadScoped is RestoreTreeAtHead limited to the paths the run
+// is KNOWN to have written (from its own tool calls), when the caller knows
+// them.
+//
+// The snapshot boundary alone cannot tell the run's edits from a person's
+// concurrent ones: a reject restored the whole tree to run-start and erased
+// engine work a person had written — uncommitted — while the run was going
+// (B-077). The run's write set can: whatever the run did not write is not
+// the run's to undo. wrote nil means unknown, which keeps the whole-tree
+// behaviour for callers without a record.
+func (g *Git) RestoreTreeAtHeadScoped(snapshot, expectedHead string, wrote []string) error {
 	if strings.TrimSpace(expectedHead) == "" {
 		// Runs recorded before TreeSnapshotHead existed cannot distinguish their
 		// own changes from later history. Preserve their established cleanup
@@ -537,7 +551,10 @@ func (g *Git) RestoreTreeAtHead(snapshot, expectedHead string) error {
 		if err != nil {
 			return fmt.Errorf("cannot safely restore: HEAD changed since the run began: %w", err)
 		}
-		return g.restoreAroundCommits(snapshot, expectedHead, len(commits))
+		return g.restoreAroundCommits(snapshot, expectedHead, len(commits), wrote)
+	}
+	if wrote != nil {
+		return g.restorePaths(snapshot, wrote)
 	}
 	return g.restoreTree(snapshot)
 }
@@ -554,7 +571,7 @@ func (g *Git) RestoreTreeAtHead(snapshot, expectedHead string) error {
 // path whose worktree matches HEAD holds no run residue and is skipped; one
 // that differs from HEAD was edited by both, and picking a side silently
 // would destroy somebody's work — refused, naming the paths.
-func (g *Git) restoreAroundCommits(snapshot, expectedHead string, commits int) error {
+func (g *Git) restoreAroundCommits(snapshot, expectedHead string, commits int, wrote []string) error {
 	landedOut, err := g.run("diff", "--name-only", expectedHead, "HEAD")
 	if err != nil {
 		return fmt.Errorf("cannot safely restore: %w", err)
@@ -580,10 +597,17 @@ func (g *Git) restoreAroundCommits(snapshot, expectedHead string, commits int) e
 			unstaged[name] = true
 		}
 	}
+	inWrote := map[string]bool{}
+	for _, name := range wrote {
+		inWrote[name] = true
+	}
 	var restore, overlap []string
 	for _, name := range strings.Split(strings.TrimSpace(dirtyOut), "\n") {
 		if name == "" {
 			continue
+		}
+		if wrote != nil && !inWrote[name] {
+			continue // not the run's to undo
 		}
 		if !landed[name] {
 			restore = append(restore, name)
