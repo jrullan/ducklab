@@ -13,6 +13,9 @@ const pinned = (entry: Entry) => entry.source === "project pin" || entry.source 
 // The columns a board shows: only the roles the mode seats (rolesForMode is
 // the same table the run view uses), Common = the mode-independent roles.
 // Every board used to paint all seven roles and read as "my whole team".
+// Ordered multi-slot seats: everything else holds one duckling.
+const multiSlot = (mode: string, role: string): boolean =>
+  (mode === "council" && role === "reviewer") || ((mode === "split" || mode === "tournament") && role === "implementer");
 const columnsFor = (mode: string): string[] | null =>
   mode === "common" ? ["triager", "scribe"] : rolesForMode(mode);
 // A duckling is local when its provider answers on this machine or the LAN;
@@ -60,22 +63,27 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       await reload();
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  const assign = (mode: string, role: string, id: string, append = false) => {
+  const assign = (mode: string, role: string, id: string) => {
     const entry = (boards[mode] ?? []).find((candidate) => candidate.role === role);
     const ids = entry ? names(entry) : [];
     if (!ids.includes(id)) {
-      // A real drag onto an inherited project seat replaces that seat. The
-      // ordinary click flow (and drops without a drag source) appends, which
-      // preserves ordered multi-slot seats.
-      const replaceInherited = scope === "project" && entry != null && !pinned(entry) && !append;
-      void write(mode, role, replaceInherited ? [id] : [...ids, id]);
+      // The SEAT decides: a single-slot seat (an implementer in solo or
+      // pair, an advisor, a judge, an architect) is replaced; a multi-slot
+      // seat (council critics, split workers, tournament contestants)
+      // appends in displayed order — unless the seat is still inherited on
+      // the Project board, where the first assignment starts the pin fresh
+      // rather than copying the global list under it. Assigning atom-local
+      // to solo's implementer once APPENDED it beside luna: solo then had a
+      // two-seat list it cannot use.
+      const appendable = multiSlot(mode, role) && (scope === "global" || (entry != null && pinned(entry)));
+      void write(mode, role, appendable ? [...ids, id] : [id]);
     }
     setChosenSeat(null);
   };
   const drop = (mode: string, role: string, event: React.DragEvent) => {
     event.preventDefault();
     const id = event.dataTransfer.getData("text/plain") || event.dataTransfer.getData("text");
-    if (id) assign(mode, role, id, !dragging.current);
+    if (id) assign(mode, role, id);
   };
 
   const roster = ducks.map((d) => d.id);
@@ -101,7 +109,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       const key = `${mode}/${entry.role}`;
       return <div key={entry.role} className="min-w-40" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(mode, entry.role, event)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}><h3 className="mb-2">{entry.role}</h3>{editable && !(chosenSeat?.mode === mode && chosenSeat.role === entry.role) && <button type="button" data-testid={`roster-drop-${mode}-${entry.role}`} aria-label={`assign to ${entry.role} in ${mode}`} onClick={() => setChosenSeat({ mode, role: entry.role })} className={`mb-2 w-full rounded border border-dashed border-hairline px-2 py-2 text-xs text-ink-muted ${ids.length === 0 ? "min-h-12" : ""}`}>{ids.length === 0 ? "drop here · assign" : "+ assign"}</button>}
         {ids.map((id) => <div key={id} data-testid={`roster-card-${mode}-${entry.role}-${id}`} data-ghost={ghost ? "true" : undefined} title={isPinned && (entry.global_ducklings ?? entry.default) ? `Global: ${Array.isArray(entry.global_ducklings) ? entry.global_ducklings.join(", ") : entry.default}` : undefined} className={`flex items-center gap-2 rounded border p-2 mb-2 ${ghost ? "border-dashed text-ink-muted" : "border-hairline"}`}><DuckAvatar id={id} roster={roster} /><span className="font-medium">{id}</span>{(ghost || isPinned) && <small className="rounded border border-hairline px-1 text-ink-muted">{ghost ? "global" : "pinned"}</small>}<span className="ml-auto flex gap-2 text-xs">{editable && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`remove ${id} from ${entry.role}`} onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>remove</button>}{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setUnpins((value) => ({ ...value, [key]: true })); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(e.message)); }}>unpin</button>}</span></div>)}
-        {editable && chosenSeat?.mode === mode && chosenSeat.role === entry.role && <div>{ducks.map((duck) => <button key={duck.id} type="button" aria-label={`assign ${duck.id} to ${entry.role}`} onClick={() => assign(mode, entry.role, duck.id)}>assign {duck.id}</button>)}</div>}
+        {editable && chosenSeat?.mode === mode && chosenSeat.role === entry.role && <div className="mb-2 rounded border border-hairline bg-surface2 p-2" role="listbox" aria-label={`choose a duckling for ${entry.role}`}><div className="mb-1 flex items-center justify-between text-xs text-ink-muted"><span>assign to {entry.role}</span><button type="button" className="underline" onClick={() => setChosenSeat(null)}>cancel</button></div><div className="max-h-56 space-y-1 overflow-y-auto">{ducks.filter((duck) => !ids.includes(duck.id)).map((duck) => <button key={duck.id} type="button" className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface" aria-label={`assign ${duck.id} to ${entry.role}`} onClick={() => assign(mode, entry.role, duck.id)}><DuckAvatar id={duck.id} roster={roster} /> <span className="ml-1">{duck.id}</span></button>)}</div></div>}
       </div>;
     })}</div></section>)}</div>
     </div>

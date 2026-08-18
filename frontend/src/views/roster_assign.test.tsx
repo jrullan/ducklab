@@ -44,10 +44,18 @@ function entries(pairOverlap = false): Record<string, Seat[]> {
   };
 }
 
-async function renderRoster(options: { rejectSet?: boolean; pairOverlap?: boolean } = {}) {
+async function renderRoster(options: { rejectSet?: boolean; pairOverlap?: boolean; pinnedCouncilCritics?: boolean } = {}) {
   const { Roster } = await loadRoster();
   const global = entries(options.pairOverlap);
   const project = entries(options.pairOverlap);
+  if (options.pinnedCouncilCritics) {
+    project.council = (project.council ?? []).map((seat) =>
+      seat.role === "reviewer" ? { ...seat, source: "project pin", global_ducklings: ["critic-a"] } : seat,
+    );
+    project.solo = (project.solo ?? []).map((seat) =>
+      seat.role === "implementer" ? { ...seat, source: "project pin", global_ducklings: ["builder"] } : seat,
+    );
+  }
   project.pair = [
     { role: "implementer", ducklings: ["builder"], source: "project pin", global_ducklings: ["builder"] },
     { role: "advisor", ducklings: ["advisor"], source: "global mode seat" },
@@ -98,11 +106,21 @@ describe("Roster assignment", () => {
     await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-b"]));
   });
 
-  it("appends drops to a multi-slot seat in displayed order", async () => {
-    const client = await renderRoster();
+  // The SEAT decides append vs replace, never a drag flag (B-067): a pinned
+  // multi-slot seat appends in displayed order; an inherited one starts the
+  // pin fresh; a single-slot seat always replaces.
+  it("appends drops to a pinned multi-slot seat in displayed order", async () => {
+    const client = await renderRoster({ pinnedCouncilCritics: true });
     await projectScope();
     fireEvent.drop(screen.getByTestId("roster-column-council-reviewer"), { dataTransfer: dataTransfer("critic-b") });
     await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-a", "critic-b"]));
+  });
+
+  it("replaces a single-slot seat even when it is already pinned", async () => {
+    const client = await renderRoster({ pinnedCouncilCritics: true });
+    await projectScope();
+    fireEvent.drop(screen.getByTestId("roster-column-solo-implementer"), { dataTransfer: dataTransfer("worker-b") });
+    await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "solo", "implementer", ["worker-b"]));
   });
 
   it("removes an assigned card by writing the remaining ordered seat", async () => {
