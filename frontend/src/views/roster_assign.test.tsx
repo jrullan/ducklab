@@ -68,9 +68,16 @@ async function renderRoster(options: { rejectSet?: boolean; pairOverlap?: boolea
     ducklings: vi.fn(() => Promise.resolve(ducklings.map((id) => ({ id, provider: "local", model: "qwen" })))),
     globalRosterGet: vi.fn((mode: string) => Promise.resolve({ entries: global[mode] })),
     rosterGet: vi.fn((_projectId: string, mode: string) => Promise.resolve({ entries: project[mode] })),
+    // Unpinning is real on the fake engine too: the next re-read shows the
+    // seat inherited from Global. The board must not guess the outcome.
     RosterSetManyMode: set,
     GlobalRosterSet: vi.fn(() => Promise.resolve({})),
-    RosterUnpin: vi.fn(() => Promise.resolve({})),
+    RosterUnpin: vi.fn((_projectId: string, mode: string, role: string) => {
+      project[mode] = (project[mode] ?? []).map((seat) =>
+        seat.role === role ? { ...seat, source: "global mode seat", ducklings: seat.global_ducklings ?? seat.ducklings, global_ducklings: undefined } : seat,
+      );
+      return Promise.resolve({});
+    }),
   };
   render(<Roster client={client as never} projectId="p-1" projectName="Pond" />);
   await waitFor(() => expect(client.globalRosterGet).toHaveBeenCalledWith("pair"));
