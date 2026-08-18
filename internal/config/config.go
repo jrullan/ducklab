@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -201,7 +202,18 @@ type Caps struct {
 	ContextTokens *int  `toml:"context_tokens" json:"context_tokens"`
 	// Vision says the model accepts images. Declared, not probed: a probe
 	// would cost an image round-trip per duckling.
-	Vision *bool `toml:"vision" json:"vision"`
+	Vision   *bool `toml:"vision" json:"vision"`
+	JSONMode *bool `toml:"json_mode" json:"json_mode"`
+}
+
+// ExternalIndex is a declared third-party score, retained with provenance.
+type ExternalIndex struct {
+	CodingScore float64 `toml:"coding_score" json:"coding_score"`
+	// Coding is the canonical short TOML spelling. CodingScore is retained for
+	// the original on-disk spelling and the typed JSON contract.
+	Coding float64 `toml:"coding,omitempty" json:"-"`
+	Source string  `toml:"source" json:"source"`
+	AsOf   string  `toml:"as_of" json:"as_of"`
 }
 
 // Duckling is a named, configured model participant.
@@ -213,6 +225,7 @@ type Duckling struct {
 	Params   SamplingParams `toml:"params" json:"params"`
 	Caps     Caps           `toml:"caps" json:"caps"`
 	Cost     Cost           `toml:"cost" json:"cost"`
+	Index    *ExternalIndex `toml:"index,omitempty" json:"index,omitempty"`
 	// Fallback names the duckling that takes this one's seats when its
 	// provider is unreachable — declared here by the person, never chosen by
 	// a router. Availability only; quality-based switching is Switchyard's
@@ -453,6 +466,12 @@ func LoadGlobal(path string) (*Global, error) {
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
+	for id, d := range g.Ducklings {
+		if d.Index != nil && d.Index.CodingScore == 0 && d.Index.Coding != 0 {
+			d.Index.CodingScore = d.Index.Coding
+			g.Ducklings[id] = d
+		}
+	}
 	if len(g.Defaults.ModeDucklings) > 0 {
 		// Migrate legacy positional configuration exactly once; canonical values win.
 		if len(g.Defaults.ModeSeats) == 0 {
@@ -520,6 +539,11 @@ func (g *Global) Validate(path string) error {
 		}
 		if d.Cost.InputPerMTok < 0 || d.Cost.OutputPerMTok < 0 {
 			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.cost", id), Msg: "cost must be non-negative"}
+		}
+		if d.Index != nil {
+			if _, err := time.Parse("2006-01-02", d.Index.AsOf); err != nil {
+				return &Error{File: path, Key: fmt.Sprintf("duckling.%s.index.as_of", id), Msg: "must be YYYY-MM-DD"}
+			}
 		}
 	}
 	return nil

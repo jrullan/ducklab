@@ -57,6 +57,7 @@ export interface ConfigBudget {
 
 export interface ConfigCaps {
   context_tokens?: number;
+  json_mode?: boolean;
   native_tools?: boolean;
   vision?: boolean;
 }
@@ -64,6 +65,12 @@ export interface ConfigCaps {
 export interface ConfigCost {
   input_per_mtok?: number;
   output_per_mtok?: number;
+}
+
+export interface ConfigExternalIndex {
+  as_of?: string;
+  coding_score?: number;
+  source?: string;
 }
 
 export interface ConfigGit {
@@ -87,9 +94,11 @@ export interface ConfigProject {
   git?: ConfigGit;
   github?: ConfigGitHub;
   id?: string;
+  mode_seats?: Record<string, Record<string, string[]>>;
   modes?: Record<string, string>;
   name?: string;
   roster?: Record<string, string>;
+  roster_seats?: Record<string, string[]>;
   run?: ConfigRunApp;
   schema?: number;
   shell?: ConfigShellPolicy;
@@ -224,6 +233,8 @@ export interface EngineapirestartRequest {
 
 export interface EngineapirosterSetRequest {
   duckling?: string;
+  ducklings?: string[];
+  mode?: string;
   role?: string;
 }
 
@@ -319,6 +330,15 @@ export interface RunlogEvent {
   type?: string;
 }
 
+export interface RunlogGateReproduction {
+  command?: string;
+  duration_s?: number;
+  exit_code?: number;
+  gate?: string;
+  green?: boolean;
+  output?: string;
+}
+
 export interface RunlogRedoNote {
   advisor?: string;
   draft?: string;
@@ -326,6 +346,7 @@ export interface RunlogRedoNote {
 }
 
 export interface RunlogRun {
+  acceptance_gate?: RunlogGateReproduction;
   accepted?: boolean;
   agent_turns?: number;
   autonomy?: string;
@@ -365,6 +386,7 @@ export interface RunlogRun {
   tests_modified?: boolean;
   tokens_estimated?: boolean;
   tree_snapshot?: string;
+  tree_snapshot_head?: string;
   unsafe_writes?: boolean;
   verdict?: string;
   wallclock_ms?: number;
@@ -393,6 +415,17 @@ export interface ServiceAutopilotDefaultsView {
   autonomy?: string;
   max_fails?: number;
   max_tasks?: number;
+}
+
+export interface ServiceBenchEvidence {
+  cost?: number;
+  estimated?: boolean;
+  started_at?: string;
+  suite?: string;
+  suite_version?: number;
+  tokens?: number;
+  verdict?: string;
+  wallclock?: number;
 }
 
 export interface ServiceBenchSummary {
@@ -471,10 +504,21 @@ export interface ServiceInitRequest {
   path?: string;
 }
 
+export interface ServiceMeasuredEvidence {
+  avg_cost_per_run?: number;
+  avg_wallclock?: number;
+  estimated?: boolean;
+  pass_rate?: number;
+  runs?: number;
+  tokens?: number;
+}
+
 export interface ServiceModeDefaultsView {
   agent_max_turns?: number;
   build_mode?: string;
   ducklings?: Record<string, string[]>;
+  mode_seats?: Record<string, Record<string, string[]>>;
+  role_pins?: Record<string, string[]>;
   role_turns?: Record<string, number>;
   rounds?: Record<string, number>;
   script_role_turns?: Record<string, number>;
@@ -522,7 +566,9 @@ export interface ServiceReviewRequest {
 }
 
 export interface ServiceRosterEntry {
+  default?: string;
   duckling?: string;
+  ducklings?: string[];
   role?: string;
   source?: string;
 }
@@ -553,6 +599,20 @@ export interface ServiceRunRequest {
   task_id?: string;
   unsafe_writes?: boolean;
   verify?: string;
+}
+
+export interface ServiceScorecard {
+  bench?: Record<string, ServiceBenchEvidence>;
+  caps?: ConfigCaps;
+  cost?: ConfigCost;
+  id?: string;
+  index?: ConfigExternalIndex;
+  locality?: string;
+  measured?: ServiceMeasuredEvidence;
+  model?: string;
+  notes?: string;
+  provider?: string;
+  roles?: string[];
 }
 
 export interface ServiceSkillSummary {
@@ -620,6 +680,7 @@ export interface ServiceTaskView {
 }
 
 export interface ServiceTestFirstRequest {
+  agent_turns?: number;
   build?: ServiceRunRequest;
   duckling?: string;
   ducklings?: string[];
@@ -651,7 +712,10 @@ export const OPERATIONS = [
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
   { id: "ModeDefaultsSet", method: "PUT", path: "/v1/defaults/modes" },
+  { id: "GlobalRosterGet", method: "GET", path: "/v1/defaults/roster" },
+  { id: "GlobalRosterSet", method: "PUT", path: "/v1/defaults/roster" },
   { id: "DucklingList", method: "GET", path: "/v1/ducklings" },
+  { id: "Scorecards", method: "GET", path: "/v1/ducklings/scorecards" },
   { id: "DucklingRemove", method: "DELETE", path: "/v1/ducklings/{id}" },
   { id: "DucklingSet", method: "PUT", path: "/v1/ducklings/{id}" },
   { id: "DucklingProbe", method: "POST", path: "/v1/ducklings/{id}/probe" },
@@ -697,6 +761,7 @@ export const OPERATIONS = [
   { id: "ReviewList", method: "GET", path: "/v1/projects/{id}/reviews" },
   { id: "ReviewStart", method: "POST", path: "/v1/projects/{id}/reviews" },
   { id: "ReviewGet", method: "GET", path: "/v1/projects/{id}/reviews/{task}" },
+  { id: "RosterUnpin", method: "DELETE", path: "/v1/projects/{id}/roster" },
   { id: "RosterGet", method: "GET", path: "/v1/projects/{id}/roster" },
   { id: "RosterSet", method: "PUT", path: "/v1/projects/{id}/roster" },
   { id: "RosterSuggest", method: "GET", path: "/v1/projects/{id}/roster/suggest" },

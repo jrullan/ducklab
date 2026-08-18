@@ -29,7 +29,22 @@ as_of = "2026-08-18"
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadGlobal(path); err != nil {
+	g, err := LoadGlobal(path)
+	if err != nil {
 		t.Fatalf("LoadGlobal rejected declared external index: %v", err)
+	}
+	if g.Ducklings["pato"].Index == nil || g.Ducklings["pato"].Index.CodingScore != 87.5 || g.Ducklings["pato"].Index.Source != "Example Coding Index" || g.Ducklings["pato"].Index.AsOf != "2026-08-18" {
+		t.Fatalf("index did not load with provenance: %+v", g.Ducklings["pato"].Index)
+	}
+	if err := SaveGlobal(path, g); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := reloaded.Ducklings["pato"].Index
+	if idx == nil || idx.CodingScore != 87.5 || idx.Source != "Example Coding Index" || idx.AsOf != "2026-08-18" {
+		t.Fatalf("index did not round-trip with provenance: %+v", idx)
 	}
 }

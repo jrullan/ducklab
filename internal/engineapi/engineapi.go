@@ -342,6 +342,15 @@ func (s *Server) handleProviderRemove(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
 }
 
+func (s *Server) handleScorecards(w http.ResponseWriter, r *http.Request) {
+	items, err := s.svc.Scorecards(r.Context())
+	if err != nil {
+		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items, "total": len(items)})
+}
+
 func (s *Server) handleDucklingSet(w http.ResponseWriter, r *http.Request) {
 	var view service.DucklingView
 	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {

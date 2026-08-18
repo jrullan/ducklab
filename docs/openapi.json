@@ -183,6 +183,9 @@
           "context_tokens": {
             "type": "integer"
           },
+          "json_mode": {
+            "type": "boolean"
+          },
           "native_tools": {
             "type": "boolean"
           },
@@ -192,6 +195,7 @@
         },
         "required": [
           "context_tokens",
+          "json_mode",
           "native_tools",
           "vision"
         ],
@@ -209,6 +213,25 @@
         "required": [
           "input_per_mtok",
           "output_per_mtok"
+        ],
+        "type": "object"
+      },
+      "ConfigExternalIndex": {
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "coding_score": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "as_of",
+          "coding_score",
+          "source"
         ],
         "type": "object"
       },
@@ -280,6 +303,18 @@
           "id": {
             "type": "string"
           },
+          "mode_seats": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
           "modes": {
             "additionalProperties": {
               "type": "string"
@@ -292,6 +327,15 @@
           "roster": {
             "additionalProperties": {
               "type": "string"
+            },
+            "type": "object"
+          },
+          "roster_seats": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "type": "object"
           },
@@ -754,12 +798,23 @@
           "duckling": {
             "type": "string"
           },
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
           "role": {
             "type": "string"
           }
         },
         "required": [
           "duckling",
+          "ducklings",
+          "mode",
           "role"
         ],
         "type": "object"
@@ -1076,6 +1131,37 @@
         ],
         "type": "object"
       },
+      "RunlogGateReproduction": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "duration_s": {
+            "type": "number"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "green": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "duration_s",
+          "exit_code",
+          "gate",
+          "green",
+          "output"
+        ],
+        "type": "object"
+      },
       "RunlogRedoNote": {
         "properties": {
           "advisor": {
@@ -1097,6 +1183,9 @@
       },
       "RunlogRun": {
         "properties": {
+          "acceptance_gate": {
+            "$ref": "#/components/schemas/RunlogGateReproduction"
+          },
           "accepted": {
             "type": "boolean"
           },
@@ -1228,6 +1317,9 @@
           "tree_snapshot": {
             "type": "string"
           },
+          "tree_snapshot_head": {
+            "type": "string"
+          },
           "unsafe_writes": {
             "type": "boolean"
           },
@@ -1334,6 +1426,40 @@
           "autonomy",
           "max_fails",
           "max_tasks"
+        ],
+        "type": "object"
+      },
+      "ServiceBenchEvidence": {
+        "properties": {
+          "cost": {
+            "type": "number"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          },
+          "suite_version": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "wallclock": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "started_at",
+          "suite",
+          "suite_version"
         ],
         "type": "object"
       },
@@ -1593,6 +1719,37 @@
         ],
         "type": "object"
       },
+      "ServiceMeasuredEvidence": {
+        "properties": {
+          "avg_cost_per_run": {
+            "type": "number"
+          },
+          "avg_wallclock": {
+            "type": "number"
+          },
+          "estimated": {
+            "type": "boolean"
+          },
+          "pass_rate": {
+            "type": "number"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "avg_cost_per_run",
+          "avg_wallclock",
+          "estimated",
+          "pass_rate",
+          "runs",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "ServiceModeDefaultsView": {
         "properties": {
           "agent_max_turns": {
@@ -1602,6 +1759,27 @@
             "type": "string"
           },
           "ducklings": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "mode_seats": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "role_pins": {
             "additionalProperties": {
               "items": {
                 "type": "string"
@@ -1784,8 +1962,17 @@
       },
       "ServiceRosterEntry": {
         "properties": {
+          "default": {
+            "type": "string"
+          },
           "duckling": {
             "type": "string"
+          },
+          "ducklings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "role": {
             "type": "string"
@@ -1796,6 +1983,7 @@
         },
         "required": [
           "duckling",
+          "ducklings",
           "role",
           "source"
         ],
@@ -1898,6 +2086,58 @@
           "task_id",
           "unsafe_writes",
           "verify"
+        ],
+        "type": "object"
+      },
+      "ServiceScorecard": {
+        "properties": {
+          "bench": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ServiceBenchEvidence"
+            },
+            "type": "object"
+          },
+          "caps": {
+            "$ref": "#/components/schemas/ConfigCaps"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/ConfigCost"
+          },
+          "id": {
+            "type": "string"
+          },
+          "index": {
+            "$ref": "#/components/schemas/ConfigExternalIndex"
+          },
+          "locality": {
+            "type": "string"
+          },
+          "measured": {
+            "$ref": "#/components/schemas/ServiceMeasuredEvidence"
+          },
+          "model": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "caps",
+          "cost",
+          "id",
+          "locality",
+          "model",
+          "provider"
         ],
         "type": "object"
       },
@@ -2140,6 +2380,9 @@
       },
       "ServiceTestFirstRequest": {
         "properties": {
+          "agent_turns": {
+            "type": "integer"
+          },
           "build": {
             "$ref": "#/components/schemas/ServiceRunRequest"
           },
@@ -2500,6 +2743,66 @@
         "summary": "Replace the per-mode defaults"
       }
     },
+    "/v1/defaults/roster": {
+      "get": {
+        "operationId": "GlobalRosterGet",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Global canonical roster"
+      },
+      "put": {
+        "operationId": "GlobalRosterSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirosterSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set global canonical roster"
+      }
+    },
     "/v1/ducklings": {
       "get": {
         "operationId": "DucklingList",
@@ -2539,6 +2842,47 @@
           }
         ],
         "summary": "List ducklings"
+      }
+    },
+    "/v1/ducklings/scorecards": {
+      "get": {
+        "operationId": "Scorecards",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceScorecard"
+                      },
+                      "type": "array"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Comparable duckling scorecards"
       }
     },
     "/v1/ducklings/{id}": {
@@ -4141,6 +4485,50 @@
       }
     },
     "/v1/projects/{id}/roster": {
+      "delete": {
+        "operationId": "RosterUnpin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirosterSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRosterView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove project roster pin"
+      },
       "get": {
         "operationId": "RosterGet",
         "parameters": [

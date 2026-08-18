@@ -619,6 +619,29 @@ func (c *Client) DucklingList() ([]map[string]interface{}, error) {
 	return result.Items, err
 }
 
+// Scorecard is the typed comparable duckling record.
+type Scorecard struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Locality string `json:"locality"`
+	Cost     struct { InputPerMTok float64 `json:"input_per_mtok"`; OutputPerMTok float64 `json:"output_per_mtok"` } `json:"cost"`
+	Caps     struct { NativeTools *bool `json:"native_tools"`; ContextTokens *int `json:"context_tokens"`; Vision *bool `json:"vision"`; JSONMode *bool `json:"json_mode"` } `json:"caps"`
+	Roles    []string `json:"roles,omitempty"`
+	Notes    string `json:"notes,omitempty"`
+	Measured *struct { Runs int `json:"runs"`; PassRate float64 `json:"pass_rate"`; AvgCostPerRun float64 `json:"avg_cost_per_run"`; AvgWallclock float64 `json:"avg_wallclock"`; Tokens int64 `json:"tokens"`; Estimated bool `json:"estimated"` } `json:"measured,omitempty"`
+	Bench map[string]struct { Suite string `json:"suite"`; SuiteVersion int `json:"suite_version"`; StartedAt string `json:"started_at"`; Verdict string `json:"verdict,omitempty"`; Tokens int64 `json:"tokens,omitempty"`; Cost float64 `json:"cost,omitempty"`; Wallclock float64 `json:"wallclock,omitempty"`; Estimated bool `json:"estimated,omitempty"` } `json:"bench,omitempty"`
+	Index *struct { CodingScore float64 `json:"coding_score"`; Source string `json:"source"`; AsOf string `json:"as_of"` } `json:"index,omitempty"`
+}
+
+func (c *Client) Scorecards() ([]Scorecard, error) {
+	var r struct {
+		Items []Scorecard `json:"items"`
+	}
+	err := c.get("/v1/ducklings/scorecards", &r)
+	return r.Items, err
+}
+
 // DucklingTest tests a duckling.
 func (c *Client) DucklingTest(id, prompt string) (map[string]interface{}, error) {
 	var result map[string]interface{}

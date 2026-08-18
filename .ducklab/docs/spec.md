@@ -346,6 +346,8 @@ Tools exposed to MCP clients:
 
 Attribution: decisions recorded as `mcp:<client-name>`, never `human`. Server implementation: `internal/mcp/mcp.go`, CLI: `internal/cli/mcp.go`.
 
+The engine also exposes `GET /v1/ducklings/scorecards`, returning one configured duckling per row with declared provider/model/cost/capabilities/roles/notes and explicitly sourced measured, latest-per-suite bench, and declared external-index evidence. Missing evidence is null/absent.
+
 The `roster` MCP tool accepts `action` (`get | set | unpin`), `scope` (`global | project`), `project_id`, `mode`, `role`, and ordered `ducklings`. `get` returns every board-addressable seat with `role`, ordered `ducklings`, effective `duckling`, and `source` provenance (`global mode seat`, `project pin`, or `global role fallback`); project pins also return the overridden global `default`. Project `set` replaces the complete ordered pin and `unpin` removes it to restore Global inheritance. Global `set` writes mode seats (or mode-independent triager/scribe role pins) and never changes project files. Invalid action/scope, role, duckling, and mode cardinality return field-named actionable errors with `next` guidance. MCP dispatch delegates to the canonical service roster resolver and records operator actions as `mcp:<client-name>`.
 
 ## SPEC-022 — Six contract formats
@@ -391,7 +393,7 @@ Configuration sources (precedence order):
 
 Strict TOML parsing rejects unknown keys. Schema version in frontmatter. Hand edits preserved for known keys on write-back.
 
-Structure: `internal/config/config.go`. CLI overrides via flags (not persisted).
+Structure: `internal/config/config.go`. CLI overrides via flags (not persisted). Each `[duckling.<id>.index]` may declare `coding_score`, `source`, and `as_of` (YYYY-MM-DD); it is round-tripped with provenance and never fetched or inferred.
 
 Canonical global seats are persisted as `defaults.mode_seats` (mode → real role name → ordered duckling IDs), with mode-independent `role_pins` for triager and scribe. Legacy `mode_ducklings` is migrated once, written back, and removed. Resolution precedence is per-run pick, project pin, global mode seat, then global role fallback; provenance is reported as `project pin`, `global mode seat`, or `global role fallback`. Council requires at least one critic, split at least two workers, and tournament at least two contestants.
 
