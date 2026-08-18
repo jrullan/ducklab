@@ -112,7 +112,9 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	// Read-only tools touch no tree: a chat may run beside anything.
 	s.queue.submit(s, &queued{
 		rs: rs, ctx: runCtx, parallel: true,
-		exec: func(c context.Context) { s.executeChatTurn(c, rs, entry.Path, req.AboutKind, req.AboutID, req.Duckling) },
+		exec: func(c context.Context) {
+			s.executeChatTurn(c, rs, entry.Path, req.AboutKind, req.AboutID, req.Duckling)
+		},
 	})
 	return run, nil
 }

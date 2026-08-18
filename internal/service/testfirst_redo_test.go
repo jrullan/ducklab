@@ -107,27 +107,59 @@ func TestRedoRetiresAnUnbuiltAcceptedTest(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 	git := vcs.New(dir)
-	if err := git.Init(); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(dir, "baseline.txt"), []byte("baseline\n"), 0o644); err != nil { t.Fatal(err) }
-	if err := git.AddAll(); err != nil { t.Fatal(err) }
-	if _, err := git.Commit("baseline"); err != nil { t.Fatal(err) }
+	if err := git.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "baseline.txt"), []byte("baseline\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("baseline"); err != nil {
+		t.Fatal(err)
+	}
 	stale := filepath.Join(dir, "stale_test.py")
-	if err := os.WriteFile(stale, []byte("def test_stale(): assert False\n"), 0o644); err != nil { t.Fatal(err) }
-	if err := git.AddAll(); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(stale, []byte("def test_stale(): assert False\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.AddAll(); err != nil {
+		t.Fatal(err)
+	}
 	sha, err := git.Commit("ducklab: T-001 failing test")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	prior := &runlog.Run{ID: "r-stale", ProjectID: id, TaskID: "T-001", Stage: "test", Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: sha, StartedAt: "2026-08-01T00:00:00Z"}
-	w, err := runlog.NewWriter(dir, prior); if err != nil { t.Fatal(err) }; w.Close()
+	w, err := runlog.NewWriter(dir, prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
 	s.RecoverRuns(context.Background())
-	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"verify.mode": "tests", "verify.tests": "true"}); err != nil { t.Fatal(err) }
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"verify.mode": "tests", "verify.tests": "true"}); err != nil {
+		t.Fatal(err)
+	}
 
 	run, err := s.TestStart(context.Background(), id, TestFirstRequest{TaskID: "T-001", Redo: true, Note: "replace the stale test"})
-	if err != nil { t.Fatalf("redo was refused: %v", err) }
-	s.RunAbort(context.Background(), run.ID); s.waitForRun(context.Background(), run.ID)
-	got, err := s.RunGet(context.Background(), "r-stale"); if err != nil { t.Fatal(err) }
-	if got.Run.RevertSHA == "" { t.Fatal("redo did not record a revert SHA on the stale test") }
-	if _, err := os.Stat(stale); !os.IsNotExist(err) { t.Fatalf("stale test remains after redo cleanup: %v", err) }
-	if reason := s.projectHeld(id, "T-019"); reason != "" { t.Fatalf("queue hold remained after redo cleanup: %q", reason) }
+	if err != nil {
+		t.Fatalf("redo was refused: %v", err)
+	}
+	s.RunAbort(context.Background(), run.ID)
+	s.waitForRun(context.Background(), run.ID)
+	got, err := s.RunGet(context.Background(), "r-stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Run.RevertSHA == "" {
+		t.Fatal("redo did not record a revert SHA on the stale test")
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale test remains after redo cleanup: %v", err)
+	}
+	if reason := s.projectHeld(id, "T-019"); reason != "" {
+		t.Fatalf("queue hold remained after redo cleanup: %q", reason)
+	}
 }
 
 // Redo is deliberately finite per task. Drive accepted test-first history past
@@ -137,17 +169,24 @@ func TestRedoCommitCapRefusesAndNamesLimit(t *testing.T) {
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 	for i := 0; i < 32; i++ {
 		r := &runlog.Run{ID: fmt.Sprintf("r-redo-%d", i), ProjectID: id, TaskID: "T-001", Stage: "test", Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: fmt.Sprintf("sha-%d", i), StartedAt: fmt.Sprintf("2026-08-01T00:00:%02dZ", i)}
-		w, err := runlog.NewWriter(dir, r); if err != nil { t.Fatal(err) }; w.Close()
+		w, err := runlog.NewWriter(dir, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Close()
 	}
 	s.RecoverRuns(context.Background())
 	for i := 0; i < 32; i++ {
 		r, err := s.TestStart(context.Background(), id, TestFirstRequest{TaskID: "T-001", Redo: true, Note: "bounded retry"})
 		if err != nil {
 			msg := strings.ToLower(err.Error())
-			if !strings.Contains(msg, "limit") && !strings.Contains(msg, "cap") { t.Fatalf("redo refusal does not name its limit: %v", err) }
+			if !strings.Contains(msg, "limit") && !strings.Contains(msg, "cap") {
+				t.Fatalf("redo refusal does not name its limit: %v", err)
+			}
 			return
 		}
-		s.RunAbort(context.Background(), r.ID); s.waitForRun(context.Background(), r.ID)
+		s.RunAbort(context.Background(), r.ID)
+		s.waitForRun(context.Background(), r.ID)
 	}
 	t.Fatal("redo remained unbounded; no per-task cap refusal was observed")
 }

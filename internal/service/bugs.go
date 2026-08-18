@@ -337,7 +337,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			"bug": b.ID, "severity": t.Severity, "reason": t.Reason,
 			"component": t.Component, "task_title": t.TaskTitle,
 			"suspected_files": t.SuspectedFiles,
-			"test_strategy": t.TestStrategy, "test_reason": t.TestReason,
+			"test_strategy":   t.TestStrategy, "test_reason": t.TestReason,
 		}
 		if t.DuplicateOf != "" {
 			p["duplicate_of"] = t.DuplicateOf

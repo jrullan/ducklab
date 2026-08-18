@@ -1005,6 +1005,27 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	if run.Mode == "" {
 		run.Mode, run.ModeSource = s.resolveBuildMode(entry.Path)
 	}
+	// Validate cardinality at the launch boundary as well as when defaults are edited.
+	if run.Mode == "council" || run.Mode == "split" || run.Mode == "tournament" {
+		ids := req.Ducklings
+		if len(ids) == 0 {
+			s.cfgMu.RLock()
+			seats := s.cfg.Defaults.ModeSeats[run.Mode]
+			role := "reviewer"
+			if run.Mode == "split" || run.Mode == "tournament" {
+				role = "implementer"
+			}
+			ids = seats[role]
+			s.cfgMu.RUnlock()
+		}
+		n := len(ids)
+		if run.Mode == "council" && n < 2 {
+			return nil, fmt.Errorf("council requires at least one critic")
+		}
+		if (run.Mode == "split" || run.Mode == "tournament") && n < 2 {
+			return nil, fmt.Errorf("%s requires at least two %s", run.Mode, map[string]string{"split": "workers", "tournament": "contestants"}[run.Mode])
+		}
+	}
 	if run.Autonomy == "" {
 		// The project's configured autonomy is the default the plan promised
 		// and RunStart never read: a project.toml saying autonomy = "auto"
@@ -3033,6 +3054,30 @@ func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapte
 // failing the run: the line-up is a preference, and a deleted model should
 // degrade the council, not close it.
 func (s *Service) stageCritics(mode string) []config.DucklingID {
+	if mode == "" {
+		mode = "council"
+	}
+	s.cfgMu.RLock()
+	var ids []config.DucklingID
+	seats := s.cfg.Defaults.ModeSeats[mode]
+	for _, raw := range seats["reviewer"] {
+		ids = append(ids, config.DucklingID(raw))
+	}
+	s.cfgMu.RUnlock()
+	if len(ids) > 0 {
+		var out []config.DucklingID
+		seen := map[config.DucklingID]bool{}
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			if _, err := s.ducklings.Get(id); err == nil {
+				out = append(out, id)
+				seen[id] = true
+			}
+		}
+		return out
+	}
 	return s.criticsFrom(mode, s.stageLineupFor(mode))
 }
 
@@ -3063,11 +3108,19 @@ func (s *Service) criticsFrom(mode string, lineup []string) []config.DucklingID 
 // used: the person edited the right seat and the engine looked at another.
 func (s *Service) stageLineupFor(mode string) []string {
 	s.cfgMu.RLock()
-	lineup := append([]string{}, s.cfg.Defaults.ModeDucklings["council"]...)
-	s.cfgMu.RUnlock()
-	if mode == "solo" && len(lineup) > 1 {
-		lineup = lineup[:1]
+	seats := s.cfg.Defaults.ModeSeats[mode]
+	orders := map[string][]string{
+		"solo":       {"implementer", "advisor"},
+		"pair":       {"implementer", "advisor", "reviewer"},
+		"council":    {"architect", "reviewer"},
+		"split":      {"architect", "implementer", "reviewer"},
+		"tournament": {"implementer", "judge"},
 	}
+	var lineup []string
+	for _, role := range orders[mode] {
+		lineup = append(lineup, seats[role]...)
+	}
+	s.cfgMu.RUnlock()
 	return lineup
 }
 

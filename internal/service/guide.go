@@ -49,14 +49,14 @@ type NextStep struct {
 // ProjectNext, synthetic in tests — the guidance rules are pinned without a
 // filesystem.
 type projectSnapshot struct {
-	HasRequirements  bool
-	HasSpec          bool
-	OpenSpecSections int
-	HasPlan          bool
-	Tasks            []TaskView
+	HasRequirements    bool
+	HasSpec            bool
+	OpenSpecSections   int
+	HasPlan            bool
+	Tasks              []TaskView
 	AcceptedUnreleased int
 	UnreleasedBranches int
-	Bugs             []bug.Bug
+	Bugs               []bug.Bug
 	// Paused runs, newest first.
 	Paused []*runlog.Run
 }
@@ -66,7 +66,9 @@ func nextSteps(st projectSnapshot) []NextStep {
 	var out []NextStep
 	if st.AcceptedUnreleased == 0 {
 		for _, t := range st.Tasks {
-			if t.Status == "accepted" && t.Branch != "" && t.Branch != "main" { st.AcceptedUnreleased++ }
+			if t.Status == "accepted" && t.Branch != "" && t.Branch != "main" {
+				st.AcceptedUnreleased++
+			}
 		}
 	}
 	// A branch is required to classify accepted work as unreleased; accepted work
@@ -109,10 +111,10 @@ func nextSteps(st projectSnapshot) []NextStep {
 	// release door visible and promote it ahead of new work.
 	if st.AcceptedUnreleased > 0 && nextBuildable(st.Tasks) == nil {
 		out = append(out, NextStep{
-			ID: "release",
+			ID:     "release",
 			Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
 			Reason: fmt.Sprintf("%d accepted task(s) await a release", st.AcceptedUnreleased),
-			Kind: "release",
+			Kind:   "release",
 		})
 	}
 
@@ -135,7 +137,7 @@ func nextSteps(st projectSnapshot) []NextStep {
 	}
 	// A fixed bug is waiting for a person's verification. Reopen is the
 	// deliberate alternative when that verification finds the fix insufficient.
-		for _, b := range st.Bugs {
+	for _, b := range st.Bugs {
 		if b.Status == bug.Fixed {
 			out = append(out, NextStep{
 				ID:     "verify-bug",

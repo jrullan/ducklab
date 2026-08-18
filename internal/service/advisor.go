@@ -196,7 +196,9 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 		repair, repairErr := p.Chat(ctx, provider.ChatRequest{Model: d.Model, Messages: []provider.Message{
 			{Role: "system", Content: systemPrompt}, {Role: "user", Content: repairPrompt},
 		}, MaxTokens: &maxTok})
-		if repairErr != nil { return "", string(advisorID), repairErr }
+		if repairErr != nil {
+			return "", string(advisorID), repairErr
+		}
 		answer = stripAdvisorThinking(answerText(repair))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			return "", string(advisorID), fmt.Errorf("advisor contract violation after repair: %s", violation)
@@ -271,19 +273,27 @@ func (s *Service) draftRedoNote(ctx context.Context, rs *runState) *runlog.RedoN
 	if diff, err := s.RunDiff(ctx, rs.run.ID); err == nil && strings.TrimSpace(diff) != "" {
 		parts = append(parts, "Diff summary:\n"+firstN(strings.TrimSpace(diff), 4000))
 	}
-	if len(parts) == 0 { return nil }
+	if len(parts) == 0 {
+		return nil
+	}
 	advisor := s.pickAdvisor(rs)
 	note := "Retry the task after addressing the failure.\n\n" + strings.Join(parts, "\n\n")
 	return &runlog.RedoNote{Draft: firstN(note, 12000), Advisor: string(advisor), Editable: true}
 }
 
 func redoNoteEligible(r *runlog.Run) bool {
-	if r == nil { return false }
-	if r.Status == "failed" || r.Verdict == "FAILED" { return true }
+	if r == nil {
+		return false
+	}
+	if r.Status == "failed" || r.Verdict == "FAILED" {
+		return true
+	}
 	// A run the advisor stopped pauses with its work in place (the no-error-
 	// discards-work rule) and its Failure names the reason and the reshuffle;
 	// that IS the redo material.
-	if r.Status == "paused" && r.PendingKind == "error" && strings.HasPrefix(r.Failure, "stopped by advisor") { return true }
+	if r.Status == "paused" && r.PendingKind == "error" && strings.HasPrefix(r.Failure, "stopped by advisor") {
+		return true
+	}
 	// A green test-first run is actionable: its test is the input to the
 	// chained build, even though the test gate itself passed.
 	return r.Stage == "test" && r.Status == "paused" && r.PendingKind == "gate" && r.Verdict != "FAILED"

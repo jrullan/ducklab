@@ -17,7 +17,7 @@ type RosterEntry struct {
 	// Default is the all-projects choice when this project overrides the role.
 	// It lets clients explain both values instead of presenting the project value
 	// as if it were the global default.
-	Default  string `json:"default,omitempty"`
+	Default string `json:"default,omitempty"`
 	// Source is "project" when project.toml declares it, "default" when the
 	// engine picked it. A user needs to know which assignments are theirs.
 	Source string `json:"source"`
@@ -47,50 +47,28 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 	if err != nil {
 		return nil, err
 	}
-	resolved, _ := s.resolveRoster(projCfg)
-
-	lineup := map[config.Role]bool{}
-	if mode != "" {
-		for _, role := range applyStageLineup(resolved, s.stageLineupFor(mode)) {
-			lineup[role] = true
-		}
+	resolved, sources := s.resolveCanonicalRoster(projCfg, mode)
+	warning := ""
+	if mode == "" || mode == "pair" {
+		warning = bothSidesWarning(resolved)
 	}
-	view := &RosterView{Warning: bothSidesWarning(resolved)}
-
-	// A council seats every line-up duckling after the first as a critic, so
-	// the preview lists one reviewer entry per critic — the run will pin each
-	// critique turn to its own model, and a preview naming only one of three
-	// critics is the preview lying about who will run, again.
-	critics := s.stageCritics(mode)
+	view := &RosterView{Warning: warning}
 
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
 		}
-		source := "default"
-		if id, ok := projCfg.Roster[role]; ok && id != "" {
-			source = "project"
-		}
-		if lineup[role] {
-			source = mode + " line-up"
-		}
-		if role == config.RoleReviewer && len(critics) > 1 {
-			for _, c := range critics {
-				view.Entries = append(view.Entries, RosterEntry{
-					Role: string(role), Duckling: string(c), Source: mode + " line-up",
-				})
-			}
-			continue
-		}
-		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Source: source}
-		if source == "project" {
-			// Resolve once with this pin removed to expose the global fallback.
+		canonicalSource := sources[role]
+		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Source: canonicalSource}
+		if canonicalSource == "project pin" {
 			withoutPin := *projCfg
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
 			for r, id := range projCfg.Roster {
-				if r != role { withoutPin.Roster[r] = id }
+				if r != role {
+					withoutPin.Roster[r] = id
+				}
 			}
-			defaults, _ := s.resolveRoster(&withoutPin)
+			defaults, _ := s.resolveCanonicalRoster(&withoutPin, mode)
 			entry.Default = string(defaults[role])
 		}
 		view.Entries = append(view.Entries, entry)

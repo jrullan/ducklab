@@ -127,7 +127,8 @@ type ModeDefaultsView struct {
 	// Ducklings is the line-up to use for each mode when a run does not name
 	// one, in order. A combination that works is a finding, and re-ticking the
 	// same boxes on every run is how a finding gets lost.
-	Ducklings map[string][]string `json:"ducklings"`
+	Ducklings map[string][]string            `json:"ducklings"`
+	ModeSeats map[string]map[string][]string `json:"mode_seats,omitempty"`
 	// RoleTurns caps the model calls one turn of a role may chain. Zero or
 	// absent leaves the script's own cap alone.
 	RoleTurns map[string]int `json:"role_turns"`
@@ -182,19 +183,43 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 		RoleTurns:       map[string]int{},
 		ScriptRoleTurns: ScriptRoleTurns,
 		Seats:           ModeSeats,
+		ModeSeats:       map[string]map[string][]string{},
 		BuildMode:       s.cfg.Defaults.BuildMode,
 		TestMode:        s.cfg.Defaults.TestMode,
 	}
 	for mode, n := range s.cfg.Defaults.Rounds {
 		out.Rounds[mode] = n
 	}
-	for mode, ids := range s.cfg.Defaults.ModeDucklings {
-		out.Ducklings[mode] = append([]string{}, ids...)
+	for mode, seats := range s.cfg.Defaults.ModeSeats {
+		out.ModeSeats[mode] = seats
+		var ids []string
+		for _, role := range []string{"architect", "implementer", "reviewer", "judge", "advisor"} {
+			ids = append(ids, seats[role]...)
+		}
+		out.Ducklings[mode] = ids
 	}
 	for role, n := range s.cfg.Defaults.RoleTurns {
 		out.RoleTurns[role] = n
 	}
 	return out
+}
+
+func validateModeCardinality(mode string, n int) error {
+	switch mode {
+	case "council":
+		if n < 2 {
+			return fmt.Errorf("council requires at least one critic")
+		}
+	case "split":
+		if n < 2 {
+			return fmt.Errorf("split requires at least two workers")
+		}
+	case "tournament":
+		if n < 2 {
+			return fmt.Errorf("tournament requires at least two contestants")
+		}
+	}
+	return nil
 }
 
 // ModeDefaultsSet replaces them and writes the config back.
@@ -254,6 +279,38 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		}
 	}
 
+	for mode, roles := range v.ModeSeats {
+		if _, ok := ModeRounds[mode]; !ok {
+			return fmt.Errorf("unknown mode %q", mode)
+		}
+		count := 0
+		for role, ids := range roles {
+			if !validRole(config.Role(role)) || role == "human" {
+				return fmt.Errorf("unknown roster role %q", role)
+			}
+			for _, id := range ids {
+				if _, ok := s.cfg.Ducklings[config.DucklingID(id)]; !ok {
+					return fmt.Errorf("mode %q names duckling %q, which does not exist", mode, id)
+				}
+			}
+			if mode == "council" && role == "reviewer" {
+				count += len(ids)
+			}
+			if mode == "split" && role == "implementer" {
+				count += len(ids)
+			}
+			if mode == "tournament" && role == "implementer" {
+				count += len(ids)
+			}
+		}
+		if mode == "council" && count < 1 {
+			return fmt.Errorf("council requires at least one critic")
+		}
+		if (mode == "split" || mode == "tournament") && count < 2 {
+			return fmt.Errorf("%s requires at least two %s", mode, map[string]string{"split": "workers", "tournament": "contestants"}[mode])
+		}
+	}
+
 	// The default modes launchers open on. Empty clears back to solo; a mode
 	// that does not exist would open every launcher on nonsense.
 	if v.BuildMode != "" {
@@ -268,7 +325,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
-	prevDucklings, prevRoleTurns := s.cfg.Defaults.ModeDucklings, s.cfg.Defaults.RoleTurns
+	prevModeSeats, prevRoleTurns := s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns
 	prevBuildMode, prevTestMode := s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode
 	rounds := map[string]int{}
 	for mode, n := range v.Rounds {
@@ -290,13 +347,21 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 			roleTurns[role] = n
 		}
 	}
-	s.cfg.Defaults.ModeDucklings = lineups
+	s.cfg.Defaults.ModeDucklings = nil
+	seats := map[string]map[string][]string{}
+	for mode, roles := range v.ModeSeats {
+		seats[mode] = roles
+	}
+	if len(seats) == 0 {
+		seats = config.LegacyModeSeats(lineups)
+	}
+	s.cfg.Defaults.ModeSeats = seats
 	s.cfg.Defaults.RoleTurns = roleTurns
 	s.cfg.Defaults.BuildMode = v.BuildMode
 	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
-		s.cfg.Defaults.ModeDucklings, s.cfg.Defaults.RoleTurns = prevDucklings, prevRoleTurns
+		s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns = prevModeSeats, prevRoleTurns
 		s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode = prevBuildMode, prevTestMode
 		return err
 	}

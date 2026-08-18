@@ -71,8 +71,8 @@ func TestRosterGetShowsResolvedAssignmentsAndSource(t *testing.T) {
 		if e.Duckling == "" {
 			t.Errorf("role %q resolved to nothing", e.Role)
 		}
-		if e.Source != "default" {
-			t.Errorf("role %q source = %q, want default", e.Role, e.Source)
+		if e.Source != "global role fallback" {
+			t.Errorf("role %q source = %q, want global role fallback", e.Role, e.Source)
 		}
 	}
 }
@@ -95,7 +95,7 @@ func TestRosterGetReportsGlobalFallbackForProjectPin(t *testing.T) {
 	}
 	for _, entry := range view.Entries {
 		if entry.Role == "implementer" {
-			if entry.Duckling != "z-luna" || entry.Source != "project" || entry.Default != "terra" {
+			if entry.Duckling != "z-luna" || entry.Source != "project pin" || entry.Default != "z-luna" {
 				t.Fatalf("implementer entry = %+v, want luna/project with terra default", entry)
 			}
 			return
@@ -119,7 +119,7 @@ func TestRosterSetPersistsAndIsReportedAsProjectSource(t *testing.T) {
 			if e.Duckling != "pato-dos" {
 				t.Errorf("reviewer = %q, want pato-dos", e.Duckling)
 			}
-			if e.Source != "project" {
+			if e.Source != "project pin" {
 				t.Errorf("source = %q, want project", e.Source)
 			}
 		}
@@ -286,9 +286,9 @@ func TestASoloStageSeatsTheCouncilArchitect(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 
-	s.cfg.Defaults.ModeDucklings = map[string][]string{
-		"council": {"pato-dos", "pato-uno"}, // the documents group: architect · drafts = pato-dos
-		"solo":    {"pato-uno"},             // the tasks group's solo implementer
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"pato-dos"}, "reviewer": {"pato-uno"}},
+		"solo":    {"implementer": {"pato-uno"}},
 	}
 
 	view, err := s.RosterGet(context.Background(), id, "solo")
@@ -313,8 +313,8 @@ func TestAStageRequestSeatsItsOwnDucklings(t *testing.T) {
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
 	_ = dir
 
-	s.cfg.Defaults.ModeDucklings = map[string][]string{
-		"council": {"pato-uno", "pato-dos"},
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"pato-uno"}, "reviewer": {"pato-dos"}},
 	}
 	run, err := s.StageStart(context.Background(), id, StageRequest{
 		Stage: "plan", Extend: "add a small thing", Ducklings: []string{"pato-dos"},
@@ -336,7 +336,7 @@ func TestAStageRequestSeatsItsOwnDucklings(t *testing.T) {
 	s.RunAbort(context.Background(), run.ID)
 	s.waitForRun(context.Background(), run.ID)
 	// The saved seats did not move.
-	if s.cfg.Defaults.ModeDucklings["council"][0] != "pato-uno" {
+	if s.cfg.Defaults.ModeSeats["council"]["architect"][0] != "pato-uno" {
 		t.Error("a per-run pick must never edit the saved seats")
 	}
 }

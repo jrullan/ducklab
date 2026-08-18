@@ -378,6 +378,8 @@ Events: `token`, `tool_call`, `tool_result`, `status`, `overflow`.
 
 ## SPEC-024 — Two-tier configuration with strict parsing
 
+**As-built canonical roster:** Global defaults persist `defaults.mode_seats` keyed by mode and real role name, with ordered duckling IDs; `defaults.role_pins` carries mode-independent triager and scribe pins. Legacy `mode_ducklings` is migrated one-way and idempotently on load, then removed. Resolution precedence is per-run pick, project role pin, global mode seat, and global role fallback, with provenance reported as `project pin`, `global mode seat`, or `global role fallback`. Writes and launches reject council without a critic, split with fewer than two workers, and tournament with fewer than two contestants.
+
 **Implements:** REQ-024
 **As-built:** yes
 
@@ -388,6 +390,8 @@ Configuration sources (precedence order):
 Strict TOML parsing rejects unknown keys. Schema version in frontmatter. Hand edits preserved for known keys on write-back.
 
 Structure: `internal/config/config.go`. CLI overrides via flags (not persisted).
+
+Canonical global seats are persisted as `defaults.mode_seats` (mode → real role name → ordered duckling IDs), with mode-independent `role_pins` for triager and scribe. Legacy `mode_ducklings` is migrated once, written back, and removed. Resolution precedence is per-run pick, project pin, global mode seat, then global role fallback; provenance is reported as `project pin`, `global mode seat`, or `global role fallback`. Council requires at least one critic, split at least two workers, and tournament at least two contestants.
 
 ## SPEC-025 — Runtime concurrent run queue
 

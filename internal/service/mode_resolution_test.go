@@ -89,14 +89,14 @@ func TestRunRosterSourcesRecordEverySeatDecision(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			req: RunRequest{Mode: "solo"}, wantSource: "project",
+			req: RunRequest{Mode: "solo"}, wantSource: "project pin",
 		},
 		{
 			name: "settings",
 			configure: func(_ *testing.T, s *Service, _ string) {
-				s.cfg.Defaults.ModeDucklings = map[string][]string{"solo": {"terra"}}
+				s.cfg.Defaults.ModeSeats = map[string]map[string][]string{"solo": {"implementer": {"terra"}}}
 			},
-			req: RunRequest{Mode: "solo"}, wantSource: "settings",
+			req: RunRequest{Mode: "solo"}, wantSource: "global mode seat",
 		},
 		{
 			name:      "request",
@@ -106,7 +106,7 @@ func TestRunRosterSourcesRecordEverySeatDecision(t *testing.T) {
 		{
 			name:      "spread",
 			configure: func(_ *testing.T, _ *Service, _ string) {},
-			req:       RunRequest{Mode: "solo"}, wantSource: "spread",
+			req:       RunRequest{Mode: "solo"}, wantSource: "global role fallback",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

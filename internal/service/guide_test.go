@@ -79,7 +79,7 @@ func TestPausedRunsOutrankEverything(t *testing.T) {
 func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
-		Bugs: []bug.Bug{{ID: "B-017", Status: bug.Fixed}},
+		Bugs:  []bug.Bug{{ID: "B-017", Status: bug.Fixed}},
 		Tasks: []TaskView{{ID: "T-016", Status: "accepted"}},
 	})
 
@@ -115,7 +115,7 @@ func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 	// Reopen is not a generic action for every bug or task: only fixed bugs
 	// and accepted tasks earn it.
 	quiet := nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true,
-		Bugs: []bug.Bug{{ID: "B-018", Status: bug.Verified}},
+		Bugs:  []bug.Bug{{ID: "B-018", Status: bug.Verified}},
 		Tasks: []TaskView{{ID: "T-017", Status: "todo"}},
 	})
 	for _, step := range quiet {

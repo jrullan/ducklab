@@ -80,7 +80,7 @@ func TestAcceptingAChainedTestFirstDoesNotFixItsBug(t *testing.T) {
 	run := &runlog.Run{
 		ID: "r-test-first", ProjectID: id, TaskID: taskID, Stage: "test",
 		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
-		StartedAt: "2026-08-06T03:00:12Z",
+		StartedAt:  "2026-08-06T03:00:12Z",
 		ChainBuild: map[string]interface{}{"task_id": taskID, "mode": "solo"},
 	}
 	w, err := runlog.NewWriter(dir, run)

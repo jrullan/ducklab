@@ -139,14 +139,19 @@ type Defaults struct {
 	// A combination that works is a finding, and re-ticking the same boxes on
 	// every run is how a finding gets lost.
 	ModeDucklings map[string][]string `toml:"mode_ducklings" json:"mode_ducklings"`
+	// ModeSeats is the canonical role-keyed global roster. Legacy ModeDucklings
+	// is read only to support migration of existing installations.
+	ModeSeats map[string]map[string][]string `toml:"mode_seats" json:"mode_seats"`
+	// RolePins are mode-independent global seats (notably triager and scribe).
+	RolePins map[string][]string `toml:"role_pins" json:"role_pins"`
 	// BuildMode and TestMode are the modes a launcher opens on: the person
 	// who always builds in pair and tests in solo should not re-pick both on
 	// every task.
-	BuildMode string `toml:"build_mode" json:"build_mode"`
-	TestMode  string `toml:"test_mode" json:"test_mode"`
-	HTTPTimeoutS       int      `toml:"http_timeout_s" json:"http_timeout_s"`
-	TransientRetries   int      `toml:"transient_retries" json:"transient_retries"`
-	Budget             Budget   `toml:"budget" json:"budget"`
+	BuildMode        string `toml:"build_mode" json:"build_mode"`
+	TestMode         string `toml:"test_mode" json:"test_mode"`
+	HTTPTimeoutS     int    `toml:"http_timeout_s" json:"http_timeout_s"`
+	TransientRetries int    `toml:"transient_retries" json:"transient_retries"`
+	Budget           Budget `toml:"budget" json:"budget"`
 }
 
 // Engine holds engine configuration.
@@ -439,6 +444,16 @@ func LoadGlobal(path string) (*Global, error) {
 	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
+	if len(g.Defaults.ModeDucklings) > 0 {
+		// Migrate legacy positional configuration exactly once; canonical values win.
+		if len(g.Defaults.ModeSeats) == 0 {
+			g.Defaults.ModeSeats = migrateModeSeats(g.Defaults.ModeDucklings)
+		}
+		g.Defaults.ModeDucklings = nil
+		if err := SaveGlobal(path, g); err != nil {
+			return nil, err
+		}
+	}
 	if err := rejectUndecoded(path, md); err != nil {
 		return nil, err
 	}
@@ -513,6 +528,7 @@ func DefaultGlobal() *Global {
 			AgentMaxTurns:      24,
 			HTTPTimeoutS:       300,
 			TransientRetries:   3,
+			RolePins:           map[string][]string{"triager": {"fallback"}, "scribe": {"fallback"}},
 			Budget: Budget{
 				MaxUSD:        2.00,
 				MaxTokens:     400000,
@@ -727,6 +743,7 @@ func SaveGlobal(path string, cfg *Global) error {
 		return fmt.Errorf("nil global config")
 	}
 	var buf bytes.Buffer
+	buf.WriteString("# mode_ducklings is retired; canonical seats are stored under defaults.mode_seats\n")
 	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
 		return fmt.Errorf("encode global config: %w", err)
 	}
@@ -743,6 +760,59 @@ func SaveGlobal(path string, cfg *Global) error {
 // makes the app unusable until the user hand-writes TOML they have not been
 // shown yet — the engine knows what a valid file looks like, so it writes one.
 // An existing file is never rewritten: the user's edits are theirs.
+// LegacyModeSeats translates the old positional line-up using the canonical
+// role order. It is shared by file migration and API writes so the two paths
+// cannot silently assign different seats.
+func LegacyModeSeats(legacy map[string][]string) map[string]map[string][]string {
+	out := make(map[string]map[string][]string)
+	orders := map[string][]string{
+		"solo":       {"implementer", "advisor"},
+		"pair":       {"implementer", "reviewer"},
+		"council":    {"architect", "reviewer"},
+		"split":      {"architect", "implementer", "reviewer"},
+		"tournament": {"implementer", "judge"},
+	}
+	for mode, ids := range legacy {
+		roles, ok := orders[mode]
+		if !ok || len(ids) == 0 {
+			continue
+		}
+		seats := map[string][]string{}
+		if mode == "council" {
+			seats[roles[0]] = []string{ids[0]}
+			if len(ids) > 1 {
+				seats[roles[1]] = append([]string{}, ids[1:]...)
+			}
+		} else if mode == "pair" || mode == "solo" {
+			seats[roles[0]] = []string{ids[0]}
+			if len(ids) > 1 {
+				seats[roles[1]] = []string{ids[1]}
+			}
+		} else if mode == "tournament" {
+			if len(ids) > 1 {
+				seats[roles[0]] = append([]string{}, ids[:len(ids)-1]...)
+				seats[roles[1]] = []string{ids[len(ids)-1]}
+			} else {
+				seats[roles[0]] = append([]string{}, ids...)
+			}
+		} else { // split: architect, workers, reviewer
+			seats[roles[0]] = []string{ids[0]}
+			if len(ids) > 2 {
+				seats[roles[1]] = append([]string{}, ids[1:len(ids)-1]...)
+				seats[roles[2]] = []string{ids[len(ids)-1]}
+			} else if len(ids) > 1 {
+				seats[roles[1]] = append([]string{}, ids[1:]...)
+			}
+		}
+		out[mode] = seats
+	}
+	return out
+}
+
+func migrateModeSeats(legacy map[string][]string) map[string]map[string][]string {
+	return LegacyModeSeats(legacy)
+}
+
 func EnsureGlobal(path string) (*Global, bool, error) {
 	if _, err := os.Stat(path); err == nil {
 		cfg, err := LoadGlobal(path)

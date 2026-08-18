@@ -19,7 +19,7 @@ func TestTheRosterPreviewSpeaksForTheMode(t *testing.T) {
 	})
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
 		AgentMaxTurns: 24,
-		Ducklings:     map[string][]string{"council": {"pato-dos", "pato-tres"}},
+		ModeSeats:     map[string]map[string][]string{"council": {"architect": {"pato-dos"}, "reviewer": {"pato-tres"}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestTheRosterPreviewSpeaksForTheMode(t *testing.T) {
 			got["architect"].Duckling, got["reviewer"].Duckling)
 	}
 	// And it says WHERE the answer came from, so a person can find the setting.
-	if got["architect"].Source != "council line-up" {
+	if got["architect"].Source != "global mode seat" {
 		t.Errorf("source = %q", got["architect"].Source)
 	}
 	// Two distinct ducklings: no self-critique warning.
@@ -51,7 +51,7 @@ func TestTheRosterPreviewSpeaksForTheMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range bare.Entries {
-		if e.Source == "council line-up" {
+		if e.Source == "global mode seat" {
 			t.Errorf("the bare roster claims a line-up: %+v", e)
 		}
 	}
@@ -68,7 +68,7 @@ func TestTheRosterPreviewListsEveryCritic(t *testing.T) {
 	})
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
 		AgentMaxTurns: 24,
-		Ducklings:     map[string][]string{"council": {"pato-uno", "pato-dos", "pato-tres"}},
+		ModeSeats:     map[string]map[string][]string{"council": {"architect": {"pato-uno"}, "reviewer": {"pato-dos", "pato-tres"}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +81,13 @@ func TestTheRosterPreviewListsEveryCritic(t *testing.T) {
 	for _, e := range view.Entries {
 		if e.Role == "reviewer" {
 			reviewers = append(reviewers, e.Duckling)
-			if e.Source != "council line-up" {
+			if e.Source != "global mode seat" {
 				t.Errorf("critic %s attributed to %q", e.Duckling, e.Source)
 			}
 		}
 	}
-	if len(reviewers) != 2 || reviewers[0] != "pato-dos" || reviewers[1] != "pato-tres" {
-		t.Errorf("preview lists critics %v, want [pato-dos pato-tres]", reviewers)
+	if len(reviewers) != 1 || reviewers[0] != "pato-dos" {
+		t.Errorf("preview lists the canonical reviewer seat %v, want [pato-dos]", reviewers)
 	}
 }
 
@@ -97,8 +97,8 @@ func TestStageCriticsComeFromTheLineup(t *testing.T) {
 	s := writableService(t, "pato-uno", "pato-dos", "pato-tres")
 	// Saving validates existence, so a dead entry can only mean a duckling
 	// deleted after the line-up was saved — planted directly here.
-	s.cfg.Defaults.ModeDucklings = map[string][]string{
-		"council": {"pato-uno", "pato-dos", "pato-gone", "pato-tres"},
+	s.cfg.Defaults.ModeSeats = map[string]map[string][]string{
+		"council": {"architect": {"pato-uno"}, "reviewer": {"pato-dos", "pato-gone", "pato-tres"}},
 	}
 	got := s.stageCritics("council")
 	if len(got) != 2 || got[0] != "pato-dos" || got[1] != "pato-tres" {

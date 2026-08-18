@@ -184,9 +184,9 @@ func TestAChatAboutDucklabCarriesTheHarnessDossier(t *testing.T) {
 
 	prompt := s.chatPromptFor(context.Background(), rs, entry.Path, "ducklab", "")
 	for _, want := range []string{
-		"authoritative description",      // the dossier frames itself as truth
-		"gate is deterministic",          // the laws are in it
-		"suggested next steps",           // and the live state rides beside it
+		"authoritative description",       // the dossier frames itself as truth
+		"gate is deterministic",           // the laws are in it
+		"suggested next steps",            // and the live state rides beside it
 		"Describe what you want to build", // a fresh project's guide says intake
 	} {
 		if !strings.Contains(prompt, want) {
@@ -201,15 +201,15 @@ func TestAChatAboutDucklabCarriesTheHarnessDossier(t *testing.T) {
 // quietly drop one.
 func TestTheDossierWalksTheWholePath(t *testing.T) {
 	for _, must := range []string{
-		"git repository",           // step 1: a place to work
-		"ducklings & providers",    // step 2: a team
-		"intake",                   // step 3: say the idea
-		"[verify]",                 // step 5: the gate that makes "done" mean something
-		"Test first",               // step 6: the build discipline
-		"promote",                  // step 8: bugs become tasks
-		"Autopilot",                // step 9: the unattended loop, gated
-		"Cut tags the version",     // step 10: the release
-		"meet them at their",       // pedagogy: never dump the list
+		"git repository",        // step 1: a place to work
+		"ducklings & providers", // step 2: a team
+		"intake",                // step 3: say the idea
+		"[verify]",              // step 5: the gate that makes "done" mean something
+		"Test first",            // step 6: the build discipline
+		"promote",               // step 8: bugs become tasks
+		"Autopilot",             // step 9: the unattended loop, gated
+		"Cut tags the version",  // step 10: the release
+		"meet them at their",    // pedagogy: never dump the list
 	} {
 		if !strings.Contains(harnessDossier, must) {
 			t.Errorf("the dossier lost %q from the idea-to-release path", must)

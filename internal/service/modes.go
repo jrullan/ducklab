@@ -50,10 +50,10 @@ type loopCache struct {
 	onCall func(*agent.Turn, int, int)
 	// onToolStart says what just began running — the other half of a gate
 	// command's fifteen legal minutes of silence.
-	onToolStart func(*agent.Turn, string, string, json.RawMessage)
+	onToolStart      func(*agent.Turn, string, string, json.RawMessage)
 	onRepetitionLoop func(*agent.Turn, string)
-	mu      sync.Mutex
-	loops   map[config.DucklingID]*agent.Loop
+	mu               sync.Mutex
+	loops            map[config.DucklingID]*agent.Loop
 }
 
 func (c *loopCache) get(ctx context.Context, id config.DucklingID) (*agent.Loop, error) {
@@ -127,40 +127,70 @@ func (s *Service) buildLoop(ctx context.Context, id config.DucklingID, tracker *
 // implementer and reviewer measures self-consistency, not review — the second
 // model exists to be decorrelated, and silently collapsing it to the first
 // would make pair look like it works while doing nothing (05 §3.2).
-func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config.DucklingID, string) {
-	available := make([]config.DucklingID, 0, len(s.cfg.Ducklings))
-	for id := range s.cfg.Ducklings {
-		available = append(available, id)
-	}
-	sort.Slice(available, func(i, j int) bool { return available[i] < available[j] })
-
-	// Roles that must be decorrelated from the implementer get the next
-	// distinct duckling when one exists.
-	fallbackFor := func(role config.Role) config.DucklingID {
-		if len(available) == 0 {
-			return ""
-		}
-		switch role {
-		case config.RoleReviewer, config.RoleJudge, config.RoleAdvisor:
-			if len(available) > 1 {
-				return available[1]
-			}
-		}
-		return available[0]
-	}
-
+func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (map[config.Role]config.DucklingID, map[config.Role]string) {
 	out := map[config.Role]config.DucklingID{}
+	sources := map[config.Role]string{}
+	s.cfgMu.RLock()
+	seats := s.cfg.Defaults.ModeSeats[mode]
+	pins := s.cfg.Defaults.RolePins
+	available := make(map[config.DucklingID]bool, len(s.cfg.Ducklings))
+	for id := range s.cfg.Ducklings {
+		available[id] = true
+	}
+	s.cfgMu.RUnlock()
+	availableIDs := make([]config.DucklingID, 0, len(available))
+	for id := range available {
+		availableIDs = append(availableIDs, id)
+	}
+	sort.Slice(availableIDs, func(i, j int) bool { return availableIDs[i] < availableIDs[j] })
 	for _, role := range config.ValidRoles() {
 		if role == config.RoleHuman {
 			continue
 		}
-		if id, ok := projCfg.Roster[role]; ok && id != "" {
-			out[role] = id
+		if id := projCfg.Roster[role]; id != "" {
+			out[role], sources[role] = id, "project pin"
 			continue
 		}
-		out[role] = fallbackFor(role)
+		for _, id := range seats[string(role)] {
+			if available[config.DucklingID(id)] {
+				out[role], sources[role] = config.DucklingID(id), "global mode seat"
+				break
+			}
+		}
+		if out[role] != "" {
+			continue
+		}
+		for _, id := range pins[string(role)] {
+			if available[config.DucklingID(id)] {
+				out[role], sources[role] = config.DucklingID(id), "global role fallback"
+				break
+			}
+		}
+		if sources[role] == "" {
+			for _, id := range availableIDs {
+				used := false
+				for _, assigned := range out {
+					if assigned == id {
+						used = true
+						break
+					}
+				}
+				if !used {
+					out[role] = id
+					break
+				}
+			}
+			if out[role] == "" && len(availableIDs) > 0 {
+				out[role] = availableIDs[0]
+			}
+			sources[role] = "global role fallback"
+		}
 	}
+	return out, sources
+}
 
+func (s *Service) resolveRoster(projCfg *config.Project) (map[config.Role]config.DucklingID, string) {
+	out, _ := s.resolveCanonicalRoster(projCfg, "")
 	return out, bothSidesWarning(out)
 }
 
@@ -483,21 +513,16 @@ func rosterStrings(r map[config.Role]config.DucklingID) map[string]string {
 }
 
 func (s *Service) rosterSources(projCfg *config.Project, mode string, chosen []string) map[string]string {
-	out := map[string]string{}
-	for _, role := range config.ValidRoles() {
-		if role == config.RoleHuman {
-			continue
-		}
-		source := "spread"
-		if projCfg.Roster[role] != "" {
-			source = "project"
-		} else if len(s.cfg.Defaults.ModeDucklings[mode]) > 0 {
-			source = "settings"
-		}
+	_, sources := s.resolveCanonicalRoster(projCfg, mode)
+	out := make(map[string]string, len(sources))
+	for role, source := range sources {
 		out[string(role)] = source
 	}
+	// A run pick is the highest-priority, non-persistent override. The request
+	// lineup is positional only at the launch boundary; resolution below records
+	// its seats before any configured source can be reported.
 	for i, role := range []config.Role{config.RoleImplementer, config.RoleReviewer} {
-		if (mode == "" || mode == "solo" || mode == "pair") && i < len(chosen) && chosen[i] != "" {
+		if i < len(chosen) && chosen[i] != "" {
 			out[string(role)] = "request"
 		}
 	}
