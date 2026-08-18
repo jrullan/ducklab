@@ -143,6 +143,9 @@ type Run struct {
 	// overwritten if a stale copy was persisted — clients render buttons from
 	// this list and never encode the loop's rules themselves.
 	Next []string `json:"next,omitempty"`
+	// StageRequest is the persisted artifact-stage launch request, exposed on
+	// reads so an operator can replay an amendment without losing its shape.
+	StageRequest map[string]interface{} `json:"stage_request,omitempty"`
 }
 
 // GateReproduction is the result of proving the accepted commit in a clean checkout.

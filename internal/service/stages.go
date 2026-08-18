@@ -240,6 +240,9 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// stage with the same brief, mode and revision, and the request used to
 	// live nowhere a resume could find it.
 	writeStageRequest(rs.runDir, req)
+	if data, err := json.Marshal(req); err == nil {
+		_ = json.Unmarshal(data, &run.StageRequest)
+	}
 
 	go s.executeStage(runCtx, rs, entry.Path, req)
 	return run, nil
@@ -392,6 +395,17 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Mode:        req.Mode,
 		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
+		// An amendment revision edits its own pending fragment, not the
+		// approved plan it originally extended.
+		PriorFragment: func() string {
+			if req.Extend == "" || req.Revise == "" {
+				return ""
+			}
+			if proposed, _ := artifact.LoadProposed(projectRoot, artifact.KindPlan); proposed != nil {
+				return proposed.Raw
+			}
+			return ""
+		}(),
 		Adopt:       req.Adopt,
 		Extend:      req.Extend,
 		Images:      images,

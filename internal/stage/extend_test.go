@@ -25,7 +25,7 @@ func TestTheExtendPromptIsAnOutlineNotTheDocument(t *testing.T) {
 	}}
 	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Snapshot\n\nShows weight.\n")
 
-	prompt, err := buildExtendPrompt(root, plan, "make the header cosmetic change")
+	prompt, err := buildExtendPrompt(root, plan, "make the header cosmetic change", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

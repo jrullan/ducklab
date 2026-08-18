@@ -63,6 +63,9 @@ type Params struct {
 	Revision string
 	// Ducklings that took part, recorded in the artifact's frontmatter.
 	Ducklings []string
+	// PriorFragment is this amendment's earlier task fragment. Unlike the
+	// approved plan outline, it contains the unapproved tasks being revised.
+	PriorFragment string
 	// Critics pins each of a council's critique turns to its own duckling, in
 	// line-up order. Empty seats the roster's single reviewer.
 	Critics []config.DucklingID

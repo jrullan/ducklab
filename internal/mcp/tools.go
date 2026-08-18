@@ -749,10 +749,21 @@ func (s *Server) decide(runID, action, reason string) (map[string]interface{}, e
 		return toolText("rejected", false), nil
 	case "request_changes":
 		projectID, _ := run["project_id"].(string)
-		stage, _ := run["stage"].(string)
-		out, err := s.eng.StageStart(projectID, stage, map[string]interface{}{
-			"revise": reason,
-		})
+		stageName, _ := run["stage"].(string)
+		// An amendment is its own small operation. Replay its persisted request
+		// so its change, solo mode, and one-round limit survive the revision.
+		// Other stages retain the ordinary document-revision path.
+		req := map[string]interface{}{"revise": reason}
+		if saved, ok := run["stage_request"].(map[string]interface{}); ok {
+			if extend, _ := saved["extend"].(string); strings.TrimSpace(extend) != "" {
+				req = make(map[string]interface{}, len(saved)+1)
+				for key, value := range saved {
+					req[key] = value
+				}
+				req["revise"] = reason
+			}
+		}
+		out, err := s.eng.StageStart(projectID, stageName, req)
 		if err != nil {
 			return nil, err
 		}

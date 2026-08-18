@@ -31,7 +31,15 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		return nil, fmt.Errorf("no plan to extend")
 	}
 
-	prompt, err := buildExtendPrompt(p.ProjectRoot, current, p.Extend)
+	prior := p.PriorFragment
+	if prior == "" && p.Drafts != nil {
+		// Tests and direct callers may carry the prior architect fragment via
+		// the stand-pat draft channel; the service supplies the proposal above.
+		if drafts := p.Drafts(); len(drafts) > 0 {
+			prior = drafts[0]
+		}
+	}
+	prompt, err := buildExtendPrompt(p.ProjectRoot, current, p.Extend, p.Revision, previousExtensionFragment(current, prior))
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +120,7 @@ func normalizeFragment(raw string) string {
 // buildExtendPrompt is compact by design: the plan as an OUTLINE (ids and
 // titles — placement and duplicate-checking need no bodies), the spec as a
 // wiring list, the change, and the fragment contract.
-func buildExtendPrompt(projectRoot string, plan *artifact.Document, change string) (string, error) {
+func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, revision, priorFragment string) (string, error) {
 	var b strings.Builder
 
 	memory, err := artifact.LoadMemory(projectRoot)
@@ -127,6 +135,10 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change strin
 		"Return ONLY the new task section(s) — never the rest of the plan; the engine merges " +
 		"your fragment into the document itself.\n\n")
 	b.WriteString("## The change\n\n" + strings.TrimSpace(change) + "\n\n")
+	if strings.TrimSpace(revision) != "" {
+		b.WriteString("## What the operator asked to change\n\n" + strings.TrimSpace(revision) + "\n\n")
+		b.WriteString("## Your previous amendment fragment to revise\n\n" + strings.TrimSpace(priorFragment) + "\n\n")
+	}
 
 	b.WriteString("## The plan today (outline)\n\n")
 	for _, m := range plan.Sections {
@@ -161,6 +173,35 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change strin
 		"- If the change alters what the product IS — its requirements — return NO sections: " +
 		"one sentence saying why, and the person will write a feature brief instead.\n")
 	return b.String(), nil
+}
+
+// previousExtensionFragment extracts only tasks added by the prior amendment.
+// The proposal is a merged plan, but its added task ids do not exist in the
+// approved plan it was based on.
+func previousExtensionFragment(current *artifact.Document, raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	proposed, err := artifact.Parse(raw, artifact.KindPlan)
+	if err != nil || proposed == nil || len(proposed.Sections) == 0 {
+		return raw
+	}
+	existing := map[string]bool{}
+	for _, milestone := range current.Sections {
+		for _, task := range milestone.Children {
+			existing[task.ID] = true
+		}
+	}
+	var b strings.Builder
+	for _, milestone := range proposed.Sections {
+		for _, task := range milestone.Children {
+			if existing[task.ID] {
+				continue
+			}
+			fmt.Fprintf(&b, "## %s — %s\n\n%s\n\n", task.ID, task.Title, task.Body)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // mergeExtension appends the produced tasks to a copy of the current plan:

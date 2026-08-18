@@ -16,7 +16,7 @@ func TestEveryTaskWritingPromptDictatesTheBodyContract(t *testing.T) {
 		t.Error("the plan stage instruction does not dictate Deliverables")
 	}
 	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-001", Title: "Core"}}}
-	extend, err := buildExtendPrompt(t.TempDir(), plan, "add camera capture")
+	extend, err := buildExtendPrompt(t.TempDir(), plan, "add camera capture", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
