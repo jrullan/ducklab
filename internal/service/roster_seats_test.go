@@ -110,8 +110,14 @@ func TestRosterWritesRejectWithTheFieldNamed(t *testing.T) {
 	if _, err := s.RosterSetManyMode(context.Background(), projectID, "pair", "chef", []string{"luna"}); err == nil || !strings.Contains(err.Error(), "role") {
 		t.Errorf("invalid role not named: %v", err)
 	}
-	if _, err := s.RosterSetManyMode(context.Background(), projectID, "split", "implementer", []string{"luna"}); err == nil || !strings.Contains(err.Error(), "two workers") {
-		t.Errorf("split cardinality not enforced at write: %v", err)
+	// Cardinality warns at write and refuses at launch: a split or a
+	// tournament is assembled one seat at a time, so the first pin must land.
+	view, err := s.RosterSetManyMode(context.Background(), projectID, "split", "implementer", []string{"luna"})
+	if err != nil {
+		t.Fatalf("the first worker must be accepted at write: %v", err)
+	}
+	if !strings.Contains(view.Warning, "two workers") {
+		t.Errorf("the board must be told the launch will refuse: %q", view.Warning)
 	}
 	if _, err := s.GlobalRosterSet(context.Background(), "tournament", "implementer", []string{"luna", "terra"}); err != nil {
 		t.Errorf("a valid two-contestant tournament must be accepted: %v", err)

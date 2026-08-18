@@ -54,6 +54,18 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 	if mode == "" || mode == "pair" {
 		warning = bothSidesWarning(resolved)
 	}
+	// The board's per-mode note: what a launch of this mode would refuse
+	// today (a tournament with one contestant, a split with one worker).
+	if mode != "" {
+		if err := s.validateRosterMode(mode, projCfg); err != nil {
+			note := fmt.Sprintf("not runnable yet: %v", err)
+			if warning == "" {
+				warning = note
+			} else {
+				warning += "; " + note
+			}
+		}
+	}
 	view := &RosterView{Warning: warning}
 
 	for _, role := range config.ValidRoles() {
@@ -248,9 +260,11 @@ func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role s
 		projCfg.RosterSeats[config.Role(role)] = ids
 	}
 
-	if err := s.validateRosterMode(mode, projCfg); err != nil {
-		return nil, fmt.Errorf("field ducklings: %v; next: provide a complete valid roster", err)
-	}
+	// Cardinality is a LAUNCH rule, not a write rule: a tournament is built
+	// one contestant at a time, and refusing the first pin because there is
+	// no second yet made the seat impossible to fill from the board. The
+	// write lands; the board is told what the launch will still refuse; the
+	// launch itself (RunStart) keeps the hard check.
 	path := filepath.Join(entry.Path, ".ducklab", "project.toml")
 	if err := writeProjectTOML(path, projCfg); err != nil {
 		return nil, fmt.Errorf("write project.toml: %w", err)
