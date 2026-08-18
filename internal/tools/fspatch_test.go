@@ -127,6 +127,77 @@ func TestAnAmbiguousSearchIsStillRefused(t *testing.T) {
 	}
 }
 
+func TestFSPatchRefusalsEndTheTurnOnTheFifthRefusalPerFile(t *testing.T) {
+	const maxRefusalsBeforeTurnEnd = 5
+
+	root := t.TempDir()
+	for _, name := range []string{"target.go", "other.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package target\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ectx := &ExecContext{ProjectRoot: root}
+	registry := NewRegistry()
+	patch := func(path, search string) *Result {
+		t.Helper()
+		args, err := json.Marshal(map[string]interface{}{
+			"path": path,
+			"edits": []map[string]string{{"search": search, "replace": "replacement"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := registry.Execute(context.Background(), ectx, "fs_patch", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	// Five failed patches engage the existing brake; they are not refusals.
+	for i := 1; i <= FSPatchFailLimit; i++ {
+		if result := patch("target.go", "missing-"+strconv.Itoa(i)); !result.IsError || strings.Contains(result.Content, "REFUSED") {
+			t.Fatalf("failure %d = %#v; want a non-refusal error", i, result)
+		}
+	}
+
+	// The first four knocks on the brake retain its existing rewrite remedy.
+	for refusal := 1; refusal < maxRefusalsBeforeTurnEnd; refusal++ {
+		result := patch("target.go", "refused-"+strconv.Itoa(refusal))
+		if !result.IsError || !strings.Contains(result.Content, "REFUSED") {
+			t.Fatalf("refusal %d = %#v; want REFUSED error", refusal, result)
+		}
+		if !strings.Contains(result.Content, "fs_write_lines") || !strings.Contains(result.Content, "fs_write") {
+			t.Errorf("refusal %d lacks rewrite remedy: %q", refusal, result.Content)
+		}
+		if strings.Contains(result.Content, "end your reply") {
+			t.Errorf("refusal %d ended the turn early: %q", refusal, result.Content)
+		}
+	}
+
+	// Refusals are per file: another file starts at its own first refusal.
+	for i := 1; i <= FSPatchFailLimit; i++ {
+		patch("other.go", "other-missing-"+strconv.Itoa(i))
+	}
+	if other := patch("other.go", "other-refused"); !other.IsError || !strings.Contains(other.Content, "REFUSED") || strings.Contains(other.Content, "end your reply") {
+		t.Fatalf("other.go inherited target.go's refusal count: %#v", other)
+	}
+
+	last := patch("target.go", "terminal-refusal")
+	if !last.IsError || !strings.Contains(last.Content, "REFUSED") {
+		t.Fatalf("fifth refusal = %#v; want terminal refusal", last)
+	}
+	if !strings.Contains(last.Content, "fs_write_lines") || !strings.Contains(last.Content, "fs_write") {
+		t.Errorf("terminal refusal lacks rewrite remedy: %q", last.Content)
+	}
+	// Match the gate brake's explicit instruction that makes this the last tool
+	// result of the turn, rather than another invitation to vary the patch.
+	if !strings.Contains(last.Content, "end your reply") {
+		t.Errorf("terminal refusal does not end the turn: %q", last.Content)
+	}
+}
+
 func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "target.go")

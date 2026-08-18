@@ -1325,3 +1325,23 @@ When an operator selects or focuses a seat, prioritize the most relevant evidenc
 
 **Out of scope:** Automatic assignment, new role types, changing roster resolution, or exposing recommendations based on undeclared external or web-fetched data.
 
+### T-069 — End the turn after repeated fs_patch-brake refusals on one file
+
+Fixes B-057.
+
+## Reported
+
+What happened: T-058's build hit the fs_patch brake on tools.go (working as designed: instant refusals, remedy named, zero file churn — a huge upgrade over the 83-failure massacres it was built for). But the implementer generated 20+ fresh fs_patch variations against the same refusal before finally following the remedy, burning call budget on a wall that had already spoken. The brake protects the world; nothing concludes the loop.\n\nExpected: refusals count toward their own escalation — after N refused attempts on the same tool+file (say 5 more past the brake), the TURN ends with the remedy as the parting instruction, the same way the gate brake ends a run with orders to stop and explain. A wall that has said no six times should stop accepting knocks and close the door.
+
+## Triage
+
+**Component:** tool dispatch
+**Suspected files:** internal/tools/tools.go, internal/tools/fs.go, internal/tools/fspatch_test.go
+
+B-029 added the per-file failure brake but does not escalate repeated refusals into terminating the futile turn.
+
+**Verification (triage recommends):** test-first — Exercise repeated refused fs_patch calls for one file and assert the threshold ends the turn with the rewrite remedy.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+

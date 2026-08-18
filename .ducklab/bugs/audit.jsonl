@@ -257,3 +257,7 @@
 {"ts":"2026-08-18T18:12:43Z","bug":"B-071","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-18T18:12:46Z","bug":"B-071","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-18T18:12:49Z","bug":"B-071","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T18:32:06Z","bug":"B-072","from":"open","to":"triaged","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T18:32:09Z","bug":"B-072","from":"triaged","to":"in_progress","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T18:32:12Z","bug":"B-072","from":"in_progress","to":"fixed","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T19:45:05Z","bug":"B-057","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-069"}
