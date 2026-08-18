@@ -5,7 +5,11 @@
 package internal
 
 import (
-	"os/exec"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,19 +17,78 @@ import (
 const modulePath = "github.com/jrullan/ducklab"
 
 // deps returns the transitive ducklab-internal dependencies of a package.
+//
+// It reads the source files itself rather than asking `go list`. A test that
+// shells out is opaque to Go's test cache — the cache keys on the files the
+// test process opens, and a subprocess opens nothing it can see — so after
+// internal/mcp gained an import of internal/service the cached "ok" stood
+// while the clean checkout said FAIL (B-070). Reading the files here makes
+// every import edge an input the cache tracks: change one, and the test
+// runs again.
 func deps(t *testing.T, pkg string) map[string]bool {
 	t.Helper()
-	out, err := exec.Command("go", "list", "-deps", pkg).Output()
+	root, err := filepath.Abs("..")
 	if err != nil {
-		t.Skipf("go list unavailable: %v", err)
+		t.Fatal(err)
 	}
 	got := map[string]bool{}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, modulePath+"/") {
-			got[strings.TrimPrefix(line, modulePath+"/")] = true
+	var walk func(rel string)
+	walk = func(rel string) {
+		if got[rel] {
+			return
+		}
+		got[rel] = true
+		for _, imp := range importsOf(t, filepath.Join(root, filepath.FromSlash(rel))) {
+			if strings.HasPrefix(imp, modulePath+"/") {
+				walk(strings.TrimPrefix(imp, modulePath+"/"))
+			}
 		}
 	}
+	walk(strings.TrimPrefix(pkg, modulePath+"/"))
 	return got
+}
+
+// importsOf lists the imports of the non-test Go files in dir. Build tags are
+// not honoured: a dependency behind a tag is still a dependency the rule
+// must see.
+func importsOf(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read package dir %s: %v", dir, err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, spec := range f.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err != nil || seen[path] {
+				continue
+			}
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// directImports lists a package's own imports (not transitive).
+func directImports(t *testing.T, pkg string) []string {
+	t.Helper()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return importsOf(t, filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(pkg, modulePath+"/"))))
 }
 
 // AC-16 / 01 §4.1: the CLI is a client. If it can reach a domain package it
@@ -70,18 +133,50 @@ func TestToolsDoesNotImportOrchestration(t *testing.T) {
 
 // Nothing may import the client packages: they are the outermost layer.
 func TestNoPackageImportsCLI(t *testing.T) {
-	out, err := exec.Command("go", "list", "./...").Output()
-	if err != nil {
-		t.Skipf("go list unavailable: %v", err)
-	}
-	for _, pkg := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if pkg == "" || strings.HasSuffix(pkg, "/internal/cli") || strings.HasSuffix(pkg, "/cmd/ducklab") {
+	for _, pkg := range allPackages(t) {
+		if pkg == "internal/cli" || pkg == "cmd/ducklab" {
 			continue
 		}
-		if deps(t, pkg)["internal/cli"] {
+		if deps(t, modulePath+"/"+pkg)["internal/cli"] {
 			t.Errorf("%s imports internal/cli", pkg)
 		}
 	}
+}
+
+// allPackages walks the module for directories holding non-test Go files —
+// the same set `go list ./...` would name, found by reading the tree so the
+// cache sees it.
+func allPackages(t *testing.T) []string {
+	t.Helper()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkgs []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules" || name == "testdata" || name == "dist") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go") {
+			rel, _ := filepath.Rel(root, filepath.Dir(path))
+			rel = filepath.ToSlash(rel)
+			if len(pkgs) == 0 || pkgs[len(pkgs)-1] != rel {
+				pkgs = append(pkgs, rel)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkgs
 }
 
 // engineapi is a transport shim; it must not reach past service into the
@@ -93,12 +188,7 @@ func TestEngineAPIDoesNotImportStrategyDirectly(t *testing.T) {
 	}
 	// engineapi reaches strategy only transitively through service, which is
 	// fine; what matters is that it never grows its own orchestration.
-	out, err := exec.Command("go", "list", "-f", "{{join .Imports \"\\n\"}}",
-		modulePath+"/internal/engineapi").Output()
-	if err != nil {
-		t.Skip()
-	}
-	for _, imp := range strings.Split(string(out), "\n") {
+	for _, imp := range directImports(t, modulePath+"/internal/engineapi") {
 		switch strings.TrimPrefix(imp, modulePath+"/") {
 		case "internal/strategy", "internal/agent", "internal/conv", "internal/stage":
 			t.Errorf("engineapi imports %s directly; handlers must call service only", imp)

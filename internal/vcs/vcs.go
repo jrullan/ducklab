@@ -79,6 +79,23 @@ func (g *Git) HeadSHA() (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// UncommitOwn undoes a commit this process made a moment ago, keeping its
+// changes in the working tree and index. It refuses unless sha is HEAD: the
+// only commit that is safe to take back is the one nobody could have built
+// on yet. History moves back one step; the diff stays where the person and
+// the next accept can see it.
+func (g *Git) UncommitOwn(sha string) error {
+	head, err := g.HeadSHA()
+	if err != nil {
+		return fmt.Errorf("read HEAD before uncommit: %w", err)
+	}
+	if head != strings.TrimSpace(sha) {
+		return fmt.Errorf("HEAD is %s, not %s; another commit landed on top", head[:min(8, len(head))], sha[:min(8, len(sha))])
+	}
+	_, err = g.run("reset", "--soft", "HEAD~1")
+	return err
+}
+
 // IsClean returns whether the working tree is clean.
 func (g *Git) IsClean() (bool, error) {
 	out, err := g.run("status", "--porcelain")

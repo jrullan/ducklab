@@ -1966,6 +1966,22 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	}
 	reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage)
 	if err != nil {
+		// Nothing lands that did not reproduce. The commit above was ours and
+		// a moment old; leaving it on the branch made the run undecidable
+		// (B-069): accept re-verified the same red sha forever, and reject
+		// refused because "a commit landed since the run began" — its own.
+		// Take the commit back, keep the diff in the tree, and return the
+		// failure: the person can fix the tree and accept (a new commit,
+		// verified again) or reject (the tree restores cleanly).
+		if uerr := git.UncommitOwn(sha); uerr != nil {
+			rs.writer.AppendEvent("warning", map[string]interface{}{
+				"detail": fmt.Sprintf("the unreproducible commit %s could not be taken back: %v", short(sha), uerr),
+			})
+		} else {
+			rs.writer.AppendEvent("commit_withdrawn", map[string]interface{}{
+				"sha": sha, "detail": "the accept commit did not reproduce from a clean checkout; its diff stays in the tree, uncommitted",
+			})
+		}
 		return err
 	}
 	rs.run.GateReproduced = reproduction
