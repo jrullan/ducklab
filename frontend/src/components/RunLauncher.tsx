@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Duckling, RosterEntry } from "../api/client";
-import { money } from "../lib/format";
 import { fixedSeats, seatLabel } from "../lib/seats";
 import { SeatChips, type MeasuredSpend } from "./SeatChips";
 
@@ -81,7 +80,7 @@ export function LaunchConfig({
             return (
               <option key={m} value={m}>
                 {m}
-                {avg !== undefined ? ` · ~${money(avg)}` : ""}
+                {avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}
               </option>
             );
           })}
@@ -98,6 +97,7 @@ export function LaunchConfig({
           fleet={[...ducklings]}
           measured={measured}
           allowDefault
+          stack
           optionsFor={(i) =>
             ducklings.filter((d) => d.id === value.ducklings[i] || !value.ducklings.includes(d.id))
           }
@@ -275,7 +275,7 @@ export function RunLauncher({
             return (
               <option key={m} value={m}>
                 {m}
-                {avg !== undefined ? ` · ~${money(avg)}` : ""}
+                {avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}
               </option>
             );
           })}

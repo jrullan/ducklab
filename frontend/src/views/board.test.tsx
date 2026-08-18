@@ -207,8 +207,7 @@ describe("Board, the bugs half", () => {
       ...BUGS,
       { id: "B-010", title: "Long " + "title ".repeat(40), severity: "high", status: "open", source: "mcp", reporter: "mcp:claude-code",
         body: "What happened: the brake refused.\\n\\nExpected: it concludes.", created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z" },
-      { id: "B-020", title: "Done one", severity: "normal", status: "verified", source: "manual", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
-      { id: "B-021", title: "Done two", severity: "normal", status: "verified", source: "manual", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" },
+      ...Array.from({ length: 7 }, (_, i) => ({ id: `B-02${i}`, title: i === 0 ? "Done one" : `Done ${i + 1}`, severity: "normal", status: "verified", source: "manual", created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z" }) as Bug),
     ];
     const client = clientWith((p) => {
       if (p.includes("/bugs")) return json({ items: many, total: many.length });
@@ -217,10 +216,10 @@ describe("Board, the bugs half", () => {
     });
     render(<Board client={client} projectId="p" tab="bugs" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card").length).toBeGreaterThan(3));
-    // Verified is folded: its two cards are not on the board, its count is.
-    expect(screen.getByTestId("board-col-verified").textContent).toContain("Verified · 2");
+    // Verified is folded past a handful: its seven cards are not on the board, its count is.
+    expect(screen.getByTestId("board-col-verified").textContent).toContain("Verified · 7");
     expect(screen.queryByText("Done one")).toBeNull();
-    fireEvent.click(screen.getByTestId("board-verified-toggle"));
+    fireEvent.click(screen.getByTestId("board-archive-toggle"));
     await waitFor(() => expect(screen.getByText("Done one")).toBeTruthy());
     // Empty Fixed is a strip; Open with work is wide.
     expect(screen.getByTestId("board-col-fixed").className).toContain("w-28");
@@ -240,7 +239,7 @@ describe("Board, the bugs half", () => {
     expect(body.textContent).not.toContain("\\n");
     // Toolbar: triage is the primary action, filters left, count reads "all N".
     expect(screen.getByTestId("bug-triage").className).toContain("font-medium");
-    expect(screen.getByText(/^all 6$/)).toBeTruthy();
+    expect(screen.getByText(/^all 11$/)).toBeTruthy();
   });
 });
 
@@ -816,7 +815,15 @@ describe("the rail follows the contract's order", () => {
     }) as unknown as EngineClient;
   const openRail = async () => {
     fireEvent.click(await screen.findByText("A task"));
-    return screen.findByTestId("task-runner");
+    const runner = await screen.findByTestId("task-runner");
+    // The button leads; seats and caps fold beneath "adjust seats & caps".
+    // The TDD tests are about the seats, so they unfold them when offered.
+    const tune = screen.queryByTestId("tdd-tune");
+    if (tune) {
+      fireEvent.click(tune);
+      await screen.findByTestId("tdd-tuning");
+    }
+    return runner;
   };
 
   it("puts the two-phase TDD block on top when the engine states test_first first", async () => {
@@ -1144,5 +1151,54 @@ describe("board rail contains its own scroll", () => {
     fireEvent.click(await screen.findByText("A thing"));
     const rail = await screen.findByTestId("board-rail");
     expect(rail.className).toContain("overscroll-contain");
+  });
+});
+
+// The tasks board after a long adopt: one card to do, sixty-seven accepted.
+// Accepted is the archive and folds past a handful; "spec-debt" is said once
+// above the board (a label of exception on every card means nothing); the
+// "Ready to start" line yields when that task is already open; the body is
+// rendered as markdown; "Fixes B-0xx" links to the bug; the gate command is
+// one line; the launcher leads with its button and a summary line.
+describe("Board — the tasks board at scale", () => {
+  it("folds the accepted archive, says spec-debt once, and renders the task", async () => {
+    const many: Task[] = [
+      { id: "T-069", title: "End the turn after repeated refusals", milestone: "M-001", status: "todo", spec_debt: true, next: ["test_first", "run"],
+        body: "Fixes B-057.\n\n## Reported\n\nWhat happened: the brake refused." },
+      ...Array.from({ length: 8 }, (_, i) => ({ id: `T-00${i + 1}`, title: `Done ${i + 1}`, milestone: "M-001", status: "accepted", spec_debt: true }) as Task),
+    ];
+    const client = clientWith((p) => {
+      if (p.includes("/tasks/next")) return json(many[0]);
+      if (p.includes("/tasks")) return json({ items: many, total: many.length });
+      if (p.includes("/bugs")) return json({ items: [], total: 0 });
+      if (p.includes("/defaults/modes")) return json({ rounds: {}, agent_max_turns: 24, build_mode: "pair", test_mode: "solo", ducklings: {} });
+      return json({}, 404);
+    });
+    render(<Board client={client} projectId="p" />);
+    await waitFor(() => expect(screen.getByTestId("board-col-accepted").textContent).toContain("Accepted · 8"));
+    expect(screen.queryByText("Done 1")).toBeNull();
+    expect(screen.getByTestId("spec-debt-banner").textContent).toContain("8 accepted tasks carry spec-debt");
+    // The one todo card carries no spec-debt sticker in the archive sense —
+    // it is not accepted, so its own sticker stays.
+    expect(screen.getAllByTestId("spec-debt")).toHaveLength(1);
+    // Ready-to-start names T-069 until it is opened.
+    expect(screen.getByTestId("task-next").textContent).toContain("T-069");
+    fireEvent.click(screen.getByText("End the turn after repeated refusals"));
+    await waitFor(() => expect(screen.queryByTestId("task-next")).toBeNull());
+    // Body as markdown: a heading, not "## Reported"; the fix link.
+    const body = await screen.findByTestId("task-body");
+    expect(body.querySelector("h4")?.textContent).toBe("Reported");
+    expect(body.textContent).not.toContain("## ");
+    expect(screen.getByTestId("task-fixes").textContent).toBe("B-057");
+    // The launcher: button first, one-line summary, seats folded.
+    const block = screen.getByTestId("tdd-block");
+    const start = block.querySelector('[data-testid="tdd-start"]')!;
+    const summary = block.querySelector('[data-testid="tdd-summary"]')!;
+    expect(start.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(summary.textContent).toMatch(/^test: solo · .* → build: pair · /);
+    expect(block.querySelector('[data-testid="tdd-tuning"]')).toBeNull();
+    // Open the archive on demand.
+    fireEvent.click(screen.getByTestId("board-archive-toggle"));
+    await waitFor(() => expect(screen.getByText("Done 1")).toBeTruthy());
   });
 });

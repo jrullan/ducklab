@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
+import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
 import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
@@ -31,6 +32,8 @@ const COLUMNS = [
 // The bug loop's columns (08 §4.3). duplicate, wontfix and closed are decided
 // outcomes rather than places work sits, so they are not columns; a board that
 // showed them would be mostly archive.
+const ARCHIVE_FOLD_AT = 6;
+
 const BUG_COLUMNS = [
   { key: "open", label: "Open" },
   { key: "triaged", label: "Triaged" },
@@ -113,7 +116,7 @@ export function Board({
   // state told you to go and run `ducklab bug add`. On a desktop-only setup the
   // whole loop was unreachable.
   const [filing, setFiling] = useState(false);
-  const [verifiedOpen, setVerifiedOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [bugTitle, setBugTitle] = useState("");
   const [bugBody, setBugBody] = useState("");
   const [bugSeverity, setBugSeverity] = useState("normal");
@@ -287,6 +290,7 @@ export function Board({
 
   const isBugs = board === "bugs";
   const total = isBugs ? bugs.length : tasks.length;
+  const specDebtCount = tasks.filter((t) => t.status === "accepted" && t.spec_debt).length;
   const shownCount = isBugs ? shownBugs.length : shownTasks.length;
   const decidedStatuses = ["closed", "duplicate", "wontfix"];
   const decided = bugs.filter((b) => decidedStatuses.includes(b.status));
@@ -312,7 +316,7 @@ export function Board({
         {/* One line, above the columns: the answer, not a nudge. It disappears
             when there is nothing ready, which is itself the answer — everything
             is done, running, or waiting on something. */}
-        {!isBugs && next && (
+        {!isBugs && next && selected !== next.id && (
           <p className="mb-3 text-sm text-ink-secondary" data-testid="task-next">
             Ready to start:{" "}
             <button
@@ -326,6 +330,15 @@ export function Board({
           </p>
         )}
 
+        {/* Said once, not sixty-seven times: a label of exception on every
+            accepted card stops meaning anything. The count and the door to
+            settle it, above the board. */}
+        {!isBugs && specDebtCount > 0 && (
+          <p className="mb-3 text-xs text-warn" data-testid="spec-debt-banner">
+            {specDebtCount} accepted task{specDebtCount === 1 ? "" : "s"} carr{specDebtCount === 1 ? "ies" : "y"} spec-debt — no spec section covers {specDebtCount === 1 ? "it" : "them"} yet;{" "}
+            <a href="#/cycle/spec" className="underline">settle the spec</a> to teach it what was built.
+          </p>
+        )}
         {empty && (
           <div className="mb-3">
             <EmptyState message="Nothing here yet. Plan the work from Cycle, or file a report with the button below." />
@@ -561,31 +574,35 @@ export function Board({
           </p>
         )}
 
-        <div className={isBugs ? "flex items-start gap-2" : "grid grid-cols-5 gap-2"}>
+        <div className="flex items-start gap-2">
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
               ? shownBugs.filter((b) => b.status === col.key)
               : shownTasks.filter((t) => t.status === col.key);
-            // Verified is the archive, not the work: 57 cards there are
-            // permanent noise. Folded to its count by default; empty columns
-            // shrink to a strip; the width goes to columns with work.
-            const folded = isBugs && col.key === "verified" && !verifiedOpen && items.length > 0;
-            const strip = isBugs && (items.length === 0 || folded);
-            if (isBugs && folded) {
+            // Verified (bugs) and Accepted (tasks) are the archive, not the
+            // work: 57 or 67 cards there are permanent noise. Folded to the
+            // count by default; empty columns shrink to a strip; the width
+            // goes to columns with work.
+            const archive = col.key === (isBugs ? "verified" : "accepted");
+            // A handful of finished cards is context; dozens are noise. Fold
+            // past a handful.
+            const folded = archive && !archiveOpen && items.length > ARCHIVE_FOLD_AT;
+            const strip = items.length === 0 || folded;
+            if (folded) {
               return (
                 <section key={col.key} data-testid={`board-col-${col.key}`} className="w-28 shrink-0">
-                  <button type="button" data-testid="board-verified-toggle" onClick={() => setVerifiedOpen(true)} className="w-full rounded border border-dashed border-hairline px-2 py-2 text-left text-sm text-ink-muted hover:text-ink" title="show the verified archive">
+                  <button type="button" data-testid="board-archive-toggle" onClick={() => setArchiveOpen(true)} className="w-full rounded border border-dashed border-hairline px-2 py-2 text-left text-sm text-ink-muted hover:text-ink" title={`show the ${col.label.toLowerCase()} archive`}>
                     {col.label} · {items.length} ›
                   </button>
                 </section>
               );
             }
             return (
-              <section key={col.key} data-testid={`board-col-${col.key}`} className={isBugs ? (strip ? "w-28 shrink-0" : "min-w-0 flex-1") : undefined}>
+              <section key={col.key} data-testid={`board-col-${col.key}`} className={strip ? "w-28 shrink-0" : "min-w-0 flex-1"}>
                 <h2 className="mb-2 flex items-baseline text-sm text-ink-muted">
                   {col.label}
                   <span className="ml-1 text-ink-muted">{items.length}</span>
-                  {isBugs && col.key === "verified" && verifiedOpen && <button type="button" className="ml-auto text-xs underline" data-testid="board-verified-toggle" onClick={() => setVerifiedOpen(false)}>fold</button>}
+                  {archive && archiveOpen && <button type="button" className="ml-auto text-xs underline" data-testid="board-archive-toggle" onClick={() => setArchiveOpen(false)}>fold</button>}
                 </h2>
                 <ul className="space-y-2">
                   {items.map((it) => (
@@ -634,7 +651,7 @@ export function Board({
                             covered by {(it as Task).implements!.join(", ")}
                           </div>
                         )}
-                        {!isBugs && (it as Task).spec_debt && (
+                        {!isBugs && (it as Task).spec_debt && (it as Task).status !== "accepted" && (
                           <div
                             data-testid="spec-debt"
                             className="mt-1 text-xs text-warn"
@@ -752,6 +769,7 @@ function TaskRail({
   onDone: () => void;
   measured?: MeasuredSpend;
 }) {
+  const fixes = /\bFixes\s+(B-\d+)/.exec(task.body ?? "")?.[1];
   return (
     <div className="space-y-2">
       <div className="font-mono text-xs text-ink-muted">{task.id}</div>
@@ -781,10 +799,15 @@ function TaskRail({
         <Row label="milestone" value={task.milestone} />
         <Row label="implements" value={task.implements?.join(", ")} />
         <Row label="depends on" value={task.depends_on?.join(", ")} />
+        {fixes && (
+          <div className="flex gap-2"><dt className="w-24 shrink-0">fixes</dt><dd><a href="#/board/bugs" data-testid="task-fixes" className="text-ink underline">{fixes}</a></dd></div>
+        )}
       </dl>
+      {/* The body is markdown (a promoted bug carries "## Reported"): render
+          it, do not print the hashes. */}
       {task.body && (
         <div className="max-h-72 overflow-y-auto overscroll-contain border-t border-hairline pt-2" data-testid="task-body">
-          <p className="whitespace-pre-wrap text-sm text-ink-secondary">{task.body}</p>
+          <Prose body={task.body} suppress={[]} />
         </div>
       )}
     </div>
@@ -1372,7 +1395,9 @@ function GateState({
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="gate-state">
       <span className="text-ink-muted">gate</span>
-      <span className="min-w-0 break-all font-mono text-ink-secondary">{command || gate}</span>
+      {/* One line: the command rarely changes and is whole on hover; the
+          block used to spend three rows on it. */}
+      <span className="min-w-0 max-w-[16rem] truncate font-mono text-ink-secondary" title={command || gate}>{command || gate}</span>
       {result ? (
         <StatusChip
           role={result.green ? "good" : "critical"}

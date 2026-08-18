@@ -33,6 +33,7 @@ export function SeatChips({
   onPick,
   optionsFor,
   allowDefault = false,
+  stack = false,
 }: {
   entries: SeatEntry[];
   fleet: Duckling[];
@@ -42,6 +43,10 @@ export function SeatChips({
   optionsFor?: (index: number) => Duckling[];
   /** Offer "default" (empty) — the roster decides that seat. */
   allowDefault?: boolean;
+  /** One chip per row: in a narrow rail a chip that carries role, duckling,
+   *  provenance and facts overflows and wraps mid-word. Stacked, each reads
+   *  as a line of a seating list. */
+  stack?: boolean;
 }) {
   const colors = assignDucklingColors(fleet);
   const [open, setOpen] = useState<number | null>(null);
@@ -49,7 +54,7 @@ export function SeatChips({
   // here without a remount or a save button.
   const facts = useChipFacts();
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="seat-chips">
+    <div className={stack ? "flex flex-col items-start gap-1" : "flex flex-wrap items-center gap-2"} data-testid="seat-chips">
       {entries.map((e, i) => {
         const d = fleet.find((x) => x.id === e.duckling);
         const m = measured?.[e.duckling];

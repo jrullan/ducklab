@@ -43,33 +43,18 @@ export function TddLaunch({
   const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, _prevMode: string) => {
     set(next);
   };
+  const [tuning, setTuning] = useState(false);
+  // One line saying what a click does: modes and who is seated (the picked
+  // duckling, else the roster's), and the build's measured cost when known.
+  const seatFor = (cfg: PhaseConfig, role: string, index: number) =>
+    cfg.ducklings[index] || (Array.isArray(roster) ? roster.find((r) => r.role === role)?.duckling : undefined) || "roster";
+  const est = estimates?.[buildCfg.mode];
+  const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
+  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildCfg.mode} · ${seatFor(buildCfg, "implementer", 0)}${buildCfg.mode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 1)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
-      <div>
-        <div className="text-xs font-medium text-ink-muted">1 · write the failing test</div>
-        <LaunchConfig
-          measured={measured}
-          ducklings={ducklings}
-          value={testCfg}
-          onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
-          modes={["solo", "pair"]}
-          roster={roster}
-          defaultProvenance="roster"
-        />
-      </div>
-      <div>
-        <div className="text-xs font-medium text-ink-muted">2 · build until it passes</div>
-        <LaunchConfig
-          measured={measured}
-          ducklings={ducklings}
-          value={buildCfg}
-          onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
-          estimates={estimates}
-          showTokens
-          roster={roster}
-          defaultProvenance="roster"
-        />
-      </div>
+      {/* The common case is one click; the button leads. Seats and caps are
+          the exception and fold beneath. */}
       <button
         type="button"
         onClick={() => onTdd(testCfg, buildCfg)}
@@ -79,6 +64,39 @@ export function TddLaunch({
       >
         {busy ? "Starting…" : "Test first → Build"}
       </button>
+      <div className="flex items-center gap-2 text-xs text-ink-muted">
+        <span className="min-w-0 truncate" data-testid="tdd-summary" title={summary}>{summary}</span>
+        <button type="button" data-testid="tdd-tune" aria-expanded={tuning} onClick={() => setTuning((v) => !v)} className="ml-auto shrink-0 underline hover:text-ink">{tuning ? "hide" : "adjust seats & caps"}</button>
+      </div>
+      {tuning && (
+        <div className="space-y-2 border-t border-hairline pt-2" data-testid="tdd-tuning">
+          <div>
+            <div className="text-xs font-medium text-ink-muted">1 · write the failing test</div>
+            <LaunchConfig
+              measured={measured}
+              ducklings={ducklings}
+              value={testCfg}
+              onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
+              modes={["solo", "pair"]}
+              roster={roster}
+              defaultProvenance="roster"
+            />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-ink-muted">2 · build until it passes</div>
+            <LaunchConfig
+              measured={measured}
+              ducklings={ducklings}
+              value={buildCfg}
+              onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
+              estimates={estimates}
+              showTokens
+              roster={roster}
+              defaultProvenance="roster"
+            />
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-3 text-xs">
         <button
           type="button"
