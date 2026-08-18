@@ -287,22 +287,29 @@ func (s *Server) roster(a args) (map[string]interface{}, error) {
 	if scope == "project" && project == "" {
 		return nil, fmt.Errorf("field project_id is required for project scope; next: provide a project id")
 	}
-	if action == "get" {
-		if scope == "global" {
-			return s.eng.GlobalRosterGet(a.str("mode"))
-		}
-		return s.eng.RosterGet(project, a.str("mode"))
+	// Every tool answers in the MCP envelope (toolJSON): a raw map at the
+	// result level is not a tool result to an MCP client, and the reviewer
+	// caught roster() being the one tool that returned one.
+	var view map[string]interface{}
+	var err error
+	switch {
+	case action == "get" && scope == "global":
+		view, err = s.eng.GlobalRosterGet(a.str("mode"))
+	case action == "get":
+		view, err = s.eng.RosterGet(project, a.str("mode"))
+	case scope == "global" && action == "unpin":
+		return nil, fmt.Errorf("field action: global roster has no unpin; next: use project scope to remove a project pin")
+	case scope == "global":
+		view, err = s.eng.GlobalRosterSet(a.str("mode"), a.str("role"), rosterDucklings(a))
+	case action == "unpin":
+		view, err = s.eng.RosterUnpin(project, a.str("mode"), a.str("role"))
+	default:
+		view, err = s.eng.RosterSetManyMode(project, a.str("mode"), a.str("role"), rosterDucklings(a))
 	}
-	if scope == "global" {
-		if action == "unpin" {
-			return nil, fmt.Errorf("field action: global roster has no unpin; next: use project scope to remove a project pin")
-		}
-		return s.eng.GlobalRosterSet(a.str("mode"), a.str("role"), rosterDucklings(a))
+	if err != nil {
+		return nil, err
 	}
-	if action == "unpin" {
-		return s.eng.RosterUnpin(project, a.str("mode"), a.str("role"))
-	}
-	return s.eng.RosterSetManyMode(project, a.str("mode"), a.str("role"), rosterDucklings(a))
+	return toolJSON(view), nil
 }
 
 func rosterDucklings(a args) []string {

@@ -73,7 +73,12 @@ func TestRosterGetDelegatesCanonicalViewsByScope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := result.(map[string]interface{})
+		env := result.(map[string]interface{})
+		content := env["content"].([]map[string]interface{})
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(content[0]["text"].(string)), &m); err != nil {
+			t.Fatalf("roster get did not answer in the MCP envelope: %#v", env)
+		}
 		if m["scope"] == "global" && tc.want != "global" {
 			t.Fatalf("wrong project view: %#v", m)
 		}
