@@ -543,3 +543,17 @@ describe("recorded reasoning survives a relaunch", () => {
     expect(turns[0]!.reasoning).toContain("session cookie path");
   });
 });
+
+// Movement is how this UI says "working" — the ducks bob — and a still cog
+// under a minutes-long gate read as a hang. It turns while the suite runs
+// and stops the moment the gate settles.
+it("the gate's cog turns while running and rests when settled", () => {
+  const running = { key: "g1", round: 1, turn: -1, role: "gate", duckling: "gate", toolCalls: [], text: "", done: false, messageOnly: true, gate: "running" } as never;
+  const { unmount } = render(<ConversationTurn block={running} roster={[]} />);
+  expect(screen.getByTestId("gate-cog").getAttribute("data-turning")).toBe("true");
+  expect(screen.getByTestId("gate-cog").className).toContain("cog-turn");
+  unmount();
+  const settled = { ...(running as object), done: true, gate: "green" } as never;
+  render(<ConversationTurn block={settled} roster={[]} />);
+  expect(screen.getByTestId("gate-cog").getAttribute("data-turning")).toBe("false");
+});
