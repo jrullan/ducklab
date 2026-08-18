@@ -380,6 +380,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// The gate before anything is written. A suite that was already red stays
 	// red for its own reasons, and reading that as "the new test fails" would
 	// accept a test that asserts nothing (05 §5.2).
+	// Announced BEFORE it runs: the suite takes minutes, and a transcript
+	// that stays blank while it does reads as an engine hang or a bug —
+	// the person must see that something is happening and what.
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "before",
+		"detail": "running the suite before any test is written — a red test only means something against a green baseline",
+	})
 	before, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate before: %w", err))
@@ -491,6 +498,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		return
 	}
 
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "after",
+		"detail": "running the suite over the new test — an honest red is the deliverable",
+	})
 	after, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate after: %w", err))

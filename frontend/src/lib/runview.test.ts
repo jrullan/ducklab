@@ -552,3 +552,29 @@ describe("humaniseContract", () => {
     expect(humaniseContract("advisor", '{"action":"dance"}')).toBeNull();
   });
 });
+
+
+// A test-first's baseline suite takes minutes before any model speaks; the
+// blank read as a hang. The announcement opens a gate turn wearing its own
+// words, the settled gate event closes it, and the rail says "baseline".
+describe("the announced test-first gate", () => {
+  const ev = (type: string, data: Record<string, unknown>, seq: number) => ({ type, data, seq }) as unknown as DucklabEvent;
+  it("opens on gate_started with the phase's words and closes on the gate event", () => {
+    const turns = buildTurns([
+      ev("gate_started", { phase: "before", detail: "running the suite before any test is written — a red test only means something against a green baseline" }, 1),
+      ev("gate", { gate: "tests", cmd: "go test ./...", exit: 0, phase: "before" }, 2),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.role).toBe("gate");
+    expect(turns[0]!.subject).toBe("gate before");
+    expect(turns[0]!.text).toContain("green baseline");
+    expect(turns[0]!.done).toBe(true);
+    expect(turns[0]!.gate).toBe("green");
+  });
+  it("labels the rail's baseline as a baseline, not a verdict", () => {
+    const g = buildGate([ev("gate", { gate: "tests", cmd: "x", exit: 0, phase: "before" }, 1)]);
+    expect(g!.label).toBe("baseline tests passed");
+    const after = buildGate([ev("gate", { gate: "tests", cmd: "x", exit: 1, phase: "after" }, 1)]);
+    expect(after!.label).toBe("tests failed");
+  });
+});

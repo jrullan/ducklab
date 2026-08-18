@@ -456,13 +456,27 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           role: "gate",
           duckling: "gate",
           toolCalls: [],
-          text: "",
+          // A test-first's baseline suite takes minutes before any model
+          // speaks; the announcement's own words are what stands between
+          // "working" and "hung".
+          text: d.detail ? String(d.detail) : "",
+          subject: d.phase ? `gate ${String(d.phase)}` : undefined,
           done: false,
           messageOnly: true,
           gate: "running",
         };
         blocks.push(block);
         openGate = block;
+        break;
+      }
+      case "gate": {
+        // Test-first's settled gate (phase before/after) closes the turn its
+        // announcement opened; build rounds close via round_gate instead.
+        if (openGate && !openGate.done && d.phase) {
+          openGate.done = true;
+          openGate.gate = (typeof d.exit === "number" ? d.exit : 1) === 0 ? "green" : "red";
+          openGate = null;
+        }
         break;
       }
       case "round_gate": {
@@ -601,6 +615,7 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
   const gate = String(d.gate ?? "none");
   const exit = typeof d.exit === "number" ? d.exit : undefined;
   const cmd = d.cmd ? String(d.cmd) : undefined;
+  const phase = d.phase ? String(d.phase) : "";
 
   if (gate === "none") {
     return {
@@ -611,10 +626,13 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
     };
   }
   const green = exit === 0;
+  // The baseline is not a verdict: "✓ tests passed" on a test-first's rail
+  // read as a judgment of work that had not happened yet.
+  const phaseWord = phase === "before" ? "baseline " : "";
   return {
     gate, exitCode: exit, cmd,
     role: green ? "good" : "critical",
-    label: green ? `${gate} passed` : `${gate} failed`,
+    label: green ? `${phaseWord}${gate} passed` : `${phaseWord}${gate} failed`,
     unverified: false,
   };
 }
