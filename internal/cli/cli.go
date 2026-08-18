@@ -407,7 +407,7 @@ func rosterCmd(verb string, args []string, repo string) int {
 
 	switch verb {
 	case "", "show":
-		view, err := client.RosterGet(projectID)
+		view, err := client.RosterGet(projectID, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

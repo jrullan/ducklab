@@ -147,6 +147,10 @@ func (s *Service) resolveCanonicalRoster(projCfg *config.Project, mode string) (
 		if role == config.RoleHuman {
 			continue
 		}
+		if ids := projCfg.RosterSeats[role]; len(ids) > 0 {
+			out[role], sources[role] = ids[0], "project pin"
+			continue
+		}
 		if id := projCfg.Roster[role]; id != "" {
 			out[role], sources[role] = id, "project pin"
 			continue

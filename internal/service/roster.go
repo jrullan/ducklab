@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
@@ -12,8 +13,9 @@ import (
 
 // RosterEntry is one role assignment, with where it came from.
 type RosterEntry struct {
-	Role     string `json:"role"`
-	Duckling string `json:"duckling"`
+	Role      string   `json:"role"`
+	Duckling  string   `json:"duckling"`
+	Ducklings []string `json:"ducklings"`
 	// Default is the all-projects choice when this project overrides the role.
 	// It lets clients explain both values instead of presenting the project value
 	// as if it were the global default.
@@ -59,13 +61,19 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 			continue
 		}
 		canonicalSource := sources[role]
-		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Source: canonicalSource}
+		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource}
 		if canonicalSource == "project pin" {
 			withoutPin := *projCfg
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
 			for r, id := range projCfg.Roster {
 				if r != role {
 					withoutPin.Roster[r] = id
+				}
+			}
+			withoutPin.RosterSeats = make(map[config.Role][]config.DucklingID, len(projCfg.RosterSeats))
+			for r, ids := range projCfg.RosterSeats {
+				if r != role {
+					withoutPin.RosterSeats[r] = append([]config.DucklingID{}, ids...)
 				}
 			}
 			defaults, _ := s.resolveCanonicalRoster(&withoutPin, mode)
@@ -75,6 +83,61 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 	}
 	sort.SliceStable(view.Entries, func(i, j int) bool { return view.Entries[i].Role < view.Entries[j].Role })
 	return view, nil
+}
+
+// GlobalRosterGet returns effective global seats with canonical provenance.
+func (s *Service) GlobalRosterGet(ctx context.Context, mode string) (*RosterView, error) {
+	resolved, sources := s.resolveCanonicalRoster(&config.Project{}, mode)
+	view := &RosterView{}
+	for _, role := range config.ValidRoles() {
+		if role == config.RoleHuman {
+			continue
+		}
+		ids := []string{}
+		s.cfgMu.RLock()
+		if v := s.cfg.Defaults.ModeSeats[mode][string(role)]; len(v) > 0 {
+			ids = append(ids, v...)
+		} else {
+			ids = append(ids, s.cfg.Defaults.RolePins[string(role)]...)
+		}
+		s.cfgMu.RUnlock()
+		view.Entries = append(view.Entries, RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: ids, Source: sources[role]})
+	}
+	return view, nil
+}
+
+// GlobalRosterSet replaces one complete global seat list.
+func (s *Service) GlobalRosterSet(ctx context.Context, mode, role string, ids []string) (*RosterView, error) {
+	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
+		return nil, fmt.Errorf("field role invalid for roster: %q; next: choose a board role", role)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("field ducklings must be a non-empty ordered list; next: provide duckling IDs")
+	}
+	for _, id := range ids {
+		if _, err := s.ducklings.Get(config.DucklingID(id)); err != nil {
+			return nil, fmt.Errorf("no duckling %q — registered: %s; next: choose a registered duckling", id, registeredDucklings(s))
+		}
+	}
+	v := s.ModeDefaults()
+	if v.ModeSeats == nil {
+		v.ModeSeats = map[string]map[string][]string{}
+	}
+	if v.ModeSeats[mode] == nil {
+		v.ModeSeats[mode] = map[string][]string{}
+	}
+	if role == "triager" || role == "scribe" {
+		if v.RolePins == nil {
+			v.RolePins = map[string][]string{}
+		}
+		v.RolePins[role] = append([]string{}, ids...)
+	} else {
+		v.ModeSeats[mode][role] = append([]string{}, ids...)
+	}
+	if err := s.ModeDefaultsSet(v); err != nil {
+		return nil, fmt.Errorf("field mode/ducklings: %v; next: provide a valid complete roster", err)
+	}
+	return s.GlobalRosterGet(ctx, mode)
 }
 
 // ProjectAutonomy reports the project's declared autonomy, empty when it
@@ -116,11 +179,26 @@ func (s *Service) ProjectAutonomySet(projectID, autonomy string) error {
 
 // RosterSet assigns a duckling to a role and persists it to project.toml.
 func (s *Service) RosterSet(ctx context.Context, projectID, role, ducklingID string) (*RosterView, error) {
-	if !validRole(config.Role(role)) {
-		return nil, fmt.Errorf("unknown role %q (valid: %s)", role, rolesList())
+	return s.RosterSetMany(ctx, projectID, role, []string{ducklingID})
+}
+
+// RosterSetMany replaces the complete ordered project pin for a role.
+func (s *Service) RosterSetMany(ctx context.Context, projectID, role string, ducklingIDs []string) (*RosterView, error) {
+	return s.RosterSetManyMode(ctx, projectID, "", role, ducklingIDs)
+}
+
+// RosterSetManyMode replaces a project pin and validates the complete mode roster.
+func (s *Service) RosterSetManyMode(ctx context.Context, projectID, mode, role string, ducklingIDs []string) (*RosterView, error) {
+	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
+		return nil, fmt.Errorf("field role invalid for roster: %q (valid: %s); next: choose a board role", role, rolesList())
 	}
-	if _, err := s.ducklings.Get(config.DucklingID(ducklingID)); err != nil {
-		return nil, fmt.Errorf("unknown duckling %q", ducklingID)
+	if len(ducklingIDs) == 0 {
+		return nil, fmt.Errorf("field ducklings must be a non-empty ordered list; next: provide duckling IDs")
+	}
+	for _, ducklingID := range ducklingIDs {
+		if _, err := s.ducklings.Get(config.DucklingID(ducklingID)); err != nil {
+			return nil, fmt.Errorf("no duckling %q — registered: %s; next: choose a registered duckling", ducklingID, registeredDucklings(s))
+		}
 	}
 
 	entry, err := s.registry.Get(projectID)
@@ -134,13 +212,106 @@ func (s *Service) RosterSet(ctx context.Context, projectID, role, ducklingID str
 	if projCfg.Roster == nil {
 		projCfg.Roster = config.Roster{}
 	}
-	projCfg.Roster[config.Role(role)] = config.DucklingID(ducklingID)
+	// Keep the legacy scalar mirror for readers that still understand it; the
+	// canonical ordered pin is persisted in RosterSeats below.
+	projCfg.Roster[config.Role(role)] = config.DucklingID(ducklingIDs[0])
+	if projCfg.RosterSeats == nil {
+		projCfg.RosterSeats = map[config.Role][]config.DucklingID{}
+	}
+	ids := make([]config.DucklingID, len(ducklingIDs))
+	for i, id := range ducklingIDs {
+		ids[i] = config.DucklingID(id)
+	}
+	projCfg.RosterSeats[config.Role(role)] = ids
 
+	if err := s.validateRosterMode(mode, projCfg); err != nil {
+		return nil, fmt.Errorf("field ducklings: %v; next: provide a complete valid roster", err)
+	}
 	path := filepath.Join(entry.Path, ".ducklab", "project.toml")
 	if err := writeProjectTOML(path, projCfg); err != nil {
 		return nil, fmt.Errorf("write project.toml: %w", err)
 	}
-	return s.RosterGet(ctx, projectID, "")
+	return s.RosterGet(ctx, projectID, mode)
+}
+
+func (s *Service) validateRosterMode(mode string, proj *config.Project) error {
+	if mode == "" {
+		return nil
+	}
+	count := 0
+	role := ""
+	switch mode {
+	case "council":
+		role = "reviewer"
+	case "split", "tournament":
+		role = "implementer"
+	default:
+		return nil
+	}
+	if ids := proj.RosterSeats[config.Role(role)]; len(ids) > 0 {
+		count = len(ids)
+	} else if id := proj.Roster[config.Role(role)]; id != "" {
+		count = 1
+	} else {
+		s.cfgMu.RLock()
+		count = len(s.cfg.Defaults.ModeSeats[mode][role])
+		s.cfgMu.RUnlock()
+	}
+	if mode == "council" && count < 1 {
+		return fmt.Errorf("council requires at least one critic")
+	}
+	if (mode == "split" || mode == "tournament") && count < 2 {
+		return fmt.Errorf("%s requires at least two %s", mode, map[string]string{"split": "workers", "tournament": "contestants"}[mode])
+	}
+	return nil
+}
+
+func (s *Service) RosterUnpin(ctx context.Context, projectID, mode, role string) (*RosterView, error) {
+	if !validRole(config.Role(role)) || role == string(config.RoleHuman) {
+		return nil, fmt.Errorf("field role invalid for roster: %q; next: choose a valid role", role)
+	}
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	projCfg, err := s.projectConfig(projectID)
+	if err != nil {
+		return nil, err
+	}
+	delete(projCfg.Roster, config.Role(role))
+	delete(projCfg.RosterSeats, config.Role(role))
+	if err := writeProjectTOML(filepath.Join(entry.Path, ".ducklab", "project.toml"), projCfg); err != nil {
+		return nil, fmt.Errorf("write project.toml: %w", err)
+	}
+	return s.RosterGet(ctx, projectID, mode)
+}
+
+func (s *Service) rosterIDs(proj *config.Project, mode string, role config.Role) []string {
+	if ids := proj.RosterSeats[role]; len(ids) > 0 {
+		out := make([]string, len(ids))
+		for i, id := range ids {
+			out[i] = string(id)
+		}
+		return out
+	}
+	if id := proj.Roster[role]; id != "" {
+		return []string{string(id)}
+	}
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	if ids := s.cfg.Defaults.ModeSeats[mode][string(role)]; len(ids) > 0 {
+		return append([]string{}, ids...)
+	}
+	return append([]string{}, s.cfg.Defaults.RolePins[string(role)]...)
+}
+
+func registeredDucklings(s *Service) string {
+	ids := make([]string, 0)
+	for _, d := range s.ducklings.List() {
+		ids = append(ids, string(d.ID))
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ", ")
 }
 
 // Suggestion is one ranked candidate for a role.

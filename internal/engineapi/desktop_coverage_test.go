@@ -41,6 +41,9 @@ var knownGaps = map[string]string{
 }
 
 var notInTheDesktop = map[string]string{
+	"GET /v1/defaults/roster": "MCP canonical roster read; desktop settings changes are explicitly out of scope",
+	"PUT /v1/defaults/roster": "MCP canonical roster write; desktop settings changes are explicitly out of scope",
+	"DELETE /v1/projects/{id}/roster": "MCP roster unpin; desktop settings changes are explicitly out of scope",
 	"POST /v1/bench":       "the blocking form, which answers when the whole matrix is done — the CLI's shape; the desktop starts one with /v1/bench/start and watches the cells as runs",
 	"GET /v1/health":       "liveness for the CLI and the daemon supervisor; the desktop uses the event stream's connection state",
 	"GET /v1/events":       "consumed by api/events.ts, which builds the URL itself rather than going through the client",

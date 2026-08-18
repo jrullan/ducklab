@@ -346,6 +346,8 @@ Tools exposed to MCP clients:
 
 Attribution: decisions recorded as `mcp:<client-name>`, never `human`. Server implementation: `internal/mcp/mcp.go`, CLI: `internal/cli/mcp.go`.
 
+The `roster` MCP tool accepts `action` (`get | set | unpin`), `scope` (`global | project`), `project_id`, `mode`, `role`, and ordered `ducklings`. `get` returns every board-addressable seat with `role`, ordered `ducklings`, effective `duckling`, and `source` provenance (`global mode seat`, `project pin`, or `global role fallback`); project pins also return the overridden global `default`. Project `set` replaces the complete ordered pin and `unpin` removes it to restore Global inheritance. Global `set` writes mode seats (or mode-independent triager/scribe role pins) and never changes project files. Invalid action/scope, role, duckling, and mode cardinality return field-named actionable errors with `next` guidance. MCP dispatch delegates to the canonical service roster resolver and records operator actions as `mcp:<client-name>`.
+
 ## SPEC-022 — Six contract formats
 
 **Implements:** REQ-022

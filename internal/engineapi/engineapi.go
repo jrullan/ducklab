@@ -28,9 +28,9 @@ import (
 
 // Server is the engine API server.
 type Server struct {
-	svc     *service.Service
-	bus     *bus.Bus
-	token   string
+	svc        *service.Service
+	bus        *bus.Bus
+	token      string
 	version    string
 	provenance string
 	mux        *http.ServeMux
@@ -536,6 +536,32 @@ func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, st)
 }
 
+func (s *Server) handleGlobalRosterGet(w http.ResponseWriter, r *http.Request) {
+	view, err := s.svc.GlobalRosterGet(r.Context(), r.URL.Query().Get("mode"))
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+func (s *Server) handleGlobalRosterSet(w http.ResponseWriter, r *http.Request) {
+	var body rosterSetRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, 400, "bad_request", err.Error())
+		return
+	}
+	ids := body.Ducklings
+	if len(ids) == 0 {
+		ids = []string{body.Duckling}
+	}
+	view, err := s.svc.GlobalRosterSet(r.Context(), body.Mode, body.Role, ids)
+	if err != nil {
+		s.error(w, 400, "bad_request", err.Error())
+		return
+	}
+	s.json(w, 200, view)
+}
+
 func (s *Server) handleRosterGet(w http.ResponseWriter, r *http.Request) {
 	view, err := s.svc.RosterGet(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"))
 	if err != nil {
@@ -546,15 +572,33 @@ func (s *Server) handleRosterGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRosterSet(w http.ResponseWriter, r *http.Request) {
+	var body rosterSetRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	ids := body.Ducklings
+	if len(ids) == 0 {
+		ids = []string{body.Duckling}
+	}
+	view, err := s.svc.RosterSetManyMode(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"), body.Role, ids)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, view)
+}
+
+// handleRosterUnpin is an MCP/service route; desktop roster UI remains out of scope.
+func (s *Server) handleRosterUnpin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Role     string `json:"role"`
-		Duckling string `json:"duckling"`
+		Role string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	view, err := s.svc.RosterSet(r.Context(), r.PathValue("id"), body.Role, body.Duckling)
+	view, err := s.svc.RosterUnpin(r.Context(), r.PathValue("id"), r.URL.Query().Get("mode"), body.Role)
 	if err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -836,7 +880,7 @@ func (s *Server) json(w http.ResponseWriter, status int, v interface{}) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	running, waiting, limit := s.svc.QueueStats()
 	s.json(w, http.StatusOK, map[string]interface{}{
-		"ok":      true,
+		"ok":         true,
 		"version":    s.version,
 		"provenance": s.provenance,
 		// The queue's live counters. The one time they were needed — a run

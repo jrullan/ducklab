@@ -66,8 +66,10 @@ type answerRequest struct {
 }
 
 type rosterSetRequest struct {
-	Role     string `json:"role"`
-	Duckling string `json:"duckling"`
+	Mode      string   `json:"mode"`
+	Role      string   `json:"role"`
+	Duckling  string   `json:"duckling"`
+	Ducklings []string `json:"ducklings"`
 }
 
 type ducklingTestRequest struct {
@@ -256,6 +258,8 @@ func routeTable() []Route {
 			ClientMethod: "DucklingProbe", handler: func(s *Server) http.HandlerFunc { return s.handleDucklingProbe }},
 
 		// Roster
+		{Method: "GET", Path: "/v1/defaults/roster", Auth: true, Response: service.RosterView{}, Summary: "Global canonical roster", ClientMethod: "GlobalRosterGet", handler: func(s *Server) http.HandlerFunc { return s.handleGlobalRosterGet }},
+		{Method: "PUT", Path: "/v1/defaults/roster", Auth: true, Request: rosterSetRequest{}, Response: service.RosterView{}, Summary: "Set global canonical roster", ClientMethod: "GlobalRosterSet", handler: func(s *Server) http.HandlerFunc { return s.handleGlobalRosterSet }},
 		{Method: "GET", Path: "/v1/projects/{id}/roster", Auth: true,
 			Response: service.RosterView{}, Summary: "Resolved roster", ClientMethod: "RosterGet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRosterGet }},
@@ -263,6 +267,9 @@ func routeTable() []Route {
 			Request: rosterSetRequest{}, Response: service.RosterView{},
 			Summary: "Assign a duckling to a role", ClientMethod: "RosterSet",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRosterSet }},
+		{Method: "DELETE", Path: "/v1/projects/{id}/roster", Auth: true,
+			Request: rosterSetRequest{}, Response: service.RosterView{}, Summary: "Remove project roster pin", ClientMethod: "RosterUnpin",
+			handler: func(s *Server) http.HandlerFunc { return s.handleRosterUnpin }},
 		{Method: "GET", Path: "/v1/projects/{id}/roster/suggest", Auth: true,
 			Response: listOf{Items: []service.Suggestion{}}, Summary: "Ranked roster suggestion",
 			ClientMethod: "RosterSuggest", handler: func(s *Server) http.HandlerFunc { return s.handleRosterSuggest }},

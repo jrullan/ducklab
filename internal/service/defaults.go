@@ -129,6 +129,7 @@ type ModeDefaultsView struct {
 	// same boxes on every run is how a finding gets lost.
 	Ducklings map[string][]string            `json:"ducklings"`
 	ModeSeats map[string]map[string][]string `json:"mode_seats,omitempty"`
+	RolePins  map[string][]string            `json:"role_pins,omitempty"`
 	// RoleTurns caps the model calls one turn of a role may chain. Zero or
 	// absent leaves the script's own cap alone.
 	RoleTurns map[string]int `json:"role_turns"`
@@ -184,11 +185,15 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 		ScriptRoleTurns: ScriptRoleTurns,
 		Seats:           ModeSeats,
 		ModeSeats:       map[string]map[string][]string{},
+		RolePins:        map[string][]string{},
 		BuildMode:       s.cfg.Defaults.BuildMode,
 		TestMode:        s.cfg.Defaults.TestMode,
 	}
 	for mode, n := range s.cfg.Defaults.Rounds {
 		out.Rounds[mode] = n
+	}
+	for role, ids := range s.cfg.Defaults.RolePins {
+		out.RolePins[role] = append([]string{}, ids...)
 	}
 	for mode, seats := range s.cfg.Defaults.ModeSeats {
 		out.ModeSeats[mode] = seats
@@ -326,6 +331,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
 	prevModeSeats, prevRoleTurns := s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns
+	prevRolePins := s.cfg.Defaults.RolePins
 	prevBuildMode, prevTestMode := s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode
 	rounds := map[string]int{}
 	for mode, n := range v.Rounds {
@@ -356,12 +362,18 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		seats = config.LegacyModeSeats(lineups)
 	}
 	s.cfg.Defaults.ModeSeats = seats
+	rolePins := map[string][]string{}
+	for role, ids := range v.RolePins {
+		rolePins[role] = append([]string{}, ids...)
+	}
+	s.cfg.Defaults.RolePins = rolePins
 	s.cfg.Defaults.RoleTurns = roleTurns
 	s.cfg.Defaults.BuildMode = v.BuildMode
 	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
 		s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns = prevModeSeats, prevRoleTurns
+		s.cfg.Defaults.RolePins = prevRolePins
 		s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode = prevBuildMode, prevTestMode
 		return err
 	}

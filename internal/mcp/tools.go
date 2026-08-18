@@ -26,6 +26,11 @@ func toolList() []map[string]interface{} {
 	}
 	return []map[string]interface{}{
 		{
+			"name":        "roster",
+			"description": "Read or edit canonical roster seats. get resolves provenance; set replaces ordered ducklings; unpin restores Global inheritance.",
+			"inputSchema": obj(map[string]interface{}{"action": str("get | set | unpin"), "scope": str("global | project"), "project_id": str("project id"), "mode": str("mode"), "role": str("role"), "ducklings": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "action", "scope"),
+		},
+		{
 			"name": "status",
 			"description": "What needs a decision and what is running, across every project. " +
 				"Start here. Each pending run carries `next`: the ONLY actions you may take on it. " +
@@ -270,6 +275,48 @@ func (a args) str(k string) string {
 	return v
 }
 
+func (s *Server) roster(a args) (map[string]interface{}, error) {
+	action, scope := a.str("action"), a.str("scope")
+	if action != "get" && action != "set" && action != "unpin" {
+		return nil, fmt.Errorf("field action must be get | set | unpin; next: choose one")
+	}
+	if scope != "global" && scope != "project" {
+		return nil, fmt.Errorf("field scope must be global | project; next: choose global or project")
+	}
+	project := a.str("project_id")
+	if scope == "project" && project == "" {
+		return nil, fmt.Errorf("field project_id is required for project scope; next: provide a project id")
+	}
+	if action == "get" {
+		if scope == "global" {
+			return s.eng.GlobalRosterGet(a.str("mode"))
+		}
+		return s.eng.RosterGet(project, a.str("mode"))
+	}
+	if scope == "global" {
+		if action == "unpin" {
+			return nil, fmt.Errorf("field action: global roster has no unpin; next: use project scope to remove a project pin")
+		}
+		return s.eng.GlobalRosterSet(a.str("mode"), a.str("role"), rosterDucklings(a))
+	}
+	if action == "unpin" {
+		return s.eng.RosterUnpin(project, a.str("mode"), a.str("role"))
+	}
+	return s.eng.RosterSetManyMode(project, a.str("mode"), a.str("role"), rosterDucklings(a))
+}
+
+func rosterDucklings(a args) []string {
+	raw, ok := a["ducklings"].([]interface{})
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	ids := make([]string, len(raw))
+	for i, v := range raw {
+		ids[i], _ = v.(string)
+	}
+	return ids
+}
+
 func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{}, error) {
 	var a args
 	if len(raw) > 0 {
@@ -278,6 +325,8 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 	}
 	switch name {
+	case "roster":
+		return s.roster(a)
 	case "status":
 		return s.status()
 	case "run_get":

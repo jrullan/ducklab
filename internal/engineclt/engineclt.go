@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -174,6 +175,21 @@ func (c *Client) put(path string, body interface{}, result interface{}) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return httpError("PUT", path, resp)
+	}
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+func (c *Client) doDelete(path string, body interface{}, result interface{}) error {
+	resp, err := c.do("DELETE", path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return httpError("DELETE", path, resp)
 	}
 	if result != nil {
 		return json.NewDecoder(resp.Body).Decode(result)
@@ -624,18 +640,54 @@ func (c *Client) Report(projectID, by, since string) (map[string]interface{}, er
 	return result, err
 }
 
+func (c *Client) GlobalRosterGet(mode string) (map[string]interface{}, error) {
+	var v map[string]interface{}
+	path := "/v1/defaults/roster?mode=" + url.QueryEscape(mode)
+	if err := c.get(path, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+func (c *Client) GlobalRosterSet(mode, role string, ducklings []string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.put("/v1/defaults/roster", map[string]interface{}{"mode": mode, "role": role, "ducklings": ducklings}, &out)
+	return out, err
+}
+
 // RosterGet returns the resolved roster for a project.
-func (c *Client) RosterGet(projectID string) (map[string]interface{}, error) {
+func (c *Client) RosterGet(projectID, mode string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.get(fmt.Sprintf("/v1/projects/%s/roster", projectID), &result)
+	path := fmt.Sprintf("/v1/projects/%s/roster", projectID)
+	if mode != "" {
+		path += "?mode=" + url.QueryEscape(mode)
+	}
+	err := c.get(path, &result)
 	return result, err
 }
 
 // RosterSet assigns a duckling to a role.
 func (c *Client) RosterSet(projectID, role, ducklingID string) (map[string]interface{}, error) {
+	return c.RosterSetMany(projectID, role, []string{ducklingID})
+}
+func (c *Client) RosterSetMany(projectID, role string, ducklings []string) (map[string]interface{}, error) {
+	return c.RosterSetManyMode(projectID, "", role, ducklings)
+}
+func (c *Client) RosterSetManyMode(projectID, mode, role string, ducklings []string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.put(fmt.Sprintf("/v1/projects/%s/roster", projectID),
-		map[string]string{"role": role, "duckling": ducklingID}, &result)
+	path := fmt.Sprintf("/v1/projects/%s/roster", projectID)
+	if mode != "" {
+		path += "?mode=" + url.QueryEscape(mode)
+	}
+	err := c.put(path, map[string]interface{}{"role": role, "ducklings": ducklings}, &result)
+	return result, err
+}
+func (c *Client) RosterUnpin(projectID, mode, role string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	path := fmt.Sprintf("/v1/projects/%s/roster", projectID)
+	if mode != "" {
+		path += "?mode=" + url.QueryEscape(mode)
+	}
+	err := c.doDelete(path, map[string]string{"role": role}, &result)
 	return result, err
 }
 

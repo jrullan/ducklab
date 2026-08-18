@@ -53,6 +53,13 @@ type Engine interface {
 	AppStop(projectID string) error
 	ProjectNext(projectID string) ([]map[string]interface{}, error)
 	ProjectStatus(projectID string) (map[string]interface{}, error)
+	RosterSet(projectID, role, ducklingID string) (map[string]interface{}, error)
+	RosterSetMany(projectID, role string, ducklings []string) (map[string]interface{}, error)
+	RosterSetManyMode(projectID, mode, role string, ducklings []string) (map[string]interface{}, error)
+	RosterUnpin(projectID, mode, role string) (map[string]interface{}, error)
+	RosterGet(projectID, mode string) (map[string]interface{}, error)
+	GlobalRosterGet(mode string) (map[string]interface{}, error)
+	GlobalRosterSet(mode, role string, ducklings []string) (map[string]interface{}, error)
 }
 
 // Server speaks MCP (JSON-RPC 2.0, newline-delimited) over a reader/writer

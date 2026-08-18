@@ -301,20 +301,22 @@ type GitHub struct {
 
 // Project is the project configuration.
 type Project struct {
-	Schema   int         `toml:"schema" json:"schema"`
-	ID       string      `toml:"id" json:"id"`
-	Name     string      `toml:"name" json:"name"`
-	Describe string      `toml:"describe" json:"describe"`
-	Created  string      `toml:"created" json:"created"`
-	Autonomy Autonomy    `toml:"autonomy" json:"autonomy"`
-	Verify   Verify      `toml:"verify" json:"verify"`
-	Roster   Roster      `toml:"roster" json:"roster"`
-	Modes    Modes       `toml:"modes" json:"modes"`
-	Budget   Budget      `toml:"budget" json:"budget"`
-	Git      Git         `toml:"git" json:"git"`
-	GitHub   GitHub      `toml:"github" json:"github"`
-	Shell    ShellPolicy `toml:"shell" json:"shell"`
-	Run      RunApp      `toml:"run" json:"run"`
+	Schema   int      `toml:"schema" json:"schema"`
+	ID       string   `toml:"id" json:"id"`
+	Name     string   `toml:"name" json:"name"`
+	Describe string   `toml:"describe" json:"describe"`
+	Created  string   `toml:"created" json:"created"`
+	Autonomy Autonomy `toml:"autonomy" json:"autonomy"`
+	Verify   Verify   `toml:"verify" json:"verify"`
+	Roster   Roster   `toml:"roster" json:"roster"`
+	// RosterSeats preserves ordered multi-slot project pins; Roster is retained for legacy scalar pins.
+	RosterSeats map[Role][]DucklingID `toml:"roster_seats" json:"roster_seats,omitempty"`
+	Modes       Modes                 `toml:"modes" json:"modes"`
+	Budget      Budget                `toml:"budget" json:"budget"`
+	Git         Git                   `toml:"git" json:"git"`
+	GitHub      GitHub                `toml:"github" json:"github"`
+	Shell       ShellPolicy           `toml:"shell" json:"shell"`
+	Run         RunApp                `toml:"run" json:"run"`
 }
 
 // RunApp is how the built application actually starts — the stage the gate

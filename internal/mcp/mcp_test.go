@@ -15,29 +15,34 @@ import (
 
 // fakeEngine records what the operator did and answers from fixtures.
 type fakeEngine struct {
-	lastRunReq    map[string]interface{}
-	images        []string
-	settled       []string
-	extended      []string
-	testThenBuild bool
-	testNote      string
-	tasks         []map[string]interface{}
-	artifacts     map[string]map[string]interface{}
-	bugs          []map[string]interface{}
-	nextSteps     []map[string]interface{}
-	runs          map[string]map[string]interface{}
-	accepted      []string
-	acceptedAs    string
-	rejected      []string
-	filed         []map[string]string
-	attached      string
-	attachedName  string
-	revised       []string
-	lastStageReq  map[string]interface{}
-	lastTriageReq map[string]interface{}
-	budgetLifted  string
-	resumeCount   int
-	projectStatus map[string]interface{}
+	lastRunReq          map[string]interface{}
+	images              []string
+	settled             []string
+	extended            []string
+	testThenBuild       bool
+	testNote            string
+	tasks               []map[string]interface{}
+	artifacts           map[string]map[string]interface{}
+	bugs                []map[string]interface{}
+	nextSteps           []map[string]interface{}
+	runs                map[string]map[string]interface{}
+	accepted            []string
+	acceptedAs          string
+	rejected            []string
+	filed               []map[string]string
+	attached            string
+	attachedName        string
+	revised             []string
+	lastStageReq        map[string]interface{}
+	lastTriageReq       map[string]interface{}
+	budgetLifted        string
+	resumeCount         int
+	projectStatus       map[string]interface{}
+	lastRosterProject   string
+	lastRosterRole      string
+	lastRosterDucklings []string
+	lastRosterUnpin     string
+	rosterViews         map[string]map[string]interface{}
 }
 
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
@@ -45,6 +50,42 @@ func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
 }
 func (f *fakeEngine) ProjectStatus(string) (map[string]interface{}, error) {
 	return f.projectStatus, nil
+}
+func (f *fakeEngine) RosterSet(projectID, role, duckling string) (map[string]interface{}, error) {
+	return f.RosterSetMany(projectID, role, []string{duckling})
+}
+func (f *fakeEngine) RosterSetManyMode(projectID, mode, role string, ducklings []string) (map[string]interface{}, error) {
+	f.lastRosterProject, f.lastRosterRole = projectID, role
+	f.lastRosterDucklings = append([]string{}, ducklings...)
+	return map[string]interface{}{"project_id": projectID, "role": role, "entries": ducklings, "mode": mode}, nil
+}
+func (f *fakeEngine) RosterSetMany(projectID, role string, ducklings []string) (map[string]interface{}, error) {
+	f.lastRosterProject, f.lastRosterRole = projectID, role
+	f.lastRosterDucklings = append([]string{}, ducklings...)
+	return map[string]interface{}{"project_id": projectID, "role": role, "entries": ducklings}, nil
+}
+func (f *fakeEngine) RosterUnpin(projectID, mode, role string) (map[string]interface{}, error) {
+	f.lastRosterUnpin = projectID + ":" + mode + ":" + role
+	return map[string]interface{}{"project_id": projectID, "role": role}, nil
+}
+func (f *fakeEngine) GlobalRosterGet(mode string) (map[string]interface{}, error) {
+	if f.rosterViews != nil {
+		if v := f.rosterViews["global:"+mode]; v != nil {
+			return v, nil
+		}
+	}
+	return map[string]interface{}{"scope": "global", "mode": mode}, nil
+}
+func (f *fakeEngine) GlobalRosterSet(mode, role string, ducklings []string) (map[string]interface{}, error) {
+	return map[string]interface{}{"scope": "global", "mode": mode, "role": role, "ducklings": ducklings}, nil
+}
+func (f *fakeEngine) RosterGet(projectID, mode string) (map[string]interface{}, error) {
+	if f.rosterViews != nil {
+		if v := f.rosterViews[projectID+":"+mode]; v != nil {
+			return v, nil
+		}
+	}
+	return map[string]interface{}{"project_id": projectID, "mode": mode}, nil
 }
 func (f *fakeEngine) RunList(string) ([]map[string]interface{}, error) {
 	var out []map[string]interface{}
