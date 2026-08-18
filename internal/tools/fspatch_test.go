@@ -198,6 +198,63 @@ func TestFSPatchRefusalsEndTheTurnOnTheFifthRefusalPerFile(t *testing.T) {
 	}
 }
 
+func TestFSReadOfBrakedFileResetsItsPatchFailureStreak(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "target.go"), []byte("package target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ectx := &ExecContext{ProjectRoot: root}
+	registry := NewRegistry()
+	patch := func(search, replace string) *Result {
+		t.Helper()
+		args, err := json.Marshal(map[string]interface{}{
+			"path":  "target.go",
+			"edits": []map[string]string{{"search": search, "replace": replace}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := registry.Execute(context.Background(), ectx, "fs_patch", args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	// The fifth failed patch engages the brake; the following call is refused.
+	for i := 0; i < FSPatchFailLimit; i++ {
+		if result := patch("missing-"+strconv.Itoa(i), "replacement"); !result.IsError || strings.Contains(result.Content, "REFUSED") {
+			t.Fatalf("failure %d = %#v; want a non-refusal error", i+1, result)
+		}
+	}
+	if refused := patch("package target", "package changed"); !refused.IsError || !strings.Contains(refused.Content, "REFUSED") {
+		t.Fatalf("braked patch = %#v; want REFUSED", refused)
+	}
+
+	// Reading the braked path is the prescribed recovery and reopens fs_patch.
+	read, err := registry.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"target.go"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.IsError {
+		t.Fatalf("fs_read = %#v", read)
+	}
+	if recovered := patch("package target", "package changed"); recovered.IsError {
+		t.Fatalf("matching patch remained braked after fs_read: %q", recovered.Content)
+	}
+
+	// The reset is only a fresh window: five new failures engage the brake again.
+	for i := 0; i < FSPatchFailLimit; i++ {
+		if result := patch("again-missing-"+strconv.Itoa(i), "replacement"); !result.IsError || strings.Contains(result.Content, "REFUSED") {
+			t.Fatalf("new failure %d = %#v; want a non-refusal error", i+1, result)
+		}
+	}
+	if refused := patch("package changed", "package target"); !refused.IsError || !strings.Contains(refused.Content, "REFUSED") {
+		t.Fatalf("brake did not re-engage after new failures: %#v", refused)
+	}
+}
+
 func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "target.go")

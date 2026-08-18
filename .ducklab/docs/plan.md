@@ -1344,4 +1344,23 @@ B-029 added the per-file failure brake but does not escalate repeated refusals i
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-070 — Reset the fs_patch per-file brake when the model fs_reads the braked file, restoring a one-probe window
+
+Fixes B-060.
+
+## Reported
+
+What happened: T-058's second implementer (terra) genuinely mismatched her first anchors on tools.go, tripped the 5-failure brake — and then RECOVERED: her later fs_patch calls carried search strings verified to match the file exactly once. The brake refused them anyway: once tripped it blocks every patch to that file unconditionally, without testing any, so a model that follows the harder path (fixing its anchors instead of pivoting) is punished precisely for improving. Two models on the same file read as \"the tool is broken\"; the truth is genuine mismatches first, then a brake that never forgives.\n\nExpected: the brake's own remedy is its reset condition — it prescribes \"read the full section\"; an fs_read of the braked file after tripping resets the streak, so compliance re-opens the door (one probe's worth: fail again within the window and the brake returns harder). The refusal keeps teaching, the prescription becomes enforceable, and a model that sharpened its anchors gets to prove it.
+
+## Triage
+
+**Component:** tool dispatch / fs_patch brake
+**Suspected files:** internal/tools/tools.go, internal/tools/fspatch_test.go
+
+The brake check at Execute never clears fsPatchFailStreak except via a successful patch it now blocks, so a model that follows the prescribed fs_read remedy is permanently refused; the fix hooks the reset into fs_read of the braked path.
+
+**Verification (triage recommends):** test-first — Trip the brake with 5 failing patches on a file, fs_read it, then apply a search string that matches exactly once — expect success; fail again within the window and the brake re-engages
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
