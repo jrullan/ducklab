@@ -233,3 +233,6 @@
 {"ts":"2026-08-17T17:57:36Z","bug":"B-022","from":"fixed","to":"verified","actor":"mcp:claude-code","via":"move"}
 {"ts":"2026-08-17T18:32:13Z","bug":"B-055","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-058"}
 {"ts":"2026-08-17T18:36:33Z","bug":"B-058","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-059"}
+{"ts":"2026-08-17T18:46:40Z","bug":"B-058","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-059"}
+{"ts":"2026-08-18T01:21:23Z","bug":"B-059","from":"fixed","to":"verified","actor":"mcp:claude-code","via":"move"}
+{"ts":"2026-08-18T01:21:29Z","bug":"B-058","from":"fixed","to":"verified","actor":"mcp:claude-code","via":"move"}

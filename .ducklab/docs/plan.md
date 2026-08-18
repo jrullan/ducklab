@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 1
-updated_at: 2026-08-16T12:40:41Z
-run_id: r-20260816-123325-wfkc
-ducklings: [luna, beelink-local, k3]
-based_on: 121a37a792e74f09
+version: 2
+updated_at: 2026-08-18T01:31:04Z
+run_id: r-20260818-013005-jqku
+ducklings: [atom-local, beelink-local, terra, k3]
+based_on: eb262b5b43f5ae9b
 approved_by: human
 ---
 
@@ -1158,4 +1158,74 @@ Distress telemetry is produced but not routed to either the advisor or the revie
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-060 — Unify canonical roster seats and resolution
+
+**Implements:** SPEC-003, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-024, SPEC-043, SPEC-044
+
+Replace positional global mode line-ups with canonical role-keyed `mode_seats` and make one resolver the authority for roster, launch, and MCP seating, so project pins, global mode seats, common-role fallbacks, and per-run picks have explicit precedence and provenance.
+
+**Deliverables:**
+- Persist canonical global mode seats as mode → real role name → ordered duckling-ID list, replacing positional `mode_ducklings`
+  - Include assignable per-mode advisors and retain mode-independent `triager` and `scribe` as global role pins.
+  - Provide an automatic, repeatable, one-way migration from valid legacy positional configuration.
+- Deliver a single roster resolution service returning every seat’s effective ordered list and provenance
+  - Resolve precedence as per-run pick, project role pin, global mode seat, then global role fallback.
+  - Treat a project pin as replacement of the entire ordered list; unpinned project roles inherit Global.
+  - Report provenance as `project pin`, `global mode seat`, or `global role fallback`.
+- Route engine runs, launcher prefill, and MCP roster/launch consumption through the canonical resolution service
+  - Preserve per-run selections as the highest-priority, non-persistent override.
+  - Remove remaining production reads of positional mode line-ups.
+- Enforce roster cardinality on edits and launches
+  - Reject council without critics, split with fewer than two workers, and tournament with fewer than two contestants.
+- Update specification document 02 and add configuration/service tests
+  - Assert repeatable migration, scope resolution and provenance, global fallback and common-role behavior, per-run precedence, and cardinality rejection.
+
+**Out of scope:** Desktop roster-board interaction, Settings UI replacement, and MCP roster mutation endpoints.
+
+### T-061 — Deliver the scoped roster board
+
+**Implements:** SPEC-003, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-026, SPEC-044  
+**Depends on:** T-060
+
+Deliver the Desktop Roster view as the sole persistent-seat editor, consuming the canonical roster model and resolver while preserving launcher chips as per-run overrides. It makes Global versus Project inheritance, pins, provenance, cardinality failures, and unsafe role combinations visible and actionable.
+
+**Deliverables:**
+- Add a Desktop Roster view with a Flock column and boards for Council, Solo, Pair, Split, Tournament, and Common
+  - List every registered duckling, mark local versus remote, and show per-run cost when known.
+  - Use only real role names for columns; support ordered multi-slot cards for critics, workers, and contestants.
+- Support accessible seat assignment and removal for every board-addressable seat
+  - Provide drag-and-drop from Flock plus an equivalent keyboard/click flow to select a seat and pick a duckling.
+  - Allow removal and ordered multi-slot assignment without requiring drag-and-drop.
+- Add a Global | Project · `<name>` scope selector backed by the canonical roster service
+  - Global reads and writes only global seats and role pins.
+  - Project renders inherited assignments as muted dashed `global` ghosts and project pins as solid `pinned` cards.
+  - Project drops create or replace only that role’s pin; unpin restores the inherited ghost; show the overridden global value on hover and plainly identify projects with no pins.
+- Retire Settings’ positional mode chips in favor of the Roster board and retain launcher chips as per-run overrides
+  - Launcher provenance continues to distinguish project, global, and picked-now seating.
+  - Surface cardinality errors and warn when a Pair duckling both implements and reviews or a Council architect critiques its own draft.
+- Update specification document 08 and add Desktop tests
+  - Assert scope switching, pin and unpin inheritance, accessible assignment/removal, ordered multi-slot seats, validation display, conflict warnings, and provenance rendering.
+
+**Out of scope:** Changing roster resolution precedence, adding new execution roles or modes, and MCP roster management.
+
+### T-062 — Expose canonical roster management through MCP
+
+**Implements:** SPEC-021, SPEC-024, SPEC-044  
+**Depends on:** T-060
+
+Expose Global and Project roster management through an MCP settings/roster tool using the same canonical service contract as the board and run seating. The tool must make project-pin boundaries explicit and return actionable errors rather than silently coercing invalid roster edits.
+
+**Deliverables:**
+- Add MCP roster reads for Global and Project scopes
+  - Return effective ordered seat assignments, duckling identity, and per-seat provenance for every board-addressable seat.
+- Add MCP assignment, replacement, removal, and unpin operations for every board-addressable role
+  - Accept and preserve ordered lists for multi-slot roles.
+  - Restrict Global operations to global seats and role pins; restrict Project writes to project pins.
+- Enforce canonical service validation and inheritance semantics in MCP responses
+  - Return actionable errors for unknown ducklings, invalid roles, and minimum-cardinality violations.
+  - Ensure unpin restores the effective Global assignment and replacement does not merge with an existing project list.
+- Update specification document 07 and add MCP tests
+  - Assert board/run-service parity, project pin replacement and unpin inheritance, multi-slot list edits, and validation failures.
+
+**Out of scope:** Desktop UI changes, new MCP launch override semantics, and alternate roster persistence formats.
 
