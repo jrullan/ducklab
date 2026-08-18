@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 // Kept as a dynamic import while the view does not exist: this specifies the
 // public view without making TypeScript require its implementation first.
@@ -100,8 +100,21 @@ describe("Roster", () => {
     for (const mode of ["council", "solo", "pair", "split", "tournament", "common"]) {
       expect(screen.getByTestId(`roster-board-${mode}`)).toBeTruthy();
     }
-    for (const role of ["architect", "implementer", "advisor", "reviewer", "judge", "triager", "scribe"]) {
-      expect(screen.getByText(role, { exact: true })).toBeTruthy();
+    // Each board shows only the roles its mode seats, named for real roles.
+    const columns: Record<string, string[]> = {
+      council: ["architect", "reviewer"],
+      solo: ["implementer", "advisor"],
+      pair: ["implementer", "advisor", "reviewer"],
+      split: ["architect", "implementer", "reviewer"],
+      tournament: ["implementer", "judge"],
+      common: ["triager", "scribe"],
+    };
+    for (const [mode, roles] of Object.entries(columns)) {
+      const board = screen.getByTestId(`roster-board-${mode}`);
+      for (const role of roles) {
+        expect(within(board).getByRole("heading", { name: role, level: 3 })).toBeTruthy();
+      }
+      expect(within(board).queryByRole("heading", { name: "scribe", level: 3 })).toBe(mode === "common" ? within(board).getByRole("heading", { name: "scribe", level: 3 }) : null);
     }
 
     // Repeated seats retain the resolver's ordered values, rather than being
