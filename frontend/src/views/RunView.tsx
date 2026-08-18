@@ -1688,7 +1688,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               {/* One tracker serves every duckling and every turn, so the run's
                   total cannot say which model is burning it. In a mode with two
                   models that is usually the only question worth asking. */}
-              {perDuckling.length > 1 && (
+              {/* Even a solo run's one row earns its place: it is the answer
+                  to "who is doing this" once the turn header has scrolled
+                  away, with the live share beside the name. */}
+              {perDuckling.length > 0 && (
                 <dl className="mt-3 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling">
                   {perDuckling.map(([id, d]) => (
                     <div key={id} className="flex justify-between gap-2">

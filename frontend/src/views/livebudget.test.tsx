@@ -104,9 +104,11 @@ describe("the run's budget while it is running", () => {
     expect(box.textContent).toContain("no calls yet");
   });
 
-  // A solo run seats one model, and a breakdown of one row is noise — the
-  // roster naming an architect and a scribe does not mean they ran.
-  it("shows no breakdown for a solo run", async () => {
+  // Reversed on purpose: the one-row "breakdown" of a solo run duplicates
+  // the totals, but it is the answer to WHO is doing this once the turn
+  // header scrolls away under forty searches — so the row stays, wearing
+  // the name and the live share. Seats that never ran still do not appear.
+  it("names the solo run's one spender, and only the spender", async () => {
     useRuns.setState({
       runs: { "r-1": { ...run, mode: "solo", roster: { implementer: "pato-local", architect: "pato-atom" } } },
       spend: {}, events: {}, deltas: {}, reasoning: {},
@@ -120,7 +122,9 @@ describe("the run's budget while it is running", () => {
     );
     render(<RunView runId="r-1" client={client} />);
     await waitFor(() => expect(screen.getAllByTestId("budget-meter").length).toBeGreaterThan(0));
-    expect(screen.queryByTestId("spend-by-duckling")).toBeNull();
+    const rows = screen.getByTestId("spend-by-duckling");
+    expect(rows.textContent).toContain("pato-local");
+    expect(rows.textContent).not.toContain("pato-atom"); // seated, never ran
   });
 });
 
