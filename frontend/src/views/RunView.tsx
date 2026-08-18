@@ -511,7 +511,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
         : !next.includes("accept")
           ? "nothing passed, so there is nothing to accept — reject discards this run's diff and frees the task to retry"
-          : "commits the diff to the project";
+          : events.some((e) => e.type === "commit_withdrawn")
+            ? "The last accept committed the diff, but it did not reproduce from a clean checkout, so the commit was taken back — the diff is still in the tree, uncommitted. Fix the tree and accept again (a new commit, verified again), or reject to restore the tree."
+            : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";
     if (run.accepted) {
