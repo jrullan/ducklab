@@ -1386,4 +1386,31 @@ linkInstalledDeps (service.go:2086) is a hard-coded two-ecosystem table with no 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-072 — Route request_changes on a plan_extend proposal back into the amendment with its own fragment, note, and solo mode
+
+Fixes B-062.
+
+## Reported
+
+What happened: a plan_extend (r-20260818-012151-xrgs, solo, $0.03) drafted T-060..T-062 as a proposal. I sent request_changes with a small note ("add Depends on: T-060 to T-061 and T-062"). The engine relaunched the PLAN STAGE (r-...-r6e7) — in council, not solo — against the approved store, which holds T-001..T-059 only; the architect could not read T-061/T-062 (they exist only in plan.md.proposed), paused with a question, and the advisor correctly explained that the amendment door only adds new tasks and cannot edit existing ones. The revision path for an amendment is therefore unusable: the note asked for an edit to the amendment's own fragment, and the rerun could see neither the fragment nor a way to edit it. Aborted; relaunched plan_extend with the dependency instruction folded into the change text (which works, but the operator had to know the trick).
+
+Expected: request_changes on an amendment run reruns the AMENDMENT with the operator's note — the architect receives its own previous fragment (Params.Drafts / RoleTexts, the stand-pat machinery from B-001) as the draft to revise, plus the note, and emits the corrected fragment; same mode as the original run (solo), not the stage's configured council. Small-operator-first: an operator that says "add a dependency to the two tasks you just proposed" must be understood, not sent to reconcile a store.
+
+**Deliverables:**
+- request_changes on a plan_extend run rebuilds the follow-up from the persisted StageRequest (stage_request.json): the original Extend text plus the operator note, instead of the blank StageStart{revise} the MCP decide handler issues today (internal/mcp/tools.go:750-759)
+- the amendment rerun keeps the original run's mode and rounds (solo, one round) rather than defaulting to the stage council
+- runExtend/buildExtendPrompt receives the run's own previous fragment (via the stand-pat Drafts machinery / prior proposal) as the draft to revise, so the architect edits T-060..T-062 instead of reconciling the approved plan store
+- a test asserts the whole path: extend proposal -> request_changes with a note -> new run whose StageRequest carries extend+note in solo, and whose prompt contains the note and the previous fragment; the original run's gate resolves as superseded
+
+## Triage
+
+**Component:** plan amendment revision (stage/extend)
+**Suspected files:** internal/mcp/tools.go, internal/service/stages.go, internal/stage/stage.go, internal/stage/extend.go
+
+request_changes on an amendment discards the original Extend request and relaunches a bare plan revision against the approved store, and neither the rerun's mode nor the amendment's own fragment survives, which the verify-run evidence in stages.go/stage.go/extend.go confirms structurally.
+
+**Verification (triage recommends):** test-first — Extend-run revision is engine behaviour: assert that deciding request_changes on an extend gate relaunches a solo extend run whose prompt carries the operator note and the prior T-060.. fragment (stage/service-level tests, no model needed via injected Execute).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
