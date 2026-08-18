@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildTurns, anonymiseTurns, buildTimeline, toolFamily,
   buildGate, buildPending, parseDiff, toolTarget, reviewerDissent, findingsFiled, chainedBuildId, orderDiffFiles, touchesTests, isTestPath,
+  humaniseContract,
 } from "./runview";
 import type { DucklabEvent } from "../api/events";
 
@@ -525,5 +526,29 @@ describe("chainedBuildId", () => {
   });
   it("answers nothing when no chain fired", () => {
     expect(chainedBuildId([ev("run_end", 1, {})])).toBe("");
+  });
+});
+
+// The advisor, the judge and the triager answer in JSON — the contract — and
+// the lane rendered the blob: a folded advisor turn read
+// {"action":"note","note":"Stop assuming…"}. Said as a person would say it.
+describe("humaniseContract", () => {
+  it("turns the advisor's actions into a chip and the note", () => {
+    const note = humaniseContract("advisor", 'Some preamble.\n{"action":"note","note":"Stop assuming the gate is blocked.\\nRun it."}');
+    expect(note).toEqual({ label: "note — back to work", tone: "warning", body: "Stop assuming the gate is blocked.\nRun it." });
+    expect(humaniseContract("advisor", '{"action":"none","note":""}')).toEqual({ label: "no concerns", tone: "muted", body: "" });
+    expect(humaniseContract("advisor", '{"action":"stop","note":"reshuffle"}')!.tone).toBe("serious");
+  });
+  it("says the judge's choice and the triager's classification", () => {
+    expect(humaniseContract("judge", '{"choice":"B","reason":"only green candidate"}')).toEqual({ label: "chose B", tone: "good", body: "only green candidate" });
+    const t = humaniseContract("triager", '{"severity":"high","duplicate_of":"","component":"tool dispatch","reason":"the brake never resets"}');
+    expect(t!.label).toBe("high");
+    expect(t!.body).toBe("not a duplicate · tool dispatch — the brake never resets");
+  });
+  it("leaves prose and other roles alone", () => {
+    expect(humaniseContract("advisor", "I think this is fine.")).toBeNull();
+    expect(humaniseContract("implementer", '{"action":"note","note":"x"}')).toBeNull();
+    expect(humaniseContract("advisor", undefined)).toBeNull();
+    expect(humaniseContract("advisor", '{"action":"dance"}')).toBeNull();
   });
 });

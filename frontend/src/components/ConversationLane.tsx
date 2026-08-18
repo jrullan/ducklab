@@ -6,7 +6,7 @@ import { StatusChip } from "./StatusChip";
 import { Prose } from "./Prose";
 import { statusVar } from "../lib/colors";
 import { DeliverablesInline } from "./DeliverablesCard";
-import { splitDeliverablesReport } from "../lib/runview";
+import { humaniseContract, splitDeliverablesReport } from "../lib/runview";
 
 /**
  * One turn in the conversation.
@@ -73,7 +73,13 @@ export function ConversationTurn({
   // The implementer's closing report is a contract, not prose: split it out
   // once so both the folded and the open turn can show it as a checklist.
   const report = block.done && block.role === "implementer" && block.text ? splitDeliverablesReport(block.text) : null;
-  const preview = ((report ? report.prose : block.text) ?? "").split("\n").find((l) => l.trim() !== "") ?? "";
+  // A contract turn's JSON, said as a person would say it — the folded
+  // advisor line read {"action":"note","note":"…"} where it should read
+  // note — the note itself.
+  const human = block.done ? humaniseContract(block.role, block.text) : null;
+  const preview = human
+    ? [human.label, human.body.split("\n").find((l) => l.trim() !== "") ?? ""].filter(Boolean).join(" — ")
+    : (((report ? report.prose : block.text) ?? "").split("\n").find((l) => l.trim() !== "") ?? "");
   const reportDone = report ? report.items.filter((i) => i.status === "done").length : 0;
 
   return (
@@ -219,7 +225,15 @@ export function ConversationTurn({
           rendered once the turn has settled. */}
       {!collapsed && (block.done && block.text && !block.verdict ? (
         <div data-testid="turn-text">
-          {!report ? (
+          {human ? (
+            /* The engine already parsed this contract; the view re-parses
+               only to display. The chip carries the decision, the prose the
+               why — never the braces. */
+            <div className="mt-1" data-testid="contract-answer">
+              <StatusChip role={human.tone} label={human.label} />
+              {human.body && <Prose body={human.body} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />}
+            </div>
+          ) : !report ? (
             <Prose body={block.text} suppress={[]} className="mt-1 space-y-2 text-sm text-ink-secondary" />
           ) : (
             <>

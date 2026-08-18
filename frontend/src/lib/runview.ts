@@ -861,3 +861,57 @@ export function buildTriage(events: readonly DucklabEvent[]): TriageProposal[] {
   }
   return [...byBug.values()];
 }
+
+/** A contract turn's answer, said the way a person would say it.
+ *
+ * The advisor, the judge and the triager answer in JSON — that is the
+ * contract — and the lane rendered the blob: a folded advisor turn read
+ * `{"action":"note","note":"Stop assuming…"}` where a human would write
+ * "note — Stop assuming…". The engine has already parsed these; the view
+ * re-parses only to display, and anything that does not parse stays as the
+ * text it was. */
+export type HumanisedContract = {
+  /** One or two words for the header chip: "note", "stop", "chose A". */
+  label: string;
+  /** The chip's tone. */
+  tone: "good" | "warning" | "serious" | "muted";
+  /** The prose a person actually wants to read. */
+  body: string;
+};
+
+function contractObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed.slice(start, end + 1));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function humaniseContract(role: string, text: string | undefined): HumanisedContract | null {
+  if (!text) return null;
+  const o = contractObject(text);
+  if (!o) return null;
+  if (role === "advisor" && typeof o.action === "string") {
+    const note = typeof o.note === "string" ? o.note : "";
+    if (o.action === "none") return { label: "no concerns", tone: "muted", body: note };
+    if (o.action === "note") return { label: "note — back to work", tone: "warning", body: note };
+    if (o.action === "stop") return { label: "stop", tone: "serious", body: note };
+    return null;
+  }
+  if (role === "judge" && typeof o.choice === "string") {
+    return { label: `chose ${o.choice}`, tone: "good", body: typeof o.reason === "string" ? o.reason : "" };
+  }
+  if (role === "triager" && typeof o.severity === "string") {
+    const parts = [o.severity as string];
+    parts.push(o.duplicate_of ? `duplicate of ${String(o.duplicate_of)}` : "not a duplicate");
+    if (typeof o.component === "string" && o.component) parts.push(o.component);
+    return { label: parts[0]!, tone: "muted", body: `${parts.slice(1).join(" · ")}${typeof o.reason === "string" && o.reason ? ` — ${o.reason}` : ""}` };
+  }
+  return null;
+}
