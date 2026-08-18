@@ -293,6 +293,18 @@ export type RosterEntry = {
  *
  * There is no key field and there never will be: a provider records the name
  * of an environment variable, and the engine reads the value at call time. */
+export type Scorecard = {
+  id: string;
+  provider: string;
+  model: string;
+  locality?: string;
+  cost?: { input_per_mtok?: number; output_per_mtok?: number };
+  caps?: { context_tokens?: number; vision?: boolean; native_tools?: boolean };
+  measured?: { runs?: number; pass_rate?: number; avg_cost_usd?: number };
+  bench?: Record<string, { score?: number }>;
+  index?: { coding?: number; source?: string; as_of?: string };
+};
+
 export type ProviderView = {
   id: string;
   kind: string;
@@ -907,6 +919,10 @@ export class EngineClient {
   }
   ducklings() {
     return this.request<{ items: Duckling[] }>("GET", "/v1/ducklings").then((r) => r.items ?? []);
+  }
+  /** Evidence assembled by the scorecard service; the roster never infers it. */
+  Scorecards() {
+    return this.request<{ items: Scorecard[] }>("GET", "/v1/scorecards").then((r) => r.items ?? []);
   }
   runs(projectId?: string) {
     const q = projectId ? `?project=${encodeURIComponent(projectId)}` : "";

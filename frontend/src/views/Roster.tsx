@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Duckling, EngineClient } from "../api/client";
+import type { Duckling, EngineClient, Scorecard } from "../api/client";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { StatusChip } from "../components/StatusChip";
 import { rolesForMode } from "../lib/seats";
@@ -31,6 +31,15 @@ const isLocal = (d: Duckling, providers: ProviderView[]): boolean => {
 export function Roster({ client, projectId, projectName }: { client: EngineClient; projectId: string; projectName?: string }) {
   const [scope, setScope] = useState<"global" | "project">("global");
   const [ducks, setDucks] = useState<Duckling[]>([]);
+  const [scorecards, setScorecards] = useState<Scorecard[]>([]);
+  const [flockText, setFlockText] = useState("");
+  const [flockProvider, setFlockProvider] = useState("");
+  const [flockLocality, setFlockLocality] = useState("");
+  const [flockVision, setFlockVision] = useState(false);
+  const [flockTools, setFlockTools] = useState(false);
+  const [flockContext, setFlockContext] = useState("");
+  const [flockSort, setFlockSort] = useState("input-cost");
+  const [flockDir, setFlockDir] = useState<"asc" | "desc">("asc");
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [boards, setBoards] = useState<Record<string, Entry[]>>({});
   const [warnings, setWarnings] = useState<Record<string, string | undefined>>({});
@@ -59,6 +68,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
+  useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch(() => {}); }, [client]);
   useEffect(() => {
     if (typeof client.providers !== "function") return;
     client.providers().then(setProviders).catch(() => {});
@@ -108,8 +118,18 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       <button type="button" className={scope === "project" ? "text-ink font-semibold" : "text-ink-muted"} onClick={() => setScope("project")}>Project · {projectName ?? projectId}</button>
     </div>
     <div className="flex gap-6 items-start">
-    <aside className="w-64 shrink-0" data-testid="roster-flock"><h2 className="text-lg font-semibold">Flock</h2><div className="mt-2 space-y-2">
-      {ducks.map((d) => { const local = isLocal(d, providers); return <div key={d.id} draggable data-testid={`roster-flock-card-${d.id}`} onDragStart={(event) => { dragging.current = true; event.dataTransfer.setData("text/plain", d.id); }} onDragEnd={() => { dragging.current = false; }} className="rounded border border-hairline bg-surface p-2"><DuckAvatar id={d.id} roster={roster} /><span className="ml-2 font-medium">{`${d.id}${d.model ? ` · ${d.model}` : ""}`}</span><div className="text-sm text-ink-muted"><StatusChip role="muted" label={local ? "local" : "remote"} /> <span title="cost per million tokens, in / out">{d.cost ? `$${d.cost.input_per_mtok} / $${d.cost.output_per_mtok} per Mtok` : "cost unknown"}</span></div></div>; })}
+    <aside className="w-64 shrink-0" data-testid="roster-flock"><h2 className="text-lg font-semibold">Flock</h2>
+      <div className="mt-2 space-y-1 text-sm">
+        <input data-testid="roster-flock-filter-text" value={flockText} onChange={(e) => setFlockText(e.target.value)} placeholder="id or model" />
+        <select data-testid="roster-flock-filter-provider" value={flockProvider} onChange={(e) => setFlockProvider(e.target.value)}><option value="">all providers</option>{[...new Set(scorecards.map(s => s.provider))].map(p => <option key={p}>{p}</option>)}</select>
+        <select data-testid="roster-flock-filter-locality" value={flockLocality} onChange={(e) => setFlockLocality(e.target.value)}><option value="">all localities</option>{[...new Set(scorecards.map(s => s.locality).filter(Boolean))].map(p => <option key={p}>{p}</option>)}</select>
+        <label><input data-testid="roster-flock-filter-vision" type="checkbox" checked={flockVision} onChange={(e) => setFlockVision(e.target.checked)} /> vision</label>
+        <label><input data-testid="roster-flock-filter-native-tools" type="checkbox" checked={flockTools} onChange={(e) => setFlockTools(e.target.checked)} /> native-tools</label>
+        <input data-testid="roster-flock-filter-context" type="number" value={flockContext} onChange={(e) => setFlockContext(e.target.value)} placeholder="minimum context" />
+        <select data-testid="roster-flock-sort" value={flockSort} onChange={(e) => setFlockSort(e.target.value)}><option value="input-cost">input cost</option><option value="output-cost">output cost</option><option value="pass-rate">pass rate</option><option value="avg-cost">avg cost per run</option><option value="bench:arena">bench score · arena</option><option value="coding-index">coding index</option><option value="context">context</option></select>
+        <select data-testid="roster-flock-sort-dir" value={flockDir} onChange={(e) => setFlockDir(e.target.value as "asc" | "desc")}><option value="asc">ascending</option><option value="desc">descending</option></select>
+      </div><div className="mt-2 space-y-2">
+      {(() => { const cards = ducks.map(d => scorecards.find(s => s.id === d.id) ?? ({ ...d } as Scorecard)); const value = (s: Scorecard): number | undefined => flockSort === "input-cost" ? s.cost?.input_per_mtok : flockSort === "output-cost" ? s.cost?.output_per_mtok : flockSort === "pass-rate" ? (s.measured?.runs ? s.measured.pass_rate : undefined) : flockSort === "avg-cost" ? (s.measured?.runs ? s.measured.avg_cost_usd : undefined) : flockSort === "coding-index" ? s.index?.coding : flockSort === "context" ? s.caps?.context_tokens : s.bench?.[flockSort.slice(6)]?.score; const filtered = cards.filter(s => (!flockText || `${s.id} ${s.model}`.toLowerCase().includes(flockText.toLowerCase())) && (!flockProvider || s.provider === flockProvider) && (!flockLocality || s.locality === flockLocality) && (!flockVision || s.caps?.vision) && (!flockTools || s.caps?.native_tools) && (!flockContext || (s.caps?.context_tokens ?? 0) >= Number(flockContext))).sort((a,b) => { const av=value(a), bv=value(b); if (av === undefined && bv === undefined) return 0; if (av === undefined) return 1; if (bv === undefined) return -1; return (av-bv) * (flockDir === "asc" ? 1 : -1); }); return filtered.map(s => { const d = ducks.find(x => x.id === s.id)!; const local = s.locality ?? ""; const v=value(s); return <div key={s.id} draggable data-testid={`roster-flock-card-${s.id}`} onDragStart={(event) => { dragging.current = true; event.dataTransfer.setData("text/plain", s.id); }} onDragEnd={() => { dragging.current = false; }} className="rounded border border-hairline bg-surface p-2"><DuckAvatar id={s.id} roster={roster} /><span className="ml-2 font-medium">{`${s.id} · ${s.model}`}</span><div className="text-sm text-ink-muted"><StatusChip role="muted" label={local || (isLocal(d, providers) ? "local" : "remote")} /> <span>{s.cost ? `$${s.cost.input_per_mtok} / $${s.cost.output_per_mtok} per Mtok` : "cost unknown"}</span></div><div data-testid={`roster-flock-value-${s.id}`}>{v === undefined ? "—" : v}</div><div className="text-xs">{(!s.measured?.runs) && "no runs yet "}{!s.bench && "no bench "}{!s.index && "no index"}</div></div>; }); })()}
     </div></aside>
     <div className="flex-1 min-w-0">
     {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
