@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
-import type { Bug, Duckling, EngineClient, GateResult, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
@@ -76,8 +76,7 @@ export function Board({
   // The saved line-up per mode, so picking a mode fills the boxes with the
   // combination that was found to work.
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
-  // The modes launchers open on, from Settings: the person who always builds
-  // in pair and tests in solo should not re-pick both on every task.
+  // The launchers open on the configured mode defaults.
   const [phaseDefaults, setPhaseDefaults] = useState<{ build: string; test: string }>({
     build: "solo",
     test: "solo",
@@ -782,6 +781,12 @@ function TaskRunner({
   measured?: MeasuredSpend;
 }) {
   const [chosen, setChosen] = useState<string[]>([]);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
+  const [runMode, setRunMode] = useState("solo");
+  useEffect(() => {
+    const getRoster = client.RosterGet ?? client.rosterGet ?? (() => Promise.resolve({ entries: [] as RosterEntry[] }));
+    void getRoster.call(client, projectId, runMode).then((r) => setRoster(r.entries ?? [])).catch(() => setRoster([]));
+  }, [client, projectId, runMode]);
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
   // The revert commit of a successful retire — the click's answer. The rail
@@ -909,6 +914,7 @@ function TaskRunner({
                 estimates={estimates}
                 label="Build again"
                 busy={busy}
+                roster={roster}
                 onLaunch={(opts) => void go("run", opts)}
               />
             </div>
@@ -931,6 +937,8 @@ function TaskRunner({
               estimates={estimates}
               busy={busy}
               onDucklingsChange={setChosen}
+              roster={roster}
+              onModeChange={setRunMode}
               onLaunch={(opts) => void go("run", opts)}
             />
           </div>
@@ -950,6 +958,7 @@ function TaskRunner({
               phaseDefaults={phaseDefaults}
               estimates={estimates}
               busy={busy}
+              roster={roster}
               onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
               onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
               onBuildOnly={(b) =>

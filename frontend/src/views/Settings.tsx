@@ -3,7 +3,6 @@ import { Ducklings } from "./Ducklings";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
-import { seatLabel } from "../lib/seats";
 import { StatusChip } from "../components/StatusChip";
 import type { BudgetView, EngineClient, ModeDefaultsView, RosterEntry } from "../api/client";
 
@@ -259,12 +258,8 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [rounds, setRounds] = useState<Record<string, string>>({});
   const [roleTurns, setRoleTurns] = useState<Record<string, string>>({});
   const [agentTurns, setAgentTurns] = useState("");
-  const [lineups, setLineups] = useState<Record<string, string[]>>({});
   const [buildMode, setBuildMode] = useState("");
   const [testMode, setTestMode] = useState("");
-  // Extra columns a person opened on an open-seated mode, beyond what the
-  // saved line-up needs. UI state only; empty seats are dropped on save.
-  const [extraCols, setExtraCols] = useState<Record<string, number>>({});
   const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: string }>({
     kind: "idle",
   });
@@ -334,7 +329,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     }
     setRoleTurns(rt);
     setAgentTurns(String(v.agent_max_turns));
-    setLineups(v.ducklings ?? {});
     setBuildMode(v.build_mode ?? "");
     setTestMode(v.test_mode ?? "");
   };
@@ -392,9 +386,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         // Empty seats are UI scaffolding, not preferences.
         build_mode: buildMode,
         test_mode: testMode,
-        ducklings: Object.fromEntries(
-          Object.entries(lineups).map(([m, ids]) => [m, ids.filter(Boolean)]),
-        ),
         role_turns: numbersOnly(roleTurns),
       }),
     ])
@@ -454,157 +445,16 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
                 <span className="text-xs text-ink-muted">intake → spec → plan</span>
                 <ScopeChip scope="all projects" />
               </div>
-              <div className="mt-2" data-testid="function-lineups">
-                {(() => {
-                  const mode = "council";
-                  const picked = lineups[mode] ?? [];
-                  const cols = Math.max(2, picked.length, extraCols[mode] ?? 0);
-                  const setSeat = (i: number, id: string) => {
-                    const next = [...picked];
-                    while (next.length <= i) next.push("");
-                    next[i] = id;
-                    setLineups({ ...lineups, [mode]: next });
-                    touched();
-                  };
-                  return (
-                    <div className="flex flex-wrap items-end gap-2 text-sm text-ink-secondary">
-                      <span
-                        className="w-24 shrink-0 self-center text-ink-secondary"
-                        title="the council drafts the documents — a drafter plus a critic per further seat"
-                      >
-                        council
-                      </span>
-                      {Array.from({ length: cols }, (_, i) => (
-                        <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                          {seatLabel(mode, i)}
-                          <select
-                            value={picked[i] ?? ""}
-                            onChange={(e) => setSeat(i, e.target.value)}
-                            data-testid={`seat-${mode}-${i}`}
-                            className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
-                          >
-                            <option value="">—</option>
-                            {fleet
-                              .filter((id) => id === picked[i] || !picked.includes(id))
-                              .map((id) => (
-                                <option key={id} value={id}>{id}</option>
-                              ))}
-                          </select>
-                        </label>
-                      ))}
-                      <button
-                        type="button"
-                        data-testid={`seat-add-${mode}`}
-                        onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
-                        className="rounded border border-hairline px-2 py-0.5 text-xs"
-                        title="add a critic seat"
-                      >
-                        +
-                      </button>
-                    </div>
-                  );
-                })()}
-              </div>
+              <a
+                href="#/roster"
+                role="link"
+                className="text-sm text-ink underline"
+              >
+                Roster board
+              </a>
             </section>
 
-            <section className="py-3" data-testid="stage-tasks">
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm font-medium text-ink">tasks</span>
-                <span className="text-xs text-ink-muted">test-first & build</span>
-                <ScopeChip scope="all projects" />
-              </div>
-              {/* The launcher's opening picks, aligned into the same label
-                  column as the seat rows below — "default modes" floated as
-                  its own orphan heading before. */}
-              <div className="mt-2 flex flex-wrap items-end gap-2 text-sm text-ink-secondary" data-testid="default-modes">
-                <span className="w-24 shrink-0 self-center" title="what the launchers open on">defaults</span>
-                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                  build
-                  <select
-                    data-testid="default-build-mode"
-                    value={buildMode}
-                    onChange={(e) => { setBuildMode(e.target.value); touched(); }}
-                    className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-                  >
-                    <option value="">solo (unset)</option>
-                    {Object.keys(modes.script_rounds ?? {})
-                      .filter((m) => m !== "council")
-                      .sort()
-                      .map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                  test first
-                  <select
-                    data-testid="default-test-mode"
-                    value={testMode}
-                    onChange={(e) => { setTestMode(e.target.value); touched(); }}
-                    className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
-                  >
-                    <option value="">solo (unset)</option>
-                    <option value="solo">solo</option>
-                    <option value="pair">pair</option>
-                  </select>
-                </label>
-              </div>
-              <div className="mt-2 space-y-2" data-testid="mode-lineups">
-                {Object.keys(modes.script_rounds ?? {})
-                  .filter((m) => m !== "council")
-                  .sort()
-                  .map((mode) => {
-                    const seats = modes.seats?.[mode] ?? 0;
-                    const picked = lineups[mode] ?? [];
-                    const cols =
-                      seats > 0
-                        ? seats
-                        : Math.max(2, picked.length, extraCols[mode] ?? 0);
-                    const setSeat = (i: number, id: string) => {
-                      const next = [...picked];
-                      while (next.length <= i) next.push("");
-                      next[i] = id;
-                      setLineups({ ...lineups, [mode]: next });
-                      touched();
-                    };
-                    return (
-                      <div key={mode} className="flex flex-wrap items-end gap-2 text-sm text-ink-secondary">
-                        <span className="w-24 shrink-0 self-center">{mode}</span>
-                        {Array.from({ length: cols }, (_, i) => (
-                          <label key={i} className="flex flex-col gap-0.5 text-xs text-ink-muted">
-                            {seatLabel(mode, i)}
-                            <select
-                              value={picked[i] ?? ""}
-                              onChange={(e) => setSeat(i, e.target.value)}
-                              data-testid={`seat-${mode}-${i}`}
-                              className="rounded border border-hairline bg-surface2 px-1 py-0.5 text-sm text-ink-secondary"
-                            >
-                              <option value="">—</option>
-                              {fleet
-                                .filter((id) => id === picked[i] || !picked.includes(id))
-                                .map((id) => (
-                                  <option key={id} value={id}>{id}</option>
-                                ))}
-                            </select>
-                          </label>
-                        ))}
-                        {seats === 0 && (
-                          <button
-                            type="button"
-                            data-testid={`seat-add-${mode}`}
-                            onClick={() => setExtraCols({ ...extraCols, [mode]: cols + 1 })}
-                            className="rounded border border-hairline px-2 py-0.5 text-xs"
-                            title="add a seat"
-                          >
-                            +
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            </section>
-
+            {/* Positional mode seats belong to the Roster board; Settings keeps only role defaults. */}
             {FUNCTION_ORDER.map((role) => {
               const e = roster.find((r) => r.role === role);
               if (!e || !WORKFLOW_ROWS[role]) return null;
@@ -648,11 +498,10 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
                 </section>
               );
             })}
-          </div>
+            </div>
 
           <p className="mt-3 text-xs text-ink-muted">
-            Seat pickers ride the Save button below; the this-project pickers
-            (all function roles) apply the moment you choose.
+            Role assignments are managed on the Roster board; launcher seat picks apply only to their run.
           </p>
         </SettingsCard>
       )}

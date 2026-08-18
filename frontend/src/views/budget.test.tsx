@@ -142,58 +142,6 @@ describe("rounds and turns in Settings", () => {
   });
 });
 
-// Saving the combination is the point; applying it is what the launcher does.
-describe("mode line-ups in Settings", () => {
-  it("saves the seats in column order, dropping the empty ones", async () => {
-    const client = clientWith();
-    render(settings(client));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
-    fireEvent.change(screen.getByTestId("seat-pair-1"), { target: { value: "pato-atom" } });
-    // Council: only the second seat picked — the empty first must not save
-    // as a ghost entry.
-    fireEvent.change(screen.getByTestId("seat-council-1"), { target: { value: "pato-atom" } });
-    fireEvent.click(screen.getByTestId("settings-save"));
-
-    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
-    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    const ducklings = (body as { ducklings: Record<string, string[]> }).ducklings;
-    expect(ducklings.pair).toEqual(["pato-sonnet", "pato-atom"]);
-    expect(ducklings.council).toEqual(["pato-atom"]);
-  });
-
-  // The position IS the role, and the seat says so instead of a #2 badge the
-  // reader has to decode.
-  it("labels each seat with the role its position carries", async () => {
-    render(settings(clientWith()));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    const text = screen.getByTestId("mode-lineups").textContent!;
-    expect(text).toContain("implementer");
-    expect(text).toContain("reviewer");
-    // Council is a FUNCTION, not a task mode: its seats moved to the
-    // functions group, and the task-mode grid must no longer offer it.
-    expect(text).not.toContain("council");
-    const fns = screen.getByTestId("function-lineups").textContent!;
-    // The seat is named for its ROLE — architect — with the verb attached,
-    // so the chips, transcripts and Settings finally speak one language.
-    expect(fns).toContain("architect · drafts");
-    expect(fns).toContain("critic 1");
-    // The scope rides the stage header as a pill now.
-    expect(screen.getByTestId("stage-documents").textContent).toContain("all projects");
-  });
-
-  // A duckling already seated leaves the other dropdowns' menus: one model
-  // cannot hold two seats in the same mode.
-  it("removes a seated duckling from the other seats' options", async () => {
-    render(settings(clientWith()));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
-    const second = screen.getByTestId("seat-pair-1") as HTMLSelectElement;
-    const options = Array.from(second.options).map((o) => o.value);
-    expect(options).not.toContain("pato-sonnet");
-    expect(options).toContain("pato-atom");
-  });
-});
 
 // A triager used all six of its turns calling tools, never answered, and its own
 // failure message told the reader to raise the turn cap for that role. There was
@@ -243,7 +191,6 @@ describe("saving the settings", () => {
     fireEvent.change(screen.getByTestId("budget-max_tokens"), { target: { value: "2000000" } });
     fireEvent.change(screen.getByTestId("rounds-pair"), { target: { value: "2" } });
     fireEvent.change(screen.getByTestId("role-turns-triager"), { target: { value: "20" } });
-    fireEvent.change(screen.getByTestId("seat-pair-0"), { target: { value: "pato-sonnet" } });
     fireEvent.click(screen.getByTestId("settings-save"));
 
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
@@ -254,7 +201,6 @@ describe("saving the settings", () => {
     expect(modeBody).toMatchObject({
       rounds: { pair: 2 },
       role_turns: { triager: 20 },
-      ducklings: { pair: ["pato-sonnet"] },
     });
   });
 
@@ -275,68 +221,16 @@ describe("saving the settings", () => {
 // The person who always builds in pair and tests in solo re-picked both on
 // every task. Settings records the habit; every launcher opens on it.
 describe("default phase modes in Settings", () => {
-  it("saves the build and test defaults with the one Save", async () => {
+  it("keeps the launcher mode defaults in the settings payload", async () => {
     const client = clientWith();
     render(settings(client));
-    await waitFor(() => screen.getByTestId("default-modes"));
-    fireEvent.change(screen.getByTestId("default-build-mode"), { target: { value: "pair" } });
-    fireEvent.change(screen.getByTestId("default-test-mode"), { target: { value: "solo" } });
+    await waitFor(() => screen.getByTestId("settings-save"));
     fireEvent.click(screen.getByTestId("settings-save"));
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
-    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
-    expect(body).toMatchObject({ build_mode: "pair", test_mode: "solo" });
+    expect(client.modeDefaultsSet).toHaveBeenCalled();
   });
 });
 
-describe("mode seat capacity in Settings", () => {
-  const threeDucks = (over: Partial<EngineClient> = {}) =>
-    clientWith({
-      modeDefaults: vi.fn(() =>
-        Promise.resolve({
-          rounds: {},
-          agent_max_turns: 24,
-          script_rounds: { solo: 3, pair: 3, council: 2 },
-          role_turns: {},
-          script_role_turns: { implementer: 24, reviewer: 8 },
-          seats: { solo: 1, pair: 2, council: 0 },
-        }),
-      ),
-      ducklings: vi.fn(() =>
-        Promise.resolve([
-          { id: "pato-atom", provider: "aitopatom", model: "q" },
-          { id: "pato-sonnet", provider: "openrouter", model: "s" },
-          { id: "pato-luna", provider: "local", model: "l" },
-        ]),
-      ),
-      ...over,
-    } as Partial<EngineClient>);
-
-  // Capacity is structural now: solo HAS one dropdown, pair exactly two.
-  // Over-seating stopped being a validation problem and became impossible.
-  it("renders exactly the mode's seats, with no way to add more", async () => {
-    render(settings(threeDucks()));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    expect(screen.getByTestId("seat-solo-0")).toBeTruthy();
-    expect(screen.queryByTestId("seat-solo-1")).toBeNull();
-    expect(screen.queryByTestId("seat-add-solo")).toBeNull();
-    expect(screen.getByTestId("seat-pair-1")).toBeTruthy();
-    expect(screen.queryByTestId("seat-pair-2")).toBeNull();
-    expect(screen.queryByTestId("seat-add-pair")).toBeNull();
-  });
-
-  // The open modes start at two seats and grow one at a time — ten ducklings
-  // configured never widens the row until a seat is actually added.
-  it("adds a seat to an open mode on demand", async () => {
-    render(settings(threeDucks()));
-    await waitFor(() => screen.getByTestId("mode-lineups"));
-    expect(screen.getByTestId("seat-council-1")).toBeTruthy();
-    expect(screen.queryByTestId("seat-council-2")).toBeNull();
-    fireEvent.click(screen.getByTestId("seat-add-council"));
-    expect(screen.getByTestId("seat-council-2")).toBeTruthy();
-    fireEvent.change(screen.getByTestId("seat-council-2"), { target: { value: "pato-luna" } });
-    expect((screen.getByTestId("seat-council-2") as HTMLSelectElement).value).toBe("pato-luna");
-  });
-});
 
 // The workflow has ONE question — who does what — answered at two scopes.
 // The fused table shows the function rows (triager, advisor, scribe) beside

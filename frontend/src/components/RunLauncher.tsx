@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { Duckling } from "../api/client";
+import { useEffect, useRef, useState } from "react";
+import type { Duckling, RosterEntry } from "../api/client";
 import { money } from "../lib/format";
 import { fixedSeats, seatLabel } from "../lib/seats";
 import { SeatChips, type MeasuredSpend } from "./SeatChips";
@@ -31,6 +31,7 @@ export function LaunchConfig({
   showTokens = false,
   measured,
   defaultProvenance,
+  roster,
 }: {
   ducklings: readonly Duckling[];
   value: PhaseConfig;
@@ -39,10 +40,20 @@ export function LaunchConfig({
   estimates?: ModeEstimates;
   showTokens?: boolean;
   measured?: MeasuredSpend;
+  roster?: readonly RosterEntry[];
   /** Provenance for untouched empty seats; a pick is always per-run. */
   defaultProvenance?: string;
 }) {
   const [extraSeats, setExtraSeats] = useState(0);
+  useEffect(() => {
+    if (roster?.length && value.ducklings.length === 0) {
+      onChange({
+        ...value,
+        ducklings: roster.map((e) => e.duckling),
+        seatProvenance: roster.map((e) => e.source === "project pin" ? "project" : "global"),
+      });
+    }
+  }, [roster, value.mode]);
   const seats = fixedSeats(value.mode);
   const cols = seats > 0 ? seats : Math.max(2, value.ducklings.length, extraSeats);
   const setSeat = (i: number, id: string) => {
@@ -167,7 +178,9 @@ export function RunLauncher({
   busy = false,
   onLaunch,
   onDucklingsChange,
+  onModeChange,
   measured,
+  roster,
 }: {
   ducklings: readonly Duckling[];
   initialMode?: string;
@@ -187,15 +200,20 @@ export function RunLauncher({
   /** Reported as it changes, not only on launch: a caller may have its own
    * buttons that act on the selection — writing the test first, for one. */
   onDucklingsChange?: (ids: string[]) => void;
+  onModeChange?: (mode: string) => void;
   measured?: MeasuredSpend;
+  roster?: readonly RosterEntry[];
 }) {
+  const resolved = roster ?? [];
   const [mode, setMode] = useState(initialMode);
   // The run-specific instruction — the consultant's "relaunch with a note"
   // had the channel (RunRequest.note) and no general doorway. Collapsed
   // until wanted: most launches carry nothing extra.
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
-  const [chosen, setChosen] = useState<string[]>([...initialDucklings]);
+  const changed = useRef(initialDucklings.length > 0 && resolved.length === 0);
+  const [chosen, setChosen] = useState<string[]>(() => resolved.length ? [] : initialDucklings.length ? [...initialDucklings] : []);
+  const [seatProvenance, setSeatProvenance] = useState<string[]>(() => resolved.length ? [] : initialDucklings.map(() => "picked now"));
   const [maxTokens, setMaxTokens] = useState("");
   const [yolo, setYolo] = useState(false);
   const [agentTurns, setAgentTurns] = useState("");
@@ -206,7 +224,15 @@ export function RunLauncher({
   const [extraSeats, setExtraSeats] = useState(0);
   const seats = fixedSeats(mode);
   const cols = seats > 0 ? seats : Math.max(2, chosen.length, extraSeats);
+  useEffect(() => {
+    if (!changed.current && resolved.length) {
+      setChosen(resolved.map((e) => e.duckling));
+      setSeatProvenance(resolved.map((e) => e.source === "project pin" ? "project" : "global"));
+    }
+  }, [roster, mode]);
   const setSeat = (i: number, id: string) => {
+    changed.current = true;
+    setSeatProvenance((cur) => { const next = [...cur]; next[i] = "picked now"; return next; });
     setChosen((cur) => {
       const next = [...cur];
       while (next.length <= i) next.push("");
@@ -226,12 +252,19 @@ export function RunLauncher({
           onChange={(e) => {
             const next = e.target.value;
             setMode(next);
-            // Only when that mode has a saved line-up. Clearing the boxes for a
-            // mode with none would throw away a selection the person just made.
-            const saved = preferred?.[next];
-            if (saved && saved.length > 0) {
-              setChosen([...saved]);
-              onDucklingsChange?.([...saved]);
+            onModeChange?.(next);
+            if (roster) {
+              // A mode change re-resolves from the canonical roster; saved
+              // Settings line-ups must not clobber the resolver.
+              changed.current = false;
+              setChosen([]);
+              setSeatProvenance([]);
+            } else {
+              const saved = preferred?.[next];
+              if (saved?.length) {
+                setChosen([...saved]);
+                onDucklingsChange?.([...saved]);
+              }
             }
           }}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
@@ -339,6 +372,7 @@ export function RunLauncher({
             entries={Array.from({ length: cols }, (_, i) => ({
               role: seatLabel(mode, i),
               duckling: chosen[i] ?? "",
+              provenance: seatProvenance[i],
             }))}
             fleet={[...ducklings]}
             measured={measured}

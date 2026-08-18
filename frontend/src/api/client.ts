@@ -281,6 +281,7 @@ export interface Task {
 export type RosterEntry = {
   role: string;
   duckling: string;
+  ducklings?: string[];
   /** "project" when project.toml declares it, "default" when the engine chose.
    * A person needs to know which assignments are theirs. */
   source: string;
@@ -808,6 +809,10 @@ export class EngineClient {
   }
   rosterGet(projectId: string, mode: string) {
     return this.roster(projectId, mode);
+  }
+  /** Compatibility spelling used by desktop launcher mocks and generated clients. */
+  RosterGet(projectId: string, mode: string) {
+    return this.rosterGet(projectId, mode);
   }
   rosterSet(projectId: string, role: string, duckling: string) {
     return this.request<unknown>("PUT", `/v1/projects/${projectId}/roster`, { role, duckling });

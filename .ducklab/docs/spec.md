@@ -774,6 +774,8 @@ The engine announces run-settled moments to one configured webhook: `startNotifi
 
 ## SPEC-026 — Editable roster board
 
+Desktop Settings links to the Roster board instead of editing positional mode seats. Task, TDD, and stage launchers prefill seat chips from the canonical resolver and show `project` or `global` provenance; changing a chip shows `picked now`, is sent only with that run request, and never writes Global or Project roster settings.
+
 **Implements:** REQ-024
 **As-built:** yes
 

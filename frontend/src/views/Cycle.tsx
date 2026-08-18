@@ -78,7 +78,10 @@ export function Cycle({
   }, [client, projectId]);
   useEffect(() => {
     Promise.all([
-      Promise.resolve().then(() => client.roster(projectId, "solo")),
+      Promise.resolve().then(() => {
+        const getRoster = client.RosterGet ?? client.rosterGet ?? client.roster;
+        return getRoster.call(client, projectId, "solo");
+      }),
       Promise.resolve().then(() => client.ducklings()),
     ])
       .then(([r, ds]) => {
@@ -170,8 +173,8 @@ export function Cycle({
   // roster warned that one model would critique its own draft while the run
   // was going to use the two the person had saved.
   useEffect(() => {
-    client
-      .roster(projectId, mode)
+    const getRoster = client.RosterGet ?? client.rosterGet ?? client.roster;
+    (getRoster ? getRoster.call(client, projectId, mode) : Promise.resolve({ entries: [] as RosterEntry[] }))
       .then((r) => setRoster(r.entries))
       .catch(() => setRoster([]));
   }, [client, projectId, mode]);
@@ -763,6 +766,7 @@ export function Cycle({
                   entries={stageSeats(mode, roster).map((e, i) => ({
                     ...e,
                     duckling: seatPicks[`extend:${i}`] || e.duckling,
+                    provenance: seatPicks[`extend:${i}`] ? "picked now" : (e.source === "project pin" ? "project" : "global"),
                   }))}
                   fleet={fleet}
                   measured={measured}

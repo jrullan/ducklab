@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Duckling } from "../api/client";
+import type { Duckling, RosterEntry } from "../api/client";
 import { LaunchConfig, type PhaseConfig, type ModeEstimates } from "./RunLauncher";
 import type { MeasuredSpend } from "./SeatChips";
 
@@ -14,7 +14,7 @@ import type { MeasuredSpend } from "./SeatChips";
  * only say what to do when a button is pressed. */
 export function TddLaunch({
   ducklings,
-  preferred,
+  preferred: _preferred,
   phaseDefaults,
   estimates,
   busy,
@@ -22,6 +22,7 @@ export function TddLaunch({
   onTestOnly,
   onBuildOnly,
   measured,
+  roster,
 }: {
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
@@ -32,19 +33,14 @@ export function TddLaunch({
   onTestOnly: (test: PhaseConfig) => void;
   onBuildOnly: (build: PhaseConfig) => void;
   measured?: MeasuredSpend;
+  roster?: readonly RosterEntry[];
 }) {
   // Opening seats are empty: omitted ducklings leave the resolved roster in charge.
   const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.test, ducklings: [] }));
   const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.build, ducklings: [] }));
-  // Changing a mode re-seats from that mode's saved line-up.
-  const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, prevMode: string) => {
-    if (next.mode !== prevMode) {
-      const saved = preferred[next.mode];
-      set(saved && saved.length > 0
-        ? { ...next, ducklings: [...saved], seatProvenance: saved.map(() => "Settings") }
-        : next);
-      return;
-    }
+  // Changing a mode re-resolves from the canonical roster. Saved Settings
+  // line-ups are not launch defaults anymore; picks remain run-local.
+  const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, _prevMode: string) => {
     set(next);
   };
   return (
@@ -57,6 +53,7 @@ export function TddLaunch({
           value={testCfg}
           onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
           modes={["solo", "pair"]}
+          roster={roster}
           defaultProvenance="roster"
         />
       </div>
@@ -69,6 +66,7 @@ export function TddLaunch({
           onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
           estimates={estimates}
           showTokens
+          roster={roster}
           defaultProvenance="roster"
         />
       </div>
