@@ -5,11 +5,12 @@ import "testing"
 // RankCandidates is the one seat-aware ordering rule; every client (desktop,
 // MCP) shows what it returns. Pin the shape a small operator relies on: the
 // seat decides the metric, evidence is required, three at most, why is text.
+// PassRate is a percentage (report.Row.PassRate), not a fraction.
 func TestRankCandidatesFollowsTheSeat(t *testing.T) {
 	cards := []Scorecard{
-		{ID: "bench-best", Measured: &MeasuredEvidence{Runs: 14, PassRate: .92, AvgCostPerRun: .31, AvgWallclock: 90}, Bench: map[string]BenchEvidence{"suite": {Score: .91}}},
-		{ID: "pass-cheap", Measured: &MeasuredEvidence{Runs: 14, PassRate: .92, AvgCostPerRun: .20, AvgWallclock: 40}},
-		{ID: "pass-slow", Measured: &MeasuredEvidence{Runs: 9, PassRate: .95, AvgCostPerRun: .50, AvgWallclock: 300}},
+		{ID: "bench-best", Measured: &MeasuredEvidence{Runs: 14, PassRate: 92, AvgCostPerRun: .31, AvgWallclock: 90}, Bench: map[string]BenchEvidence{"suite": {Score: .91}}},
+		{ID: "pass-cheap", Measured: &MeasuredEvidence{Runs: 14, PassRate: 92, AvgCostPerRun: .20, AvgWallclock: 40}},
+		{ID: "pass-slow", Measured: &MeasuredEvidence{Runs: 9, PassRate: 95, AvgCostPerRun: .50, AvgWallclock: 300}},
 		{ID: "no-runs", Measured: &MeasuredEvidence{Runs: 0}},
 		{ID: "unmeasured"},
 	}
@@ -36,6 +37,9 @@ func TestRankCandidatesFollowsTheSeat(t *testing.T) {
 	}
 	if got := first("architect"); got != "bench-best" {
 		t.Errorf("architect first = %s, want bench-best (bench-first)", got)
+	}
+	if got := RankCandidates("reviewer", cards)[0]; got.Why != "pass rate 95% over 9 runs · $0.50/run" {
+		t.Errorf("reviewer why = %q; pass rate is already a percentage", got.Why)
 	}
 	if got := first("reviewer"); got != "pass-slow" {
 		t.Errorf("reviewer first = %s, want pass-slow (pass rate first)", got)

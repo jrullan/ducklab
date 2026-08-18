@@ -109,7 +109,7 @@ func RankCandidates(role string, scorecards []Scorecard) []Candidate {
 			}
 		}
 		row := ranked{c: Candidate{ID: s.ID}, primary: pass, secondary: cost}
-		row.c.Why = fmt.Sprintf("pass rate %.0f%% over %d runs · $%.2f/run", pass*100, s.Measured.Runs, cost)
+		row.c.Why = fmt.Sprintf("pass rate %.0f%% over %d runs · $%.2f/run", pass, s.Measured.Runs, cost)
 		switch {
 		case benchFirst && hasBench:
 			row.primary, row.bench = bench, true
