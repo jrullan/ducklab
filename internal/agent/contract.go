@@ -346,6 +346,12 @@ type Triage struct {
 	// (behavioural, crash, data), "build-only" when the honest check is
 	// eyes (visual/cosmetic/config). Recommends, never decides.
 	TestStrategy string `json:"test_strategy"`
+	// Deliverables are the fix task's work contract: 2-5 concrete,
+	// verifiable outcomes. The plan architects are dictated the same shape
+	// (stage.TaskBodyContract); a promoted bug used to be the one door into
+	// the build loop that carried none, so its implementer ran without a
+	// checklist and reported "1/1" on the task as a whole.
+	Deliverables []string `json:"deliverables"`
 	// TestReason is one line: why that strategy — and for test-first, a
 	// sketch of the reproduction the test-writer can start from.
 	TestReason string `json:"test_reason"`

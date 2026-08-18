@@ -339,6 +339,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			"suspected_files": t.SuspectedFiles,
 			"test_strategy":   t.TestStrategy, "test_reason": t.TestReason,
 		}
+		if len(t.Deliverables) > 0 {
+			p["deliverables"] = t.Deliverables
+		}
 		if t.DuplicateOf != "" {
 			p["duplicate_of"] = t.DuplicateOf
 		}
@@ -543,6 +546,18 @@ func promotedTaskBody(b *store.Bug) string {
 		sb.WriteString(strings.TrimSpace(b.Body))
 		sb.WriteString("\n")
 	}
+	// The implementer's numbered work contract, in the same shape the plan
+	// architects are dictated (stage.TaskBodyContract): top-level bullets
+	// under **Deliverables:** become the checklist it reports against. A
+	// promoted bug was the one door into the build loop without one.
+	if b.Deliverables != "" {
+		sb.WriteString("\n**Deliverables:**\n")
+		for _, line := range strings.Split(b.Deliverables, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				fmt.Fprintf(&sb, "- %s\n", line)
+			}
+		}
+	}
 	if b.Component != "" || b.SuspectedFiles != "" || b.TriageReason != "" {
 		sb.WriteString("\n## Triage\n\n")
 		if b.Component != "" {
@@ -721,6 +736,18 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		}
 		if files, ok := p["suspected_files"].([]string); ok {
 			rec.SuspectedFiles = strings.Join(files, "\n")
+		}
+		if items, ok := p["deliverables"].([]interface{}); ok {
+			var lines []string
+			for _, it := range items {
+				if line, _ := it.(string); strings.TrimSpace(line) != "" {
+					lines = append(lines, strings.TrimSpace(line))
+				}
+			}
+			rec.Deliverables = strings.Join(lines, "\n")
+		}
+		if items, ok := p["deliverables"].([]string); ok {
+			rec.Deliverables = strings.Join(items, "\n")
 		}
 		// A classification must never undo a promotion. Move(InProgress,
 		// Triaged) is a LEGAL transition — it exists so a person can send

@@ -1386,6 +1386,7 @@ Reply with one JSON object:
  "task_title": "imperative one-liner for the fix task, or empty if not actionable",
  "test_strategy": "test-first" | "build-only",
  "test_reason": "one line",
+ "deliverables": ["2-5 concrete, verifiable outcomes for the fix task", …],
  "reason": "one sentence"}
 
 Base "duplicate_of" only on the open bugs you were given. If you are unsure,
@@ -1398,7 +1399,12 @@ answer null; a missed duplicate is cheaper than a wrongly closed bug.
 - "build-only" when the honest check is eyes (visual, cosmetic, layout,
   config): a forced test degenerates into grepping the source, which pins the
   implementation and not the bug. Then "test_reason" says why in one line.
-You recommend; a person decides.`
+You recommend; a person decides.
+
+"deliverables" become the fix task's numbered work contract: each one a
+concrete outcome a reviewer can check against the diff ("the brake resets
+after a successful fs_read of the braked path", "a test asserts the reset"),
+not steps and not vague goals. 2-5 of them; empty only if not actionable.`
 
 // usageMap is what goes to llm.jsonl for one call.
 //

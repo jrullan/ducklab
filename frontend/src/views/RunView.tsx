@@ -401,9 +401,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // names every role, but a solo run seats one model, so the one-row
   // breakdown stays hidden as before.
   const spend = live?.ducklings ?? run.spend ?? {};
+  // Only the seats this run's MODE fields: the resolver fills every role
+  // (terra is council's architect), and the spend line said "architect" on
+  // the duckling that implemented this pair run.
+  const modeRoles = rolesForMode(run.mode);
   const rolesByDuckling: Record<string, string[]> = {};
   for (const [role, id] of Object.entries(run.roster ?? {})) {
-    if (id) (rolesByDuckling[id] ??= []).push(role);
+    if (id && (!modeRoles || modeRoles.includes(role))) (rolesByDuckling[id] ??= []).push(role);
   }
   const spenders = Object.keys(spend)
     .filter((id) => (spend[id]?.calls ?? 0) > 0)
@@ -482,6 +486,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
   const isWorking = run.status === "running" || run.status === "queued" || run.status === "paused";
+  const finished = !isWorking;
   // Caps can be lifted only once the budget exists: a queued run's budget is
   // created when it starts, and the engine refuses until then.
   const canLift = run.status === "running" || run.status === "paused";
@@ -645,8 +650,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </button>
         )}
         <span className="text-ink-secondary" title={run.mode_source ? `mode source: ${run.mode_source}` : undefined}>{run.mode}{run.mode_source ? ` (${run.mode_source})` : ""}</span>
-        <CycleMap stage={run.stage} />
-        {run.no_changes ? (
+        {/* The cycle map places a stage run in its pipeline; a triage or a
+            chat is not IN the pipeline, and "unverified" is its loudest chip
+            for what is simply a run with no gate by design. Their headers
+            say what the run did instead. */}
+        {run.stage !== "triage" && run.stage !== "chat" && <CycleMap stage={run.stage} />}
+        {run.stage === "triage" ? (
+          <StatusChip role={run.accepted ? "good" : isWorking ? "muted" : "serious"} label={run.accepted ? `triaged ${triage.length || "the"} report${triage.length === 1 ? "" : "s"} · applied` : isWorking ? "triaging" : "triage awaiting your decision"} />
+        ) : run.stage === "chat" ? (
+          <StatusChip role="muted" label={isWorking ? "conversing" : "conversation ended"} />
+        ) : run.no_changes ? (
           <StatusChip role="muted" label="no changes — already in the tree" />
         ) : (
           <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${verdictLabel(run.verdict as Verdict)} · reproduced green at accept` : verdictLabel(run.verdict as Verdict)} />
@@ -677,9 +690,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             // What became of it, in the space the buttons used to occupy: the
             // question "is there anything for me to do here" is answered
             // either way, never by an absence.
-            <span className="text-sm text-ink-secondary" data-testid="run-outcome">
-              {outcome}
-            </span>
+            run.accepted ? (
+              <span data-testid="run-outcome"><StatusChip role="good" label={outcome} /></span>
+            ) : (
+              <span className="text-sm text-ink-secondary" data-testid="run-outcome">
+                {outcome}
+              </span>
+            )
           )}
           {liveNow && nowTick - lastSignal.current > 30000 && (
             <span className="text-xs text-ink-muted" data-testid="quiet-chip" title="no events, tokens or thinking since then — a slow model is normal; provider retries land in the lane as they happen">
@@ -744,6 +761,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         )}
       </header>
 
+      {/* Breathing room so the first card clears the pinned header's shadow
+          instead of peeking out cut in half. */}
+      <div className="pt-1" />
       {/* The rail is metadata of the WHOLE run — budget, spend, gate — so it
           docks at the right edge for the whole read, not just the stretch of
           page its old grid column happened to span. The wrapper holds every
@@ -979,12 +999,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <ul className="mt-2 space-y-1 text-sm" data-testid="file-findings-list">
             {lastVerdict!.findings.map((f, i) => (
               <li key={i} className="text-ink-secondary">
-                {f.severity && <span className="mr-1 text-xs uppercase text-ink-muted">[{f.severity}]</span>}
-                {f.issue}
-                {f.file && (
-                  <span className="text-ink-muted"> — {f.file}{f.line ? `:${f.line}` : ""}</span>
-                )}
-                {f.fix && <span className="text-ink-muted"> · fix: {f.fix}</span>}
+                {/* Clamped: the card is a decision surface, not the reading
+                    copy — the whole finding is one click away in the verdict. */}
+                <div className="line-clamp-3" title={`${f.issue}${f.fix ? ` · fix: ${f.fix}` : ""}`}>
+                  {f.severity && <span className="mr-1 text-xs uppercase text-ink-muted">[{f.severity}]</span>}
+                  {f.issue}
+                  {f.file && (
+                    <span className="text-ink-muted"> — {f.file}{f.line ? `:${f.line}` : ""}</span>
+                  )}
+                  {f.fix && <span className="text-ink-muted"> · fix: {f.fix}</span>}
+                </div>
               </li>
             ))}
           </ul>
@@ -1076,6 +1100,32 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           the failure is written down. Nothing rendered it, so a run that
           triaged two of three looked exactly like one that triaged two, and the
           third stayed open with no explanation anywhere a person would look. */}
+      {/* The triage's RESULT, as a card — it used to live only as the raw
+          JSON tail of the transcript. Severity, duplicate, component and the
+          proposed task, per report; the reasoning stays in the transcript. */}
+      {run.stage === "triage" && triage.length > 0 && (
+        <section data-testid="triage-results" className="m-2 rounded-card border border-hairline p-3">
+          <h2 className="mb-2 text-sm font-medium text-ink">triaged {triage.length} report{triage.length === 1 ? "" : "s"}</h2>
+          <ul className="space-y-2 text-sm">
+            {triage.map((t) => (
+              <li key={t.bug} data-testid={`triage-result-${t.bug}`}>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-mono text-xs text-ink-muted">{t.bug}</span>
+                  {t.severity && <span className="text-xs" style={{ color: `var(--status-${t.severity === "critical" ? "critical" : t.severity === "high" ? "serious" : t.severity === "low" ? "good" : "warning"})` }}>{t.severity}</span>}
+                  <span className="text-xs text-ink-muted">{t.duplicate_of ? `duplicate of ${t.duplicate_of}` : "not a duplicate"}</span>
+                  {t.component && <span className="text-xs text-ink-muted">· {t.component}</span>}
+                  {t.reproducible !== undefined && <span className="text-xs text-ink-muted">· {t.reproducible ? "reproducible" : "not reproducible"}</span>}
+                </div>
+                {t.task_title && <div className="mt-0.5 text-ink">→ {t.task_title}</div>}
+                {t.reason && <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted" title={t.reason}>{t.reason}</p>}
+                {(t.suspected_files ?? []).length > 0 && (
+                  <div className="mt-0.5 flex flex-wrap gap-1">{t.suspected_files!.map((f) => <span key={f} className="rounded border border-hairline px-1 font-mono text-[11px] text-ink-muted">{f}</span>)}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {triageFailed.length > 0 && (
         <section
           data-testid="triage-failures"
@@ -1387,8 +1437,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           a build's long diff and went unseen: calls looked absent from build
           runs when it was one unscrolled click away. Except in a live chat:
           the composer owns the bottom edge there. */}
+      {/* Sticky only while the run works: mid-transcript the dock is
+          consulted, not read. On a finished run the reading is top-to-bottom
+          — verdict, findings, what changed — and a dock pinned to the
+          viewport under an empty stretch read as another page's footer. */}
       <div
-        className={chatLive ? "" : "sticky bottom-0 z-10 border-t border-hairline bg-page"}
+        className={chatLive || finished ? "border-t border-hairline" : "sticky bottom-0 z-10 border-t border-hairline bg-page"}
         data-testid="bottom-dock"
       >
         <div className="px-4 pt-2">
@@ -1401,12 +1455,16 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             split never have any. */}
         <nav className="mt-1 flex gap-2 px-4">
         {(codeRun
-          ? ([
+          ? (([
               ["diff", testHunks ? "edits tests" : diff ? undefined : "empty"],
               ["verify", verify ? undefined : "no output"],
               ["candidates", candidates.length ? String(candidates.length) : "none"],
               ["calls", calls.length ? String(calls.length) : "none"],
             ] as [Tab, string | undefined][])
+              // A section that is empty BY DESIGN is not announced on a
+              // finished run: "candidates none" on every solo build taught
+              // the eye to skip the bar.
+              .filter(([t, note]) => !(finished && t === "candidates" && note === "none")))
           : // A document, triage or chat run has no diff, no gate output and
             // no candidates BY DESIGN — three dimmed tabs whose empty states
             // all truthfully said "none" taught the eye to skip the bar
@@ -1519,7 +1577,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           // overscroll-contain: the dock's scroll ends AT the dock. Without
           // it, reaching its bottom chained the wheel into the page scroller
           // and the transcript crawled away under a rail that felt "linked".
-          className="flex flex-col gap-3 p-4 md:sticky md:top-14 md:h-[calc(100vh-12rem)] md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:overscroll-contain md:border-l md:border-hairline"
+          className={`flex flex-col gap-3 p-4 md:sticky md:top-14 md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:overscroll-contain md:border-l md:border-hairline ${finished ? "md:max-h-[calc(100vh-12rem)]" : "md:h-[calc(100vh-12rem)]"}`}
         >
           <button
             type="button"
@@ -1530,7 +1588,23 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           >
             hide
           </button>
-          {budget && (
+          {budget && finished && (
+            /* A finished run's meters measure nothing any more; one line of
+               what it actually spent, spenders beneath. */
+            <div className="rounded-card border border-hairline p-3" data-testid="spent-line">
+              <div className="text-sm text-ink-muted">spent</div>
+              <div className="mt-1 text-sm text-ink tabular-nums">{money(budget.usd)} · {tokens(budget.tokens)} tokens · {Math.round(budget.turns)} turn{Math.round(budget.turns) === 1 ? "" : "s"}</div>
+              <dl className="mt-2 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling-done">
+                {perDuckling.filter(([, v]) => (v?.calls ?? 0) > 0).map(([id, v]) => (
+                  <div key={id} className="flex justify-between gap-2">
+                    <dt className="truncate"><span style={{ color: ducklingColors[id] }}>{id}</span>{rolesByDuckling[id] && <span className="ml-1.5 text-ink-muted">{rolesByDuckling[id].join(" · ")}</span>}</dt>
+                    <dd className="shrink-0 tabular-nums text-ink-muted">{tokens(v?.tokens ?? 0)} · {money(v?.cost_usd ?? 0)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+          {budget && !finished && (
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
               <div className="mt-2 flex flex-col gap-2">
@@ -1634,7 +1708,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
-          <GateCard gate={gate} stage={run.stage} />
+          {/* The gate on a finished run is already said once, in the turn
+              list and the header; the box earned its place only while the
+              command is still to run. */}
+          {!finished && <GateCard gate={gate} stage={run.stage} />}
         </aside>
         ) : (
           <button

@@ -31,6 +31,13 @@ var (
 // an out-of-scope marker. A body with no bullets yields the title as the one
 // deliverable — a task is always at least itself.
 func ExtractDeliverables(title, body string) []string {
+	// A body that carries the contract's own label is read by the label:
+	// only the bullets in that block are the contract. Without this, a
+	// promoted bug whose REPORT happened to contain bullets handed the
+	// implementer the reporter's prose as numbered work items.
+	if block := deliverablesBlock(body); block != nil {
+		return block
+	}
 	var out []string
 	inScope := true
 	for _, line := range strings.Split(body, "\n") {
@@ -240,4 +247,42 @@ func deliverablesForReviewer(items []string, rep *DeliverablesReport) string {
 		"Anything the implementer itself reports undelivered is not yours to excuse: an approve " +
 		"with undelivered items must say why the task is nonetheless satisfied.\n")
 	return b.String()
+}
+
+// deliverablesBlock returns the top-level bullets under a
+// "**Deliverables:**" label, or nil when the body has no such label.
+func deliverablesBlock(body string) []string {
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.EqualFold(strings.TrimSpace(line), "**deliverables:**") {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	var out []string
+	for _, line := range lines[start:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if headingRe.MatchString(line) {
+			break
+		}
+		if m := bulletRe.FindStringSubmatch(line); m != nil {
+			if strings.HasPrefix(line, "  ") || strings.HasPrefix(line, "\t") {
+				continue // sub-bullets elaborate their parent
+			}
+			out = append(out, strings.TrimSpace(m[1]))
+			continue
+		}
+		break // the block ends at the first non-bullet content line
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
