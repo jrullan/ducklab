@@ -303,7 +303,9 @@ export type Scorecard = {
   caps?: { context_tokens?: number; vision?: boolean; native_tools?: boolean };
   measured?: { runs?: number; pass_rate?: number; avg_cost_usd?: number; avg_wallclock_s?: number };
   bench?: Record<string, { score?: number }>;
-  index?: { coding?: number; source?: string; as_of?: string };
+  /** Mirrors config.ExternalIndex: coding_score (declared by hand or fetched
+   *  from OpenRouter's benchmarks endpoint), with source and as_of. */
+  index?: { coding_score?: number; intelligence_score?: number; agentic_score?: number; source?: string; as_of?: string };
 };
 
 export type ProviderView = {

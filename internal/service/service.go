@@ -56,6 +56,9 @@ type Service struct {
 	// shuttingDown makes an in-flight run's cancellation read as a deliberate
 	// pause rather than a failure, so a graceful stop never marks work FAILED.
 	shuttingDown atomic.Bool
+	// indexes caches third-party model indices fetched for the scorecards
+	// (benchindex.go); zero value is ready to use.
+	indexes indexFetcher
 	// now and restartRecoveryDeadline make the bounded restart checkpoint
 	// recoverable without tying tests or recovery logic to wall-clock sleeps.
 	now                     func() time.Time

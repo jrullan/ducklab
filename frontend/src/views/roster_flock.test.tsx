@@ -16,11 +16,11 @@ const ducks = [
 // These are deliberately heterogeneous: every evidence category has a real
 // ordering as well as an absent value, and a filter can isolate a distinct card.
 const scorecards = [
-  { id: "atlas", provider: "cloud", model: "atlas-3", locality: "remote", cost: { input_per_mtok: 1, output_per_mtok: 10 }, caps: { context_tokens: 128000, vision: false, native_tools: false }, measured: { runs: 14, pass_rate: 92, avg_cost_usd: 0.12 }, bench: { arena: { score: 0.81 } }, index: { coding: 0.72, source: "index", as_of: "2026-01-01" } },
+  { id: "atlas", provider: "cloud", model: "atlas-3", locality: "remote", cost: { input_per_mtok: 1, output_per_mtok: 10 }, caps: { context_tokens: 128000, vision: false, native_tools: false }, measured: { runs: 14, pass_rate: 92, avg_cost_usd: 0.12 }, bench: { arena: { score: 0.81 } }, index: { coding_score: 72, source: "index", as_of: "2026-01-01" } },
   { id: "bravo", provider: "local", model: "bravo-v", locality: "local", cost: { input_per_mtok: 3, output_per_mtok: 1 }, caps: { context_tokens: 64000, vision: true, native_tools: false }, measured: { runs: 0 } },
-  { id: "cedar", provider: "cloud", model: "cedar-tools", locality: "remote", cost: { input_per_mtok: 2, output_per_mtok: 4 }, caps: { context_tokens: 32000, vision: false, native_tools: true }, measured: { runs: 8, pass_rate: 50, avg_cost_usd: 0.2 }, bench: { arena: { score: 0.65 } }, index: { coding: 0.91, source: "index", as_of: "2026-01-01" } },
+  { id: "cedar", provider: "cloud", model: "cedar-tools", locality: "remote", cost: { input_per_mtok: 2, output_per_mtok: 4 }, caps: { context_tokens: 32000, vision: false, native_tools: true }, measured: { runs: 8, pass_rate: 50, avg_cost_usd: 0.2 }, bench: { arena: { score: 0.65 } }, index: { coding_score: 91, source: "index", as_of: "2026-01-01" } },
   { id: "delta", provider: "cloud", model: "delta-long", locality: "remote", caps: { context_tokens: 256000, vision: false, native_tools: false }, measured: { runs: 4, pass_rate: 70, avg_cost_usd: 0.3 }, bench: { arena: { score: 0.95 } } },
-  { id: "echo", provider: "local", model: "echo-mini", locality: "local", cost: { input_per_mtok: 4, output_per_mtok: 2 }, caps: { context_tokens: 16000, vision: false, native_tools: true }, index: { coding: 0.55, source: "index", as_of: "2026-01-01" } },
+  { id: "echo", provider: "local", model: "echo-mini", locality: "local", cost: { input_per_mtok: 4, output_per_mtok: 2 }, caps: { context_tokens: 16000, vision: false, native_tools: true }, index: { coding_score: 55, source: "index", as_of: "2026-01-01" } },
 ];
 
 const seats = { council: [{ role: "reviewer", ducklings: ["atlas"], source: "global mode seat" }] };
@@ -106,8 +106,8 @@ describe("Roster flock evidence", () => {
     // positive when there is some, one quiet word when there is none.
     expect(screen.getByTestId("roster-flock-value-delta").textContent).toBe("256k ctx");
     expect(screen.getByTestId("roster-flock-evidence-bravo").textContent).toBe("no evidence yet");
-    expect(screen.getByTestId("roster-flock-evidence-echo").textContent).toBe("index 0.55");
-    expect(screen.getByTestId("roster-flock-evidence-atlas").textContent).toBe("92% · 14 runs · $0.12/run · bench 81 · index 0.72");
+    expect(screen.getByTestId("roster-flock-evidence-echo").textContent).toBe("coding 55");
+    expect(screen.getByTestId("roster-flock-evidence-atlas").textContent).toBe("92% · 14 runs · $0.12/run · bench 81 · coding 72");
 
     fireEvent.change(screen.getByTestId("roster-flock-filter-text"), { target: { value: "cedar" } });
     await waitFor(() => expect(flockOrder()).toEqual(["cedar"]));

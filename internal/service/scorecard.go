@@ -162,10 +162,20 @@ func (s *Service) Scorecards(ctx context.Context) ([]Scorecard, error) {
 		measured[r.Key] = r
 	}
 	benchRows := loadLatestBench()
+	// Fetched indices fill the ducklings nobody declared one for; only
+	// ducklings on the provider that serves the endpoint are looked up —
+	// a local model has no permaslug there and must not borrow one.
+	var fetched *indexCache
+	if p := openRouterProvider(s.cfg); p != nil {
+		fetched = s.indexes.current(ctx, p)
+	}
 	out := make([]Scorecard, 0, len(s.cfg.Ducklings))
 	for id, d := range s.cfg.Ducklings {
 		p := s.cfg.Providers[d.Provider]
 		c := Scorecard{ID: string(id), Provider: string(d.Provider), Model: d.Model, Cost: d.Cost, Caps: d.Caps, Notes: d.Notes, Index: d.Index}
+		if c.Index == nil && isOpenRouter(p) {
+			c.Index = externalIndexFor(fetched, d.Model)
+		}
 		c.Locality = "remote"
 		if IsLocalHost(p.BaseURL) {
 			c.Locality = "local"

@@ -206,14 +206,21 @@ type Caps struct {
 	JSONMode *bool `toml:"json_mode" json:"json_mode"`
 }
 
-// ExternalIndex is a declared third-party score, retained with provenance.
+// ExternalIndex is a third-party score, retained with provenance. Declared
+// by hand in config, or fetched by the engine from a source it can name
+// (OpenRouter's benchmarks endpoint carries Artificial Analysis's indices);
+// Source says which, AsOf says when.
 type ExternalIndex struct {
 	CodingScore float64 `toml:"coding_score" json:"coding_score"`
 	// Coding is the canonical short TOML spelling. CodingScore is retained for
 	// the original on-disk spelling and the typed JSON contract.
 	Coding float64 `toml:"coding,omitempty" json:"-"`
-	Source string  `toml:"source" json:"source"`
-	AsOf   string  `toml:"as_of" json:"as_of"`
+	// Companion indices from the same source, when it has them. Not
+	// declared by hand today; carried so a future seat rule can use them.
+	IntelligenceScore float64 `toml:"intelligence_score,omitempty" json:"intelligence_score,omitempty"`
+	AgenticScore      float64 `toml:"agentic_score,omitempty" json:"agentic_score,omitempty"`
+	Source            string  `toml:"source" json:"source"`
+	AsOf              string  `toml:"as_of" json:"as_of"`
 }
 
 // Duckling is a named, configured model participant.

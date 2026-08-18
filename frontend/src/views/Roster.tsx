@@ -35,7 +35,7 @@ const SORTS: { key: string; label: string; value: (s: Scorecard) => number | und
   { key: "input-cost", label: "input cost", value: (s) => s.cost?.input_per_mtok, format: (v) => `$${v}/Mtok in` },
   { key: "output-cost", label: "output cost", value: (s) => s.cost?.output_per_mtok, format: (v) => `$${v}/Mtok out` },
   { key: "bench:arena", label: "bench · arena", value: (s) => s.bench?.arena?.score, format: (v) => `bench ${Math.round(v * 100)}` },
-  { key: "coding-index", label: "coding index", value: (s) => s.index?.coding, format: (v) => `index ${v}` },
+  { key: "coding-index", label: "coding index", value: (s) => s.index?.coding_score, format: (v) => `coding ${v}` },
   { key: "context", label: "context", value: (s) => s.caps?.context_tokens, format: (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M ctx` : `${Math.round(v / 1000)}k ctx`) },
 ];
 // One line, positive when there is evidence, one quiet word when there is
@@ -45,7 +45,7 @@ const evidenceLine = (s: Scorecard): string => {
   if (s.measured?.runs) parts.push(`${Math.round(s.measured.pass_rate ?? 0)}% · ${s.measured.runs} runs${s.measured.avg_cost_usd !== undefined ? ` · $${s.measured.avg_cost_usd.toFixed(2)}/run` : ""}`);
   const bench = s.bench?.arena?.score;
   if (bench !== undefined) parts.push(`bench ${Math.round(bench * 100)}`);
-  if (s.index?.coding !== undefined) parts.push(`index ${s.index.coding}`);
+  if (s.index?.coding_score !== undefined) parts.push(`coding ${s.index.coding_score}`);
   return parts.length ? parts.join(" · ") : "no evidence yet";
 };
 function FilterChip({ testId, label, on, onClick }: { testId: string; label: string; on: boolean; onClick: () => void }) {
@@ -183,7 +183,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         <div className="flex items-center gap-2"><DuckAvatar id={s.id} roster={roster} /><span className="font-medium truncate" title={`${s.id} · ${s.model}`}>{s.id}</span><span className="ml-auto text-xs text-ink-muted"><StatusChip role="muted" label={local || (isLocal(d, providers) ? "local" : "remote")} /></span></div>
         <div className="mt-0.5 truncate text-xs text-ink-muted" title={s.model}>{s.model}</div>
         <div className="mt-1 flex items-baseline justify-between text-sm"><span className="text-ink-muted">{s.cost ? `$${s.cost.input_per_mtok} / $${s.cost.output_per_mtok} per Mtok` : "cost unknown"}</span><span data-testid={`roster-flock-value-${s.id}`} className="tabular-nums" title={flock.sortLabel}>{v === undefined ? "—" : flock.format(v)}</span></div>
-        <div className="mt-1 text-xs text-ink-muted" data-testid={`roster-flock-evidence-${s.id}`}>{evidenceLine(s)}</div>
+        <div className="mt-1 text-xs text-ink-muted" data-testid={`roster-flock-evidence-${s.id}`} title={s.index?.source ? `coding index: ${s.index.source} · as of ${s.index.as_of ?? "?"}` : undefined}>{evidenceLine(s)}</div>
         {candidate && <div className="mt-1 text-xs"><span data-testid={`roster-suggested-${s.id}`} className="font-medium">suggested for {flock.forRole}</span> <span data-testid={`roster-suggested-why-${s.id}`} className="text-ink-muted">· {candidate.why}</span></div>}
       </div>; })}
     </div></aside>

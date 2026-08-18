@@ -1,0 +1,129 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/jrullan/ducklab/internal/config"
+)
+
+// OpenRouter's permaslugs carry a release date; a model appears under each
+// release it had. The scorecard wants the newest — and never a different
+// model that merely shares a prefix.
+func TestMatchIndexPicksTheNewestReleaseOfTheModel(t *testing.T) {
+	items := []indexItem{
+		{Permaslug: "deepseek/deepseek-v4-pro-20260423", Coding: 59.4},
+		{Permaslug: "deepseek/deepseek-v4-pro-20260813", Coding: 68.8},
+		{Permaslug: "deepseek/deepseek-v4-pro-max-20260901", Coding: 90},
+		{Permaslug: "openai/gpt-5.6-luna", Coding: 71.4},
+	}
+	got, ok := matchIndex(items, "deepseek/deepseek-v4-pro")
+	if !ok || got.Coding != 68.8 {
+		t.Fatalf("got %+v ok=%v, want the 20260813 release", got, ok)
+	}
+	if got, ok := matchIndex(items, "openai/gpt-5.6-luna"); !ok || got.Coding != 71.4 {
+		t.Fatalf("exact permaslug: %+v ok=%v", got, ok)
+	}
+	if _, ok := matchIndex(items, "deepseek/deepseek-v4"); ok {
+		t.Fatal("a shorter model name matched a longer model's permaslug")
+	}
+	if _, ok := matchIndex(items, "qwen/qwen3.8-max"); ok {
+		t.Fatal("an absent model matched")
+	}
+}
+
+// A person's declared index is a statement; the fetch fills only the seats
+// nobody declared, and says where its number came from.
+func TestExternalIndexCarriesProvenance(t *testing.T) {
+	cache := &indexCache{AsOf: "2026-08-18", Source: "artificial-analysis", Items: []indexItem{{Permaslug: "z-ai/glm-5.2-20260616", Coding: 68.8, Intelligence: 52.6, Agentic: 45.7}}}
+	got := externalIndexFor(cache, "z-ai/glm-5.2")
+	if got == nil || got.CodingScore != 68.8 || got.IntelligenceScore != 52.6 || got.AgenticScore != 45.7 {
+		t.Fatalf("index = %+v", got)
+	}
+	if got.AsOf != "2026-08-18" || got.Source != "artificial-analysis via openrouter (z-ai/glm-5.2-20260616)" {
+		t.Errorf("provenance = %q as of %q", got.Source, got.AsOf)
+	}
+	if externalIndexFor(nil, "z-ai/glm-5.2") != nil {
+		t.Error("no cache must mean no index, not a zero one")
+	}
+	declared := &config.ExternalIndex{CodingScore: 1, Source: "me", AsOf: "2026-01-01"}
+	if declared.Source != "me" {
+		t.Fatal("fixture")
+	}
+}
+
+func TestOpenRouterProviderIsRecognisedByHost(t *testing.T) {
+	if !isOpenRouter(config.Provider{BaseURL: "https://openrouter.ai/api/v1"}) {
+		t.Error("openrouter.ai not recognised")
+	}
+	if isOpenRouter(config.Provider{BaseURL: "http://10.0.0.5:8000/v1"}) || isOpenRouter(config.Provider{BaseURL: "https://api.openai.com/v1"}) {
+		t.Error("a non-OpenRouter host was taken for it")
+	}
+}
+
+// End to end through Scorecards: an OpenRouter duckling with no declared index
+// gets the fetched one; a declared index is left alone; a local duckling gets
+// none; and the answer is cached on disk so the next service does not fetch.
+func TestScorecardsFillUndeclaredIndicesFromOpenRouter(t *testing.T) {
+	isolate(t)
+	t.Setenv("OR_KEY_FOR_TEST", "k")
+	calls := 0
+	orig := fetchIndexFn
+	fetchIndexFn = func(p config.Provider) (*indexCache, error) {
+		calls++
+		return &indexCache{FetchedAt: "2026-08-18T12:00:00Z", AsOf: "2026-08-18", Source: "artificial-analysis", Items: []indexItem{
+			{Permaslug: "z-ai/glm-5.2-20260616", Coding: 68.8},
+			{Permaslug: "openai/gpt-5.6-luna-20260709", Coding: 71.4},
+		}}, nil
+	}
+	t.Cleanup(func() { fetchIndexFn = orig })
+
+	cfg := config.DefaultGlobal()
+	cfg.Providers["openrouter"] = config.Provider{Kind: "openai", BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OR_KEY_FOR_TEST"}
+	cfg.Providers["beelink"] = config.Provider{Kind: "openai", BaseURL: "http://localhost:8081/v1"}
+	cfg.Ducklings["glm52"] = config.Duckling{Provider: "openrouter", Model: "z-ai/glm-5.2"}
+	cfg.Ducklings["luna"] = config.Duckling{Provider: "openrouter", Model: "openai/gpt-5.6-luna", Index: &config.ExternalIndex{CodingScore: 50, Source: "me", AsOf: "2026-01-01"}}
+	cfg.Ducklings["local"] = config.Duckling{Provider: "beelink", Model: "z-ai/glm-5.2"}
+	s, err := New(cfg, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards, err := s.Scorecards(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Scorecard{}
+	for _, c := range cards {
+		byID[c.ID] = c
+	}
+	if idx := byID["glm52"].Index; idx == nil || idx.CodingScore != 68.8 || !strings.Contains(idx.Source, "artificial-analysis via openrouter") {
+		t.Fatalf("glm52 index = %+v, want the fetched 68.8 with provenance", idx)
+	}
+	if idx := byID["luna"].Index; idx == nil || idx.CodingScore != 50 || idx.Source != "me" {
+		t.Fatalf("luna's declared index was overwritten: %+v", idx)
+	}
+	if byID["local"].Index != nil {
+		t.Fatalf("a local duckling borrowed an OpenRouter index: %+v", byID["local"].Index)
+	}
+	if calls != 1 {
+		t.Fatalf("fetched %d times, want 1", calls)
+	}
+
+	// A fresh service reads the day-old-or-newer cache from disk: no fetch.
+	s2, err := New(cfg, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetchIndexFn = func(p config.Provider) (*indexCache, error) { calls++; return nil, fmt.Errorf("must not be called") }
+	cards2, _ := s2.Scorecards(context.Background())
+	for _, c := range cards2 {
+		if c.ID == "glm52" && (c.Index == nil || c.Index.CodingScore != 68.8) {
+			t.Fatalf("cache miss: %+v", c.Index)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("the on-disk cache was ignored (%d fetches)", calls)
+	}
+}
