@@ -13,7 +13,8 @@ export type Route =
   | { name: "projects" }
   | { name: "run"; id: string }
   | { name: "ducklings" }
-  | { name: "settings" };
+  | { name: "settings" }
+  | { name: "roster" }; 
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\//, "");
@@ -47,6 +48,8 @@ export function parseRoute(hash: string): Route {
       return { name: "ducklings" };
     case "settings":
       return { name: "settings" };
+    case "roster":
+      return { name: "roster" };
     default:
       return { name: "now" };
   }
@@ -74,6 +77,8 @@ export function routeHref(route: Route): string {
       return "#/ducklings";
     case "settings":
       return "#/settings";
+    case "roster":
+      return "#/roster";
     case "now":
       return "#/now";
     case "bench":

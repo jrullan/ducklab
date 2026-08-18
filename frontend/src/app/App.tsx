@@ -20,6 +20,7 @@ import { Projects } from "../views/Projects";
 import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
+import { Roster } from "../views/Roster";
 import { parseRoute, routeHref, type Route } from "./routes";
 import { loadTheme, type Theme } from "./theme";
 
@@ -68,7 +69,7 @@ const ZONES: Zone[] = [
     members: ["runs", "run", "reports", "review", "release", "bench"],
   },
 ];
-const CONFIG_MEMBERS: Route["name"][] = ["settings", "ducklings", "projects"];
+const CONFIG_MEMBERS: Route["name"][] = ["settings", "ducklings", "projects", "roster"];
 
 // Within a zone, its rooms. Documents is the old Cycle: for a solo dev the
 // lifecycle documents are work items, not a separate ceremony.
@@ -87,6 +88,7 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
   ],
   Config: [
     { label: "Settings", route: { name: "settings" } },
+    { label: "Roster", route: { name: "roster" } },
     { label: "Projects", route: { name: "projects" } },
   ],
 };
@@ -389,6 +391,14 @@ export function App() {
             </a>
           ))}
           <a
+            href={routeHref({ name: "roster" })}
+            data-testid="nav-roster"
+            title="Read-only roster"
+            className={route.name === "roster" ? "text-ink" : "text-ink-muted"}
+          >
+            Roster
+          </a>
+          <a
             href={routeHref({ name: "settings" })}
             data-testid="nav-config"
             title="Settings, ducklings and projects"
@@ -581,6 +591,9 @@ export function App() {
           </div>
         )}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
+        {route.name === "roster" && client && projectId && (
+          <div className="p-4"><Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} /></div>
+        )}
         {route.name === "settings" && (
           <Settings
             projectId={projectId}

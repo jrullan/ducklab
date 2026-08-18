@@ -794,12 +794,20 @@ export class EngineClient {
    * filled in, which the file does not declare. */
   /** Who would play each role — for a mode, when named, so the answer matches
    * the run about to start rather than the bare roster a line-up overrides. */
+  globalRosterGet(mode: string) {
+    return this.request<{ entries: RosterEntry[] | null; warning?: string }>(
+      "GET", `/v1/defaults/roster?mode=${encodeURIComponent(mode)}`,
+    ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
+  }
   roster(projectId: string, mode = "") {
     const q = mode ? `?mode=${encodeURIComponent(mode)}` : "";
     return this.request<{ entries: RosterEntry[] | null; warning?: string }>(
       "GET",
       `/v1/projects/${projectId}/roster${q}`,
     ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
+  }
+  rosterGet(projectId: string, mode: string) {
+    return this.roster(projectId, mode);
   }
   rosterSet(projectId: string, role: string, duckling: string) {
     return this.request<unknown>("PUT", `/v1/projects/${projectId}/roster`, { role, duckling });

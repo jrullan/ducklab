@@ -410,6 +410,12 @@ Implementation: `internal/service/queue.go` with semaphore. Status exposed via `
 
 **Assumption:** Queue does not persist order or maintain FIFO guarantee across engine restarts. Queued runs are drained and paused on shutdown.
 
+## SPEC-008 — Desktop Roster view
+
+**As-built:** yes
+
+The desktop provides a read-only Roster view beside Settings. It lists the complete Flock and known local/remote provider and per-run cost information, then renders effective Global or Project assignments for Council, Solo, Pair, Split, Tournament, and Common. Project inherited seats are muted dashed ghosts labelled `global`; project pins are solid, labelled `pinned`, and expose the overridden global assignment on hover. The view has no assignment controls.
+
 ## SPEC-026 — Desktop asset bundling
 
 **Implements:** REQ-026
