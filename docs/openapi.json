@@ -218,10 +218,16 @@
       },
       "ConfigExternalIndex": {
         "properties": {
+          "agentic_score": {
+            "type": "number"
+          },
           "as_of": {
             "type": "string"
           },
           "coding_score": {
+            "type": "number"
+          },
+          "intelligence_score": {
             "type": "number"
           },
           "source": {
@@ -651,6 +657,23 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "EngineapicandidateCriteriaRequest": {
+        "properties": {
+          "criteria": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "criteria"
         ],
         "type": "object"
       },
@@ -1437,6 +1460,9 @@
           "estimated": {
             "type": "boolean"
           },
+          "score": {
+            "type": "number"
+          },
           "started_at": {
             "type": "string"
           },
@@ -1548,6 +1574,62 @@
         ],
         "type": "object"
       },
+      "ServiceCandidate": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "why"
+        ],
+        "type": "object"
+      },
+      "ServiceCandidateCriteriaView": {
+        "properties": {
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceCriterion"
+            },
+            "type": "array"
+          },
+          "configured": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "criteria": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "catalog",
+          "configured",
+          "criteria",
+          "defaults"
+        ],
+        "type": "object"
+      },
       "ServiceCandidateView": {
         "properties": {
           "diff": {
@@ -1586,6 +1668,29 @@
           "about_kind",
           "duckling",
           "message"
+        ],
+        "type": "object"
+      },
+      "ServiceCriterion": {
+        "properties": {
+          "direction": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "direction",
+          "key",
+          "label",
+          "source"
         ],
         "type": "object"
       },
@@ -1721,10 +1826,10 @@
       },
       "ServiceMeasuredEvidence": {
         "properties": {
-          "avg_cost_per_run": {
+          "avg_cost_usd": {
             "type": "number"
           },
-          "avg_wallclock": {
+          "avg_wallclock_s": {
             "type": "number"
           },
           "estimated": {
@@ -1741,8 +1846,8 @@
           }
         },
         "required": [
-          "avg_cost_per_run",
-          "avg_wallclock",
+          "avg_cost_usd",
+          "avg_wallclock_s",
           "estimated",
           "pass_rate",
           "runs",
@@ -1962,6 +2067,12 @@
       },
       "ServiceRosterEntry": {
         "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceCandidate"
+            },
+            "type": "array"
+          },
           "default": {
             "type": "string"
           },
@@ -2114,6 +2225,12 @@
           },
           "measured": {
             "$ref": "#/components/schemas/ServiceMeasuredEvidence"
+          },
+          "measured_by_role": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ServiceMeasuredEvidence"
+            },
+            "type": "object"
           },
           "model": {
             "type": "string"
@@ -2688,6 +2805,66 @@
           }
         ],
         "summary": "Replace the default run budget"
+      }
+    },
+    "/v1/defaults/candidates": {
+      "get": {
+        "operationId": "CandidateCriteria",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceCandidateCriteriaView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Seat-suggestion criteria per role: what is in effect, the engine's defaults, and the catalog to choose from"
+      },
+      "put": {
+        "operationId": "CandidateCriteriaSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapicandidateCriteriaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceCandidateCriteriaView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the configured seat-suggestion criteria (a role omitted keeps the default; an empty list turns its suggestions off)"
       }
     },
     "/v1/defaults/modes": {

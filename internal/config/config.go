@@ -145,6 +145,13 @@ type Defaults struct {
 	ModeSeats map[string]map[string][]string `toml:"mode_seats" json:"mode_seats"`
 	// RolePins are mode-independent global seats (notably triager and scribe).
 	RolePins map[string][]string `toml:"role_pins" json:"role_pins"`
+	// CandidateCriteria orders the evidence a seat's suggestions are ranked
+	// by, per role: e.g. implementer = ["coding_index", "pass_rate",
+	// "cost_per_run"]. One developer wants cost first, another the coding
+	// index; the engine ships a default per role and this overrides it. An
+	// empty list for a role turns its suggestions off. Keys are the
+	// service's criterion catalog; unknown keys are refused at write.
+	CandidateCriteria map[string][]string `toml:"candidate_criteria,omitempty" json:"candidate_criteria,omitempty"`
 	// BuildMode and TestMode are the modes a launcher opens on: the person
 	// who always builds in pair and tests in solo should not re-pick both on
 	// every task.

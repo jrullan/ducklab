@@ -308,6 +308,23 @@ func (s *Server) handleModeDefaults(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.ModeDefaults())
 }
 
+func (s *Server) handleCandidateCriteria(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.CandidateCriteria())
+}
+
+func (s *Server) handleCandidateCriteriaSet(w http.ResponseWriter, r *http.Request) {
+	var body candidateCriteriaRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.CandidateCriteriaSet(body.Criteria); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.CandidateCriteria())
+}
+
 func (s *Server) handleModeDefaultsSet(w http.ResponseWriter, r *http.Request) {
 	var view service.ModeDefaultsView
 	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {

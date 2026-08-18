@@ -438,6 +438,14 @@ export interface ReleaseSummary {
 }
 
 /** One model call, as recorded in llm.jsonl. */
+/** Mirrors service.CandidateCriteriaView. */
+export interface CandidateCriteriaView {
+  criteria: Record<string, string[]>;
+  configured: string[];
+  defaults: Record<string, string[]>;
+  catalog: { key: string; label: string; direction: "asc" | "desc"; source: string }[];
+}
+
 export interface AutopilotDefaultsView {
   max_tasks: number;
   max_fails: number;
@@ -906,6 +914,15 @@ export class EngineClient {
    * push back meant editing Go and rebuilding. */
   modeDefaults() {
     return this.request<ModeDefaultsView>("GET", "/v1/defaults/modes");
+  }
+  /** Seat-suggestion criteria per role: in effect, defaults, catalog. */
+  candidateCriteria() {
+    return this.request<CandidateCriteriaView>("GET", "/v1/defaults/candidates");
+  }
+  /** Replace the configured criteria; a role omitted keeps its default, an
+   *  empty list turns that seat's suggestions off. */
+  candidateCriteriaSet(criteria: Record<string, string[]>) {
+    return this.request<CandidateCriteriaView>("PUT", "/v1/defaults/candidates", { criteria });
   }
   modeDefaultsSet(body: ModeDefaultsView) {
     return this.request<ModeDefaultsView>("PUT", "/v1/defaults/modes", body);

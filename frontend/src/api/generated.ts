@@ -68,8 +68,10 @@ export interface ConfigCost {
 }
 
 export interface ConfigExternalIndex {
+  agentic_score?: number;
   as_of?: string;
   coding_score?: number;
+  intelligence_score?: number;
   source?: string;
 }
 
@@ -183,6 +185,10 @@ export interface EngineapibenchRequest {
 
 export interface EngineapibugItems {
   items?: BugBug[];
+}
+
+export interface EngineapicandidateCriteriaRequest {
+  criteria?: Record<string, string[]>;
 }
 
 export interface EngineapichatSendRequest {
@@ -420,6 +426,7 @@ export interface ServiceAutopilotDefaultsView {
 export interface ServiceBenchEvidence {
   cost?: number;
   estimated?: boolean;
+  score?: number;
   started_at?: string;
   suite?: string;
   suite_version?: number;
@@ -453,6 +460,18 @@ export interface ServiceBugRequest {
   title?: string;
 }
 
+export interface ServiceCandidate {
+  id?: string;
+  why?: string;
+}
+
+export interface ServiceCandidateCriteriaView {
+  catalog?: ServiceCriterion[];
+  configured?: string[];
+  criteria?: Record<string, string[]>;
+  defaults?: Record<string, string[]>;
+}
+
 export interface ServiceCandidateView {
   diff?: string;
   gate?: string;
@@ -464,6 +483,13 @@ export interface ServiceChatStartRequest {
   about_kind?: string;
   duckling?: string;
   message?: string;
+}
+
+export interface ServiceCriterion {
+  direction?: string;
+  key?: string;
+  label?: string;
+  source?: string;
 }
 
 export interface ServiceDucklingView {
@@ -505,8 +531,8 @@ export interface ServiceInitRequest {
 }
 
 export interface ServiceMeasuredEvidence {
-  avg_cost_per_run?: number;
-  avg_wallclock?: number;
+  avg_cost_usd?: number;
+  avg_wallclock_s?: number;
   estimated?: boolean;
   pass_rate?: number;
   runs?: number;
@@ -566,6 +592,7 @@ export interface ServiceReviewRequest {
 }
 
 export interface ServiceRosterEntry {
+  candidates?: ServiceCandidate[];
   default?: string;
   duckling?: string;
   ducklings?: string[];
@@ -609,6 +636,7 @@ export interface ServiceScorecard {
   index?: ConfigExternalIndex;
   locality?: string;
   measured?: ServiceMeasuredEvidence;
+  measured_by_role?: Record<string, ServiceMeasuredEvidence>;
   model?: string;
   notes?: string;
   provider?: string;
@@ -710,6 +738,8 @@ export const OPERATIONS = [
   { id: "AutopilotDefaultsSet", method: "PUT", path: "/v1/defaults/autopilot" },
   { id: "BudgetDefaults", method: "GET", path: "/v1/defaults/budget" },
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
+  { id: "CandidateCriteria", method: "GET", path: "/v1/defaults/candidates" },
+  { id: "CandidateCriteriaSet", method: "PUT", path: "/v1/defaults/candidates" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
   { id: "ModeDefaultsSet", method: "PUT", path: "/v1/defaults/modes" },
   { id: "GlobalRosterGet", method: "GET", path: "/v1/defaults/roster" },

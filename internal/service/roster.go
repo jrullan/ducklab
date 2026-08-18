@@ -75,7 +75,7 @@ func (s *Service) RosterGet(ctx context.Context, projectID, mode string) (*Roste
 			continue
 		}
 		canonicalSource := sources[role]
-		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource, Candidates: RankCandidates(string(role), scorecards)}
+		entry := RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: s.rosterIDs(projCfg, mode, role), Source: canonicalSource, Candidates: s.candidatesFor(string(role), scorecards)}
 		if canonicalSource == "project pin" || canonicalSource == "project mode seat" {
 			withoutPin := *projCfg
 			withoutPin.Roster = make(config.Roster, len(projCfg.Roster))
@@ -137,7 +137,7 @@ func (s *Service) GlobalRosterGet(ctx context.Context, mode string) (*RosterView
 			ids = append(ids, s.cfg.Defaults.RolePins[string(role)]...)
 		}
 		s.cfgMu.RUnlock()
-		view.Entries = append(view.Entries, RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: ids, Source: sources[role], Candidates: RankCandidates(string(role), scorecards)})
+		view.Entries = append(view.Entries, RosterEntry{Role: string(role), Duckling: string(resolved[role]), Ducklings: ids, Source: sources[role], Candidates: s.candidatesFor(string(role), scorecards)})
 	}
 	return view, nil
 }

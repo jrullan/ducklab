@@ -136,7 +136,7 @@ type Resolution struct {
 // Options selects and groups runs.
 type Options struct {
 	Since time.Time
-	By    string // mode | duckling | role | task
+	By    string // mode | duckling | role | task | duckling_role
 }
 
 // Build aggregates runs into a report.
@@ -194,8 +194,12 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			// Grouped by duckling, the numbers are that duckling's share.
 			// Adding the run's total to every row was what made the rows
 			// identical: three models, one run, the whole cost three times.
-			if by == "duckling" {
-				spend := r.Spend[key]
+			if by == "duckling" || by == "duckling_role" {
+				id := key
+				if by == "duckling_role" {
+					id = key[:strings.Index(key, "/")]
+				}
+				spend := r.Spend[id]
 				g.Tokens += spend.Tokens
 				g.CostUSD += spend.CostUSD
 				if spend.Estimated {
@@ -307,6 +311,22 @@ func keysFor(r *runlog.Run, by string) []string {
 		for role, id := range r.Roster {
 			if id != "" {
 				out = append(out, role)
+			}
+		}
+		sort.Strings(out)
+		return out
+	case "duckling_role":
+		// What each model did IN EACH SEAT: "id/role" for every seat the
+		// roster gave it that it actually worked (spend > 0). A reviewer's
+		// pass rate is a different fact from the same model's as
+		// implementer, and a seat suggestion needs the one for the seat.
+		var out []string
+		for role, id := range r.Roster {
+			if id == "" {
+				continue
+			}
+			if spend, ok := r.Spend[id]; ok && spend.Calls > 0 {
+				out = append(out, id+"/"+role)
 			}
 		}
 		sort.Strings(out)

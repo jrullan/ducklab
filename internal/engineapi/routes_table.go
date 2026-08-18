@@ -65,6 +65,11 @@ type answerRequest struct {
 	Answer     string `json:"answer"`
 }
 
+// candidateCriteriaRequest is the PUT body: the configured criteria per role.
+type candidateCriteriaRequest struct {
+	Criteria map[string][]string `json:"criteria"`
+}
+
 type rosterSetRequest struct {
 	Mode      string   `json:"mode"`
 	Role      string   `json:"role"`
@@ -231,6 +236,16 @@ func routeTable() []Route {
 			Request: service.AutopilotDefaultsView{}, Summary: "Replace autopilot and autonomy defaults",
 			ClientMethod: "AutopilotDefaultsSet",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleAutopilotDefaultsSet }},
+		{Method: "GET", Path: "/v1/defaults/candidates", Auth: true,
+			Response:     service.CandidateCriteriaView{},
+			Summary:      "Seat-suggestion criteria per role: what is in effect, the engine's defaults, and the catalog to choose from",
+			ClientMethod: "CandidateCriteria",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleCandidateCriteria }},
+		{Method: "PUT", Path: "/v1/defaults/candidates", Auth: true,
+			Request: candidateCriteriaRequest{}, Response: service.CandidateCriteriaView{},
+			Summary:      "Replace the configured seat-suggestion criteria (a role omitted keeps the default; an empty list turns its suggestions off)",
+			ClientMethod: "CandidateCriteriaSet",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleCandidateCriteriaSet }},
 		{Method: "GET", Path: "/v1/defaults/modes", Auth: true,
 			Response:     service.ModeDefaultsView{},
 			Summary:      "Per-mode defaults: rounds, the duckling line-up, and the per-turn model-call cap. All lived only in the scripts and the config.",

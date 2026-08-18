@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Duckling, EngineClient, Scorecard } from "../api/client";
+import type { CandidateCriteriaView, Duckling, EngineClient, Scorecard } from "../api/client";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { StatusChip } from "../components/StatusChip";
 import { rolesForMode } from "../lib/seats";
@@ -52,6 +52,41 @@ function FilterChip({ testId, label, on, onClick }: { testId: string; label: str
   return <button type="button" data-testid={testId} aria-pressed={on} onClick={onClick} className={`rounded-full border px-2 py-0.5 ${on ? "border-ink bg-surface2 text-ink" : "border-hairline text-ink-muted hover:text-ink"}`}>{label}</button>;
 }
 
+// The criteria a seat's suggestions are ordered by, per role, editable in
+// place: the engine ships a default and one developer wants cost first while
+// another wants the coding index. Every list is visible — a rule the engine
+// honours and the UI hides is a rule nobody can trust (B-052).
+function CriteriaPanel({ client, onSaved }: { client: EngineClient; onSaved: () => void }) {
+  const [view, setView] = useState<CandidateCriteriaView | null>(null);
+  const [error, setError] = useState("");
+  const load = () => { if (typeof client.candidateCriteria !== "function") return; client.candidateCriteria().then(setView).catch((e) => setError(e instanceof Error ? e.message : String(e))); };
+  useEffect(load, [client]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!view) return error ? <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{error}</p> : null;
+  const label = (key: string) => view.catalog.find((c) => c.key === key)?.label ?? key;
+  const dir = (key: string) => view.catalog.find((c) => c.key === key)?.direction === "asc" ? "↑ lowest first" : "↓ highest first";
+  const roles = Object.keys(view.defaults).sort();
+  const save = (next: Record<string, string[]>) => { setError(""); client.candidateCriteriaSet(next).then((v) => { setView(v); onSaved(); }).catch((e) => setError(e instanceof Error ? e.message : String(e))); };
+  const configured = () => { const out: Record<string, string[]> = {}; for (const r of view.configured) out[r] = view.criteria[r] ?? []; return out; };
+  const setRole = (role: string, list: string[]) => save({ ...configured(), [role]: list });
+  const reset = (role: string) => { const next = configured(); delete next[role]; save(next); };
+  return <div className="rounded border border-hairline bg-surface p-3 text-sm" data-testid="roster-criteria">
+    <div className="mb-2 text-xs text-ink-muted">Suggestions rank the flock for a seat by these criteria, in order; a duckling with no value for a criterion sorts after those with one. Ducklings whose declared roles exclude the seat are never suggested. Local models are not compared on price.</div>
+    {error && <p role="alert" className="mb-2 text-xs" style={{ color: "var(--status-critical)" }}>{error}</p>}
+    <div className="space-y-2">{roles.map((role) => { const list = view.criteria[role] ?? []; const isCustom = view.configured.includes(role); const available = view.catalog.filter((c) => !list.includes(c.key)); return <div key={role} className="flex flex-wrap items-center gap-1" data-testid={`roster-criteria-${role}`}>
+      <span className="w-24 font-medium">{role}</span>
+      {list.length === 0 && <span className="text-xs text-ink-muted">suggestions off</span>}
+      {list.map((key, i) => <span key={key} className="inline-flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs" data-testid={`roster-criteria-${role}-${key}`} title={`${label(key)} — ${dir(key)}`}>
+        <span className="text-ink-muted">{i + 1}.</span>{label(key)}
+        <button type="button" aria-label={`move ${label(key)} earlier for ${role}`} disabled={i === 0} className="disabled:opacity-30" onClick={() => { const n = list.slice(); [n[i - 1], n[i]] = [n[i]!, n[i - 1]!]; setRole(role, n); }}>‹</button>
+        <button type="button" aria-label={`move ${label(key)} later for ${role}`} disabled={i === list.length - 1} className="disabled:opacity-30" onClick={() => { const n = list.slice(); [n[i], n[i + 1]] = [n[i + 1]!, n[i]!]; setRole(role, n); }}>›</button>
+        <button type="button" aria-label={`remove ${label(key)} from ${role}`} onClick={() => setRole(role, list.filter((k) => k !== key))}>×</button>
+      </span>)}
+      {available.length > 0 && <select aria-label={`add a criterion for ${role}`} data-testid={`roster-criteria-add-${role}`} value="" onChange={(e) => { if (e.target.value) setRole(role, [...list, e.target.value]); }} className="rounded border border-hairline bg-surface px-1 py-0.5 text-xs"><option value="">+ add…</option>{available.map((c) => <option key={c.key} value={c.key} title={c.source}>{c.label} ({c.direction === "asc" ? "lowest first" : "highest first"})</option>)}</select>}
+      {isCustom ? <button type="button" className="text-xs underline text-ink-muted" data-testid={`roster-criteria-reset-${role}`} onClick={() => reset(role)}>reset to default</button> : <span className="text-xs text-ink-muted">default</span>}
+    </div>; })}</div>
+  </div>;
+}
+
 export function Roster({ client, projectId, projectName }: { client: EngineClient; projectId: string; projectName?: string }) {
   const [scope, setScope] = useState<"global" | "project">("global");
   const [ducks, setDucks] = useState<Duckling[]>([]);
@@ -69,6 +104,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const clearFlockFilters = () => { setFlockText(""); setFlockProvider(""); setFlockLocality(""); setFlockVision(false); setFlockTools(false); setFlockContext(0); };
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [boards, setBoards] = useState<Record<string, Entry[]>>({});
+  const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [warnings, setWarnings] = useState<Record<string, string | undefined>>({});
   // Errors live with the board that produced them: an error rendered at
   // the top of the view was invisible from Tournament and Common, and two
@@ -160,7 +196,9 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       <button type="button" className={scope === "global" ? "text-ink font-semibold" : "text-ink-muted"} onClick={() => setScope("global")}>Global</button>
       <span>|</span>
       <button type="button" className={scope === "project" ? "text-ink font-semibold" : "text-ink-muted"} onClick={() => setScope("project")}>Project · {projectName ?? projectId}</button>
+      <button type="button" className="ml-auto text-xs text-ink-muted underline" data-testid="roster-criteria-toggle" aria-expanded={criteriaOpen} onClick={() => setCriteriaOpen((v) => !v)}>{criteriaOpen ? "hide suggestion criteria" : "how seats are suggested"}</button>
     </div>
+    {criteriaOpen && <CriteriaPanel client={client} onSaved={() => { void reload(); }} />}
     <div className="flex min-h-0 flex-1 gap-6 items-stretch">
     <aside className="flex w-72 shrink-0 flex-col min-h-0" data-testid="roster-flock">
       <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold">Flock</h2>
