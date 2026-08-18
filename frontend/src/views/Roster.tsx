@@ -6,7 +6,9 @@ import { rolesForMode } from "../lib/seats";
 import type { ProviderView } from "../api/client";
 
 type Entry = { role: string; duckling?: string; ducklings?: string[]; source?: string; default?: string; global_ducklings?: string[]; candidates?: { id: string; why: string }[] };
-const MODES = ["council", "solo", "pair", "split", "tournament", "common"];
+// Common first: triager and scribe serve every mode, and at the bottom of a
+// long page they read as an afterthought — or a sixth mode.
+const MODES = ["common", "council", "solo", "pair", "split", "tournament"];
 const names = (entry: Entry) => entry.ducklings ?? (entry.duckling ? [entry.duckling] : []);
 const pinned = (entry: Entry) => entry.source === "project pin" || entry.source === "project mode seat" || entry.source === "project";
 // The columns a board shows: only the roles the mode seats (rolesForMode is
@@ -37,16 +39,24 @@ const SORTS: { key: string; label: string; value: (s: Scorecard) => number | und
   { key: "coding-index", label: "coding index", value: (s) => s.index?.coding_score, format: (v) => `coding ${v}` },
   { key: "context", label: "context", value: (s) => s.caps?.context_tokens, format: (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M ctx` : `${Math.round(v / 1000)}k ctx`) },
 ];
-// One line, positive when there is evidence, one quiet word when there is
-// none — not three negatives in a row.
-const evidenceLine = (s: Scorecard): string => {
+// One grammar for evidence everywhere: "84% · 198 runs · $0.21/run ·
+// coding 68.8". Positive when there is some, one quiet word when there is
+// none — not three negatives in a row. Few runs are said to be few: a 0%
+// on one run is noise, and it must not read like a measurement. Local
+// models have no price to compare, so no "$0.00/run".
+const runsWord = (n: number) => `${n} ${n === 1 ? "run" : "runs"}${n < 5 ? " · few" : ""}`;
+const evidenceParts = (s: Scorecard, m: { runs?: number; pass_rate?: number; avg_cost_usd?: number } | undefined, prefix = ""): string[] => {
   const parts: string[] = [];
-  if (s.measured?.runs) parts.push(`${Math.round(s.measured.pass_rate ?? 0)}% · ${s.measured.runs} runs${s.measured.avg_cost_usd !== undefined ? ` · $${s.measured.avg_cost_usd.toFixed(2)}/run` : ""}`);
+  if (m?.runs) {
+    parts.push(`${Math.round(m.pass_rate ?? 0)}%${prefix} · ${runsWord(m.runs)}`);
+    if (s.locality !== "local" && m.avg_cost_usd !== undefined) parts.push(`$${m.avg_cost_usd.toFixed(2)}/run`);
+  }
   const bench = s.bench?.arena?.score;
   if (bench !== undefined) parts.push(`bench ${Math.round(bench * 100)}`);
   if (s.index?.coding_score !== undefined) parts.push(`coding ${s.index.coding_score}`);
-  return parts.length ? parts.join(" · ") : "no evidence yet";
+  return parts;
 };
+const evidenceLine = (s: Scorecard): string => { const parts = evidenceParts(s, s.measured); return parts.length ? parts.join(" · ") : "no evidence yet"; };
 function FilterChip({ testId, label, on, onClick }: { testId: string; label: string; on: boolean; onClick: () => void }) {
   return <button type="button" data-testid={testId} aria-pressed={on} onClick={onClick} className={`rounded-full border px-2 py-0.5 ${on ? "border-ink bg-surface2 text-ink" : "border-hairline text-ink-muted hover:text-ink"}`}>{label}</button>;
 }
@@ -195,11 +205,8 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const seatEvidence = (id: string, role: string): string => {
     const s = scorecards.find((c) => c.id === id);
     if (!s) return "";
-    const parts: string[] = [];
     const inRole = s.measured_by_role?.[role];
-    if (inRole?.runs) parts.push(`${Math.round(inRole.pass_rate ?? 0)}% as ${role} · ${inRole.runs} runs`);
-    else if (s.measured?.runs) parts.push(`${Math.round(s.measured.pass_rate ?? 0)}% overall · ${s.measured.runs} runs`);
-    if (s.index?.coding_score !== undefined) parts.push(`coding ${s.index.coding_score}`);
+    const parts = inRole?.runs ? evidenceParts(s, inRole) : evidenceParts(s, s.measured, " overall");
     return parts.join(" · ");
   };
   return <div className="flex h-full min-h-0 flex-col gap-4" data-testid="roster-view">
@@ -244,16 +251,17 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1" data-testid="roster-boards">
     {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
-    <div className="space-y-6">{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)} className={common ? "border-l-4 border-transparent pl-3" : "border-l-4 pl-3"} style={common ? undefined : { borderLeftColor: notRunnable ? "var(--status-warning)" : "var(--status-good)" }}>
-      {/* The bar's colour MEANS something: green runs, amber says "not
-          runnable yet" from across the room. Common is not a mode; it sits
-          quieter, without a bar. */}
+    <div className="space-y-6">{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)} className={common ? "border-l-4 border-transparent pl-3" : "border-l-4 pl-3"} style={common ? undefined : { borderLeftColor: notRunnable ? "var(--status-warning)" : "var(--border)" }}>
+      {/* The bar's colour MEANS something: hairline when the mode runs,
+          amber when it says "not runnable yet" — the exception is the one
+          that should be seen from across the room. Common is not a mode;
+          it sits quieter, without a bar. */}
       <div className="flex items-baseline gap-2"><h2 className={common ? "text-base font-medium capitalize text-ink-muted" : "text-lg font-semibold capitalize"}>{mode}</h2>{common && <span className="text-xs text-ink-muted">shared by every mode</span>}{warnings[mode] && <span className="text-xs" data-testid={`roster-warning-${mode}`} style={{ color: "var(--status-warning)" }}>⚠ {warnings[mode]}</span>}</div>
       {errors[mode] && <p role="alert" className="text-sm" data-testid={`roster-error-${mode}`} style={{ color: "var(--status-critical)" }}>{errors[mode]}</p>}
       {mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p className="text-xs text-ink-muted">no pins</p>}
       <div className="mt-2 flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
       const ids = names(entry); const isPinned = pinned(entry); const ghost = scope === "project" && !isPinned; const open = chosenSeat?.mode === mode && chosenSeat.role === entry.role; const top = entry.candidates?.[0]; const suggestion = top && !ids.includes(top.id) ? top : undefined;
-      return <div key={entry.role} className="min-w-44 max-w-56" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(mode, entry.role, event)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
+      return <div key={entry.role} className="w-56 shrink-0" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(mode, entry.role, event)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
         {/* Column header: the role, and — when the seat is occupied — one
             small "+" to add or change. The dashed drop zone is for empty
             seats only; an occupied seat with a big "+ assign" over it was
@@ -265,7 +273,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
             <span className="ml-auto flex gap-2 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(mode, ""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(mode, e instanceof Error ? e.message : String(e))); }}>unpin</button>}{editable && <button type="button" className="text-ink-muted hover:text-ink" aria-label={`remove ${id} from ${entry.role}`} title="remove" onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>×</button>}</span></div>
           {evidence && <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-seat-evidence-${mode}-${entry.role}-${id}`}>{evidence}</div>}
         </div>; })}
-        {suggestion && !open && <div className="mb-2 text-xs text-ink-muted" data-testid={`roster-seat-suggestion-${mode}-${entry.role}`} title={suggestion.why}>suggested: <button type="button" className="underline hover:text-ink" aria-label={`assign suggested ${suggestion.id} to ${entry.role} in ${mode}`} onClick={() => assign(mode, entry.role, suggestion.id)}>{suggestion.id}</button></div>}
+        {suggestion && !open && <div className="mb-2 text-[11px] text-ink-muted" data-testid={`roster-seat-suggestion-${mode}-${entry.role}`} title={suggestion.why}>suggested: <button type="button" className="underline hover:text-ink" aria-label={`assign suggested ${suggestion.id} to ${entry.role} in ${mode}`} onClick={() => assign(mode, entry.role, suggestion.id)}>{suggestion.id}</button></div>}
         {editable && open && <div className="mb-2 rounded border border-hairline bg-surface2 p-2" role="listbox" aria-label={`choose a duckling for ${entry.role}`}><div className="mb-1 flex items-center justify-between text-xs text-ink-muted"><span>assign to {entry.role}</span><button type="button" className="underline" onClick={() => setChosenSeat(null)}>cancel</button></div><div className="max-h-56 space-y-1 overflow-y-auto">{(() => { const candidates = entry.candidates ?? []; const rank = new Map(candidates.map((c, i) => [c.id, i])); const ordered = ducks.filter((duck) => !ids.includes(duck.id)).slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 999) - (rank.has(b.id) ? rank.get(b.id)! : 999)); return ordered.map((duck) => { const candidate = candidates.find((c) => c.id === duck.id); return <button key={duck.id} type="button" className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-surface" aria-label={`assign ${duck.id} to ${entry.role}`} onClick={() => assign(mode, entry.role, duck.id)} data-testid={candidate ? `roster-pick-suggested-${duck.id}` : undefined}><DuckAvatar id={duck.id} roster={roster} /> <span className="ml-1">{duck.id}</span>{candidate && <><span className="ml-2 text-xs">suggested for {entry.role}</span><span data-testid={`roster-pick-suggested-why-${duck.id}`} className="ml-2 text-xs text-ink-muted">{candidate.why}</span></>}</button>; }); })()}</div></div>}
       </div>;
     })}</div></section>; })}</div>

@@ -15,17 +15,17 @@ func ctx(n int) *int { return &n }
 func rankingFixture() []Scorecard {
 	return []Scorecard{
 		{ID: "coder", Locality: "remote", Cost: config.Cost{InputPerMTok: 1, OutputPerMTok: 6},
-			Measured: &MeasuredEvidence{Runs: 20, PassRate: 60, AvgCostPerRun: 0.40, AvgWallclock: 300},
+			Measured:       &MeasuredEvidence{Runs: 20, PassRate: 60, AvgCostPerRun: 0.40, AvgWallclock: 300},
 			MeasuredByRole: map[string]MeasuredEvidence{"implementer": {Runs: 12, PassRate: 75, AvgCostPerRun: 0.5}, "reviewer": {Runs: 8, PassRate: 40}},
-			Index: &config.ExternalIndex{CodingScore: 76.7, IntelligenceScore: 56.6, AgenticScore: 50.2, Source: "aa", AsOf: "2026-08-18"}},
+			Index:          &config.ExternalIndex{CodingScore: 76.7, IntelligenceScore: 56.6, AgenticScore: 50.2, Source: "aa", AsOf: "2026-08-18"}},
 		{ID: "cheap", Locality: "remote", Cost: config.Cost{InputPerMTok: 0.07, OutputPerMTok: 0.22},
-			Measured: &MeasuredEvidence{Runs: 30, PassRate: 68, AvgCostPerRun: 0.21, AvgWallclock: 650},
+			Measured:       &MeasuredEvidence{Runs: 30, PassRate: 68, AvgCostPerRun: 0.21, AvgWallclock: 650},
 			MeasuredByRole: map[string]MeasuredEvidence{"reviewer": {Runs: 25, PassRate: 70, AvgCostPerRun: 0.2}, "implementer": {Runs: 5, PassRate: 20}},
-			Index: &config.ExternalIndex{CodingScore: 68.8, IntelligenceScore: 52.6, AgenticScore: 45.7}},
+			Index:          &config.ExternalIndex{CodingScore: 68.8, IntelligenceScore: 52.6, AgenticScore: 45.7}},
 		{ID: "quick", Locality: "remote", Cost: config.Cost{InputPerMTok: 0.1, OutputPerMTok: 0.6},
-			Measured: &MeasuredEvidence{Runs: 40, PassRate: 63, AvgCostPerRun: 0.02, AvgWallclock: 100},
+			Measured:       &MeasuredEvidence{Runs: 40, PassRate: 63, AvgCostPerRun: 0.02, AvgWallclock: 100},
 			MeasuredByRole: map[string]MeasuredEvidence{"implementer": {Runs: 30, PassRate: 65, AvgCostPerRun: 0.02}},
-			Index: &config.ExternalIndex{CodingScore: 71.4, AgenticScore: 46.9}},
+			Index:          &config.ExternalIndex{CodingScore: 71.4, AgenticScore: 46.9}},
 		// A person's statement: implementer only.
 		{ID: "impl-only", Roles: []string{"implementer"}, Locality: "remote",
 			Measured:       &MeasuredEvidence{Runs: 10, PassRate: 90, AvgCostPerRun: 0.30},
@@ -57,9 +57,9 @@ func TestDefaultCriteriaOrderBySeat(t *testing.T) {
 	}
 	// reviewer: pass rate IN THE SEAT first → cheap 70%, coder 40%; impl-only
 	// (90% as reviewer!) is declared implementer-only and is left out; quick
-	// has never reviewed → no in-seat value, sorts after those with one,
-	// then by intelligence (none) then cost.
-	if got := candIDs(RankCandidates("reviewer", cards, CriteriaFor(nil, "reviewer"))); strings.Join(got, ",") != "cheap,coder,quick" {
+	// has never reviewed → no value for the FIRST criterion → not a
+	// candidate at all, rather than a winner-by-default over an empty field.
+	if got := candIDs(RankCandidates("reviewer", cards, CriteriaFor(nil, "reviewer"))); strings.Join(got, ",") != "cheap,coder" {
 		t.Errorf("reviewer = %v", got)
 	}
 	// advisor: cost then wallclock → quick $0.02, cheap $0.21, coder $0.40.
@@ -98,6 +98,46 @@ func TestConfiguredCriteriaReorder(t *testing.T) {
 	// them: with input price first, blank (no price) trails coder/cheap/quick.
 	if got := candIDs(RankCandidates("implementer", cards, []string{"input_cost"})); strings.Join(got, ",") != "cheap,quick,coder" {
 		t.Errorf("input-price implementer = %v", got)
+	}
+}
+
+// Three of three is not "100%". Ranking uses the lower bound of the Wilson
+// interval, so a long record at a good rate outranks a short perfect one —
+// the reviewer seat suggested a local model with 3 runs at 100% over the
+// seated one with 198 at 84%. And below three runs a rate is not evidence.
+func TestPassRateRanksByEvidenceNotByLuck(t *testing.T) {
+	cards := []Scorecard{
+		{ID: "veteran", Locality: "remote", Measured: &MeasuredEvidence{Runs: 198, PassRate: 84}, MeasuredByRole: map[string]MeasuredEvidence{"reviewer": {Runs: 198, PassRate: 84}}},
+		{ID: "lucky", Locality: "local", Measured: &MeasuredEvidence{Runs: 3, PassRate: 100}, MeasuredByRole: map[string]MeasuredEvidence{"reviewer": {Runs: 3, PassRate: 100}}},
+		{ID: "two-runs", Locality: "remote", Measured: &MeasuredEvidence{Runs: 2, PassRate: 100}, MeasuredByRole: map[string]MeasuredEvidence{"reviewer": {Runs: 2, PassRate: 100}}},
+	}
+	got := RankCandidates("reviewer", cards, []string{"pass_rate"})
+	if len(got) != 2 || got[0].ID != "veteran" || got[1].ID != "lucky" {
+		t.Fatalf("reviewer by pass rate = %v, want veteran then lucky, two-runs not counted", got)
+	}
+	// The why still shows the facts, not the estimate.
+	if got[1].Why != "100% over 3 runs as reviewer" {
+		t.Errorf("why = %q", got[1].Why)
+	}
+	if lb := passRateEstimate(100, 3); lb < 40 || lb > 50 {
+		t.Errorf("Wilson lower bound for 3/3 = %.1f, want ≈44", lb)
+	}
+	if lb := passRateEstimate(84, 198); lb < 77 || lb > 80 {
+		t.Errorf("Wilson lower bound for 84%% of 198 = %.1f, want ≈78", lb)
+	}
+}
+
+// A seat whose primary criterion nobody can answer gets no suggestion.
+func TestNoEvidenceForThePrimaryCriterionMeansSilence(t *testing.T) {
+	cards := []Scorecard{
+		{ID: "priced-only", Locality: "remote", Cost: config.Cost{InputPerMTok: 1, OutputPerMTok: 2}},
+		{ID: "indexed-only", Locality: "remote", Index: &config.ExternalIndex{CodingScore: 70}},
+	}
+	if got := RankCandidates("reviewer", cards, []string{"pass_rate", "cost_per_run", "input_cost"}); len(got) != 0 {
+		t.Fatalf("suggested %v for a seat nobody has held", got)
+	}
+	if got := candIDs(RankCandidates("implementer", cards, []string{"coding_index", "input_cost"})); strings.Join(got, ",") != "indexed-only" {
+		t.Fatalf("implementer by coding index = %v", got)
 	}
 }
 

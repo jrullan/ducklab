@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -96,14 +97,43 @@ func ValidateCriteria(cfg map[string][]string) error {
 	return nil
 }
 
+// minRuns is the evidence a measured criterion needs before it counts at
+// all: two runs say almost nothing, and "unknown sorts last" must not turn
+// them into a winner by default.
+const minRuns = 3
+
+// passRateEstimate is what a pass rate is worth given how many runs it
+// rests on: the lower bound of the 95% Wilson interval, in percent. 3 of 3
+// is not "100%", it is "somewhere above 44%"; 166 of 198 is "above 78%".
+// Ordering by the bound is what lets 198 runs at 84% outrank 3 at 100%
+// without a hand-tuned threshold. The why line still shows the raw rate
+// and the run count — the estimate ranks, the facts explain.
+func passRateEstimate(ratePercent float64, runs int) float64 {
+	if runs <= 0 {
+		return 0
+	}
+	const z = 1.96
+	n := float64(runs)
+	p := ratePercent / 100
+	den := 1 + z*z/n
+	centre := p + z*z/(2*n)
+	half := z * math.Sqrt(p*(1-p)/n+z*z/(4*n*n))
+	lb := (centre - half) / den
+	if lb < 0 {
+		lb = 0
+	}
+	return lb * 100
+}
+
 // criterionValue reads one criterion off a scorecard for a seat. ok=false
 // means "no value" — unknown, not zero — and unknowns sort after knowns.
 func criterionValue(key, role string, s Scorecard) (v float64, ok bool) {
 	local := s.Locality == "local"
 	inRole := func() (MeasuredEvidence, bool) {
 		m, has := s.MeasuredByRole[role]
-		return m, has && m.Runs > 0
+		return m, has && m.Runs >= minRuns
 	}
+	overall := s.Measured != nil && s.Measured.Runs >= minRuns
 	switch key {
 	case "coding_index":
 		if s.Index != nil && s.Index.CodingScore > 0 {
@@ -119,20 +149,20 @@ func criterionValue(key, role string, s Scorecard) (v float64, ok bool) {
 		}
 	case "pass_rate":
 		if m, has := inRole(); has {
-			return m.PassRate, true
+			return passRateEstimate(m.PassRate, m.Runs), true
 		}
 	case "pass_rate_overall":
-		if s.Measured != nil && s.Measured.Runs > 0 {
-			return s.Measured.PassRate, true
+		if overall {
+			return passRateEstimate(s.Measured.PassRate, s.Measured.Runs), true
 		}
 	case "cost_per_run":
 		// A local model's $0 is not a price, it is the absence of one; it
 		// must not top every cost ordering by saying nothing.
-		if !local && s.Measured != nil && s.Measured.Runs > 0 {
+		if !local && overall {
 			return s.Measured.AvgCostPerRun, true
 		}
 	case "wallclock":
-		if s.Measured != nil && s.Measured.Runs > 0 && s.Measured.AvgWallclock > 0 {
+		if overall && s.Measured.AvgWallclock > 0 {
 			return s.Measured.AvgWallclock, true
 		}
 	case "bench":
@@ -171,9 +201,9 @@ func criterionPhrase(key, role string, s Scorecard, v float64) string {
 		return fmt.Sprintf("agentic %.1f", v)
 	case "pass_rate":
 		m := s.MeasuredByRole[role]
-		return fmt.Sprintf("%.0f%% over %d runs as %s", v, m.Runs, role)
+		return fmt.Sprintf("%.0f%% over %d runs as %s", m.PassRate, m.Runs, role)
 	case "pass_rate_overall":
-		return fmt.Sprintf("%.0f%% over %d runs", v, s.Measured.Runs)
+		return fmt.Sprintf("%.0f%% over %d runs", s.Measured.PassRate, s.Measured.Runs)
 	case "cost_per_run":
 		return fmt.Sprintf("$%.2f/run", v)
 	case "wallclock":
@@ -195,11 +225,15 @@ func criterionPhrase(key, role string, s Scorecard, v float64) string {
 
 // RankCandidates orders the scorecards for a seat by the given criteria and
 // returns at most three, each with a why line built from the criteria that
-// placed it. A duckling is eligible when it has a value for at least one
-// criterion and its declared roles (if any) include the seat — "Not good for
-// reviewer" written as roles=[implementer] is a statement the suggestion
-// must respect. Comparison is lexicographic over the criteria; at each level
-// a duckling with no value sorts after every duckling with one.
+// placed it. A duckling is eligible when it has a value for the FIRST
+// criterion — the one the person put first is the one they mean; a
+// duckling known only by a tie-breaker would win by default over an empty
+// field, and a suggestion that rests on nothing is worse than none — and
+// when its declared roles (if any) include the seat: "Not good for reviewer"
+// written as roles=[implementer] is a statement the suggestion must respect.
+// Comparison is lexicographic over the criteria; below the first, a
+// duckling with no value sorts after every duckling with one. No eligible
+// duckling → no candidates → the seat says nothing.
 func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Candidate {
 	if len(criteria) == 0 {
 		return []Candidate{}
@@ -212,7 +246,6 @@ func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Ca
 		s      Scorecard
 		values []float64
 		known  []bool
-		any    bool
 	}
 	rows := make([]ranked, 0, len(scorecards))
 	for _, s := range scorecards {
@@ -231,9 +264,8 @@ func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Ca
 		for i, k := range criteria {
 			v, ok := criterionValue(k, role, s)
 			r.values[i], r.known[i] = v, ok
-			r.any = r.any || ok
 		}
-		if r.any {
+		if r.known[0] {
 			rows = append(rows, r)
 		}
 	}

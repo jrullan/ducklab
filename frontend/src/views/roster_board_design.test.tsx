@@ -42,7 +42,9 @@ async function renderRoster() {
 describe("Roster board as a decision surface", () => {
   it("shows in-seat evidence, the seat's suggestion, and one control per seat state", async () => {
     const { set } = await renderRoster();
-    expect(screen.getByTestId("roster-seat-evidence-solo-implementer-terra").textContent).toBe("55% as implementer · 40 runs · coding 76.7");
+    // In-seat evidence, in the one grammar the Flock uses; the column header
+    // already says the seat, so the line does not repeat it.
+    expect(screen.getByTestId("roster-seat-evidence-solo-implementer-terra").textContent).toBe("55% · 40 runs · coding 76.7");
     // terra is seated but luna is the top suggestion: the seat says so and one
     // click assigns her.
     const hint = screen.getByTestId("roster-seat-suggestion-solo-implementer");

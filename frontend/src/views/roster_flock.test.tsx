@@ -108,6 +108,8 @@ describe("Roster flock evidence", () => {
     expect(screen.getByTestId("roster-flock-evidence-bravo").textContent).toBe("no evidence yet");
     expect(screen.getByTestId("roster-flock-evidence-echo").textContent).toBe("coding 55");
     expect(screen.getByTestId("roster-flock-evidence-atlas").textContent).toBe("92% · 14 runs · $0.12/run · bench 81 · coding 72");
+    // Few runs are said to be few; a local model shows no $/run.
+    expect(screen.getByTestId("roster-flock-evidence-delta").textContent).toBe("70% · 4 runs · few · $0.30/run · bench 95");
 
     fireEvent.change(screen.getByTestId("roster-flock-filter-text"), { target: { value: "cedar" } });
     await waitFor(() => expect(flockOrder()).toEqual(["cedar"]));
