@@ -1182,32 +1182,6 @@ Replace positional global mode line-ups with canonical role-keyed `mode_seats` a
 
 **Out of scope:** Desktop roster-board interaction, Settings UI replacement, and MCP roster mutation endpoints.
 
-### T-061 — Deliver the scoped roster board
-
-**Implements:** SPEC-003, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-026, SPEC-044  
-**Depends on:** T-060
-
-Deliver the Desktop Roster view as the sole persistent-seat editor, consuming the canonical roster model and resolver while preserving launcher chips as per-run overrides. It makes Global versus Project inheritance, pins, provenance, cardinality failures, and unsafe role combinations visible and actionable.
-
-**Deliverables:**
-- Add a Desktop Roster view with a Flock column and boards for Council, Solo, Pair, Split, Tournament, and Common
-  - List every registered duckling, mark local versus remote, and show per-run cost when known.
-  - Use only real role names for columns; support ordered multi-slot cards for critics, workers, and contestants.
-- Support accessible seat assignment and removal for every board-addressable seat
-  - Provide drag-and-drop from Flock plus an equivalent keyboard/click flow to select a seat and pick a duckling.
-  - Allow removal and ordered multi-slot assignment without requiring drag-and-drop.
-- Add a Global | Project · `<name>` scope selector backed by the canonical roster service
-  - Global reads and writes only global seats and role pins.
-  - Project renders inherited assignments as muted dashed `global` ghosts and project pins as solid `pinned` cards.
-  - Project drops create or replace only that role’s pin; unpin restores the inherited ghost; show the overridden global value on hover and plainly identify projects with no pins.
-- Retire Settings’ positional mode chips in favor of the Roster board and retain launcher chips as per-run overrides
-  - Launcher provenance continues to distinguish project, global, and picked-now seating.
-  - Surface cardinality errors and warn when a Pair duckling both implements and reviews or a Council architect critiques its own draft.
-- Update specification document 08 and add Desktop tests
-  - Assert scope switching, pin and unpin inheritance, accessible assignment/removal, ordered multi-slot seats, validation display, conflict warnings, and provenance rendering.
-
-**Out of scope:** Changing roster resolution precedence, adding new execution roles or modes, and MCP roster management.
-
 ### T-062 — Expose canonical roster management through MCP
 
 **Implements:** SPEC-021, SPEC-024, SPEC-044  
