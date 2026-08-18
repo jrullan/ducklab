@@ -101,7 +101,6 @@ describe("the cycle map in the run header", () => {
     ["intake", "intake"],
     ["spec", "spec"],
     ["test", "build"], // the failing test is the first half of building
-    ["triage", "plan"], // classified bugs become the plan's tasks
   ])("a %s run lights the %s station", async (stage, station) => {
     render(<RunView runId="r-x" client={clientWith(runWith(stage))} />);
     const map = await waitFor(() => screen.getByTestId("cycle-map"));
@@ -115,5 +114,16 @@ describe("the cycle map in the run header", () => {
     render(<RunView runId="r-x" client={clientWith(runWith("chat"))} />);
     await waitFor(() => screen.getByTestId("run-view"));
     expect(screen.queryByTestId("cycle-map")).toBeNull();
+  });
+
+  // Reversed from "triage lights the plan station": a triage is not IN the
+  // pipeline — its classifications feed the plan, but the map with plan lit
+  // read as "this run is planning", and its loudest chip was "unverified"
+  // for a run that has no gate by design. The header says what the run did.
+  it("a triage run shows its outcome instead of the map", async () => {
+    render(<RunView runId="r-x" client={clientWith(runWith("triage"))} />);
+    await waitFor(() => screen.getByTestId("run-view"));
+    expect(screen.queryByTestId("cycle-map")).toBeNull();
+    expect(screen.getAllByTestId("status-chip").some((c) => /triag/i.test(c.textContent ?? ""))).toBe(true);
   });
 });
