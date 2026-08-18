@@ -155,8 +155,30 @@ func appendVerifyPreparation(t *testing.T, root, preparation string) {
 	if at < 0 {
 		t.Fatal("project fixture lacks [verify]")
 	}
-	insert := at + len(verifyHeader)
-	updated := string(body[:insert]) + preparation + "\n" + string(body[insert:])
+	start := at + len(verifyHeader)
+	end := strings.Index(string(body[start:]), "\n[")
+	if end < 0 {
+		end = len(body)
+	} else {
+		end += start + 1
+	}
+
+	// The fixture already supplies mode and custom. Replace those values rather
+	// than emitting duplicate TOML keys, so each test reaches checkout behavior.
+	replacements := map[string]bool{}
+	for _, line := range strings.Split(preparation, "\n") {
+		if key, _, ok := strings.Cut(line, "="); ok {
+			replacements[strings.TrimSpace(key)] = true
+		}
+	}
+	var kept []string
+	for _, line := range strings.Split(string(body[start:end]), "\n") {
+		key, _, hasKey := strings.Cut(line, "=")
+		if !hasKey || !replacements[strings.TrimSpace(key)] {
+			kept = append(kept, line)
+		}
+	}
+	updated := string(body[:start]) + preparation + "\n" + strings.Join(kept, "\n") + string(body[end:])
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		t.Fatal(err)
 	}
