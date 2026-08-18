@@ -184,6 +184,26 @@ func TestTheGuideGroupsReopenableTasks(t *testing.T) {
 	}
 }
 
+// After a cut, every accepted commit is under the tag: the count is zero and
+// MEANS zero. The rail said "53 accepted task(s) await shipping" right after
+// v0.6.0 was tagged because zero was read as unknown and re-estimated from
+// branches.
+func TestTheGuideOffersNoReleaseWhenEverythingShipped(t *testing.T) {
+	steps := nextSteps(projectSnapshot{
+		HasRequirements: true, HasSpec: true, HasPlan: true,
+		Tasks: []TaskView{
+			{ID: "T-001", Status: "accepted", Branch: "ducklab/T-001"},
+			{ID: "T-002", Status: "accepted", Branch: "ducklab/T-002"},
+		},
+		AcceptedUnreleased: 0, UnreleasedCounted: true,
+	})
+	for _, s := range steps {
+		if s.ID == "release" {
+			t.Fatalf("release offered with nothing unreleased: %+v", s)
+		}
+	}
+}
+
 func TestTheGuideSurfacesAcceptedUnreleasedWork(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,

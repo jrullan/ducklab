@@ -92,6 +92,20 @@ type Item struct {
 	Summary string
 }
 
+// unverifiedSentence names the accepted-without-a-gate changes, in number.
+func unverifiedSentence(n int, ids []string) string {
+	which := ""
+	if len(ids) > 0 {
+		which = " (" + strings.Join(ids, ", ") + ")"
+	}
+	if n == 1 {
+		return fmt.Sprintf("1 of these changes%s was accepted with no gate that could run, "+
+			"so nothing was verified about it beyond a person reading the diff.", which)
+	}
+	return fmt.Sprintf("%d of these changes%s were accepted with no gate that could run, "+
+		"so nothing was verified about them beyond a person reading the diff.", n, which)
+}
+
 // Notes is a release's contents, grouped as the document will present them.
 type Notes struct {
 	Version    Version
@@ -101,6 +115,9 @@ type Notes struct {
 	// than hidden: a release note that reads the same whether or not anything
 	// was tested is a release note that cannot be trusted (P3).
 	Unverified int
+	// UnverifiedTasks names them: "1 of these changes" without saying which
+	// sends the reader hunting through the inventory.
+	UnverifiedTasks []string
 }
 
 // Milestone groups items under the milestone they belong to.
@@ -163,6 +180,9 @@ func Render(n Notes, prose string) string {
 	fmt.Fprintf(&b, "tasks: %d\n", count(n))
 	if n.Unverified > 0 {
 		fmt.Fprintf(&b, "unverified: %d\n", n.Unverified)
+		if len(n.UnverifiedTasks) > 0 {
+			fmt.Fprintf(&b, "unverified_tasks: %s\n", strings.Join(n.UnverifiedTasks, ", "))
+		}
 	}
 	b.WriteString("---\n\n")
 
@@ -182,8 +202,7 @@ func Render(n Notes, prose string) string {
 	}
 
 	if n.Unverified > 0 {
-		fmt.Fprintf(&b, "> %d of these changes were accepted with no gate that could run, "+
-			"so nothing was verified about them beyond a person reading the diff.\n\n", n.Unverified)
+		b.WriteString("> " + unverifiedSentence(n.Unverified, n.UnverifiedTasks) + "\n\n")
 	}
 
 	b.WriteString("## What shipped\n\n")

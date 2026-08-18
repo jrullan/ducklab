@@ -60,7 +60,11 @@ type projectSnapshot struct {
 	Tasks              []TaskView
 	AcceptedUnreleased int
 	UnreleasedBranches int
-	Bugs               []bug.Bug
+	// UnreleasedCounted says AcceptedUnreleased was computed against the
+	// tags (and may honestly be zero). Synthetic snapshots that leave it
+	// false get the branch-based estimate below.
+	UnreleasedCounted bool
+	Bugs              []bug.Bug
 	// Paused runs, newest first.
 	Paused []*runlog.Run
 }
@@ -79,7 +83,12 @@ func bugIDs(bugs []bug.Bug, status bug.Status) []string {
 
 func nextSteps(st projectSnapshot) []NextStep {
 	var out []NextStep
-	if st.AcceptedUnreleased == 0 {
+	// The estimate is for when the count is UNKNOWN, not when it is zero:
+	// after v0.6.0 was cut every accepted commit sat under the tag, the
+	// count was rightly 0, and this loop re-counted 53 accepted tasks by
+	// their branches — "Cut a release — 53 accepted task(s) await shipping"
+	// stayed on the rail forever.
+	if !st.UnreleasedCounted && st.AcceptedUnreleased == 0 {
 		for _, t := range st.Tasks {
 			if t.Status == "accepted" && t.Branch != "" && t.Branch != "main" {
 				st.AcceptedUnreleased++
@@ -402,6 +411,7 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	if accepted, branches, countErr := s.acceptedUnreleased(ctx, projectID, entry.Path, st.Tasks); countErr == nil {
 		st.AcceptedUnreleased = accepted
 		st.UnreleasedBranches = branches
+		st.UnreleasedCounted = true
 	}
 
 	st.Bugs, _ = s.BugList(ctx, projectID, false)

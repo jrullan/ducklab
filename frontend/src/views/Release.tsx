@@ -200,8 +200,10 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         )}
 
         {current && current.unverified ? (
-          <p data-testid="release-unverified" className="mb-3 text-sm text-serious">
-            {current.unverified} of these changes were accepted with no gate that could run.
+          <p data-testid="release-unverified" className="mb-3 text-sm text-serious" title="the run that accepted this change had no gate result — a person read the diff and accepted; nothing executable proved it">
+            {current.unverified === 1 ? "1 of these changes" : `${current.unverified} of these changes`}
+            {current.unverified_tasks?.length ? ` (${current.unverified_tasks.join(", ")})` : ""}
+            {current.unverified === 1 ? " was" : " were"} accepted with no gate that could run.
           </p>
         ) : null}
 

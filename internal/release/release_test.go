@@ -118,3 +118,20 @@ func TestRenderIsHonestAboutAnEmptyRelease(t *testing.T) {
 		t.Errorf("an empty release does not say so:\n%s", got)
 	}
 }
+
+// "1 of these changes were accepted with no gate" named nothing and sent the
+// reader hunting through the inventory. The sentence names the tasks and
+// agrees in number; the frontmatter carries the ids so the list can too.
+func TestUnverifiedSentenceNamesTheTasks(t *testing.T) {
+	if got := unverifiedSentence(1, []string{"T-049"}); got != "1 of these changes (T-049) was accepted with no gate that could run, so nothing was verified about it beyond a person reading the diff." {
+		t.Errorf("one: %q", got)
+	}
+	if got := unverifiedSentence(2, []string{"T-001", "T-002"}); !strings.HasPrefix(got, "2 of these changes (T-001, T-002) were accepted") {
+		t.Errorf("two: %q", got)
+	}
+	v, _ := ParseVersion("v0.6.0")
+	md := Render(Notes{Version: v, Unverified: 1, UnverifiedTasks: []string{"T-049"}, Milestones: []Milestone{{ID: "M-1", Items: []Item{{TaskID: "T-049", Title: "Recover"}}}}}, "notes")
+	if !strings.Contains(md, "unverified_tasks: T-049\n") || !strings.Contains(md, "> 1 of these changes (T-049) was accepted") {
+		t.Errorf("rendered:\n%s", md)
+	}
+}

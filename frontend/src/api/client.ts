@@ -434,6 +434,8 @@ export interface ReleaseSummary {
   since?: string;
   tasks: number;
   unverified?: number;
+  /** Which accepted changes had no gate result. */
+  unverified_tasks?: string[];
   /** Still awaiting a person. A draft and a cut release are not the same
    * claim, and showing them alike would let an unapproved one read as
    * shipped. */

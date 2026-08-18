@@ -55,13 +55,13 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 		since = prev.String()
 	}
 
-	items, unverified, err := s.acceptedSince(ctx, projectID, entry.Path, since)
+	items, unverifiedIDs, err := s.acceptedSince(ctx, projectID, entry.Path, since)
 	if err != nil {
 		return nil, err
 	}
 	notes := release.Notes{
 		Version: next, Since: since,
-		Milestones: release.Group(items), Unverified: unverified,
+		Milestones: release.Group(items), Unverified: len(unverifiedIDs), UnverifiedTasks: unverifiedIDs,
 	}
 
 	run := &runlog.Run{
@@ -104,20 +104,20 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 // A run counts when a person accepted it and it produced a commit. Runs that
 // failed, were rejected, or committed nothing are not part of a release, and
 // including them would make the notes describe work that does not exist.
-func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, int, error) {
+func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, []string, error) {
 	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	inRange, err := commitsAfter(root, sinceTag)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 
 	titles := s.taskTitles(ctx, projectID)
 	seen := map[string]bool{}
 	var items []release.Item
-	unverified := 0
+	var unverified []string
 
 	for _, r := range runs { // newest first
 		if !r.Accepted || r.CommitSHA == "" || r.TaskID == "" {
@@ -137,7 +137,7 @@ func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag s
 			TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: r.CommitSHA, Summary: t.summary,
 		})
 		if r.Verdict == "UNVERIFIED" {
-			unverified++
+			unverified = append(unverified, r.TaskID)
 		}
 	}
 	return items, unverified, nil
@@ -405,6 +405,8 @@ type ReleaseSummary struct {
 	Since      string `json:"since,omitempty"`
 	Tasks      int    `json:"tasks"`
 	Unverified int    `json:"unverified,omitempty"`
+	// UnverifiedTasks names the accepted-without-a-gate changes.
+	UnverifiedTasks []string `json:"unverified_tasks,omitempty"`
 	// Drafted is true while the notes are still awaiting a person. A draft and
 	// a cut release are not the same claim, and a list that showed them alike
 	// would let an unapproved one be read as shipped.
@@ -507,6 +509,12 @@ func summariseRelease(version, body string) ReleaseSummary {
 			fmt.Sscanf(strings.TrimSpace(v), "%d", &sum.Tasks)
 		case "unverified":
 			fmt.Sscanf(strings.TrimSpace(v), "%d", &sum.Unverified)
+		case "unverified_tasks":
+			for _, id := range strings.Split(v, ",") {
+				if id = strings.TrimSpace(id); id != "" {
+					sum.UnverifiedTasks = append(sum.UnverifiedTasks, id)
+				}
+			}
 		}
 	}
 	return sum
