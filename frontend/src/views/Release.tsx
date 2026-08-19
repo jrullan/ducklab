@@ -22,15 +22,18 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   const [busy, setBusy] = useState(false);
   const [planned, setPlanned] = useState<string | null>(null);
   const [bump, setBump] = useState<"patch" | "minor" | "major">("minor");
+  const [reviseText, setReviseText] = useState("");
 
   // Drafting starts a release RUN — a scribe writes the prose over the
   // deterministically collected changelog — so the affordance here is
   // "start it and point at the run", not a spinner that hides one.
-  const draft = async (bump: string) => {
+  const draft = async (bump: string, revise?: string) => {
     setBusy(true);
     setFailure(null);
     try {
-      const run = await client.releasePlan(projectId, bump);
+      const run = revise
+        ? await client.releasePlan(projectId, bump, revise)
+        : await client.releasePlan(projectId, bump);
       setPlanned(run.id);
     } catch (err) {
       setFailure(err instanceof Error ? err.message : String(err));
@@ -182,20 +185,43 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         {current?.drafted && (
           <div
             data-testid="release-draft-notice"
-            className="mb-3 flex items-center justify-between rounded-card border border-serious p-3 text-sm"
+            className="mb-3 rounded-card border border-serious p-3 text-sm"
           >
             <div className="text-ink">
               These notes are a draft. Cutting tags {current.version} and makes them the record.
             </div>
-            <button
-              type="button"
-              data-testid="release-cut"
-              disabled={busy}
-              onClick={() => void cut(current.version)}
-              className="rounded border border-serious px-3 py-1 text-ink"
-            >
-              Cut {current.version}
-            </button>
+            <div className="mt-2 flex items-end justify-between gap-3">
+              <label className="flex-1 text-xs text-ink-secondary">
+                Request changes
+                <textarea
+                  aria-label="Revision text"
+                  value={reviseText}
+                  onChange={(e) => setReviseText(e.target.value)}
+                  className="mt-1 block w-full rounded border border-hairline bg-surface p-2 text-sm text-ink"
+                />
+              </label>
+              <div className="flex shrink-0 gap-2">
+                {reviseText.trim() && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void draft(bump, reviseText.trim())}
+                    className="rounded border border-hairline px-3 py-1 text-ink"
+                  >
+                    Request changes
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="release-cut"
+                  disabled={busy}
+                  onClick={() => void cut(current.version)}
+                  className="rounded border border-serious px-3 py-1 text-ink"
+                >
+                  Cut {current.version}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
