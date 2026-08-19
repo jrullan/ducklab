@@ -16,10 +16,12 @@ function turn(role: string): TurnBlock {
 }
 
 describe("ConversationTurn avatars", () => {
-  it("renders a human avatar rather than a duck for human transcript turns", () => {
+  it("renders the current human avatar, not the legacy person icon, for human transcript turns", () => {
     render(<ConversationTurn block={turn("human")} roster={[]} />);
 
-    expect(screen.getByRole("img", { name: "human avatar" })).toBeInTheDocument();
+    const avatar = screen.getByRole("img", { name: "human avatar" });
+    expect(avatar).toHaveTextContent("🧑");
+    expect(avatar).not.toHaveTextContent("👤");
     expect(screen.queryByTestId("duck-avatar")).not.toBeInTheDocument();
   });
 
