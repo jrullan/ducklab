@@ -236,10 +236,15 @@ func TestValidateAllowsHumanTurn(t *testing.T) {
 // and reusing solo's condition cost two wasted rounds on a real run: the model
 // kept trying to make its own new test pass, which it cannot — the write guard
 // allows only test files — and should not, because passing is the failure.
-func TestTheTestFirstScriptStopsOnRed(t *testing.T) {
+// Reversed from "stops on red": with one round there is no second attempt
+// for any expression to buy, and `gate == "red"` made the round gate look
+// load-bearing — so the service wired one in and the suite ran twice on an
+// unchanged tree, minutes per test-first. The stage's own after-gate is the
+// honest measurement; solo runs no round gate at all.
+func TestTheTestFirstScriptRunsOneRoundWithoutAGate(t *testing.T) {
 	s := TestFirstScript()
-	if s.Until != `gate == "red"` {
-		t.Errorf("Until = %q, want it to stop when the gate goes red", s.Until)
+	if s.Until != "round == 1" {
+		t.Errorf("Until = %q, want the one round stated plainly", s.Until)
 	}
 	if s.MaxRounds != 1 {
 		t.Errorf("MaxRounds = %d; there is no second attempt to loop towards", s.MaxRounds)

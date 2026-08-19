@@ -48,7 +48,13 @@ func TestFirstScript() *Script {
 				MaxTurns: 24,
 			},
 		},
-		Until:     `gate == "red"`,
+		// One round, so no expression can buy another: the old
+		// `gate == "red"` made the round gate look load-bearing, and the
+		// service wired a Gate in — the suite ran there AND again as the
+		// stage's own "after" measurement, back to back on an unchanged
+		// tree. Minutes per test-first, measuring nothing twice. The pair
+		// script's gate stays: with two rounds, green-means-retry works.
+		Until:     "round == 1",
 		MaxRounds: 1,
 	}
 }

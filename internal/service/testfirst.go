@@ -470,15 +470,23 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
 		TurnCaps:    s.roleTurnCapsFor(req.AgentTurns),
-		Gate: func(ctx context.Context) (string, string, error) {
+		Diff:        func() (string, error) { return vcs.New(projectRoot).Diff() },
+		OnEvent:     func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+	}
+
+	// The round gate earns its suite only in pair: two rounds, and a green
+	// (the test does not fail) sends the writer back with the reviewer's
+	// verdict. In solo there is no second round for it to buy, and the
+	// stage's own "after" gate measures the same unchanged tree minutes
+	// later — so solo runs no round gate at all.
+	if testMode(req.Mode) == "pair" {
+		params.Gate = func(ctx context.Context) (string, string, error) {
 			res, err := verify.Run(ctx, projectRoot, projCfg.Verify)
 			if err != nil {
 				return "none", "", err
 			}
 			return gateWord(res), res.Output, nil
-		},
-		Diff:    func() (string, error) { return vcs.New(projectRoot).Diff() },
-		OnEvent: func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		}
 	}
 
 	res, err := strategy.ExecuteTestFirstMode(ctx, testMode(req.Mode), params)
