@@ -603,7 +603,7 @@ export function Board({
           const archived = (isBugs ? shownBugs : shownTasks).filter((it) => it.status === archiveKey);
           if (working.length === 0 && archived.length > ARCHIVE_FOLD_AT && !archiveOpen) return null;
           return (
-        <div className="flex items-start gap-2 overflow-x-auto pb-2">
+        <div className="flex max-h-[calc(100vh-16rem)] items-start gap-2 overflow-x-auto pb-2">
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
               ? shownBugs.filter((b) => b.status === col.key)
@@ -627,13 +627,17 @@ export function Board({
               );
             }
             return (
-              <section key={col.key} data-testid={`board-col-${col.key}`} className={strip ? "w-28 shrink-0" : "min-w-52 flex-1"}>
+              /* Each column scrolls its own cards inside the viewport-height
+                 row — with the page as the only scroller, the row's
+                 horizontal scrollbar sat below twenty-one cards, off screen,
+                 and a clipped column offered no way to reach the rest. */
+              <section key={col.key} data-testid={`board-col-${col.key}`} className={strip ? "w-28 shrink-0" : "flex max-h-full min-w-52 flex-1 flex-col"}>
                 <h2 className="mb-2 flex items-baseline text-sm text-ink-muted">
                   {col.label}
                   <span className="ml-1 text-ink-muted">{items.length}</span>
                   {archive && archiveOpen && <button type="button" className="ml-auto text-xs underline" data-testid="board-archive-toggle" onClick={() => setArchiveOpen(false)}>fold</button>}
                 </h2>
-                <ul className="space-y-2">
+                <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                   {items.map((it) => (
                     <li key={it.id}>
                       <button
