@@ -460,7 +460,10 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           // speaks; the announcement's own words are what stands between
           // "working" and "hung".
           text: d.detail ? String(d.detail) : "",
-          subject: d.phase ? `gate ${String(d.phase)}` : undefined,
+          // The phase named by the moment it measures, not by harness
+          // vocabulary: "accept" says who ordered the suite, "after commit ·
+          // clean checkout" says what world it ran in.
+          subject: d.phase ? gatePhaseLabel(String(d.phase)) : undefined,
           done: false,
           messageOnly: true,
           gate: "running",
@@ -614,6 +617,19 @@ export function toolFamily(tool: string): "read" | "write" | "exec" | "vcs" | "o
  * A `none` gate can never read as success (P3): nothing was executed, and the
  * label says so rather than showing a neutral tick a user would read as green.
  */
+/** The words a gate phase wears in the lane. */
+export function gatePhaseLabel(phase: string): string {
+  switch (phase) {
+    case "before":
+      return "baseline";
+    case "after":
+      return "over the new test";
+    case "accept":
+      return "after commit · clean checkout";
+  }
+  return `gate ${phase}`;
+}
+
 export function buildGate(events: readonly DucklabEvent[]): GateState | null {
   let latest: DucklabEvent | null = null;
   for (const e of events) {

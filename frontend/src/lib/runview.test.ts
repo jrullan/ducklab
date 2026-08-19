@@ -566,7 +566,7 @@ describe("the announced test-first gate", () => {
     ]);
     expect(turns).toHaveLength(1);
     expect(turns[0]!.role).toBe("gate");
-    expect(turns[0]!.subject).toBe("gate before");
+    expect(turns[0]!.subject).toBe("baseline");
     expect(turns[0]!.text).toContain("green baseline");
     expect(turns[0]!.done).toBe(true);
     expect(turns[0]!.gate).toBe("green");
@@ -577,7 +577,7 @@ describe("the announced test-first gate", () => {
       ev("gate_reproduced", { green: true }, 2),
     ]);
     expect(turns).toHaveLength(1);
-    expect(turns[0]!.subject).toBe("gate accept");
+    expect(turns[0]!.subject).toBe("after commit · clean checkout");
     expect(turns[0]!.text).toContain("clean checkout");
     expect(turns[0]!.done).toBe(true);
     expect(turns[0]!.gate).toBe("green");
