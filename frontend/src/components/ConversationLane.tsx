@@ -118,7 +118,7 @@ export function ConversationTurn({
           </span>
         ) : isHuman ? (
           <span aria-label="human avatar" role="img" title="human">
-            👤
+            🧑
           </span>
         ) : (
           <DuckAvatar id={block.duckling} roster={roster} color={color} bobbing={!block.done} />

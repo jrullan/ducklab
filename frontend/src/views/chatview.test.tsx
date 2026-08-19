@@ -84,7 +84,9 @@ describe("chat transcript author avatars", () => {
     for (const message of ["Does T-064 implement the preferences?", "Write me a bug report."]) {
       const turn = screen.getByText(message).closest("article");
       expect(turn).not.toBeNull();
-      expect(within(turn!).getByLabelText("human avatar")).toBeTruthy();
+      const avatar = within(turn!).getByLabelText("human avatar");
+      expect(avatar).toHaveTextContent("🧑");
+      expect(avatar).not.toHaveTextContent("👤");
       expect(within(turn!).queryByTestId("duck-avatar")).toBeNull();
     }
 
