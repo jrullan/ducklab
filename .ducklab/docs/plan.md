@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 4
-updated_at: 2026-08-18T14:19:18Z
-run_id: r-20260818-141819-sdfs
-ducklings: [k3, atom-local, terra]
-based_on: 64b9f40246d1e46e
+version: 5
+updated_at: 2026-08-19T01:28:57Z
+run_id: r-20260819-012807-7b3b
+ducklings: [k3, qwen38-max, atom-local, terra]
+based_on: 5ea108cf93c95299
 approved_by: human
 ---
 
@@ -1469,4 +1469,18 @@ Confirmed: NewGitWorkspaceFactory issues `git worktree add` concurrently per con
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-075 — Differentiate human turns in chat transcription
+
+Render human-authored chat transcript turns with a human representation rather than the duckling duck graphic, while retaining the existing duck representation for duckling turns.
+
+**Deliverables:**
+- Chat transcription visually identifies human turns with a human icon or avatar
+  - Replace the duck graphic only where the transcript turn author is the human
+  - Preserve the existing duckling graphic for consultant/duckling messages
+- The human representation is applied consistently to all rendered human turns, including historical conversation entries
+- Frontend tests assert author-specific visual selection for human and duckling transcript turns
+
+**Out of scope:** Redesigning the chat layout, changing author labels, adding user profile/avatar configuration, or changing non-chat uses of duck graphics.
+
+**Assumption:** The current transcript renderer already distinguishes human and duckling authors in its turn data.
 

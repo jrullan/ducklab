@@ -294,3 +294,10 @@
 {"ts":"2026-08-19T00:26:10Z","bug":"B-078","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-19T00:26:10Z","bug":"B-078","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-19T00:26:10Z","bug":"B-078","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T00:34:34Z","bug":"B-066","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-074"}
+{"ts":"2026-08-19T01:04:51Z","bug":"B-079","from":"open","to":"triaged","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:04:51Z","bug":"B-079","from":"triaged","to":"in_progress","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:04:51Z","bug":"B-079","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"open","to":"triaged","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"triaged","to":"in_progress","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"in_progress","to":"fixed","actor":"human","via":"move"}
