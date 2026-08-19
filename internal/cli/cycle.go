@@ -262,6 +262,18 @@ func taskCmd(verb string, args []string, repo string) int {
 		}
 		return 0
 
+	case "remove":
+		if len(args) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab task remove <id>")
+			return 2
+		}
+		if _, err := client.TaskRemove(projectID, args[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("task %s removed\n", args[0])
+		return 0
+
 	case "next":
 		task, err := client.TaskNext(projectID)
 		if err != nil {

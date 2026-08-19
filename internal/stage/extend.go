@@ -170,6 +170,7 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, revi
 		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
 		"the real id. Never depend on a task that comes later in your own list.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
+		"- This amendment cannot remove tasks. Retire superseded tasks separately with task_remove.\n" +
 		"- If the change alters what the product IS — its requirements — return NO sections: " +
 		"one sentence saying why, and the person will write a feature brief instead.\n")
 	return b.String(), nil

@@ -99,6 +99,14 @@ func toolList() []map[string]interface{} {
 			}, "project_id"),
 		},
 		{
+			"name":        "task_remove",
+			"description": "Retire an unstarted superseded task from the plan. The engine refuses tasks with accepted or open runs.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"task_id":    str("the task id, T-..."),
+			}, "project_id", "task_id"),
+		},
+		{
 			"name": "run_start",
 			"description": "Build a task WITHOUT the test-first discipline — an exception, not the " +
 				"ordinary path. When the human says to run, start or build a task, they mean " +
@@ -366,6 +374,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(doc), nil
+	case "task_remove":
+		out, err := s.eng.TaskRemove(a.str("project_id"), a.str("task_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "task_list":
 		tasks, err := s.eng.TaskList(a.str("project_id"))
 		if err != nil {
