@@ -89,6 +89,9 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	if err != nil {
 		return nil, err
 	}
+	// The explicit relaunch is the decision on a FAILED gate for this task;
+	// without this the retry queued forever behind the run it retries.
+	s.settleFailedGateForRetry(ctx, projectID, req.TaskID)
 	// A finished task is refused before any other door is tried: "your gate
 	// does not run tests" is noise when the real answer is "T-001 was done
 	// days ago". Launched test-first by an overnight operator, the launch

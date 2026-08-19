@@ -403,3 +403,60 @@ func TestAChatAboutATaskDoesNotFoldIntoItsStatus(t *testing.T) {
 		}
 	}
 }
+
+// "Retry with this note" launched the new test run and left the old FAILED
+// one pausing the project: the retry sat queued behind a gate that would
+// never move without a second human action nobody knew they owed (T-074).
+// A FAILED verdict has nothing to accept — the relaunch IS the reject.
+func TestAnExplicitRetryClosesTheFailedGateItRetries(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	g := gitProject(t, dir)
+	_ = g
+	failedRun := &runlog.Run{
+		ID: "r-failed", ProjectID: id, TaskID: "T-001", Stage: "test", Mode: "solo",
+		Status: "paused", PendingKind: "gate", Verdict: "FAILED",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(dir, failedRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if held := s.projectHeld(id, "T-001"); held == "" {
+		t.Fatal("fixture: the failed gate does not hold the project")
+	}
+	s.settleFailedGateForRetry(context.Background(), id, "T-001")
+	detail, err := s.RunGet(context.Background(), "r-failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != "done" || detail.Run.Verdict != "FAILED" {
+		t.Errorf("failed run not closed: status=%q verdict=%q", detail.Run.Status, detail.Run.Verdict)
+	}
+	if held := s.projectHeld(id, "T-001"); held != "" {
+		t.Errorf("project still held after the retry's reject: %q", held)
+	}
+	// A PASSED gate is never a side-effect casualty.
+	passed := &runlog.Run{
+		ID: "r-passed", ProjectID: id, TaskID: "T-002", Stage: "test", Mode: "solo",
+		Status: "paused", PendingKind: "gate", Verdict: "PASSED",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w2, err := runlog.NewWriter(dir, passed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.settleFailedGateForRetry(context.Background(), id, "T-002")
+	detail, _ = s.RunGet(context.Background(), "r-passed")
+	if detail.Run.Status != "paused" {
+		t.Errorf("a PASSED gate was discarded by a retry: %q", detail.Run.Status)
+	}
+}

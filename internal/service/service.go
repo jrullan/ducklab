@@ -931,6 +931,9 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	if err != nil {
 		return nil, err
 	}
+	// The explicit relaunch is the decision on a FAILED gate for this task;
+	// without this the new run queued forever behind it.
+	s.settleFailedGateForRetry(ctx, projectID, req.TaskID)
 	// Checked before any model is asked for anything.
 	//
 	// A split run spent its architect's whole turn producing a good
@@ -1102,6 +1105,44 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 //
 // Document stages keep their drafts in proposal files, not the tree, so only
 // tree-writing stages hold the project.
+// settleFailedGateForRetry closes a FAILED run paused at its gate for the
+// same task a person is explicitly relaunching.
+//
+// "Retry with this note" started the new run and left the old one pausing
+// the project: the retry sat queued behind a gate that would never move
+// without a second human action nobody knew they owed (T-074 — the rail
+// showed an empty circle and the note went nowhere). A FAILED verdict has
+// nothing to accept — reject is its only door — and the click that
+// relaunches the task IS that decision. PASSED and UNVERIFIED gates are
+// not touched: work someone might accept is never discarded on a side
+// effect.
+func (s *Service) settleFailedGateForRetry(ctx context.Context, projectID, taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.runsMu.RLock()
+	var ids []string
+	for id, rs := range s.runs {
+		r := rs.run
+		if r.ProjectID == projectID && r.TaskID == taskID && r.Status == "paused" &&
+			r.PendingKind == "gate" && r.Verdict == "FAILED" {
+			ids = append(ids, id)
+		}
+	}
+	s.runsMu.RUnlock()
+	for _, id := range ids {
+		if err := s.RunReject(ctx, id, "superseded: the task was explicitly retried"); err != nil {
+			s.runsMu.RLock()
+			if rs := s.runs[id]; rs != nil && rs.writer != nil {
+				rs.writer.AppendEvent("warning", map[string]interface{}{
+					"detail": "the failed run could not be closed for the retry: " + err.Error(),
+				})
+			}
+			s.runsMu.RUnlock()
+		}
+	}
+}
+
 func (s *Service) projectHeld(projectID, taskID string) string {
 	s.runsMu.RLock()
 	defer s.runsMu.RUnlock()
