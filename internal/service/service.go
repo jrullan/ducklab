@@ -461,6 +461,13 @@ func (s *Service) ProjectOpen(ctx context.Context, path string) (*Project, error
 	if err != nil {
 		return nil, err
 	}
+	// A re-opened project brings its in-flight runs back with it. Forget
+	// drops them from memory, and RecoverRuns only ran at engine start —
+	// so a forget-and-reopen showed an intake proposal whose run the
+	// engine no longer knew, and every decision on it failed (B-083).
+	if err := s.RecoverRuns(ctx); err != nil {
+		return nil, fmt.Errorf("recover the project's runs: %w", err)
+	}
 	return &Project{
 		ID:       id,
 		Path:     absPath,
@@ -673,6 +680,28 @@ func sortedKeys(m map[string]string) []string {
 func (s *Service) ProjectForget(ctx context.Context, id string) error {
 	if _, err := s.registry.Get(id); err != nil {
 		return err
+	}
+	// Refused while work is in flight. Forget deliberately leaves the
+	// project's files alone — the directory is the person's — but a run
+	// mid-flight or paused at a gate becomes an orphan the moment the
+	// engine forgets its project, and it greeted the next open as an
+	// undecidable proposal card (B-083). Settle the runs first; the
+	// refusal names them.
+	s.runsMu.RLock()
+	var inFlight []string
+	for rid, rs := range s.runs {
+		switch rs.run.Status {
+		case "running", "queued", "paused":
+			if rs.run.ProjectID == id {
+				inFlight = append(inFlight, rid)
+			}
+		}
+	}
+	s.runsMu.RUnlock()
+	if len(inFlight) > 0 {
+		sort.Strings(inFlight)
+		return fmt.Errorf("%s has %d run(s) in flight (%s); decide or abort them first — forgetting now would orphan their gates",
+			id, len(inFlight), strings.Join(inFlight, ", "))
 	}
 	s.projMu.Lock()
 	delete(s.projects, id)

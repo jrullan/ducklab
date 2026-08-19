@@ -668,3 +668,54 @@ func TestARunRefusesAProjectItCannotWorkIn(t *testing.T) {
 		t.Errorf("a run record was created for a project that cannot host one: %d", len(runs))
 	}
 }
+
+// Forget-and-reopen greeted the next open with an intake proposal whose run
+// the engine no longer knew — every decision on it failed. Forget refuses
+// while runs are in flight, naming them; and a re-opened project brings its
+// runs back without waiting for an engine restart (B-083).
+func TestForgetRefusesInFlightRunsAndReopenRecoversThem(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ProjectOpen loads the config, which the bare test project lacks.
+	if err := os.WriteFile(filepath.Join(entry.Path, ".ducklab", "project.toml"),
+		[]byte("schema = 1\nid = \""+projectID+"\"\nname = \"proj\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-gate", ProjectID: projectID, Stage: "intake", Mode: "council",
+		Status: "paused", PendingKind: "gate", Verdict: "UNVERIFIED",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	w, err := runlog.NewWriter(entry.Path, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.ProjectForget(context.Background(), projectID)
+	if err == nil || !strings.Contains(err.Error(), "r-gate") {
+		t.Fatalf("forget with a gated run = %v, want a refusal naming it", err)
+	}
+
+	// Decide it, forget, and reopen: the runs come back with the project.
+	if err := s.RunReject(context.Background(), "r-gate", "abandoned"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProjectForget(context.Background(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := s.ProjectOpen(context.Background(), entry.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunGet(context.Background(), "r-gate"); err != nil {
+		t.Fatalf("reopened project %s does not know its run: %v", reopened.ID, err)
+	}
+}
