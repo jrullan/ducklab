@@ -40,7 +40,7 @@ var roleToolbelts = map[config.Role][]string{
 		"fs_search", "fs_read", "bug_read", "git_log",
 	},
 	config.RoleAdvisor: {
-		"fs_read", "fs_search", "artifact_read",
+		"fs_read", "fs_search", "artifact_read", "roster_read",
 	},
 	config.RoleScribe: {
 		"fs_read", "artifact_read",

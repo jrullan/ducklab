@@ -1431,7 +1431,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           the model-calls dock, which a viewport-sticky composer did. */}
       {chatLive && (
         <section
-          className="border-t border-hairline bg-surface p-3"
+          className="mt-auto border-t border-hairline bg-surface p-3"
           data-testid="chat-reply"
         >
           <div className="flex items-start gap-2">
@@ -1500,7 +1500,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           — verdict, findings, what changed — and a dock pinned to the
           viewport under an empty stretch read as another page's footer. */}
       <div
-        className={chatLive || finished ? "border-t border-hairline" : "mt-auto sticky bottom-0 z-10 border-t border-hairline bg-page"}
+        className={finished ? "border-t border-hairline" : chatLive ? "border-t border-hairline" : "mt-auto sticky bottom-0 z-10 border-t border-hairline bg-page"}
         data-testid="bottom-dock"
       >
         <div className={codeRun ? "px-4 pt-2" : "flex flex-wrap items-center gap-x-4 px-4 pt-1"}>

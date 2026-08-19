@@ -1447,6 +1447,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 		s.publishTransition(rs, "distress", payload)
 	}
+	// The team, readable by the models that advise about it: a consultant
+	// reconstructed the roster from run history because project.toml's
+	// seats were empty — the resolver's answer was one closure away.
+	ectx.OnRosterRead = func(ctx context.Context) (string, error) {
+		return s.rosterSummary(ctx, rs.run.ProjectID)
+	}
+
 	// The rubber duck on demand: an implementer's ask_advisor reaches the
 	// advisor seat without pausing the run. Only wired when a seat exists,
 	// so the tool can tell the model plainly when there is nobody to ask.
@@ -3120,6 +3127,82 @@ func runHasUnsavedWork(rs *runState) bool {
 // restoreAfterUnaccepted puts the tree back to the run's start when the run
 // ended without its work being accepted. Quietly a no-op when there is nothing
 // recorded — stage runs and pre-git projects take no snapshot.
+// rosterSummary renders the resolved team for roster_read: seats per mode
+// with provenance, each seated duckling's evidence in the one grammar the
+// desktop uses, and the engine's suggestions.
+func (s *Service) rosterSummary(ctx context.Context, projectID string) (string, error) {
+	cards, err := s.Scorecards(ctx)
+	if err != nil {
+		return "", err
+	}
+	byID := map[string]Scorecard{}
+	for _, c := range cards {
+		byID[c.ID] = c
+	}
+	evidence := func(id, role string) string {
+		c, ok := byID[id]
+		if !ok {
+			return ""
+		}
+		m := c.Measured
+		if r, has := c.MeasuredByRole[role]; has && r.Runs > 0 {
+			m = &r
+		}
+		out := ""
+		if m != nil && m.Runs > 0 {
+			out = fmt.Sprintf("%.0f%% · %d runs · $%.2f/run", m.PassRate, m.Runs, m.AvgCostPerRun)
+		}
+		if c.Index != nil && c.Index.CodingScore > 0 {
+			if out != "" {
+				out += " · "
+			}
+			out += fmt.Sprintf("coding %.1f", c.Index.CodingScore)
+		}
+		if out == "" {
+			out = "no evidence yet"
+		}
+		return out
+	}
+	var b strings.Builder
+	b.WriteString("The resolved team (the source the launchers use).\n")
+	for _, mode := range []string{"solo", "pair", "council", "split", "tournament", "common"} {
+		view, verr := s.RosterGet(ctx, projectID, mode)
+		if verr != nil {
+			// A project whose config cannot load still has the global team.
+			if view, verr = s.GlobalRosterGet(ctx, mode); verr != nil {
+				continue
+			}
+		}
+		fmt.Fprintf(&b, "\n## %s\n", mode)
+		if view.Warning != "" {
+			fmt.Fprintf(&b, "(%s)\n", view.Warning)
+		}
+		for _, e := range view.Entries {
+			ids := e.Ducklings
+			if len(ids) == 0 && e.Duckling != "" {
+				ids = []string{e.Duckling}
+			}
+			if len(ids) == 0 {
+				fmt.Fprintf(&b, "- %s: (unseated)", e.Role)
+			} else {
+				fmt.Fprintf(&b, "- %s: %s [%s]", e.Role, strings.Join(ids, ", "), e.Source)
+				for _, id := range ids {
+					fmt.Fprintf(&b, " — %s", evidence(id, e.Role))
+				}
+			}
+			if len(e.Candidates) > 0 {
+				var names []string
+				for _, c := range e.Candidates {
+					names = append(names, c.ID)
+				}
+				fmt.Fprintf(&b, " · suggested: %s", strings.Join(names, ", "))
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String(), nil
+}
+
 // runWrittenPaths reads the run's own record of what it wrote — every
 // fs_write, fs_write_lines and successful fs_patch names its path in the
 // event log, and the shell policy routes mutations through those tools — so

@@ -287,3 +287,26 @@ func TestModeDefaultsSetWithoutSeatsKeepsTheRoster(t *testing.T) {
 		}
 	}
 }
+
+// A consultant asked to suggest a Pair line-up reconstructed the team from
+// run history: project.toml's seats were empty because the roster lives in
+// the resolver. roster_read hands models the resolver's own answer.
+func TestRosterSummarySaysSeatsEvidenceAndSuggestions(t *testing.T) {
+	s := writableService(t, "terra", "glm52", "k3", "atom-local")
+	if _, err := s.GlobalRosterSet(context.Background(), "pair", "implementer", []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GlobalRosterSet(context.Background(), "pair", "reviewer", []string{"glm52"}); err != nil {
+		t.Fatal(err)
+	}
+	id := newTestProject(t, s, "proj")
+	out, err := s.rosterSummary(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"## pair", "implementer: terra [global mode seat]", "reviewer: glm52 [global mode seat]", "no evidence yet"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary lacks %q:\n%s", want, out)
+		}
+	}
+}

@@ -94,6 +94,10 @@ type ExecContext struct {
 	// with the advisor seat's reply. Nil means no advisor is seated: the tool
 	// says so and the model carries on with its own judgement.
 	OnAskAdvisor func(ctx context.Context, question string) (string, error)
+	// OnRosterRead renders the resolved team — seats, evidence, suggestions —
+	// for roster_read. Injected by the service (tools is a leaf); nil means
+	// the tool says the roster is not readable here.
+	OnRosterRead func(ctx context.Context) (string, error)
 	// lastFailSig and lastFailCount track the most recent FAILING call's
 	// tool+args, for the repetition brake: a small model that gets its
 	// arguments wrong retries the identical call — six artifact_reads of
@@ -199,6 +203,7 @@ func (r *Registry) registerBuiltins() {
 	// the chat's — and sits in no role's ceiling on purpose.
 	r.Register(&BugRead{})
 	r.Register(&RunListTool{})
+	r.Register(&RosterRead{})
 	r.Register(&RunReadTool{})
 	r.Register(&BugFile{})
 }
