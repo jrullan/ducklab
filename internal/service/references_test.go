@@ -28,7 +28,7 @@ func TestLoadReferencesIsBoundedAndHonest(t *testing.T) {
 	if !loaded[0].Truncated || loaded[0].Chars != refPerFileChars {
 		t.Errorf("oversize file not truncated to the cap: %+v", loaded[0])
 	}
-	for _, want := range []string{"## Reference documents", "the code is the truth", "a-overview.md", "module notes", "deep note", "[truncated"} {
+	for _, want := range []string{"## Reference documents", "the code is the truth", "BACKGROUND, not as scope", "never derive requirements from it", "a-overview.md", "module notes", "deep note", "[truncated"} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered lacks %q", want)
 		}

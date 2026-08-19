@@ -103,7 +103,11 @@ func loadReferences(paths []string) (rendered string, loaded []refFile, dropped 
 		return "", loaded, dropped, nil
 	}
 	head := "\n\n## Reference documents\n\n" +
-		"Provided by the person as context. Where a reference and the code disagree, " +
-		"the code is the truth for as-built claims — note the disagreement instead of copying the claim.\n"
+		"Provided by the person as BACKGROUND, not as scope. Where a reference and the code " +
+		"disagree, the code is the truth for as-built claims — note the disagreement instead of " +
+		"copying the claim. A reference that lists open problems, pending feedback, plans or " +
+		"wishes describes WORK, not the product: never derive requirements from it — the first " +
+		"survey of MiEmpresa turned a bug-inbox snapshot into fifteen requirements about its " +
+		"fourteen bugs. Requirements state what the system IS.\n"
 	return head + b.String(), loaded, dropped, nil
 }
