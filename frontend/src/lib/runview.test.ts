@@ -242,6 +242,28 @@ describe("buildTurns and what the model said", () => {
     expect(turns[0]!.text).toBe("Looks right.");
     expect(turns[0]!.role).toBe("reviewer");
   });
+
+  // Live chats append each human message before the consultant's next turn;
+  // resync derives the whole recorded sequence after that turn is already
+  // known. A human message must not be absorbed by that consultant block.
+  it("keeps recorded chat human messages as human blocks beside consultant turns", () => {
+    const turns = buildTurns([
+      ev("run_start", 1, { stage: "chat" }),
+      ev("message", 2, { role: "human", content: "Can you inspect this?" }),
+      ev("turn_start", 3, { round: 1, turn: 0, role: "consultant", duckling: "pato-uno" }),
+      ev("message", 4, { round: 1, turn: 0, role: "consultant", content: "I found the issue." }),
+      ev("turn_end", 5, { round: 1, turn: 0 }),
+      ev("message", 6, { role: "human", content: "What should I change?" }),
+    ]);
+
+    expect(turns.map((turn) => ({ role: turn.role, text: turn.text }))).toEqual([
+      { role: "human", text: "Can you inspect this?" },
+      { role: "consultant", text: "I found the issue." },
+      { role: "human", text: "What should I change?" },
+    ]);
+    expect(turns.filter((turn) => turn.role === "human").every((turn) => turn.messageOnly)).toBe(true);
+    expect(turns[1]!.duckling).toBe("pato-uno");
+  });
 });
 
 // A tournament runs its contestants in parallel, so their events interleave.

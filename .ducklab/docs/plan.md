@@ -1484,3 +1484,29 @@ Render human-authored chat transcript turns with a human representation rather t
 
 **Assumption:** The current transcript renderer already distinguishes human and duckling authors in its turn data.
 
+### T-076 — Show the human avatar on human turns of reopened chat transcripts
+
+Fixes B-081.
+
+## Reported
+
+Upon opening a past chat and inspecting its transcript human turns are shown with the duck representation instead of the human representation.
+
+**Deliverables:**
+- the root cause of human chat turns losing their human identity on a reopened (resynced) chat is identified — live vs past path, since both feed buildTurns but only the past one is reported broken
+- a reopened past chat renders human turns with the human representation (👤), not DuckAvatar
+- a test in frontend/src/lib/runview.test.ts (or the lane component tests) asserts a human message event from a recorded chat produces a turn block rendered as human
+- consultant/duckling turns in the same transcript still render their duck avatar unchanged
+
+## Triage
+
+**Component:** run view / conversation lane
+**Suspected files:** frontend/src/lib/runview.ts, frontend/src/components/ConversationLane.tsx, frontend/src/views/RunView.tsx
+
+Avatar choice in ConversationLane keys on block.role === "human", and chat human messages are recorded with role "human", so the defect is that on the past-transcript path (resyncRun → buildTurns over the full event log) the human turn either loses that role or is absorbed into a consultant's block; I could not finish tracing why live chats differ from reopened ones before running out of tool calls, so the exact line is unverified — but the derivation is pure and testable, and no open bug covers it.
+
+**Verification (triage recommends):** test-first — buildTurns over a recorded chat event log (run_start, human message, consultant turn_start/message, human message) must yield blocks with role "human" that ConversationLane renders as the human avatar; a derivation-level unit test in runview.test.ts reproduces without a DOM.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+

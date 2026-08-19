@@ -301,3 +301,5 @@
 {"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-19T01:23:13Z","bug":"B-080","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T01:45:19Z","bug":"B-081","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-19T01:46:13Z","bug":"B-081","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-076"}
