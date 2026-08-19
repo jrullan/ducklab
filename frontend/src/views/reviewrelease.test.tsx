@@ -152,6 +152,30 @@ describe("drafting and cutting from the desktop", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(releaseCut).toHaveBeenCalledWith("p", "v0.1.0"));
   });
+
+  it("requests changes to a draft with the supplied revision text", async () => {
+    const releasePlan = vi.fn(() => Promise.resolve({ id: "r-revise" }));
+    const client = {
+      releases: vi.fn(() => Promise.resolve([
+        { version: "v0.1.0", drafted: true, tagged: false, tasks: 3, since: "" },
+      ])),
+      release: vi.fn(() => Promise.resolve("# draft notes")),
+      releasePlan,
+    } as unknown as EngineClient;
+    render(<Release client={client} projectId="p" />);
+
+    const revise = await screen.findByRole("textbox", { name: /revision|changes/i });
+    // A blank request is not a request: it must not expose a runnable action.
+    expect(screen.queryByRole("button", { name: /request changes/i })).toBeNull();
+
+    fireEvent.change(revise, { target: { value: "Include the migration warning." } });
+    fireEvent.click(screen.getByRole("button", { name: /request changes/i }));
+
+    await waitFor(() =>
+      expect(releasePlan).toHaveBeenCalledWith("p", "minor", "Include the migration warning."),
+    );
+    await screen.findByTestId("release-planned");
+  });
 });
 
 // With releases on file the door to the next one is still there — and it

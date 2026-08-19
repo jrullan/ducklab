@@ -1523,3 +1523,30 @@ Render 🧑 instead of 👤 for turns authored by the current human in chat tran
 
 **Out of scope:** Changing avatars for ducklings, historical non-current-human identities, or other UI iconography.
 
+### T-078 — Add a request-changes (revise) affordance for a drafted release in the Release view
+
+Fixes B-083.
+
+## Reported
+
+A release has been drafted, but there is no way to make or request changes to the release. Only option shown is Cut release.
+
+**Deliverables:**
+- The draft notice (or its area) in Release.tsx offers a way to enter revision text and request changes, alongside Cut
+- Requesting changes calls client.releasePlan(projectId, bump, reviseText) and surfaces the started run (e.g. via the release-planned 'Drafting — watch the release run' path)
+- The revise path sends a non-empty revise string and does not offer the action when the text is blank
+- A test in reviewrelease.test.tsx asserts releasePlan is called with the revise text when a person requests changes on a drafted release
+- The Cut path and the 'a draft is waiting' sidebar copy still behave as before
+
+## Triage
+
+**Component:** frontend/releases
+**Suspected files:** frontend/src/views/Release.tsx, frontend/src/views/reviewrelease.test.tsx
+
+The backend and API client already support release revision, but Release.tsx exposes only Cut, so a drafted release cannot be revised from the desktop despite the sidebar copy saying 'cut or revise'.
+
+**Verification (triage recommends):** test-first — Render Release with a drafted release, submit revision text, assert client.releasePlan called with (projectId, bump, revise text) — mirroring existing releasePlan/cut tests in reviewrelease.test.tsx
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
