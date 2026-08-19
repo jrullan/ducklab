@@ -1441,4 +1441,32 @@ TaskRemove exists engine-side with refusals and an HTTP route but is reachable o
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-074 — Serialize git worktree add/remove per repository so concurrent contestant workspaces cannot race .git/worktrees
+
+Fixes B-066.
+
+## Reported
+
+What happened: T-063's clean-checkout acceptance gate went red on TestGitWorkspacesAreIndependent (internal/strategy/tournament_test.go:339): "git worktree add … -b ducklab/wt/r-test-c: exit status 128: fatal: failed to read .git/worktrees/r-test-d/commondir: Success" — two worktree adds racing in the same repository. The test passes locally and on the retry; the diff under acceptance was frontend-only. The flake is the symptom of a real hazard: tournament (and split) create one worktree per contestant in parallel, and git's worktree metadata is not safe for concurrent `worktree add` on one repository — under load a contestant will fail to start with a git error unrelated to its work.
+
+Expected: workspace creation serialised (a mutex around `git worktree add` / `worktree remove` per repository — creation is fast, only the runs inside must be parallel), and the test asserting independence of the workspaces AFTER serial creation. Until then acceptance gates can go red on this flake and need a retry.
+
+**Deliverables:**
+- A per-repository mutex (keyed by repo path, shared across callers) serializes WorktreeAdd/WorktreeAddDetached/WorktreeRemove/PruneWorktrees, so two worktree ops on the same repo never run concurrently in-process
+- The serialization is placed so both the strategy workspace factory and the service's clean-checkout detached worktree (internal/service/service.go:2037) share the same lock, while contestant work inside the worktrees stays fully parallel
+- TestGitWorkspacesAreIndependent keeps launching workspace creation from concurrent goroutines and asserts the two workspaces produce distinct patches after creation succeeds
+- A stress test creating N (e.g. 8) worktrees concurrently on one repository passes repeatedly (go test -run ... -count=20) with no exit-128/commondir failure
+- go test -race over internal/strategy and internal/vcs is clean
+
+## Triage
+
+**Component:** strategy workspaces / vcs worktrees
+**Suspected files:** internal/strategy/workspace.go, internal/vcs/vcs.go, internal/strategy/tournament_test.go, internal/service/service.go
+
+Confirmed: NewGitWorkspaceFactory issues `git worktree add` concurrently per contestant and git's .git/worktrees metadata is not concurrency-safe, so a per-repo mutex around the vcs worktree ops is the right, testable fix.
+
+**Verification (triage recommends):** test-first — TestGitWorkspacesAreIndependent (internal/strategy/tournament_test.go:339) already drives two concurrent factory calls on one repo and flakes with exit 128; a looped/-count run of concurrent worktree creates is the reproduction the fix must make reliably green.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

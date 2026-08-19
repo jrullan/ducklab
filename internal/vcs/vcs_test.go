@@ -1,9 +1,11 @@
 package vcs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -104,6 +106,59 @@ func TestCommitWithTrailerHandlesQuotesAndNewlines(t *testing.T) {
 	}
 	if !strings.Contains(out, "Ducklab-Run: r-20260726-000000-abcd") {
 		t.Errorf("trailer missing:\n%s", out)
+	}
+}
+
+// Worktree operations modify shared repository metadata. They must therefore
+// serialize even when independent Git values name the same repository.
+func TestConcurrentWorktreeOperationsShareRepositoryLock(t *testing.T) {
+	if filepath.Separator == '\\' {
+		t.Skip("fake git command is POSIX shell script")
+	}
+
+	repo := t.TempDir()
+	bin := t.TempDir()
+	lock := filepath.Join(t.TempDir(), "worktree-operation")
+	script := "#!/bin/sh\n" +
+		"if ! mkdir \"$DUCKLAB_WORKTREE_TEST_LOCK\" 2>/dev/null; then\n" +
+		"  echo concurrent worktree metadata operation >&2\n" +
+		"  exit 128\n" +
+		"fi\n" +
+		"sleep 0.1\n" +
+		"rmdir \"$DUCKLAB_WORKTREE_TEST_LOCK\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DUCKLAB_WORKTREE_TEST_LOCK", lock)
+
+	const workers = 9
+	errs := make([]error, workers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			g := New(repo) // callers do not share a Git receiver.
+			path := filepath.Join(repo, fmt.Sprintf("worktree-%d", i))
+			switch i % 3 {
+			case 0:
+				errs[i] = g.WorktreeAdd(path, fmt.Sprintf("branch-%d", i))
+			case 1:
+				errs[i] = g.WorktreeAddDetached(path, "HEAD")
+			default:
+				errs[i] = g.WorktreeRemove(path)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("worktree operation %d ran concurrently: %v", i, err)
+		}
 	}
 }
 
