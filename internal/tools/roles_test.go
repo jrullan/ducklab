@@ -40,17 +40,30 @@ func TestAvailableFiltersUnimplementedTools(t *testing.T) {
 	}
 }
 
-// Skills landed and must now reach the role that uses them — and only that one.
-// A reviewer that could run a skill could run a script, and "the reviewer
-// evaluates, it never rewrites" would hold by convention instead of by
-// construction.
-func TestSkillToolsReachTheImplementerAndNoOneElse(t *testing.T) {
+// skill_run executes a script, and only the implementer executes: a reviewer
+// or architect that could run a skill could rewrite the tree, and their
+// evaluate-only contracts would hold by convention instead of construction.
+// Reading is different — a survey guide (a documentation skill) briefs the
+// architect before an adopt survey, and reading a skill cannot do anything
+// to the project. The architect surveyed MiEmpresa wandering the tree and
+// missed four live modules; the guide is how a project steers the sweep.
+func TestSkillRunReachesTheImplementerAndNoOneElse(t *testing.T) {
 	r := NewRegistry()
 	for _, name := range []string{"skill_list", "skill_read", "skill_run"} {
 		if !contains(r.Available(config.RoleImplementer), name) {
 			t.Errorf("%s is registered but the implementer cannot see it", name)
 		}
-		for _, role := range []config.Role{config.RoleReviewer, config.RoleJudge, config.RoleArchitect} {
+	}
+	for _, role := range []config.Role{config.RoleReviewer, config.RoleJudge, config.RoleArchitect} {
+		if contains(r.Available(role), "skill_run") {
+			t.Errorf("skill_run reached the %s", role)
+		}
+	}
+	for _, name := range []string{"skill_list", "skill_read"} {
+		if !contains(r.Available(config.RoleArchitect), name) {
+			t.Errorf("%s does not reach the architect, so no survey guide can", name)
+		}
+		for _, role := range []config.Role{config.RoleReviewer, config.RoleJudge} {
 			if contains(r.Available(role), name) {
 				t.Errorf("%s reached the %s", name, role)
 			}

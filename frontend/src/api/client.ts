@@ -452,6 +452,22 @@ export interface ReleaseSummary {
 
 /** One model call, as recorded in llm.jsonl. */
 /** Mirrors service.CandidateCriteriaView. */
+export interface SkillSummary {
+  name?: string;
+  description?: string;
+  version?: number;
+  scope?: string;
+  runnable?: boolean;
+  pending?: boolean;
+  problems?: string[];
+  args?: { name?: string; type?: string; required?: boolean }[];
+}
+
+export interface SkillDetail extends SkillSummary {
+  entry?: string;
+  body?: string;
+}
+
 export interface CandidateCriteriaView {
   criteria: Record<string, string[]>;
   configured: string[];
@@ -933,6 +949,25 @@ export class EngineClient {
   projectInstall(projectId: string) {
     return this.request<{ command: string; exit_code: number; output: string; seconds: number; ok: boolean }>(
       "POST", `/v1/projects/${projectId}/install`,
+    );
+  }
+  /** The project's skills — global shadowed by project-local — with the
+   *  problems `skill validate` would report and the pending flag a
+   *  duckling-authored skill wears until its run is accepted. */
+  skills(projectId: string) {
+    return this.request<{ skills: SkillSummary[] }>("GET", `/v1/projects/${projectId}/skills`);
+  }
+  skillGet(projectId: string, name: string) {
+    return this.request<SkillDetail>("GET", `/v1/projects/${projectId}/skills/${name}`);
+  }
+  skillNew(projectId: string, name: string, runnable: boolean) {
+    return this.request<SkillDetail>("POST", `/v1/projects/${projectId}/skills`, { name, runnable });
+  }
+  skillRun(projectId: string, name: string, args: Record<string, unknown>) {
+    return this.request<{ output?: string; exit_code?: number }>(
+      "POST",
+      `/v1/projects/${projectId}/skills/${name}/run`,
+      { args },
     );
   }
   candidateCriteria() {

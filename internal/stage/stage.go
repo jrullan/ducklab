@@ -293,6 +293,10 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 				"- Invent nothing aspirational. A requirement the code does not " +
 				"satisfy today does not belong in a survey; new work arrives later " +
 				"as briefs.\n\n")
+			b.WriteString("Before reading the tree, call skill_list: a project that carries a " +
+				"survey guide (module map, where the routes live, which schema is the truth) " +
+				"expects you to read it with skill_read and follow it — coverage beats " +
+				"wandering.\n\n")
 			if seed != "" {
 				b.WriteString("## Context from the person\n\n")
 				b.WriteString(strings.TrimSpace(seed))
@@ -353,7 +357,9 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			// the product and the spine from demanding tasks for it.
 			b.WriteString("This project was ADOPTED: the requirements describe a codebase " +
 				"that already exists, and so does your specification. Ground every " +
-				"section in the code — read the tree before writing. Mark every " +
+				"section in the code — read the tree before writing, and call " +
+				"skill_list first: a project that carries a survey guide expects you " +
+				"to read it with skill_read and follow it. Mark every " +
 				"section that the code already implements with a line:\n\n" +
 				"**As-built:** yes\n\n" +
 				"Only a section describing a genuine gap — behaviour the requirements " +

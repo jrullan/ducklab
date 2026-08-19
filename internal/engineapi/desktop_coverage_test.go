@@ -29,15 +29,11 @@ import (
 //
 // Removing a line here is the definition of done for closing one.
 var knownGaps = map[string]string{
-	"GET /v1/projects/{id}":                    "one project's record; the desktop lists all and filters, which works until projects number dozens",
-	"GET /v1/projects/{id}/skills":             "the skills loop has no desktop surface at all",
-	"GET /v1/projects/{id}/skills/{name}":      "same",
-	"POST /v1/projects/{id}/skills":            "same",
-	"POST /v1/projects/{id}/skills/{name}/run": "same",
-	"GET /v1/projects/{id}/roster/suggest":     "roster is editable but the engine's suggestion is not offered",
-	"POST /v1/projects/{id}/roster/suggest":    "same",
-	"GET /v1/runs/{id}/transcript":             "the conversation is rebuilt from events; the engine's own rendering is unreachable",
-	"GET /v1/engine":                           "engine version and paths; Settings shows a version it gets from the event stream",
+	"GET /v1/projects/{id}":                 "one project's record; the desktop lists all and filters, which works until projects number dozens",
+	"GET /v1/projects/{id}/roster/suggest":  "roster is editable but the engine's suggestion is not offered",
+	"POST /v1/projects/{id}/roster/suggest": "same",
+	"GET /v1/runs/{id}/transcript":          "the conversation is rebuilt from events; the engine's own rendering is unreachable",
+	"GET /v1/engine":                        "engine version and paths; Settings shows a version it gets from the event stream",
 }
 
 var notInTheDesktop = map[string]string{

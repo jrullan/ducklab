@@ -24,6 +24,9 @@ var roleToolbelts = map[config.Role][]string{
 	config.RoleArchitect: {
 		"fs_list", "fs_read", "fs_search", "git_log", "artifact_read", "ask_human",
 		"ref_read",
+		// list+read only, never skill_run: a survey guide briefs the
+		// architect; a script is the implementer's to execute.
+		"skill_list", "skill_read",
 	},
 	config.RoleImplementer: {
 		"fs_list", "fs_read", "fs_search", "fs_write", "fs_write_lines", "fs_patch", "fs_delete",
