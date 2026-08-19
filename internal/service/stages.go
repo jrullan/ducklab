@@ -295,7 +295,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// itself: a user pasting a sentence should not have to make a file.
 	}
 	if len(req.Refs) > 0 {
-		refs, loaded, dropped, rerr := loadReferences(req.Refs)
+		refs, loaded, dropped, rerr := loadReferences(req.Refs, projCfg.References)
 		if rerr != nil {
 			s.failRun(rs, fmt.Errorf("references: %w", rerr))
 			return

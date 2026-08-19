@@ -214,6 +214,20 @@ type Caps struct {
 }
 
 // Install declares the project's reinstall chain.
+// References bounds how much attached reference material a stage ingests.
+// Zero means the built-in default: the defaults suit a README-sized brief,
+// and a mature multi-module wiki (MiEmpresa's) legitimately needs more.
+// Declared per project, like verify — the budget is a property of the
+// project's documentation, not of the binary.
+type References struct {
+	// PerFileChars caps each document; 0 means 12000.
+	PerFileChars int `toml:"per_file_chars" json:"per_file_chars,omitempty"`
+	// TotalChars caps the whole reference section; 0 means 80000.
+	TotalChars int `toml:"total_chars" json:"total_chars,omitempty"`
+	// MaxFiles caps how many documents load; 0 means 40.
+	MaxFiles int `toml:"max_files" json:"max_files,omitempty"`
+}
+
 type Install struct {
 	// Command rebuilds and installs the project's runnable form, run from
 	// the project root ("make desktop && make install"). Empty means the
@@ -355,8 +369,9 @@ type Project struct {
 	// make accepted work runnable (the self-hosted case: T-075's avatar sat
 	// accepted and invisible until a terminal make install). Declared, not
 	// guessed — the same rule as verify.
-	Install Install `toml:"install" json:"install"`
-	Roster   Roster   `toml:"roster" json:"roster"`
+	Install    Install    `toml:"install" json:"install"`
+	References References `toml:"references" json:"references"`
+	Roster     Roster     `toml:"roster" json:"roster"`
 	// RosterSeats preserves ordered multi-slot project pins; Roster is retained for legacy scalar pins.
 	// Both are ROLE pins: they apply to every mode that seats the role.
 	RosterSeats map[Role][]DucklingID `toml:"roster_seats" json:"roster_seats,omitempty"`
@@ -679,6 +694,9 @@ func (p *Project) Validate(path string) error {
 		p.Verify.Mode != "build" && p.Verify.Mode != "lint" && p.Verify.Mode != "none" &&
 		p.Verify.Mode != "custom" {
 		return &Error{File: path, Key: "verify.mode", Msg: fmt.Sprintf("invalid mode %q", p.Verify.Mode)}
+	}
+	if p.References.PerFileChars < 0 || p.References.TotalChars < 0 || p.References.MaxFiles < 0 {
+		return &Error{File: path, Key: "references", Msg: "caps must be zero (default) or positive"}
 	}
 	for _, dep := range p.Verify.LinkDeps {
 		if dep == "" || filepath.IsAbs(dep) || filepath.Clean(dep) != dep || dep == "." || strings.HasPrefix(dep, ".."+string(filepath.Separator)) || dep == ".." {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/config"
 )
 
 // Reference documents for a document stage.
@@ -24,6 +26,20 @@ const (
 	refMaxFiles     = 40
 )
 
+// resolveRefCaps fills a project's unset reference caps with the defaults.
+func resolveRefCaps(caps config.References) config.References {
+	if caps.PerFileChars == 0 {
+		caps.PerFileChars = refPerFileChars
+	}
+	if caps.TotalChars == 0 {
+		caps.TotalChars = refTotalChars
+	}
+	if caps.MaxFiles == 0 {
+		caps.MaxFiles = refMaxFiles
+	}
+	return caps
+}
+
 // refFile is one loaded reference, for the record.
 type refFile struct {
 	Path      string `json:"path"`
@@ -34,7 +50,8 @@ type refFile struct {
 // loadReferences expands the named paths (files, or directories searched
 // recursively for .md and .txt), loads them under the caps, and renders the
 // section a stage prompt carries. dropped names what the caps excluded.
-func loadReferences(paths []string) (rendered string, loaded []refFile, dropped []string, err error) {
+func loadReferences(paths []string, caps config.References) (rendered string, loaded []refFile, dropped []string, err error) {
+	caps = resolveRefCaps(caps)
 	var files []string
 	for _, p := range paths {
 		p = strings.TrimSpace(p)
@@ -73,7 +90,7 @@ func loadReferences(paths []string) (rendered string, loaded []refFile, dropped 
 	var b strings.Builder
 	total := 0
 	for _, f := range files {
-		if len(loaded) >= refMaxFiles || total >= refTotalChars {
+		if len(loaded) >= caps.MaxFiles || total >= caps.TotalChars {
 			dropped = append(dropped, f)
 			continue
 		}
@@ -84,12 +101,12 @@ func loadReferences(paths []string) (rendered string, loaded []refFile, dropped 
 		}
 		text := string(raw)
 		truncated := false
-		if len(text) > refPerFileChars {
-			text = text[:refPerFileChars]
+		if len(text) > caps.PerFileChars {
+			text = text[:caps.PerFileChars]
 			truncated = true
 		}
-		if total+len(text) > refTotalChars {
-			text = text[:refTotalChars-total]
+		if total+len(text) > caps.TotalChars {
+			text = text[:caps.TotalChars-total]
 			truncated = true
 		}
 		fmt.Fprintf(&b, "\n### Reference: %s\n\n%s\n", f, strings.TrimSpace(text))
