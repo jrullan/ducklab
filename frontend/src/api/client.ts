@@ -1280,8 +1280,8 @@ export class EngineClient {
     });
   }
 
-  releasePlan(projectId: string, bump: string) {
-    return this.request<Run>("POST", `/v1/projects/${projectId}/releases`, { bump });
+  releasePlan(projectId: string, bump: string, revise?: string) {
+    return this.request<Run>("POST", `/v1/projects/${projectId}/releases`, revise ? { bump, revise } : { bump });
   }
 
   releaseCut(projectId: string, version: string) {

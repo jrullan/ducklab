@@ -601,7 +601,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const requestChanges = async (text: string) => {
     setActionError(null);
     try {
-      const started = await client.stageStart(run.project_id, stageToRevise, { revise: text });
+      // A release's draft revises through its own door; the document stages
+      // through theirs. Same button, same meaning: "almost".
+      const started =
+        run.stage === "release"
+          ? await client.releasePlan(run.project_id, "", text)
+          : await client.stageStart(run.project_id, stageToRevise, { revise: text });
       setRevisionRun(started.id);
     } catch (e) {
       useRuns.getState().failAccept(runId, e instanceof Error ? e.message : String(e));
@@ -1257,7 +1262,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               setActionError(null);
               void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
             }}
-            onRequestChanges={stageToRevise ? requestChanges : undefined}
+            onRequestChanges={stageToRevise || run.stage === "release" ? requestChanges : undefined}
             onResume={() => {
               setActionError(null);
               void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));

@@ -1324,6 +1324,10 @@
           "stage": {
             "type": "string"
           },
+          "stage_request": {
+            "additionalProperties": {},
+            "type": "object"
+          },
           "started_at": {
             "type": "string"
           },
@@ -2070,6 +2074,9 @@
       "ServiceReleaseRequest": {
         "properties": {
           "bump": {
+            "type": "string"
+          },
+          "revise": {
             "type": "string"
           }
         },

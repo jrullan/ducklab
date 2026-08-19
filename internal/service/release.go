@@ -23,6 +23,11 @@ import (
 type ReleaseRequest struct {
 	// Bump is major, minor or patch. Empty means minor (05 §9.1).
 	Bump string `json:"bump"`
+	// Revise is what to change about the draft already on the table — the
+	// same door every document stage has. The scribe gets the prior
+	// proposal and this note, and rewrites; the older paused release run is
+	// superseded when the new draft lands.
+	Revise string `json:"revise,omitempty"`
 }
 
 // ReleasePlan collects what has shipped and drafts the notes (05 §9.1).
@@ -50,6 +55,14 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 	if err != nil {
 		return nil, err
 	}
+	// A revision is ABOUT the draft on the table, whatever bump made it:
+	// the UI asking for changes does not know the original bump, and
+	// recomputing from a default could aim at a different version.
+	if strings.TrimSpace(req.Revise) != "" {
+		if v, ok := newestProposed(entry.Path); ok {
+			next = v
+		}
+	}
 	since := ""
 	if hadPrev {
 		since = prev.String()
@@ -62,6 +75,17 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 	notes := release.Notes{
 		Version: next, Since: since,
 		Milestones: release.Group(items), Unverified: len(unverifiedIDs), UnverifiedTasks: unverifiedIDs,
+	}
+	// A revision reads the draft it revises. Refused without one: a note
+	// about a draft that does not exist is a launch mistake worth catching.
+	revise := strings.TrimSpace(req.Revise)
+	priorDraft := ""
+	if revise != "" {
+		raw, rerr := os.ReadFile(release.Path(entry.Path, next) + ".proposed")
+		if rerr != nil {
+			return nil, fmt.Errorf("release revise: no draft for %s to revise — draft one first", next)
+		}
+		priorDraft = string(raw)
 	}
 
 	run := &runlog.Run{
@@ -95,7 +119,25 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 		"version": next.String(), "since": since, "tasks": len(items),
 	})
 
-	go s.executeRelease(runCtx, rs, entry.Path, notes)
+	// The old draft's run is superseded the moment its revision starts —
+	// the same rule the document stages follow: a gate over a draft that is
+	// being replaced is a gate nobody can decide.
+	if revise != "" {
+		s.runsMu.RLock()
+		var moot []string
+		for id, other := range s.runs {
+			if id != run.ID && other.run.ProjectID == projectID && other.run.Stage == "release" &&
+				other.run.Status == "paused" {
+				moot = append(moot, id)
+			}
+		}
+		s.runsMu.RUnlock()
+		for _, id := range moot {
+			s.resolveSuperseded(id, "changes requested: "+revise)
+		}
+	}
+
+	go s.executeRelease(runCtx, rs, entry.Path, notes, revise, priorDraft)
 	return run, nil
 }
 
@@ -205,7 +247,7 @@ func commitsAfter(root, sinceTag string) (map[string]bool, error) {
 	return set, nil
 }
 
-func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot string, notes release.Notes) {
+func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot string, notes release.Notes, revise, priorDraft string) {
 	defer recoverRun(rs)
 	defer close(rs.done)
 	defer rs.writer.Close()
@@ -213,7 +255,7 @@ func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot 
 	prose := ""
 	if len(notes.Milestones) > 0 {
 		var err error
-		prose, err = s.scribeNotes(ctx, rs, projectRoot, notes)
+		prose, err = s.scribeNotes(ctx, rs, projectRoot, notes, revise, priorDraft)
 		if err != nil {
 			s.failRun(rs, err)
 			return
@@ -250,7 +292,7 @@ func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot 
 }
 
 // scribeNotes runs the one turn a release involves a model in.
-func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot string, notes release.Notes) (string, error) {
+func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot string, notes release.Notes, revise, priorDraft string) (string, error) {
 	projCfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml"))
 	if err != nil {
 		return "", fmt.Errorf("load project config: %w", err)
@@ -276,7 +318,7 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 	params := &strategy.ExecuteParams{
 		LiveToolEvents: true,
 		ProjectRoot:    projectRoot,
-		Prompt:         scribePrompt(notes),
+		Prompt:         scribePrompt(notes) + revisionAddendum(revise, priorDraft),
 		Runner:         s.runnerFor(cache, roster, ectx),
 		Roster:         roster,
 		OnEvent: func(kind string, data map[string]interface{}) {
@@ -292,6 +334,44 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 		return "", nil
 	}
 	return res.Outcome.Text, nil
+}
+
+// revisionAddendum carries the person's note and the draft it is about.
+// The prose section of the prior draft is what the scribe revises; the
+// inventory is regenerated deterministically either way.
+func revisionAddendum(revise, priorDraft string) string {
+	if strings.TrimSpace(revise) == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Revision requested\n\nA person read the draft below and asks for this change:\n\n")
+	b.WriteString(strings.TrimSpace(revise))
+	b.WriteString("\n\n## The draft being revised\n\n")
+	b.WriteString(strings.TrimSpace(priorDraft))
+	b.WriteString("\n\nRewrite the notes with the change applied. Keep what the note does not touch.\n")
+	return b.String()
+}
+
+// newestProposed finds the highest-versioned .proposed draft on disk.
+func newestProposed(root string) (release.Version, bool) {
+	entries, err := os.ReadDir(release.Dir(root))
+	if err != nil {
+		return release.Version{}, false
+	}
+	var best release.Version
+	found := false
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md.proposed") {
+			continue
+		}
+		if v, ok := release.ParseVersion(strings.TrimSuffix(name, ".md.proposed")); ok {
+			if !found || release.Newer(v, best) {
+				best, found = v, true
+			}
+		}
+	}
+	return best, found
 }
 
 // scribePrompt hands over the inventory and asks only for the prose.

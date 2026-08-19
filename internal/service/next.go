@@ -64,7 +64,9 @@ func runNext(r *runlog.Run) []string {
 			// Only a document can be sent back with a note; code runs are
 			// accepted or rejected, and "almost" for code is a new run.
 			switch r.Stage {
-			case "intake", "spec", "plan":
+			case "intake", "spec", "plan", "release":
+				// A release's draft is a document like any stage's: the
+				// person could accept or abort, but not say "almost".
 				out = append(out, "request_changes")
 			}
 			return append(out, "reject")

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -40,5 +41,38 @@ func TestFirstParagraphIsTheOpeningNotTheDeliverables(t *testing.T) {
 	}
 	if firstParagraph("", 10) != "" {
 		t.Error("empty body must give an empty summary")
+	}
+}
+
+// The release cycle had no "almost": the person could accept the scribe's
+// draft or abort it. Revision is the same door every document stage has —
+// the note and the draft it is about reach the scribe, the rewrite targets
+// the DRAFT's version whatever bump made it, and the superseded run's gate
+// does not linger.
+func TestReleaseReviseCarriesTheNoteAndTheDraft(t *testing.T) {
+	addendum := revisionAddendum("Say what the roster is FOR in the first line.", "---\nkind: release\n---\n\n# v0.7.0\n\nold prose")
+	if !strings.Contains(addendum, "## Revision requested") ||
+		!strings.Contains(addendum, "Say what the roster is FOR") ||
+		!strings.Contains(addendum, "old prose") ||
+		!strings.Contains(addendum, "Keep what the note does not touch") {
+		t.Errorf("addendum:\n%s", addendum)
+	}
+	if revisionAddendum("", "draft") != "" {
+		t.Error("no note must mean no addendum")
+	}
+}
+
+func TestNewestProposedFindsTheDraftBeingRevised(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(release.Dir(dir), 0o755)
+	os.WriteFile(release.Dir(dir)+"/v0.6.0.md", []byte("cut"), 0o644)
+	os.WriteFile(release.Dir(dir)+"/v0.6.1.md.proposed", []byte("draft"), 0o644)
+	os.WriteFile(release.Dir(dir)+"/v0.7.0.md.proposed", []byte("draft"), 0o644)
+	v, ok := newestProposed(dir)
+	if !ok || v.String() != "v0.7.0" {
+		t.Fatalf("newestProposed = %v %v, want v0.7.0", v, ok)
+	}
+	if _, ok := newestProposed(t.TempDir()); ok {
+		t.Error("an empty dir invented a draft")
 	}
 }

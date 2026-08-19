@@ -385,6 +385,7 @@ export interface RunlogRun {
   roster_sources?: Record<string, string>;
   spend?: Record<string, RunlogDucklingSpend>;
   stage?: string;
+  stage_request?: Record<string, unknown>;
   started_at?: string;
   status?: string;
   stream?: boolean;
@@ -589,6 +590,7 @@ export interface ServiceProviderView {
 
 export interface ServiceReleaseRequest {
   bump?: string;
+  revise?: string;
 }
 
 export interface ServiceReviewRequest {
