@@ -51,6 +51,7 @@ export function ConversationTurn({
 }) {
   const anonymous = !!block.label;
   const isGate = block.role === "gate";
+  const isHuman = block.role === "human";
   if (block.role === "pause" && block.pause) {
     return (
       <div
@@ -114,6 +115,10 @@ export function ConversationTurn({
             title="identities hidden — this reviewer must not know who wrote which candidate"
           >
             🔒
+          </span>
+        ) : isHuman ? (
+          <span aria-label="human avatar" role="img" title="human">
+            👤
           </span>
         ) : (
           <DuckAvatar id={block.duckling} roster={roster} color={color} bobbing={!block.done} />
