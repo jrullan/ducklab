@@ -344,6 +344,16 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 				"Only a section describing a genuine gap — behaviour the requirements " +
 				"promise and the code does not deliver — goes without the marker.\n\n")
 		}
+		// The seed carries what the person attached at launch — context and
+		// reference documents. Intake was the only branch that read it: spec
+		// refs loaded, logged, landed in the brief, and never reached the
+		// architect (B-086). Placed before the requirements so the primary
+		// input stays last and most salient.
+		if seed != "" {
+			b.WriteString("## Context from the person\n\n")
+			b.WriteString(strings.TrimSpace(seed))
+			b.WriteString("\n\n")
+		}
 		b.WriteString("## Requirements\n\n")
 		for _, r := range approved {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", r.ID, r.Title, strings.TrimSpace(r.Body))
@@ -362,6 +372,11 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			b.WriteString("Sections marked **As-built:** yes are already delivered by the " +
 				"existing code. Plan NO tasks for them — a task to build what is built " +
 				"is invented work. Tasks come only from sections without the marker.\n\n")
+		}
+		if seed != "" {
+			b.WriteString("## Context from the person\n\n")
+			b.WriteString(strings.TrimSpace(seed))
+			b.WriteString("\n\n")
 		}
 		b.WriteString("## Specification\n\n")
 		for _, s := range spec.Sections {

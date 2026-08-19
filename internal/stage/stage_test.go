@@ -156,6 +156,27 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 	}
 }
 
+// What the person attaches at launch — context, reference documents — must
+// reach the architect in every stage that accepts it. Spec refs used to load,
+// log, land in the brief, and never enter the prompt (B-086).
+func TestSpecAndPlanPromptsCarryTheSeed(t *testing.T) {
+	root := projectWith(t, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Users can log in\n\n**Priority:** must\n\nDetail here.\n",
+		artifact.KindSpec:         "## SPEC-001 — Login\n\n**Implements:** REQ-001\n\nDetail.\n",
+	})
+	seed := "## Reference documents\n\nThe wiki spec of the login module."
+	for _, name := range []Name{Spec, Plan} {
+		current, _ := artifact.Load(root, name.Kind())
+		prompt, err := BuildPrompt(root, name, seed, current, "", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(prompt, "The wiki spec of the login module.") {
+			t.Errorf("%s prompt dropped the seed:\n%s", name, prompt)
+		}
+	}
+}
+
 // A stage that cannot run says which one to run first, rather than producing
 // an artifact with nothing behind it.
 func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
