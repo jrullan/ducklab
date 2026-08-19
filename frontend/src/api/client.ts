@@ -466,6 +466,10 @@ export interface SkillSummary {
 export interface SkillDetail extends SkillSummary {
   entry?: string;
   body?: string;
+  /** The whole SKILL.md, frontmatter included — what the editor edits. */
+  raw?: string;
+  /** Where the skill lives on disk. */
+  dir?: string;
 }
 
 export interface CandidateCriteriaView {
@@ -968,6 +972,17 @@ export class EngineClient {
   }
   /** Runs a runnable skill. {output, failed}: a skill that ran and exited
    *  non-zero is an answer with output, not a request error. */
+  /** Replace a skill's SKILL.md; the reply carries the saved text's
+   *  validation problems — saving broken is allowed, shipping it silently
+   *  broken is not. */
+  skillSave(projectId: string, name: string, content: string) {
+    return this.request<{ problems?: string[] }>("PUT", `/v1/projects/${projectId}/skills/${name}`, {
+      content,
+    });
+  }
+  skillDelete(projectId: string, name: string) {
+    return this.request<{ deleted?: boolean }>("DELETE", `/v1/projects/${projectId}/skills/${name}`);
+  }
   skillRun(projectId: string, name: string, args: Record<string, unknown>) {
     return this.request<{ output?: string; failed?: boolean }>(
       "POST",

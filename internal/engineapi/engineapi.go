@@ -12,6 +12,8 @@ import (
 	"net/http"
 	netpprof "net/http/pprof"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -179,11 +181,38 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	// raw is the whole SKILL.md, frontmatter included: the desktop editor
+	// edits the file, not a projection of it. dir is where it lives, so a
+	// person can find it on disk.
+	raw, _ := os.ReadFile(filepath.Join(sk.Dir, "SKILL.md"))
 	s.json(w, http.StatusOK, map[string]interface{}{
 		"name": sk.Name, "description": sk.Description, "version": sk.Version,
 		"scope": sk.Scope, "entry": sk.Entry, "body": sk.Body,
 		"args": sk.Args, "problems": problems,
+		"raw": string(raw), "dir": sk.Dir,
 	})
+}
+
+func (s *Server) handleSkillSave(w http.ResponseWriter, r *http.Request) {
+	var req skillSaveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	problems, err := s.svc.SkillSave(r.PathValue("id"), r.PathValue("name"), req.Content)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"problems": problems})
+}
+
+func (s *Server) handleSkillDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.SkillDelete(r.PathValue("id"), r.PathValue("name")); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"deleted": true})
 }
 
 func (s *Server) handleSkillNew(w http.ResponseWriter, r *http.Request) {

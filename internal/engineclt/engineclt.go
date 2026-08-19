@@ -278,6 +278,21 @@ func (c *Client) SkillNew(projectID, name string, runnable bool) (string, error)
 	return result.Dir, err
 }
 
+// SkillSave replaces a skill's SKILL.md and returns the saved text's problems.
+func (c *Client) SkillSave(projectID, name, content string) ([]string, error) {
+	var result struct {
+		Problems []string `json:"problems"`
+	}
+	err := c.put("/v1/projects/"+projectID+"/skills/"+name,
+		map[string]interface{}{"content": content}, &result)
+	return result.Problems, err
+}
+
+// SkillDelete removes a skill's directory.
+func (c *Client) SkillDelete(projectID, name string) error {
+	return c.delete("/v1/projects/" + projectID + "/skills/" + name)
+}
+
 // SkillRun runs a skill. No model is involved.
 func (c *Client) SkillRun(projectID, name string, args map[string]interface{}) (string, bool, error) {
 	var result struct {

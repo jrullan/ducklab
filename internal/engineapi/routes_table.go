@@ -96,6 +96,11 @@ type skillNewRequest struct {
 	Runnable bool `json:"runnable"`
 }
 
+type skillSaveRequest struct {
+	// Content is the whole SKILL.md, frontmatter included.
+	Content string `json:"content"`
+}
+
 type skillRunRequest struct {
 	Args map[string]interface{} `json:"args"`
 }
@@ -237,8 +242,8 @@ func routeTable() []Route {
 			ClientMethod: "AutopilotDefaultsSet",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleAutopilotDefaultsSet }},
 		{Method: "POST", Path: "/v1/projects/{id}/install", Auth: true,
-			Response: service.InstallResult{},
-			Summary:  "Run the project's declared install chain ([install] command in project.toml) so accepted work becomes the running app without leaving ducklab",
+			Response:     service.InstallResult{},
+			Summary:      "Run the project's declared install chain ([install] command in project.toml) so accepted work becomes the running app without leaving ducklab",
 			ClientMethod: "ProjectInstall",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleProjectInstall }},
 		{Method: "GET", Path: "/v1/defaults/candidates", Auth: true,
@@ -317,6 +322,14 @@ func routeTable() []Route {
 			Request: skillNewRequest{}, Summary: "Scaffold a skill directory",
 			ClientMethod: "SkillNew",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillNew }},
+		{Method: "PUT", Path: "/v1/projects/{id}/skills/{name}", Auth: true,
+			Request: skillSaveRequest{}, Summary: "Replace a skill's SKILL.md; answers with the saved text's validation problems",
+			ClientMethod: "SkillSave",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillSave }},
+		{Method: "DELETE", Path: "/v1/projects/{id}/skills/{name}", Auth: true,
+			Summary:      "Delete a skill's directory, project or global",
+			ClientMethod: "SkillDelete",
+			handler:      func(s *Server) http.HandlerFunc { return s.handleSkillDelete }},
 		{Method: "POST", Path: "/v1/projects/{id}/skills/{name}/run", Auth: true,
 			Request: skillRunRequest{}, Summary: "Run a skill. No model is involved.",
 			ClientMethod: "SkillRun",

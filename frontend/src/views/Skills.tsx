@@ -19,6 +19,10 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
   const [runArgs, setRunArgs] = useState<Record<string, string>>({});
   const [runOut, setRunOut] = useState<{ name: string; output: string; failed: boolean } | null>(null);
   const [running, setRunning] = useState(false);
+  const [editText, setEditText] = useState<string | null>(null);
+  const [saveProblems, setSaveProblems] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const reload = useCallback(() => {
     client
@@ -43,6 +47,9 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
     setDetail(null);
     setRunOut(null);
     setRunArgs({});
+    setEditText(null);
+    setSaveProblems(null);
+    setConfirmDelete(false);
     client
       .skillGet(projectId, name)
       .then(setDetail)
@@ -55,6 +62,36 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       await client.skillNew(projectId, newName.trim(), newRunnable);
       setCreating(false);
       setNewName("");
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const save = async (name: string) => {
+    if (editText === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await client.skillSave(projectId, name, editText);
+      setSaveProblems(r.problems ?? []);
+      setEditText(null);
+      reload();
+      const d = await client.skillGet(projectId, name);
+      setDetail(d);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (name: string) => {
+    setError(null);
+    try {
+      await client.skillDelete(projectId, name);
+      setOpen(null);
+      setDetail(null);
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -189,6 +226,11 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
               )}
               {open === sk.name && detail && (
                 <div className="mt-2 border-t border-hairline pt-2" data-testid="skill-detail">
+                  {detail.dir && (
+                    <p className="text-[10px] text-ink-muted" data-testid="skill-dir">
+                      {detail.dir}
+                    </p>
+                  )}
                   {(detail.args?.length ?? 0) > 0 && (
                     <p className="text-xs text-ink-muted">
                       args:{" "}
@@ -197,9 +239,94 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
                         .join(", ")}
                     </p>
                   )}
-                  <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap text-xs text-ink-secondary">
-                    {detail.body}
-                  </pre>
+                  {editText !== null ? (
+                    <div className="mt-1">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        data-testid="skill-edit"
+                        rows={16}
+                        className="w-full rounded border border-hairline bg-surface p-2 font-mono text-xs"
+                      />
+                      <div className="mt-1 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void save(sk.name ?? "")}
+                          disabled={saving}
+                          data-testid="skill-save"
+                          className="rounded border border-hairline px-3 py-1 text-xs disabled:opacity-50"
+                        >
+                          {saving ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditText(null)}
+                          className="rounded border border-hairline px-3 py-1 text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap text-xs text-ink-secondary">
+                      {detail.body}
+                    </pre>
+                  )}
+                  {saveProblems !== null &&
+                    (saveProblems.length > 0 ? (
+                      <ul className="mt-1 text-xs text-warn" data-testid="skill-save-problems">
+                        {saveProblems.map((p) => (
+                          <li key={p}>⚠ {p}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-1 text-xs text-ink-muted" data-testid="skill-save-ok">
+                        saved — valid
+                      </p>
+                    ))}
+                  {editText === null && (
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSaveProblems(null);
+                          setEditText(detail.raw ?? "");
+                        }}
+                        data-testid="skill-edit-open"
+                        className="rounded border border-hairline px-3 py-1 text-xs"
+                      >
+                        Edit
+                      </button>
+                      {confirmDelete ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void remove(sk.name ?? "")}
+                            data-testid="skill-delete-confirm"
+                            className="rounded border border-serious px-3 py-1 text-xs text-warn"
+                          >
+                            Delete {sk.name} — for real
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(false)}
+                            className="rounded border border-hairline px-3 py-1 text-xs"
+                          >
+                            Keep it
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDelete(true)}
+                          data-testid="skill-delete"
+                          className="rounded border border-hairline px-3 py-1 text-xs text-ink-muted"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {detail.entry && !sk.pending && (
                     <div className="mt-2">
                       {(detail.args ?? []).map((a) => (

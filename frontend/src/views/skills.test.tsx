@@ -48,11 +48,15 @@ function client(overrides: Partial<Record<string, unknown>> = {}) {
       Promise.resolve({
         name,
         body: "## Survey map\n\nRoutes live in api/src/routes.",
+        raw: "---\nname: x\n---\n\n## Survey map\n\nRoutes live in api/src/routes.",
+        dir: `/home/u/p/.ducklab/skills/${name}`,
         entry: name === "pdf-extract" ? "run.sh" : "",
         args: name === "pdf-extract" ? [{ name: "file", type: "string", required: true }] : [],
       }),
     ),
     skillNew: vi.fn(() => Promise.resolve({ name: "n" })),
+    skillSave: vi.fn(() => Promise.resolve({ problems: [] })),
+    skillDelete: vi.fn(() => Promise.resolve({ deleted: true })),
     skillRun: vi.fn(() => Promise.resolve({ output: "extracted 3 pages", failed: false })),
     ...overrides,
   } as unknown as EngineClient;
@@ -102,5 +106,33 @@ describe("Skills view", () => {
   it("says what a good first skill is when there are none", async () => {
     render(<Skills client={client({ skills: vi.fn(() => Promise.resolve({ items: [] })) })} projectId="p" />);
     expect((await screen.findByTestId("skills-empty")).textContent).toContain("survey map");
+  });
+
+  it("edits the whole SKILL.md and reports the saved text's problems", async () => {
+    const c = client({ skillSave: vi.fn(() => Promise.resolve({ problems: ["description: must say WHEN"] })) });
+    render(<Skills client={c} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("skill-open-survey-map"));
+    await screen.findByTestId("skill-detail");
+    expect(screen.getByTestId("skill-dir").textContent).toContain(".ducklab/skills/survey-map");
+    fireEvent.click(screen.getByTestId("skill-edit-open"));
+    const editor = screen.getByTestId("skill-edit") as HTMLTextAreaElement;
+    expect(editor.value).toContain("---"); // the WHOLE file, frontmatter included
+    fireEvent.change(editor, { target: { value: "---\nname: survey-map\ndescription: short\n---\nbody" } });
+    fireEvent.click(screen.getByTestId("skill-save"));
+    await waitFor(() =>
+      expect(c.skillSave).toHaveBeenCalledWith("p", "survey-map", "---\nname: survey-map\ndescription: short\n---\nbody"),
+    );
+    expect((await screen.findByTestId("skill-save-problems")).textContent).toContain("WHEN");
+  });
+
+  it("deletes only after an explicit second click", async () => {
+    const c = client();
+    render(<Skills client={c} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("skill-open-survey-map"));
+    await screen.findByTestId("skill-detail");
+    fireEvent.click(screen.getByTestId("skill-delete"));
+    expect(c.skillDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("skill-delete-confirm"));
+    await waitFor(() => expect(c.skillDelete).toHaveBeenCalledWith("p", "survey-map"));
   });
 });

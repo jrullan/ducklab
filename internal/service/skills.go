@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -88,6 +89,49 @@ func (s *Service) SkillGet(projectID, name string) (*skill.Skill, []string, erro
 		return nil, nil, err
 	}
 	return sk, skill.Validate(sk), nil
+}
+
+// SkillSave replaces a skill's SKILL.md with what the person wrote in the
+// desktop editor, and answers with the problems the saved text has — saving
+// a broken skill is allowed (the file is theirs), shipping it silently
+// broken is not.
+func (s *Service) SkillSave(projectID, name, content string) ([]string, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	sk, err := skill.Find(entry.Path, globalSkillsDir(), name)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(sk.Dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		return nil, err
+	}
+	saved, err := skill.Load(sk.Dir, sk.Scope)
+	if err != nil {
+		return []string{err.Error()}, nil
+	}
+	return skill.Validate(saved), nil
+}
+
+// SkillDelete removes a skill's directory, wherever the name resolves —
+// project or global. Bounded to the two skill roots: RemoveAll aimed by a
+// path a lookup produced deserves a belt even when the lookup is trusted.
+func (s *Service) SkillDelete(projectID, name string) error {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return err
+	}
+	sk, err := skill.Find(entry.Path, globalSkillsDir(), name)
+	if err != nil {
+		return err
+	}
+	for _, root := range []string{skill.ProjectDir(entry.Path), globalSkillsDir()} {
+		if root != "" && sk.Dir != root && strings.HasPrefix(sk.Dir, root+string(filepath.Separator)) {
+			return os.RemoveAll(sk.Dir)
+		}
+	}
+	return fmt.Errorf("skill %q resolves outside the skill directories: %s", name, sk.Dir)
 }
 
 // validateProposedSkills checks skills a run wrote into .ducklab/skills/.

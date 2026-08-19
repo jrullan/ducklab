@@ -347,6 +347,9 @@
           "name": {
             "type": "string"
           },
+          "references": {
+            "$ref": "#/components/schemas/ConfigReferences"
+          },
           "roster": {
             "additionalProperties": {
               "type": "string"
@@ -386,12 +389,27 @@
           "install",
           "modes",
           "name",
+          "references",
           "roster",
           "run",
           "schema",
           "shell",
           "verify"
         ],
+        "type": "object"
+      },
+      "ConfigReferences": {
+        "properties": {
+          "max_files": {
+            "type": "integer"
+          },
+          "per_file_chars": {
+            "type": "integer"
+          },
+          "total_chars": {
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "ConfigRunApp": {
@@ -895,6 +913,17 @@
         },
         "required": [
           "args"
+        ],
+        "type": "object"
+      },
+      "EngineapiskillSaveRequest": {
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
         ],
         "type": "object"
       },
@@ -5130,6 +5159,41 @@
       }
     },
     "/v1/projects/{id}/skills/{name}": {
+      "delete": {
+        "operationId": "SkillDelete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a skill's directory, project or global"
+      },
       "get": {
         "operationId": "SkillGet",
         "parameters": [
@@ -5164,6 +5228,51 @@
           }
         ],
         "summary": "One skill, with its body and any validation problems"
+      },
+      "put": {
+        "operationId": "SkillSave",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiskillSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace a skill's SKILL.md; answers with the saved text's validation problems"
       }
     },
     "/v1/projects/{id}/skills/{name}/run": {

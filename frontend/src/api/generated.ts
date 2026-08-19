@@ -105,12 +105,19 @@ export interface ConfigProject {
   mode_seats?: Record<string, Record<string, string[]>>;
   modes?: Record<string, string>;
   name?: string;
+  references?: ConfigReferences;
   roster?: Record<string, string>;
   roster_seats?: Record<string, string[]>;
   run?: ConfigRunApp;
   schema?: number;
   shell?: ConfigShellPolicy;
   verify?: ConfigVerify;
+}
+
+export interface ConfigReferences {
+  max_files?: number;
+  per_file_chars?: number;
+  total_chars?: number;
 }
 
 export interface ConfigRunApp {
@@ -259,6 +266,10 @@ export interface EngineapiskillNewRequest {
 
 export interface EngineapiskillRunRequest {
   args?: Record<string, unknown>;
+}
+
+export interface EngineapiskillSaveRequest {
+  content?: string;
 }
 
 export interface EngineapitraceCheckResponse {
@@ -823,7 +834,9 @@ export const OPERATIONS = [
   { id: "RunStart", method: "POST", path: "/v1/projects/{id}/runs" },
   { id: "SkillList", method: "GET", path: "/v1/projects/{id}/skills" },
   { id: "SkillNew", method: "POST", path: "/v1/projects/{id}/skills" },
+  { id: "SkillDelete", method: "DELETE", path: "/v1/projects/{id}/skills/{name}" },
   { id: "SkillGet", method: "GET", path: "/v1/projects/{id}/skills/{name}" },
+  { id: "SkillSave", method: "PUT", path: "/v1/projects/{id}/skills/{name}" },
   { id: "SkillRun", method: "POST", path: "/v1/projects/{id}/skills/{name}/run" },
   { id: "StageStart", method: "POST", path: "/v1/projects/{id}/stages/{stage}" },
   { id: "ProjectStatus", method: "GET", path: "/v1/projects/{id}/status" },
