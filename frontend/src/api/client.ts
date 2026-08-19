@@ -926,6 +926,12 @@ export class EngineClient {
     return this.request<ModeDefaultsView>("GET", "/v1/defaults/modes");
   }
   /** Seat-suggestion criteria per role: in effect, defaults, catalog. */
+  /** Run the project's declared install chain ([install] in project.toml). */
+  projectInstall(projectId: string) {
+    return this.request<{ command: string; exit_code: number; output: string; seconds: number; ok: boolean }>(
+      "POST", `/v1/projects/${projectId}/install`,
+    );
+  }
   candidateCriteria() {
     return this.request<CandidateCriteriaView>("GET", "/v1/defaults/candidates");
   }

@@ -88,6 +88,11 @@ export interface ConfigGitHub {
   repo?: string;
 }
 
+export interface ConfigInstall {
+  command?: string;
+  timeout_s?: number;
+}
+
 export interface ConfigProject {
   autonomy?: string;
   budget?: ConfigBudget;
@@ -96,6 +101,7 @@ export interface ConfigProject {
   git?: ConfigGit;
   github?: ConfigGitHub;
   id?: string;
+  install?: ConfigInstall;
   mode_seats?: Record<string, Record<string, string[]>>;
   modes?: Record<string, string>;
   name?: string;
@@ -535,6 +541,14 @@ export interface ServiceInitRequest {
   path?: string;
 }
 
+export interface ServiceInstallResult {
+  command?: string;
+  exit_code?: number;
+  ok?: boolean;
+  output?: string;
+  seconds?: number;
+}
+
 export interface ServiceMeasuredEvidence {
   avg_cost_usd?: number;
   avg_wallclock_s?: number;
@@ -789,6 +803,7 @@ export const OPERATIONS = [
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
+  { id: "ProjectInstall", method: "POST", path: "/v1/projects/{id}/install" },
   { id: "ProjectNext", method: "GET", path: "/v1/projects/{id}/next" },
   { id: "ProjectRecover", method: "POST", path: "/v1/projects/{id}/recover/{action}" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },

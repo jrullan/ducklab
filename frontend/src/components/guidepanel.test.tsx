@@ -168,3 +168,21 @@ describe("the guide rail, quiet", () => {
     expect(shortAction("Promote B-057 to a task, or park it")).toBe("Promote B-057 to a task, or park it");
   });
 });
+
+// The self-hosted install step is a button — the whole point is not leaving
+// ducklab for a terminal. It runs the declared chain and reports; the engine
+// restart stays a separate, deliberate click.
+it("runs the declared install chain from the rail", async () => {
+  localStorage.clear();
+  useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
+  const steps: NextStep[] = [
+    { id: "install", action: "Reinstall ducklab — the repo is 3 commit(s) ahead of the running engine", reason: "run `make install`, then Restart engine and relaunch the app; accepted work is invisible until then", kind: "project" },
+  ];
+  const base = clientWith(steps) as unknown as Record<string, unknown>;
+  base.projectInstall = vi.fn(() => Promise.resolve({ ok: true, seconds: 42, exit_code: 0, output: "", command: "make install" }));
+  render(<GuideRail client={base as never} projectId="p" view="board" />);
+  await waitFor(() => screen.getByTestId("guide-install"));
+  fireEvent.click(screen.getByTestId("guide-install"));
+  await waitFor(() => expect(screen.getByTestId("guide-install-result").textContent).toContain("Restart engine"));
+  expect(base.projectInstall).toHaveBeenCalledWith("p");
+});

@@ -213,6 +213,16 @@ type Caps struct {
 	JSONMode *bool `toml:"json_mode" json:"json_mode"`
 }
 
+// Install declares the project's reinstall chain.
+type Install struct {
+	// Command rebuilds and installs the project's runnable form, run from
+	// the project root ("make desktop && make install"). Empty means the
+	// project declares none and the door stays closed.
+	Command string `toml:"command" json:"command"`
+	// TimeoutS bounds it; 0 means 600.
+	TimeoutS int `toml:"timeout_s" json:"timeout_s,omitempty"`
+}
+
 // ExternalIndex is a third-party score, retained with provenance. Declared
 // by hand in config, or fetched by the engine from a source it can name
 // (OpenRouter's benchmarks endpoint carries Artificial Analysis's indices);
@@ -340,6 +350,12 @@ type Project struct {
 	Created  string   `toml:"created" json:"created"`
 	Autonomy Autonomy `toml:"autonomy" json:"autonomy"`
 	Verify   Verify   `toml:"verify" json:"verify"`
+	// Install declares how this project's own executables and assets are
+	// rebuilt and installed, so a developer never has to leave ducklab to
+	// make accepted work runnable (the self-hosted case: T-075's avatar sat
+	// accepted and invisible until a terminal make install). Declared, not
+	// guessed — the same rule as verify.
+	Install Install `toml:"install" json:"install"`
 	Roster   Roster   `toml:"roster" json:"roster"`
 	// RosterSeats preserves ordered multi-slot project pins; Roster is retained for legacy scalar pins.
 	// Both are ROLE pins: they apply to every mode that seats the role.

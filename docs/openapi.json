@@ -286,6 +286,20 @@
         ],
         "type": "object"
       },
+      "ConfigInstall": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "timeout_s": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
       "ConfigProject": {
         "properties": {
           "autonomy": {
@@ -308,6 +322,9 @@
           },
           "id": {
             "type": "string"
+          },
+          "install": {
+            "$ref": "#/components/schemas/ConfigInstall"
           },
           "mode_seats": {
             "additionalProperties": {
@@ -366,6 +383,7 @@
           "git",
           "github",
           "id",
+          "install",
           "modes",
           "name",
           "roster",
@@ -1847,6 +1865,33 @@
           "git_init",
           "name",
           "path"
+        ],
+        "type": "object"
+      },
+      "ServiceInstallResult": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "output": {
+            "type": "string"
+          },
+          "seconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "command",
+          "exit_code",
+          "ok",
+          "output",
+          "seconds"
         ],
         "type": "object"
       },
@@ -4316,6 +4361,42 @@
           }
         ],
         "summary": "Run the gate now and report what happened. On demand: a gate can be a whole test suite."
+      }
+    },
+    "/v1/projects/{id}/install": {
+      "post": {
+        "operationId": "ProjectInstall",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceInstallResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Run the project's declared install chain ([install] command in project.toml) so accepted work becomes the running app without leaving ducklab"
       }
     },
     "/v1/projects/{id}/next": {

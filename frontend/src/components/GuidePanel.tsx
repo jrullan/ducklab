@@ -69,6 +69,8 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   const viewKey = `${STORE}.${view}`;
   const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off" && (actionable || localStorage.getItem(viewKey) === "on"));
   const [showAll, setShowAll] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installMsg, setInstallMsg] = useState<string | null>(null);
   useEffect(() => { setOpen(localStorage.getItem(STORE) !== "off" && (actionable || localStorage.getItem(viewKey) === "on")); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
   // Runs are the guide's pulse: an accept, a pause, a landed proposal all
   // change what is next.
@@ -216,9 +218,38 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
       <ol className="mt-1.5 space-y-1.5">
         {(showAll ? steps : steps.slice(0, 4)).map((s, i) => (
           <li key={`${s.id}:${s.ref ?? i}`} data-testid="guide-step" data-primary={i === 0 ? "true" : undefined}>
+            {/* The self-hosted install step is a BUTTON: the whole point is
+                not leaving ducklab for a terminal. It runs the project's
+                declared [install] command and reports; the engine restart
+                stays a separate, deliberate click. */}
+            {s.id === "install" ? (
+              <span className={i === 0 ? "text-sm" : "text-xs"}>
+                <button
+                  type="button"
+                  data-testid="guide-install"
+                  disabled={installing}
+                  title={`${s.action} — ${s.reason}`}
+                  onClick={() => {
+                    if (typeof client.projectInstall !== "function") return;
+                    setInstalling(true);
+                    setInstallMsg(null);
+                    client.projectInstall(projectId)
+                      .then((r) => setInstallMsg(r.ok ? `installed in ${Math.round(r.seconds)}s — now Restart engine (Settings) and relaunch the app` : `install failed (exit ${r.exit_code}):
+${r.output.slice(-600)}`))
+                      .catch((e) => setInstallMsg(e instanceof Error ? e.message : String(e)))
+                      .finally(() => setInstalling(false));
+                  }}
+                  className={`rounded border px-2 py-1 ${i === 0 ? "border-ink text-ink" : "border-hairline text-ink-muted hover:text-ink"} disabled:opacity-50`}
+                >
+                  {installing ? "Installing…" : shortAction(s.action)}
+                </button>
+                {installMsg && <p className="mt-1 whitespace-pre-wrap text-xs text-ink-muted" data-testid="guide-install-result">{installMsg}</p>}
+              </span>
+            ) : (
             <a href={hrefFor(s)} title={`${s.action} — ${s.reason}`} className={i === 0 ? "text-sm text-ink underline" : "text-xs text-ink-muted underline hover:text-ink"}>
               {i === 0 ? s.action : shortAction(s.action)}
             </a>
+            )}
             {i === 0 && <p className="mt-0.5 text-xs text-ink-muted">{s.reason}</p>}
             {s.refs && s.refs.length > 1 && (
               <span className="mt-0.5 flex flex-wrap gap-1" data-testid="guide-step-refs">

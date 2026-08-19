@@ -8,6 +8,10 @@ describe = ""
 created = "2026-08-03T13:35:24Z"
 autonomy = "yolo"
 
+[install]
+  command = "make desktop && make install"
+  timeout_s = 600
+
 [verify]
   mode = "tests"
   tests = "go test ./... && cd frontend && npx tsc --noEmit && npx vitest run"
