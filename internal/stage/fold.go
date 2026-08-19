@@ -45,17 +45,39 @@ func FoldPasses(texts []string, kind artifact.Kind) (string, []string) {
 		return passes[0].raw, nil
 	}
 
+	// New sections all wear the same placeholder id (SPEC-900, T-900 …)
+	// until AssignIDs renumbers, so an id-only key made the fold blind: a
+	// final pass carrying ONE placeholder section looked like it re-emitted
+	// them all, and four verified additions vanished (B-090). A duplicated
+	// id folds by id+title instead.
+	placeholder := map[string]bool{}
+	for _, p := range passes {
+		within := map[string]int{}
+		for _, sec := range p.doc.Sections {
+			within[sec.ID]++
+			if within[sec.ID] > 1 {
+				placeholder[sec.ID] = true
+			}
+		}
+	}
+	key := func(sec artifact.Section) string {
+		if placeholder[sec.ID] {
+			return sec.ID + "|" + strings.ToLower(strings.TrimSpace(sec.Title))
+		}
+		return sec.ID
+	}
+
 	folded := append([]artifact.Section(nil), passes[0].doc.Sections...)
 	index := map[string]int{}
 	for i, sec := range folded {
-		index[sec.ID] = i
+		index[key(sec)] = i
 	}
 	for _, p := range passes[1:] {
 		for _, sec := range p.doc.Sections {
-			if i, ok := index[sec.ID]; ok {
+			if i, ok := index[key(sec)]; ok {
 				folded[i] = sec
 			} else {
-				index[sec.ID] = len(folded)
+				index[key(sec)] = len(folded)
 				folded = append(folded, sec)
 			}
 		}
@@ -64,12 +86,12 @@ func FoldPasses(texts []string, kind artifact.Kind) (string, []string) {
 	final := passes[len(passes)-1].doc
 	inFinal := map[string]bool{}
 	for _, sec := range final.Sections {
-		inFinal[sec.ID] = true
+		inFinal[key(sec)] = true
 	}
 	var kept []string
 	for _, sec := range folded {
-		if !inFinal[sec.ID] {
-			kept = append(kept, sec.ID)
+		if !inFinal[key(sec)] {
+			kept = append(kept, sec.ID+" — "+sec.Title)
 		}
 	}
 

@@ -24,8 +24,8 @@ func TestFoldPassesKeepsWhatTheRevisionDidNotMention(t *testing.T) {
 	if strings.Contains(folded, "Module-first permissions.\n") {
 		t.Error("the revised section kept its old body")
 	}
-	if len(kept) != 2 || kept[0] != "SPEC-001" || kept[1] != "SPEC-003" {
-		t.Errorf("kept = %v, want [SPEC-001 SPEC-003]", kept)
+	if len(kept) != 2 || !strings.HasPrefix(kept[0], "SPEC-001") || !strings.HasPrefix(kept[1], "SPEC-003") {
+		t.Errorf("kept = %v, want SPEC-001 and SPEC-003", kept)
 	}
 }
 
@@ -53,5 +53,29 @@ func TestFoldPassesDegradesGracefully(t *testing.T) {
 	}
 	if folded, _ := FoldPasses([]string{"no sections here"}, artifact.KindSpec); folded != "no sections here" {
 		t.Errorf("unparseable passes should return the last text, got %q", folded)
+	}
+}
+
+// The B-090 regression, in the shape it actually happened: every NEW
+// fragment section wears the placeholder id until AssignIDs renumbers, so
+// an id-only fold saw "SPEC-900 is in the final pass" and dropped four
+// verified additions. Placeholder ids fold by id+title.
+func TestFoldPassesDistinguishesPlaceholderSectionsByTitle(t *testing.T) {
+	round1 := "## SPEC-900 — GanttPRO sync\n\nverified as-built\n\n" +
+		"## SPEC-900 — Email senders\n\ntwo-level fallback\n\n" +
+		"## SPEC-900 — Status overrides\n\nnot found in tree\n"
+	round2 := "## SPEC-900 — Email senders\n\nmodule then default; no deployment fallback\n"
+
+	folded, kept := FoldPasses([]string{round1, round2}, artifact.KindSpec)
+	for _, want := range []string{"GanttPRO sync", "verified as-built", "no deployment fallback", "Status overrides"} {
+		if !strings.Contains(folded, want) {
+			t.Errorf("fold lacks %q:\n%s", want, folded)
+		}
+	}
+	if strings.Contains(folded, "two-level fallback") {
+		t.Error("the revised placeholder section kept its old body")
+	}
+	if len(kept) != 2 {
+		t.Errorf("kept = %v, want the two un-re-emitted placeholder sections", kept)
 	}
 }
