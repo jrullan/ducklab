@@ -633,3 +633,21 @@ describe("task actions on the run view card", () => {
     expect(screen.queryByTestId("task-remove")).toBeNull();
   });
 });
+
+
+// A finished build's deliverable is the diff, and "open by default" at the
+// very bottom of the page meant never seen: it renders beside the verdict
+// now, the dock drops its diff tab, and the dock's default falls to verify.
+describe("the finished run's diff", () => {
+  it("shows what changed beside the verdict, not in the bottom dock", async () => {
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: { ...failed, status: "done", verdict: "PASSED", accepted: true, commit_sha: "abc1234" }, events: [] })),
+      runDiff: vi.fn(() => Promise.resolve({ diff: "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-old\n+new", tests: "" })),
+    } as Partial<EngineClient>);
+    render(<RunView runId="r-1" client={client} />);
+    const inline = await screen.findByTestId("diff-inline");
+    expect(inline.textContent).toContain("what changed");
+    expect(inline.textContent).toContain("x.go");
+    await waitFor(() => expect(screen.queryByTestId("tab-diff")).toBeNull());
+  });
+});

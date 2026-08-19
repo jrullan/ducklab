@@ -449,8 +449,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // software, and a stage reviewer's findings are about a draft — their
   // destiny is a revision (request changes), not the bug board.
   const codeRun = run.stage === "build" || run.stage === "test";
-  // The tab a non-code run actually shows: its bar offers only calls.
-  const shownTab: Tab = codeRun ? tab : "calls";
+  const finished = run.status !== "running" && run.status !== "queued" && run.status !== "paused";
+  // The tab a non-code run actually shows: its bar offers only calls — and
+  // once a finished run's diff moves up beside the verdict, the dock's own
+  // default falls through to verify rather than pointing at a tab that is
+  // no longer there.
+  const shownTab: Tab = !codeRun ? "calls" : finished && (diff || testHunks) && tab === "diff" ? "verify" : tab;
   // A non-code run's only panel is the model-calls list — debugging
   // material, not the content — so it starts folded; a build's diff starts
   // open. The person's own click wins over either default.
@@ -492,7 +496,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
   const isWorking = run.status === "running" || run.status === "queued" || run.status === "paused";
-  const finished = !isWorking;
   // Caps can be lifted only once the budget exists: a queued run's budget is
   // created when it starts, and the engine refuses until then.
   const canLift = run.status === "running" || run.status === "paused";
@@ -1090,6 +1093,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
+      {/* WHAT CHANGED, where the reading order wants it: verdict, findings,
+          then the diff — a finished build's deliverable lived at the very
+          bottom of the page, "open by default" and never seen. The bottom
+          tab bar drops its diff tab while this section owns it. */}
+      {finished && codeRun && (diff || testHunks) && (
+        <section className="m-2 rounded-card border border-hairline p-3" data-testid="diff-inline">
+          <h2 className="mb-2 text-sm font-medium text-ink">what changed</h2>
+          {testHunks && (
+            <section className="mb-3 rounded-card border border-serious p-2" data-testid="tests-modified">
+              <p className="mb-2 text-sm text-serious">
+                this change edits tests; read these hunks before accepting
+              </p>
+              <DiffView files={parseDiff(testHunks)} />
+            </section>
+          )}
+          {diff && <DiffView files={parseDiff(diff)} />}
+        </section>
+      )}
+
       {/* The stage run's subject IS a document. The lanes show the council
           arguing; this is the thing being decided, rendered where the
           decision happens — before this, a spec run paused at its gate
@@ -1486,8 +1508,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             ] as [Tab, string | undefined][])
               // A section that is empty BY DESIGN is not announced on a
               // finished run: "candidates none" on every solo build taught
-              // the eye to skip the bar.
-              .filter(([t, note]) => !(finished && t === "candidates" && note === "none")))
+              // the eye to skip the bar — and the diff moves up beside the
+              // verdict once the run ends, so its tab goes with it.
+              .filter(([t, note]) => !(finished && t === "candidates" && note === "none"))
+              .filter(([t]) => !(t === "diff" && finished && (diff || testHunks))))
           : // A document, triage or chat run has no diff, no gate output and
             // no candidates BY DESIGN — three dimmed tabs whose empty states
             // all truthfully said "none" taught the eye to skip the bar
@@ -1534,7 +1558,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             whole point is that they are read before the decision and not
             after. Not a blocker — sometimes a test is genuinely wrong (05
             §5.3) — so the Accept button stays exactly where it was. */}
-        {shownTab === "diff" && testHunks && (
+        {shownTab === "diff" && !(finished && (diff || testHunks)) && testHunks && (
           <section
             className="mb-3 rounded-card border border-serious p-2"
             data-testid="tests-modified"
@@ -1545,7 +1569,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <DiffView files={parseDiff(testHunks)} />
           </section>
         )}
-        {shownTab === "diff" &&
+        {shownTab === "diff" && !(finished && (diff || testHunks)) &&
           (diff ? (
             <DiffView files={parseDiff(diff)} />
           ) : (
