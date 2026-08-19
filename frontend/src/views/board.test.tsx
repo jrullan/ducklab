@@ -1249,3 +1249,25 @@ describe("Board — the tasks board at scale", () => {
     await waitFor(() => expect(screen.getByText("Done 1")).toBeTruthy());
   });
 });
+
+// A board with nothing in flight said it with five empty strips and a
+// scrollbar. One line and the archive's door instead.
+describe("the quiet board", () => {
+  it("says nothing is in flight when only the archive has cards", async () => {
+    const many: Task[] = Array.from({ length: 9 }, (_, i) => ({ id: `T-00${i + 1}`, title: `Done ${i + 1}`, milestone: "M-1", status: "accepted" }) as Task);
+    const client = clientWith((p) => {
+      if (p.includes("/tasks/next")) return json({});
+      if (p.includes("/tasks")) return json({ items: many, total: many.length });
+      if (p.includes("/bugs")) return json({ items: [], total: 0 });
+      if (p.includes("/defaults/modes")) return json({ rounds: {}, agent_max_turns: 24, ducklings: {} });
+      return json({}, 404);
+    });
+    render(<Board client={client} projectId="p" />);
+    const quiet = await screen.findByTestId("board-quiet");
+    expect(quiet.textContent).toContain("Nothing in flight");
+    expect(screen.queryByTestId("board-col-todo")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-archive-toggle"));
+    await waitFor(() => expect(screen.getByText("Done 1")).toBeTruthy());
+    expect(screen.queryByTestId("board-quiet")).toBeNull();
+  });
+});

@@ -577,10 +577,32 @@ export function Board({
           </p>
         )}
 
-        {/* Columns keep a card-shaped minimum and the BOARD scrolls
-            sideways in a narrow window — squeezed, the one column with
-            work collapsed into a sliver of vertical letters while the
-            empty strips kept their width. */}
+        {/* A board with nothing in flight says so in one line instead of
+            drawing five empty strips and a scrollbar: the only thing on it
+            is the archive's door. */}
+        {(() => {
+          const archiveKey = isBugs ? "verified" : "accepted";
+          const working = (isBugs ? shownBugs : shownTasks).filter((it) => it.status !== archiveKey);
+          const archived = (isBugs ? shownBugs : shownTasks).filter((it) => it.status === archiveKey);
+          if (working.length === 0 && archived.length > ARCHIVE_FOLD_AT && !archiveOpen) {
+            return (
+              <div className="flex flex-col items-center gap-2 py-10 text-sm text-ink-muted" data-testid="board-quiet">
+                <span aria-hidden="true">🦆</span>
+                <p>Nothing in flight{isBugs ? " — no open, triaged, in-progress or fixed reports" : ""}.</p>
+                <button type="button" data-testid="board-archive-toggle" onClick={() => setArchiveOpen(true)} className="rounded border border-hairline px-3 py-1 text-ink-muted hover:text-ink">
+                  {isBugs ? "Verified" : "Accepted"} · {archived.length} ›
+                </button>
+              </div>
+            );
+          }
+          return null;
+        })() ?? null}
+        {(() => {
+          const archiveKey = isBugs ? "verified" : "accepted";
+          const working = (isBugs ? shownBugs : shownTasks).filter((it) => it.status !== archiveKey);
+          const archived = (isBugs ? shownBugs : shownTasks).filter((it) => it.status === archiveKey);
+          if (working.length === 0 && archived.length > ARCHIVE_FOLD_AT && !archiveOpen) return null;
+          return (
         <div className="flex items-start gap-2 overflow-x-auto pb-2">
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
@@ -697,6 +719,8 @@ export function Board({
             );
           })}
         </div>
+          );
+        })()}
 
         {/* Decided outcomes — closed, duplicate, wontfix — are rightly not
             columns: a board that showed them would be mostly archive. But they
