@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 5
-updated_at: 2026-08-19T01:28:57Z
-run_id: r-20260819-012807-7b3b
-ducklings: [k3, qwen38-max, atom-local, terra]
-based_on: 5ea108cf93c95299
+version: 6
+updated_at: 2026-08-19T11:01:44Z
+run_id: r-20260819-110137-r4mc
+ducklings: [atom-local, terra, qwen38-max, k3]
+based_on: 342c9950a93bc53c
 approved_by: human
 ---
 
@@ -1509,4 +1509,17 @@ Avatar choice in ConversationLane keys on block.role === "human", and chat human
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-077 — Replace the current human-turn avatar
+
+**Implements:** SPEC-054  
+
+Render 🧑 instead of 👤 for turns authored by the current human in chat transcripts. This makes the human-turn marker consistent wherever the active chat UI presents it.
+
+**Deliverables:**
+- The current human’s chat turns display the 🧑 avatar rather than 👤
+  - Update the shared/current chat-turn rendering path, including reopened transcripts if it is reused there
+- Frontend tests assert that current-human turns render 🧑 and do not render 👤
+  - Preserve distinct avatars and styling for non-human roles
+
+**Out of scope:** Changing avatars for ducklings, historical non-current-human identities, or other UI iconography.
 
