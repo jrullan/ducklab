@@ -68,7 +68,8 @@ describe("anonymiseTurns", () => {
       ev("turn_end", 4),
       ev("turn_start", 5, { round: 2, turn: 0, role: "implementer", duckling: "pato-uno" }),
     ]);
-    const anon = anonymiseTurns(turns, true);
+    // The round divider is not a contestant; the letters belong to turns.
+    const anon = anonymiseTurns(turns, true).filter((t) => t.role !== "round");
 
     for (const t of anon) expect(t.duckling).toBe("");
     expect(anon[0]!.label).toBe("A");
@@ -610,5 +611,25 @@ describe("the announced test-first gate", () => {
     expect(g!.label).toBe("baseline tests passed");
     const after = buildGate([ev("gate", { gate: "tests", cmd: "x", exit: 1, phase: "after" }, 1)]);
     expect(after!.label).toBe("tests failed");
+  });
+});
+
+// A council whose reviewer asked for changes opens round 2 with the
+// architect again — two adjacent same-actor entries that read as a
+// duplicated turn until the divider names the loop.
+describe("the round divider", () => {
+  const ev = (type: string, data: Record<string, unknown>, seq: number) => ({ type, data, seq }) as unknown as DucklabEvent;
+  it("separates rounds, once, and never before round 1", () => {
+    const turns = buildTurns([
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "k3" }, 1),
+      ev("turn_end", { round: 1, turn: 0, role: "architect" }, 2),
+      ev("turn_start", { round: 1, turn: 3, role: "architect", duckling: "k3" }, 3),
+      ev("turn_end", { round: 1, turn: 3, role: "architect" }, 4),
+      ev("turn_start", { round: 2, turn: 0, role: "architect", duckling: "k3" }, 5),
+    ]);
+    const dividers = turns.filter((t) => t.role === "round");
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]!.text).toBe("round 2");
+    expect(turns.findIndex((t) => t.role === "round")).toBe(2); // between the rounds
   });
 });

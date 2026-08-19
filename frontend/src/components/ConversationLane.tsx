@@ -52,6 +52,15 @@ export function ConversationTurn({
   const anonymous = !!block.label;
   const isGate = block.role === "gate";
   const isHuman = block.role === "human";
+  if (block.role === "round") {
+    return (
+      <div data-testid="round-divider" className="my-2 flex items-center gap-2 text-xs text-ink-muted" role="separator">
+        <span className="h-px flex-1 bg-hairline" />
+        <span>{block.text}</span>
+        <span className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
   if (block.role === "pause" && block.pause) {
     return (
       <div

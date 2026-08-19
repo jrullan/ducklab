@@ -302,6 +302,20 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
       case "turn_start": {
         const round = Number(d.round ?? 1);
         const turn = Number(d.turn ?? 0);
+        // The round boundary, said out loud. A council whose reviewer asked
+        // for changes opens round 2 with the architect again — two adjacent
+        // entries by the same actor that read as a duplicated turn until
+        // the divider names the loop.
+        const lastReal = [...blocks].reverse().find((b) => b.role !== "pause" && !b.key.startsWith("round:"));
+        // Not in chats: there a "round" is just one exchange's coordinates,
+        // and a divider between every reply would slice the conversation.
+        if (round > 1 && String(d.role ?? "") !== "consultant" && lastReal && lastReal.round < round) {
+          blocks.push({
+            key: `round:${round}:${e.seq ?? blocks.length}`,
+            round, turn: -1, role: "round", duckling: "",
+            toolCalls: [], text: `round ${round}`, done: true, messageOnly: true,
+          });
+        }
         const key = keyFor(round, turn);
         const block: TurnBlock = {
           key,
@@ -570,6 +584,9 @@ export function anonymiseTurns(blocks: readonly TurnBlock[], anonymise: boolean)
 
   const labels = new Map<string, string>();
   return blocks.map((b) => {
+    // Dividers and harness blocks are not contestants; handing them a
+    // letter shifted everyone after them down the alphabet.
+    if (!b.duckling) return { ...b };
     let label = labels.get(b.duckling);
     if (!label) {
       label = String.fromCharCode(65 + labels.size);
