@@ -2412,6 +2412,12 @@
           "mode": {
             "type": "string"
           },
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "revise": {
             "type": "string"
           },

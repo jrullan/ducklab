@@ -684,6 +684,7 @@ export interface ServiceStageRequest {
   from?: string;
   images?: string[];
   mode?: string;
+  refs?: string[];
   revise?: string;
   rounds?: number;
   settle?: boolean;

@@ -18,6 +18,7 @@ func stageCmd(stage string, args []string, repo string) int {
 	mode := ""
 	rounds := 0
 	adopt := false
+	var refs []string
 	sub := ""
 	var revArgs []string
 	for i := 0; i < len(args); i++ {
@@ -37,6 +38,16 @@ func stageCmd(stage string, args []string, repo string) int {
 			i++
 		case "--yes":
 			yes = true
+		case "--ref":
+			// Repeatable: reference documents (files, or directories of
+			// .md/.txt) loaded bounded into the stage's prompt as context —
+			// the wiki an adopt should read lives where run tools cannot.
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --ref needs a file or directory")
+				return 2
+			}
+			refs = append(refs, args[i+1])
+			i++
 		case "--adopt":
 			// Intake only, and the engine enforces it: a survey of the tree
 			// instead of an interview about an idea.
@@ -68,7 +79,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--adopt] [--mode council|solo] [--rounds N] [--yes]\n"+
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--adopt] [--mode council|solo] [--rounds N] [--yes]\n"+
 				"       ducklab %s accept|reject|diff\n"+
 				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
@@ -87,6 +98,9 @@ func stageCmd(stage string, args []string, repo string) int {
 	req := map[string]interface{}{}
 	if from != "" {
 		req["from"] = from
+	}
+	if len(refs) > 0 {
+		req["refs"] = refs
 	}
 	if yes {
 		req["autonomy"] = "auto"

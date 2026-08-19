@@ -223,6 +223,24 @@ describe("Cycle — starting a stage", () => {
     expect((await screen.findByTestId("cycle-run-link")).getAttribute("href")).toBe("#/runs/r-42");
   });
 
+  // References are a door, not a form field: closed, one quiet line; open,
+  // the same surface2 input the brief is, and the launch carries the paths.
+  it("attaches reference documents from their door", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-start");
+    fireEvent.click(screen.getByTestId("cycle-refs-door"));
+    fireEvent.change(screen.getByTestId("cycle-refs"), {
+      target: { value: "~/wiki/Desarrollo/miempresa/MiEmpresa.md\n\n~/wiki/Desarrollo/miempresa/feedback-pipeline.md\n" },
+    });
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({
+        refs: ["~/wiki/Desarrollo/miempresa/MiEmpresa.md", "~/wiki/Desarrollo/miempresa/feedback-pipeline.md"],
+      })),
+    );
+  });
+
   it("starts intake with no brief at all", async () => {
     const c = client();
     render(<Cycle client={c} projectId="p" />);

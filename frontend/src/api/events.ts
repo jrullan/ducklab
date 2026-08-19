@@ -263,6 +263,8 @@ export const KNOWN_EVENT_TYPES = [
   // An accept whose commit did not reproduce from a clean checkout takes
   // the commit back; the diff stays in the tree, uncommitted (B-069).
   "commit_withdrawn",
+  // Which reference documents a stage loaded, and what its caps dropped.
+  "references_loaded",
   "message",
   "proposal",
   "verdict",

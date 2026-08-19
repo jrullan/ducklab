@@ -71,8 +71,14 @@ type StageRequest struct {
 	// writes the requirements the code ALREADY satisfies, instead of
 	// interviewing a person about a product that is still an idea. For a
 	// codebase that exists, this is the front door.
-	Adopt  bool `json:"adopt,omitempty"`
-	Stream bool `json:"stream"`
+	Adopt bool `json:"adopt,omitempty"`
+	// Refs name reference documents — files, or directories of .md/.txt —
+	// loaded bounded into the prompt as context. They live where the
+	// ducklings' fs tools cannot reach (a wiki outside the project root),
+	// so the prompt is the one honest channel; the run records what was
+	// included and what the caps dropped.
+	Refs   []string `json:"refs,omitempty"`
+	Stream bool     `json:"stream"`
 	// resumed is set only by RunResume: the run keeps its recorded ceilings
 	// and its ledger continues from what it already spent.
 	resumed bool
@@ -285,12 +291,28 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		if data, err := os.ReadFile(seed); err == nil {
 			seed = string(data)
 		}
+		// A --from that is not a readable path is treated as the brief text
+		// itself: a user pasting a sentence should not have to make a file.
+	}
+	if len(req.Refs) > 0 {
+		refs, loaded, dropped, rerr := loadReferences(req.Refs)
+		if rerr != nil {
+			s.failRun(rs, fmt.Errorf("references: %w", rerr))
+			return
+		}
+		rs.writer.AppendEvent("references_loaded", map[string]interface{}{
+			"files": loaded, "dropped": dropped,
+		})
+		// Appended to the seed, which is recorded as the brief: the
+		// references ARE part of what was asked for, and the brief file is
+		// where a person checks the draft against its inputs.
+		seed += refs
+	}
+	if seed != "" {
 		// Kept as its own file. Comparing requirements against what was asked
 		// for is the first thing anyone does with them, and the brief was
 		// reachable only by digging it out of a prompt in llm.jsonl.
 		rs.writer.WriteBrief(seed)
-		// A --from that is not a readable path is treated as the brief text
-		// itself: a user pasting a sentence should not have to make a file.
 	}
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)

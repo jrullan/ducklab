@@ -135,6 +135,7 @@ func toolList() []map[string]interface{} {
 				"mode":        str("optional mode: solo | council | sectioned"),
 				"agent_turns": map[string]interface{}{"type": "integer", "description": "optional per-seat agent turn cap"},
 				"adopt":       map[string]interface{}{"type": "boolean", "description": "intake only: survey the tree"},
+				"refs":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "reference documents: paths to files or directories of .md/.txt, loaded bounded into the prompt as context (a wiki outside the project root)"},
 			}, "project_id", "stage"),
 		},
 		{
@@ -500,6 +501,9 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 		if adopt, _ := a["adopt"].(bool); adopt {
 			req["adopt"] = true
+		}
+		if refs, ok := a["refs"].([]interface{}); ok && len(refs) > 0 {
+			req["refs"] = refs
 		}
 		copyRunOverrides(req, a)
 		run, err := s.eng.StageStart(a.str("project_id"), a.str("stage"), req)

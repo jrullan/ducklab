@@ -47,6 +47,12 @@ export function Cycle({
   const [failure, setFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
   const [brief, setBrief] = useState("");
+  // Reference documents for intake and spec: paths to files or folders of
+  // .md/.txt, one per line — a wiki outside the project root is the
+  // commonest home of adoption context, and run tools cannot reach it.
+  const [refsText, setRefsText] = useState("");
+  const [refsOpen, setRefsOpen] = useState(false);
+  const refsList = () => refsText.split("\n").map((l) => l.trim()).filter(Boolean);
   // The plan amendment's text — Review's light exit, separate from the brief
   // so the two doors never share a box.
   const [amendment, setAmendment] = useState("");
@@ -296,6 +302,7 @@ export function Cycle({
         adopt,
         ducklings,
         agentTurns: stageAgentTurns(),
+        ...(refsList().length ? { refs: refsList() } : {}),
       });
       setStartedRun(run.id);
       setBrief("");
@@ -580,6 +587,39 @@ export function Cycle({
                   ? "Reads the accepted requirements and proposes a specification."
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
+            )}
+            {(active.stage === "intake" || active.stage === "spec") && (
+              <div className="mb-2">
+                {/* A door, not a form field: most launches carry no
+                    references, and an always-open input would tax the card.
+                    Open, it is the same quiet surface2 input the brief is. */}
+                {!refsOpen && refsList().length === 0 ? (
+                  <button
+                    type="button"
+                    data-testid="cycle-refs-door"
+                    onClick={() => setRefsOpen(true)}
+                    className="text-xs text-ink-muted underline hover:text-ink"
+                  >
+                    attach reference documents…
+                  </button>
+                ) : (
+                  <>
+                    <label className="mb-1 block text-xs text-ink-muted" htmlFor="cycle-refs">
+                      reference documents — paths to .md/.txt files or folders, one per line
+                      (loaded bounded into the prompt; the run records what was included)
+                    </label>
+                    <textarea
+                      id="cycle-refs"
+                      data-testid="cycle-refs"
+                      rows={2}
+                      placeholder={"~/wiki/Desarrollo/miempresa/MiEmpresa.md\n~/wiki/Desarrollo/miempresa/feedback-pipeline.md"}
+                      value={refsText}
+                      onChange={(e) => setRefsText(e.target.value)}
+                      className="w-full rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs"
+                    />
+                  </>
+                )}
+              </div>
             )}
             {active.stage === "spec" && debtCount > 0 && (
               <div className="mb-3 rounded-card border border-hairline p-2" data-testid="spec-settle">

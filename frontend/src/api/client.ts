@@ -1044,7 +1044,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[] } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -1056,6 +1056,10 @@ export class EngineClient {
       // Intake only: survey the tree into the requirements the code already
       // satisfies, instead of interviewing about an idea.
       adopt: opts.adopt ?? false,
+      // Reference documents: paths (files or folders of .md/.txt) the engine
+      // loads bounded into the prompt — a wiki outside the project root is
+      // the commonest home of adoption context.
+      refs: opts.refs ?? [],
       // Plan only: the light path out of review — an architect amends the
       // plan for a small change instead of running the whole design cycle.
       extend: opts.extend ?? "",
