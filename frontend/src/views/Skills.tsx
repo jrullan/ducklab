@@ -17,13 +17,13 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
   const [newName, setNewName] = useState("");
   const [newRunnable, setNewRunnable] = useState(false);
   const [runArgs, setRunArgs] = useState<Record<string, string>>({});
-  const [runOut, setRunOut] = useState<{ name: string; output: string; exit: number } | null>(null);
+  const [runOut, setRunOut] = useState<{ name: string; output: string; failed: boolean } | null>(null);
   const [running, setRunning] = useState(false);
 
   const reload = useCallback(() => {
     client
       .skills(projectId)
-      .then((r: { skills?: SkillSummary[] }) => setSkills(r.skills ?? []))
+      .then((r: { items?: SkillSummary[] }) => setSkills(r.items ?? []))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [client, projectId]);
   useEffect(() => {
@@ -69,7 +69,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       const args: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(runArgs)) if (v.trim() !== "") args[k] = v;
       const r = await client.skillRun(projectId, sk.name ?? "", args);
-      setRunOut({ name: sk.name ?? "", output: r.output ?? "", exit: r.exit_code ?? 0 });
+      setRunOut({ name: sk.name ?? "", output: r.output ?? "", failed: r.failed ?? false });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -225,7 +225,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
                           className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded border border-hairline bg-surface2 p-2 text-xs"
                           data-testid="skill-run-output"
                         >
-                          {`exit ${runOut.exit}\n${runOut.output}`}
+                          {`${runOut.failed ? "✕ failed" : "✓ ran"}\n${runOut.output}`}
                         </pre>
                       )}
                     </div>

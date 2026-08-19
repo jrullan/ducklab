@@ -8,9 +8,12 @@ import type { EngineClient, SkillSummary } from "../api/client";
 
 function client(overrides: Partial<Record<string, unknown>> = {}) {
   return {
+    // {items} is the engine's real envelope (handleSkillList) — the first
+    // version of this mock mirrored the client's wrong assumption ({skills})
+    // and the view shipped reading a field that never existed.
     skills: vi.fn(() =>
       Promise.resolve({
-        skills: [
+        items: [
           {
             name: "survey-map",
             description: "Read before surveying the code: module map",
@@ -50,7 +53,7 @@ function client(overrides: Partial<Record<string, unknown>> = {}) {
       }),
     ),
     skillNew: vi.fn(() => Promise.resolve({ name: "n" })),
-    skillRun: vi.fn(() => Promise.resolve({ output: "extracted 3 pages", exit_code: 0 })),
+    skillRun: vi.fn(() => Promise.resolve({ output: "extracted 3 pages", failed: false })),
     ...overrides,
   } as unknown as EngineClient;
 }
@@ -82,7 +85,7 @@ describe("Skills view", () => {
     fireEvent.change(screen.getByPlaceholderText("file (required)"), { target: { value: "a.pdf" } });
     fireEvent.click(screen.getByTestId("skill-run"));
     await waitFor(() => expect(c.skillRun).toHaveBeenCalledWith("p", "pdf-extract", { file: "a.pdf" }));
-    expect((await screen.findByTestId("skill-run-output")).textContent).toContain("exit 0");
+    expect((await screen.findByTestId("skill-run-output")).textContent).toContain("✓ ran");
     expect(screen.getByTestId("skill-run-output").textContent).toContain("extracted 3 pages");
   });
 
@@ -97,7 +100,7 @@ describe("Skills view", () => {
   });
 
   it("says what a good first skill is when there are none", async () => {
-    render(<Skills client={client({ skills: vi.fn(() => Promise.resolve({ skills: [] })) })} projectId="p" />);
+    render(<Skills client={client({ skills: vi.fn(() => Promise.resolve({ items: [] })) })} projectId="p" />);
     expect((await screen.findByTestId("skills-empty")).textContent).toContain("survey map");
   });
 });

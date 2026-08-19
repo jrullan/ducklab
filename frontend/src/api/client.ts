@@ -955,7 +955,10 @@ export class EngineClient {
    *  problems `skill validate` would report and the pending flag a
    *  duckling-authored skill wears until its run is accepted. */
   skills(projectId: string) {
-    return this.request<{ skills: SkillSummary[] }>("GET", `/v1/projects/${projectId}/skills`);
+    // The engine's list envelope is {items}, like the other collection
+    // routes — the view once read a field the response never had and every
+    // project looked skill-less.
+    return this.request<{ items: SkillSummary[] }>("GET", `/v1/projects/${projectId}/skills`);
   }
   skillGet(projectId: string, name: string) {
     return this.request<SkillDetail>("GET", `/v1/projects/${projectId}/skills/${name}`);
@@ -963,8 +966,10 @@ export class EngineClient {
   skillNew(projectId: string, name: string, runnable: boolean) {
     return this.request<SkillDetail>("POST", `/v1/projects/${projectId}/skills`, { name, runnable });
   }
+  /** Runs a runnable skill. {output, failed}: a skill that ran and exited
+   *  non-zero is an answer with output, not a request error. */
   skillRun(projectId: string, name: string, args: Record<string, unknown>) {
-    return this.request<{ output?: string; exit_code?: number }>(
+    return this.request<{ output?: string; failed?: boolean }>(
       "POST",
       `/v1/projects/${projectId}/skills/${name}/run`,
       { args },
