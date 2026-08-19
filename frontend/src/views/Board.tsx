@@ -577,7 +577,11 @@ export function Board({
           </p>
         )}
 
-        <div className="flex items-start gap-2">
+        {/* Columns keep a card-shaped minimum and the BOARD scrolls
+            sideways in a narrow window — squeezed, the one column with
+            work collapsed into a sliver of vertical letters while the
+            empty strips kept their width. */}
+        <div className="flex items-start gap-2 overflow-x-auto pb-2">
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
               ? shownBugs.filter((b) => b.status === col.key)
@@ -601,7 +605,7 @@ export function Board({
               );
             }
             return (
-              <section key={col.key} data-testid={`board-col-${col.key}`} className={strip ? "w-28 shrink-0" : "min-w-0 flex-1"}>
+              <section key={col.key} data-testid={`board-col-${col.key}`} className={strip ? "w-28 shrink-0" : "min-w-52 flex-1"}>
                 <h2 className="mb-2 flex items-baseline text-sm text-ink-muted">
                   {col.label}
                   <span className="ml-1 text-ink-muted">{items.length}</span>
