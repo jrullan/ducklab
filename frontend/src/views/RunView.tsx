@@ -382,7 +382,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // Only the seats this mode actually uses, in speaking order; the record's
   // roster names every role, and a pair run showing seven chips read as
   // "my whole team is on this run".
-  const seatRoles = rolesForMode(run.stage === "build" || run.stage === "test" ? run.mode : run.stage);
+  // Keyed by the run's MODE except where the stage IS the shape (triage,
+  // release, chat): a spec run asked rolesForMode("spec"), got null, and
+  // showed all seven chairs of a council that seats three.
+  const seatRoles = rolesForMode(["triage", "release", "chat"].includes(run.stage) ? run.stage : run.mode);
   const rosterEntries = Object.entries(run.roster ?? {})
     .filter(([role]) => !seatRoles || seatRoles.includes(role))
     .sort(([a], [b]) => (seatRoles ? seatRoles.indexOf(a) - seatRoles.indexOf(b) : 0))

@@ -147,6 +147,22 @@ describe("the cycle map in the run header", () => {
     expect(screen.getByTestId("run-active-duckling").textContent).toContain("triager");
   });
 
+  // A spec run seats a council — architect, reviewers, advisor — and its
+  // chip row said all seven roles ("implementer default", "judge unseated"):
+  // the role filter was keyed by the stage name instead of the run's mode.
+  it("shows only the council's chairs on a document run", async () => {
+    const run = { ...runWith("spec"), mode: "council",
+      roster: { architect: "k3", reviewer: "terra", advisor: "qwen38-max", implementer: "", judge: "", scribe: "atom-local", triager: "k3" } } as unknown as Run;
+    render(<RunView runId="r-x" client={clientWith(run)} />);
+    await waitFor(() => screen.getAllByTestId("seat-chip"));
+    const roles = screen.getAllByTestId("seat-chip").map((c) => c.textContent ?? "");
+    expect(roles).toHaveLength(3);
+    expect(roles[0]).toContain("architect");
+    expect(roles[1]).toContain("reviewer");
+    expect(roles[2]).toContain("advisor");
+    expect(roles.join(" ")).not.toMatch(/judge|scribe|triager|implementer/);
+  });
+
   it("starts with the calls panel folded on a triage", async () => {
     render(<RunView runId="r-x" client={clientWith(runWith("triage"))} />);
     await waitFor(() => screen.getByTestId("run-view"));
