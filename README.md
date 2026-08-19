@@ -1,49 +1,69 @@
 # Ducklab
 
-A full-cycle software development harness that is multi-LLM by default.
+A full-cycle software development harness that is **multi-LLM by default**
+and honest by construction.
 
 You give it a brief. It writes requirements, a spec and a plan; builds tasks
-with one model or several arguing; runs your project's real gate; and stops for
-you before anything is committed. Every model call is logged. No model decides
-a verdict.
+with one model or several arguing; runs your project's real test gate; and
+stops for you before anything is committed. Every model call is logged. No
+model ever decides a verdict.
 
-It runs against local models. The two used to develop it are a vLLM box on the
-LAN and a llama.cpp server on localhost, and both are priced at zero.
+It was built for **local models first** — the two that built most of it are a
+vLLM box on the LAN and a llama.cpp server on localhost, both priced at zero —
+and hosted models sit beside them in the same roster, measured by the same
+evidence.
 
-This repository implements the specification in `~/dev/ducklab-spec/`. The spec
-is normative: where the code differs, that is recorded in
-[`docs/decisions/`](docs/decisions/).
+## Why this exists
+
+Most agentic coding tools assume one strong model and trust it. Ducklab
+assumes **several cheap models and trusts none of them**:
+
+- **The gate decides, never a model.** A verdict is a command's exit code.
+  A test-first run measures a green **baseline** before any test is written,
+  the red **over the new test** after, and every accept **reproduces the gate
+  from a clean checkout of the committed sha** — nothing lands that did not
+  reproduce, and an accept whose reproduction fails takes its own commit back.
+- **Decorrelation everywhere.** A different model reviews; a reviewer never
+  learns who wrote the code (absent from the payload, not hidden in the UI);
+  tournament judges choose blind; council critics read the draft, not each
+  other.
+- **Work is a contract.** A task's deliverables are the implementer's
+  numbered checklist; it reports on each by number, the reviewer checks each
+  against the diff, and an undelivered item summons the **rubber duck** — an
+  advisor seat that wakes only on measured distress (brake refusals, failure
+  streaks, red gates) and answers `none`, a note that sends the implementer
+  straight back to work, or `stop`.
+- **Seats are chosen on evidence.** Every duckling carries a scorecard —
+  in-seat pass rate from your own runs, cost per run, coding index — and the
+  roster board suggests seats from it, with the ranking criteria yours to
+  reorder. Suggestions are rare and justified: pass rates rank by their
+  Wilson lower bound, three runs minimum, locals never win on a $0 price.
+- **Nothing is unbounded.** Turns, tokens, cost, wallclock, tool output,
+  shell commands — every ceiling visible and liftable mid-run, on the record.
+
+And the existence proof: **ducklab is developed inside ducklab.** The plan,
+the bugs, the releases and most of the last eighty accepted tasks went
+through its own loop, driven by the same local models it measures.
 
 ## Status
 
-**Version 0.4.0.** Seven stages, five modes, skills, bugs, releases, a CLI and
-a desktop app.
+**v0.6.0**, moving fast. Seven stages, five modes, the roster board with
+evidence and suggestions, skills, bugs, releases, autopilot, a CLI, a
+desktop app, and an **MCP server** that lets another model operate the whole
+loop with recorded, attributed decisions.
 
-The version number is not a phase number. Work did not happen in the spec's
-phase order — there are v0.8 features here and two open v0.1 criteria.
-[`docs/status.md`](docs/status.md) has all 67 acceptance criteria with what is
-built, what is half built and what is missing, and does not round up.
-
-Measurement works: `ducklab bench` runs a versioned suite and Reports charts
-the result. What it found is that the suite does not yet tell two very
-different local models apart — see
-[decision 0005](docs/decisions/0005-canonical-tasks-do-not-discriminate.md).
-
-Still missing: deploy recipes, MCP, GitHub commands, and engine auto-start.
+[`docs/status.md`](docs/status.md) tracks all acceptance criteria and does
+not round up. Where code and spec differ, the difference is recorded in
+[`docs/decisions/`](docs/decisions/).
 
 ## Install
 
-Needs Go 1.24+, Node 22+ for the desktop, and git. The repository is private,
-so clone with an authenticated client:
-
-```bash
-gh repo clone jrullan/ducklab && cd ducklab
-```
+Needs Go 1.24+, Node 22+ for the desktop, and git.
 
 ### Linux
 
 The CLI and engine are pure Go. The desktop is a Wails v3 app and needs the
-GTK/WebKit development packages to build:
+GTK/WebKit development packages:
 
 ```bash
 sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev   # Debian/Ubuntu names
@@ -58,42 +78,34 @@ On Ubuntu 24.04+ the desktop also needs an AppArmor profile — see
 
 ```bash
 xcode-select --install    # the desktop build links against WebKit
-brew install go node gh
+brew install go node
 make desktop && make install
 ```
 
 Honesty note: ducklab is developed and exercised daily on Linux. The CLI and
-engine are compile-checked for `darwin/arm64` on every `make cross`, but no
-desktop build has been **verified on a Mac yet** — Wails v3 supports macOS, so it is
-expected to work, and the first person to try it is the test. If `make
-desktop` fails, `make install` still gives you the CLI and engine, and every
-capability is reachable from the CLI. Please report whatever breaks.
+engine compile-check for `darwin/arm64` on every `make cross`, but no desktop
+build has been verified on a Mac yet — the first person to try it is the
+test, and `make install` gives you the CLI and engine either way. Please
+report whatever breaks.
 
 ### Both
 
-`make install` installs to `~/.local/bin` — make sure that is on your `PATH`
-(on macOS it usually is not: `echo 'export PATH="$HOME/.local/bin:$PATH"' >>
-~/.zshrc`). It warns when the desktop binary predates `frontend/src`, because
-it will happily install a stale one.
+`make install` installs to `~/.local/bin` — make sure it is on your `PATH`.
+It warns when the desktop binary predates `frontend/src`, because it will
+happily install a stale one.
 
 ## Three binaries
 
 | | What it is |
 |---|---|
-| `ducklab-engine` | The daemon. Owns every run. Binds 127.0.0.1 only, with a bearer token rotated on each start. |
+| `ducklab-engine` | The daemon. Owns every run. Binds 127.0.0.1 only, bearer token rotated each start. |
 | `ducklab` | The CLI client. Holds no state; it asks the engine. |
-| `ducklab-desktop` | The desktop app. Also a client, also holds no state. |
+| `ducklab-desktop` | The desktop app. Also a client, also holds no state. Starts (or adopts) the engine itself. |
 
-Start the engine yourself for now — auto-start is specified and not built.
-Export any provider keys first: the engine reads them from its own
-environment at call time, so a key exported after the engine started is
-invisible to it.
-
-```bash
-export OPENROUTER_API_KEY=...   # if you use a hosted provider
-ducklab-engine &
-ducklab-desktop &               # or work from the CLI
-```
+Provider keys come from the engine's environment at call time — export them
+before it starts, or launch the desktop through a wrapper that loads them
+from your keyring. The app tells you when the engine it adopted is missing a
+key this app has, with the restart button beside the words.
 
 ## A cycle, end to end
 
@@ -116,13 +128,24 @@ ducklab review T-001                        # read the commit
 ducklab release plan --bump minor           # what shipped
 ```
 
-Each stage writes a `.proposed` file first and waits for you. `accept` promotes
-it; `reject` leaves the original untouched. Nothing is committed without you.
+Each stage writes a `.proposed` file first and waits for you. `accept`
+promotes it; `reject` restores exactly what the run wrote and nothing else;
+"request changes" sends any draft — spec, plan, release notes — back with
+your note. Nothing is committed without you (or without the autonomy level
+you explicitly granted).
+
+**Adopting an existing codebase** works the same way: intake reads the code
+and writes as-built requirements, the spec marks its sections `as-built`, and
+the plan stays deliberately empty — new work then enters through bug reports
+and plan amendments, which is how ducklab itself is developed.
+
+Your project declares its own truth in `.ducklab/project.toml`: the gate
+(`[verify]` — with `link_deps` and `setup` for what a clean checkout needs),
+how the app launches (`[run]` with a preflight), and how the project's own
+binaries are rebuilt (`[install]`) so the whole loop runs without leaving
+ducklab.
 
 ## Adding a model
-
-Local and hosted models sit side by side, which is the point — a local model is
-worth knowing about relative to something stronger.
 
 ```bash
 ducklab provider set openrouter --url https://openrouter.ai/api/v1 \
@@ -134,13 +157,14 @@ ducklab duckling set pato-sonnet --provider openrouter \
 ducklab duckling test pato-sonnet --prompt "say OK"
 ```
 
-`--key-env` is the **name** of an environment variable, never a key. The engine
-reads that variable when it makes a call, so no key is written to config, sent
-over the API, or kept in shell history. `ducklab provider list` says whether
-each one is actually set — that is the commonest reason a hosted model fails.
+`--key-env` is the **name** of an environment variable, never a key. No key
+is written to config, sent over the API, or kept in shell history.
 
-The same is available in the desktop under **Ducklings**, and takes effect
-immediately: no engine restart.
+The desktop's **Roster** view is where seats are assigned: drag from the
+Flock onto a mode's seat, globally or per project, with each duckling's
+evidence on the card and the engine's suggestions beside the seats. Coding /
+intelligence / agentic indices come from OpenRouter's benchmarks endpoint
+when a duckling lives there; your own runs supply the rest.
 
 ## The five modes
 
@@ -149,82 +173,65 @@ immediately: no engine restart.
 | Mode | What it does |
 |---|---|
 | `solo` | One duckling. The yardstick everything else is measured against. |
-| `pair` | Implementer and reviewer, decorrelated — a different model reviews. Between them sits the advisor, the rubber duck: silent unless the harness measured distress in the implementer's turn, then one of `none` / a note that sends the implementer straight back to work / `stop`. The implementer works to a numbered deliverables checklist and reports on it by number. |
-| `tournament` | Contestants build the same task in isolated worktrees; a judge picks, blind to who wrote what. |
-| `split` | An architect decomposes; subtasks run in parallel; integration is file copies with no model involved. |
-| `council` | Several models on one document, for intake, spec, plan and review. |
-
-`--ducklings a,b` assigns models positionally in `tournament` and `split`.
+| `pair` | Implementer and reviewer, decorrelated. Between them the advisor — the rubber duck. |
+| `tournament` | Contestants build the same task in isolated worktrees; a judge picks, blind. |
+| `split` | An architect decomposes; subtasks run in parallel; integration is file copies, no model involved. |
+| `council` | Several models on one document, for intake, spec, plan and review. One drafts, the others critique blind, the first revises. |
 
 ## What it will not do
 
 These are load-bearing, not preferences.
 
 - **A model never decides a verdict.** A gate is a command's exit code.
-- **A green candidate is applied byte-for-byte.** Nothing is re-generated after
-  it passed.
-- **A reviewer never learns who wrote the code.** Not hidden in the UI —
-  absent from the payload.
-- **Nothing is unbounded.** Turns, tokens, cost, wallclock, tool output, shell
-  commands.
-- **Secrets never touch project state.** Keys come from the environment or the
-  keyring; no API response returns one.
+- **A green candidate is applied byte-for-byte.** Nothing is re-generated
+  after it passed.
+- **A reviewer never learns who wrote the code.**
+- **Nothing lands that did not reproduce** from a clean checkout.
+- **A reject undoes what the run wrote, and nobody else's work.**
+- **Nothing is unbounded.**
+- **Secrets never touch project state.**
 - **The engine is loopback-only.** There is no remote mode.
 
 ## Skills
 
-A skill is a directory with a `SKILL.md` in it, under `.ducklab/skills/`.
-The documentation-only form has no script and is the default: a model reads it
+A skill is a directory with a `SKILL.md` under `.ducklab/skills/`. The
+documentation-only form has no script and is the default: a model reads it
 and follows it.
 
 ```bash
 ducklab skill new house-style
-ducklab skill list
-ducklab skill validate house-style
 ducklab skill run changelog-entry --arg summary="..."
 ```
-
-A duckling can write one during a run, with the ordinary `fs_write` tool,
-through the ordinary write guard — so reviewing a new skill is reading a diff.
 
 ## Operating ducklab from another model
 
 `ducklab mcp serve` exposes the whole loop over stdio as an MCP server: an
 external model reads each result, decides gates (with a required, recorded
 reason — decisions land as `approved_by: mcp:<client>`, never as "human"),
-answers questions, and starts work. The engine's `next` lists are the law:
-an operator cannot take an action a person could not. Configure it in any
-MCP client as command `ducklab`, args `mcp serve`.
+answers questions, files bugs, amends plans and starts work. The engine's
+`next` lists are the law: an operator cannot take an action a person could
+not.
 
-## Development
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, how the tests guard
+the architecture, how work flows through ducklab's own loop, and where to
+start. The short version:
 
 ```bash
 make            # vet, test, build the frontend
-go test ./...   # 30 packages
+go test ./...   # 38 packages
 cd frontend && npx vitest run
-make cross      # compile CHECK for linux/amd64, linux/arm64, darwin/arm64,
-                # windows/amd64 — produces no binaries; packaging is future work
 ```
 
-`docs/openapi.json` and `frontend/src/api/generated.ts` are generated from the
-route table by `make api`; do not edit them.
-
-Two tests are architectural and are meant to fail the build:
-`TestCLIImportsOnlyClientPackages` keeps the CLI from reaching into the domain,
-and `internal/arch_test.go` audits CLI/desktop parity.
+**License:** not chosen yet — the repository is private today. An OSI
+license will be picked before it goes public; nothing here is intended to
+stay proprietary.
 
 ## Specification
 
-Read in order:
-
-| # | File | What it fixes |
-|---|------|---------------|
-| 0 | `00-VISION.md` | Purpose, scope, non-goals, glossary |
-| 1 | `01-ARCHITECTURE.md` | Topology, 12 invariants, package layout |
-| 2 | `02-DATA-MODEL.md` | Config files, SQLite schema, artifacts |
-| 3 | `03-CLI.md` | CLI client: command grammar, flags, exit codes |
-| 4 | `04-AGENT-PROTOCOL.md` | Provider interface, toolbelt, role prompts |
-| 5 | `05-LIFECYCLE.md` | Stages, conversation engine, duck modes |
-| 6 | `06-PHASES.md` | Milestones v0.1 → v1.0, and the 67 criteria |
-| 7 | `07-ENGINE-API.md` | HTTP + SSE contract |
-| 8 | `08-DESKTOP-UI.md` | Desktop app design |
+The code implements a written specification (the `ducklab-spec` repository,
+published alongside this one when the repo goes public; sections
+00-VISION through 08-DESKTOP-UI). The spec is normative: where the code
+differs, that is recorded in [`docs/decisions/`](docs/decisions/), and the
+as-built spec the loop maintains lives in `.ducklab/docs/spec.md`.
