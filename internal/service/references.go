@@ -50,7 +50,7 @@ type refFile struct {
 // loadReferences expands the named paths (files, or directories searched
 // recursively for .md and .txt), loads them under the caps, and renders the
 // section a stage prompt carries. dropped names what the caps excluded.
-func loadReferences(paths []string, caps config.References) (rendered string, loaded []refFile, dropped []string, err error) {
+func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {
 	caps = resolveRefCaps(caps)
 	var files []string
 	for _, p := range paths {
@@ -119,12 +119,25 @@ func loadReferences(paths []string, caps config.References) (rendered string, lo
 	if len(loaded) == 0 {
 		return "", loaded, dropped, nil
 	}
-	head := "\n\n## Reference documents\n\n" +
-		"Provided by the person as BACKGROUND, not as scope. Where a reference and the code " +
+	// The guidance is stage-shaped. Intake's hardline ("never derive
+	// requirements") exists because a bug-inbox snapshot once became fifteen
+	// requirements — but read in a SPEC it told the architect to leave the
+	// wiki's architecture, RBAC and audit detail out of the document, the
+	// opposite of why the person attached it.
+	guidance := "Provided by the person as BACKGROUND, not as scope. Where a reference and the code " +
 		"disagree, the code is the truth for as-built claims — note the disagreement instead of " +
 		"copying the claim. A reference that lists open problems, pending feedback, plans or " +
 		"wishes describes WORK, not the product: never derive requirements from it — the first " +
 		"survey of MiEmpresa turned a bug-inbox snapshot into fifteen requirements about its " +
 		"fourteen bugs. Requirements state what the system IS.\n"
+	if stageName == "spec" || stageName == "plan" {
+		guidance = "Provided by the person as design context. USE them: ground your sections in the " +
+			"detail they carry — architecture decisions, domain rules, exact identifiers, " +
+			"workflows — rather than restating the requirements more vaguely. Two limits: the " +
+			"approved requirements define scope, so a reference's plans, wish lists or open " +
+			"problems never add sections; and where a reference and the code disagree, the code " +
+			"is the truth for as-built claims — note the disagreement instead of copying the claim.\n"
+	}
+	head := "\n\n## Reference documents\n\n" + guidance
 	return head + b.String(), loaded, dropped, nil
 }

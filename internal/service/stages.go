@@ -201,6 +201,18 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		kind := stage.Name(req.Stage).Kind()
 		if prop, pErr := artifact.LoadProposed(entry.Path, kind); pErr == nil && prop != nil && prop.Front.RunID != "" {
 			s.resolveSuperseded(prop.Front.RunID, "changes requested: "+req.Revise)
+			// The revision inherits what the revised run was launched with.
+			// A spec drafted over 13 reference documents was once revised
+			// with the note "use the reference documents" — and the revise
+			// request carried none, so the model revised blind (B-087).
+			// Reloaded fresh from the same paths, not copied: the person may
+			// have edited a document between draft and revision.
+			if len(req.Refs) == 0 && req.From == "" {
+				if prior, ok := loadStageRequest(filepath.Join(entry.Path, ".ducklab", "runs", prop.Front.RunID)); ok {
+					req.Refs = prior.Refs
+					req.From = prior.From
+				}
+			}
 		}
 	}
 
@@ -295,7 +307,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// itself: a user pasting a sentence should not have to make a file.
 	}
 	if len(req.Refs) > 0 {
-		refs, loaded, dropped, rerr := loadReferences(req.Refs, projCfg.References)
+		refs, loaded, dropped, rerr := loadReferences(req.Refs, projCfg.References, req.Stage)
 		if rerr != nil {
 			s.failRun(rs, fmt.Errorf("references: %w", rerr))
 			return

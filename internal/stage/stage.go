@@ -263,6 +263,11 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		r.WriteString("- If the note asks for something that cannot be done, say so in the " +
 			"section rather than silently doing something else.\n")
 		r.WriteString("- Return the whole document, not a fragment.\n\n")
+		if seed != "" {
+			r.WriteString("## Context from the person\n\n")
+			r.WriteString(strings.TrimSpace(seed))
+			r.WriteString("\n\n")
+		}
 		r.WriteString("## The document to revise\n\n")
 		r.WriteString(strings.TrimSpace(current.Raw))
 		r.WriteString("\n\n")

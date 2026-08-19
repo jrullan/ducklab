@@ -177,6 +177,27 @@ func TestSpecAndPlanPromptsCarryTheSeed(t *testing.T) {
 	}
 }
 
+// A revision inherits the launch context of the run it revises; the person
+// once wrote "use the reference documents" into a revise note and the prompt
+// held none of them (B-087).
+func TestRevisionPromptCarriesTheSeed(t *testing.T) {
+	root := projectWith(t, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Users can log in\n\n**Priority:** must\n\nDetail here.\n",
+		artifact.KindSpec:         "## SPEC-001 — Login\n\n**Implements:** REQ-001\n\nDetail.\n",
+	})
+	current, _ := artifact.Load(root, artifact.KindSpec)
+	prompt, err := BuildPrompt(root, Spec, "## Reference documents\n\nThe wiki RBAC spec.", current, "cover RBAC", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "The wiki RBAC spec.") {
+		t.Errorf("revision prompt dropped the seed:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "cover RBAC") {
+		t.Errorf("revision prompt lost the note")
+	}
+}
+
 // A stage that cannot run says which one to run first, rather than producing
 // an artifact with nothing behind it.
 func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
