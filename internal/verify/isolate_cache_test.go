@@ -26,7 +26,7 @@ func TestIsolatedGateKeepsTheBuildCaches(t *testing.T) {
 	want := map[string]string{
 		// GOPATH is the root for Go's shared downloads; GOMODCACHE also holds
 		// the automatically downloaded GOTOOLCHAIN module.
-		"GOPATH":      sharedGoPath,
+		"GOPATH":     sharedGoPath,
 		"GOMODCACHE": filepath.Join(sharedGoPath, "pkg", "mod"),
 		"GOCACHE":    sharedBuildCache,
 	}

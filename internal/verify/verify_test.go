@@ -36,6 +36,23 @@ func TestDetectNoGateForPlainDocs(t *testing.T) {
 	}
 }
 
+func TestDetectPythonGateNamesAnInterpreterOnPATH(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "main.py", "print('hi')\n")
+
+	gate, cmd, err := Detect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate != GateBuild {
+		t.Fatalf("gate = %q, want build", gate)
+	}
+	interp := strings.Fields(cmd)[0]
+	if _, err := exec.LookPath(interp); err != nil {
+		t.Errorf("detected gate %q names %q, which is not on PATH", cmd, interp)
+	}
+}
+
 func TestDetectGoProject(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "go.mod", "module example.com/x\n\ngo 1.24\n")

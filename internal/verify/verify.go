@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -78,9 +79,11 @@ func Detect(root string) (Gate, string, error) {
 	if fileExists(filepath.Join(root, "tsconfig.json")) {
 		return GateBuild, "npx tsc --noEmit", nil
 	}
-	// Rung 7: Python compile
+	// Rung 7: Python compile. Modern Debian/Ubuntu ship only `python3`
+	// unless python-is-python3 is installed — a gate spelled `python`
+	// fails every clean-checkout accept with "python: not found" (B-085).
 	if hasPythonFiles(root) {
-		return GateBuild, "python -m compileall -q .", nil
+		return GateBuild, pythonInterpreter() + " -m compileall -q .", nil
 	}
 	// Rung 8: golangci-lint
 	if fileExists(filepath.Join(root, ".golangci.yml")) {
@@ -344,6 +347,14 @@ func hasTestScript(packageJSONPath string) bool {
 	// Simplified check: has a "test" script that's not the default stub
 	return strings.Contains(content, `"test"`) &&
 		!strings.Contains(content, `"test": "echo \"Error: no test specified\" && exit 1"`)
+}
+
+// pythonInterpreter names the interpreter actually on PATH.
+func pythonInterpreter() string {
+	if _, err := exec.LookPath("python"); err == nil {
+		return "python"
+	}
+	return "python3"
 }
 
 func hasPythonFiles(root string) bool {
