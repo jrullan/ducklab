@@ -1331,6 +1331,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               {pending.detail}
             </p>
           )}
+          {/* When Abort is the only door, say so — "waiting for you" over a
+              provider pause read as a missing Resume button. */}
+          {["provider", "error", "budget"].includes(pending.kind) && !next.includes("resume") && (
+            <p className="mt-1 text-sm text-ink-muted" data-testid="pending-abort-only">
+              A {run.stage} run cannot be resumed once stopped — Abort is the only door, and it loses
+              nothing: {run.stage === "release" ? "Draft next release rewrites the notes from the record" : "starting it again rebuilds from the record"}.
+            </p>
+          )}
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>

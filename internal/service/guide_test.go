@@ -499,3 +499,20 @@ func TestTheGuideSurfacesSpecDebt(t *testing.T) {
 		t.Fatalf("no spec-debt step in %v", ids(steps))
 	}
 }
+
+// "Resume or abort" over a run whose only door is Abort sent the person
+// hunting for a button that does not exist: only stages the engine can
+// re-enter get resume language.
+func TestPausedStepOffersResumeOnlyWhereResumeExists(t *testing.T) {
+	release := pausedStep(&runlog.Run{ID: "r-1", Stage: "release", Status: "paused", PendingKind: "provider"})
+	if release.ID != "abort-run" || !strings.HasPrefix(release.Action, "Abort the paused release run") {
+		t.Errorf("release step = %+v, want abort-only language", release)
+	}
+	if !strings.Contains(release.Reason, "cannot be resumed") || !strings.Contains(release.Reason, "loses nothing") {
+		t.Errorf("release reason = %q", release.Reason)
+	}
+	build := pausedStep(&runlog.Run{ID: "r-2", Stage: "build", TaskID: "T-001", Status: "paused", PendingKind: "provider"})
+	if build.ID != "resume-run" {
+		t.Errorf("build step = %+v, want resume language", build)
+	}
+}

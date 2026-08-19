@@ -299,10 +299,25 @@ func pausedStep(r *runlog.Run) NextStep {
 			Kind:   "run", Ref: r.ID,
 		}
 	default: // budget, provider, error
+		// Only the stages the engine can actually re-enter get resume
+		// language: build and test replay their strategy, the document
+		// stages reload their persisted request. A release or a triage has
+		// neither — "Resume or abort" over a run whose only door is Abort
+		// sent the person hunting for a button that does not exist. Nothing
+		// is lost either way: those runs rebuild from the record.
+		switch r.Stage {
+		case "build", "test", "intake", "spec", "plan":
+			return NextStep{
+				ID:     "resume-run",
+				Action: fmt.Sprintf("Resume or abort the paused %s run", subject),
+				Reason: fmt.Sprintf("it stopped on %s with its work preserved", orDefault(r.PendingKind, "an interruption")),
+				Kind:   "run", Ref: r.ID,
+			}
+		}
 		return NextStep{
-			ID:     "resume-run",
-			Action: fmt.Sprintf("Resume or abort the paused %s run", subject),
-			Reason: fmt.Sprintf("it stopped on %s with its work preserved", orDefault(r.PendingKind, "an interruption")),
+			ID:     "abort-run",
+			Action: fmt.Sprintf("Abort the paused %s run and start it again", subject),
+			Reason: fmt.Sprintf("it stopped on %s; a %s run cannot be resumed, and starting again loses nothing — it rebuilds from the record", orDefault(r.PendingKind, "an interruption"), r.Stage),
 			Kind:   "run", Ref: r.ID,
 		}
 	}
