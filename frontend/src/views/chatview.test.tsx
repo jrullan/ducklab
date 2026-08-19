@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
 import { EngineClient, type Run } from "../api/client";
@@ -68,6 +68,35 @@ const client = new EngineClient({
 // turn. It is pinned to the bottom now, like every conversation the person
 // already knows, and stays present-but-disabled while the consultant thinks
 // so the box never jumps around.
+describe("chat transcript author avatars", () => {
+  it("uses a human avatar for every recorded human message and ducks for consultant replies", async () => {
+    useRuns.setState({
+      runs: { "r-c": chatRun },
+      // These are already-recorded entries when the transcript is opened,
+      // including a human question before and after a consultant reply.
+      events: { "r-c": [...chatEvents] },
+      spend: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-c" client={client} />);
+
+    await waitFor(() => expect(screen.getAllByTestId("conversation-turn")).toHaveLength(4));
+
+    for (const message of ["Does T-064 implement the preferences?", "Write me a bug report."]) {
+      const turn = screen.getByText(message).closest("article");
+      expect(turn).not.toBeNull();
+      expect(within(turn!).getByLabelText("human avatar")).toBeTruthy();
+      expect(within(turn!).queryByTestId("duck-avatar")).toBeNull();
+    }
+
+    for (const reply of ["Yes on both counts.", "Filed B-016."]) {
+      const turn = screen.getByText(reply).closest("article");
+      expect(turn).not.toBeNull();
+      expect(within(turn!).getByTestId("duck-avatar")).toBeTruthy();
+      expect(within(turn!).queryByLabelText("human avatar")).toBeNull();
+    }
+  });
+});
+
 describe("the chat composer", () => {
   it("waits at the bottom section, not in the pending card", async () => {
     useRuns.setState({
