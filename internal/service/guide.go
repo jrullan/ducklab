@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/jrullan/ducklab/internal/build"
+	"github.com/jrullan/ducklab/internal/vcs"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -67,9 +70,34 @@ type projectSnapshot struct {
 	Bugs              []bug.Bug
 	// Paused runs, newest first.
 	Paused []*runlog.Run
+	// SelfAhead counts the commits the project repo holds past the RUNNING
+	// binary's build commit, when the project IS this software (ducklab
+	// developing ducklab). Accepted frontend work was invisible for hours
+	// because nothing said "the app you are looking at predates it".
+	SelfAhead int
 }
 
 // nextSteps is the guide's whole brain: the loop's own order, stated.
+// selfAheadCount is nonzero only when the project at root IS this binary's
+// own module and its HEAD has commits the running binary was not built
+// from. Zero on any doubt: a wrong nag here would train the person to
+// ignore a right one.
+func selfAheadCount(root string) int {
+	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil || !strings.Contains(strings.SplitN(string(mod), "\n", 2)[0], "github.com/jrullan/ducklab") {
+		return 0
+	}
+	sha := build.Commit
+	if sha == "" || sha == "unknown" {
+		return 0
+	}
+	shas, err := vcs.New(root).RevListAfter(sha)
+	if err != nil {
+		return 0
+	}
+	return len(shas)
+}
+
 // bugIDs lists the bugs in a status, in board order.
 func bugIDs(bugs []bug.Bug, status bug.Status) []string {
 	var out []string
@@ -139,6 +167,18 @@ func nextSteps(st projectSnapshot) []NextStep {
 			Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
 			Reason: fmt.Sprintf("%d accepted task(s) await a release", st.AcceptedUnreleased),
 			Kind:   "release",
+		})
+	}
+
+	// 2b. The mirror check only a self-hosted project needs: work that
+	// landed in this repo is invisible until the binaries are reinstalled
+	// and restarted, and T-075's avatar sat accepted and unseen for hours.
+	if st.SelfAhead > 0 {
+		out = append(out, NextStep{
+			ID:     "install",
+			Action: fmt.Sprintf("Reinstall ducklab — the repo is %d commit(s) ahead of the running engine", st.SelfAhead),
+			Reason: "run `make install`, then Restart engine and relaunch the app; accepted work is invisible until then",
+			Kind:   "project",
 		})
 	}
 
@@ -429,6 +469,7 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 		st.UnreleasedCounted = true
 	}
 
+	st.SelfAhead = selfAheadCount(entry.Path)
 	st.Bugs, _ = s.BugList(ctx, projectID, false)
 	if runs, rerr := s.RunList(ctx, RunFilter{ProjectID: projectID}); rerr == nil {
 		for _, r := range runs {

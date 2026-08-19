@@ -516,3 +516,27 @@ func TestPausedStepOffersResumeOnlyWhereResumeExists(t *testing.T) {
 		t.Errorf("build step = %+v, want resume language", build)
 	}
 }
+
+// Ducklab developing ducklab: accepted work is invisible until the binaries
+// are reinstalled — T-075's avatar sat accepted and unseen for hours. The
+// guide says it, once, with the command; other projects never see it.
+func TestTheGuideSaysWhenTheRepoOutrunsTheRunningBinary(t *testing.T) {
+	steps := nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true, SelfAhead: 5})
+	found := false
+	for _, s := range steps {
+		if s.ID == "install" {
+			found = true
+			if !strings.Contains(s.Action, "5 commit(s) ahead") || !strings.Contains(s.Reason, "make install") {
+				t.Errorf("install step = %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("guide = %v, want an install step", ids(steps))
+	}
+	for _, s := range nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true}) {
+		if s.ID == "install" {
+			t.Fatal("install step offered with nothing ahead")
+		}
+	}
+}
