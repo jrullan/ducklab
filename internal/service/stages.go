@@ -294,25 +294,33 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
-	// The mode's saved line-up, which for council is the ONLY place it can
-	// apply — council never runs as a task. First drafts, the rest critique.
-	// A request naming its own seats overrides for THIS run alone.
+	// A request naming its own seats overrides for THIS run alone. An empty
+	// request means THE RESOLVED ROSTER DECIDES — project seats included.
+	// The legacy fallback re-read the GLOBAL mode line-up over the resolver:
+	// the launcher showed the project's terra as council reviewer and the
+	// run seated the global glm52, and only an explicit pick could win
+	// (B-081). Council's extra critics come from the resolved reviewer
+	// seat-list for the same reason.
 	lineup := req.Ducklings
+	var filled []config.Role
+	var critics []config.DucklingID
 	if len(lineup) == 0 {
-		lineup = s.stageLineupFor(rs.run.Mode)
-	} else if rs.run.Mode == "solo" && len(lineup) > 1 {
-		lineup = lineup[:1]
+		for _, id := range s.rosterIDs(projCfg, rs.run.Mode, config.RoleReviewer) {
+			if _, err := s.ducklings.Get(config.DucklingID(id)); err == nil {
+				critics = append(critics, config.DucklingID(id))
+			}
+		}
+	} else {
+		if rs.run.Mode == "solo" && len(lineup) > 1 {
+			lineup = lineup[:1]
+		}
+		filled = applyStageLineup(roster, lineup)
+		critics = s.criticsFrom(rs.run.Mode, lineup)
 	}
-	filled := applyStageLineup(roster, lineup)
-	critics := s.criticsFrom(rs.run.Mode, lineup)
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
 	for _, role := range filled {
-		if len(req.Ducklings) == 0 {
-			rs.run.RosterSources[string(role)] = "settings"
-		} else {
-			rs.run.RosterSources[string(role)] = "request"
-		}
+		rs.run.RosterSources[string(role)] = "request"
 	}
 	if warning != "" {
 		rs.run.Warning = warning
@@ -406,9 +414,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 			return ""
 		}(),
-		Adopt:       req.Adopt,
-		Extend:      req.Extend,
-		Images:      images,
+		Adopt:  req.Adopt,
+		Extend: req.Extend,
+		Images: images,
 		// A small architect gets the engine as its working memory: below
 		// 64k of declared context, document updates run sectioned — one
 		// triage pass, then one fresh conversation per touched section.

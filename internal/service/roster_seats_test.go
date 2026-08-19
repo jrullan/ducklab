@@ -310,3 +310,36 @@ func TestRosterSummarySaysSeatsEvidenceAndSuggestions(t *testing.T) {
 		}
 	}
 }
+
+// The spec launcher showed the project's council reviewer (terra) and the
+// run seated the global one (glm52): with an empty request, StageStart's
+// legacy fallback re-read the GLOBAL mode line-up over the resolver, and
+// only an explicit pick could win. An empty request means the resolved
+// roster — project seats included — decides (B-081).
+func TestStageStartHonorsProjectCouncilSeatsWithoutAnExplicitPick(t *testing.T) {
+	s := writableService(t, "terra", "glm52")
+	// Global council: architect terra, reviewer glm52 — Jose's exact shape.
+	// Project overrides: reviewer terra.
+	if _, err := s.GlobalRosterSet(context.Background(), "council", "architect", []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GlobalRosterSet(context.Background(), "council", "reviewer", []string{"glm52"}); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := projectWithConfig(t, s, "proj")
+	if _, err := s.RosterSetManyMode(context.Background(), id, "council", "reviewer", []string{"terra"}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.StageStart(context.Background(), id, StageRequest{Stage: "intake", From: "adopt this"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), run.ID)
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detail.Run.Roster["reviewer"]; got != "terra" {
+		t.Fatalf("council reviewer = %q, want the project's terra over the global glm52", got)
+	}
+}
