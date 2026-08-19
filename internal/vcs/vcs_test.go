@@ -143,13 +143,15 @@ func TestConcurrentWorktreeOperationsShareRepositoryLock(t *testing.T) {
 			<-start
 			g := New(repo) // callers do not share a Git receiver.
 			path := filepath.Join(repo, fmt.Sprintf("worktree-%d", i))
-			switch i % 3 {
+			switch i % 4 {
 			case 0:
 				errs[i] = g.WorktreeAdd(path, fmt.Sprintf("branch-%d", i))
 			case 1:
 				errs[i] = g.WorktreeAddDetached(path, "HEAD")
-			default:
+			case 2:
 				errs[i] = g.WorktreeRemove(path)
+			default:
+				errs[i] = g.PruneWorktrees()
 			}
 		}(i)
 	}
@@ -158,6 +160,39 @@ func TestConcurrentWorktreeOperationsShareRepositoryLock(t *testing.T) {
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("worktree operation %d ran concurrently: %v", i, err)
+		}
+	}
+}
+
+// Git's worktree metadata cannot safely process parallel adds. Repeat this
+// test with -count to exercise the real repository path rather than only the
+// fake-git serialization test above.
+func TestConcurrentWorktreeAdds(t *testing.T) {
+	g, dir := newRepo(t)
+	const workers = 8
+	worktrees := make([]string, workers)
+	errs := make([]error, workers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range workers {
+		worktrees[i] = filepath.Join(filepath.Dir(dir), fmt.Sprintf("wt-%s-%d", filepath.Base(dir), i))
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = New(dir).WorktreeAdd(worktrees[i], fmt.Sprintf("concurrent-%d", i))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("create worktree %d: %v", i, err)
+		}
+	}
+	for _, worktree := range worktrees {
+		if err := g.WorktreeRemove(worktree); err != nil {
+			t.Errorf("remove worktree %s: %v", worktree, err)
 		}
 	}
 }

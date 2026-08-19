@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jrullan/ducklab/internal/xplat"
 )
@@ -236,8 +237,27 @@ func (g *Git) DiffStat() (string, error) {
 	return g.run("diff", "--stat", "HEAD", "--", ".", ":^.ducklab")
 }
 
+// worktreeLocks protects git's shared .git/worktrees metadata. Git does not
+// serialize concurrent worktree add/remove/prune commands itself.
+var worktreeLocks sync.Map // map[string]*sync.Mutex, keyed by canonical repository path
+
+func worktreeLock(root string) *sync.Mutex {
+	key, err := filepath.Abs(root)
+	if err != nil {
+		key = filepath.Clean(root)
+	}
+	if resolved, err := filepath.EvalSymlinks(key); err == nil {
+		key = resolved
+	}
+	lock, _ := worktreeLocks.LoadOrStore(key, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 // WorktreeAdd creates a worktree.
 func (g *Git) WorktreeAdd(path, branch string) error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := g.run("worktree", "add", path, "-b", branch)
 	return err
 }
@@ -246,12 +266,18 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 // used when a caller must verify precisely what a commit contains, rather than
 // the potentially dirtier working tree that produced it.
 func (g *Git) WorktreeAddDetached(path, rev string) error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := g.run("worktree", "add", "--detach", path, rev)
 	return err
 }
 
 // WorktreeRemove removes a worktree.
 func (g *Git) WorktreeRemove(path string) error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := g.run("worktree", "remove", "--force", path)
 	return err
 }
@@ -447,6 +473,9 @@ func (g *Git) DiffAgainst(ref string) (string, error) {
 // Called at engine start: a killed engine leaves stale entries that make a
 // later `worktree add` on the same path fail.
 func (g *Git) PruneWorktrees() error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := g.run("worktree", "prune")
 	return err
 }

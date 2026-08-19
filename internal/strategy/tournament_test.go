@@ -342,8 +342,6 @@ func TestGitWorkspacesAreIndependent(t *testing.T) {
 			mu.Lock()
 			wss = append(wss, ws)
 			mu.Unlock()
-			os.WriteFile(filepath.Join(ws.Root(), "add.go"),
-				[]byte("package x\n\n// contestant "+string(rune('0'+i))+"\n"), 0o644)
 		}(i)
 	}
 	wg.Wait()
@@ -356,8 +354,22 @@ func TestGitWorkspacesAreIndependent(t *testing.T) {
 		}
 	}()
 
-	p0, _ := wss[0].Patch()
-	p1, _ := wss[1].Patch()
+	// Creation above remains concurrent; only after both worktrees exist do
+	// contestants edit them and verify their isolated patches.
+	for i, ws := range wss {
+		if err := os.WriteFile(filepath.Join(ws.Root(), "add.go"),
+			[]byte("package x\n\n// contestant "+string(rune('0'+i))+"\n"), 0o644); err != nil {
+			t.Fatalf("edit workspace %d: %v", i, err)
+		}
+	}
+	p0, err := wss[0].Patch()
+	if err != nil {
+		t.Fatalf("patch workspace 0: %v", err)
+	}
+	p1, err := wss[1].Patch()
+	if err != nil {
+		t.Fatalf("patch workspace 1: %v", err)
+	}
 	if p0 == p1 {
 		t.Error("two workspaces produced the same patch; they are not isolated")
 	}
