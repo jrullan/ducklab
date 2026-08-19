@@ -98,6 +98,13 @@ type ExecContext struct {
 	// for roster_read. Injected by the service (tools is a leaf); nil means
 	// the tool says the roster is not readable here.
 	OnRosterRead func(ctx context.Context) (string, error)
+	// RefPaths are the reference documents this run was launched with — the
+	// only files ref_read may open. References live outside the project root
+	// on purpose; the tool is a bridge to THEM, not out of the sandbox.
+	RefPaths []string
+	// OnRefRead marks a reference as opened, so the gate can name the ones
+	// that never were.
+	OnRefRead func(path string)
 	// lastFailSig and lastFailCount track the most recent FAILING call's
 	// tool+args, for the repetition brake: a small model that gets its
 	// arguments wrong retries the identical call — six artifact_reads of
@@ -171,6 +178,7 @@ func NewRegistry() *Registry {
 
 // registerBuiltins registers all built-in tools.
 func (r *Registry) registerBuiltins() {
+	r.Register(&RefRead{})
 	// Filesystem
 	r.Register(&FSList{})
 	r.Register(&FSRead{})
@@ -295,7 +303,9 @@ const FSPatchFailLimit = 5
 const FSPatchRefusalLimit = 5
 
 func fsPatchPath(root string, args json.RawMessage) string {
-	var a struct{ Path string `json:"path"` }
+	var a struct {
+		Path string `json:"path"`
+	}
 	if json.Unmarshal(args, &a) != nil || a.Path == "" {
 		return ""
 	}

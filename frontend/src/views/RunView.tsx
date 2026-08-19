@@ -1274,6 +1274,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             redoNote={run.redo_note}
             onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
           />
+          {(() => {
+            const unread = (run.pending_data?.unread_refs as string[] | undefined) ?? [];
+            if (unread.length === 0) return null;
+            return (
+              <p data-testid="run-unread-refs" className="mt-2 text-xs text-warn">
+                ⚠ {unread.length} reference document{unread.length === 1 ? " was" : "s were"} digested
+                but never opened during this run:{" "}
+                {unread.map((r) => r.split("/").pop()).join(", ")} — the draft may miss their detail.
+              </p>
+            );
+          })()}
           {/* The declared-fallback door: provider weather, a stand-in named
               in Settings, one click to swap the seats and go — recorded as
               seat_failover, never a router's silent choice. */}

@@ -61,6 +61,15 @@ export function ConversationTurn({
       </div>
     );
   }
+  if (block.role === "refs") {
+    return (
+      <div data-testid="refs-divider" className="my-2 flex items-center gap-2 text-xs text-ink-muted" role="separator">
+        <span className="h-px flex-1 bg-hairline" />
+        <span>📚 {block.text}</span>
+        <span className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
   if (block.role === "pause" && block.pause) {
     return (
       <div

@@ -113,6 +113,56 @@ type runState struct {
 	// another goroutine while a reply is in flight. The durable half lives on
 	// the record (run.AgentTurns = -1) for resume.
 	capLifted atomic.Bool
+	// refMu guards the run's reference bookkeeping: ref_read executes on
+	// agent turns while critics may run concurrently.
+	refMu sync.Mutex
+	// refPaths are the resolved reference files this run was launched with;
+	// refReads marks the ones ref_read actually opened. In digest mode the
+	// difference is reported at the gate — "considered" must be observable.
+	refPaths []string
+	refReads map[string]bool
+	// refMode is "inline" or "digest"; empty when the run has no references.
+	refMode string
+}
+
+// armRefs records the run's reference corpus and mode for ref_read.
+func (rs *runState) armRefs(files []string, mode string) {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	rs.refPaths = files
+	rs.refMode = mode
+	rs.refReads = map[string]bool{}
+}
+
+func (rs *runState) refFiles() []string {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	return append([]string(nil), rs.refPaths...)
+}
+
+func (rs *runState) markRefRead(path string) {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	if rs.refReads != nil {
+		rs.refReads[path] = true
+	}
+}
+
+// unreadRefs names digest-mode references no one opened. Inline runs return
+// nil: the full text was in the prompt, there was nothing left to open.
+func (rs *runState) unreadRefs() []string {
+	rs.refMu.Lock()
+	defer rs.refMu.Unlock()
+	if rs.refMode != "digest" {
+		return nil
+	}
+	var out []string
+	for _, p := range rs.refPaths {
+		if !rs.refReads[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Options are service options.

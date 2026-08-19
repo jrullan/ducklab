@@ -23,6 +23,7 @@ import (
 var roleToolbelts = map[config.Role][]string{
 	config.RoleArchitect: {
 		"fs_list", "fs_read", "fs_search", "git_log", "artifact_read", "ask_human",
+		"ref_read",
 	},
 	config.RoleImplementer: {
 		"fs_list", "fs_read", "fs_search", "fs_write", "fs_write_lines", "fs_patch", "fs_delete",
@@ -32,6 +33,7 @@ var roleToolbelts = map[config.Role][]string{
 	},
 	config.RoleReviewer: {
 		"fs_read", "fs_search", "git_diff", "verify_run", "artifact_read",
+		"ref_read",
 	},
 	config.RoleJudge: {
 		"fs_read", "git_diff",

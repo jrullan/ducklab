@@ -306,26 +306,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// A --from that is not a readable path is treated as the brief text
 		// itself: a user pasting a sentence should not have to make a file.
 	}
-	if len(req.Refs) > 0 {
-		refs, loaded, dropped, rerr := loadReferences(req.Refs, projCfg.References, req.Stage)
-		if rerr != nil {
-			s.failRun(rs, fmt.Errorf("references: %w", rerr))
-			return
-		}
-		rs.writer.AppendEvent("references_loaded", map[string]interface{}{
-			"files": loaded, "dropped": dropped,
-		})
-		// Appended to the seed, which is recorded as the brief: the
-		// references ARE part of what was asked for, and the brief file is
-		// where a person checks the draft against its inputs.
-		seed += refs
-	}
-	if seed != "" {
-		// Kept as its own file. Comparing requirements against what was asked
-		// for is the first thing anyone does with them, and the brief was
-		// reachable only by digging it out of a prompt in llm.jsonl.
-		rs.writer.WriteBrief(seed)
-	}
+	// References load AFTER the roster and tracker below: which mode fits —
+	// inline or digest — is the architect seat's property, and digestion is
+	// real spend that must land on this run's ledger.
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
 	// A request naming its own seats overrides for THIS run alone. An empty
@@ -384,12 +367,31 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
+	if len(req.Refs) > 0 {
+		refs, rerr := s.stageReferences(ctx, rs, projCfg, req.Stage, req.Refs, roster[config.RoleArchitect])
+		if rerr != nil {
+			s.failRun(rs, fmt.Errorf("references: %w", rerr))
+			return
+		}
+		// Appended to the seed, which is recorded as the brief: the
+		// references ARE part of what was asked for, and the brief file is
+		// where a person checks the draft against its inputs.
+		seed += refs
+	}
+	if seed != "" {
+		// Kept as its own file. Comparing requirements against what was asked
+		// for is the first thing anyone does with them, and the brief was
+		// reachable only by digging it out of a prompt in llm.jsonl.
+		rs.writer.WriteBrief(seed)
+	}
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
 		RunID:       rs.run.ID,
 		Autonomy:    config.Autonomy(rs.run.Autonomy),
 		ShellPolicy: projCfg.Shell,
 		Answers:     rs.answers(),
+		RefPaths:    rs.refFiles(),
+		OnRefRead:   rs.markRefRead,
 	}
 	cache := &loopCache{
 		svc: s, tracker: tracker,
@@ -586,6 +588,13 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"artifact": string(result.Kind),
 		"sections": len(result.Proposed.Sections),
 	}
+	// In digest mode "the references were considered" is a claim about tool
+	// use, not about the prompt — so the gate names the documents no one
+	// opened, and the person weighs the draft knowing it. The same honesty
+	// contract as unverified_tasks on a release.
+	if unread := rs.unreadRefs(); len(unread) > 0 {
+		rs.run.PendingData["unread_refs"] = unread
+	}
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{
 		"kind": "gate", "verdict": "UNVERIFIED", "artifact": string(result.Kind),
 	})
@@ -656,12 +665,22 @@ func (s *Service) ArtifactGet(ctx context.Context, projectID, kind string) (map[
 		"run_id": current.Front.RunID,
 	}
 	if proposed != nil {
-		out["proposal"] = map[string]interface{}{
+		prop := map[string]interface{}{
 			"markdown": proposed.Raw,
 			"sections": sectionViews(proposed.Sections),
 			"run_id":   proposed.Front.RunID,
 			"diff":     diff,
 		}
+		// Carried from the proposing run while it waits at its gate, so the
+		// Cycle card can say which digest-mode references were never opened.
+		s.runsMu.RLock()
+		if rs, ok := s.runs[proposed.Front.RunID]; ok {
+			if unread := rs.unreadRefs(); len(unread) > 0 {
+				prop["unread_refs"] = unread
+			}
+		}
+		s.runsMu.RUnlock()
+		out["proposal"] = prop
 	}
 	return out, nil
 }

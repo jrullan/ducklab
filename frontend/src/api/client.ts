@@ -229,6 +229,9 @@ export interface Artifact {
     sections?: Section[] | null;
     run_id?: string;
     ducklings?: string[];
+    /** Digest-mode references no seat ever opened with ref_read — the gate
+     * names them so "considered" is a checked claim, not an assumed one. */
+    unread_refs?: string[];
   };
 }
 

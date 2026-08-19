@@ -469,6 +469,15 @@ export function Cycle({
                 </button>
               }
             />
+            {(artifact.proposal.unread_refs?.length ?? 0) > 0 && (
+              <p data-testid="proposal-unread-refs" className="mb-2 text-xs text-warn">
+                ⚠ {artifact.proposal.unread_refs!.length} reference document
+                {artifact.proposal.unread_refs!.length === 1 ? " was" : "s were"} digested but never
+                opened during this run:{" "}
+                {artifact.proposal.unread_refs!.map((r) => r.split("/").pop()).join(", ")} — the
+                draft may miss their detail.
+              </p>
+            )}
             {proposalAsDiff ? (
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             ) : artifact.proposal.sections && artifact.proposal.sections.length > 0 ? (

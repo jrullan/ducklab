@@ -461,6 +461,43 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         }
         break;
       }
+      case "references_loaded": {
+        const files = Array.isArray(d.files) ? d.files : [];
+        const total = files.reduce((n: number, f) => n + Number((f as Record<string, unknown>).chars ?? 0), 0);
+        const mode = String(d.mode ?? "inline");
+        blocks.push({
+          key: `refs:${e.seq ?? blocks.length}`,
+          round: 0,
+          turn: -1,
+          role: "refs",
+          duckling: "",
+          toolCalls: [],
+          text:
+            `${files.length} reference document${files.length === 1 ? "" : "s"} · ${total.toLocaleString()} chars — ` +
+            (mode === "digest"
+              ? "digest mode: summaries in the prompt, full text via ref_read"
+              : "full text in the prompt"),
+          done: true,
+          messageOnly: true,
+        });
+        break;
+      }
+      case "reference_digested": {
+        const path = String(d.path ?? "");
+        const base = path.split("/").pop() ?? path;
+        blocks.push({
+          key: `refdigest:${e.seq ?? blocks.length}`,
+          round: 0,
+          turn: -1,
+          role: "refs",
+          duckling: "",
+          toolCalls: [],
+          text: `digested ${base} (${Number(d.chars ?? 0).toLocaleString()} → ${Number(d.digest_chars ?? 0).toLocaleString()} chars${d.cached ? ", cached" : ""})`,
+          done: true,
+          messageOnly: true,
+        });
+        break;
+      }
       case "gate_started": {
         const round = Number(d.round ?? 1);
         const block: TurnBlock = {

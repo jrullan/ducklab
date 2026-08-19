@@ -582,6 +582,25 @@ describe("humaniseContract", () => {
 // words, the settled gate event closes it, and the rail says "baseline".
 describe("the announced test-first gate", () => {
   const ev = (type: string, data: Record<string, unknown>, seq: number) => ({ type, data, seq }) as unknown as DucklabEvent;
+  it("narrates reference loading and per-document digestion", () => {
+    const turns = buildTurns([
+      ev("references_loaded", { files: [{ path: "/w/a.md", chars: 5000 }, { path: "/w/b.md", chars: 60000 }], mode: "digest" }, 1),
+      ev("reference_digested", { path: "/w/b.md", chars: 60000, digest_chars: 1600, cached: true }, 2),
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.role).toBe("refs");
+    expect(turns[0]!.text).toContain("2 reference documents");
+    expect(turns[0]!.text).toContain("digest mode");
+    expect(turns[0]!.text).toContain("ref_read");
+    expect(turns[1]!.text).toContain("digested b.md");
+    expect(turns[1]!.text).toContain("cached");
+  });
+  it("says inline references travelled whole", () => {
+    const turns = buildTurns([
+      ev("references_loaded", { files: [{ path: "/w/a.md", chars: 5000 }], mode: "inline" }, 1),
+    ]);
+    expect(turns[0]!.text).toContain("full text in the prompt");
+  });
   it("opens on gate_started with the phase's words and closes on the gate event", () => {
     const turns = buildTurns([
       ev("gate_started", { phase: "before", detail: "running the suite before any test is written — a red test only means something against a green baseline" }, 1),

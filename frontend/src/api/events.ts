@@ -265,6 +265,7 @@ export const KNOWN_EVENT_TYPES = [
   "commit_withdrawn",
   // Which reference documents a stage loaded, and what its caps dropped.
   "references_loaded",
+  "reference_digested",
   "message",
   "proposal",
   "verdict",
