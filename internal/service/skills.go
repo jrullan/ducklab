@@ -22,11 +22,15 @@ import (
 // as "no global skills" rather than an error: a machine with nowhere to put
 // them is a machine that has none.
 func globalSkillsDir() string {
+	// DataDir already ends in /ducklab; joining "ducklab" again buried the
+	// global skills at data/ducklab/ducklab/skills, where nothing a person
+	// placed at the spec path (02 §1: <data-dir>/skills) could be found —
+	// the first real global skill was invisible to list and tools (B-091).
 	dir, err := xplat.DataDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "ducklab", "skills")
+	return filepath.Join(dir, "skills")
 }
 
 // SkillSummary is one skill as a client sees it.
