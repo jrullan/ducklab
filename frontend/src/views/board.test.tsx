@@ -1271,3 +1271,20 @@ describe("the quiet board", () => {
     expect(screen.queryByTestId("board-quiet")).toBeNull();
   });
 });
+
+// Inspecting the kanban wants the width: the record rail folds to a strip
+// (wearing the selected id), comes back on click, and the choice survives a
+// reload — the run view's own pattern.
+it("the record rail folds to a strip and remembers", async () => {
+  localStorage.removeItem("ducklab.boardrail");
+  render(<Board client={bothClient()} projectId="p" tab="bugs" />);
+  await screen.findByTestId("board-rail");
+  fireEvent.click(screen.getByText("Login loops"));
+  fireEvent.click(screen.getByTestId("board-rail-hide"));
+  expect(screen.queryByTestId("board-rail")).toBeNull();
+  expect(screen.getByTestId("board-rail-pill").textContent).toContain("B-001");
+  expect(localStorage.getItem("ducklab.boardrail")).toBe("off");
+  fireEvent.click(screen.getByTestId("board-rail-pill"));
+  await screen.findByTestId("board-rail");
+  localStorage.removeItem("ducklab.boardrail");
+});

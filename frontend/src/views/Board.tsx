@@ -117,6 +117,17 @@ export function Board({
   // whole loop was unreachable.
   const [filing, setFiling] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  // The record rail folds away like the run view's does: inspecting the
+  // kanban wants the width, and the record is one click back — remembered
+  // across sessions, shared by both boards.
+  const [railOpen, setRailOpen] = useState(() => localStorage.getItem("ducklab.boardrail") !== "off");
+  const toggleRail = () => {
+    setRailOpen((v) => {
+      if (v) localStorage.setItem("ducklab.boardrail", "off");
+      else localStorage.removeItem("ducklab.boardrail");
+      return !v;
+    });
+  };
   const [bugTitle, setBugTitle] = useState("");
   const [bugBody, setBugBody] = useState("");
   const [bugSeverity, setBugSeverity] = useState("normal");
@@ -759,7 +770,11 @@ export function Board({
           long column used to mean scrolling back to the top to find the rail
           that describes it. The kanban and the rail are different documents;
           they scroll like it. */}
+      {railOpen ? (
       <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto overscroll-contain">
+        <div className="mb-1 flex justify-end">
+          <button type="button" data-testid="board-rail-hide" onClick={toggleRail} title="hide the record rail (a strip stays to bring it back)" className="text-xs text-ink-muted underline">hide</button>
+        </div>
         {current === null ? (
           <p className="text-sm text-ink-muted">
             Select {isBugs ? "a bug" : "a task"} to see its record.
@@ -782,6 +797,17 @@ export function Board({
           />
         )}
       </aside>
+      ) : (
+        <button
+          type="button"
+          data-testid="board-rail-pill"
+          onClick={toggleRail}
+          title="show the record rail"
+          className="mr-3 self-start rounded border border-hairline px-2 py-2 text-xs text-ink-muted sticky top-2"
+        >
+          ‹{current !== null ? ` ${(current as { id: string }).id}` : ""}
+        </button>
+      )}
     </div>
   );
 }
