@@ -39,7 +39,7 @@ import (
 
 // chatToolbelt is read-only investigation — code, history, records — plus
 // bug_file, the one loop-side act a conversation can conclude in.
-const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read,run_list,run_read,roster_read"
+const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read,run_list,run_read,roster_read,skill_list,skill_read"
 
 // ChatRequest starts a conversation about a subject.
 type ChatStartRequest struct {
@@ -237,6 +237,12 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		RunID:       rs.run.ID,
 		Autonomy:    config.AutonomyGuarded,
 		ShellPolicy: projCfg.Shell,
+		// Without this, skill_list shows only the project's skills: the
+		// global directory lives outside every project root and the fs
+		// tools rightly cannot reach it — the consultant asked about the
+		// machine's recipes and truthfully saw none (the same blind spot
+		// the stage ectx had).
+		GlobalSkillsDir: globalSkillsDir(),
 	}
 	// The consultant advises about the team; it reads the resolver, not
 	// project.toml guesses.

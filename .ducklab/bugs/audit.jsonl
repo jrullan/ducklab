@@ -360,3 +360,6 @@
 {"ts":"2026-08-19T18:16:21Z","bug":"B-090","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-19T18:16:21Z","bug":"B-090","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-19T18:16:21Z","bug":"B-090","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"open","to":"triaged","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"triaged","to":"in_progress","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"in_progress","to":"fixed","actor":"human","via":"move"}
