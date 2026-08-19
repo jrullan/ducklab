@@ -2,12 +2,27 @@
 kind: release
 version: v0.6.1
 since: v0.6.0
-tasks: 6
+tasks: 10
+---
+
+# v0.6.1
+
+---
+kind: release
+version: v0.6.1
+since: v0.6.0
+tasks: 10
 ---
 
 # v0.6.1
 
 **Release v0.6.1**
+
+**Chat transcripts**
+Human turns now render with a human avatar instead of the duckling duck graphic — duckling turns keep the duck. The human avatar shows on reopened transcripts as well as new ones, and the avatar itself was refreshed.
+
+**Release view**
+A drafted release can now be sent back for revision: the Release view has a request-changes action on drafts instead of leaving them stuck until accepted.
 
 **Removing tasks**
 Tasks can now be retired. A new `ducklab task remove` command and matching `task_remove` MCP tool let you drop a task, and the plan-amendment flow knows how to use that retire path.
@@ -34,4 +49,8 @@ A turn now ends once the model's write attempts on a single file have been refus
 - **T-072** Route request_changes on a plan_extend proposal back into the amendment with its own fragment, note, and solo mode (`c89e7df`)
 - **T-073** Expose TaskRemove as MCP task_remove and CLI `ducklab task remove`, and teach plan_extend the retire path (`3a86788`)
 - **T-074** Serialize git worktree add/remove per repository so concurrent contestant workspaces cannot race .git/worktrees (`afbe1d2`)
+- **T-075** Differentiate human turns in chat transcription (`938d3e7`)
+- **T-076** Show the human avatar on human turns of reopened chat transcripts (`f46a5d4`)
+- **T-077** Replace the current human-turn avatar (`2328a2f`)
+- **T-078** Add a request-changes (revise) affordance for a drafted release in the Release view (`f3d0ffa`)
 
