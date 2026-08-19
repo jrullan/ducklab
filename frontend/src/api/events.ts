@@ -266,6 +266,7 @@ export const KNOWN_EVENT_TYPES = [
   // Which reference documents a stage loaded, and what its caps dropped.
   "references_loaded",
   "reference_digested",
+  "sections_folded",
   "message",
   "proposal",
   "verdict",

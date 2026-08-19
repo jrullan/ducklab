@@ -351,3 +351,6 @@
 {"ts":"2026-08-19T15:42:17Z","bug":"B-087","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-19T15:42:17Z","bug":"B-087","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-19T15:42:17Z","bug":"B-087","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T16:05:42Z","bug":"B-088","from":"open","to":"triaged","actor":"human","via":"move"}
+{"ts":"2026-08-19T16:05:42Z","bug":"B-088","from":"triaged","to":"in_progress","actor":"human","via":"move"}
+{"ts":"2026-08-19T16:05:42Z","bug":"B-088","from":"in_progress","to":"fixed","actor":"human","via":"move"}

@@ -520,6 +520,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				// question, no pending state, and nothing to answer.
 				return "", pendingOrErr(res, rerr)
 			}
+			// The document is the FOLD of the architect's passes, never the
+			// last reply alone: a round-2 revision that re-emits only the
+			// sections it retouched must not erase the rest (B-089).
+			if texts := res.RoleTexts[string(config.RoleArchitect)]; len(texts) > 1 {
+				folded, kept := stage.FoldPasses(texts, stage.Name(req.Stage).Kind())
+				if len(kept) > 0 {
+					rs.writer.AppendEvent("sections_folded", map[string]interface{}{
+						"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
+					})
+					return folded, nil
+				}
+			}
 			return res.Text, nil
 		},
 	})
