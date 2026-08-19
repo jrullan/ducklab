@@ -142,7 +142,9 @@ func refGuidance(stageName string) string {
 	if stageName == "spec" || stageName == "plan" {
 		return "Provided by the person as design context. USE them: ground your sections in the " +
 			"detail they carry — architecture decisions, domain rules, exact identifiers, " +
-			"workflows — rather than restating the requirements more vaguely. Two limits: the " +
+			"workflows — rather than restating the requirements more vaguely. Your document is " +
+			"judged against this detail: a section vaguer than the reference it draws on is " +
+			"unfinished. Two limits: the " +
 			"approved requirements define scope, so a reference's plans, wish lists or open " +
 			"problems never add sections; and where a reference and the code disagree, the code " +
 			"is the truth for as-built claims — note the disagreement instead of copying the claim.\n"

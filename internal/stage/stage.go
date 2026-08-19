@@ -333,6 +333,16 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		}
 		b.WriteString("## Your task\n\nWrite the specification for these requirements. " +
 			"Every section must carry an **Implements:** line naming the requirements it covers.\n\n" +
+			"A specification says HOW the system delivers its requirements — it is not a " +
+			"restatement of them. Name the concrete design: the data model and its key " +
+			"entities, the access-control model with its exact scheme, the architecture and " +
+			"deployment shape, domain rules with their numbers, workflows with their states. " +
+			"A section a reader could have written from the requirement's title alone is not " +
+			"yet a specification.\n\n" +
+			"Cross-cutting design — architecture, access control, auditing, data model — " +
+			"deserves sections of its own; a cross-cutting section carries **Implements:** " +
+			"with the several requirements it serves. Do not shape the document as one " +
+			"section per requirement.\n\n" +
 			"A section that records what will NOT be built must also carry " +
 			"**Priority:** wont, so the traceability check knows not to ask for " +
 			"a task that implements it.\n\n")

@@ -154,6 +154,19 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 	if !strings.Contains(prompt, "Implements:") {
 		t.Error("spec prompt does not ask for the traceability edge")
 	}
+	// A 236k-char reference corpus once came back as 14 sections mirroring
+	// the 14 requirements title-for-title with zero design vocabulary
+	// (B-088): the contract must demand the HOW and invite cross-cutting
+	// sections, or the skeleton anchors to the requirements list.
+	for _, want := range []string{
+		"HOW the system delivers",
+		"Cross-cutting design",
+		"Do not shape the document as one section per requirement",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("spec prompt lacks %q", want)
+		}
+	}
 }
 
 // What the person attaches at launch — context, reference documents — must
