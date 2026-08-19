@@ -51,6 +51,12 @@ export function Cycle({
   // .md/.txt, one per line — a wiki outside the project root is the
   // commonest home of adoption context, and run tools cannot reach it.
   const [refsText, setRefsText] = useState("");
+  // The intake's path: survey the code (adopt) or interview from a brief.
+  // ONE choice, ONE launch button whose label follows it — the old layout
+  // had two doors ("Survey the code" boxed at the top, "Draft it" at the
+  // bottom) with the shared inputs attached to the second: a person who
+  // filled in references was led straight past the survey.
+  const [intakePath, setIntakePath] = useState<"adopt" | "brief" | null>(null);
   const [refsOpen, setRefsOpen] = useState(false);
   const refsList = () => refsText.split("\n").map((l) => l.trim()).filter(Boolean);
   // The plan amendment's text — Review's light exit, separate from the brief
@@ -541,22 +547,38 @@ export function Cycle({
                 className="mb-3 rounded-card border border-hairline bg-surface2 p-2"
                 data-testid="cycle-adopt-door"
               >
-                <p className="text-sm text-ink">This project already has code.</p>
-                <p className="mt-1 text-xs text-ink-muted">
-                  Adopt it: the council reads the tree and drafts the requirements the code
-                  already satisfies — marked as derived, gated by you like everything else.
-                  Anything you type below travels along as context. Or ignore this and start
-                  from the brief alone, as if greenfield.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void start(true)}
-                  disabled={starting}
-                  data-testid="cycle-adopt"
-                  className="mt-2 rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
-                >
-                  {starting ? "Starting…" : "Survey the code"}
-                </button>
+                <p className="text-sm text-ink">This project already has code. Where do the requirements come from?</p>
+                <div className="mt-2 flex flex-col gap-1 text-sm" role="radiogroup" aria-label="intake path">
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="intake-path"
+                      data-testid="cycle-adopt"
+                      checked={(intakePath ?? "adopt") === "adopt"}
+                      onChange={() => setIntakePath("adopt")}
+                    />
+                    <span>
+                      <span className="text-ink">Survey the code</span>{" "}
+                      <span className="text-xs text-ink-muted">
+                        — the council reads the tree and drafts the requirements the code already
+                        satisfies. The brief and references below travel along as context.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="intake-path"
+                      data-testid="cycle-greenfield"
+                      checked={intakePath === "brief"}
+                      onChange={() => setIntakePath("brief")}
+                    />
+                    <span>
+                      <span className="text-ink">Start from the brief alone</span>{" "}
+                      <span className="text-xs text-ink-muted">— as if greenfield; the code is ignored.</span>
+                    </span>
+                  </label>
+                </div>
               </div>
             )}
             {active.stage === "intake" && (
@@ -817,12 +839,18 @@ export function Cycle({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void start()}
+                onClick={() => void start(active.stage === "intake" && sections.length === 0 && hasCode && (intakePath ?? "adopt") === "adopt")}
                 disabled={starting}
                 data-testid="cycle-run"
                 className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
               >
-                {starting ? "Starting…" : sections.length === 0 ? "Draft it" : "Redraft"}
+                {starting
+                  ? "Starting…"
+                  : active.stage === "intake" && sections.length === 0 && hasCode && (intakePath ?? "adopt") === "adopt"
+                    ? "Survey the code"
+                    : sections.length === 0
+                      ? "Draft it"
+                      : "Redraft"}
               </button>
               {startedRun && (
                 <a

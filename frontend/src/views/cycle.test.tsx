@@ -256,9 +256,15 @@ describe("Cycle — starting a stage", () => {
       projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
     });
     render(<Cycle client={c} projectId="p" />);
+    // ONE choice, ONE button: the old layout had "Survey the code" boxed at
+    // the top and "Draft it" at the bottom with the shared inputs (brief,
+    // references) attached to the second — a person who filled references
+    // was led straight past the survey and the code was never read.
     const door = await screen.findByTestId("cycle-adopt-door");
     expect(door.textContent).toContain("already has code");
-    fireEvent.click(screen.getByTestId("cycle-adopt"));
+    expect((screen.getByTestId("cycle-adopt") as HTMLInputElement).checked).toBe(true); // the default
+    expect(screen.getByTestId("cycle-run").textContent).toBe("Survey the code");
+    fireEvent.click(screen.getByTestId("cycle-run"));
     await waitFor(() =>
       expect(c.stageStart).toHaveBeenCalledWith("p", "intake", {
         from: "",
@@ -266,6 +272,20 @@ describe("Cycle — starting a stage", () => {
         rounds: 2,
         adopt: true,
       }),
+    );
+  });
+
+  it("starts from the brief alone only when that path is chosen", async () => {
+    const c = client({
+      projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
+    });
+    render(<Cycle client={c} projectId="p" />);
+    await screen.findByTestId("cycle-adopt-door");
+    fireEvent.click(screen.getByTestId("cycle-greenfield"));
+    expect(screen.getByTestId("cycle-run").textContent).toBe("Draft it");
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() =>
+      expect(c.stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({ adopt: false })),
     );
   });
 
