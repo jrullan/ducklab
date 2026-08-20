@@ -2,11 +2,19 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -250,6 +258,161 @@ func TestAChatProjectWallclockOverrideDoesNotCreateACeiling(t *testing.T) {
 	if rs.run.Budget.Limit.WallclockS != 0 {
 		t.Errorf("chat inherited project wallclock ceiling = %d, want none", rs.run.Budget.Limit.WallclockS)
 	}
+}
+
+// A screenshot is evidence for precisely one reply.  It is retained on the
+// human event, but must not be smuggled into later text-only turns when the
+// conversation is replayed.
+func TestChatImagesReachSeeingConsultantAndRemainWithTheirMessage(t *testing.T) {
+	const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/bwAAAABJRU5ErkJggg=="
+	var mu sync.Mutex
+	var requests []string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, string(body))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"seen"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer provider.Close()
+
+	isolate(t)
+	seeing := true
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{"test": {Kind: config.ProviderKindOpenAI, BaseURL: provider.URL}}
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{"seer": {Provider: "test", Model: "m", Caps: config.Caps{Vision: &seeing}}}
+	s, err := New(cfg, Options{Bus: bus.New(32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := projectWithConfig(t, s, "chat-images")
+
+	run := chatStartWithImages(t, s, projectID, ChatStartRequest{Duckling: "seer", Message: "What is wrong?"}, []string{image})
+	waitForChatPause(t, s, run.ID)
+	chatSendWithImages(t, s, run.ID, "What about this text-only state?", nil)
+	waitForChatPause(t, s, run.ID)
+	chatSendWithImages(t, s, run.ID, "And this screenshot?", []string{image})
+	waitForChatPause(t, s, run.ID)
+
+	mu.Lock()
+	gotRequests := append([]string(nil), requests...)
+	mu.Unlock()
+	if len(gotRequests) != 3 {
+		t.Fatalf("consultant requests = %d, want one reply per human message", len(gotRequests))
+	}
+	for _, n := range []int{0, 2} {
+		if !strings.Contains(gotRequests[n], "image_url") || !strings.Contains(gotRequests[n], image) {
+			t.Errorf("reply %d did not receive its screenshot: %s", n+1, gotRequests[n])
+		}
+	}
+	if strings.Contains(gotRequests[1], "image_url") || strings.Contains(gotRequests[1], image) {
+		t.Errorf("text-only reply was sent an earlier screenshot: %s", gotRequests[1])
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	humanImages, warnings := 0, 0
+	for _, event := range detail.Events {
+		if event.Type == "message" && event.Data["role"] == "human" && reflect.DeepEqual(event.Data["images"], []interface{}{image}) {
+			humanImages++
+		}
+		if event.Type == "warning" && strings.Contains(fmt.Sprint(event.Data["detail"]), "1 screenshot(s) shown") {
+			warnings++
+		}
+	}
+	if humanImages != 2 {
+		t.Errorf("human events retaining screenshots = %d, want 2", humanImages)
+	}
+	if warnings != 2 {
+		t.Errorf("screenshot warnings = %d, want 2", warnings)
+	}
+}
+
+// Both the declared capability and the decoded payload are boundaries. A
+// text-only duckling must be refused before its endpoint is called; malformed,
+// non-image, and over-limit data URLs must identify the offending image.
+func TestChatImagesRequireSeeingDucklingAndValidPayload(t *testing.T) {
+	textOnly := serviceWithDucklings(t, "text-only")
+	projectID, _ := projectWithConfig(t, textOnly, "chat-images")
+	valid := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("small image"))
+	_, err := chatStartWithImagesErr(textOnly, projectID, ChatStartRequest{Duckling: "text-only", Message: "look"}, []string{valid})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "seeing duckling") {
+		t.Fatalf("text-only consultant error = %v, want refusal to pick a seeing duckling", err)
+	}
+
+	seeing := true
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{"fake": {Kind: config.ProviderKindOpenAI, BaseURL: "fake://"}}
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{"seer": {Provider: "fake", Model: "m", Caps: config.Caps{Vision: &seeing}}}
+	s, err := New(cfg, Options{Bus: bus.New(8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ = projectWithConfig(t, s, "chat-image-validation")
+	for name, image := range map[string]string{
+		"non-image": "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte("not a picture")),
+		"oversized": "data:image/png;base64," + base64.StdEncoding.EncodeToString(make([]byte, (8<<20)+1)),
+		"malformed": "data:image/png;base64,not base64!",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := chatStartWithImagesErr(s, projectID, ChatStartRequest{Duckling: "seer", Message: "look"}, []string{image})
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "image 1") {
+				t.Fatalf("invalid image error = %v, want invalid_request naming image 1", err)
+			}
+		})
+	}
+}
+
+func chatStartWithImages(t *testing.T, s *Service, projectID string, req ChatStartRequest, images []string) *runlog.Run {
+	t.Helper()
+	run, err := chatStartWithImagesErr(s, projectID, req, images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+func chatStartWithImagesErr(s *Service, projectID string, req ChatStartRequest, images []string) (*runlog.Run, error) {
+	field := reflect.ValueOf(&req).Elem().FieldByName("Images")
+	if !field.IsValid() {
+		return nil, fmt.Errorf("ChatStartRequest must accept images")
+	}
+	field.Set(reflect.ValueOf(images))
+	out := reflect.ValueOf(s.ChatStart).Call([]reflect.Value{reflect.ValueOf(context.Background()), reflect.ValueOf(projectID), reflect.ValueOf(req)})
+	if !out[1].IsNil() {
+		return nil, out[1].Interface().(error)
+	}
+	return out[0].Interface().(*runlog.Run), nil
+}
+
+func chatSendWithImages(t *testing.T, s *Service, runID, message string, images []string) {
+	t.Helper()
+	method := reflect.ValueOf(s).MethodByName("ChatSend")
+	if method.Type().NumIn() != 4 {
+		t.Fatalf("ChatSend accepts %d arguments, want context, run ID, message, and images", method.Type().NumIn())
+	}
+	out := method.Call([]reflect.Value{reflect.ValueOf(context.Background()), reflect.ValueOf(runID), reflect.ValueOf(message), reflect.ValueOf(images)})
+	if !out[1].IsNil() {
+		t.Fatal(out[1].Interface().(error))
+	}
+}
+
+func waitForChatPause(t *testing.T, s *Service, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		s.runsMu.RLock()
+		rs := s.runs[runID]
+		s.runsMu.RUnlock()
+		if rs != nil && rs.run.Status == "paused" && rs.run.PendingKind == "chat" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("chat did not pause for its next message")
 }
 
 func TestAChatHasNoWallclockCeiling(t *testing.T) {
