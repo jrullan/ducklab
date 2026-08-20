@@ -319,21 +319,38 @@ function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId:
 }
 
 function RecentRun({ run }: { run: Run }) {
-  const label = run.task_id
-    ? `${run.task_id}${run.stage ? ` ${run.stage}` : ""}`
-    : run.stage || run.id;
+  if (!run.stage) {
+    return (
+      <li className="flex items-center gap-1 text-xs">
+        <RecentRunGlyph run={run} />
+        <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{run.id}</a>
+      </li>
+    );
+  }
+
+  const identifier = run.stage === "triage"
+    ? run.subject || (run.task_id.startsWith("B-") ? run.task_id : "")
+    : run.stage === "test" || run.stage === "build"
+      ? run.task_id
+      : run.task_id || run.subject;
+  const label = identifier ? `${run.stage} ${identifier}` : run.stage;
+  return (
+    <li className="flex items-center gap-1 text-xs">
+      <RecentRunGlyph run={run} />
+      <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{label}</a>
+    </li>
+  );
+}
+
+function RecentRunGlyph({ run }: { run: Run }) {
   const role = run.status === "failed" || ["FAILED", "ABORTED", "BUDGET_EXCEEDED"].includes(run.verdict)
     ? verdictStatus("FAILED")
     : run.verdict === "PASSED" || run.accepted === true
       ? verdictStatus("PASSED")
       : verdictStatus("UNVERIFIED");
-  const glyph = role === "warning" ? "UNVERIFIED" : statusIcon(role);
-  return (
-    <li className="flex items-center gap-1 text-xs">
-      <span role="img" aria-label={glyph} style={{ color: statusVar(role) }}>{glyph}</span>
-      <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{label}</a>
-    </li>
-  );
+  const glyph = role === "warning" ? "—" : statusIcon(role);
+  const ariaLabel = role === "warning" ? "unverified" : role === "good" ? "passed" : role === "critical" ? "failed" : role;
+  return <span role="img" aria-label={ariaLabel} style={{ color: statusVar(role) }}>{glyph}</span>;
 }
 
 /** One live run, rail-compact: the status in its color, the shortest name
