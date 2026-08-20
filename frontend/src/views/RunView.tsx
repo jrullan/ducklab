@@ -195,6 +195,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [answer, setAnswer] = useState("");
   const [chatMsg, setChatMsg] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatImages, setChatImages] = useState<{ name: string; data: string }[]>([]);
+  const [chatImageError, setChatImageError] = useState<string | null>(null);
+  const chatImageInput = useRef<HTMLInputElement>(null);
   // Follow the chain: accepting a watched test starts its build, and the
   // person watching should keep watching. Auto-navigate ONLY when the run
   // was waiting under their eyes — a historical test opened later gets a
@@ -481,6 +484,30 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const chatLive =
     run?.stage === "chat" &&
     (run.status === "running" || run.status === "paused" || run.status === "queued");
+  const chatCanSee = !!fleet.find((d) => d.id === Object.values(run.roster ?? {})[0])?.caps?.vision;
+  const readChatImages = (files: FileList | null) => {
+    if (!files) return;
+    setChatImageError(null);
+    const picked = Array.from(files);
+    if (picked.some((file) => !file.type.startsWith("image/"))) {
+      setChatImageError("Only image files can be attached.");
+      return;
+    }
+    void Promise.all(picked.map((file) => new Promise<{ name: string; data: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, data: String(reader.result) });
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    }))).then((pickedImages) => setChatImages((current) => [...current, ...pickedImages]))
+      .catch(() => setChatImageError("Could not read the selected image."));
+  };
+  const sendChat = () => {
+    setChatBusy(true);
+    void client.chatSend(runId, chatMsg.trim(), chatImages.map((image) => image.data))
+      .then(() => { setChatMsg(""); setChatImages([]); })
+      .catch(() => {})
+      .finally(() => setChatBusy(false));
+  };
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
   // The live figures while the run is GOING, the recorded ones once it is
@@ -1451,17 +1478,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <div className="flex items-start gap-2">
             <textarea
               aria-label="chat message"
+              data-testid="chat-message"
               value={chatMsg}
               onChange={(e) => setChatMsg(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && chatMsg.trim() && !chatBusy && pending?.kind === "chat") {
                   e.preventDefault();
-                  setChatBusy(true);
-                  void client
-                    .chatSend(runId, chatMsg.trim())
-                    .then(() => setChatMsg(""))
-                    .catch(() => {})
-                    .finally(() => setChatBusy(false));
+                  sendChat();
                 }
               }}
               rows={2}
@@ -1469,18 +1492,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               placeholder={pending?.kind === "chat" ? "your reply… (Enter to send)" : "the consultant is thinking…"}
               className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1 disabled:opacity-60"
             />
+            <input ref={chatImageInput} type="file" accept="image/*" multiple data-testid="chat-image" className="hidden" onChange={(e) => { readChatImages(e.target.files); e.currentTarget.value = ""; }} />
+            <button type="button" data-testid="chat-add-image" disabled={!chatCanSee || pending?.kind !== "chat"} title={chatCanSee ? "Add images" : "The chat duckling needs vision to see attached images"} onClick={() => chatImageInput.current?.click()} className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40">Add image</button>
             <button
               type="button"
               data-testid="chat-send"
               disabled={chatBusy || pending?.kind !== "chat" || !chatMsg.trim()}
-              onClick={() => {
-                setChatBusy(true);
-                void client
-                  .chatSend(runId, chatMsg.trim())
-                  .then(() => setChatMsg(""))
-                  .catch(() => {})
-                  .finally(() => setChatBusy(false));
-              }}
+              onClick={sendChat}
               className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
             >
               {chatBusy ? "Sending…" : "Send"}
@@ -1496,6 +1514,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               End chat
             </button>
           </div>
+          {chatImages.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{chatImages.map((image, index) => <span key={`${image.name}-${index}`} data-testid="chat-image-chip" className="flex items-center gap-1 rounded border border-hairline px-1 py-0.5 text-xs"><img src={image.data} alt="" className="h-6 w-6 object-cover" />{image.name}<button type="button" aria-label={`remove image ${image.name}`} onClick={() => setChatImages((current) => current.filter((_, i) => i !== index))}>×</button></span>)}</div>}
+          {chatImageError && <p className="mt-1 text-xs text-critical" data-testid="chat-image-error">{chatImageError}</p>}
         </section>
       )}
         </section>

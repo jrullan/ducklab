@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Duckling, EngineClient } from "../api/client";
 
 /** "Chat about this": a conversation with a chosen duckling about one
@@ -30,6 +30,27 @@ export function ChatAbout({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [images, setImages] = useState<{ name: string; data: string }[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const selectedDuckling = ducklings.find((d) => d.id === duckling);
+  const canSee = !!selectedDuckling?.caps?.vision;
+  const readImages = (files: FileList | null) => {
+    if (!files) return;
+    setImageError(null);
+    const picked = Array.from(files);
+    if (picked.some((file) => !file.type.startsWith("image/"))) {
+      setImageError("Only image files can be attached.");
+      return;
+    }
+    void Promise.all(picked.map((file) => new Promise<{ name: string; data: string }>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, data: String(reader.result) });
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    }))).then((pickedImages) => setImages((current) => [...current, ...pickedImages]))
+      .catch(() => setImageError("Could not read the selected image."));
+  };
   if (!open) {
     return (
       <button
@@ -63,7 +84,29 @@ export function ChatAbout({
         rows={2}
         className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
       />
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-1" data-testid="chat-image-chips">
+          {images.map((image, index) => (
+            <span key={`${image.name}-${index}`} data-testid="chat-image-chip" className="flex items-center gap-1 rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs">
+              <img src={image.data} alt="" className="h-6 w-6 object-cover" />
+              {image.name}
+              <button type="button" aria-label={`remove image ${image.name}`} onClick={() => setImages((current) => current.filter((_, i) => i !== index))}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input ref={imageInput} type="file" accept="image/*" multiple data-testid="chat-image" className="hidden" onChange={(e) => { readImages(e.target.files); e.currentTarget.value = ""; }} />
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="chat-add-image"
+          disabled={!canSee}
+          title={canSee ? "Add images" : "Pick a duckling with vision to attach images"}
+          onClick={() => imageInput.current?.click()}
+          className="rounded border border-hairline px-2 py-0.5 text-xs disabled:opacity-40"
+        >
+          Add image
+        </button>
         <button
           type="button"
           data-testid="chat-start"
@@ -72,8 +115,9 @@ export function ChatAbout({
             setBusy(true);
             setError(null);
             void client
-              .chatStart(projectId, { duckling, aboutKind, aboutId, message: message.trim() })
+              .chatStart(projectId, { duckling, aboutKind, aboutId, message: message.trim(), images: images.map((image) => image.data) })
               .then((r) => {
+                setImages([]);
                 location.hash = `#/runs/${r.id}`;
               })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -87,6 +131,7 @@ export function ChatAbout({
           cancel
         </button>
       </div>
+      {imageError && <p className="text-xs text-critical" data-testid="chat-image-error">{imageError}</p>}
       {error && <p className="text-xs text-critical" data-testid="chat-error">{error}</p>}
     </div>
   );
