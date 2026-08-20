@@ -1728,4 +1728,29 @@ The backend already announces the accept phase but only after CommitWithTrailer 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-081 — Warn on plan proposals whose accept rewrites task bodies carrying accepted history
+
+Fixes B-094.
+
+## Reported
+
+Jose accepted a spec-alignment plan trusting the gate, and only discovered afterwards that 64 tasks had reverted to todo: the proposal card showed the textual diff but said nothing about what accepting would do to derived task statuses. sections_removed warns what an accept ERASES from the document; nothing warns what it resets on the BOARD. When a plan proposal rewrites the SUBSTANCE of task bodies that carry accepted history (post-B-093: traceability edits are exempt), the card should say so: this accept rewrites N task bodies whose accepted history will stop counting — never blocked, never hidden.
+
+**Deliverables:**
+- A plan proposal that rewrites the substance of N task bodies carrying accepted run history sets the run's warning to name the N and the consequence (accepted history stops counting), alongside the existing sections_removed/sections_gutted warnings
+- The comparison uses the post-B-093 normalized task-body hash, so an Implements-only edit (traceability change) produces no warning
+- The warning is set for the plan kind only and never blocks the proposal — the accept path is unchanged
+- A test in internal/service (taskhash_test.go or a stages test) asserts the warning appears for a substance rewrite and is absent for a traceability-only edit
+
+## Triage
+
+**Component:** lifecycle / stage proposal gate
+**Suspected files:** internal/service/stages.go, internal/service/taskhash_test.go, internal/runlog/runlog.go
+
+This is the board-side counterpart to the existing sections_removed/sections_gutted document warnings: the same proposal card already warns what an accept erases from the document, and the fix adds a deterministic warning about what an accept resets on the board, reusing the taskBodyHashes/runsForCurrentTaskBodies machinery that already exists.
+
+**Verification (triage recommends):** test-first — Build a project with a task that has an accepted run (recorded TaskBodyHash), propose a plan that rewrites that task's substance, and assert the run's warning names the body rewrite and the count; a plan that only edits Implements lines must warn nothing.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
