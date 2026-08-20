@@ -507,6 +507,35 @@ describe("the gate as a turn in the lane", () => {
     expect(g2.gate).toBe("red");
   });
 
+  it("shows and closes accept's commit announcement without a round", () => {
+    const commitStarted = ev("gate_started", 1, {
+      phase: "accept",
+      detail: "committing accepted work before clean-checkout verification",
+    });
+    const live = buildTurns([commitStarted]);
+    const commit = live.find((t) => t.role === "gate")!;
+    expect(commit.done).toBe(false);
+    const r = render(<ConversationTurn block={commit} roster={[]} />);
+    expect(r.getByTestId("conversation-turn").textContent).toContain("committing accepted work");
+    r.unmount();
+
+    // Accept announces the commit and then the clean-checkout reproduction.
+    // The latter is the terminal signal for this accept gate: neither gate may
+    // remain live after it has reproduced.
+    const settled = buildTurns([
+      commitStarted,
+      ev("gate_started", 2, {
+        phase: "accept",
+        detail: "reproducing the gate from a clean checkout",
+      }),
+      ev("gate_reproduced", 3, { green: true }),
+    ]);
+    const gates = settled.filter((t) => t.role === "gate");
+    expect(gates).toHaveLength(2);
+    expect(gates.every((gate) => gate.done)).toBe(true);
+    expect(gates.map((gate) => gate.gate)).toEqual(["green", "green"]);
+  });
+
   it("historical runs without gate_started still show the settled gate", () => {
     const turns = buildTurns([
       { seq: 1, type: "round_gate", data: { round: 2, result: "green" } },

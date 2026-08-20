@@ -1753,4 +1753,29 @@ This is the board-side counterpart to the existing sections_removed/sections_gut
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-082 — Make the accept-phase gate_started event render as a live gate turn in the transcript
+
+Fixes B-097.
+
+## Reported
+
+A previous task was supposed to make the commit signal show on the transcript when the commit is being invoked. When I go to the transcript of a run after the fix was implemented and I don't see the commit signal on the transcript.
+
+**Deliverables:**
+- A frontend test feeds an accept-phase gate_started event (phase 'accept', no round) followed by gate_reproduced and asserts the transcript lane shows the commit step
+- The gate lane in buildTurns settles on gate_reproduced (not only round_gate) so accept-phase gates close
+- A viewing-a-run transcript shows 'committing accepted work' while the accept commit is in flight and settles when the clean-checkout gate reproduces
+- The existing round_gate gate behaviour remains intact (regression test stays green)
+
+## Triage
+
+**Component:** run transcript / accept flow
+**Suspected files:** frontend/src/lib/runview.ts, frontend/src/components/runview.test.tsx, internal/service/service.go
+
+The backend emits the pre-commit gate_started announcement (service.go:2054, 2115), but the front-end gate-as-turn logic only handles gate_started keyed by round and settles on round_gate (runview.test.tsx:491-508); the accept flow settles via gate_reproduced, so its announcement never appears as a live transcript signal — I could not read the gate_started branch of buildTurns before tool calls ran out, so the exact drop point is inferred, not confirmed.
+
+**Verification (triage recommends):** test-first — buildTurns fed gate_started{phase:accept} → gate_started → gate_reproduced must show the commit step; today the lane settles only on round_gate, so the accept signal is dropped or stuck
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
