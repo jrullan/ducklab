@@ -156,6 +156,32 @@ describe("buildPending", () => {
     expect(p.questionId).toBe("q1");
   });
 
+  it("shows the seated advisor preparing a recommendation only while a question has no result", () => {
+    const waiting = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
+    ])!;
+    expect(waiting.advisorPending).toBe("pato-advisor");
+
+    const answered = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
+      ev("advice", 2, { question_id: "q1", advisor: "pato-advisor", answer: "Use the documented contract." }),
+    ])!;
+    expect(answered.advisorPending).toBeUndefined();
+    expect(answered.advice).toBe("Use the documented contract.");
+
+    const failed = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
+      ev("advice_failed", 2, { question_id: "q1", advisor: "pato-advisor", cause: "advisor offline" }),
+    ])!;
+    expect(failed.advisorPending).toBeUndefined();
+    expect(failed.detail).toBe("advisor offline");
+
+    const gate = buildPending([
+      ev("human_needed", 1, { kind: "gate", advisor: "pato-advisor" }),
+    ])!;
+    expect(gate.advisorPending).toBeUndefined();
+  });
+
   it("clears once the human acts", () => {
     expect(buildPending([
       ev("human_needed", 1, { kind: "gate" }),

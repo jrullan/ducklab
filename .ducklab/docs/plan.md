@@ -1975,4 +1975,30 @@ Service.emitGateStarted is invoked after branch creation but the event is placed
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-091 — Show the advisor's in-flight work on the ask_human question card and account it to the run's budget
+
+Fixes B-099.
+
+## Reported
+
+When an ask_human turn shows the question in the desktop, the advisor's activity is not shown. An indication in the ask_human card should show that the advisor's is trying to prepare an answer, and also it's activity should be tracked agains the budget for that run.
+
+**Deliverables:**
+- The human_needed event (or pending data) for a question names the advisor seat being consulted, so the UI knows who is preparing the answer
+- buildPending returns an advisor-pending indicator when a question has no advice yet, clears it when advice/advice_failed arrives, and never shows it for non-question pending kinds
+- RunView and Board question cards render 'advisor X is preparing a recommendation' while pending, replaced by the advice card or the failure cause on arrival
+- A test asserts advisor chat cost/tokens for a paused-question consult land in the run's spend record (fix the accounting if the assertion fails)
+- Board.tsx's pending-question panel (line ~1220) shows the same indicator as RunView
+
+## Triage
+
+**Component:** advisor question card (desktop + run record)
+**Suspected files:** internal/service/lifecycle.go, internal/service/advisor.go, frontend/src/lib/runview.ts, frontend/src/views/RunView.tsx, frontend/src/views/Board.tsx
+
+pauseForQuestion launches the advisor silently (lifecycle.go:525) so the card shows a bare question with no working indicator, and advisor spend must be verifiably charged to the run.
+
+**Verification (triage recommends):** test-first — buildPending over [human_needed(kind=question)] with no advice event should expose an advisor-pending state; RunView renders it as a working indicator, replaced when advice arrives
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

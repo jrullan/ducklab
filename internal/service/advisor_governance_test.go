@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -22,6 +23,7 @@ type advisorTestProvider struct {
 	replies []string
 	err     error
 	calls   []provider.ChatRequest
+	usage   provider.Usage
 }
 
 func (p *advisorTestProvider) ID() string { return "fake" }
@@ -36,7 +38,7 @@ func (p *advisorTestProvider) Chat(_ context.Context, req provider.ChatRequest) 
 	if i >= len(p.replies) {
 		i = len(p.replies) - 1
 	}
-	return provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Content: p.replies[i]}}}}, nil
+	return provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Content: p.replies[i]}}}, Usage: p.usage}, nil
 }
 func (p *advisorTestProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
 	return provider.ChatResponse{}, provider.ErrUnsupported
@@ -79,6 +81,32 @@ func TestAdvisorRepairsAndStripsDeliberation(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(p.calls[1].Messages[len(p.calls[1].Messages)-1].Content), "violation") {
 		t.Error("repair prompt did not name the contract violation")
+	}
+}
+
+// A question pauses before its advisor call completes, but that call still
+// belongs to the paused run rather than disappearing from its per-duckling spend.
+func TestPausedQuestionAdvisorSpendIsAttributedToTheRun(t *testing.T) {
+	s := serviceWithDucklings(t, "fast-advisor")
+	s.ducklings.RegisterProvider(&advisorTestProvider{
+		replies: []string{"Use the documented option. It is the project contract."},
+		usage: provider.Usage{PromptTokens: 400, CompletionTokens: 60, TotalTokens: 460},
+	})
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-paused-advisor-spend", ProjectID: "p", Status: "paused", PendingKind: "question", Roster: map[string]string{"advisor": "fast-advisor"}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	rs.setTracker(budget.NewTracker(&budget.Budget{MaxTokens: 10_000}))
+
+	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which option?"}); err != nil {
+		t.Fatal(err)
+	}
+	spent := rs.snapshotRun().Spend["fast-advisor"]
+	if spent.Calls != 1 || spent.Tokens != 460 {
+		t.Fatalf("paused question advisor spend = %+v, want one 460-token call", spent)
 	}
 }
 

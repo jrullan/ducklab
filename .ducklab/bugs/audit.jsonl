@@ -411,3 +411,5 @@
 {"ts":"2026-08-20T16:10:49Z","bug":"B-099","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-20T16:26:56Z","bug":"B-098","from":"open","to":"triaged","actor":"engine","via":"triage"}
 {"ts":"2026-08-20T16:59:38Z","bug":"B-098","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-090"}
+{"ts":"2026-08-20T17:07:35Z","bug":"B-098","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-090"}
+{"ts":"2026-08-20T17:10:03Z","bug":"B-099","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-091"}
