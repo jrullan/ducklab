@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { RunView } from "./RunView";
+import { ChatAbout } from "../components/ChatAbout";
 import { useRuns } from "../store/runs";
 import { EngineClient, type Run } from "../api/client";
 import { buildTurns } from "../lib/runview";
@@ -99,6 +100,69 @@ describe("chat transcript author avatars", () => {
   });
 });
 
+describe("ChatAbout image attachments", () => {
+  const ducklings = [
+    { id: "text-only", provider: "test", model: "text", caps: { native_tools: true, context_tokens: 1, vision: false } },
+    { id: "seeing", provider: "test", model: "vision", caps: { native_tools: true, context_tokens: 1, vision: true } },
+  ];
+
+  function chatClient(requests: { body?: unknown }[]) {
+    return new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (_url: string, init?: RequestInit) => {
+        requests.push({ body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        return new Response('{"id":"new-chat"}', { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as never,
+    });
+  }
+
+  it("shows removable image chips and starts the chat with data URLs", async () => {
+    const requests: { body?: unknown }[] = [];
+    render(<ChatAbout client={chatClient(requests)} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={ducklings} />);
+    fireEvent.click(screen.getByTestId("chat-about"));
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "seeing" } });
+    fireEvent.change(screen.getByTestId("chat-message"), { target: { value: "please inspect this" } });
+
+    const picker = screen.getByTestId("chat-image") as HTMLInputElement;
+    expect(picker.accept).toBe("image/*");
+    expect(picker.multiple).toBe(true);
+    fireEvent.change(picker, { target: { files: [new File(["pixels"], "broken-ui.png", { type: "image/png" })] } });
+
+    await waitFor(() => expect(screen.getByTestId("chat-image-chip")).toHaveTextContent("broken-ui.png"));
+    fireEvent.click(screen.getByLabelText("remove image broken-ui.png"));
+    expect(screen.queryByTestId("chat-image-chip")).toBeNull();
+
+    fireEvent.change(picker, { target: { files: [new File(["pixels"], "broken-ui.png", { type: "image/png" })] } });
+    await waitFor(() => expect(screen.getByTestId("chat-image-chip")).toHaveTextContent("broken-ui.png"));
+    fireEvent.click(screen.getByTestId("chat-start"));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.body).toMatchObject({
+      duckling: "seeing", about_kind: "bug", about_id: "B-1", message: "please inspect this",
+      images: ["data:image/png;base64,cGl4ZWxz"],
+    });
+    await waitFor(() => expect(screen.queryByTestId("chat-image-chip")).toBeNull());
+  });
+
+  it("disables image selection for a text-only duckling and refuses non-images", async () => {
+    const requests: { body?: unknown }[] = [];
+    render(<ChatAbout client={chatClient(requests)} projectId="p" aboutKind="task" aboutId="T-1" ducklings={ducklings} />);
+    fireEvent.click(screen.getByTestId("chat-about"));
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "text-only" } });
+    const picker = screen.getByTestId("chat-image") as HTMLInputElement;
+    const add = screen.getByTestId("chat-add-image") as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    expect(add.title).toMatch(/vision|see/i);
+
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "seeing" } });
+    expect(add.disabled).toBe(false);
+    fireEvent.change(picker, { target: { files: [new File(["not an image"], "notes.txt", { type: "text/plain" })] } });
+    expect(await screen.findByTestId("chat-image-error")).toHaveTextContent(/image/i);
+    expect(screen.queryByTestId("chat-image-chip")).toBeNull();
+  });
+});
+
 describe("the chat composer", () => {
   it("waits at the bottom section, not in the pending card", async () => {
     useRuns.setState({
@@ -117,6 +181,27 @@ describe("the chat composer", () => {
       conversation.compareDocumentPosition(screen.getByTestId("chat-reply")) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("sends reply attachments as data URLs", async () => {
+    const send = vi.spyOn(client, "chatSend").mockResolvedValue(chatRun);
+    useRuns.setState({
+      runs: { "r-c": chatRun },
+      events: { "r-c": [...chatEvents, ev("human_needed", 9, { kind: "chat" })] },
+      spend: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-c" client={client} />);
+    await waitFor(() => screen.getByTestId("chat-reply"));
+    fireEvent.change(screen.getByTestId("chat-message"), { target: { value: "look at this" } });
+    fireEvent.change(screen.getByTestId("chat-image"), {
+      target: { files: [new File(["reply pixels"], "reply.png", { type: "image/png" })] },
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-image-chip")).toHaveTextContent("reply.png"));
+    fireEvent.click(screen.getByTestId("chat-send"));
+    await waitFor(() => expect(send).toHaveBeenCalledWith(
+      "r-c", "look at this", ["data:image/png;base64,cmVwbHkgcGl4ZWxz"],
+    ));
+    send.mockRestore();
   });
 
   it("stays present but disabled while the consultant is thinking", async () => {
