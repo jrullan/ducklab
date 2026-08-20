@@ -280,11 +280,13 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		for attempt := 1; ; attempt++ {
 			start = time.Now()
 			resp, err = chatMaybeStreaming(ctx, loop, turn, req)
-				if errors.Is(err, ErrRepetitionLoop) && attempt == 1 {
-					if loop.OnRepetitionLoop != nil { loop.OnRepetitionLoop(turn, repetitionLoopText(err)) }
-					req.Messages = append(req.Messages, provider.Message{Role: "user", Content: fmt.Sprintf("A repetition loop was detected (%s). Stop repeating it and answer directly.", repetitionLoopText(err))})
-					continue
+			if errors.Is(err, ErrRepetitionLoop) && attempt == 1 {
+				if loop.OnRepetitionLoop != nil {
+					loop.OnRepetitionLoop(turn, repetitionLoopText(err))
 				}
+				req.Messages = append(req.Messages, provider.Message{Role: "user", Content: fmt.Sprintf("A repetition loop was detected (%s). Stop repeating it and answer directly.", repetitionLoopText(err))})
+				continue
+			}
 
 			if err != nil && provider.IsTransient(err) {
 				// Retry with backoff — VISIBLY. Each transient failure lands
@@ -653,10 +655,18 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 
 // ErrRepetitionLoop reports a token repetition loop detected in a stream.
 var ErrRepetitionLoop = errors.New("repetition loop")
+
 type repetitionError struct{ text string }
+
 func (e *repetitionError) Error() string { return fmt.Sprintf("%s: %s", ErrRepetitionLoop, e.text) }
 func (e *repetitionError) Unwrap() error { return ErrRepetitionLoop }
-func repetitionLoopText(err error) string { var e *repetitionError; if errors.As(err, &e) { return e.text }; return "repeated output" }
+func repetitionLoopText(err error) string {
+	var e *repetitionError
+	if errors.As(err, &e) {
+		return e.text
+	}
+	return "repeated output"
+}
 
 // chatMaybeStreaming streams when the caller asked for it and the provider can,
 // and falls back to a plain call otherwise.
@@ -669,7 +679,9 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 		resp, err := loop.Provider.Chat(ctx, req)
 		if err == nil && len(resp.Choices) > 0 {
 			d := newRepetitionDetector()
-			if d.Add(resp.Choices[0].Message.Content) { return provider.ChatResponse{}, &repetitionError{text: d.Repeated()} }
+			if d.Add(resp.Choices[0].Message.Content) {
+				return provider.ChatResponse{}, &repetitionError{text: d.Repeated()}
+			}
 		}
 		return resp, err
 	}
@@ -739,7 +751,9 @@ func chatMaybeStreaming(ctx context.Context, loop *Loop, turn *Turn, req provide
 			}
 		}
 	}
-	if loopErr != nil { return provider.ChatResponse{}, loopErr }
+	if loopErr != nil {
+		return provider.ChatResponse{}, loopErr
+	}
 	return resp, err
 }
 

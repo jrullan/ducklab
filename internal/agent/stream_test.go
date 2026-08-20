@@ -161,7 +161,7 @@ type capProbeProvider struct {
 	requests []provider.ChatRequest
 }
 
-func (p *capProbeProvider) ID() string { return "cap-probe" }
+func (p *capProbeProvider) ID() string                               { return "cap-probe" }
 func (p *capProbeProvider) Models(context.Context) ([]string, error) { return nil, nil }
 func (p *capProbeProvider) ChatStream(context.Context, provider.ChatRequest, chan<- provider.Delta) (provider.ChatResponse, error) {
 	return provider.ChatResponse{}, provider.ErrUnsupported
@@ -169,7 +169,7 @@ func (p *capProbeProvider) ChatStream(context.Context, provider.ChatRequest, cha
 func (p *capProbeProvider) Chat(ctx context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
 	p.requests = append(p.requests, req)
 	return provider.ChatResponse{Choices: []provider.Choice{{
-		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`}, 
+		Message:      provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`},
 		FinishReason: provider.FinishStop,
 	}}}, nil
 }
@@ -210,7 +210,7 @@ type repetitionProvider struct {
 	wasCanceled bool
 }
 
-func (p *repetitionProvider) ID() string { return "repetition" }
+func (p *repetitionProvider) ID() string                               { return "repetition" }
 func (p *repetitionProvider) Models(context.Context) ([]string, error) { return nil, nil }
 func (p *repetitionProvider) Chat(context.Context, provider.ChatRequest) (provider.ChatResponse, error) {
 	return provider.ChatResponse{}, provider.ErrUnsupported
@@ -233,7 +233,7 @@ func (p *repetitionProvider) ChatStream(ctx context.Context, req provider.ChatRe
 		return provider.ChatResponse{}, ctx.Err()
 	}
 	return provider.ChatResponse{Choices: []provider.Choice{{
-		Message: provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"fixed","reason":"classified"}`}, 
+		Message:      provider.Message{Role: "assistant", Content: `{"severity":"high","component":"auth","task_title":"fixed","reason":"classified"}`},
 		FinishReason: provider.FinishStop,
 	}}}, nil
 }

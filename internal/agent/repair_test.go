@@ -142,9 +142,9 @@ func TestRepairSucceedsAndReturnsTheParsedValue(t *testing.T) {
 // original structured turn, rather than the duckling's large declared cap.
 func TestJSONTriageRepairUsesTheContractOutputCap(t *testing.T) {
 	p := &countingProvider{replies: []string{
-			"not json",
-			`{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`,
-		}}
+		"not json",
+		`{"severity":"high","component":"auth","task_title":"x","reason":"classified"}`,
+	}}
 	loop := testLoop(p, 1)
 	loop.Duckling.Params.MaxTokens = func() *int { n := 20000; return &n }()
 	turn := &Turn{Role: config.RoleTriager, Prompt: "classify", Contract: "json:triage", MaxTurns: 1}

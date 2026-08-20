@@ -90,7 +90,7 @@ func TestPausedQuestionAdvisorSpendIsAttributedToTheRun(t *testing.T) {
 	s := serviceWithDucklings(t, "fast-advisor")
 	s.ducklings.RegisterProvider(&advisorTestProvider{
 		replies: []string{"Use the documented option. It is the project contract."},
-		usage: provider.Usage{PromptTokens: 400, CompletionTokens: 60, TotalTokens: 460},
+		usage:   provider.Usage{PromptTokens: 400, CompletionTokens: 60, TotalTokens: 460},
 	})
 	dir := t.TempDir()
 	run := &runlog.Run{ID: "r-paused-advisor-spend", ProjectID: "p", Status: "paused", PendingKind: "question", Roster: map[string]string{"advisor": "fast-advisor"}}

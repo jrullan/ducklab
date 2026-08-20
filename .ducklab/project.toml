@@ -14,7 +14,7 @@ autonomy = "yolo"
 
 [verify]
   mode = "tests"
-  tests = "go test ./... && cd frontend && npx tsc --noEmit && npx vitest run"
+  tests = "test -z \"$(gofmt -l $(find . -type f -name '*.go'))\" && go test ./... && cd frontend && npx tsc --noEmit && npx vitest run"
   build = ""
   lint = ""
   custom = ""

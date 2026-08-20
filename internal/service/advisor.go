@@ -223,7 +223,7 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 				"content": firstN(answer, 2000),
 			},
 			Usage: map[string]interface{}{
-				"prompt_tokens": resp.Usage.PromptTokens,
+				"prompt_tokens":     resp.Usage.PromptTokens,
 				"completion_tokens": resp.Usage.CompletionTokens,
 			},
 			CostUSD:      cost,
