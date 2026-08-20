@@ -141,6 +141,72 @@ describe("the guide rail", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(container.innerHTML).toBe("");
   });
+
+  it("shows an empty recent-runs state when guidance exists but no project run is complete", async () => {
+    render(<GuideRail client={clientWith(STEPS)} projectId="p" />);
+    await waitFor(() => screen.getByTestId("guide-rail"));
+    const recent = screen.getByTestId("rail-recent");
+    expect(recent.textContent).toContain("no completed runs");
+    expect(recent.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  it("pins the ten newest completed project runs below the scrollable guide", async () => {
+    const completed = Array.from({ length: 12 }, (_, index) => {
+      const number = index + 1;
+      const id = `r-${number}`;
+      return {
+        id,
+        project_id: "p",
+        stage: number === 11 ? "review" : "build",
+        mode: "pair",
+        task_id: number === 11 ? "" : number === 8 ? "" : `T-${number}`,
+        status: number === 10 ? "failed" : "done",
+        verdict: number === 12 ? "PASSED" : number === 9 ? "FAILED" : number === 6 ? "BUDGET_EXCEEDED" : "",
+        accepted: number === 11,
+        started_at: `2026-08-${String(number).padStart(2, "0")}T10:00:00Z`,
+      };
+    });
+    useRuns.setState({
+      runs: Object.fromEntries(completed.map((run) => [run.id, run])) as never,
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+
+    render(<GuideRail client={clientWith(STEPS)} projectId="p" />);
+    const rail = await waitFor(() => screen.getByTestId("guide-rail"));
+    const recent = screen.getByTestId("rail-recent");
+    const links = Array.from(recent.querySelectorAll("a"));
+
+    // The two oldest records are omitted; the remaining runs follow the Runs
+    // view's started_at ordering, rather than object insertion order.
+    expect(links).toHaveLength(10);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      [12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map((number) => `#/runs/r-${number}`),
+    );
+    expect(links.map((link) => link.textContent)).toEqual([
+      "T-12", "review", "T-10", "T-9", "r-8", "T-7", "T-6", "T-5", "T-4", "T-3",
+    ]);
+
+    const rowFor = (id: string) => links.find((link) => link.getAttribute("href") === `#/runs/${id}`)!.parentElement!;
+    expect(rowFor("r-12").textContent).toContain("✓"); // PASSED
+    expect(rowFor("r-11").textContent).toContain("✓"); // accepted without a verdict
+    expect(rowFor("r-10").textContent).toContain("✕"); // failed status
+    expect(rowFor("r-9").textContent).toContain("✕"); // FAILED verdict
+    expect(rowFor("r-8").textContent).toContain("UNVERIFIED");
+    expect(rowFor("r-7").textContent).toContain("UNVERIFIED");
+    expect(rowFor("r-6").textContent).toContain("✕"); // budget exceeded
+
+    // The footer is a sibling of, not content inside, the scrolling guide.
+    expect(recent.parentElement).toBe(rail);
+    expect(rail.className).toContain("flex");
+    expect(rail.className).toContain("flex-col");
+    const scrollable = Array.from(rail.children).find((child) => child.className.includes("overflow-y-auto"));
+    expect(scrollable).toBeTruthy();
+    expect(scrollable!.contains(recent)).toBe(false);
+
+    fireEvent.click(screen.getByTestId("chat-about"));
+    expect(screen.getByTestId("chat-about-form")).toBeTruthy();
+    expect(screen.getByTestId("rail-recent")).toBe(recent);
+  });
 });
 
 // Less noise, same thread: the first step is the headline with its why, the
