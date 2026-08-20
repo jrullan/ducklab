@@ -52,6 +52,7 @@ Some tests are architectural and are meant to fail your build:
 - `TestEveryEngineCapabilityIsReachableFromTheDesktop` — a new route needs a
   desktop client method, or an explicit entry saying why not.
 
+The normative spec lives at [`docs/spec/`](docs/spec/) (see decision 0009).
 House invariants worth internalizing before a PR (the spec's I-numbers):
 no model decides a verdict; green candidates apply byte-for-byte; reviewers
 never learn authorship; secrets never touch project state; everything is

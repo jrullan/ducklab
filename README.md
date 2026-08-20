@@ -290,11 +290,11 @@ stay proprietary.
 
 ## Specification
 
-The code implements a written specification (the `ducklab-spec` repository,
-published alongside this one when the repo goes public; sections
-00-VISION through 08-DESKTOP-UI). Until then the **readable spec is in this
-repo**: `.ducklab/docs/spec.md` is the as-built specification the loop
-itself maintains, traceable section-by-section to `requirements.md` and
-`plan.md` beside it — read those three files and you know what this system
-believes it is. Where code and normative spec differ, the difference is
-recorded in [`docs/decisions/`](docs/decisions/).
+The code implements a written specification, in this repo:
+[`docs/spec/`](docs/spec/) (00-VISION through 08-DESKTOP-UI) is the
+**normative** layer — vision, invariants, protocol contracts, acceptance
+criteria. What the system IS today lives in `.ducklab/docs/` — the as-built
+requirements, spec and plan the loop itself maintains, each version signed
+at a human gate. Where the two differ deliberately, the difference is
+recorded in [`docs/decisions/`](docs/decisions/); the diff between them is
+the roadmap, and the alignment stage computes it.
