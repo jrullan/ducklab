@@ -197,6 +197,20 @@ func TestCommonBoardWritesRolePinsOnBothScopes(t *testing.T) {
 // A pair with an advisor is three seats; the legacy positional cap says pair
 // seats two. That echo must not refuse a canonical write — it refused every
 // global write from the board while pair carried an advisor.
+func TestCommonConsultantPinResolvesAcrossModes(t *testing.T) {
+	s := writableService(t, "consultant-duck")
+	projectID, _ := projectWithConfig(t, s, "common-consultant")
+
+	if _, err := s.GlobalRosterSet(context.Background(), "common", "consultant", []string{"consultant-duck"}); err != nil {
+		t.Fatalf("global consultant from the Common board: %v", err)
+	}
+	for _, mode := range []string{"solo", "pair", "common"} {
+		if e := seatOf(t, s, projectID, mode, "consultant"); e.Duckling != "consultant-duck" || e.Source != "global role fallback" {
+			t.Errorf("%s consultant = %+v, want consultant-duck from common role pin", mode, e)
+		}
+	}
+}
+
 func TestGlobalWritesSurviveAPairWithAnAdvisor(t *testing.T) {
 	s := writableService(t, "luna", "k3", "glm52", "terra", "qwen38-max")
 	for _, w := range []struct {

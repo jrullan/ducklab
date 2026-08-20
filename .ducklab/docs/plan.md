@@ -1846,4 +1846,30 @@ The chat image path validates only the declared vision flag ('declared, not prob
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-086 — Add a consultant seat to Roster Common and pre-select it in the guide chat box
+
+Fixes B-101.
+
+## Reported
+
+There is currently no consultant seat for a duckling in the Roster. There should be a consultant seat in the common area of the roster and the duckling selected there should be pre-selected in the guide chat box duckling selection.
+
+**Deliverables:**
+- The engine treats "consultant" as a common role: isCommonRole and role validation accept it, and the Common scope pin resolves for chat launches (tests in internal/service extend the existing triager/scribe cases)
+- Roster view's Common board lists consultant beside triager and scribe (columnsFor in frontend/src/views/Roster.tsx)
+- ChatAbout's duckling select is pre-filled with the resolved common consultant when one is pinned, while remaining a free pick otherwise
+- A test asserts the pre-selection (component test) and a backend test asserts consultant pins resolve as common-role pins
+- No unpinned behavior changes: with no consultant pin the select still shows the placeholder
+
+## Triage
+
+**Component:** roster common / chat launcher
+**Suspected files:** internal/service/roster.go, internal/config/config.go, frontend/src/views/Roster.tsx, frontend/src/components/ChatAbout.tsx, frontend/src/components/GuidePanel.tsx, frontend/src/lib/seats.ts
+
+The common-role set is hard-coded to triager and scribe (roster.go isCommonRole, Roster.tsx columnsFor) and ChatAbout always starts with an empty select, so the consultant seat cannot be pinned in Common nor pre-selected in the guide chat.
+
+**Verification (triage recommends):** test-first — Backend: isCommonRole('consultant') must resolve like triager/scribe (roster_seats_test-style assertions); frontend: ChatAbout rendered with a resolved common roster pre-selects the consultant duckling instead of 'pick a duckling…'
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GuideRail, shortAction } from "./GuidePanel";
 import { useRuns } from "../store/runs";
@@ -111,6 +111,28 @@ describe("the guide rail", () => {
     // The chat teaches the how as well as the why — its dossier walks the
     // idea-to-release path — and the label says so.
     expect(screen.getByTestId("guide-ask").textContent).toContain("ask how & why");
+  });
+
+  it("preselects the Common consultant for the guide chat, but leaves an unpinned chat free", async () => {
+    const consultant = { id: "sage", provider: "test", model: "consultant" };
+    const pinned = clientWith(STEPS);
+    vi.spyOn(pinned, "ducklings").mockResolvedValue([consultant]);
+    const pinnedRoster = vi.spyOn(pinned, "RosterGet").mockResolvedValue({
+      entries: [{ role: "consultant", duckling: "sage", source: "project pin" }],
+    });
+    render(<GuideRail client={pinned} projectId="p" />);
+    await waitFor(() => expect(pinnedRoster).toHaveBeenCalledWith("p", "common"));
+    fireEvent.click(screen.getByTestId("chat-about"));
+    expect((screen.getByTestId("chat-duckling") as HTMLSelectElement).value).toBe("sage");
+
+    // No Common consultant pin preserves the deliberate free choice.
+    const unpinned = clientWith(STEPS);
+    vi.spyOn(unpinned, "ducklings").mockResolvedValue([consultant]);
+    vi.spyOn(unpinned, "RosterGet").mockResolvedValue({ entries: [] });
+    render(<GuideRail client={unpinned} projectId="p-unpinned" />);
+    await waitFor(() => expect(unpinned.RosterGet).toHaveBeenCalledWith("p-unpinned", "common"));
+    fireEvent.click(screen.getAllByTestId("chat-about")[1]!);
+    expect((screen.getAllByTestId("chat-duckling")[1] as HTMLSelectElement).value).toBe("");
   });
 
   it("renders nothing at all when the engine has no step to offer", async () => {
