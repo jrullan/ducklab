@@ -159,7 +159,8 @@ describe("the guide rail", () => {
         project_id: "p",
         stage: number === 12 ? "test" : number === 11 ? "review" : number === 8 ? "triage" : "build",
         mode: "pair",
-        task_id: number === 11 ? "" : number === 8 ? "B-098" : `T-${number}`,
+        task_id: number === 11 || number === 8 ? "" : `T-${number}`,
+        subject: number === 8 ? "B-098" : "",
         status: number === 10 ? "failed" : "done",
         verdict: number === 12 ? "PASSED" : number === 9 ? "FAILED" : number === 6 ? "BUDGET_EXCEEDED" : "",
         accepted: number === 11,
@@ -182,24 +183,27 @@ describe("the guide rail", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
       [12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map((number) => `#/runs/r-${number}`),
     );
-    // Task labels include the stage in the same task-then-stage order as the
-    // live rail. A standalone stage remains singular, while bug triage keeps
-    // both its bug id and its stage.
+    // Labels lead with the action being reported. Triage's bug id is supplied
+    // by its engine-sourced subject, rather than a task association.
     expect(links.map((link) => link.textContent)).toEqual([
-      "T-12 test", "review", "T-10 build", "T-9 build", "B-098 triage",
-      "T-7 build", "T-6 build", "T-5 build", "T-4 build", "T-3 build",
+      "test T-12", "review", "build T-10", "build T-9", "triage B-098",
+      "build T-7", "build T-6", "build T-5", "build T-4", "build T-3",
     ]);
-    expect(links[0]!.textContent).toContain("T-12 test");
-    expect(links[2]!.textContent).toContain("T-10 build");
-    expect(links[4]!.textContent).toBe("B-098 triage");
+    expect(links[0]!.textContent).toContain("test T-12");
+    expect(links[2]!.textContent).toContain("build T-10");
+    expect(links[4]!.textContent).toBe("triage B-098");
 
     const rowFor = (id: string) => links.find((link) => link.getAttribute("href") === `#/runs/${id}`)!.parentElement!;
     expect(rowFor("r-12").textContent).toContain("✓"); // PASSED
     expect(rowFor("r-11").textContent).toContain("✓"); // accepted without a verdict
     expect(rowFor("r-10").textContent).toContain("✕"); // failed status
     expect(rowFor("r-9").textContent).toContain("✕"); // FAILED verdict
-    expect(rowFor("r-8").textContent).toContain("UNVERIFIED");
-    expect(rowFor("r-7").textContent).toContain("UNVERIFIED");
+    expect(rowFor("r-8").textContent).toContain("—");
+    expect(rowFor("r-7").textContent).toContain("—");
+    expect(rowFor("r-8").querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("unverified");
+    expect(rowFor("r-7").querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("unverified");
+    expect(rowFor("r-8").querySelector('[role="img"]')?.getAttribute("style")).toContain("--status-warning");
+    expect(rowFor("r-7").querySelector('[role="img"]')?.getAttribute("style")).toContain("--status-warning");
     expect(rowFor("r-6").textContent).toContain("✕"); // budget exceeded
 
     // The footer is a sibling of, not content inside, the scrolling guide.
@@ -213,6 +217,44 @@ describe("the guide rail", () => {
     fireEvent.click(screen.getByTestId("chat-about"));
     expect(screen.getByTestId("chat-about-form")).toBeTruthy();
     expect(screen.getByTestId("rail-recent")).toBe(recent);
+  });
+
+  it("uses stage-first labels across taskless and non-task stages", async () => {
+    const completed = [
+      { id: "r-triage-subject", stage: "triage", task_id: "", subject: "3 open bugs" },
+      { id: "r-triage-bug", stage: "triage", task_id: "B-099", subject: "" },
+      { id: "r-test", stage: "test", task_id: "T-088", subject: "" },
+      { id: "r-build", stage: "build", task_id: "T-089", subject: "" },
+      { id: "r-chat-subject", stage: "chat", task_id: "", subject: "release notes" },
+      { id: "r-chat-task", stage: "chat", task_id: "T-090", subject: "" },
+      { id: "r-chat", stage: "chat", task_id: "", subject: "" },
+      { id: "r-no-stage", stage: "", task_id: "", subject: "" },
+    ].map((run, index) => ({
+      ...run,
+      project_id: "p",
+      mode: "pair",
+      status: "done",
+      verdict: "PASSED",
+      accepted: false,
+      started_at: `2026-09-${String(7 - index).padStart(2, "0")}T10:00:00Z`,
+    }));
+    useRuns.setState({
+      runs: Object.fromEntries(completed.map((run) => [run.id, run])) as never,
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+
+    render(<GuideRail client={clientWith(STEPS)} projectId="p" />);
+    await waitFor(() => screen.getByTestId("rail-recent"));
+    expect(Array.from(screen.getByTestId("rail-recent").querySelectorAll("a")).map((link) => link.textContent)).toEqual([
+      "triage 3 open bugs",
+      "triage B-099",
+      "test T-088",
+      "build T-089",
+      "chat release notes",
+      "chat T-090",
+      "chat",
+      "r-no-stage",
+    ]);
   });
 });
 
