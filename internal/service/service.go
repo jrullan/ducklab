@@ -2041,7 +2041,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// unexplained pause. Keep this event before branch creation as well, so it
 	// is durable when AddAll or CommitWithTrailer aborts acceptance.
 	rs.writer.AppendEvent("gate_started", map[string]interface{}{
-		"phase":  "accept",
+		"phase":  "commit",
 		"detail": "committing accepted work before clean-checkout verification",
 	})
 	// Create branch if needed

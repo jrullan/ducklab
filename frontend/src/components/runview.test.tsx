@@ -509,7 +509,7 @@ describe("the gate as a turn in the lane", () => {
 
   it("shows and closes accept's commit announcement without a round", () => {
     const commitStarted = ev("gate_started", 1, {
-      phase: "accept",
+      phase: "commit",
       detail: "committing accepted work before clean-checkout verification",
     });
     const live = buildTurns([commitStarted]);

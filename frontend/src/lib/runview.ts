@@ -503,6 +503,13 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "gate_started": {
+        // A new gate phase supersedes an earlier open gate block. Acceptance
+        // announces committing first, then clean-checkout reproduction; the
+        // first announcement is complete once the commit phase hands off.
+        if (openGate && !openGate.done) {
+          openGate.done = true;
+          openGate.gate = "green";
+        }
         const round = Number(d.round ?? 1);
         const block: TurnBlock = {
           key: `gate:${round}:${e.seq ?? blocks.length}`,
@@ -686,6 +693,8 @@ export function gatePhaseLabel(phase: string): string {
       return "baseline";
     case "after":
       return "over the new test";
+    case "commit":
+      return "committing accepted work";
     case "accept":
       return "after commit · clean checkout";
   }

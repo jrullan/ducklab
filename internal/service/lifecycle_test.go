@@ -683,7 +683,7 @@ func TestAcceptTranscriptAnnouncesCommitBeforeCleanCheckoutReproduction(t *testi
 					reproduced = i
 					continue
 				}
-				if event.Type != "gate_started" || event.Data["phase"] != "accept" {
+				if event.Type != "gate_started" || (event.Data["phase"] != "accept" && event.Data["phase"] != "commit") {
 					continue
 				}
 				detail, _ := event.Data["detail"].(string)
