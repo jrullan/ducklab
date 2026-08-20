@@ -1219,6 +1219,7 @@ function TaskRunner({
         const question = typeof pd.question === "string" ? pd.question : "";
         const advice = typeof pd.advice === "string" ? pd.advice : "";
         const advisor = typeof pd.advisor === "string" ? pd.advisor : "";
+        const adviceFailed = typeof pd.advice_failed === "string" ? pd.advice_failed : "";
         const questionId = typeof pd.question_id === "string" ? pd.question_id : "";
         const seats = Object.entries(liveRun.roster ?? {}).filter(([, d]) => d).map(([role, d]) => `${role} ${d}`).join(" · ");
         const state = liveRun.status === "paused" ? `paused: ${liveRun.pending_kind ?? "waiting"}` : liveRun.status;
@@ -1238,6 +1239,9 @@ function TaskRunner({
             {question && (
               <div className="mt-2" data-testid="task-question">
                 <p className="text-sm text-ink">{question}</p>
+                {!advice && !adviceFailed && advisor && liveRun.status === "paused" && (
+                  <p className="mt-1 text-ink-muted" data-testid="task-advisor-pending">{advisor} is preparing a recommendation</p>
+                )}
                 {advice && (
                   <div className="mt-1 rounded border border-hairline p-2">
                     <p className="text-ink-muted">{advisor || "the advisor"} recommends:</p>
@@ -1245,6 +1249,7 @@ function TaskRunner({
                     <button type="button" data-testid="task-answer-advice" onClick={() => send(advice)} className="mt-1 rounded border border-good px-2 py-0.5 text-good">Answer with this</button>
                   </div>
                 )}
+                {adviceFailed && <p className="mt-1 text-critical" data-testid="task-advice-failed">Advisor recommendation failed: {adviceFailed}</p>}
                 <div className="mt-1 flex gap-2">
                   <input aria-label="answer" data-testid="task-answer-input" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(answer); }} className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1" placeholder="your answer" />
                   <button type="button" data-testid="task-answer-button" onClick={() => send(answer)} className="rounded border border-hairline px-2 py-1">Answer</button>

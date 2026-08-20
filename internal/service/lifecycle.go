@@ -512,11 +512,18 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	if len(q.Options) > 0 {
 		rs.run.PendingData["options"] = q.Options
 	}
+	// Record the seat before launching the asynchronous consultation so clients
+	// can show who is preparing the recommendation immediately.
+	advisor := s.pickAdvisor(rs)
+	if advisor != "" {
+		rs.run.PendingData["advisor"] = string(advisor)
+	}
 	w.AppendEvent("human_needed", map[string]interface{}{
 		"kind":        "question",
 		"question_id": q.ID,
 		"question":    q.Question,
 		"options":     q.Options,
+		"advisor":     string(advisor),
 	})
 	w.WriteState()
 	// The advisor drafts the answer while the question waits — a fleet of

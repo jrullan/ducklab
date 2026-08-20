@@ -1388,6 +1388,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {pending.question && (
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
+              {pending.advisorPending && (
+                <p className="mt-1 text-sm text-ink-muted" data-testid="advisor-pending">{pending.advisorPending} is preparing a recommendation</p>
+              )}
+              {pending.detail && pending.kind === "question" && !pending.advice && (
+                <p className="mt-1 text-sm text-critical" data-testid="advice-failed">Advisor recommendation failed: {pending.detail}</p>
+              )}
               {pending.advice && (
                 <div className="mt-2 rounded border border-hairline p-2" data-testid="advice">
                   <p className="text-xs text-ink-muted">

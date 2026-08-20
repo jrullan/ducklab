@@ -252,6 +252,8 @@ export interface PendingHuman {
    * becomes choosing, not researching. */
   advice?: string;
   advisor?: string;
+  /** Advisor seat while its recommendation is still in flight. */
+  advisorPending?: string;
   /** Why the run stopped, for pauses that carry a reason (budget, provider,
    * error). "waiting for you — error" without the error sent the person to
    * the record to learn what the event already said. */
@@ -795,7 +797,7 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
       latest = e;
       advice = null;
     }
-    if (e.type === "advice") advice = e;
+    if (e.type === "advice" || e.type === "advice_failed") advice = e;
     // A human action clears the wait — and so does a checkpoint: resume
     // appends one, and a budget pause that was lifted and resumed went on
     // saying "waiting for you" over a run that was already working again.
@@ -808,14 +810,17 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
   const d = latest.data ?? {};
   const a = advice?.data ?? {};
   const adviceMatches = advice && String(a.question_id ?? "") === String(d.question_id ?? "");
+  const question = String(d.kind ?? "") === "question";
+  const failed = adviceMatches && advice?.type === "advice_failed";
   return {
     kind: String(d.kind ?? "gate"),
     question: d.question ? String(d.question) : undefined,
     questionId: d.question_id ? String(d.question_id) : undefined,
     verdict: d.verdict ? String(d.verdict) : undefined,
-    detail: d.detail ? String(d.detail) : undefined,
-    advice: adviceMatches && a.answer ? String(a.answer) : undefined,
-    advisor: adviceMatches && a.advisor ? String(a.advisor) : undefined,
+    detail: failed && (a.cause || a.error) ? String(a.cause ?? a.error) : d.detail ? String(d.detail) : undefined,
+    advice: adviceMatches && !failed && a.answer ? String(a.answer) : undefined,
+    advisor: adviceMatches && a.advisor ? String(a.advisor) : d.advisor ? String(d.advisor) : undefined,
+    advisorPending: question && !adviceMatches && d.advisor ? String(d.advisor) : undefined,
   };
 }
 
