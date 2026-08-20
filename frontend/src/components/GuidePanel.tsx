@@ -4,6 +4,7 @@ import { useRuns } from "../store/runs";
 import { routeHref, type Route } from "../app/routes";
 import { ChatAbout } from "./ChatAbout";
 import { tokens } from "../lib/format";
+import { statusIcon, statusVar, verdictStatus } from "../lib/colors";
 
 /** Where a step's button lives. The guide points, it never duplicates. */
 function hrefFor(step: NextStep): string {
@@ -160,8 +161,9 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   return (
     <aside
       data-testid="guide-rail"
-      className="w-60 shrink-0 overflow-y-auto overscroll-contain border-r border-hairline p-3"
+      className="flex h-full max-h-full w-60 shrink-0 flex-col border-r border-hairline p-3"
     >
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {/* First thing in the panel, because it acts on ALL of it — parked
           beside "next steps" it read as hiding that one section. */}
       <div className="mb-2 flex justify-end">
@@ -290,7 +292,45 @@ ${r.output.slice(-600)}`))
           preselectedDuckling={consultant}
         />
       </div>
+      </div>
+      <RecentRuns runs={runs} projectId={projectId} />
     </aside>
+  );
+}
+
+function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId: string }) {
+  const completed = Object.values(runs)
+    .filter((run) => run.project_id === projectId && (run.status === "done" || run.status === "failed"))
+    .sort((a, b) => b.started_at.localeCompare(a.started_at))
+    .slice(0, 10);
+
+  return (
+    <section data-testid="rail-recent" className="shrink-0 border-t border-hairline pt-2">
+      <h2 className="text-xs text-ink-muted">Recent runs</h2>
+      {completed.length === 0 ? (
+        <p className="mt-1 text-xs text-ink-muted">no completed runs</p>
+      ) : (
+        <ul className="mt-1 space-y-0.5">
+          {completed.map((run) => <RecentRun key={run.id} run={run} />)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RecentRun({ run }: { run: Run }) {
+  const label = run.task_id || run.stage || run.id;
+  const role = run.status === "failed" || ["FAILED", "ABORTED", "BUDGET_EXCEEDED"].includes(run.verdict)
+    ? verdictStatus("FAILED")
+    : run.verdict === "PASSED" || run.accepted === true
+      ? verdictStatus("PASSED")
+      : verdictStatus("UNVERIFIED");
+  const glyph = role === "warning" ? "UNVERIFIED" : statusIcon(role);
+  return (
+    <li className="flex items-center gap-1 text-xs">
+      <span role="img" aria-label={glyph} style={{ color: statusVar(role) }}>{glyph}</span>
+      <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{label}</a>
+    </li>
   );
 }
 

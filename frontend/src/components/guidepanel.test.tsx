@@ -183,7 +183,7 @@ describe("the guide rail", () => {
       [12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map((number) => `#/runs/r-${number}`),
     );
     expect(links.map((link) => link.textContent)).toEqual([
-      "T-12", "review", "T-10", "T-9", "r-8", "T-7", "T-6", "T-5", "T-4", "T-3",
+      "T-12", "review", "T-10", "T-9", "build", "T-7", "T-6", "T-5", "T-4", "T-3",
     ]);
 
     const rowFor = (id: string) => links.find((link) => link.getAttribute("href") === `#/runs/${id}`)!.parentElement!;
