@@ -50,7 +50,7 @@ const (
 
 // validateChatImages keeps untrusted data URLs within the same evidence bounds
 // as triage and refuses them before a text-only provider sees them.
-func (s *Service) validateChatImages(duckling string, images []string) error {
+func (s *Service) validateChatImages(ctx context.Context, duckling string, images []string) error {
 	if len(images) == 0 {
 		return nil
 	}
@@ -58,7 +58,10 @@ func (s *Service) validateChatImages(duckling string, images []string) error {
 	if !ok || cfg.Caps.Vision == nil || !*cfg.Caps.Vision {
 		return fmt.Errorf("pick a seeing duckling to send images")
 	}
-	vision, err := s.ducklings.VerifyVision(context.Background(), config.DucklingID(duckling))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	vision, err := s.ducklings.VerifyVision(ctx, config.DucklingID(duckling))
 	if err != nil {
 		return err
 	}
@@ -122,7 +125,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	if _, err := s.ducklings.Get(config.DucklingID(req.Duckling)); err != nil {
 		return nil, err
 	}
-	if err := s.validateChatImages(req.Duckling, req.Images); err != nil {
+	if err := s.validateChatImages(ctx, req.Duckling, req.Images); err != nil {
 		return nil, err
 	}
 	entry, err := s.registry.Get(projectID)
@@ -213,7 +216,7 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets
 	about := strings.TrimPrefix(rs.run.Note, "chat about ")
 	kind, id, _ := strings.Cut(about, " ")
 	duckling := rs.run.Roster["consultant"]
-	if err := s.validateChatImages(duckling, images); err != nil {
+	if err := s.validateChatImages(ctx, duckling, images); err != nil {
 		return nil, err
 	}
 
