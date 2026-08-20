@@ -90,6 +90,8 @@ export interface TurnBlock {
    * approve above it and the silence below it are otherwise indistinguishable
    * from a hang. */
   gate?: "running" | "green" | "red" | string;
+  /** The lifecycle phase that opened a harness gate. */
+  gatePhase?: string;
   /** The turn's recorded thinking, consolidated at turn end. The live deltas
    * are display state and die with the window; this is what a relaunched
    * desktop reads instead of showing the thinking gone. */
@@ -515,6 +517,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           // vocabulary: "accept" says who ordered the suite, "after commit ·
           // clean checkout" says what world it ran in.
           subject: d.phase ? gatePhaseLabel(String(d.phase)) : undefined,
+          gatePhase: d.phase ? String(d.phase) : undefined,
           done: false,
           messageOnly: true,
           gate: "running",
@@ -534,13 +537,16 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "gate_reproduced": {
-        // The accept's clean-checkout reproduction, announced as phase
-        // "accept"; its settled event closes the turn.
-        if (openGate && !openGate.done) {
-          openGate.done = true;
-          openGate.gate = d.green === false ? "red" : "green";
-          openGate = null;
+        // A clean-checkout reproduction is the terminal verdict for every
+        // accept step it follows: commit and reproduction are separately
+        // announced, but neither must remain live in a replayed transcript.
+        for (const gate of blocks) {
+          if (gate.role === "gate" && gate.gatePhase === "accept" && !gate.done) {
+            gate.done = true;
+            gate.gate = d.green === false ? "red" : "green";
+          }
         }
+        openGate = null;
         break;
       }
       case "round_gate": {
