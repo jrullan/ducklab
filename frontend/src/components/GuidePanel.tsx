@@ -319,7 +319,9 @@ function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId:
 }
 
 function RecentRun({ run }: { run: Run }) {
-  const label = run.task_id || run.stage || run.id;
+  const label = run.task_id
+    ? `${run.task_id}${run.stage ? ` ${run.stage}` : ""}`
+    : run.stage || run.id;
   const role = run.status === "failed" || ["FAILED", "ABORTED", "BUDGET_EXCEEDED"].includes(run.verdict)
     ? verdictStatus("FAILED")
     : run.verdict === "PASSED" || run.accepted === true

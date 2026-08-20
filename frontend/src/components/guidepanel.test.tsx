@@ -189,6 +189,9 @@ describe("the guide rail", () => {
       "T-12 test", "review", "T-10 build", "T-9 build", "B-098 triage",
       "T-7 build", "T-6 build", "T-5 build", "T-4 build", "T-3 build",
     ]);
+    expect(links[0]!.textContent).toContain("T-12 test");
+    expect(links[2]!.textContent).toContain("T-10 build");
+    expect(links[4]!.textContent).toBe("B-098 triage");
 
     const rowFor = (id: string) => links.find((link) => link.getAttribute("href") === `#/runs/${id}`)!.parentElement!;
     expect(rowFor("r-12").textContent).toContain("✓"); // PASSED
