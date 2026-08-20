@@ -8,6 +8,11 @@ with one model or several arguing; runs your project's real test gate; and
 stops for you before anything is committed. Every model call is logged. No
 model ever decides a verdict.
 
+<p align="center">
+  <img src="docs/screenshots/council-run.png" alt="A council run: architect drafting, reviewer critiquing, budget and gate visible" width="900">
+  <br><em>A council drafting ducklab's own spec — seats, budget, and the gate on one screen, every model call on the record.</em>
+</p>
+
 It was built for **local models first** — the two that built most of it are a
 vLLM box on the LAN and a llama.cpp server on localhost, both priced at zero —
 and hosted models sit beside them in the same roster, measured by the same
@@ -46,6 +51,11 @@ assumes **several cheap models and trusts none of them**:
   names any document nobody opened. A 32k local model can be briefed by a
   quarter-million characters of reference material — the harness carries the
   working memory.
+
+<p align="center">
+  <img src="docs/screenshots/runs.png" alt="The run record: 358 runs with verdicts, costs, and reproduced-green accepts" width="900">
+  <br><em>The record does not round up: every run with its verdict, its cost, and whether its accept <strong>reproduced green from a clean checkout</strong>.</em>
+</p>
 
 And the existence proof: **ducklab is developed inside ducklab.** The plan,
 the bugs, the releases and the last ninety-plus accepted tasks went through
@@ -180,6 +190,11 @@ ducklab duckling test pato-sonnet --prompt "say OK"
 `--key-env` is the **name** of an environment variable, never a key. No key
 is written to config, sent over the API, or kept in shell history.
 
+<p align="center">
+  <img src="docs/screenshots/roster.png" alt="The roster board: flock with scorecards, seats per mode, engine suggestions" width="900">
+  <br><em>Seats are argued with evidence: pass rates from your own runs, cost per run, coding index — suggestions justified, never imposed.</em>
+</p>
+
 The desktop's **Roster** view is where seats are assigned: drag from the
 Flock onto a mode's seat, globally or per project, with each duckling's
 evidence on the card and the engine's suggestions beside the seats. Coding /
@@ -242,6 +257,11 @@ writes — and takes **images**: paste a screenshot of a broken view and ask.
 Vision is verified, not assumed: a declared-vision seat is probed with a
 real image request once, and a text-only seat refuses the paste with words
 instead of hallucinating an answer.
+
+<p align="center">
+  <img src="docs/screenshots/consultant-chat.png" alt="The consultant chat: luna answering 'convince me to use Ducklab'" width="900">
+  <br><em>Asked to sell the product, the seated consultant read the repo and wrote this pitch itself. We kept it.</em>
+</p>
 
 ## Operating ducklab from another model
 
