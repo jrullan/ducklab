@@ -627,6 +627,95 @@ func TestAcceptRecordsCleanCheckoutGateSeparatelyFromUnverifiedRunVerdict(t *tes
 	assertReproducedGreen("runs list", runs[0])
 }
 
+// Accept must make the commit itself visible in the transcript, not merely
+// announce the clean-checkout reproduction after it has landed. This applies
+// when acceptance creates a commit and when another accepted run already left
+// the tree clean.
+func TestAcceptTranscriptAnnouncesCommitBeforeCleanCheckoutReproduction(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		dirty bool
+	}{
+		{name: "dirty tree creates a commit", dirty: true},
+		{name: "clean tree reuses existing commit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "accept-transcript", GitInit: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.dirty {
+				if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n\n// accepted change\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			run := &runlog.Run{
+				ID: "r-accept-transcript", ProjectID: p.ID, TaskID: "T-080", Stage: "build",
+				Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+				StartedAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			w, err := runlog.NewWriter(dir, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			if err := s.RecoverRuns(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+				t.Fatal(err)
+			}
+
+			detail, err := s.RunGet(context.Background(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commitAnnouncement, reproductionAnnouncement, reproduced := -1, -1, -1
+			for i, event := range detail.Events {
+				if event.Type == "gate_reproduced" {
+					reproduced = i
+					continue
+				}
+				if event.Type != "gate_started" || event.Data["phase"] != "accept" {
+					continue
+				}
+				detail, _ := event.Data["detail"].(string)
+				if strings.Contains(detail, "reproducing the gate from a clean checkout") {
+					reproductionAnnouncement = i
+					continue
+				}
+				if strings.Contains(strings.ToLower(detail), "commit") {
+					if strings.Contains(strings.ToLower(detail), "committed ") {
+						t.Errorf("pre-commit announcement names a commit that does not exist yet: %q", detail)
+					}
+					commitAnnouncement = i
+				}
+			}
+			if commitAnnouncement < 0 {
+				t.Fatal("accept transcript has no pre-commit announcement")
+			}
+			if reproductionAnnouncement < 0 {
+				t.Fatal("accept transcript lost the clean-checkout reproduction announcement")
+			}
+			if reproduced < 0 {
+				t.Fatal("accept transcript lost gate_reproduced")
+			}
+			if commitAnnouncement >= reproductionAnnouncement {
+				t.Errorf("commit announcement event %d must precede reproduction announcement event %d", commitAnnouncement, reproductionAnnouncement)
+			}
+			if reproductionAnnouncement >= reproduced {
+				t.Errorf("reproduction announcement event %d must be closed by gate_reproduced event %d", reproductionAnnouncement, reproduced)
+			}
+		})
+	}
+}
+
 func TestAppendToAClosedLogFails(t *testing.T) {
 	dir := t.TempDir()
 	w, err := runlog.NewWriter(dir, &runlog.Run{ID: "r-x", StartedAt: "now"})

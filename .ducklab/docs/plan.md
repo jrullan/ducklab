@@ -1703,4 +1703,29 @@ The Cycle stage card forces users to hand-type absolute reference paths into a t
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-080 — Announce the accept's commit step in the run transcript before the commit runs
+
+Fixes B-096.
+
+## Reported
+
+When the ducklings have finalized their work the gate runs once to accept, then after commit, but while the commit is running there is usually a time that the user have only seen the first gate passed but there is no signal about what is going on. I expect that when committing a message is emitted in the transcript with the moving cog indicating that the commit is in process before the next gate's turn. That way the user watching the transcript knows what is going on.
+
+**Deliverables:**
+- RunAccept's commit path appends a gate_started (or equivalent transcript) event announcing the accept/commit step BEFORE CommitWithTrailer runs, so the transcript shows activity during the commit
+- The pre-commit announcement's detail text does not name a sha that does not exist yet (no 'committed <sha>' wording before the commit lands)
+- A service test asserts the accept flow emits the announcement before the commit event, covering both the dirty-tree commit path and the already-clean path
+- The existing post-commit 'reproducing the gate from a clean checkout' announcement still fires and still closes on gate_reproduced
+
+## Triage
+
+**Component:** run transcript / accept flow
+**Suspected files:** internal/service/service.go, frontend/src/lib/runview.ts, internal/service/lifecycle_test.go
+
+The backend already announces the accept phase but only after CommitWithTrailer returns ('committed 6b8c92e; reproducing…'), leaving the commit itself silent in the transcript — moving/adding the announcement ahead of the commit closes the reported gap.
+
+**Verification (triage recommends):** test-first — Accept a dirty-tree run via RunAccept and assert a gate_started (phase accept) event is appended before the commit is created / before the 'committed <sha>' event exists
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
