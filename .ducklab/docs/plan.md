@@ -1951,3 +1951,28 @@ The Recent runs strip (T-087 / T-088) currently labels rows ID-first ("T-12 test
 
 **Assumption:** The `subject` field on a triage run already carries the bug ID(s) from the engine (SPEC-046, `triageSubject` in `internal/service/bugs.go`), so no API or store change is needed to surface the bug ID for triage labels.
 
+### T-090 — Emit the pre-commit gate event before staging/committing in RunAccept
+
+Fixes B-098.
+
+## Reported
+
+Committing message emitted seemingly at the same time with the committed gate message. I expected that after the gate verifying got green the committing would be emitted to indicate this is whats going on now during the delay between the first gate green and the after commited gate signal.
+
+**Deliverables:**
+- The 'committing accepted work before clean-checkout verification' gate_started event fires before git.AddAll/CommitWithTrailer, not after CreateBranch
+- A test asserts the committing event precedes the commit in the accepted-run event order
+- git.AddAll and commit failures still abort the accept with the event already logged
+
+## Triage
+
+**Component:** accept/run-lifecycle UX
+**Suspected files:** internal/service/service.go
+
+Service.emitGateStarted is invoked after branch creation but the event is placed relative to commit ordering, and the log-order test pins the fix without being cosmetic-only.
+
+**Verification (triage recommends):** test-first — RunAccept on a dirty tree asserts the 'committing accepted work' gate_started event is recorded before the commit succeeds (event order in the run log).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+

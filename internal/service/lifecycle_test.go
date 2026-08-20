@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -711,6 +712,93 @@ func TestAcceptTranscriptAnnouncesCommitBeforeCleanCheckoutReproduction(t *testi
 			}
 			if reproductionAnnouncement >= reproduced {
 				t.Errorf("reproduction announcement event %d must be closed by gate_reproduced event %d", reproductionAnnouncement, reproduced)
+			}
+		})
+	}
+}
+
+// The commit-progress event is an operator promise, not a retrospective
+// transcript entry: it must be durable before git starts staging, and remain
+// visible if staging or committing aborts acceptance.
+func TestAcceptLogsCommitProgressBeforeGitMutatesTheTree(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is required for acceptance tests")
+	}
+	for _, failure := range []string{"", "add", "commit"} {
+		t.Run(map[string]string{"": "commit", "add": "staging failure", "commit": "commit failure"}[failure], func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno")
+			id, dir := projectWithDocs(t, s, nil)
+			g := gitProject(t, dir)
+			if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("accepted change\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			run := &runlog.Run{
+				ID: "r-commit-progress-" + strings.ReplaceAll(failure, "commit", "failure"), ProjectID: id, TaskID: "T-090", Stage: "build",
+				Status: "paused", Verdict: "PASSED", PendingKind: "gate", StartedAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			w, err := runlog.NewWriter(dir, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			if err := s.RecoverRuns(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+
+			// The git shim observes the durable run log at the precise boundaries
+			// this UX event promises to precede. It deliberately fails selected
+			// operations only after proving the event is already recorded.
+			bin := t.TempDir()
+			events := filepath.Join(runlog.RunDirFor(dir, run.ID), "events.jsonl")
+			shim := "#!/bin/sh\n" +
+				"if [ \"$1\" = add ] || [ \"$1\" = commit ]; then\n" +
+				"  grep -Fq 'committing accepted work before clean-checkout verification' \"$DUCKLAB_T090_EVENTS\" || exit 97\n" +
+				"fi\n" +
+				"if [ \"$1\" = \"$DUCKLAB_T090_FAIL\" ]; then exit 98; fi\n" +
+				"exec " + realGit + " \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("DUCKLAB_T090_EVENTS", events)
+			t.Setenv("DUCKLAB_T090_FAIL", failure)
+
+			_, err = s.RunAccept(context.Background(), run.ID, "")
+			if failure == "" && err != nil {
+				t.Fatalf("accept: %v", err)
+			}
+			if failure != "" && err == nil {
+				t.Fatalf("accept succeeded despite forced git %s failure", failure)
+			}
+			detail, getErr := s.RunGet(context.Background(), run.ID)
+			if getErr != nil {
+				t.Fatal(getErr)
+			}
+			progress, committed := -1, -1
+			for i, event := range detail.Events {
+				if event.Type != "gate_started" {
+					continue
+				}
+				detail, _ := event.Data["detail"].(string)
+				if detail == "committing accepted work before clean-checkout verification" {
+					progress = i
+				}
+				if strings.HasPrefix(detail, "committed ") {
+					committed = i
+				}
+			}
+			if progress < 0 {
+				t.Fatal("commit-progress gate_started event was not recorded")
+			}
+			if failure == "" && committed < 0 {
+				t.Fatal("accepted run did not record its commit")
+			}
+			if failure == "" && progress >= committed {
+				t.Errorf("commit-progress event %d must precede recorded commit %d", progress, committed)
+			}
+			if failure == "" && mustHead(t, g) != detail.Run.CommitSHA {
+				t.Error("accepted commit was not recorded on HEAD")
 			}
 		})
 	}
