@@ -404,3 +404,5 @@
 {"ts":"2026-08-20T15:02:55Z","bug":"B-097","from":"fixed","to":"verified","actor":"human","via":"move"}
 {"ts":"2026-08-20T15:03:03Z","bug":"B-101","from":"fixed","to":"verified","actor":"human","via":"move"}
 {"ts":"2026-08-20T15:03:08Z","bug":"B-096","from":"fixed","to":"verified","actor":"human","via":"move"}
+{"ts":"2026-08-20T15:41:13Z","bug":"B-102","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-20T15:52:18Z","bug":"B-102","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-088"}

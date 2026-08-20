@@ -157,9 +157,9 @@ describe("the guide rail", () => {
       return {
         id,
         project_id: "p",
-        stage: number === 11 ? "review" : "build",
+        stage: number === 12 ? "test" : number === 11 ? "review" : number === 8 ? "triage" : "build",
         mode: "pair",
-        task_id: number === 11 ? "" : number === 8 ? "" : `T-${number}`,
+        task_id: number === 11 ? "" : number === 8 ? "B-098" : `T-${number}`,
         status: number === 10 ? "failed" : "done",
         verdict: number === 12 ? "PASSED" : number === 9 ? "FAILED" : number === 6 ? "BUDGET_EXCEEDED" : "",
         accepted: number === 11,
@@ -182,8 +182,12 @@ describe("the guide rail", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
       [12, 11, 10, 9, 8, 7, 6, 5, 4, 3].map((number) => `#/runs/r-${number}`),
     );
+    // Task labels include the stage in the same task-then-stage order as the
+    // live rail. A standalone stage remains singular, while bug triage keeps
+    // both its bug id and its stage.
     expect(links.map((link) => link.textContent)).toEqual([
-      "T-12", "review", "T-10", "T-9", "build", "T-7", "T-6", "T-5", "T-4", "T-3",
+      "T-12 test", "review", "T-10 build", "T-9 build", "B-098 triage",
+      "T-7 build", "T-6 build", "T-5 build", "T-4 build", "T-3 build",
     ]);
 
     const rowFor = (id: string) => links.find((link) => link.getAttribute("href") === `#/runs/${id}`)!.parentElement!;

@@ -1899,3 +1899,29 @@ The guide rail today scrolls as one tall column and ends with the ask chatbox; a
 
 **Assumption:** "Last 10" is ordered by `started_at`, the only ordering the Runs view itself uses; there is no completion timestamp guaranteed on older records (`ended_at` is optional).
 
+### T-088 — Show run stage beside the task id in the Recent runs rail entries
+
+Fixes B-102.
+
+## Reported
+
+In the newly built recent runs section (T-087), a test task is undistinguishable from a build task. In the Reports -> Run view the tasks are prepended with the type of run (test, build, chat) etc. I expect the recent runs run name to be as in the following examples:  ✓ T-087 test  ,  ✓ T-087 build, ✓ B-098 triage
+
+**Deliverables:**
+- RecentRun in frontend/src/components/GuidePanel.tsx renders the run's stage alongside its label for task runs (e.g. '✓ T-087 test' / '✓ T-087 build')
+- Stage runs (chat, plan, triage) and bug triage runs remain identifiable in the recent-runs row, e.g. '✓ B-098 triage', without duplicating the stage when the label already IS the stage
+- The existing recent-runs test in frontend/src/components/guidepanel.test.tsx is updated/extended to assert the stage appears for task runs
+- The naming matches the stage ordering used elsewhere in the rail (RailRun already appends 'build · pair' for live runs)
+
+## Triage
+
+**Component:** frontend guide rail / recent runs
+**Suspected files:** frontend/src/components/GuidePanel.tsx, frontend/src/components/guidepanel.test.tsx
+
+RecentRun labels completed runs with only task_id or stage, so a test run and a build run for the same task are indistinguishable — a presentation gap in the T-087 recent-runs section, fixable in one component with a render test.
+
+**Verification (triage recommends):** test-first — Render GuideRail with a completed run {task_id: 'T-087', stage: 'test'} and assert the rail-recent row text contains both 'T-087' and 'test' (existing guidepanel.test.tsx already renders rail-recent and asserts labels, which currently pin the buggy 'T-12'/'review' output).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
