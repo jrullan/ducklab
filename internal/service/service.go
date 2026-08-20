@@ -2048,6 +2048,14 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		return err
 	}
 
+	// Announce the commit before it starts: it can take long enough that a
+	// completed round gate otherwise looks like an unexplained pause. This also
+	// marks an already-clean accept, whose existing commit is being accepted.
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "accept",
+		"detail": "committing accepted work before clean-checkout verification",
+	})
+
 	// Accepting work that is already committed is a no-op, not a failure.
 	//
 	// Two runs of the same task produce the same fix; accepting the second
@@ -2102,6 +2110,8 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
 	}
+	// The commit is now real; keep the clean-checkout gate as its own visible
+	// step so this running event is closed by gate_reproduced below.
 	rs.writer.AppendEvent("gate_started", map[string]interface{}{
 		"phase":  "accept",
 		"detail": "committed " + short(sha) + "; reproducing the gate from a clean checkout — nothing lands that did not reproduce",
