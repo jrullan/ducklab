@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 8
-updated_at: 2026-08-20T15:09:49Z
-run_id: r-20260820-150030-yyal
-ducklings: [qwen38-max, atom-local, dsv4flash, k3, terra]
-based_on: a2c10d1b627883c1
+version: 9
+updated_at: 2026-08-20T16:45:43Z
+run_id: r-20260820-164040-puiq
+ducklings: [glm52, qwen38-max, atom-local, dsv4flash, terra, k3]
+based_on: 0a8c1afcb81a8064
 approved_by: human
 ---
 
@@ -1924,4 +1924,30 @@ RecentRun labels completed runs with only task_id or stage, so a test run and a 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-089 — Rewrite Recent runs indicators to verb-first labels and em-dash unverified glyph
+
+**Implements:** SPEC-062, SPEC-046
+
+The Recent runs strip (T-087 / T-088) currently labels rows ID-first ("T-12 test", "B-098 triage") and renders the literal word `UNVERIFIED` as the unverified glyph. This task flips the label to begin with the run's action verb and appends the related work identifier per the action, and replaces the unverified glyph with an em dash — both retaining the existing green / red / yellow colors, ordering, links, and typography.
+
+**Deliverables:**
+- The unverified result glyph in `RecentRun` renders `—` (em dash, U+2014) instead of the literal string `UNVERIFIED`, while the warning/yellow color is preserved.
+  - In `frontend/src/components/GuidePanel.tsx` `RecentRun`: the `glyph` computation changes from `role === "warning" ? "UNVERIFIED" : statusIcon(role)` to `role === "warning" ? "—" : statusIcon(role)`. The `✓` (good) and `✕` (critical) glyphs and their colors are unchanged.
+  - The `aria-label` on the glyph `<span>` stays a descriptive word (e.g. `unverified`), not the em dash, so a screen reader still conveys the result — the visible character changes, the accessible label does not.
+- Each `RecentRun` row's label begins with the run's stage (the action verb) and appends the related identifier per the action.
+  - **triage:** append the bug ID from `run.subject` (the engine-sourced field, SPEC-046) or, when `subject` is absent, from `run.task_id` if it starts with `B-` — producing `triage B-099`. When `subject` is a count phrase like `3 open bugs`, it is still appended (`triage 3 open bugs`), since it is the relevant identifier.
+  - **test** and **build:** append `run.task_id`, producing `test T-088` or `build T-088`.
+  - **other verbs** (chat, plan, review, spec, intake, etc.): show the verb alone unless `run.task_id` or `run.subject` provides a relevant identifier, then append it.
+  - The label falls back to `run.id` when `run.stage` is empty, as before.
+- Tests in `frontend/src/components/guidepanel.test.tsx` are updated to assert the new verb-first label order and the em-dash glyph.
+  - The 12-run fixture's `links.map(link => link.textContent)` expectation changes from ID-first (`"T-12 test"`, `"B-098 triage"`, …) to verb-first (`"test T-12"`, `"triage B-098"`, …).
+  - The triage fixture row (r-8) is updated to carry `subject: "B-098"` (with `task_id` cleared to `""`) so the engine-sourced `subject` path is exercised, not only the `task_id` fallback.
+  - Glyph assertions for the two unverified rows (r-8, r-7) change from `toContain("UNVERIFIED")` to `toContain("—")`.
+  - Existing assertions for `✓` (r-12 PASSED, r-11 accepted) and `✕` (r-10 failed, r-9 FAILED, r-6 BUDGET_EXCEEDED) remain unchanged.
+  - The pinned-footer structural assertions (flex column, `overflow-y-auto` sibling, chat-open persistence) remain unchanged.
+- `go build ./...`, `go test ./...`, `cd frontend && npm run build` and `npm test` all stay clean.
+
+**Out of scope:** the Records → Runs view and run detail page; the live-run `RailRun` component and its label; any engine, API, or `Run` type change; the three status roles (good / critical / warning) and their CSS variable colors; `runLabel` in `frontend/src/lib/runview.ts` (used by the Runs view, not the rail).
+
+**Assumption:** The `subject` field on a triage run already carries the bug ID(s) from the engine (SPEC-046, `triageSubject` in `internal/service/bugs.go`), so no API or store change is needed to surface the bug ID for triage labels.
 
