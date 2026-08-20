@@ -17,6 +17,24 @@ Frontend changes are invisible until `make desktop && make install` — the
 desktop embeds its assets at build time. The guide rail inside ducklab will
 tell you when the repo has outrun the installed binaries.
 
+### Working without a model, a GPU or a key
+
+`cmd/fake-engine` serves the real engine HTTP contract with scripted
+scenarios (`pair`, `tournament`, `question`, `flood`, `idle`) — it exists so
+the frontend can be exercised against streaming, reconnection and the human
+gate with zero models. The playwright e2e suite (`make e2e`) runs the
+desktop flows against it. Known gap: `npm run dev` in a plain browser
+cannot reach it yet, because the engine address is injected by the desktop
+shell — that is B-108 on the bug board, and a good first contribution.
+
+### Fast lanes
+
+- `cd frontend && npx vitest --watch` for red-green frontend loops.
+- `go test ./internal/<pkg>/ -run TestName -count=1` — most Go packages are
+  fast; the service package's full suite (~20s) is the slow one.
+- `make api` regenerates `docs/openapi.json` + `generated.ts` from the route
+  table; `make api-check` fails on drift. Never edit generated files.
+
 `docs/openapi.json` and `frontend/src/api/generated.ts` are **generated**
 from the route table by `make api`; never edit them by hand. `make api-check`
 fails CI-style on drift.
@@ -57,15 +75,40 @@ Tests are reversal-proof by intention: when you flip a behavior, find the
 test that pinned the old one and rewrite it with the new reasoning, don't
 delete it.
 
+## What the system believes it is
+
+Three files in `.ducklab/docs/` are the living, loop-maintained truth:
+`requirements.md` (what it does), `spec.md` (how, with **Implements:**
+traceability), `plan.md` (every task that built it, milestone by milestone).
+Reading them is the fastest induction there is — they were written by the
+same process you are about to contribute through, and the human gate signed
+every version.
+
 ## Where to start
 
+- **The bug board of this repo's own `.ducklab/`** — real, triaged, sized.
+  `low`-severity bugs are deliberately good first issues: small, verified,
+  with the failing behaviour described by whoever hit it.
 - [`docs/status.md`](docs/status.md) — every acceptance criterion, honestly
   graded. The "half built" rows are scoped, known work.
-- The bug board of this repo's own `.ducklab/` — real, triaged, sized.
+- **B-108** — let `npm run dev` reach `fake-engine` in a plain browser: one
+  dev-only fallback, and every future frontend contributor gets a live loop
+  without building the desktop.
 - macOS: the desktop build has never been verified on a Mac. The first
   person with a Mac and an hour owns that milestone.
 - Packaging: `make cross` compile-checks four targets; nothing ships
   artifacts yet.
+
+## PR checklist
+
+- `make` green (vet + Go tests + frontend build); frontend touched →
+  `npx tsc --noEmit && npx vitest run` too; routes touched → `make api`.
+- Behaviour flipped → the test that pinned the old behaviour is rewritten
+  with the new reasoning, not deleted.
+- New engine event → registered in `events.ts`; new route → desktop client
+  method or an excused entry. (Two architecture tests enforce these; this
+  line is so their failure does not surprise you.)
+- Comments tell the incident or the constraint, never the next line.
 
 ## License
 

@@ -40,17 +40,28 @@ assumes **several cheap models and trusts none of them**:
   Wilson lower bound, three runs minimum, locals never win on a $0 price.
 - **Nothing is unbounded.** Turns, tokens, cost, wallclock, tool output,
   shell commands — every ceiling visible and liftable mid-run, on the record.
+- **Your documentation is not bounded by the model's window.** Attach a wiki
+  to a stage and a big seat reads it whole; a small seat gets each document
+  digested to fit, the full text one `ref_read` call away, and the gate
+  names any document nobody opened. A 32k local model can be briefed by a
+  quarter-million characters of reference material — the harness carries the
+  working memory.
 
 And the existence proof: **ducklab is developed inside ducklab.** The plan,
-the bugs, the releases and most of the last eighty accepted tasks went
-through its own loop, driven by the same local models it measures.
+the bugs, the releases and the last ninety-plus accepted tasks went through
+its own loop, driven by the same local and hosted models it measures — most
+recent features (the multimodal chat, the consultant seat, the guide rail's
+run history) were built by the duck, gated by a person.
 
 ## Status
 
-**v0.6.0**, moving fast. Seven stages, five modes, the roster board with
-evidence and suggestions, skills, bugs, releases, autopilot, a CLI, a
-desktop app, and an **MCP server** that lets another model operate the whole
-loop with recorded, attributed decisions.
+**v0.6.1+**, moving fast. Seven stages, five modes, the roster board with
+evidence and suggestions, reference documents with automatic digestion,
+skills managed from the desktop, a seated consultant you can chat with
+(images included, vision verified before they are sent), bugs with
+screenshot evidence, releases, autopilot, a CLI, a desktop app, and an
+**MCP server** that lets another model operate the whole loop with
+recorded, attributed decisions.
 
 [`docs/status.md`](docs/status.md) tracks all acceptance criteria and does
 not round up. Where code and spec differ, the difference is recorded in
@@ -134,6 +145,15 @@ promotes it; `reject` restores exactly what the run wrote and nothing else;
 your note. Nothing is committed without you (or without the autonomy level
 you explicitly granted).
 
+**Reference documents** ride any stage: `--ref ~/wiki/product/` (or the
+attach door in the desktop) loads files or whole directories as background
+for the architect — grounded by two rules the prompt states outright: the
+approved requirements own the scope, and where a reference and the code
+disagree, the code is the truth. When the corpus outgrows the seat's
+context, each document is digested once (cached by content hash), the full
+text stays reachable through the `ref_read` tool, and the proposal card
+lists any document no seat ever opened.
+
 **Adopting an existing codebase** works the same way: intake reads the code
 and writes as-built requirements, the spec marks its sections `as-built`, and
 the plan stays deliberately empty — new work then enters through bug reports
@@ -194,14 +214,34 @@ These are load-bearing, not preferences.
 
 ## Skills
 
-A skill is a directory with a `SKILL.md` under `.ducklab/skills/`. The
-documentation-only form has no script and is the default: a model reads it
-and follows it.
+A skill is a directory with a `SKILL.md` — under `.ducklab/skills/` for one
+project, or in the machine-wide skills directory to serve every project
+(project shadows global on a name collision). The documentation-only form
+has no script and is the default: a recipe a model reads and follows. The
+architect reads survey guides before an adopt (`skill_list` is in its
+prompt), the consultant reads them in chat, and only the implementer can
+`skill_run` an executable one.
+
+Skills are administered from the desktop (**gear → Skills**): list with
+scope badges and validation problems, read, edit the whole `SKILL.md`,
+run with arguments, delete. A skill a duckling writes during a run shows
+there greyed `pending acceptance` until its run is accepted — proposing a
+skill goes through the same gate as proposing code.
 
 ```bash
 ducklab skill new house-style
 ducklab skill run changelog-entry --arg summary="..."
 ```
+
+## The consultant
+
+Every project seats a **consultant** (a Common seat on the roster board):
+the model behind the "chat about this" doors and the free-form chat in the
+guide rail. It reads the code, the runs, the boards and the skills — never
+writes — and takes **images**: paste a screenshot of a broken view and ask.
+Vision is verified, not assumed: a declared-vision seat is probed with a
+real image request once, and a text-only seat refuses the paste with words
+instead of hallucinating an answer.
 
 ## Operating ducklab from another model
 
@@ -232,6 +272,9 @@ stay proprietary.
 
 The code implements a written specification (the `ducklab-spec` repository,
 published alongside this one when the repo goes public; sections
-00-VISION through 08-DESKTOP-UI). The spec is normative: where the code
-differs, that is recorded in [`docs/decisions/`](docs/decisions/), and the
-as-built spec the loop maintains lives in `.ducklab/docs/spec.md`.
+00-VISION through 08-DESKTOP-UI). Until then the **readable spec is in this
+repo**: `.ducklab/docs/spec.md` is the as-built specification the loop
+itself maintains, traceable section-by-section to `requirements.md` and
+`plan.md` beside it — read those three files and you know what this system
+believes it is. Where code and normative spec differ, the difference is
+recorded in [`docs/decisions/`](docs/decisions/).
