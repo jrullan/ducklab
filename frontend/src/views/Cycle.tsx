@@ -16,6 +16,7 @@ import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
 import { DecisionCard } from "../components/DecisionCard";
+import { canChooseFile, chooseFile } from "../lib/picker";
 
 const STAGES = [
   { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ" },
@@ -59,6 +60,10 @@ export function Cycle({
   const [intakePath, setIntakePath] = useState<"adopt" | "brief" | null>(null);
   const [refsOpen, setRefsOpen] = useState(false);
   const refsList = () => refsText.split("\n").map((l) => l.trim()).filter(Boolean);
+  async function pickReferenceFile() {
+    const path = await chooseFile();
+    if (path) setRefsText((current) => (current ? `${current}\n${path}` : path));
+  }
   // The plan amendment's text — Review's light exit, separate from the brief
   // so the two doors never share a box.
   const [amendment, setAmendment] = useState("");
@@ -639,15 +644,27 @@ export function Cycle({
                       reference documents — paths to .md/.txt files or folders, one per line
                       (loaded bounded into the prompt; the run records what was included)
                     </label>
-                    <textarea
-                      id="cycle-refs"
-                      data-testid="cycle-refs"
-                      rows={2}
-                      placeholder={"~/wiki/Desarrollo/miempresa/MiEmpresa.md\n~/wiki/Desarrollo/miempresa/feedback-pipeline.md"}
-                      value={refsText}
-                      onChange={(e) => setRefsText(e.target.value)}
-                      className="w-full rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs"
-                    />
+                    <div className="flex items-start gap-2">
+                      <textarea
+                        id="cycle-refs"
+                        data-testid="cycle-refs"
+                        rows={2}
+                        placeholder={"~/wiki/Desarrollo/miempresa/MiEmpresa.md\n~/wiki/Desarrollo/miempresa/feedback-pipeline.md"}
+                        value={refsText}
+                        onChange={(e) => setRefsText(e.target.value)}
+                        className="min-w-0 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs"
+                      />
+                      {canChooseFile() && (
+                        <button
+                          type="button"
+                          data-testid="cycle-refs-pick"
+                          onClick={() => void pickReferenceFile()}
+                          className="rounded border border-hairline px-2 py-1 text-xs text-ink-secondary"
+                        >
+                          Browse…
+                        </button>
+                      )}
+                    </div>
                   </>
                 )}
               </div>

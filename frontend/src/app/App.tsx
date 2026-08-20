@@ -37,6 +37,9 @@ declare global {
       /** Wails binding name for the native folder chooser. Absent outside the
        * desktop. */
       chooseDirectory?: string;
+      /** Wails binding name for the native reference-file chooser. Absent
+       * outside the desktop. */
+      chooseFile?: string;
       /** Wails binding names for the attention surface: OS notifications and
        * the window-title badge. Absent outside the desktop. */
       notify?: string;

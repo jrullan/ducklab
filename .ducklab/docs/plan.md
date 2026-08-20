@@ -1677,3 +1677,30 @@ The backend and API client already support release revision, but Release.tsx exp
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-079 — Add a file-picker button beside the reference-documents input in the Cycle view
+
+Fixes B-095.
+
+## Reported
+
+Right now, to add a reference document you have to write the full path of the file in the multiline textbox. We need to profide a file picker control to be able to find the file and add it as a reference.
+
+**Deliverables:**
+- A ChooseFile method on the desktop Picker binding (cmd/ducklab-desktop/picker.go) that opens the system file dialog filtered to .md/.txt, returns the chosen absolute path, and treats cancel as empty-string-not-error, mirroring ChooseDirectory
+- The binding's FQN is exported (e.g. ChooseFileFQN) and wired into window.ducklab in cmd/ducklab-desktop/main.go alongside chooseDirectory
+- A browse/pick control next to the reference-documents textarea in frontend/src/views/Cycle.tsx (visible once the refs door is open) that appends the picked path as a new line in refsText
+- Typed paths in the textarea keep working unchanged, and the frontend still builds when window.ducklab.chooseFile is absent (CLI/browser use degrades gracefully)
+- go build ./... and the frontend build compile cleanly
+
+## Triage
+
+**Component:** desktop Cycle view / reference-documents input
+**Suspected files:** frontend/src/views/Cycle.tsx, cmd/ducklab-desktop/picker.go, cmd/ducklab-desktop/main.go
+
+The Cycle stage card forces users to hand-type absolute reference paths into a textarea while the desktop already has a native Picker binding pattern (ChooseDirectory) that a ChooseFile sibling can extend to close exactly this friction.
+
+**Verification (triage recommends):** build-only — The fix is a native OS file dialog plus a UI button; the verification gate is `go test ./...` with no frontend test harness, and a native dialog cannot be driven headless — an automated check would only grep source, pinning the implementation not the bug.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+

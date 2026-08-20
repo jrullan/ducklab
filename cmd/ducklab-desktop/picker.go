@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -28,6 +29,11 @@ func ChooseDirectoryFQN() string {
 	return reflect.TypeOf(Picker{}).PkgPath() + ".Picker.ChooseDirectory"
 }
 
+// ChooseFileFQN is the name the frontend calls the reference-file binding by.
+func ChooseFileFQN() string {
+	return reflect.TypeOf(Picker{}).PkgPath() + ".Picker.ChooseFile"
+}
+
 // ChooseDirectory opens the system folder chooser and returns the chosen path.
 //
 // An empty string means the person cancelled, which is not an error and must
@@ -49,4 +55,26 @@ func (p *Picker) ChooseDirectory(title string) (string, error) {
 		dialog.SetDirectory(home)
 	}
 	return dialog.PromptForSingleSelection()
+}
+
+// ChooseFile opens the system file chooser for Markdown and text documents.
+// An empty string means the person cancelled, which is not an error.
+func (p *Picker) ChooseFile(title string) (string, error) {
+	if title == "" {
+		title = "Choose a reference document"
+	}
+	dialog := application.Get().Dialog.OpenFile().
+		CanChooseDirectories(false).
+		CanChooseFiles(true).
+		AllowsOtherFileTypes(false).
+		AddFilter("Reference documents (*.md, *.txt)", "*.md;*.txt").
+		SetTitle(title)
+	if home, err := os.UserHomeDir(); err == nil {
+		dialog.SetDirectory(home)
+	}
+	path, err := dialog.PromptForSingleSelection()
+	if err != nil || path == "" {
+		return path, err
+	}
+	return filepath.Abs(path)
 }

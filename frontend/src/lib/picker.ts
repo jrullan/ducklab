@@ -38,3 +38,21 @@ export async function chooseDirectory(title = "Choose a project folder"): Promis
     return null;
   }
 }
+
+/** True when a native reference-file chooser is available. */
+export function canChooseFile(): boolean {
+  return Boolean(window.ducklab?.chooseFile && window.wails?.Call?.ByName);
+}
+
+/** Opens the system chooser for a reference document. */
+export async function chooseFile(title = "Choose a reference document"): Promise<string | null> {
+  const name = window.ducklab?.chooseFile;
+  const call = window.wails?.Call?.ByName;
+  if (!name || !call) return null;
+  try {
+    const path = await call(name, title);
+    return typeof path === "string" && path !== "" ? path : null;
+  } catch {
+    return null;
+  }
+}
