@@ -590,6 +590,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				"chars_before": cur, "chars_after": prop,
 			})
 		}
+		// A plan revision can reuse a task ID for different work. The board
+		// deliberately stops counting accepted runs for that old meaning on
+		// acceptance; make that consequence visible at the proposal gate.
+		if result.Kind == artifact.KindPlan {
+			if runs, rErr := s.RunList(ctx, RunFilter{ProjectID: rs.run.ProjectID}); rErr == nil {
+				if rewritten := acceptedHistoryRewriteCount(runs, current, result.Proposed); rewritten > 0 {
+					history := fmt.Sprintf("this proposal rewrites %d task bodies whose accepted history will stop counting after acceptance", rewritten)
+					if rs.run.Warning != "" {
+						rs.run.Warning += " · " + history
+					} else {
+						rs.run.Warning = history
+					}
+					rs.writer.AppendEvent("task_history_rewritten", map[string]interface{}{"count": rewritten})
+				}
+			}
+		}
 	}
 	// No executable gate exists for a document, so the verdict is UNVERIFIED
 	// and the human gate is the only gate (P3).
@@ -1347,6 +1363,32 @@ func taskBodyHash(body string) string {
 func rawTaskBodyHash(body string) string {
 	h := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(h[:])
+}
+
+// acceptedHistoryRewriteCount reports task bodies whose accepted history
+// currently counts but would stop counting if the proposed plan were accepted.
+// taskBodyHash deliberately compares normalized bodies, so Implements-only
+// traceability edits do not produce this warning.
+func acceptedHistoryRewriteCount(runs []*runlog.Run, current, proposed *artifact.Document) int {
+	currentHashes := taskBodyHashes(current)
+	accepted := map[string]bool{}
+	for _, r := range runsForCurrentTaskBodies(runs, currentHashes) {
+		if r != nil && r.Accepted && r.TaskID != "" {
+			accepted[r.TaskID] = true
+		}
+	}
+	if proposed == nil {
+		return 0
+	}
+	count := 0
+	for _, milestone := range proposed.Sections {
+		for _, task := range milestone.Children {
+			if accepted[task.ID] && currentHashes[task.ID] != "" && taskBodyHash(task.Body) != currentHashes[task.ID] {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 // taskBodyHashes carries both accepted spellings per task: the normalized

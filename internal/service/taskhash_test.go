@@ -66,7 +66,7 @@ func TestPlanProposalWarnsWhenItWouldOrphanAcceptedTaskHistory(t *testing.T) {
 				}
 			}
 			return &provider.ChatResponse{Choices: []provider.Choice{{
-				Message: provider.Message{Role: "assistant", Content: text},
+				Message:      provider.Message{Role: "assistant", Content: text},
 				FinishReason: provider.FinishStop,
 			}}}
 		}
@@ -101,6 +101,21 @@ func TestPlanProposalWarnsWhenItWouldOrphanAcceptedTaskHistory(t *testing.T) {
 	traceabilityOnly := propose("**Implements:** SPEC-002\n\nKeep a durable audit record.")
 	if traceabilityOnly.Warning != "" {
 		t.Errorf("Implements-only proposal warned as a body rewrite: %q", traceabilityOnly.Warning)
+	}
+}
+
+func TestAcceptedHistoryRewriteCountIgnoresTraceability(t *testing.T) {
+	oldBody := "**Implements:** SPEC-001\n\nKeep a durable audit record."
+	accepted := &runlog.Run{TaskID: "T-001", Accepted: true, TaskBodyHash: taskBodyHash(oldBody)}
+	current := planWithTask(t, "T-001", oldBody)
+
+	if got := acceptedHistoryRewriteCount([]*runlog.Run{accepted}, current,
+		planWithTask(t, "T-001", "**Implements:** SPEC-002\n\nKeep a durable audit record.")); got != 0 {
+		t.Fatalf("traceability-only rewrite count = %d, want 0", got)
+	}
+	if got := acceptedHistoryRewriteCount([]*runlog.Run{accepted}, current,
+		planWithTask(t, "T-001", "**Implements:** SPEC-001\n\nReplace the audit record with a destructive reset.")); got != 1 {
+		t.Fatalf("substance rewrite count = %d, want 1", got)
 	}
 }
 
