@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 7
-updated_at: 2026-08-20T11:10:23Z
-run_id: r-20260820-110508-ulsi
-ducklings: [k3, qwen38-max, atom-local, terra]
-based_on: 795c1b33969b48a0
+version: 8
+updated_at: 2026-08-20T15:09:49Z
+run_id: r-20260820-150030-yyal
+ducklings: [qwen38-max, atom-local, dsv4flash, k3, terra]
+based_on: a2c10d1b627883c1
 approved_by: human
 ---
 
@@ -1872,4 +1872,30 @@ The common-role set is hard-coded to triager and scribe (roster.go isCommonRole,
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-087 — Add a fixed Recent runs strip to the guide rail
+
+**Implements:** SPEC-051, SPEC-062
+
+The guide rail today scrolls as one tall column and ends with the ask chatbox; an operator who wants "what just happened" must leave for Records → Runs. This task restructures the `<aside>` as a flex column — running/autopilot/next-steps/chat in a scrollable middle region — and pins a "Recent runs" strip below the chat, listing the last 10 completed runs for the project with a verdict glyph and a link each.
+
+**Deliverables:**
+- The guide rail's `<aside data-testid="guide-rail">` is a flex column whose middle region (hide button, running, autopilot, next steps, ask chatbox) scrolls while a new pinned strip stays fixed at the bottom.
+  - In `frontend/src/components/GuidePanel.tsx`: the aside becomes `flex flex-col` with a bounded height (`h-full`/`max-h-full`, as fits the existing layout contract with App.tsx), the current content wraps in a `min-h-0 flex-1 overflow-y-auto` region, and the runs strip renders after it as a non-scrolling footer (`shrink-0`).
+  - The collapsed pill (`guide-pill`) path is untouched and still renders; opening and hiding the rail must not change.
+  - The strip stays visible whether the ChatAbout form is closed or open-and-grown; the chat growing may shrink the scrolling region but never pushes the strip off.
+- A "Recent runs" section (`data-testid="rail-recent"`) lists up to the last 10 completed runs for the current `projectId`, newest first.
+  - Sourced from the `useRuns` store: `client.runs(projectId)` already populates the store with the project's full run list (App.tsx refresh and project-switch effect), so no new fetch is needed; derive `Object.values(runs).filter(r => r.project_id === projectId && (r.status === "done" || r.status === "failed"))`, sort by `started_at` descending, and take 10.
+  - Each line is one compact row: a verdict glyph plus the run's label (`task_id || stage || id`, the same fallback `RailRun` already uses).
+  - Glyph mapping, reusing `verdictStatus`/`Verdict` from `frontend/src/lib/colors.ts`: green when `verdict === "PASSED"` **or** `accepted === true`; red when `status === "failed"` or `verdict` is `"FAILED"`, `"ABORTED"` or `"BUDGET_EXCEEDED"`; otherwise the literal text `UNVERIFIED` in the warning role. Status colour is paired with a shape/text, never colour alone (the colours module's own rule).
+  - Each line links with `routeHref({ name: "run", id: run.id })`.
+  - No dates, no status prose, no filter, no pagination; with zero completed runs the section still renders with a single muted "no completed runs" line (the rail already returns `null` when there are neither steps nor active runs, so the strip can never orphan-render on an empty project).
+- Tests in `frontend/src/components/guidepanel.test.tsx` assert the strip from a seeded `useRuns` fixture.
+  - A store with 12 completed runs (mixed `PASSED`/`accepted`, `failed`/`FAILED`, and no-verdict statuses) renders exactly 10 lines, newest first; green/red/UNVERIFIED glyphs land on the right rows; each line's `<a>` href equals `#/runs/<id>`.
+  - A structural assertion that the strip is pinned: `rail-recent` is a direct flex-child of `guide-rail` outside the `overflow-y-auto` region, and still renders when the chat form is open (open `chat-about`, then assert `rail-recent` remains).
+  - Existing guide-rail tests (collapse, steps, chat preselection) must keep passing unchanged.
+- `go build ./...`, `go test ./...`, `cd frontend && npm run build` and `npm test` all stay clean.
+
+**Out of scope:** the Records → Runs view and run detail page; dates, costs, modes or filtering on the strip; any engine, API or store-shape change; live/queued runs in the strip (they already have the `rail-running` section at the top).
+
+**Assumption:** "Last 10" is ordered by `started_at`, the only ordering the Runs view itself uses; there is no completion timestamp guaranteed on older records (`ended_at` is optional).
 
