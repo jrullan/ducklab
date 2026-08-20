@@ -1320,11 +1320,37 @@ func taskBodyHashForTask(ctx context.Context, s *Service, projectID, taskID stri
 	return ""
 }
 
+// normalizeTaskBody is what the hash covers: the task's substance, not its
+// traceability. Accepting a spec-alignment that added ONE **Implements:**
+// line to 64 tasks changed every raw hash, the recycled-id boundary
+// discarded every accepted run, and 64 shipped tasks reappeared in todo
+// (B-093). An Implements line is an edge to the spec, not the work
+// definition — annotating it must not orphan the task's history.
+func normalizeTaskBody(body string) string {
+	var kept []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "**Implements:**") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 func taskBodyHash(body string) string {
+	h := sha256.Sum256([]byte(normalizeTaskBody(body)))
+	return hex.EncodeToString(h[:])
+}
+
+// rawTaskBodyHash is the pre-B-093 form, kept so records written before the
+// normalization still count for an unchanged task.
+func rawTaskBodyHash(body string) string {
 	h := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(h[:])
 }
 
+// taskBodyHashes carries both accepted spellings per task: the normalized
+// hash (what new runs record) and the raw one (what old runs recorded).
 func taskBodyHashes(plan *artifact.Document) map[string]string {
 	out := map[string]string{}
 	if plan == nil {
@@ -1333,6 +1359,12 @@ func taskBodyHashes(plan *artifact.Document) map[string]string {
 	for _, m := range plan.Sections {
 		for _, t := range m.Children {
 			out[t.ID] = taskBodyHash(t.Body)
+			out[t.ID+"\x00raw"] = rawTaskBodyHash(t.Body)
+			// A record written before this plan revision hashed the body as
+			// it stood THEN. The only edit normalization forgives is the
+			// Implements line, so the normalized form IS that older raw body
+			// when nothing else changed — covered by the normalized entry.
+			out[t.ID+"\x00rawnorm"] = rawTaskBodyHash(normalizeTaskBody(t.Body))
 		}
 	}
 	return out
@@ -1340,7 +1372,10 @@ func taskBodyHashes(plan *artifact.Document) map[string]string {
 
 // runsForCurrentTaskBodies is the single history boundary used by all status
 // consumers. Empty hashes are legacy records and remain usable; new records
-// from a changed task body are historical for the recycled ID.
+// from a changed task body are historical for the recycled ID. A recorded
+// hash matches if it is the current body's normalized hash, its raw hash, or
+// the raw hash of its normalized text — the three spellings one unchanged
+// task has worn across the B-093 fix.
 func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*runlog.Run {
 	out := make([]*runlog.Run, 0, len(runs))
 	for _, r := range runs {
@@ -1351,7 +1386,10 @@ func runsForCurrentTaskBodies(runs []*runlog.Run, hashes map[string]string) []*r
 		if r.TaskBodyHash == "" && strings.HasPrefix(r.StartedAt, "2020-") {
 			continue
 		}
-		if current, ok := hashes[r.TaskID]; ok && r.TaskBodyHash != "" && r.TaskBodyHash != current {
+		if current, ok := hashes[r.TaskID]; ok && r.TaskBodyHash != "" &&
+			r.TaskBodyHash != current &&
+			r.TaskBodyHash != hashes[r.TaskID+"\x00raw"] &&
+			r.TaskBodyHash != hashes[r.TaskID+"\x00rawnorm"] {
 			continue
 		}
 		out = append(out, r)
