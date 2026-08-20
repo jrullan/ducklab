@@ -2036,6 +2036,14 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	if message == "" {
 		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
 	}
+	// Announce the commit before any git mutation: staging and committing can
+	// take long enough that a completed round gate otherwise looks like an
+	// unexplained pause. Keep this event before branch creation as well, so it
+	// is durable when AddAll or CommitWithTrailer aborts acceptance.
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "accept",
+		"detail": "committing accepted work before clean-checkout verification",
+	})
 	// Create branch if needed
 	branch := fmt.Sprintf("ducklab/%s", rs.run.TaskID)
 	git.CreateBranch(branch)
@@ -2047,14 +2055,6 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		s.failRun(rs, fmt.Errorf("git add: %w", err))
 		return err
 	}
-
-	// Announce the commit before it starts: it can take long enough that a
-	// completed round gate otherwise looks like an unexplained pause. This also
-	// marks an already-clean accept, whose existing commit is being accepted.
-	rs.writer.AppendEvent("gate_started", map[string]interface{}{
-		"phase":  "accept",
-		"detail": "committing accepted work before clean-checkout verification",
-	})
 
 	// Accepting work that is already committed is a no-op, not a failure.
 	//
