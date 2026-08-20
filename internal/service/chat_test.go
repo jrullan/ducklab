@@ -368,6 +368,72 @@ func TestChatImagesRequireSeeingDucklingAndValidPayload(t *testing.T) {
 	}
 }
 
+// A configured vision:true is a claim, not evidence. A llama.cpp endpoint without
+// its projector rejects image parts, so the first image attempt must establish that
+// fact before a chat stream is opened. The negative answer is then remembered: a
+// second attempt is refused locally instead of repeatedly sending unsupported data.
+func TestChatImagesProbeAndCacheMMProjLessEndpointBeforeStartingChat(t *testing.T) {
+	const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/bwAAAABJRU5ErkJggg=="
+
+	var mu sync.Mutex
+	requests := 0
+	streamedChat := false
+	visionProbe := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests++
+		visionProbe = visionProbe || strings.Contains(string(body), `"image_url"`)
+		streamedChat = streamedChat || strings.Contains(string(body), `"stream":true`)
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("image input is not supported: no vision projector (mmproj) loaded"))
+	}))
+	defer server.Close()
+
+	isolate(t)
+	seeing := true
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{"llama": {Kind: config.ProviderKindOpenAI, BaseURL: server.URL}}
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{"claimed-seer": {Provider: "llama", Model: "m", Caps: config.Caps{Vision: &seeing}}}
+	s, err := New(cfg, Options{Bus: bus.New(8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := projectWithConfig(t, s, "mmproj-less-chat")
+	req := ChatStartRequest{Duckling: "claimed-seer", Message: "What does this show?"}
+
+	_, err = chatStartWithImagesErr(s, projectID, req, []string{image})
+	if err == nil {
+		t.Fatal("image chat started against an endpoint that rejected image input")
+	}
+	for _, want := range []string{"mmproj", "--mmproj", "seeing duckling"} {
+		if !strings.Contains(strings.ToLower(err.Error()), want) {
+			t.Errorf("image capability error = %q, want guidance mentioning %q", err, want)
+		}
+	}
+
+	mu.Lock()
+	firstRequests, firstStreamedChat, firstVisionProbe := requests, streamedChat, visionProbe
+	mu.Unlock()
+	if !firstVisionProbe {
+		t.Error("declared vision capability was not verified with an image request")
+	}
+	if firstStreamedChat {
+		t.Error("unsupported image opened a chat stream instead of being refused before the chat")
+	}
+
+	_, err = chatStartWithImagesErr(s, projectID, req, []string{image})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "seeing duckling") {
+		t.Fatalf("cached non-vision duckling error = %v, want refusal to pick a seeing duckling", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != firstRequests {
+		t.Errorf("cached non-vision result made %d additional endpoint calls, want 0", requests-firstRequests)
+	}
+}
+
 func chatStartWithImages(t *testing.T, s *Service, projectID string, req ChatStartRequest, images []string) *runlog.Run {
 	t.Helper()
 	run, err := chatStartWithImagesErr(s, projectID, req, images)

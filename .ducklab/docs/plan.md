@@ -1821,3 +1821,29 @@ The initiate-chat controls — `ChatAbout`, rendered in the guide rail, the boar
 
 **Assumption:** the chat reply box in `RunView` either is or can share `ChatAbout`; if it is a separate inline form, the same picker markup is duplicated there — no new shared component is extracted.
 
+### T-085 — Classify image-input provider rejections and pre-flight the declared vision claim so an mmproj-less llama.cpp chat fails with guidance, not a raw 500
+
+Fixes B-100.
+
+## Reported
+
+I attached an image and started a chat and got this error.
+
+**Deliverables:**
+- A chat started with images against a provider that rejects image parts no longer dies as a raw 'chat stream: 500' — the failure names the cause (model/server has no vision projector, e.g. mmproj) and the remedy (start the server with --mmproj, or pick a truly seeing duckling).
+- validateChatImages (or an equivalent gate) consults the probed/cached vision capability, not only the declared config flag, so a wrongly-declared seeing duckling is refused before the provider is called.
+- The duckling probe (or an on-first-use check) records the actual vision answer for local OpenAI-compatible endpoints so the declared vision:true claim is verified, not trusted.
+- Go tests in internal/service/chat_test.go (and duckling/provider as needed) assert the classified error text and the refusal path against a fake mmproj-less endpoint.
+
+## Triage
+
+**Component:** chat vision / provider capability
+**Suspected files:** internal/service/chat.go, internal/duckling/duckling.go, internal/provider/openaicompat.go, internal/config/config.go
+
+The chat image path validates only the declared vision flag ('declared, not probed'), so a local llama.cpp server without its mmproj projector accepts the image at validation then rejects it at request time with a 500 'image input is not supported', and the run fails with no actionable guidance.
+
+**Verification (triage recommends):** test-first — ChatStart with images against a fake provider that answers 500 'image input is not supported - hint: ... mmproj' should surface a classified capability error naming the fix (attach mmproj / re-seat a seeing duckling), and validateChatImages should gate on the probed claim, not only the declared flag.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
