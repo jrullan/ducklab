@@ -2026,4 +2026,79 @@ The guide rail's reopen suggestion is emitted by Next() in internal/service/guid
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-093 — Thread the request context through validateChatImages to the VerifyVision probe
+
+Fixes B-105.
+
+## Reported
+
+internal/service/chat.go validateChatImages calls s.ducklings.VerifyVision(context.Background(), ...) instead of the request context. The vision verification can make a real network probe; detached from the caller it cannot be cancelled — a hung endpoint keeps the probe alive after the person gave up. Pass the request ctx through.
+
+**Deliverables:**
+- validateChatImages accepts a ctx parameter and passes it to s.ducklings.VerifyVision instead of context.Background()
+- Both call sites (ChatStart ~line 125, ChatSend ~line 216) pass their existing request ctx
+- No other use of context.Background() remains in the image-validation path
+- A test (or equivalent verification) shows a cancelled ctx aborts the vision probe with ctx.Err rather than blocking
+
+## Triage
+
+**Component:** chat service
+**Suspected files:** internal/service/chat.go
+
+Confirmed at chat.go:61 the vision probe detaches from the caller, so it cannot be cancelled on client disconnect; the request ctx is already in scope at both call sites.
+
+**Verification (triage recommends):** test-first — Call validateChatImages with a cancelled/deadline ctx and a stubbed VerifyVision (or blocking httptest endpoint) expecting the probe to abort with ctx.Err; if duckling config wiring proves unmockable, downgrade to build-only.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-094 — Close a superseded committing gate block with a neutral state instead of an unearned green check
+
+Fixes B-106.
+
+## Reported
+
+runview.ts case gate_started (T-090 fix) closes an open gate block with gate:"green" when the next gate_started supersedes it. For the committing block, green means only handed off, not verified — and if AddAll/CommitWithTrailer aborts acceptance, the transcript would still show a green check on committing that never completed. Close a superseded block with a neutral done state (no check), or green only when the handoff event confirms the commit landed (the reproduction gate_started detail carries the sha).
+
+**Deliverables:**
+- In runview.ts case gate_started, a superseded open gate block closes with a neutral done state (no green check) rather than gate:"green"
+- Green is shown for the committing block only when the superseding event confirms the commit landed (e.g. its detail carries the committed sha)
+- A test in runview.test.ts builds two sequential gate_started events (committing then reproduction) and asserts the first block is done with a non-green gate
+- A test covers the confirmed-handoff path if the green-on-sha option is implemented
+- Existing announced-gate tests (baseline close on gate, reproduction close on gate_reproduced) still pass
+
+## Triage
+
+**Component:** accept transcript / runview
+**Suspected files:** frontend/src/lib/runview.ts, frontend/src/lib/runview.test.ts
+
+runview.ts:509-512 marks any superseded gate block green, but for the committing phase green means only handed off, so an aborted accept would still display a green check on a commit that never completed; B-098 is the fixed predecessor whose closing behavior this refines, not a duplicate.
+
+**Verification (triage recommends):** test-first — buildTurns([gate_started(committing), gate_started(reproduction)]) yields first block gate === "green"; assert it is not green unless the handoff confirms the commit landed
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-095 — Add gofmt -l to the project gate and settle existing formatting drift
+
+Fixes B-107.
+
+## Reported
+
+T-091 (commit 9f2c20d) landed internal/service/advisor.go with misaligned struct-literal fields; gofmt -l internal/service currently flags advisor.go and advisor_governance_test.go, both from duck-authored commits. The project gate (go test + frontend) proves behaviour, not formatting, so every accepted run can leave drift a human contributor would be nitpicked for. Add a gofmt -l check to the ducklab project gate (cheap, deterministic) and settle the existing drift once.
+
+**Deliverables:**
+- The [verify] tests gateway command in .ducklab/project.toml includes a gofmt -l check that fails on any output
+- gofmt -l over the repo reports no files (advisor.go and advisor_governance_test.go drift settled)
+- Gate command remains valid and runnable end-to-end (go test + frontend chain preserved)
+
+## Triage
+
+**Component:** verify gate config
+**Suspected files:** .ducklab/project.toml, internal/service/advisor.go, internal/service/advisor_governance_test.go
+
+Deterministic formatting gap in the configured gate command with two known drifted files; cheap config edit plus one gofmt -w pass, no behavior at stake.
+
+**Verification (triage recommends):** build-only — The fix edits a gate command string in project.toml; a forced test would grep that string and pin the implementation, not the behavior.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

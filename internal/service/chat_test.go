@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -431,6 +432,62 @@ func TestChatImagesProbeAndCacheMMProjLessEndpointBeforeStartingChat(t *testing.
 	defer mu.Unlock()
 	if requests != firstRequests {
 		t.Errorf("cached non-vision result made %d additional endpoint calls, want 0", requests-firstRequests)
+	}
+}
+
+// Image verification is a request-time network probe. If the person cancels their
+// request, neither opening a chat nor sending its next image may leave that probe
+// detached and running; cancellation is reported to the caller.
+func TestCancelledChatImageValidationAbortsVisionProbe(t *testing.T) {
+	const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/bwAAAABJRU5ErkJggg=="
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"image_url"`) {
+			// A detached probe reaches this deadline instead of observing the
+			// caller's cancellation. Keep it bounded so this regression test does
+			// not strand a goroutine against the broken implementation.
+			select {
+			case <-r.Context().Done():
+			case <-time.After(150 * time.Millisecond):
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	isolate(t)
+	seeing := true
+	cfg := config.DefaultGlobal()
+	cfg.Providers = map[config.ProviderID]config.Provider{"test": {Kind: config.ProviderKindOpenAI, BaseURL: server.URL}}
+	cfg.Ducklings = map[config.DucklingID]config.Duckling{"seer": {Provider: "test", Model: "m", Caps: config.Caps{Vision: &seeing}}}
+	s, err := New(cfg, Options{Bus: bus.New(32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := projectWithConfig(t, s, "cancel-image-validation")
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.ChatStart(cancelled, projectID, ChatStartRequest{Duckling: "seer", Message: "look", Images: []string{image}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ChatStart image validation error = %v, want context.Canceled", err)
+	}
+
+	// The continuation takes a separate validation path and must preserve the
+	// context just as the opening turn does.
+	run, err := s.ChatStart(context.Background(), projectID, ChatStartRequest{Duckling: "seer", Message: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForChatPause(t, s, run.ID)
+	cancelled, cancel = context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.ChatSend(cancelled, run.ID, "look", []string{image}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ChatSend image validation error = %v, want context.Canceled", err)
 	}
 }
 
