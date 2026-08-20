@@ -281,6 +281,15 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
 
   const keyFor = (round: number, turn: number) => `${round}:${turn}`;
 
+  const isConfirmedCommitHandoff = (gate: TurnBlock, detail: Record<string, unknown>): boolean => {
+    if (gate.gatePhase !== "commit") return false;
+    for (const key of ["sha", "commit_sha", "committed_sha"]) {
+      if (typeof detail[key] === "string" && detail[key]) return true;
+    }
+    // Some handoff events carry the sha only in their human-readable detail.
+    return typeof detail.detail === "string" && /\b[0-9a-f]{7,40}\b/i.test(detail.detail);
+  };
+
   /**
    * The turn an event belongs to.
    *
@@ -503,12 +512,13 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "gate_started": {
-        // A new gate phase supersedes an earlier open gate block. Acceptance
-        // announces committing first, then clean-checkout reproduction; the
-        // first announcement is complete once the commit phase hands off.
+        // A new gate phase supersedes an earlier open gate block. Superseding
+        // is not itself a successful verdict: in particular, committing may
+        // have aborted after its announcement. Only a handoff that identifies
+        // the committed object earns a green check for that phase.
         if (openGate && !openGate.done) {
           openGate.done = true;
-          openGate.gate = "green";
+          openGate.gate = isConfirmedCommitHandoff(openGate, d) ? "green" : "done";
         }
         const round = Number(d.round ?? 1);
         const block: TurnBlock = {
@@ -553,6 +563,12 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           if (gate.role === "gate" && gate.gatePhase === "accept" && !gate.done) {
             gate.done = true;
             gate.gate = d.green === false ? "red" : "green";
+          }
+          // Reproduction is the later confirmation that the preceding commit
+          // really landed and was testable. It may upgrade the commit's
+          // previously neutral superseded state, but not before that evidence.
+          if (gate.role === "gate" && gate.gatePhase === "commit" && gate.done && gate.gate === "done" && d.green !== false) {
+            gate.gate = "green";
           }
         }
         openGate = null;

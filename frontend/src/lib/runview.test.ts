@@ -649,6 +649,16 @@ describe("the announced test-first gate", () => {
     expect(commit.gate).not.toBe("green");
   });
 
+  it("marks a committing handoff green when the superseding event carries its sha", () => {
+    const turns = buildTurns([
+      ev("gate_started", { phase: "commit", detail: "committing accepted work" }, 1),
+      ev("gate_started", { phase: "accept", sha: "0123456789abcdef0123456789abcdef01234567", detail: "reproducing the committed sha" }, 2),
+    ]);
+    const commit = turns.find((turn) => turn.role === "gate" && turn.gatePhase === "commit")!;
+    expect(commit.done).toBe(true);
+    expect(commit.gate).toBe("green");
+  });
+
   it("announces the accept's clean-checkout reproduction and closes it on gate_reproduced", () => {
     const turns = buildTurns([
       ev("gate_started", { phase: "accept", detail: "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce" }, 1),
