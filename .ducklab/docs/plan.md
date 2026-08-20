@@ -2001,4 +2001,29 @@ pauseForQuestion launches the advisor silently (lifecycle.go:525) so the card sh
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-092 — Remove the reopen-task next step from the guide
+
+Fixes B-103.
+
+## Reported
+
+Guide rail have a Reopen an accepted task area that occupies real estate in the guide rail and is not necessary remove if from the the guide rail.
+
+**Deliverables:**
+- The reopen-task step block (single and grouped cases) is removed from internal/service/guide.go Next()
+- Next() no longer returns any step with ID reopen-task regardless of accepted task state
+- Existing guide tests in internal/service/guide_test.go are updated so they assert no reopen-task step appears
+- No other guide steps (new, classify, promote, verify-bug, build, spec-debt) change behaviour
+
+## Triage
+
+**Component:** guide
+**Suspected files:** internal/service/guide.go, internal/service/guide_test.go
+
+The guide rail's reopen suggestion is emitted by Next() in internal/service/guide.go; the request is to stop surfacing it, a small logic change verifiable by the existing guide tests after updating their expectations.
+
+**Verification (triage recommends):** test-first — Next() output is deterministic: accepted redoable tasks must no longer yield a reopen-task step; update TestTheGuideSurfacesReopenDoors and TestTheGuideGroupsReopenableTasks to assert absence.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

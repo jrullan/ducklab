@@ -73,10 +73,9 @@ func TestPausedRunsOutrankEverything(t *testing.T) {
 // Accepted work is not shipped merely because its gate is green. The guide must
 // make the release obligation visible and put it ahead of the quiet-project
 // doors, so an operator cannot mistake accepted for released.
-// A fixed bug still needs a person's verification, and accepted work may be
-// deliberately reopened with redo consent. Both doors belong in the same
-// guide so clients do not have to know the lifecycle by heart.
-func TestTheGuideSurfacesReopenDoors(t *testing.T) {
+// A fixed bug still needs a person's verification. Accepted tasks must not
+// add a reopen door: the task board owns that deliberate lifecycle action.
+func TestTheGuideDoesNotSurfaceReopenTasks(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
 		Bugs:  []bug.Bug{{ID: "B-017", Status: bug.Fixed}},
@@ -98,22 +97,14 @@ func TestTheGuideSurfacesReopenDoors(t *testing.T) {
 		t.Errorf("fixed bug step must lead with verification and explain the reopen alternative: %+v", bugStep)
 	}
 
-	taskStep, ok := byRef["T-016"]
-	if !ok {
-		t.Fatalf("guide = %v, want a reopen step for accepted task T-016", ids(steps))
-	}
-	if taskStep.ID != "reopen-task" || taskStep.Kind != "task" {
-		t.Errorf("accepted task step = %+v, want id reopen-task and kind task", taskStep)
-	}
-	if !strings.Contains(strings.ToLower(taskStep.Action), "reopen") || taskStep.Reason == "" {
-		t.Errorf("accepted task step must explain the reopen outcome and reason: %+v", taskStep)
-	}
-	if !strings.Contains(strings.ToLower(taskStep.Action), "redo") && !strings.Contains(strings.ToLower(taskStep.Reason), "redo") {
-		t.Errorf("accepted task reopen must disclose the redo path: %+v", taskStep)
+	for _, step := range steps {
+		if step.ID == "reopen-task" {
+			t.Errorf("accepted task received a reopen step: %+v", step)
+		}
 	}
 
-	// Reopen is not a generic action for every bug or task: only fixed bugs
-	// and accepted tasks earn it.
+	// Reopen is not a generic action for every bug or task. Fixed bugs retain
+	// verification guidance, while tasks never receive a reopen guide step.
 	quiet := nextSteps(projectSnapshot{HasRequirements: true, HasSpec: true, HasPlan: true,
 		Bugs:  []bug.Bug{{ID: "B-018", Status: bug.Verified}},
 		Tasks: []TaskView{{ID: "T-017", Status: "todo"}},
@@ -162,9 +153,8 @@ func TestTheGuidePrioritizesVerificationForFixedBugs(t *testing.T) {
 	}
 }
 
-// Likewise reopenable accepted tasks: one door, every id behind it — a
-// project with 45 accepted tasks on branches must not get 45 lines.
-func TestTheGuideGroupsReopenableTasks(t *testing.T) {
+// Multiple accepted tasks must not create a grouped reopen door either.
+func TestTheGuideDoesNotGroupReopenableTasks(t *testing.T) {
 	steps := nextSteps(projectSnapshot{
 		HasRequirements: true, HasSpec: true, HasPlan: true,
 		Tasks: []TaskView{
@@ -173,14 +163,10 @@ func TestTheGuideGroupsReopenableTasks(t *testing.T) {
 			{ID: "T-003", Status: "accepted", Branch: "ducklab/T-003"},
 		},
 	})
-	var reopen []NextStep
-	for _, s := range steps {
-		if s.ID == "reopen-task" {
-			reopen = append(reopen, s)
+	for _, step := range steps {
+		if step.ID == "reopen-task" {
+			t.Errorf("accepted tasks received a grouped reopen step: %+v", step)
 		}
-	}
-	if len(reopen) != 1 || strings.Join(reopen[0].Refs, ",") != "T-001,T-002,T-003" || !strings.Contains(reopen[0].Action, "3 can be redone") {
-		t.Fatalf("reopen steps = %+v, want one grouped step over three tasks", reopen)
 	}
 }
 
