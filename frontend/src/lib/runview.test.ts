@@ -639,6 +639,16 @@ describe("the announced test-first gate", () => {
     expect(turns[0]!.done).toBe(true);
     expect(turns[0]!.gate).toBe("green");
   });
+  it("closes an unconfirmed committing handoff neutrally when reproduction starts", () => {
+    const turns = buildTurns([
+      ev("gate_started", { phase: "commit", detail: "committing accepted work before clean-checkout verification" }, 1),
+      ev("gate_started", { phase: "accept", detail: "reproducing the gate from a clean checkout" }, 2),
+    ]);
+    const commit = turns.find((turn) => turn.role === "gate" && turn.gatePhase === "commit")!;
+    expect(commit.done).toBe(true);
+    expect(commit.gate).not.toBe("green");
+  });
+
   it("announces the accept's clean-checkout reproduction and closes it on gate_reproduced", () => {
     const turns = buildTurns([
       ev("gate_started", { phase: "accept", detail: "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce" }, 1),
