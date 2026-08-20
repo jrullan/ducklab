@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 6
-updated_at: 2026-08-19T11:01:44Z
-run_id: r-20260819-110137-r4mc
-ducklings: [atom-local, terra, qwen38-max, k3]
-based_on: 342c9950a93bc53c
+version: 7
+updated_at: 2026-08-20T11:10:23Z
+run_id: r-20260820-110508-ulsi
+ducklings: [k3, qwen38-max, atom-local, terra]
+based_on: 795c1b33969b48a0
 approved_by: human
 ---
 
@@ -1778,4 +1778,46 @@ The backend emits the pre-commit gate_started announcement (service.go:2054, 211
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-083 — Carry images through ChatStart and ChatSend to a vision-capable consultant
+
+**Implements:** SPEC-054
+
+Let a person attach screenshots to a chat's opening message and to follow-up messages, so the consultant can advise on UI matters from the picture itself rather than from a description of it. The wire and turn machinery already exist (provider `Message.Images`, `Turn.Images`, the triage vision gate in bugs.go); this task threads the same path through chat.
+
+**Deliverables:**
+- `ChatStartRequest` and the `chatSendRequest` body each accept an optional `images` array of data URLs (`data:image/...;base64,...`), decoded and validated by the service.
+  - Reuse the bug-attachment discipline from `internal/service/bugattach.go`: image MIME types only, a per-image byte cap, and a small bound on count and total bytes (the 6<<20 total the triager uses is the ceiling) — violations are `invalid_request` errors naming the offending image.
+- ChatStart and ChatSend refuse images when the seated consultant duckling does not declare `vision: true`, with an error that says to pick a seeing duckling.
+  - Mirror the triage gate at `internal/service/bugs.go:293`: consult the duckling's declared `Caps.Vision` from the registry, never probe the endpoint.
+- The consultant's next reply turn receives the message's images as `Turn.Images`, so the vision model is shown the picture with the dossier prompt.
+  - `executeChatTurn` gains the images of the message it is answering; images ride only the turn that replies to the message that carried them — the text replay in `chatPromptFor` is unchanged.
+  - A `warning` event notes how many images were shown, as triage does.
+- The human `message` event on the run record carries the image data URLs, so a reopened transcript can show what was sent.
+  - Frontend rendering of those images is NOT part of this task; the record just keeps them.
+- The OpenAPI document and the generated TypeScript client reflect the new optional fields (`make api`; the `api-check` target must pass).
+- Go tests in `internal/service/chat_test.go` (and engineapi as needed) assert: images reach `Turn.Images` for a vision duckling, a text-only duckling gets the refusal error, an oversized or non-image payload is rejected, and the human message event records the images.
+
+**Out of scope:** MCP chat tools, CLI chat commands, persisting images as files under `.ducklab/`, re-sending earlier images on later turns, and any frontend work (that is T-901).
+
+**Assumption:** the consultant duckling's `Caps.Vision` is declared in config, as triage already assumes; no capability probing is added.
+
+### T-084 — Add an image file-picker action to the chat controls
+
+**Implements:** SPEC-054
+**Depends on:** T-083
+
+The initiate-chat controls — `ChatAbout`, rendered in the guide rail, the board, and the run view — gain an attach-image action with a file picker, so the person can show the consultant a UI problem instead of describing it. The same attach action serves the reply box of a paused chat in the run view if that box lives outside `ChatAbout`; if it is the same component, one implementation covers both.
+
+**Deliverables:**
+- An "add image" button beside the message input opens a file picker (`<input type="file" accept="image/*" multiple>`) and reads each chosen file as a data URL (FileReader), held in component state.
+  - Follow the file-picker pattern T-079 established beside the reference-documents input in the Cycle view for styling and test ids.
+- Each attached image renders as a small thumbnail chip with its filename and a remove control, so a wrong pick never reaches the record.
+- Starting (or sending) the chat includes the attached images in the request payload from T-900, then clears the attachment state.
+- The attach button is disabled with an explanatory title when the selected duckling does not declare vision capability, and re-enables when a seeing duckling is picked.
+  - The fleet list already carries duckling capabilities to the frontend; read the declared vision flag from there rather than adding an endpoint.
+- Vitest coverage asserts: picking a file shows its chip, remove drops it, the start/send call carries the data URLs, the button is disabled for a text-only duckling, and a non-image file is refused with a visible error.
+
+**Out of scope:** rendering images inside transcript bubbles on the chat run view, drag-and-drop or paste upload, image resizing/compression, and any engine changes (T-900 owns the payload contract).
+
+**Assumption:** the chat reply box in `RunView` either is or can share `ChatAbout`; if it is a separate inline form, the same picker markup is duplicated there — no new shared component is extracted.
 
