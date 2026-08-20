@@ -171,6 +171,57 @@ func (r *Registry) ProbeForce(ctx context.Context, id config.DucklingID) (*Capab
 	return r.probe(ctx, id, true)
 }
 
+// VerifyVision verifies a declared vision claim with one image request when
+// no fresh answer is cached. Explicit image rejection is a definitive negative;
+// other probe failures are returned so callers do not mistake endpoint weather
+// for a text-only model.
+func (r *Registry) VerifyVision(ctx context.Context, id config.DucklingID) (bool, error) {
+	d, err := r.Get(id)
+	if err != nil {
+		return false, err
+	}
+	if !d.Caps.Vision {
+		return false, nil
+	}
+	if cached, ok := r.CachedCaps(id); ok {
+		return cached.Vision, nil
+	}
+	// Probe records the whole capability answer, including vision, and keeps
+	// existing successful endpoints from paying a second image request.
+	if _, err := r.Probe(ctx, id); err != nil {
+		return false, err
+	}
+	if cached, ok := r.CachedCaps(id); ok {
+		return cached.Vision, nil
+	}
+	p, err := r.Provider(id)
+	if err != nil {
+		return false, err
+	}
+	_, err = p.Chat(ctx, provider.ChatRequest{
+		Model: d.Model,
+		Messages: []provider.Message{{
+			Role: "user", Content: "Reply with ok.",
+			Images: []string{"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/bwAAAABJRU5ErkJggg=="},
+		}},
+		MaxTokens: intPtr(4),
+	})
+	if err != nil && !provider.IsVisionUnsupported(err) {
+		// The endpoint did not answer the capability question. Leave the
+		// declaration in place rather than turning temporary provider weather
+		// into a durable text-only verdict.
+		return true, nil
+	}
+	vision := err == nil
+	if r.caps == nil {
+		r.caps = LoadCapsCache()
+	}
+	caps := d.Caps
+	caps.Vision = vision
+	_ = r.caps.Put(d.Provider, d.Model, &caps)
+	return vision, nil
+}
+
 // CachedCaps returns a cached record without probing, for listings.
 func (r *Registry) CachedCaps(id config.DucklingID) (*Capabilities, bool) {
 	d, err := r.Get(id)
@@ -250,6 +301,23 @@ func (r *Registry) probe(ctx context.Context, id config.DucklingID, force bool) 
 			caps.JSONMode = true
 		}
 	}
+
+	// Verify vision with a real image part. A configured vision:true is only a
+	// claim; local OpenAI-compatible servers can accept chat while lacking the
+	// llama.cpp mmproj projector.
+	visionReq := provider.ChatRequest{
+		Model: d.Model,
+		Messages: []provider.Message{{
+			Role: "user", Content: "Reply with ok.",
+			Images: []string{"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/bwAAAABJRU5ErkJggg=="},
+		}},
+		MaxTokens: intPtr(4),
+	}
+	_, err = p.Chat(ctx, visionReq)
+	// Only an explicit image rejection disproves vision. A successful endpoint
+	// may answer this tiny non-streaming probe in a streaming wire shape; that
+	// protocol mismatch is not evidence that it cannot see.
+	caps.Vision = !provider.IsVisionUnsupported(err)
 
 	// Context window from models endpoint if available
 	models, err := p.Models(ctx)

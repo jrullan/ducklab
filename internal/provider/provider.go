@@ -219,6 +219,17 @@ var ErrInvalidResponse = errors.New("invalid response")
 // ErrProviderUnavailable is returned when the provider cannot be reached.
 var ErrProviderUnavailable = errors.New("provider unavailable")
 
+// ErrVisionUnsupported means the endpoint rejected image content because the
+// selected model/server has no vision support (for llama.cpp, commonly no
+// mmproj projector).
+var ErrVisionUnsupported = errors.New("image input is not supported")
+
+// IsVisionUnsupported reports whether an endpoint explicitly rejected image
+// content rather than failing for unrelated provider weather.
+func IsVisionUnsupported(err error) bool {
+	return errors.Is(err, ErrVisionUnsupported)
+}
+
 // IsTransient returns whether an error is transient and worth retrying.
 func IsTransient(err error) bool {
 	if err == nil {

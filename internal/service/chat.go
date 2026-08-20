@@ -58,6 +58,13 @@ func (s *Service) validateChatImages(duckling string, images []string) error {
 	if !ok || cfg.Caps.Vision == nil || !*cfg.Caps.Vision {
 		return fmt.Errorf("pick a seeing duckling to send images")
 	}
+	vision, err := s.ducklings.VerifyVision(context.Background(), config.DucklingID(duckling))
+	if err != nil {
+		return err
+	}
+	if !vision {
+		return fmt.Errorf("model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling")
+	}
 	if len(images) > maxChatImages {
 		return fmt.Errorf("invalid_request: image %d exceeds the %d-image limit", maxChatImages+1, maxChatImages)
 	}

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"sync/atomic"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -253,7 +253,7 @@ func (p *OpenAICompat) doChat(ctx context.Context, req ChatRequest) (ChatRespons
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return ChatResponse{}, fmt.Errorf("chat: %s: %s", resp.Status, string(body))
+		return ChatResponse{}, classifiedChatError("chat", resp.Status, body)
 	}
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -325,6 +325,19 @@ func applyReasoning(body []byte, out *ChatResponse) {
 		}
 	}
 	out.Usage.ReasoningTokens = side.Usage.CompletionTokensDetails.ReasoningTokens
+}
+
+// classifiedChatError turns the common local vision rejection into an
+// actionable capability error rather than leaking an opaque HTTP 500.
+func classifiedChatError(operation, status string, body []byte) error {
+	message := string(body)
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "image input is not supported") ||
+		(strings.Contains(lower, "image") && strings.Contains(lower, "mmproj")) ||
+		strings.Contains(lower, "vision projector") {
+		return fmt.Errorf("%w: model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling", ErrVisionUnsupported)
+	}
+	return fmt.Errorf("%s: %s: %s", operation, status, message)
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -411,7 +424,7 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	touch()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return ChatResponse{}, fmt.Errorf("chat stream: %s: %s", resp.Status, string(body))
+		return ChatResponse{}, classifiedChatError("chat stream", resp.Status, body)
 	}
 	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		// Not actually streaming; fall back to non-streaming
@@ -847,11 +860,11 @@ func (p *Anthropic) Models(ctx context.Context) ([]string, error) {
 // Fake is a fake provider for testing.
 type Fake struct {
 	ModelInfoFn func(model string) *ModelInfo
-	id        string
-	responses []ChatResponse
-	requests  []ChatRequest
-	callCount int
-	models    []string
+	id          string
+	responses   []ChatResponse
+	requests    []ChatRequest
+	callCount   int
+	models      []string
 	// ScriptFunc is called when responses are exhausted. If it returns a
 	// response, it is used; otherwise an error is returned.
 	ScriptFunc func(req ChatRequest, callCount int) *ChatResponse
