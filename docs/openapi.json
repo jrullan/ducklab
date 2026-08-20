@@ -726,6 +726,12 @@
       },
       "EngineapichatSendRequest": {
         "properties": {
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "message": {
             "type": "string"
           }
@@ -1720,6 +1726,12 @@
           },
           "duckling": {
             "type": "string"
+          },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "message": {
             "type": "string"

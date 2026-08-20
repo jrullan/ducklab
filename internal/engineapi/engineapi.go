@@ -813,7 +813,8 @@ func (s *Server) handleBugAttachment(w http.ResponseWriter, r *http.Request) {
 }
 
 type chatSendRequest struct {
-	Message string `json:"message"`
+	Message string   `json:"message"`
+	Images  []string `json:"images,omitempty"`
 }
 
 func (s *Server) handleChatStart(w http.ResponseWriter, r *http.Request) {
@@ -845,9 +846,13 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	run, err := s.svc.ChatSend(r.Context(), r.PathValue("id"), req.Message)
+	run, err := s.svc.ChatSend(r.Context(), r.PathValue("id"), req.Message, req.Images)
 	if err != nil {
-		s.error(w, http.StatusConflict, "conflict", err.Error())
+		if strings.HasPrefix(err.Error(), "invalid_request:") || err.Error() == "say something" {
+			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		} else {
+			s.error(w, http.StatusConflict, "conflict", err.Error())
+		}
 		return
 	}
 	s.json(w, http.StatusOK, run)

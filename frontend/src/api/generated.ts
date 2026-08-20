@@ -207,6 +207,7 @@ export interface EngineapicandidateCriteriaRequest {
 }
 
 export interface EngineapichatSendRequest {
+  images?: string[];
   message?: string;
 }
 
@@ -502,6 +503,7 @@ export interface ServiceChatStartRequest {
   about_id?: string;
   about_kind?: string;
   duckling?: string;
+  images?: string[];
   message?: string;
 }
 

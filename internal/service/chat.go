@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,54 @@ import (
 // bug_file, the one loop-side act a conversation can conclude in.
 const chatToolbelt = "fs_read,fs_search,fs_list,git_log,git_diff,task_read,bug_read,bug_file,artifact_read,run_list,run_read,roster_read,skill_list,skill_read"
 
+const (
+	maxChatImages     = 6
+	maxChatImageBytes = maxAttachmentBytes
+	maxChatImageTotal = 6 << 20
+)
+
+// validateChatImages keeps untrusted data URLs within the same evidence bounds
+// as triage and refuses them before a text-only provider sees them.
+func (s *Service) validateChatImages(duckling string, images []string) error {
+	if len(images) == 0 {
+		return nil
+	}
+	cfg, ok := s.cfg.Ducklings[config.DucklingID(duckling)]
+	if !ok || cfg.Caps.Vision == nil || !*cfg.Caps.Vision {
+		return fmt.Errorf("pick a seeing duckling to send images")
+	}
+	if len(images) > maxChatImages {
+		return fmt.Errorf("invalid_request: image %d exceeds the %d-image limit", maxChatImages+1, maxChatImages)
+	}
+	total := 0
+	for i, image := range images {
+		const prefix = "data:"
+		if !strings.HasPrefix(image, prefix) {
+			return fmt.Errorf("invalid_request: image %d must be an image data URL", i+1)
+		}
+		header, encoded, ok := strings.Cut(strings.TrimPrefix(image, prefix), ",")
+		if !ok {
+			return fmt.Errorf("invalid_request: image %d must be an image data URL", i+1)
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
+		if !strings.HasPrefix(mediaType, "image/") || !strings.Contains(strings.ToLower(header), ";base64") {
+			return fmt.Errorf("invalid_request: image %d must be a base64 image data URL", i+1)
+		}
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fmt.Errorf("invalid_request: image %d has invalid base64 data", i+1)
+		}
+		if len(data) == 0 || len(data) > maxChatImageBytes {
+			return fmt.Errorf("invalid_request: image %d exceeds the %d-byte limit", i+1, maxChatImageBytes)
+		}
+		total += len(data)
+		if total > maxChatImageTotal {
+			return fmt.Errorf("invalid_request: image %d exceeds the %d-byte total limit", i+1, maxChatImageTotal)
+		}
+	}
+	return nil
+}
+
 // ChatRequest starts a conversation about a subject.
 type ChatStartRequest struct {
 	// Duckling is the model the person chose from the fleet.
@@ -50,6 +99,8 @@ type ChatStartRequest struct {
 	AboutID   string `json:"about_id"`
 	// Message is the person's opening question.
 	Message string `json:"message"`
+	// Images are screenshots shown only with the reply to this message.
+	Images []string `json:"images,omitempty"`
 }
 
 // ChatStart opens the conversation: one run, stage "chat", the subject's
@@ -62,6 +113,9 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 		return nil, fmt.Errorf("pick the duckling to talk to")
 	}
 	if _, err := s.ducklings.Get(config.DucklingID(req.Duckling)); err != nil {
+		return nil, err
+	}
+	if err := s.validateChatImages(req.Duckling, req.Images); err != nil {
 		return nil, err
 	}
 	entry, err := s.registry.Get(projectID)
@@ -106,21 +160,25 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	})
 	// The person's opening message, on the record like every turn after it.
 	writer.AppendEvent("message", map[string]interface{}{
-		"role": "human", "content": req.Message,
+		"role": "human", "content": req.Message, "images": req.Images,
 	})
 
 	// Read-only tools touch no tree: a chat may run beside anything.
 	s.queue.submit(s, &queued{
 		rs: rs, ctx: runCtx, parallel: true,
 		exec: func(c context.Context) {
-			s.executeChatTurn(c, rs, entry.Path, req.AboutKind, req.AboutID, req.Duckling)
+			s.executeChatTurn(c, rs, entry.Path, req.AboutKind, req.AboutID, req.Duckling, req.Images)
 		},
 	})
 	return run, nil
 }
 
 // ChatSend continues a paused conversation with the person's next message.
-func (s *Service) ChatSend(ctx context.Context, runID, message string) (*runlog.Run, error) {
+func (s *Service) ChatSend(ctx context.Context, runID, message string, imageSets ...[]string) (*runlog.Run, error) {
+	var images []string
+	if len(imageSets) > 0 {
+		images = imageSets[0]
+	}
 	if strings.TrimSpace(message) == "" {
 		return nil, fmt.Errorf("say something")
 	}
@@ -148,9 +206,12 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string) (*runlog.
 	about := strings.TrimPrefix(rs.run.Note, "chat about ")
 	kind, id, _ := strings.Cut(about, " ")
 	duckling := rs.run.Roster["consultant"]
+	if err := s.validateChatImages(duckling, images); err != nil {
+		return nil, err
+	}
 
 	w.AppendEvent("message", map[string]interface{}{
-		"role": "human", "content": message,
+		"role": "human", "content": message, "images": images,
 	})
 	runCtx, cancel := context.WithCancel(context.Background())
 	rs.cancel = cancel
@@ -160,7 +221,7 @@ func (s *Service) ChatSend(ctx context.Context, runID, message string) (*runlog.
 	w.WriteState()
 	s.queue.submit(s, &queued{
 		rs: rs, ctx: runCtx, parallel: true,
-		exec: func(c context.Context) { s.executeChatTurn(c, rs, entry.Path, kind, id, duckling) },
+		exec: func(c context.Context) { s.executeChatTurn(c, rs, entry.Path, kind, id, duckling, images) },
 	})
 	return rs.run, nil
 }
@@ -199,7 +260,7 @@ func (s *Service) ChatEnd(ctx context.Context, runID string) (*runlog.Run, error
 
 // executeChatTurn runs ONE consultant reply: dossier + conversation so far +
 // the person's last message, with read-only tools, then pauses for the next.
-func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot, aboutKind, aboutID, ducklingID string) {
+func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot, aboutKind, aboutID, ducklingID string, images []string) {
 	defer recoverRun(rs)
 	defer close(rs.done)
 
@@ -265,6 +326,11 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		return
 	}
 	turnNo := chatTurnCount(rs)
+	if len(images) > 0 {
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": fmt.Sprintf("%d screenshot(s) shown to the consultant", len(images)),
+		})
+	}
 	rs.writer.AppendEvent("turn_start", map[string]interface{}{
 		"round": turnNo, "turn": 0, "role": "consultant", "duckling": ducklingID,
 	})
@@ -272,7 +338,7 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	outcome, terr := agent.RunTurn(ctx, loop, &agent.Turn{
 		Role: config.RoleArchitect, Duckling: config.DucklingID(ducklingID),
 		Prompt: prompt, Toolbelt: belt, Contract: "freeform",
-		MaxTurns: 12, Persona: "consultant",
+		MaxTurns: 12, Persona: "consultant", Images: images,
 		Round: turnNo, Index: 0,
 	}, ectx)
 	recordSpend(rs, tracker)

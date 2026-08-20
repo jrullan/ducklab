@@ -269,11 +269,13 @@ func TestChatImagesReachSeeingConsultantAndRemainWithTheirMessage(t *testing.T) 
 	var requests []string
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		requests = append(requests, string(body))
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"seen"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+		if strings.Contains(string(body), `"stream":true`) {
+			mu.Lock()
+			requests = append(requests, string(body))
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"seen\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
 	}))
 	defer provider.Close()
 
