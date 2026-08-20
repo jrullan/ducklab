@@ -323,16 +323,17 @@ func (s *Service) canWriteConfig() error {
 }
 
 // validID rejects names that cannot be typed as a flag or a TOML key.
+// validID delegates to the ONE id rule. This function used to keep its own
+// looser copy — underscores allowed — and the drift let the desktop save a
+// duckling (qwen38_27b) that the next engine start refused to load: a write
+// gate looser than the load gate lets the writer lock the engine out of its
+// own config (B-095).
 func validID(id string) error {
 	if id == "" {
 		return fmt.Errorf("an id is required")
 	}
-	for _, r := range id {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-		default:
-			return fmt.Errorf("id %q must be lowercase letters, digits, dashes and underscores", id)
-		}
+	if err := config.ValidateID(id); err != nil {
+		return err
 	}
 	return nil
 }

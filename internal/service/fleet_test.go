@@ -201,15 +201,20 @@ func TestAFailedWriteLeavesNothingBehind(t *testing.T) {
 	}
 }
 
+// The write gate speaks the loader's rule, exactly. This test used to bless
+// "pato_local-2" as reasonable — the write path's private, looser idea of an
+// id — and that drift let the desktop save qwen38_27b, which the next engine
+// start refused to load: writer-made lockout (B-095). Underscores are not
+// refused for taste; they are refused because the loader refuses them.
 func TestIDsAreValidated(t *testing.T) {
 	s, _ := fleetService(t)
-	for _, bad := range []string{"", "Pato Local", "pato/local", "PATO"} {
+	for _, bad := range []string{"", "Pato Local", "pato/local", "PATO", "pato_local-2", "qwen38_27b"} {
 		if err := s.DucklingSet(bad, DucklingView{Provider: "local", Model: "x"}); err == nil {
-			t.Errorf("id %q was accepted", bad)
+			t.Errorf("id %q was accepted; the loader would refuse it at the next start", bad)
 		}
 	}
-	if err := s.DucklingSet("pato_local-2", DucklingView{Provider: "local", Model: "x"}); err != nil {
-		t.Errorf("a reasonable id was refused: %v", err)
+	if err := s.DucklingSet("pato-local-2", DucklingView{Provider: "local", Model: "x"}); err != nil {
+		t.Errorf("a loader-valid id was refused: %v", err)
 	}
 }
 

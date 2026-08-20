@@ -143,3 +143,14 @@ func TestSavingADucklingFillsBlanksFromTheProvider(t *testing.T) {
 		t.Errorf("explicit values were overwritten: ctx=%v cost=%+v", *d.Caps.ContextTokens, d.Cost)
 	}
 }
+
+// A write gate looser than the load gate lets the writer lock the engine out
+// of its own config: the desktop saved qwen38_27b, and the next start died on
+// "invalid id" reading it back (B-095). One identity, one validator.
+func TestDucklingSetRefusesIdsTheLoaderWould(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	err := s.DucklingSet("qwen38_27b", DucklingView{Provider: "fake", Model: "qwen/qwen3.8-27b"})
+	if err == nil || !strings.Contains(err.Error(), "invalid id") {
+		t.Fatalf("an underscore id was accepted for writing: %v", err)
+	}
+}
