@@ -560,4 +560,6 @@ func joinComma(s []string) string {
 }
 
 // isCommonRole names the mode-independent roles the Common board seats.
-func isCommonRole(role string) bool { return role == "triager" || role == "scribe" }
+func isCommonRole(role string) bool {
+	return role == string(config.RoleTriager) || role == string(config.RoleScribe) || role == string(config.RoleConsultant)
+}

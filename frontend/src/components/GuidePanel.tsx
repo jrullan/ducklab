@@ -65,6 +65,7 @@ const ACTIONABLE = new Set(["now", "board", "cycle", "runs", "run", "release"]);
 export function GuideRail({ client, projectId, view = "now" }: { client: EngineClient; projectId: string; view?: string }) {
   const [steps, setSteps] = useState<NextStep[]>([]);
   const [fleet, setFleet] = useState<Duckling[]>([]);
+  const [consultant, setConsultant] = useState("");
   const actionable = ACTIONABLE.has(view);
   const viewKey = `${STORE}.${view}`;
   const [open, setOpen] = useState(() => localStorage.getItem(STORE) !== "off" && (actionable || localStorage.getItem(viewKey) === "on"));
@@ -93,6 +94,15 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   useEffect(() => {
     client.ducklings().then(setFleet).catch(() => setFleet([]));
   }, [client]);
+  useEffect(() => {
+    if (!projectId) return;
+    client.RosterGet(projectId, "common")
+      .then((roster) => {
+        const entry = roster.entries.find((item) => item.role === "consultant");
+        setConsultant(entry?.source === "project pin" || entry?.source === "global role fallback" ? entry.duckling : "");
+      })
+      .catch(() => setConsultant(""));
+  }, [client, projectId]);
   // The autopilot's state, refreshed on the same pulse as the guide: its
   // whole point is acting between the person's glances.
   const [ap, setAp] = useState<AutopilotState | null>(null);
@@ -277,6 +287,7 @@ ${r.output.slice(-600)}`))
           ducklings={fleet}
           label="ask how & why · chat about Ducklab"
           placeholder="e.g. why does the test come before the build?"
+          preselectedDuckling={consultant}
         />
       </div>
     </aside>

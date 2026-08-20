@@ -198,6 +198,9 @@ func TestCommonBoardWritesRolePinsOnBothScopes(t *testing.T) {
 // seats two. That echo must not refuse a canonical write — it refused every
 // global write from the board while pair carried an advisor.
 func TestCommonConsultantPinResolvesAcrossModes(t *testing.T) {
+	if !isCommonRole("consultant") {
+		t.Fatal("consultant must be a Common role")
+	}
 	s := writableService(t, "consultant-duck")
 	projectID, _ := projectWithConfig(t, s, "common-consultant")
 

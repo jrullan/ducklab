@@ -38,6 +38,7 @@ const global: Record<string, Seat[]> = {
   ],
   common: [
     { role: "triager", ducklings: ["triager"], source: "global role fallback" },
+    { role: "consultant", ducklings: ["consultant"], source: "global role fallback" },
     { role: "scribe", ducklings: ["scribe"], source: "global role fallback" },
   ],
 };
@@ -72,6 +73,7 @@ async function renderRoster() {
       { id: "contestant-b", provider: "remote", model: "sonnet" },
       { id: "judge", provider: "remote", model: "sonnet" },
       { id: "triager", provider: "local", model: "qwen" },
+      { id: "consultant", provider: "remote", model: "sonnet" },
       { id: "scribe", provider: "remote", model: "gpt" },
     ])),
     globalRosterGet: vi.fn((mode: string) => Promise.resolve({ entries: global[mode] })),
@@ -109,7 +111,7 @@ describe("Roster", () => {
       pair: ["implementer", "advisor", "reviewer"],
       split: ["architect", "implementer", "reviewer"],
       tournament: ["implementer", "judge"],
-      common: ["triager", "scribe"],
+      common: ["triager", "consultant", "scribe"],
     };
     for (const [mode, roles] of Object.entries(columns)) {
       const board = screen.getByTestId(`roster-board-${mode}`);

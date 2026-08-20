@@ -39,6 +39,7 @@ const (
 	RoleTriager     Role = "triager"
 	RoleAdvisor     Role = "advisor"
 	RoleScribe      Role = "scribe"
+	RoleConsultant  Role = "consultant"
 	RoleHuman       Role = "human"
 )
 
@@ -46,7 +47,7 @@ const (
 func ValidRoles() []Role {
 	return []Role{
 		RoleArchitect, RoleImplementer, RoleReviewer,
-		RoleJudge, RoleTriager, RoleAdvisor, RoleScribe, RoleHuman,
+		RoleJudge, RoleTriager, RoleAdvisor, RoleScribe, RoleConsultant, RoleHuman,
 	}
 }
 
@@ -143,7 +144,7 @@ type Defaults struct {
 	// ModeSeats is the canonical role-keyed global roster. Legacy ModeDucklings
 	// is read only to support migration of existing installations.
 	ModeSeats map[string]map[string][]string `toml:"mode_seats" json:"mode_seats"`
-	// RolePins are mode-independent global seats (notably triager and scribe).
+	// RolePins are mode-independent global seats (notably triager, scribe, and consultant).
 	RolePins map[string][]string `toml:"role_pins" json:"role_pins"`
 	// CandidateCriteria orders the evidence a seat's suggestions are ranked
 	// by, per role: e.g. implementer = ["coding_index", "pass_rate",

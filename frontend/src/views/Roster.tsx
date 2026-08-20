@@ -12,7 +12,7 @@ const MODES = ["common", "council", "solo", "pair", "split", "tournament"];
 // One line each, in the spec's own words (05 §4): what the mode is FOR, so a
 // person seating it knows what they are staffing.
 const MODE_BLURB: Record<string, string> = {
-  common: "shared by every mode — the triager classifies bug reports, the scribe writes release notes",
+  common: "shared by every mode — the triager classifies bug reports, the consultant advises, the scribe writes release notes",
   council: "the artifact modes — intake, spec and plan: an architect drafts, reviewers critique, no code is written",
   solo: "the yardstick — one implementer builds until the gate passes; the advisor is a rubber duck it may consult",
   pair: "driver and navigator — an implementer builds, a reviewer reads each round; the advisor steps in on distress",
@@ -28,7 +28,7 @@ const pinned = (entry: Entry) => entry.source === "project pin" || entry.source 
 const multiSlot = (mode: string, role: string): boolean =>
   (mode === "council" && role === "reviewer") || ((mode === "split" || mode === "tournament") && role === "implementer");
 const columnsFor = (mode: string): string[] | null =>
-  mode === "common" ? ["triager", "scribe"] : rolesForMode(mode);
+  mode === "common" ? ["triager", "consultant", "scribe"] : rolesForMode(mode);
 // A duckling is local when its provider answers on this machine or the LAN;
 // the provider id says nothing about that ("beelink" is local, "openrouter"
 // is not), so the endpoint decides. A provider literally named "local" counts.
@@ -182,7 +182,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     const active = chosenSeat ? (boards[chosenSeat.mode] ?? []).find((e) => e.role === chosenSeat.role) : undefined;
     const candidates = active?.candidates ?? [];
     const rank = new Map(candidates.map((c, i) => [c.id, i]));
-    const shown = chosenSeat && !["triager", "scribe"].includes(chosenSeat.role) ? filtered.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 999) - (rank.has(b.id) ? rank.get(b.id)! : 999)) : filtered;
+    const shown = chosenSeat && !["triager", "consultant", "scribe"].includes(chosenSeat.role) ? filtered.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 999) - (rank.has(b.id) ? rank.get(b.id)! : 999)) : filtered;
     return { all, shown, filtering, providers: [...new Set(all.map((s) => s.provider).filter(Boolean))] as string[], value: sort.value, format: sort.format, sortLabel: sort.label, candidates, forRole: active?.role };
   })();
   useEffect(() => {

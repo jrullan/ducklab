@@ -343,7 +343,7 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 	})
 	belt := strings.Split(chatToolbelt, ",")
 	outcome, terr := agent.RunTurn(ctx, loop, &agent.Turn{
-		Role: config.RoleArchitect, Duckling: config.DucklingID(ducklingID),
+		Role: config.RoleConsultant, Duckling: config.DucklingID(ducklingID),
 		Prompt: prompt, Toolbelt: belt, Contract: "freeform",
 		MaxTurns: 12, Persona: "consultant", Images: images,
 		Round: turnNo, Index: 0,

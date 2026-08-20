@@ -860,7 +860,7 @@ export class EngineClient {
       "GET", `/v1/defaults/roster?mode=${encodeURIComponent(mode)}`,
     ).then((r) => ({ entries: r.entries ?? [], warning: r.warning }));
   }
-  roster(projectId: string, mode = "") {
+  roster(projectId: string, mode = ""): Promise<{ entries: RosterEntry[]; warning?: string }> {
     const q = mode ? `?mode=${encodeURIComponent(mode)}` : "";
     return this.request<{ entries: RosterEntry[] | null; warning?: string }>(
       "GET",

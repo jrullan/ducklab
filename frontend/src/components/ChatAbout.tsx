@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Duckling, EngineClient } from "../api/client";
 
 /** "Chat about this": a conversation with a chosen duckling about one
@@ -13,6 +13,7 @@ export function ChatAbout({
   ducklings,
   label = "chat about this",
   placeholder,
+  preselectedDuckling = "",
 }: {
   client: EngineClient;
   projectId: string;
@@ -24,15 +25,22 @@ export function ChatAbout({
   ducklings: readonly Duckling[];
   label?: string;
   placeholder?: string;
+  /** The resolved Common consultant, when the roster pins one. */
+  preselectedDuckling?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [duckling, setDuckling] = useState("");
+  const [duckling, setDuckling] = useState(preselectedDuckling);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<{ name: string; data: string }[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  // The roster arrives after the rail. Fill an untouched picker when it does,
+  // but never replace a person's free choice.
+  useEffect(() => {
+    if (preselectedDuckling) setDuckling((current) => current || preselectedDuckling);
+  }, [preselectedDuckling]);
   const selectedDuckling = ducklings.find((d) => d.id === duckling);
   const canSee = !!selectedDuckling?.caps?.vision;
   const readImages = (files: FileList | null) => {

@@ -120,10 +120,11 @@ describe("the guide rail", () => {
     const pinnedRoster = vi.spyOn(pinned, "RosterGet").mockResolvedValue({
       entries: [{ role: "consultant", duckling: "sage", source: "project pin" }],
     });
-    render(<GuideRail client={pinned} projectId="p" />);
+    const pinnedRail = render(<GuideRail client={pinned} projectId="p" />);
     await waitFor(() => expect(pinnedRoster).toHaveBeenCalledWith("p", "common"));
     fireEvent.click(screen.getByTestId("chat-about"));
     expect((screen.getByTestId("chat-duckling") as HTMLSelectElement).value).toBe("sage");
+    pinnedRail.unmount();
 
     // No Common consultant pin preserves the deliberate free choice.
     const unpinned = clientWith(STEPS);
@@ -131,8 +132,8 @@ describe("the guide rail", () => {
     vi.spyOn(unpinned, "RosterGet").mockResolvedValue({ entries: [] });
     render(<GuideRail client={unpinned} projectId="p-unpinned" />);
     await waitFor(() => expect(unpinned.RosterGet).toHaveBeenCalledWith("p-unpinned", "common"));
-    fireEvent.click(screen.getAllByTestId("chat-about")[1]!);
-    expect((screen.getAllByTestId("chat-duckling")[1] as HTMLSelectElement).value).toBe("");
+    fireEvent.click(screen.getByTestId("chat-about"));
+    expect((screen.getByTestId("chat-duckling") as HTMLSelectElement).value).toBe("");
   });
 
   it("renders nothing at all when the engine has no step to offer", async () => {
