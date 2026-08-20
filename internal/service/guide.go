@@ -214,33 +214,6 @@ func nextSteps(st projectSnapshot) []NextStep {
 		}
 		out = append(out, step)
 	}
-	// Accepted work can be deliberately reopened, but only with explicit redo
-	// consent so a new run cannot silently repeat finished work.
-	hasFixedBug := countBugs(st.Bugs, bug.Fixed) > 0
-	var reopenable []string
-	for _, t := range st.Tasks {
-		// Legacy accepted tasks without provenance are already treated as
-		// shipped-compatible. A redo door is meaningful for work still tied to
-		// an active fix/release context (or explicitly retained on a branch).
-		if t.Status == "accepted" && (hasFixedBug || t.Branch != "") {
-			reopenable = append(reopenable, t.ID)
-		}
-	}
-	if len(reopenable) == 1 {
-		out = append(out, NextStep{
-			ID:     "reopen-task",
-			Action: fmt.Sprintf("Reopen %s — redo the task with explicit consent", reopenable[0]),
-			Reason: "the task is accepted; starting it again would redo finished work, so pass redo and say why",
-			Kind:   "task", Ref: reopenable[0], Refs: reopenable,
-		})
-	} else if len(reopenable) > 1 {
-		out = append(out, NextStep{
-			ID:     "reopen-task",
-			Action: fmt.Sprintf("Reopen an accepted task — %d can be redone with explicit consent", len(reopenable)),
-			Reason: "starting an accepted task again would redo finished work, so pass redo and say why",
-			Kind:   "task", Ref: reopenable[0], Refs: reopenable,
-		})
-	}
 
 	// 4. The next buildable task — ONE, not the backlog: a guide that lists
 	// everything startable is a board, and the board already exists.
@@ -303,13 +276,15 @@ func nextSteps(st projectSnapshot) []NextStep {
 				Reason: "one to three tasks, no redesign; uncovered work wears spec-debt",
 				Kind:   "stage", Ref: "plan",
 			},
-			NextStep{
+		)
+		if st.AcceptedUnreleased > 0 || !st.UnreleasedCounted {
+			out = append(out, NextStep{
 				ID:     "release",
 				Action: fmt.Sprintf("Cut a release — %d accepted task(s) await shipping", st.AcceptedUnreleased),
 				Reason: "everything accepted since the last one ships",
 				Kind:   "release",
-			},
-		)
+			})
+		}
 	}
 	return out
 }
