@@ -142,7 +142,7 @@ func TestFSPatchRefusalsEndTheTurnOnTheFifthRefusalPerFile(t *testing.T) {
 	patch := func(path, search string) *Result {
 		t.Helper()
 		args, err := json.Marshal(map[string]interface{}{
-			"path": path,
+			"path":  path,
 			"edits": []map[string]string{{"search": search, "replace": "replacement"}},
 		})
 		if err != nil {
@@ -281,7 +281,7 @@ func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 	registry := NewRegistry()
 	failingPatch := func(search string) *Result {
 		args, err := json.Marshal(map[string]interface{}{
-			"path": "target.go",
+			"path":  "target.go",
 			"edits": []map[string]string{{"search": search, "replace": "replacement"}},
 		})
 		if err != nil {
@@ -333,7 +333,7 @@ func TestFSPatchFailureStreakBrakesByFileAndReportsHealth(t *testing.T) {
 
 	// A streak belongs to one file, not to the whole fs_patch tool.
 	otherArgs, err := json.Marshal(map[string]interface{}{
-		"path": "other.go",
+		"path":  "other.go",
 		"edits": []map[string]string{{"search": "also-missing", "replace": "replacement"}},
 	})
 	if err != nil {

@@ -12,6 +12,8 @@ approved_by: human
 
 ### T-001 — Expose budget lifting through MCP and identify the invalid kind field in lift errors
 
+**Implements:** SPEC-021
+
 Fixes B-004.
 
 ## Reported
@@ -34,6 +36,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-002 — Detect token repetition loops and apply contract-aware generation caps
 
+**Implements:** SPEC-042
+
 Fixes B-007.
 
 ## Reported
@@ -53,6 +57,8 @@ A token-level loop consumes substantial GPU time while bypassing existing brakes
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-003 — Always include next_steps in MCP status response, even when empty
+
+**Implements:** SPEC-021
 
 Fixes B-002.
 
@@ -75,6 +81,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-004 — Add per-project document lifecycle state to MCP status response
 
+**Implements:** SPEC-021
+
 Fixes B-003.
 
 ## Reported
@@ -95,6 +103,8 @@ MCP status lacks document lifecycle state, forcing agents to pay for full docume
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-005 — Expose reviewer findings and filing action through MCP run tools
+
+**Implements:** SPEC-021
 
 Fixes B-010.
 
@@ -117,6 +127,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-006 — Surface accepted-unreleased work and stamp installed binaries with branch and commit provenance
 
+**Implements:** SPEC-061
+
 Fixes B-018.
 
 ## Reported
@@ -138,6 +150,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-007 — Align MCP status unreleased branch fields with the OpenAPI contract
 
+**Implements:** SPEC-021
+
 Fixes B-021.
 
 ## Reported
@@ -156,6 +170,8 @@ The MCP adapter returns []string under a field documented and served by HTTP as 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-008 — Apply project budget max_tokens and other named caps to runs
+
+**Implements:** SPEC-031
 
 Fixes B-019.
 
@@ -177,6 +193,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-009 — Only mark bugs fixed after an accepted BUILD run
 
+**Implements:** SPEC-067
+
 Fixes B-009.
 
 ## Reported
@@ -196,6 +214,8 @@ The task-accepted hook falsely marks a bug fixed when only its red test has been
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-010 — Preserve an uncapped wallclock budget for chat after merging project settings
+
+**Implements:** SPEC-031
 
 Fixes B-022.
 
@@ -222,6 +242,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-011 — Govern advisor replies through contract validation and record advice failures or timeouts
 
+**Implements:** SPEC-053
+
 Fixes B-016.
 
 ## Reported
@@ -242,6 +264,8 @@ The one-shot advisor path stores raw model output and silently drops failed or t
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-012 — Add a configurable advisor seat and pass relevant project documents to advisor prompts
+
+**Implements:** SPEC-053
 
 Fixes B-017.
 
@@ -264,6 +288,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-013 — Emit webhook notifications for operator-relevant run transitions
 
+**Implements:** SPEC-055
+
 Fixes B-020.
 
 ## Reported
@@ -283,6 +309,8 @@ The MCP surface is poll-only, so operators receive no outbound signal when runs 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-014 — Add ducklings, mode, and agent_turns overrides to stage_start and bug_triage
+
+**Implements:** SPEC-021
 
 Fixes B-005.
 
@@ -329,6 +357,8 @@ Fourth tranche of B-006 (cleanup and limits), kept separate per the change. Two 
 
 ### T-019 — Restore the working tree when aborting a paused or failed build
 
+**Implements:** SPEC-064
+
 Fixes B-023.
 
 ## Reported
@@ -348,6 +378,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-020 — Add actionable Clean or Commit recovery controls to the retire-test error state
 
+**Implements:** SPEC-062
+
 Fixes B-024.
 
 ## Reported
@@ -365,6 +397,8 @@ The reported recovery error is reproducible and leaves operators without an in-p
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-021 — Expose every legal abort and reject action on paused run cards
+
+**Implements:** SPEC-062
 
 Fixes B-025.
 
@@ -385,6 +419,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-022 — Include blocked reasons in MCP task_list rows
 
+**Implements:** SPEC-021
+
 Fixes B-026.
 
 ## Reported
@@ -404,6 +440,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-023 — Prevent historical runs from affecting recycled task IDs after body revisions
 
+**Implements:** SPEC-063
+
 Fixes B-027.
 
 ## Reported
@@ -422,6 +460,8 @@ Reusing a task ID causes stale failed-run state to misclassify a semantically ne
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-024 — Reject compile-red test specifications unless the package builds and the new test fails by assertion
+
+**Implements:** SPEC-066
 
 Fixes B-028.
 
@@ -444,6 +484,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-025 — Add a per-file consecutive fs_patch failure brake with health reporting and fs_write guidance
 
+**Implements:** SPEC-042
+
 Fixes B-029.
 
 ## Reported
@@ -464,6 +506,8 @@ Repeated fs_patch failures can exhaust a run's budget without intervention, and 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-026 — Use git-derived build version and provenance across CLI, engine, and MCP
+
+**Implements:** SPEC-061
 
 Fixes B-033.
 
@@ -486,6 +530,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-027 — Map human answer events to running status and clear pending state
 
+**Implements:** SPEC-062
+
 Fixes B-030.
 
 ## Reported
@@ -506,6 +552,8 @@ The frontend receives the human answer event but does not update the paused run,
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-028 — Cover frontend tests in the gate and diagnose uncovered test-first paths
+
+**Implements:** SPEC-066
 
 Fixes B-032.
 
@@ -528,6 +576,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-029 — Resolve sibling paused triage runs when accepting a newer triage
 
+**Implements:** SPEC-067
+
 Fixes B-008.
 
 ## Reported
@@ -547,6 +597,8 @@ A paused sibling can reapply classifications already accepted by a newer triage,
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-030 — Mark all accepted unimplemented tasks as spec debt and wire spec_settle to document them
+
+**Implements:** SPEC-038
 
 Fixes B-036.
 
@@ -569,6 +621,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-031 — Draft and expose an advisor-attributed redo note on failed-run decision cards
 
+**Implements:** SPEC-053
+
 Fixes B-031.
 
 ## Reported
@@ -589,6 +643,8 @@ Failed runs currently expose the failure but do not carry the bounded, editable 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-032 — Raise or remove the 2048-token cap for json:decomposition contracts
+
+**Implements:** SPEC-042
 
 Fixes B-012.
 
@@ -615,6 +671,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-033 — Thread the contract through applySampling and enforce its output cap
 
+**Implements:** SPEC-042
+
 Fixes B-011.
 
 ## Reported
@@ -639,6 +697,8 @@ Contract repair requests ignore the turn contract when setting MaxTokens, allowi
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-034 — Run repetition detection in the unsupported-streaming fallback
+
+**Implements:** SPEC-042
 
 Fixes B-013.
 
@@ -665,6 +725,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-035 — Remove unused accumulated response storage from the repetition detector
 
+**Implements:** SPEC-042
+
 Fixes B-014.
 
 ## Reported
@@ -689,6 +751,8 @@ The detector retains the entire streamed response unnecessarily, causing avoidab
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-036 — Align the ProjectNext if statement with the preceding assignment
+
+**Implements:** SPEC-051
 
 Fixes B-015.
 
@@ -715,6 +779,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-037 — Make release guidance count only accepted work included in the latest release
 
+**Implements:** SPEC-061
+
 Fixes B-034.
 
 ## Reported
@@ -735,6 +801,8 @@ The guide and MCP status derive unreleased work from persistent branch names ins
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-038 — Skip human-only guide steps and start the first lawful mechanical task
+
+**Implements:** SPEC-049
 
 Fixes B-037.
 
@@ -757,6 +825,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-039 — Resolve launcher seats from the roster and display seat provenance
 
+**Implements:** SPEC-026
+
 Fixes B-035.
 
 ## Reported
@@ -777,6 +847,8 @@ Untouched launcher chips silently turn stale Settings defaults into explicit ove
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-040 — Prioritize Verify guidance over Reopen for fixed bugs awaiting verification
+
+**Implements:** SPEC-051
 
 Fixes B-038.
 
@@ -799,6 +871,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-041 — Unify task status derivation and scope recycled-ID history to per-task body changes
 
+**Implements:** SPEC-063
+
 Fixes B-039.
 
 ## Reported
@@ -816,6 +890,8 @@ A plan regeneration falsely reverts accepted work and causes the board, launch g
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-042 — Reject acceptance when the committed checkout omits required ignored files
+
+**Implements:** SPEC-060
 
 Fixes B-040.
 
@@ -838,6 +914,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-043 — Add a safe engine version command and prevent live engine identity overwrite
 
+**Implements:** SPEC-061
+
 Fixes B-041.
 
 ## Reported
@@ -856,6 +934,8 @@ The unrecognized version command starts a second engine and unconditionally repl
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-044 — Count accepted no_changes builds as settled and block their automatic relaunch
+
+**Implements:** SPEC-063
 
 Fixes B-042.
 
@@ -878,6 +958,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-045 — Isolate state environment variables for every verify_run process tree
 
+**Implements:** SPEC-065
+
 Fixes B-047.
 
 ## Reported
@@ -895,6 +977,8 @@ A gate child can recover and mutate the live engine registry, causing self-termi
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-046 — Bound streamed run state and debounce summary-only board refreshes
+
+**Implements:** SPEC-062
 
 Fixes B-044.
 
@@ -917,6 +1001,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-047 — Attribute yolo auto-accept decisions to the autopilot instead of human
 
+**Implements:** SPEC-049
+
 Fixes B-043.
 
 ## Reported
@@ -938,6 +1024,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-048 — Unify omitted-mode resolution across desktop, autopilot, and MCP launches
 
+**Implements:** SPEC-044
+
 Fixes B-045.
 
 ## Reported
@@ -958,6 +1046,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-049 — Recover orphaned restart checkpoints after a deadline and expose operator resume
 
+**Implements:** SPEC-012
+
 Fixes B-046.
 
 ## Reported
@@ -976,6 +1066,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-050 — Preserve shared Go caches while isolating gate state and ignore download chatter in compile-red detection
 
+**Implements:** SPEC-065
+
 Fixes B-048.
 
 ## Reported
@@ -993,6 +1085,8 @@ The gate's state-isolation change makes every verification slow, network-depende
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-051 — Prevent reject cleanup from restoring paths over commits landed after the run snapshot
+
+**Implements:** SPEC-064
 
 Fixes B-050.
 
@@ -1013,6 +1107,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-052 — Expose every project roster pin in Settings and label overridden defaults
 
+**Implements:** SPEC-026
+
 Fixes B-052.
 
 ## Reported
@@ -1031,6 +1127,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-053 — Record and expose provenance for each seated role
 
+**Implements:** SPEC-026
+
 Fixes B-051.
 
 ## Reported
@@ -1048,6 +1146,8 @@ This is a distinct observability gap: resolved roster seats lack the source meta
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-054 — Record and expose clean-checkout acceptance gate results on accepted runs
+
+**Implements:** SPEC-060
 
 Fixes B-049.
 
@@ -1070,6 +1170,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-055 — Make clean-checkout acceptance verification enforce stage-appropriate red or green results
 
+**Implements:** SPEC-060
+
 Fixes B-056.
 
 ## Reported
@@ -1087,6 +1189,8 @@ The clean-checkout gate currently makes every valid test-first acceptance imposs
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-056 — Reconnect stale desktop event streams and expose stream health
+
+**Implements:** SPEC-062
 
 Fixes B-053.
 
@@ -1106,6 +1210,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-057 — Recover stale desktop engine bindings and surface failed actions
 
+**Implements:** SPEC-062
+
 Fixes B-054.
 
 ## Reported
@@ -1124,6 +1230,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-058 — Add per-run seating and turn overrides to MCP task launchers
 
+**Implements:** SPEC-021
+
 Fixes B-055.
 
 ## Reported
@@ -1141,6 +1249,8 @@ The MCP task launchers lack the per-run override contract already available on s
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-059 — Route implementer distress to the advisor and expose reviewer-safe operational summaries
+
+**Implements:** SPEC-057
 
 Fixes B-058.
 
@@ -1327,6 +1437,8 @@ When an operator selects or focuses a seat, prioritize the most relevant evidenc
 
 ### T-069 — End the turn after repeated fs_patch-brake refusals on one file
 
+**Implements:** SPEC-042
+
 Fixes B-057.
 
 ## Reported
@@ -1346,6 +1458,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-070 — Reset the fs_patch per-file brake when the model fs_reads the braked file, restoring a one-probe window
 
+**Implements:** SPEC-042
+
 Fixes B-060.
 
 ## Reported
@@ -1364,6 +1478,8 @@ The brake check at Execute never clears fsPatchFailStreak except via a successfu
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-071 — Add [verify] link_deps and setup keys to project.toml so checkout preparation is declared, and make gate failures name the missing path
+
+**Implements:** SPEC-060
 
 Fixes B-061.
 
@@ -1387,6 +1503,8 @@ linkInstalledDeps (service.go:2086) is a hard-coded two-ecosystem table with no 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-072 — Route request_changes on a plan_extend proposal back into the amendment with its own fragment, note, and solo mode
+
+**Implements:** SPEC-038
 
 Fixes B-062.
 
@@ -1414,6 +1532,8 @@ request_changes on an amendment discards the original Extend request and relaunc
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-073 — Expose TaskRemove as MCP task_remove and CLI `ducklab task remove`, and teach plan_extend the retire path
+
+**Implements:** SPEC-021
 
 Fixes B-064.
 
@@ -1443,6 +1563,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-074 — Serialize git worktree add/remove per repository so concurrent contestant workspaces cannot race .git/worktrees
 
+**Implements:** SPEC-033
+
 Fixes B-066.
 
 ## Reported
@@ -1471,6 +1593,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-075 — Differentiate human turns in chat transcription
 
+**Implements:** SPEC-062
+
 Render human-authored chat transcript turns with a human representation rather than the duckling duck graphic, while retaining the existing duck representation for duckling turns.
 
 **Deliverables:**
@@ -1485,6 +1609,8 @@ Render human-authored chat transcript turns with a human representation rather t
 **Assumption:** The current transcript renderer already distinguishes human and duckling authors in its turn data.
 
 ### T-076 — Show the human avatar on human turns of reopened chat transcripts
+
+**Implements:** SPEC-062
 
 Fixes B-081.
 
@@ -1525,6 +1651,8 @@ Render 🧑 instead of 👤 for turns authored by the current human in chat tran
 
 ### T-078 — Add a request-changes (revise) affordance for a drafted release in the Release view
 
+**Implements:** SPEC-062
+
 Fixes B-083.
 
 ## Reported
@@ -1548,5 +1676,4 @@ The backend and API client already support release revision, but Release.tsx exp
 **Verification (triage recommends):** test-first — Render Release with a drafted release, submit revision text, assert client.releasePlan called with (projectId, bump, revise text) — mirroring existing releasePlan/cut tests in reviewrelease.test.tsx
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
-
 

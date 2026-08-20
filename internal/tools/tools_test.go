@@ -552,10 +552,10 @@ func TestToolResultsScaleToTheSeat(t *testing.T) {
 		context int
 		want    int
 	}{
-		{0, MaxToolResultBytes},       // unknown window: the flat cap
+		{0, MaxToolResultBytes},         // unknown window: the flat cap
 		{1_000_000, MaxToolResultBytes}, // huge window: ceilinged, unchanged
-		{32_768, 16_384},              // 32k seat: an eighth of its context
-		{4_096, 4_096},                // tiny seat: floored to stay usable
+		{32_768, 16_384},                // 32k seat: an eighth of its context
+		{4_096, 4_096},                  // tiny seat: floored to stay usable
 	}
 	for _, c := range cases {
 		if got := resultCapFor(c.context); got != c.want {

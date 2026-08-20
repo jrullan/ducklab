@@ -1,10 +1,10 @@
 ---
 kind: spec
-version: 2
-updated_at: 2026-08-15T00:35:37Z
-run_id: r-20260814-235312-32gx
-ducklings: [k3, atom-local, glm52, beelink-local]
-based_on: 20625e22f741bc19
+version: 3
+updated_at: 2026-08-20T00:57:29Z
+run_id: r-20260820-002540-k6e2
+ducklings: [k3, glm52, qwen38-max, atom-local]
+based_on: 99125e4699f6b5ea
 origin: adopted
 approved_by: human
 ---
@@ -182,6 +182,7 @@ Scripts specify role per turn. `ResolveToolbelt` narrows from ceiling, never wid
 
 **Implements:** REQ-012
 **As-built:** yes
+**Covers:** T-049
 
 Every run creates `.ducklab/runs/<id>/`:
 
@@ -192,7 +193,9 @@ Every run creates `.ducklab/runs/<id>/`:
 - `diff.txt`: git diff after run
 - `tests.txt`: gate output
 
-Engine rehydrates runs from disk on startup (`internal/runlog/` and `internal/service/service.go` initialization). Runs survive restarts.
+Engine rehydrates runs from disk on startup (`RecoverRuns` in `internal/service/lifecycle.go`, over `internal/runlog/`). Runs survive restarts: a run found still marked `running` or `queued` on startup is moved to `paused` with `pending_kind: engine_restart` (`markEngineRestart`), the state `RunResume` accepts, and its `next` offers `resume` and `abort`.
+
+A *requested* restart (`RequestRestart`, reached via `POST /v1/restart` or `ducklab engine restart`) checkpoints every active run the same way but with attribution: a `restart_request` event names the requester, the checkpoint's pending data carries `requester` and a `deadline` (the service's restart-recovery deadline), the worker is cancelled, and a queued run is withdrawn from the queue so resume is its only path back. The requesting engine arms a one-shot timer at the moment the checkpoints land: if the restart never completes and that engine is still alive past the deadline, `RecoverAbandonedRestarts` records `restart_abandoned {requester}` and resumes each expired checkpoint itself — a stalled restart un-parks its runs instead of stranding them mid-gate. A checkpoint whose worker is still unwinding defers to a rescheduled pass rather than resuming alongside its still-live self.
 
 ## SPEC-013 — Four autonomy levels
 
@@ -335,6 +338,7 @@ Subsequent implementation run is separate, different duckling. Script: `TestFirs
 
 **Implements:** REQ-021
 **As-built:** yes
+**Covers:** T-001, T-003, T-004, T-005, T-007, T-014, T-022, T-058, T-073
 
 `ducklab mcp serve` exposes engine over stdio as MCP server:
 
@@ -351,6 +355,16 @@ Roster `get` responses include each seat's non-binding `candidates` (up to three
 The engine also exposes `GET /v1/ducklings/scorecards`, returning one configured duckling per row with declared provider/model/cost/capabilities/roles/notes and explicitly sourced measured, latest-per-suite bench, and external-index evidence. An external index is either declared in config or, for ducklings on the OpenRouter provider with no declaration, fetched from OpenRouter's `GET /benchmarks?source=artificial-analysis` (coding, intelligence and agentic indices) under the provider's own key; the fetch is cached on disk for a day and refreshed in the background, matched to the model by permaslug (newest dated release wins), and carries `source` ("artificial-analysis via openrouter (<permaslug>)") and `as_of`. A declared index is never overwritten by a fetch; a local duckling never borrows one. Missing evidence is null/absent.
 
 The `roster` MCP tool accepts `action` (`get | set | unpin`), `scope` (`global | project`), `project_id`, `mode`, `role`, and ordered `ducklings`. `get` returns every board-addressable seat with `role`, ordered `ducklings`, effective `duckling`, and `source` provenance (`global mode seat`, `project pin`, or `global role fallback`); project pins also return the overridden global `default`. Project `set` replaces the complete ordered pin and `unpin` removes it to restore Global inheritance. Global `set` writes mode seats (or mode-independent triager/scribe role pins) and never changes project files. Invalid action/scope, role, duckling, and mode cardinality return field-named actionable errors with `next` guidance. MCP dispatch delegates to the canonical service roster resolver and records operator actions as `mcp:<client-name>`.
+
+The wider operator surface (`internal/mcp/tools.go`):
+
+- `status` answers per project: waiting and active runs, `next_steps` (the guide's own steps, present on every project even when empty), a `documents` map with each lifecycle document's state (`none | draft | proposed | approved` — never a body), task and open-bug counts, `accepted_unreleased`, `unreleased_branches` (the integer count from the service status, matching the OpenAPI contract) and `unreleased_branch_names` (the additive list of branch identities).
+- `budget_lift {run_id, kind}` removes one cap (`tokens | usd | turns | wallclock | calls`) from a live or paused run, one-way and attributed to the operator; an unknown kind fails naming the `kind` field and its legal values.
+- `run_get` carries the run's `findings` (the reviewer's structured findings) and `redo_note` beside verdict, budget, diff and `next`; `file_findings {run_id}` files a finished run's reviewer findings as attributed bugs, the desktop button's exact equivalent.
+- `task_list` rows are compact (id, status, title, `blocked_reason` when blocked, `next`) behind a status summary; bodies are omitted.
+- `task_remove {project_id, task_id}` retires an unstarted superseded task; the engine refuses tasks with accepted or open runs. The CLI mirrors it as `ducklab task remove <id>` over the same DELETE route, printing the engine's refusal verbatim, and the plan_extend prompt names the retire path itself: "this amendment cannot remove tasks. Retire superseded tasks separately with task_remove."
+- Launchers take per-run overrides: `stage_start`, `bug_triage`, `test_build`, `test_only` and `run_start` accept `ducklings`, `mode` and `agent_turns` (`run_start` also `note`, `verify`, `redo`); `test_build`/`test_only` thread the same overrides into the chained build request.
+- `decide` replays an amendment's own persisted request on `request_changes` (see SPEC-038).
 
 ## SPEC-022 — Six contract formats
 
@@ -422,19 +436,34 @@ Implementation: `internal/service/queue.go` with semaphore. Status exposed via `
 
 The desktop provides a read-only Roster view beside Settings. It lists the complete Flock and known local/remote provider and per-run cost information, then renders effective Global or Project assignments for Council, Solo, Pair, Split, Tournament, and Common. Project inherited seats are muted dashed ghosts labelled `global`; project pins are solid, labelled `pinned`, and expose the overridden global assignment on hover. The view has no assignment controls.
 
-## SPEC-026 — Desktop asset bundling
+## SPEC-026 — Editable roster board
 
-**Implements:** REQ-026
+Desktop Settings links to the Roster board instead of editing positional mode seats. Task, TDD, and stage launchers prefill seat chips from the canonical resolver — never from a saved settings line-up, so a launch without a touch sends no phantom per-run override — and show `project` or `global` provenance; changing a chip shows `picked now`, is sent only with that run request, and never writes Global or Project roster settings. Settings exposes every roster pin the engine honors, labelling the overridden global default, so a hand-edited `project.toml` pin cannot silently outrank what the page shows.
+
+**Implements:** REQ-024
 **As-built:** yes
+**Covers:** T-039, T-052, T-053
 
-Desktop binary embeds React frontend:
+The desktop Roster board displays the effective Global or Project roster and
+supports equivalent HTML5 drag/drop and keyboard flows. Flock cards carry their
+IDs in `dataTransfer`; selecting a seat with Enter or Space exposes accessible
+`assign <duckling> to <role>` buttons. Seat cards can be removed, ordered
+multi-slot seats append assignments in display order, and project pins can be
+un pinned to restore the inherited ghost presentation.
 
-- Build: Vite in `frontend/`, output embedded in Go binary
-- Communication: Wails v3 injects `window.ducklab` with engine address/token
-- No backend logic in desktop binary
-- All capability in engine, desktop is thin display layer
+Global edits use only the canonical global mode-seat/role-pin mutation. Project
+edits use only the project ordered-list mutation and never alter Global. Every
+successful mutation re-reads the roster so displayed provenance remains engine
+truth. Engine validation errors and warnings are rendered beside the boards;
+the pair board also reports implementer/reviewer overlap from effective seats.
 
-Structure: `cmd/ducklab-desktop/main.go` with Wails initialization.
+Pinned by `roster_assign.test.tsx` and `roster.test.tsx`.
+
+When a seat is selected, the board reorders eligible Flock cards and labels up to three informational candidates with their evidence reason. Selection never writes an assignment; local roles retain the operator's ordering. The board consumes the same `candidates` ids and `why` text exposed by the MCP roster view.
+
+Seat provenance survives onto the run record: every run persists `roster_sources` — per seated role, `roster` (the configured resolution, project pin outranking global) or `request` (a per-run pick) — beside the roster itself, so the record proves not just WHO sat each seat but WHY, and no assistant is needed to learn it.
+
+**Assumption:** the Settings page's coverage of EVERY engine-honored pin (T-052) is pinned by the accepted fix; the frontend breadth was not re-read line-by-line.
 
 ## SPEC-027 — CLI and engine cross-platform compile check
 
@@ -494,19 +523,21 @@ key_env = "OPENAI_API_KEY"
 
 Implementation: `internal/provider/openaicompat.go` with streaming and non-streaming support.
 
-## SPEC-031 — Dual budget enforcement
+## SPEC-031 — Budget caps, pause, and per-cap lift
 
 **Implements:** REQ-031
 **As-built:** yes
+**Covers:** T-008, T-010
 
-Budget caps enforced in `internal/budget/budget.go`:
+`internal/budget/budget.go` enforces four caps — `MaxUSD`, `MaxTokens`, `MaxWallclockS`, `MaxTurns` — with `Exceeded()` returning the breached cap's own message; the run pauses resumable (`pending_kind: budget`) rather than dying, because resume without a lift would re-pause at once.
 
-1. **USD cost**: cumulative across run, checked after each LLM call
-2. **Turn count**: increments per model turn, checked before starting turn
+Resolution order: request limits over `[budget]` in `project.toml` over global defaults, one field at a time (`projectBudget` / `mergeBudget` in `internal/service/defaults.go`, `>0` wins) — every named cap, `max_tokens` included, reaches the run it was set for.
 
-`Exceeded()` returns true when either limit hit. Run stops immediately with `budget_exceeded` verdict.
+`RunBudgetLift` removes ONE named cap (`tokens | usd | turns | wallclock | calls`) from a live or paused run: one-way, per-cap, recorded as a `budget_lifted` event with attribution; an invalid kind names the field. The `calls` lift feeds the per-reply call cap (SPEC-042).
 
-**Assumption:** Token budget is not enforced by code—only USD and turns are checked.
+Chat is the deliberate exception: its limits are built with `MaxWallclockS = 0` and re-zeroed AFTER the project merge (`internal/service/chat.go`), because the wallclock clock measures the person's thinking time between messages, not model work — a project's `max_wallclock_s` must never cap a conversation.
+
+**Assumption:** REQ-031's wording ("USD and turns") predates the token and wallclock caps; the requirement has not caught up with the four-cap budget the code enforces.
 
 ## SPEC-032 — Bounded execution guarantees
 
@@ -527,6 +558,7 @@ Validation: `internal/strategy/strategy.go` `Script.Validate()`. Enforcement dis
 
 **Implements:** REQ-033
 **As-built:** yes
+**Covers:** T-074
 
 Tournament and split modes use `WorkspaceFactory`:
 
@@ -541,6 +573,8 @@ Workspace lifecycle:
 4. `Abort()` on failure removes worktree + cleans git state
 
 Prevents main worktree corruption. Implementation: `internal/strategy/tournament.go` and `internal/strategy/split.go` use `internal/strategy/workspace.go`.
+
+Git itself does not serialize concurrent `worktree add`/`remove`/`prune` against a repository's `.git/worktrees` metadata, so `internal/vcs` does: `worktreeLocks` holds one mutex per canonical repository path (absolute, symlink-resolved) and `WorktreeAdd`, `WorktreeAddDetached` and `WorktreeRemove` all take it. Concurrent contestant workspaces in one repository queue on the lock instead of racing the metadata.
 
 ## SPEC-034 — Loopback-only security model
 
@@ -609,8 +643,13 @@ Provider failure is weather, not a verdict.
 
 **Implements:** REQ-037
 **As-built:** yes
+**Covers:** T-030, T-072
 
-The plan stage carries a light amendment path beside full redrafts: `runExtend` in `internal/stage/extend.go` sends the architect the plan as an outline (ids and titles only) plus the spec as a wiring list, and accepts back only a fragment of one to three new task sections written under the literal id `T-900`. The engine merges by code — `mergeExtension` assigns the next free `T-###` id and places each task under the milestone its `**Milestone:**` field named (or the last one), while a bare `M-` heading in the fragment is read as a placement declaration, resolved to an existing milestone or created with a real id. Amendment turns blank out the whole-document contract on every script turn (`script.Turns[i].Contract = ""`) so the fragment contract in the prompt is the only one that speaks. An amendment whose reply parses to zero work items fails with the architect's own reason (`"the architect added no tasks: …"`); a change altering what the product IS is refused in-prompt toward a requirements brief. Tasks the architect could not wire are merged with no `Implements:`, wearing spec-debt (see SPEC-010 exemption), and the one-click `spec_settle` tool in `internal/mcp/tools.go` plus the guide step in `internal/service/guide.go` ("Teach the spec what was built") close that debt: a specification revision documents delivered tasks as built and wires their `Implements:` upward.
+The plan stage carries a light amendment path beside full redrafts: `runExtend` in `internal/stage/extend.go` sends the architect the plan as an outline (ids and titles only) plus the spec as a wiring list, and accepts back only a fragment of one to three new task sections written under the literal id `T-900`. The engine merges by code — `mergeExtension` assigns the next free `T-###` id and places each task under the milestone its `**Milestone:**` field named (or the last one), while a bare `M-` heading in the fragment is read as a placement declaration, resolved to an existing milestone or created with a real id. Amendment turns blank out the whole-document contract on every script turn (`script.Turns[i].Contract = ""`) so the fragment contract in the prompt is the only one that speaks. An amendment whose reply parses to zero work items fails with the architect's own reason (`"the architect added no tasks: …"`); a change altering what the product IS is refused in-prompt toward a requirements brief.
+
+`request_changes` on an amendment proposal does NOT relaunch the plan stage: the decide path replays the amendment's own persisted stage request — its extend ref, its change, its solo mode and one-round limit — with the operator's note as `revise`, so the architect revises the fragment it wrote, against the tasks it wrote (T-061/T-062 visible), never a fresh council against the approved store.
+
+Every accepted task no spec section covers wears spec-debt, whatever its origin: `taskSpecDebt` in `internal/service/stages.go` marks amendment-born and bug-promotion-born tasks alike (bug provenance explains why a task exists; it does not document the behavior), so a board of promoted fixes reports its debt instead of reading zero. The one-click `spec_settle` tool in `internal/mcp/tools.go` plus the guide step in `internal/service/guide.go` close that debt: the engine assembles the prompt from the debt itself, a specification revision documents delivered tasks as built, `Covers:` fields wire their `Implements:` upward, and the markers come off. Settle refuses honestly: "no task wears spec-debt" when the board is clean, "N task(s) wear spec-debt but none are built yet" when nothing is settleable.
 
 **Assumption:** REQ-037's settle half delegates the wiring to the normal fragment/spec update machinery; `spec_settle` launches that update rather than a bespoke writer.
 
@@ -639,11 +678,15 @@ Each duckling declares `Caps.ContextTokens` (config, `internal/config/config.go`
 
 **Implements:** REQ-041
 **As-built:** yes
+**Covers:** T-002, T-025, T-032, T-033, T-034, T-035, T-069, T-070
 
 Loops brake at tool level, never by asking a model:
 
 - **Consecutive-gate-fail brake** — `GateFailLimit = 10` in `internal/tools/exec.go`: a run of red `verify_run` results with no green between is refused with "a person (or the reviewer) can redirect the work", and the final three reds carry warnings. A green gate resets `ConsecGateFails` to zero; the count lives on the run's exec context (`internal/tools/tools.go`).
 - **Identical-repeat brake** — the same failing tool call tracked via `lastFailSig`/`lastFailCount` is refused the third time with orders to change something.
+- **Per-file fs_patch brake with a probe window** — `FSPatchFailLimit = 5` consecutive fs_patch failures against ONE file (`fsPatchFailStreak`, fuzzy failures counted per path, other files unaffected) refuse with "stop patching. Use fs_read to see current line numbers, then fs_write_lines to replace the exact range (or fs_write for a full rewrite)". A successful `fs_read` of the braked file deletes its streak, restoring a one-probe window; five new failures re-engage the brake. `FSPatchRefusalLimit = 5` further refusals on the same braked file appends "end your reply so the next turn can use the rewrite remedy" — **Assumption:** the turn end is instructed by the refusal, not hard-enforced by the loop.
+- **Repetition detector** — `internal/agent/repetition.go` watches the token stream for an n-gram (3–12 words) repeated three consecutive times and fails the turn with a `repetitionError` naming the repeated text; it also runs over the assembled response in the non-streaming `ErrUnsupported` fallback, so a loop is caught on providers that cannot stream. The detector keeps only recent words and a partial-word tail, never an accumulated copy of the reply, so long replies do not grow its memory. A caught loop lands as a `repetition_loop` record, bridged to a `distress` transition (SPEC-055) — token flow is not health, and the stall watchdog stays silent exactly when this brake speaks.
+- **Contract-aware output caps** — `outputCapForContract` caps `json:triage` at 2048 tokens (or the duckling's lower declared cap) and leaves `json:decomposition` at the declared cap or `DefaultMaxOutputTokens = 8192`; `applySampling` threads the turn's contract, so contract-repair calls are capped by the same rule as the turn they repair.
 - **Per-reply call cap with live lift** — the agent loop (`internal/agent/agent.go`) counts calls per reply against the run's cap: `OnCapNear` announces the last allowed call in advance, and `CapLift` is consulted before every call, so a cap lifted mid-flight takes effect without a restart. Lifting past the cap resolves to `uncappedTurns` (`internal/service/modes.go:231`), the stand-in for "no cap" on the per-reply call loop.
 
 **Assumption:** the "recorded on the run / survive resume" half of REQ-041's lift is provided by `internal/service/modes.go` `capLift`/`onCapNear` wiring and the run's turn-cap resolution (`roleTurnCapsFor`); the lift choice is reflected back into the persisted stage request and re-applied on resume.
@@ -659,12 +702,14 @@ Every duckling may declare `fallback` in config (`internal/config/config.go`), c
 
 **Implements:** REQ-044
 **As-built:** yes
+**Covers:** T-048
 
 Any run launch may carry overrides of the configured defaults, recorded on the run and surviving resume:
 
 - **Seat picks** — the run's own duckling line-up overrides the roster for every role; it is persisted on the run record so a resume re-enters with the seats the person chose.
 - **Agent turn cap** — `capOverride` in `internal/service/modes.go` resolves one `AgentTurns` value applied to every role for that run (`roleTurnCapsFor` and `internal/service/defaults.go`); negative lifts the cap entirely without touching fleet tuning.
 - **Screenshots** — `Images` data URLs ride the run request (`internal/service/stages.go`) and are attached to the architect's (or triager's) own turn; a screenshot aimed at a seat whose declared `vision` cap is false is dropped with a warning event instead of silently vanishing.
+- **Mode** — an omitted mode resolves through ONE canonical path (settings phase defaults, then project, then fallback) shared by the desktop launcher, the autopilot and the MCP launchers; the resolution is recorded on the run as `mode_source` (`settings | project | fallback`; an explicit mode records `request`), so the record says not just which mode ran but who chose it.
 
 ## SPEC-045 — Triage-recommended verification strategy
 
@@ -698,8 +743,11 @@ Every bug status transition is signed and appended to `.ducklab/bugs/audit.jsonl
 
 **Implements:** REQ-049
 **As-built:** yes
+**Covers:** T-038, T-047
 
-An optional per-project autopilot drives the project guide (`internal/service/autopilot.go`): each time a run settles it asks `ProjectNext` and acts only when the first step is mechanical — test-first or build — launched through the same service methods and queue as the buttons, stamped `origin: "autopilot"` on every run it starts. Every other step is a human gate where the autopilot idles. Stop rails are fixed: a per-activation cap on runs started (default 10, `autopilot_max_tasks`), two consecutive failures switch it off with a recorded reason (default `autopilot_max_fails` = 2), a retry carries the previous failure in hand rather than blind-relaunching, and it never lifts a money cap nor crosses UNVERIFIED. State is in-memory: an engine restart lands the autopilot off, deliberately.
+An optional per-project autopilot drives the project guide (`internal/service/autopilot.go`): each time a run settles it asks `ProjectNext` and walks the list to the FIRST mechanical step — test-first, build, or triage — launched through the same service methods and queue as the buttons, stamped `origin: "autopilot"` on every run it starts. A human-only step ahead of mechanical work does not head-of-line block it: the gate stays visible as the loop's note ("needs you: …") while the startable task below it launches. Every project with nothing mechanical left is a human gate where the autopilot idles. Stop rails are fixed: a per-activation cap on runs started (default 10, `autopilot_max_tasks`), two consecutive failures switch it off with a recorded reason (default `autopilot_max_fails` = 2), a retry carries the previous failure in hand rather than blind-relaunching, and it never lifts a money cap nor crosses UNVERIFIED. A task whose latest accepted run made no changes is not relaunched automatically — `autopilotNoChangesNeedsHumanNote` parks it until a person adds a note, because a no-changes run is the tree answering the task's question. State is in-memory: an engine restart lands the autopilot off, deliberately.
+
+**Assumption:** decisions the autopilot takes under yolo are attributed to the autopilot on the record rather than `human` — asserted by the accepted fix for B-043 and the audit design (SPEC-048), but the accept-attribution call site was not re-read for this settlement.
 
 ## SPEC-050 — Managed application process
 
@@ -712,8 +760,11 @@ The engine runs the project's own app as a first-class managed process (`interna
 
 **Implements:** REQ-051
 **As-built:** yes
+**Covers:** T-036, T-040
 
 The engine answers "what do I do now?" per project with a computed, ordered list: `ProjectNext` in `internal/service/guide.go` gathers live state (a `projectSnapshot` of documents, tasks, bugs, paused runs) and `nextSteps` produces steps in the loop's own order — work already paid for waiting on one click, then intake → spec → plan, then the bug inbox (triage / promote), then the ONE next buildable task (test-ready, build-only, or test-first), then spec-debt to settle, and in a quiet project the brief / amend / release doors. Each step carries a stable id, the action in outcome language, the reason computed from the state that made it so, and the object (kind + ref) a client links to its own button. The guide is the single brain behind the desktop guide rail, the autopilot, and the MCP operator tools (`internal/mcp/tools.go`); clients render it, none re-derive it. An unparseable `project.toml` outranks every other suggestion, alone.
+
+A fixed bug produces ONE `verify-bug` step — "Verify B-004 — confirm the fix answers the report; reopen it if the problem remains" — with Reopen named inside it as the exception path, never as the day's plan. A `reopen-task` step appears only for accepted work still tied to an active fix context (a bug awaiting verification or a retained branch), with explicit redo consent as the reason.
 
 ## SPEC-052 — Spend reports per mode and per duckling
 
@@ -726,8 +777,13 @@ The engine answers "what do I do now?" per project with a computed, ordered list
 
 **Implements:** REQ-053
 **As-built:** yes
+**Covers:** T-011, T-012, T-031
 
-When a run pauses on a question, a second model drafts the answer the human should give: `adviseQuestion` in `internal/service/advisor.go` runs asynchronously from a goroutine so the pause never waits, timed out at three minutes, preferring the run's recorded architect as the advisor (decorrelated from the implementer that asked). The advisor's prompt is assembled inline in `advise`: the task's spec text (`buildTaskPrompt`, clipped at 12 000 chars) under a "work the asking model was doing" heading, then the question verbatim and its offered options (`internal/service/advisor.go:107–121`), all under `advisorSystemPrompt`, which is decisive by contract — one recommendation, citing the project's own spec when it decides the matter, written as the reply itself for verbatim submission. The recommendation lands on the record as an `advice` event and on the question's pending data; the human still decides (accept, edit, or answer from scratch). No advice degrades to an ordinary question card, never a failure. Under full autopilot autonomy the draft is submitted as the answer through the same `RunAnswer` door, with the decider on the record.
+When a run pauses on a question, a second model drafts the answer the human should give: `adviseQuestion` in `internal/service/advisor.go` runs asynchronously from a goroutine so the pause never waits, timed out at three minutes. The advisor seat is first-class: `pickAdvisor` prefers the run's recorded `advisor` roster seat, then the project roster's advisor pin, falling back to the architect only for runs recorded before the seat existed — a configured advisor, never an accident of roster resolution. The advisor's prompt is assembled in `adviseWith`: the task's spec text (`buildTaskPrompt`, clipped at 12 000 chars) under a "work the asking model was doing" heading, then the project's requirements, spec and plan documents (16 000 chars each, clipped) so the prompt's promise to cite the project's own spec is actionable, then the question verbatim and its offered options, all under `advisorSystemPrompt`, which is decisive by contract — one recommendation, citing the project's own spec when it decides the matter, written as the reply itself for verbatim submission.
+
+The reply is governed, not trusted: `advisorViolation` checks the answer against the contract (2–8 sentences, no internal monologue), one repair attempt names the violation, and a reply still invalid after repair fails the consult. Failure is recorded, never silent: an `advice_failed` event (advisor, kind, cause) lands on the record and on the question's pending data, and the run degrades to an ordinary question card. The recommendation lands on the record as an `advice` event and on the question's pending data; the human still decides (accept, edit, or answer from scratch). Under full autopilot autonomy the draft is submitted as the answer through the same `RunAnswer` door, with the decider on the record.
+
+A failed run's decision card carries the same seat's draft of what to do differently: `draftRedoNote` distills the run's own facts into a bounded (12 000 chars), editable `RedoNote` naming its advisor, attached where `redoNoteEligible` admits the run, exposed on the record as `redo_note` and through `run_get` — the lesson arrives with the failure instead of being re-distilled by hand.
 
 ## SPEC-054 — Consultation runs (chat)
 
@@ -740,8 +796,11 @@ A conversation with a chosen duckling about a subject is itself a run (`internal
 
 **Implements:** REQ-055
 **As-built:** yes
+**Covers:** T-013
 
-The engine announces run-settled moments to one configured webhook: `startNotifier` in `internal/service/notify.go` subscribes to the bus for `human_needed`, `run_end`, and autopilot stops, and POSTs a JSON envelope (event, run id, project id, RFC3339 timestamp, data) to the URL from config (`Notify.WebhookURL`); no URL configured means no notifier. Payloads are signed GitHub-style — `X-Hub-Signature-256: sha256=<hmac>` against the configured secret — because that is what receivers already verify. Delivery is best-effort by construction: a five-second HTTP timeout, exactly one retry on transport errors or 5xx, failures dropped silently — a dead receiver must never block or slow a run, since the run record on disk is the source of truth and the webhook is a doorbell. No credential appears in the record; the secret stays in config.
+The engine announces run-settled moments to one configured webhook: `startNotifier` in `internal/service/notify.go` subscribes to the bus for the persisted `human_needed` and `run_end` records, the derived operator transitions, and autopilot stops, and POSTs a JSON envelope (event, run id, project id, RFC3339 timestamp, data) to the URL from config (`Notify.WebhookURL`); no URL configured means no notifier. The persisted records stay the source of truth, and `publishEvent` in `internal/service/lifecycle.go` derives the operator vocabulary from them as doorbells: `run_paused` (carrying `pending_kind`), `question_asked`, `budget_pause`, and `distress` for a budget pause or a caught repetition loop — so a run that pauses on a question at minute 2 or burns GPU in a generation loop announces itself instead of waiting for the next poll. Payloads are signed GitHub-style — `X-Hub-Signature-256: sha256=<hmac>` against the configured secret — because that is what receivers already verify. Delivery is best-effort by construction: a five-second HTTP timeout, exactly one retry on transport errors or 5xx, failures dropped silently — a dead receiver must never block or slow a run. No credential appears in the record; the secret stays in config.
+
+**Assumption:** the notifier's exact subscribed set was confirmed for `budget_pause` and the transition family (`notify_transitions_test.go` names `run_paused`); the full event list was not re-enumerated line-by-line.
 
 ## SPEC-056 — Ranged writes: `fs_write_lines`
 
@@ -754,8 +813,11 @@ The engine announces run-settled moments to one configured webhook: `startNotifi
 
 **Implements:** REQ-057
 **As-built:** yes
+**Covers:** T-059
 
-`internal/strategy/rubberduck.go` measures a finished implementer turn structurally (`measureDistress`: `REFUSED:`-prefixed tool results, the longest consecutive-failure streak of one tool ≥ 5, `verify_run` reds ≥ 3, plus the deliverables report's undelivered ids) and, only when distressed, `consultAdvisor` runs a `RoleAdvisor` turn (contract `json:advice`, belt read-only) whose prompt carries the seats, the signals as JSON, the tool trace, the reasoning tail, the final text and the deliverables report with notes. `parseAdvice` degrades anything malformed to `none`. In `execute.go` the consult runs after the implementer's `turn_end` is emitted (never nested — T-119 showed the two as parallel), before the reviewer; a `note` appends to the corrective notes and re-runs the implementer turn at once with `retry: n` on its `turn_start`, at most `maxConsultRetries = 2` per round (`advisor_retry` event); `stop` returns `*AdvisorStop`, which the service maps to `Resolution: stopped by advisor <seat>`, an `advisor_stop` event and `failRun` (work in place), and `redoNoteEligible` admits the paused-error run so the redo note is born with the reshuffle. The reviewer prompt receives `operationalSummary` — the signals JSON — as data. No advisor seat → `advisor_consult {outcome: skipped}`; a failed consult → `outcome: failed`, run continues. `getRolePrompt(RoleAdvisor)` returns the rubber-duck system prompt. Pinned by `pair_test.go` (ordering, no-summon on a rough turn, bounded loop, stop before reviewer, skip without seat).
+`internal/strategy/rubberduck.go` measures a finished implementer turn structurally (`measureDistress` counts brake refusals in the tool results, the longest consecutive-failure streak of one tool ≥ 5, `verify_run` reds ≥ 3, plus the deliverables report's undelivered ids) and, only when distressed, `consultAdvisor` runs a `RoleAdvisor` turn (contract `json:advice`, belt read-only) whose prompt carries the seats, the signals as JSON, the tool trace, the reasoning tail, the final text and the deliverables report with notes. `parseAdvice` degrades anything malformed to `none`. In `execute.go` the consult runs after the implementer's `turn_end` is emitted (never nested — T-119 showed the two as parallel), before the reviewer; a `note` appends to the corrective notes and re-runs the implementer turn at once with `retry: n` on its `turn_start`, at most `maxConsultRetries = 2` per round (`advisor_retry` event); `stop` returns `*AdvisorStop`, which the service maps to `Resolution: stopped by advisor <seat>`, an `advisor_stop` event and `failRun` (work in place), and `redoNoteEligible` admits the paused-error run so the redo note is born with the reshuffle. No advisor seat → `advisor_consult {outcome: skipped}`; a failed consult → `outcome: failed`, run continues. `getRolePrompt(RoleAdvisor)` returns the rubber-duck system prompt. Pinned by `pair_test.go` (ordering, no-summon on a rough turn, bounded loop, stop before reviewer, skip without seat).
+
+The distress signal has TWO consumers, and decorrelation (SPEC-004) holds between them: the duck reads the implementer's reasoning, tool trace and self-report — everything the reviewer is forbidden to see — while the reviewer receives only `operationalSummary`, the measured signals marshalled as JSON data, attached to its prompt as telemetry. The reviewer's verdict can tell wounded execution from wrong design without ever reading the implementer's rationalisation of either.
 
 ## SPEC-058 — `ask_advisor`: the mid-turn consult
 
@@ -775,8 +837,15 @@ The engine announces run-settled moments to one configured webhook: `startNotifi
 
 **Implements:** REQ-060
 **As-built:** yes
+**Covers:** T-042, T-054, T-055, T-071
 
-`linkInstalledDeps(root, checkout)` in `internal/service/service.go` is a table of `{rel, markers}`: `node_modules` and `frontend/node_modules` justified by `package.json`; `.venv` justified by any of `pyproject.toml, requirements.txt, setup.py, setup.cfg, pytest.ini, tox.ini, Pipfile` — symlinked into the detached worktree before `verify.Run`. In `runTask`'s yolo branch a non-nil `acceptRun` error no longer vanishes: the run pauses `pending_kind: gate` with `PendingData.detail = "auto-accept failed: … — decide it yourself"` and a `human_needed` event, the same shape as reviewer dissent. Pinned by `clean_checkout_deps_test.go` (including the pytest.ini-only layout that stranded T-119).
+Checkout preparation is declared, not hard-coded: `[verify] link_deps = [...]` in `project.toml` names installed dependency trees (clean relative paths, validated at load) to symlink into the detached worktree — `node_modules`, `frontend/node_modules`, `.venv`, an in-tree pytest runner — and `[verify] setup = "…"` declares a preparation command run in the checkout before the gate. `linkInstalledDeps(root, checkout, cfg.Verify.LinkDeps)` performs the linking; the legacy marker table keeps working projects green. A gate that fails because the commit does not include a path the command references refuses honestly: "the gate references build/, which the commit does not include — declare it in setup or link_deps", naming the missing path. Acceptance also refuses a commit whose build relies on ignored files it therefore omits — the unanchored `build/` pattern that matched `internal/build/` shipped a commit no fresh clone could compile; the accept now says so instead of passing on the strength of untracked files still on disk.
+
+The reproduction itself is on the record: `verifyAcceptedCommit` stores a `GateReproduction` (gate, command, exit code, output, duration, green) on the accepted run as `acceptance_gate` with a `gate_reproduced` event, so an UNVERIFIED run verdict and a passing acceptance gate are two recorded facts, not one overwritten slot. Polarity is stage-appropriate: a build's accept requires the clean-checkout gate green, while a test-first accept requires the committed test's assertion-red — the deliverable of that stage is a failing test, and the two honesty mechanisms no longer fight each other.
+
+In `runTask`'s yolo branch a non-nil `acceptRun` error no longer vanishes: the run pauses `pending_kind: gate` with `PendingData.detail = "auto-accept failed: … — decide it yourself"` and a `human_needed` event, the same shape as reviewer dissent. Pinned by `clean_checkout_deps_test.go` (including the pytest.ini-only layout that stranded T-119), `lifecycle_test.go` (the ignored-`internal/build/` refusal and the recorded reproduction) and `accept_polarity_test.go`.
+
+**Assumption:** the stage-polarity branch and the ignored-file refusal are pinned by their tests; the full accept code path around them was not re-read for this settlement.
 
 ## SPEC-026 — Editable roster board
 
@@ -801,3 +870,81 @@ the pair board also reports implementer/reviewer overlap from effective seats.
 Pinned by `roster_assign.test.tsx` and `roster.test.tsx`.
 
 When a seat is selected, the board reorders eligible Flock cards and labels up to three informational candidates with their evidence reason. Selection never writes an assignment; local roles retain the operator's ordering. The board consumes the same `candidates` ids and `why` text exposed by the MCP roster view.
+
+## SPEC-061 — Git-derived build identity and release awareness
+
+**As-built:** yes
+**Covers:** T-006, T-026, T-037, T-043
+
+One package, `internal/build`, carries the binaries' identity: `Version`, `Branch` and `Commit`, stamped by the Makefile's ldflags into all three shipped binaries (`build_test.go` enforces a single stamping site and forbids a hardcoded release string); source builds read `dev`/`unknown`. `Semver()` strips the tag's `v` prefix for the client/server version-skew check; `Provenance()` is `branch@commit`. Every surface reports it: the MCP handshake's `serverInfo` (version, commit, provenance), `engine.json` (Version, Provenance beside pid/port/token), the engine's startup line and `Status.Provenance`. `ducklab-engine --version` (or `version`) prints `ducklab-engine <semver> (<branch>@<commit>)` and EXITS — it never boots an engine — and `daemon.WriteEngineJSON` refuses to overwrite an `engine.json` whose recorded pid is alive, so a stray invocation cannot re-point every client at a corpse.
+
+Release awareness is git truth, not branch-name persistence: `acceptedUnreleased` in `internal/service/service.go` counts, per accepted task, its newest accepted run's commit that is NOT an ancestor of the latest release tag (`git.IsAncestor(commit, tag)`); branch names are provenance only, surviving merge and deletion without defining shipped-ness. The count and branch total ride `ProjectStatus`, the guide's release step ("Cut a release — N accepted task(s) await shipping" appears only while that count is non-zero and nothing is buildable), and the MCP status fields (`accepted_unreleased`, `unreleased_branches`, `unreleased_branch_names`) — accepted-but-unshipped work is visible where decisions are made, and a cut release retires the reminder.
+
+## SPEC-062 — Desktop run surface: cards, stream health, transcripts
+
+**As-built:** yes
+**Covers:** T-020, T-021, T-027, T-046, T-056, T-057, T-075, T-076, T-078
+
+The desktop acts at the point where the decision sits:
+
+- A paused run card exposes every legal decision the run's `next` list offers — Resume alongside Abort/Reject — instead of sending the operator up to the task level.
+- A retire-test refusal over a dirty tree carries the remedy as actions: Clean and Commit controls sit beside the "commit or clean them" instruction, not a click-distance dead end.
+- The store maps the `human` answer event to the run's running status and clears its pending state, so an answered question stops listing as waiting.
+- Stream health is a first-class surface: a dead SSE subscription reconnects (an engine restart rotates port and token), the engine binding recovers instead of dying silently against the stale one, and a failed action surfaces an error rather than vanishing.
+- Display-only stream state is bounded — streamed deltas and reasoning are trimmed rather than kept per run per turn for the window's life — and summary-only board refreshes are debounced, so hours of heavy runs do not drown the app in its own data.
+- Chat transcripts render human turns with a human avatar and duckling turns with the duck, on live chats and on reopened, resynced ones alike.
+- A drafted release offers request-changes beside Cut: the operator enters revision text, the view calls `releasePlan(projectId, bump, reviseText)`, and the started revision run is surfaced.
+
+**Assumption:** these are frontend behaviors pinned by their accepted fixes and vitest suites; the React code was not re-read for this settlement, so widget-level detail is described at the behavior level.
+
+## SPEC-063 — Derived task status scoped to the task body
+
+**As-built:** yes
+**Covers:** T-023, T-041, T-044
+
+A task's status is derived from its runs, not from the plan document, and the derivation is scoped to the task's CURRENT meaning: every run records `task_body_hash` at launch (`taskBodyHash` over the task body, `internal/service/stages.go`), `runsForCurrentTaskBodies` discounts runs whose hash no longer matches — recycling a task id after rewriting its body makes the old runs historical, never contaminating — and `RecoverRuns` backfills hashes onto runs that predate the field (legacy `2020-` fixture stamps exempted). One derivation feeds every consumer — the board, the launch guard, the MCP task list, the guide, the autopilot — pinned by `task_status_regeneration_test.go` ("shared by all consumers"), so regenerating the plan cannot revert accepted tasks to todo.
+
+An accepted `no_changes` build settles its task: the tree answered the task's question by already containing the work, the derivation counts the acceptance, and the autopilot will not relaunch it without a human note (SPEC-049) — three identical empty runs in four minutes is the bug this closes.
+
+## SPEC-064 — Working-tree snapshot and scoped restore
+
+**Implements:** REQ-008
+**As-built:** yes
+**Covers:** T-019, T-051
+
+Every run captures `TreeSnapshot` (the working tree as it stood) plus `TreeSnapshotHead` (HEAD at capture) at start. Rejection restores the tree BEFORE touching the run record — a refusal to clean up leaves the gate decision available — and aborting a paused or already-failed run restores it too: such a run has no goroutine left whose cancellation could reach `failRun`, so `RunAbort` calls the restore itself (an active run's restore still waits for its final write, never racing the model's filesystem).
+
+The restore is surgical, not a rewind: `RestoreTreeAtHeadScoped` (`internal/vcs/vcs.go`) restores only when HEAD is still the snapshot's recorded HEAD and only over the paths the run itself wrote, so work committed after the snapshot — landed by hand or by another run — is never silently reverted by an old run's cleanup.
+
+## SPEC-065 — Gate process isolation with preserved build caches
+
+**Implements:** REQ-009
+**As-built:** yes
+**Covers:** T-045, T-050
+
+`verify_run` executes the gate under `isolatedStateEnvironment` (`internal/verify/verify.go`): a fresh temporary directory carries `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `HOME`, `USERPROFILE`, `AppData` and `LocalAppData` for the whole child process tree, removed when the gate exits — a gate that spawns a `ducklab-engine` (a red test exercising the binary IS a gate command) reads an empty registry, never the live engine's state, and cannot checkpoint the run that hosts it.
+
+Isolation covers engine state, not content-addressed caches: `GOPATH` (an explicit one wins), `GOMODCACHE` (derived from the winning GOPATH's first entry — it is also where `GOTOOLCHAIN` downloads land), `GOCACHE` and `npm_config_cache` default to the real home's locations, so a gate does not redownload the toolchain and every module per run. A scrubbed HOME has no `.gitconfig`, so gate-made commits sign as a fixed, obviously synthetic identity — `ducklab gate <gate@ducklab.invalid>` — never in the person's name.
+
+## SPEC-066 — Test-first accepts assertion-red only
+
+**Implements:** REQ-020
+**As-built:** yes
+**Covers:** T-024, T-028
+
+The test-first judge (`judgeTestFirst` in `internal/service/testfirst.go`) distinguishes a broken specification from a valid red one. A non-zero gate is not enough: `compileFailure` reads the output STRUCTURALLY — Go's `FAIL … [build failed]` / `[setup failed]` package lines, tsc's `): error TS<n>:` diagnostics, vitest/esbuild's `Transform failed with` / `Failed to parse source` — and a compile-red run FAILS with the compiler's own message, because a test that does not compile breaks the whole package and is not a specification. The check is deliberately not lexical: a test carrying those phrases as fixture data stays assertion-red, and toolchain download chatter triggers nothing.
+
+A green after-run is judged only against files the gate actually reaches: a new test under `frontend/` with a gate command that runs no frontend tests fails with "the new test lives in frontend/, which the gate never runs — widen the gate or move the test", so a correct vitest specification can no longer die silently under a Go-only gate.
+
+## SPEC-067 — Bug settlement on accepted builds and triage sibling resolution
+
+**Implements:** REQ-017
+**As-built:** yes
+**Covers:** T-009, T-029
+
+A promoted bug moves `in_progress → fixed` only when an accepted BUILD run for its task lands — the auto-accepted test-first half of a TDD chain commits the specification, not the fix, and no longer moves the bug while the build has not started.
+
+Accepting a triage run resolves its paused siblings: a superseded triage over the same bugs — aborted mid-batch, still holding partial proposals at its gate — stops offering accept on classifications the newer run already applied, instead of waiting for a person to notice and order the reject by hand.
+
+**Assumption:** both behaviors are pinned by their accepted fixes; the exact hook call sites were not re-read for this settlement.
+

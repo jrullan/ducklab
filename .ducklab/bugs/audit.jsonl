@@ -363,3 +363,6 @@
 {"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-19T19:46:06Z","bug":"B-091","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:57:10Z","bug":"B-092","from":"open","to":"triaged","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:57:10Z","bug":"B-092","from":"triaged","to":"in_progress","actor":"human","via":"move"}
+{"ts":"2026-08-19T19:57:10Z","bug":"B-092","from":"in_progress","to":"fixed","actor":"human","via":"move"}
