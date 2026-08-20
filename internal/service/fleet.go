@@ -327,7 +327,7 @@ func (s *Service) canWriteConfig() error {
 // looser copy — underscores allowed — and the drift let the desktop save a
 // duckling (qwen38_27b) that the next engine start refused to load: a write
 // gate looser than the load gate lets the writer lock the engine out of its
-// own config (B-095).
+// own config (B-104).
 func validID(id string) error {
 	if id == "" {
 		return fmt.Errorf("an id is required")

@@ -204,7 +204,7 @@ func TestAFailedWriteLeavesNothingBehind(t *testing.T) {
 // The write gate speaks the loader's rule, exactly. This test used to bless
 // "pato_local-2" as reasonable — the write path's private, looser idea of an
 // id — and that drift let the desktop save qwen38_27b, which the next engine
-// start refused to load: writer-made lockout (B-095). Underscores are not
+// start refused to load: writer-made lockout (B-104). Underscores are not
 // refused for taste; they are refused because the loader refuses them.
 func TestIDsAreValidated(t *testing.T) {
 	s, _ := fleetService(t)
