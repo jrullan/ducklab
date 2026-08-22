@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 10
-updated_at: 2026-08-22T04:01:58Z
-run_id: r-20260822-034742-disj
-ducklings: [k3, qwen38-max, atom-local, luna, terra]
-based_on: 0d42d3bbf38a6bd1
+version: 11
+updated_at: 2026-08-22T13:04:15Z
+run_id: r-20260822-124708-bgg4
+ducklings: [k3, terra, qwen38-max, atom-local, luna]
+based_on: 0b4c0a97bab81251
 approved_by: human
 ---
 
@@ -2173,4 +2173,45 @@ Make a queued run look alive: everywhere running runs already show, a queued run
 **Out of scope:** Queue position indicators, per-provider live occupancy dashboards, CLI rendering of `queued_reason` (the record carries it; printing it in the CLI is a separate task), changing how `run_queued` events render in transcripts, and any engine behavior.
 
 **Assumption:** The existing provider save path used by `Ducklings.tsx` tolerates new keys on the provider object end-to-end once the engine config and API shapes accept them; no new endpoint is needed.
+
+### T-098 — Stamp every run-spawned process tree with DUCKLAB_RUN_ID and DUCKLAB_PROJECT_ID
+
+**Implements:** SPEC-009, SPEC-065
+
+Two suites sharing one test database can both pass green while corrupting each other — the run-vs-human variant already happened on excercise-tracker. This task gives every process the engine spawns for a run a stable identity in its environment, so a project can self-isolate (`DATABASE_URL=test_db_${DUCKLAB_RUN_ID}`, a per-run docker compose project name). The variables are injected at the single place each process tree is built — `verify.Run` and the shell tool's exec — never per call site, and they are ALWAYS present: human-invoked paths get a `manual-<timestamp>` identifier so scripts need no fallback.
+
+**Deliverables:**
+- `verify.Run` (internal/verify/verify.go) stamps `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID` onto the environment of every gate process it launches, alongside the existing isolated-state variables.
+  - The identity arrives as a parameter (a small struct or two strings), merged into the env `isolatedStateEnvironment` builds, so the gate, the accept-path clean-checkout gate, and the `[verify] setup` command (which already reuses `verify.Run`, service.go:2206) are all covered by one change.
+  - Every `verify.Run` call site passes the run's identity: service.go:1636 (build gate), service.go:2207/2214 (accept clean-checkout + setup), gate.go:170, modes.go:466/519/556, testfirst.go:393/487/516, and the `verify_run` tool (internal/tools/exec.go:113, from `ectx`).
+  - An empty run id becomes `manual-<unix-timestamp>` inside `verify.Run` itself, so the variable is set even for human-invoked gates (`ducklab project gate` / handleGateRun) and no script ever needs a fallback.
+- The shell tool's exec path stamps the same two variables on every command it runs.
+  - `RunShell` (internal/tools/tools.go:835) is the single construction point: it appends the variables to `ectx.ShellEnv` (or `os.Environ()` when nil), so the `shell` tool and skill scripts (internal/tools/skill.go:253) both inherit them.
+  - `tools.ExecContext` gains a `ProjectID` field beside the existing `RunID`; the service populates both when building run contexts, and `Service.SkillRun` (internal/service/skills.go:227) sets `RunID` to `manual-<timestamp>` (or leaves it empty for the RunShell default) so a person testing a skill still gets a defined value.
+- The `[run]` preflight and app launch commands (internal/service/app.go:79 and :105) run with both variables set.
+  - **Assumption:** AppStart is human-invoked and has no run id, so it passes `manual-<timestamp>`; a docker compose preflight keyed on the variable still gets a stable, unique-per-invocation project name.
+- The README's project.toml section (~line 180) and the matching docs/spec page document the pattern with the excercise-tracker example: `DATABASE_URL=test_db_${DUCKLAB_RUN_ID}` in `[verify].tests`, and a compose preflight using a per-run project name; the docs state the engine guarantees identity only — provisioning and teardown stay the project's.
+- Go tests assert: a gate command sees both variables (e.g. a gate of `echo $DUCKLAB_RUN_ID` or `env` captured from a configured test gate); a `[verify] setup` command sees them; a shell tool invocation sees them; and two concurrent `verify.Run` processes with different run ids each observe their own id (run two gates in goroutines that write `$DUCKLAB_RUN_ID` to distinct files, assert the contents differ and match what was passed).
+
+**Out of scope:** dropping the one-run-per-working-tree queue hold (phase 3); any database/port provisioning or teardown by the engine; resource declarations in project.toml beyond documenting the pattern; desktop or MCP surface changes; changing what T-045/T-050's isolated-state environment already scrubs or preserves.
+
+**Assumption:** contestant worktree gates in tournament/split (modes.go) run per contestant within ONE run, so they share that run's id — per-contestant isolation inside one run is the project's to compose from the run id, not a second engine variable.
+
+### T-099 — Prove the per-repo worktree mutex serializes one repo and never blocks another
+
+**Implements:** SPEC-033
+
+T-074 put a per-repo-path mutex around `git worktree add/remove/prune` in internal/vcs/vcs.go (keyed by normalized absolute path, `Abs` + `EvalSymlinks`), and the existing tests race adds on one repo. The unproven half of the contract is the scoping: the lock must cover ONLY the git metadata mutation on THAT repository — contestants working in different repos, and contestants working inside their trees, must never queue behind it.
+
+**Deliverables:**
+- A test in internal/vcs/vcs_test.go races two goroutines adding worktrees on one real repo and asserts both succeed with no git error.
+  - `TestConcurrentWorktreeAdds` already does this with 8 workers; extend or confirm it covers the add/remove pair the change names, rather than duplicating it.
+- A new test asserts worktree operations on DIFFERENT repositories do not block each other.
+  - Two repos, each with a git stub (the existing fake-git script pattern at vcs_test.go:122) whose `worktree add` sleeps; start both adds together and assert total elapsed is closer to one sleep than two — or instrument entry/exit and assert the critical sections overlapped.
+  - The same test asserts the mutex is keyed by the normalized path: two `vcs.Git` values naming the same repo through different spellings (symlink, `..`, trailing slash) still serialize — the existing fake-git lock-dir test covers independent `Git` values; add the spelling-variant case if absent.
+- The lock's scope is verified to wrap only the `g.run("worktree", …)` invocation in `WorktreeAdd`, `WorktreeAddDetached`, `WorktreeRemove`, and `PruneWorktrees` — no contestant work (patch application, builds, gate runs) happens under it; if any caller is found holding the lock across non-git work, narrow it.
+
+**Out of scope:** worktree-per-run execution (phase 3); reaping or orphan-recovery policy; serializing non-worktree git operations; any change to tournament/split orchestration beyond what the tests require.
+
+**Assumption:** the T-074 mutex implementation and its two existing tests are in the tree and passing; this task closes the coverage gap rather than re-building the mechanism — if verification shows the mutex missing or wrongly keyed, the task grows to fixing that first.
 
