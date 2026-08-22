@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.jrullan/ducklab",
+  "description": "Operate a full multi-LLM development harness: file bugs, run intake/spec/plan/build/release cycles with real test gates, attach reference documents, and decide gates with recorded, attributed decisions. Local-first; verdicts are exit codes, never model opinions.",
+  "repository": {
+    "url": "https://github.com/jrullan/ducklab",
+    "source": "github"
+  },
+  "version": "0.6.2",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/jrullan/ducklab/releases/download/vX.Y.Z/ducklab-mcp.mcpb",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
