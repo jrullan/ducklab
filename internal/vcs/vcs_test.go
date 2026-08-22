@@ -245,9 +245,10 @@ func TestWorktreeLocksAreRepositoryScopedAndCanonical(t *testing.T) {
 		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		t.Setenv("DUCKLAB_WORKTREE_TEST_LOCK", lock)
 
-		// The primary checkout, an alias, and a linked worktree all mutate the
-		// same repository's worktree metadata.
-		roots := []string{repo + string(filepath.Separator), alias, linked}
+		// These spellings all name the primary checkout. A linked worktree has
+		// its own checkout path and is not a spelling alias for the repository.
+		parentDotDot := repo + string(filepath.Separator) + ".." + string(filepath.Separator) + filepath.Base(repo)
+		roots := []string{repo + string(filepath.Separator), parentDotDot, alias}
 		errs := make([]error, len(roots))
 		start := make(chan struct{})
 		var wg sync.WaitGroup
