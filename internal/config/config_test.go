@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -429,6 +430,59 @@ func TestSavedProjectPassesStrictDecoding(t *testing.T) {
 	if _, err := LoadProject(path); err != nil {
 		t.Fatalf("a config ducklab wrote was rejected by its own loader: %v", err)
 	}
+}
+
+// max_concurrent is deliberately an optional provider setting: a configured
+// value survives strict decode and save, while omission retains zero so queue
+// defaults remain a live runtime decision rather than persisted migration data.
+func TestProviderMaxConcurrentRoundTripsAndOmissionStaysZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `schema = 1
+
+[provider.local]
+kind = "openai"
+base_url = "http://localhost:8081/v1"
+max_concurrent = 3
+
+[provider.hosted]
+kind = "openai"
+base_url = "https://api.example.test/v1"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatalf("max_concurrent was not accepted by strict config loading: %v", err)
+	}
+	if got := providerMaxConcurrent(t, loaded.Providers["local"]); got != 3 {
+		t.Errorf("loaded local max_concurrent = %d, want 3", got)
+	}
+	if got := providerMaxConcurrent(t, loaded.Providers["hosted"]); got != 0 {
+		t.Errorf("omitted hosted max_concurrent = %d, want zero", got)
+	}
+	if err := SaveGlobal(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := LoadGlobal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := providerMaxConcurrent(t, roundTripped.Providers["local"]); got != 3 {
+		t.Errorf("round-tripped local max_concurrent = %d, want 3", got)
+	}
+	if got := providerMaxConcurrent(t, roundTripped.Providers["hosted"]); got != 0 {
+		t.Errorf("round-tripped omitted max_concurrent = %d, want zero", got)
+	}
+}
+
+func providerMaxConcurrent(t *testing.T, p Provider) int {
+	t.Helper()
+	field := reflect.ValueOf(p).FieldByName("MaxConcurrent")
+	if !field.IsValid() || field.Kind() != reflect.Int {
+		t.Fatal("provider has no MaxConcurrent int")
+	}
+	return int(field.Int())
 }
 
 func TestSaveGlobalRoundTripsProvidersAndDucklings(t *testing.T) {

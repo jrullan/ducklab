@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/config"
 	"sync"
 	"testing"
 	"time"
@@ -182,6 +186,179 @@ func TestAChainedBuildJumpsTheWaitingLine(t *testing.T) {
 	if len(order) != 2 || order[0] != "chained-build" || order[1] != "other-test" {
 		t.Errorf("execution order = %v, want the chained build first", order)
 	}
+}
+
+// Provider capacity belongs at the run queue, rather than in a provider client:
+// a local endpoint must be visible as queued before it is asked to serialize
+// calls internally. The resolved roster identifies the provider the run seats.
+func TestQueueQueuesLocalProviderAndRecordsWhy(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p := s.cfg.Providers["fake"]
+	p.BaseURL = "http://localhost:8081/v1"
+	s.cfg.Providers["fake"] = p
+	s.queue = newRunQueue(16)
+
+	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+	first := queuedRun(t, "r-first", "one", func() {
+		close(firstStarted)
+		<-release
+	})
+	first.parallel = true
+	first.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+	s.queue.submit(s, first)
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run did not start")
+	}
+
+	secondStarted := make(chan struct{})
+	second := queuedRun(t, "r-second", "two", func() { close(secondStarted) })
+	second.parallel = true
+	second.rs.run.Roster = map[string]string{"reviewer": "pato-uno"}
+	s.queue.submit(s, second)
+	if second.rs.run.Status != "queued" {
+		t.Fatalf("second local-provider run = %q, want queued", second.rs.run.Status)
+	}
+
+	// QueuedReason is deliberately read by name here until the production field
+	// lands with this test. It must be durable state, not an event clients have
+	// to replay, and it must identify both the constrained provider and holder.
+	reason := queuedReason(t, second.rs.run)
+	want := "waiting for a slot on provider fake (held by r-first)"
+	if reason != want {
+		t.Errorf("queued reason = %q, want %q", reason, want)
+	}
+
+	close(release)
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second run was not promoted when the provider slot freed")
+	}
+	if second.rs.run.Status != "running" {
+		t.Errorf("promoted run status = %q, want running", second.rs.run.Status)
+	}
+	if got := queuedReason(t, second.rs.run); got != "" {
+		t.Errorf("promoted run retained queued reason %q", got)
+	}
+}
+
+// queuedReason makes this test compile while the test-stage field declaration
+// is applied separately. The acceptance behavior is still the public run
+// record field named queued_reason, not queue internals.
+func queuedReason(t *testing.T, run *runlog.Run) string {
+	t.Helper()
+	field := reflect.ValueOf(run).Elem().FieldByName("QueuedReason")
+	if !field.IsValid() || field.Kind() != reflect.String {
+		t.Fatal("run record has no QueuedReason string")
+	}
+	return field.String()
+}
+
+// A named cap wins over the local/hosted starter default. This uses a hosted
+// URL so cap one can only be explained by max_concurrent, not locality.
+func TestQueueHonorsExplicitProviderCap(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p := s.cfg.Providers["fake"]
+	p.BaseURL = "https://api.example.test/v1"
+	setProviderMaxConcurrent(t, &p, 1)
+	s.cfg.Providers["fake"] = p
+	s.queue = newRunQueue(16)
+
+	release := make(chan struct{})
+	first := queuedRun(t, "r-cap-holder", "one", func() { <-release })
+	first.parallel = true
+	first.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+	s.queue.submit(s, first)
+	second := queuedRun(t, "r-cap-waiter", "two", func() {})
+	second.parallel = true
+	second.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+	s.queue.submit(s, second)
+	if second.rs.run.Status != "queued" {
+		t.Errorf("explicit cap did not queue second hosted run; status = %q", second.rs.run.Status)
+	}
+	close(release)
+}
+
+func setProviderMaxConcurrent(t *testing.T, p *config.Provider, cap int) {
+	t.Helper()
+	field := reflect.ValueOf(p).Elem().FieldByName("MaxConcurrent")
+	if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Int {
+		t.Fatal("provider has no settable MaxConcurrent int")
+	}
+	field.SetInt(int64(cap))
+}
+
+// Hosted providers receive an eight-run starter cap when no explicit value is
+// configured. All eight must start before a ninth waits.
+func TestQueueHostedProviderDefaultAllowsEightRuns(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p := s.cfg.Providers["fake"]
+	p.BaseURL = "https://api.example.test/v1"
+	s.cfg.Providers["fake"] = p
+	s.queue = newRunQueue(16)
+
+	release := make(chan struct{})
+	started := make(chan string, 9)
+	for i := 1; i <= 9; i++ {
+		id := fmt.Sprintf("r-hosted-%d", i)
+		item := queuedRun(t, id, fmt.Sprintf("project-%d", i), func() {
+			started <- id
+			<-release
+		})
+		item.parallel = true
+		item.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+		s.queue.submit(s, item)
+		if i <= 8 && item.rs.run.Status != "running" {
+			t.Errorf("hosted run %d status = %q, want running", i, item.rs.run.Status)
+		}
+		if i == 9 && item.rs.run.Status != "queued" {
+			t.Errorf("ninth hosted run status = %q, want queued", item.rs.run.Status)
+		}
+	}
+	for i := 0; i < 8; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("eight hosted runs did not start in parallel")
+		}
+	}
+	close(release)
+}
+
+// A run reserves every provider represented by its resolved seats: a free
+// hosted provider cannot make a roster start while its local seat is full.
+func TestQueueBlocksRosterWhenAnyProviderIsAtCap(t *testing.T) {
+	s := serviceWithDucklings(t, "local-duck", "hosted-duck")
+	s.cfg.Providers = map[config.ProviderID]config.Provider{
+		"local":  {Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
+		"hosted": {Kind: config.ProviderKindOpenAI, BaseURL: "https://api.example.test/v1"},
+	}
+	s.cfg.Ducklings["local-duck"] = config.Duckling{Provider: "local", Model: "local"}
+	s.cfg.Ducklings["hosted-duck"] = config.Duckling{Provider: "hosted", Model: "hosted"}
+	s.queue = newRunQueue(16)
+
+	release := make(chan struct{})
+	holder := queuedRun(t, "r-local-holder", "one", func() { <-release })
+	holder.parallel = true
+	holder.rs.run.Roster = map[string]string{"implementer": "local-duck"}
+	s.queue.submit(s, holder)
+
+	spanning := queuedRun(t, "r-spanning", "two", func() {})
+	spanning.parallel = true
+	spanning.rs.run.Roster = map[string]string{
+		"implementer": "local-duck", "reviewer": "hosted-duck",
+	}
+	s.queue.submit(s, spanning)
+	if spanning.rs.run.Status != "queued" {
+		t.Errorf("roster spanning a full local provider started: %q", spanning.rs.run.Status)
+	}
+	if got := queuedReason(t, spanning.rs.run); got != "waiting for a slot on provider local (held by r-local-holder)" {
+		t.Errorf("spanning roster reason = %q", got)
+	}
+	close(release)
 }
 
 func TestQueueStats(t *testing.T) {
