@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 11
-updated_at: 2026-08-22T13:04:15Z
-run_id: r-20260822-124708-bgg4
-ducklings: [k3, terra, qwen38-max, atom-local, luna]
-based_on: 0b4c0a97bab81251
+version: 12
+updated_at: 2026-08-22T21:56:51Z
+run_id: r-20260822-213956-viko
+ducklings: [terra, k3, qwen38-max, atom-local, luna]
+based_on: c8f89e0a38e99d65
 approved_by: human
 ---
 
@@ -2214,4 +2214,44 @@ T-074 put a per-repo-path mutex around `git worktree add/remove/prune` in intern
 **Out of scope:** worktree-per-run execution (phase 3); reaping or orphan-recovery policy; serializing non-worktree git operations; any change to tournament/split orchestration beyond what the tests require.
 
 **Assumption:** the T-074 mutex implementation and its two existing tests are in the tree and passing; this task closes the coverage gap rather than re-building the mechanism — if verification shows the mutex missing or wrongly keyed, the task grows to fixing that first.
+
+### T-100 — Two-pass adopt survey: inventory turn, coverage diff, and run-record surfacing
+
+**Implements:** SPEC-029, SPEC-022
+
+Adopt surveys (intake with `adopt=true`, and the first spec of an adopted project) gain a leading solo inventory turn whose result is checked deterministically against the proposed document, so a draft that misses an inventoried surface says so on the record instead of passing silently.
+
+**Deliverables:**
+- A solo architect inventory turn runs before the draft turn on exactly the two adopt paths: intake with `Adopt: true`, and a spec run whose approved requirements carry `Origin: "adopted"` with no existing spec sections (the detection already used at `internal/stage/stage.go:216` and `:353`). No other stage or mode is affected.
+  - The turn answers a JSON contract riding the existing `json:*` contract machinery (as `json:triage` does), returning a flat list of items `{name, kind, evidence-path}` where kind covers route/handler groups, schema entity clusters, services, clients, integrations, and config surfaces.
+  - The list is capped at 60 items; when the cap trims the list, the inventory event names the cap — trimming is never silent.
+  - The inventory turn reads the tree with the architect's normal toolbelt; a contract failure follows the existing repair-then-fail path rather than degrading to a guessed inventory.
+- The parsed inventory is recorded on the run: a `survey_inventory` event (items, kinds, capped flag) appended to the run's event log, plus the inventory written as a JSON file beside the run's brief (falling back to the run directory when the run has no brief file), so the draft turn and later readers work from the same recorded list.
+- The draft turn's prompt carries the recorded inventory as a checklist with the instruction that every item is either covered by a section or named in the document as deliberately out of scope — the checklist is injected by the engine from the recorded artifact, not re-typed by the inventory turn.
+- When the proposal lands, the engine computes the coverage diff and records it: an item counts as covered when its name or its evidence-path basename appears in some section body or in an explicit out-of-scope line of the proposed document; the check is lexical string matching only.
+  - Unaccounted items are stored on the run record (`PendingData`, following the `unread_refs` precedent) and surfaced like the `sections_removed` warning: visible, never blocking the accept path.
+  - Computation lives beside the existing proposal-time warning computation in `internal/service/stages.go` and runs only for the two adopt paths.
+- The reviewer/critique prompt for adopt runs receives the unaccounted list, so critique aims at the named gaps; when nothing is unaccounted the prompt is unchanged.
+- Tests assert: an adopt run whose draft omits an inventoried item records that item as unaccounted on the run record; covering the item in a section body or naming it in an explicit out-of-scope line clears it; a capped inventory's event names the cap; a non-adopt intake and a non-first spec run produce no inventory turn and no coverage data.
+
+**Out of scope:** desktop rendering of the unaccounted list or the inventory (T-901); semantic or fuzzy matching beyond lexical; auto-generating sections for unaccounted items; any change to the references machinery; applying the inventory pass to plan, review, or non-adopt stages.
+
+**Assumption:** The cap is fixed at 60 items as the change suggests ("e.g. 60"); it is a constant in the engine, not a configurable setting.
+
+### T-101 — Surface survey inventory and unaccounted coverage on proposal cards and the run view
+
+**Implements:** SPEC-062
+**Depends on:** T-100
+
+The desktop shows what the engine recorded: the proposal card names unaccounted surface areas, and the run view lets a person read the full inventory with its evidence paths.
+
+**Deliverables:**
+- The proposal card in the Cycle view gains a line, reusing the `unread_refs` pattern and styling, reading "N surface areas unaccounted: X, Y, Z" when the run record carries unaccounted inventory items; the line is absent when the list is empty or the run is not an adopt survey.
+  - Names shown come from the run record's `PendingData`; the card never recomputes coverage.
+  - The line is informational only — Accept and Reject behave exactly as before.
+- The same line renders on the proposal card in RunView, sharing the Cycle view's component or helper rather than duplicating the formatting.
+- The run view exposes the recorded inventory as a folded (collapsed-by-default) block listing each item with its kind and evidence path, read from the inventory artifact the engine recorded on the run.
+- Frontend tests assert: a run record with unaccounted items renders the naming line on both cards; an empty list renders nothing; the folded block lists every inventory item with its evidence path.
+
+**Out of scope:** engine-side computation of coverage (T-900); any blocking or gating on unaccounted items; MCP or CLI surfacing; restyling the existing `unread_refs` line.
 
