@@ -233,6 +233,22 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	return strings.TrimSpace(answer), string(advisorID), nil
 }
 
+// wireAdvisor arms ask_advisor on an ExecContext, guarded so the tool can
+// tell the model plainly when there is truly nobody to ask. Shared by the
+// build and test-first paths: it was wired on build only, and a test run's
+// implementer was told "no advisor is seated" while the seat chip showed
+// one sitting right there (B-115).
+func (s *Service) wireAdvisor(rs *runState, ectx *tools.ExecContext) {
+	if s.pickAdvisor(rs) == "" {
+		return
+	}
+	ectx.OnAskAdvisor = func(ctx context.Context, question string) (string, error) {
+		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		return s.adviseInline(cctx, rs, question)
+	}
+}
+
 // pickAdvisor uses the run's dedicated advisor seat. Older runs may not have
 // recorded one, so fall back to the resolved roster's advisor seat rather than
 // silently borrowing the architect.

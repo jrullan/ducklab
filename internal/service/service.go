@@ -209,6 +209,23 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		apps:                    make(map[string]*appState),
 	}
 	s.queue.held = s.projectHeld
+	s.queue.providerCap = func(id string) (int, bool) {
+		s.cfgMu.RLock()
+		defer s.cfgMu.RUnlock()
+		p, ok := s.cfg.Providers[config.ProviderID(id)]
+		if !ok {
+			return 0, false
+		}
+		if p.MaxConcurrent > 0 {
+			return p.MaxConcurrent, true
+		}
+		return func() int {
+			if IsLocalHost(p.BaseURL) {
+				return 1
+			}
+			return 8
+		}(), true
+	}
 
 	// Register providers
 	for id, p := range cfg.Providers {
@@ -1534,15 +1551,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 
 	// The rubber duck on demand: an implementer's ask_advisor reaches the
-	// advisor seat without pausing the run. Only wired when a seat exists,
-	// so the tool can tell the model plainly when there is nobody to ask.
-	if s.pickAdvisor(rs) != "" {
-		ectx.OnAskAdvisor = func(ctx context.Context, question string) (string, error) {
-			cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-			defer cancel()
-			return s.adviseInline(cctx, rs, question)
-		}
-	}
+	// advisor seat without pausing the run.
+	s.wireAdvisor(rs, ectx)
 
 	// The line-up this run will use: what it asked for, else the one configured
 	// for its mode. Filled onto the request itself so every consumer sees it —
