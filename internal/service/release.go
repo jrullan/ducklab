@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -260,6 +261,9 @@ func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot 
 			s.failRun(rs, err)
 			return
 		}
+		// Never trust the reply to be prose-only: a scribe that returns a
+		// whole document would be wrapped by Render into a doubled release.
+		prose = extractReleaseProse(prose)
 	}
 
 	// Written as a proposal: a release is a claim about the software, and a
@@ -347,10 +351,59 @@ func revisionAddendum(revise, priorDraft string) string {
 	b.WriteString("\n## Revision requested\n\nA person read the draft below and asks for this change:\n\n")
 	b.WriteString(strings.TrimSpace(revise))
 	b.WriteString("\n\n## The draft being revised\n\n")
-	b.WriteString(strings.TrimSpace(priorDraft))
-	b.WriteString("\n\nRewrite the notes with the change applied. Keep what the note does not touch.\n")
+	// Prose only. The addendum used to show the whole prior file —
+	// frontmatter, title, What shipped — and ask "rewrite the notes"; the
+	// scribe reasonably returned a whole document, Render wrapped it again,
+	// and the proposal carried the release twice (B-116).
+	b.WriteString(strings.TrimSpace(extractReleaseProse(priorDraft)))
+	b.WriteString("\n\nRewrite the prose with the change applied, and return ONLY the prose " +
+		"paragraphs — no frontmatter, no version title, no What-shipped list; the engine " +
+		"renders those. Keep what the note does not touch.\n")
 	return b.String()
 }
+
+// extractReleaseProse cuts a release document (or a scribe reply shaped like
+// one) down to its prose: frontmatter blocks, the version heading and
+// everything from "## What shipped" onward are the engine's to render, and
+// trusting a reply to be prose-only is how a document ships twice (B-116).
+func extractReleaseProse(text string) string {
+	lines := strings.Split(text, "\n")
+	var kept []string
+	inFront := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if inFront {
+				inFront = false
+				continue
+			}
+			// A frontmatter fence only opens at the start of the text or
+			// right after prior scaffolding; a horizontal rule mid-prose
+			// stays.
+			if len(kept) == 0 || i == 0 {
+				inFront = true
+				continue
+			}
+		}
+		if inFront {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## What shipped") {
+			break
+		}
+		if versionHeadingRe.MatchString(trimmed) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	out := strings.TrimSpace(strings.Join(kept, "\n"))
+	if out == "" {
+		return strings.TrimSpace(text)
+	}
+	return out
+}
+
+var versionHeadingRe = regexp.MustCompile(`^#{1,2}\s+(Release\s+)?v?\d+\.\d+\.\d+\s*$`)
 
 // newestProposed finds the highest-versioned .proposed draft on disk.
 func newestProposed(root string) (release.Version, bool) {
