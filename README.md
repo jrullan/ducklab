@@ -9,8 +9,8 @@ stops for you before anything is committed. Every model call is logged. No
 model ever decides a verdict.
 
 <p align="center">
-  <img src="docs/screenshots/council-run.png" alt="A council run: architect drafting, reviewer critiquing, budget and gate visible" width="900">
-  <br><em>A council drafting ducklab's own spec — seats, budget, and the gate on one screen, every model call on the record.</em>
+  <img src="docs/screenshots/council.gif" alt="A live council intake: the architect streams a requirements draft, the reviewer approves, and the run stops at a human gate" width="840">
+  <br><em>A real council intake, recorded live and sped up: the architect streams the draft, a different model reviews it, the budget ticks in cents — and the run stops at <strong>your</strong> gate. Total cost of what you just watched: $0.07.</em>
 </p>
 
 It was built for **local models first** — the two that built most of it are a
@@ -200,6 +200,11 @@ Flock onto a mode's seat, globally or per project, with each duckling's
 evidence on the card and the engine's suggestions beside the seats. Coding /
 intelligence / agentic indices come from OpenRouter's benchmarks endpoint
 when a duckling lives there; your own runs supply the rest.
+
+<p align="center">
+  <img src="docs/screenshots/council-run.png" alt="A council run mid-flight on ducklab's own spec" width="900">
+  <br><em>The same machinery on real work: a council revising ducklab's own spec, 4.5M tokens in, paused once on a budget it asked to lift.</em>
+</p>
 
 ## The five modes
 
