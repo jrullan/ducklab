@@ -1,0 +1,4 @@
+frontend/node_modules
+.ducklab/runs
+bin
+cmd/ducklab-desktop/frontend/dist

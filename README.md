@@ -87,7 +87,7 @@ not round up. Where code and spec differ, the difference is recorded in
 
 ## Install
 
-Needs Go 1.24+, Node 22+ for the desktop, and git.
+Needs Go 1.25+, Node 22+ for the desktop, and git.
 
 ### Linux
 
