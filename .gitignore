@@ -27,3 +27,7 @@ frontend/playwright-report/
 
 env.test
 .env.test.local
+
+# state backups never belong in the tree
+.ducklab/*.bak-*
+.ducklab/docs/*.bak-*
