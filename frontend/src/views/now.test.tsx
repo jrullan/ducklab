@@ -126,6 +126,20 @@ describe("Now — the inbox", () => {
     expect(row.textContent).toContain("$0.4200");
   });
 
+  it("shows a queued run's engine reason verbatim without requiring it on older records", async () => {
+    seed([
+      { ...base, id: "r-queued", status: "queued", verdict: "", pending_kind: undefined,
+        queued_reason: "another run holds this project working tree" } as unknown as Run,
+      { ...base, id: "r-legacy-queued", status: "queued", verdict: "", pending_kind: undefined },
+    ]);
+    render(<Now client={clientWith()} projectId="p" />);
+    const rows = await screen.findAllByTestId("now-running-row");
+    expect(rows.find((row) => row.textContent?.includes("T-026"))?.textContent).toContain(
+      "another run holds this project working tree",
+    );
+    expect(rows.map((row) => row.textContent).join(" ")).not.toContain("undefined");
+  });
+
   // "Nothing needs me" and "what should I do next" are the same moment.
   it("offers the next ready task when the queue is empty", async () => {
     const client = clientWith({

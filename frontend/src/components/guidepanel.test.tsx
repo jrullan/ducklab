@@ -73,6 +73,21 @@ describe("the guide rail", () => {
 
   // The live pulse sits above the plan: what is happening outranks what is
   // next, and the rail is the one place both survive every view change.
+  it("shows a queued run's engine reason verbatim in the live rail", async () => {
+    useRuns.setState({
+      runs: {
+        "r-queued": {
+          id: "r-queued", project_id: "p", stage: "build", mode: "solo", task_id: "T-097",
+          status: "queued", verdict: "", started_at: "2026-08-11T10:00:00Z",
+          queued_reason: "engine at max_concurrent_runs",
+        } as never,
+      },
+      events: {}, deltas: {}, reasoning: {}, spend: {},
+    });
+    render(<GuideRail client={clientWith([])} projectId="p" />);
+    expect((await screen.findByTestId("rail-running")).textContent).toContain("engine at max_concurrent_runs");
+  });
+
   it("shows running work at the top, even with no steps to offer", async () => {
     useRuns.setState({
       runs: {

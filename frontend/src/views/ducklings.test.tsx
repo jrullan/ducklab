@@ -88,6 +88,27 @@ describe("Ducklings", () => {
     );
   });
 
+  it("round-trips a provider concurrency cap while an unrelated field is edited", async () => {
+    const existing = {
+      ...provider({ id: "openrouter", api_key_env: "OPENROUTER_API_KEY" }),
+      max_concurrent: 3,
+    } as unknown as ProviderView;
+    const client = clientWith([], [existing]);
+    render(<Ducklings client={client} projectId="" />);
+    fireEvent.click(await screen.findByTestId("provider-edit-openrouter"));
+    const cap = screen.getByTestId("provider-max-concurrent") as HTMLInputElement;
+    expect(cap.value).toBe("3");
+    expect(screen.getByTestId("provider-form").textContent).toMatch(/concurrent runs.*blank.*unlimited/i);
+    fireEvent.change(screen.getByTestId("provider-url"), { target: { value: "https://changed.example/v1" } });
+    fireEvent.click(screen.getByTestId("provider-save"));
+    await waitFor(() =>
+      expect(client.providerSet).toHaveBeenCalledWith("openrouter", expect.objectContaining({
+        base_url: "https://changed.example/v1",
+        max_concurrent: 3,
+      })),
+    );
+  });
+
   // A duckling is a model reached through a provider, so offering the button
   // before there is one would promise something that cannot work.
   it("will not add a duckling before there is a provider", async () => {

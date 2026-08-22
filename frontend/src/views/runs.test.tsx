@@ -44,6 +44,18 @@ describe("Runs", () => {
     expect(screen.queryByTestId("runs-view")).toBeNull();
     expect(screen.getByText(/No runs yet/)).toBeTruthy();
   });
+
+  it("shows a queued run's engine reason verbatim, and keeps legacy queued rows plain", () => {
+    render(<Runs runs={[
+      { ...mk({ id: "r-provider-cap", status: "queued", verdict: "", started_at: "2026-07-28T00:00:00Z" }), queued_reason: "waiting for a slot on provider X (held by r-…)" } as unknown as Run,
+      mk({ id: "r-legacy-queue", status: "queued", verdict: "", started_at: "2026-07-27T00:00:00Z" }),
+    ]} />);
+
+    const blocked = screen.getAllByTestId("runs-row").find((row) => row.dataset.run === "r-provider-cap")!;
+    expect(blocked.textContent).toContain("waiting for a slot on provider X (held by r-…)");
+    const legacy = screen.getAllByTestId("runs-row").find((row) => row.dataset.run === "r-legacy-queue")!;
+    expect(legacy.textContent).not.toContain("undefined");
+  });
 });
 
 
