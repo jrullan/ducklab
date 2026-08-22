@@ -290,6 +290,14 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 				if m.Role != "system" {
 					continue
 				}
+				// Adoption inventory turns satisfy the json:inventory contract.
+				if strings.Contains(m.Content, "You are the architect") {
+					for _, um := range req.Messages {
+						if um.Role == "user" && strings.Contains(um.Content, "return the inventory JSON") {
+							return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: `{"items":[{"name":"sighting records","kind":"schema","evidence-path":"internal/service/service.go"}]}`}, FinishReason: provider.FinishStop}}, Usage: provider.Usage{PromptTokens: 90, CompletionTokens: 20}}
+						}
+					}
+				}
 				// Architect turns satisfy the markdown_sections contract, so
 				// stage runs can produce a real proposal under test instead of
 				// failing after the spend is recorded.

@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/runlog"
+
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 )
 
@@ -70,6 +74,62 @@ func TestHasCodeSeesCommittedFilesBeyondTheHarness(t *testing.T) {
 // task that does not exist, so it can never start", a dead end no button
 // could fix, because tasks have no dependency editor. The removal now cleans
 // up the references it dangles.
+func TestAdoptionCoverageUsesNamesAndEvidenceBasenames(t *testing.T) {
+	items := []agent.InventoryItem{{Name: "Billing API", Kind: "service", EvidencePath: "internal/billing/api.go"}, {Name: "Admin UI", Kind: "client", EvidencePath: "web/admin.tsx"}}
+	for name, doc := range map[string]string{
+		"section body":          "## REQ-001 — Existing\n\nThe Billing API is implemented.\n",
+		"out of scope":          "Admin UI is deliberately out of scope.\n",
+		"out of scope preamble": "Admin UI is deliberately out of scope.\n## REQ-001 — Existing\n\nOther capability.\n",
+	} {
+		proposed, err := artifact.Parse(doc, artifact.KindRequirements)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := inventoryUnaccounted(items, proposed)
+		if (name == "section body" && len(got) != 1) || (strings.HasPrefix(name, "out of scope") && len(got) != 1) {
+			t.Errorf("%s: unaccounted=%v", name, got)
+		}
+	}
+	proposed, _ := artifact.Parse("## REQ-001 — Existing\n\nBilling API and Admin UI are covered.\n", artifact.KindRequirements)
+	if got := inventoryUnaccounted(items, proposed); len(got) != 0 {
+		t.Errorf("covered items remain unaccounted: %v", got)
+	}
+}
+
+func TestAdoptionInventoryCoverageAndRunRecord(t *testing.T) {
+	root := t.TempDir()
+	items := make([]agent.InventoryItem, 61)
+	for i := range items {
+		items[i] = agent.InventoryItem{Name: "surface", Kind: "service", EvidencePath: "internal/surface.go"}
+	}
+	inv := &agent.Inventory{Items: items}
+	if len(inv.Items) > 60 {
+		inv.Items = inv.Items[:60]
+		inv.Capped = true
+	}
+	w, err := runlog.NewWriter(root, &runlog.Run{ID: "r-cap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.AppendEvent("survey_inventory", map[string]interface{}{"items": inv.Items, "capped": inv.Capped, "detail": "inventory capped at 60 items"}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := runlog.ReadEvents(filepath.Join(root, ".ducklab", "runs", "r-cap"))
+	if err != nil || len(events) != 1 || events[0].Data["detail"] != "inventory capped at 60 items" {
+		t.Fatalf("cap event = %+v, err=%v", events, err)
+	}
+	proposed, _ := artifact.Parse("## REQ-001 — Existing\n\nA surface.go service.\n", artifact.KindRequirements)
+	if got := inventoryUnaccounted(inv.Items, proposed); len(got) != 0 {
+		t.Fatalf("covered item remains: %v", got)
+	}
+	state := &runlog.Run{PendingData: map[string]interface{}{}}
+	state.PendingData["unaccounted"] = inventoryUnaccounted([]agent.InventoryItem{{Name: "Billing API", Kind: "service", EvidencePath: "internal/billing.go"}}, proposed)
+	if len(state.PendingData["unaccounted"].([]agent.InventoryItem)) != 1 {
+		t.Fatal("omitted item was not recorded")
+	}
+}
+
 func TestRemovingATaskCleansTheReferencesToIt(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{

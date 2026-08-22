@@ -80,6 +80,8 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseDecomposition(text)
 	case contract == "json:triage":
 		return parseTriage(text)
+	case contract == "json:inventory":
+		return parseInventory(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
 	case strings.HasPrefix(contract, "markdown_sections:"):
@@ -143,6 +145,35 @@ func parseChoice(text string) (*Choice, error) {
 		return nil, fmt.Errorf(`choice contract: "reason" is required`)
 	}
 	return &c, nil
+}
+
+type InventoryItem struct {
+	Name         string `json:"name"`
+	Kind         string `json:"kind"`
+	EvidencePath string `json:"evidence-path"`
+}
+
+type Inventory struct {
+	Items  []InventoryItem `json:"items"`
+	Capped bool            `json:"capped,omitempty"`
+}
+
+func parseInventory(text string) (*Inventory, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, fmt.Errorf("inventory contract: %w", err)
+	}
+	var v Inventory
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return nil, fmt.Errorf("inventory contract: %w", err)
+	}
+	valid := map[string]bool{"route": true, "handler": true, "schema": true, "service": true, "client": true, "integration": true, "config": true}
+	for i, item := range v.Items {
+		if strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.EvidencePath) == "" || !valid[item.Kind] {
+			return nil, fmt.Errorf("inventory contract: invalid item %d", i)
+		}
+	}
+	return &v, nil
 }
 
 func parseJSONObject(text string) (map[string]interface{}, error) {

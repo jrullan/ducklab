@@ -49,6 +49,15 @@ func SoloArtifactScript(prefix string) *Script {
 	}
 }
 
+// InventoryScript is the mandatory first pass of an adoption survey.
+func InventoryScript() *Script {
+	return &Script{
+		Name:  "survey-inventory",
+		Turns: []Turn{{Role: config.RoleArchitect, Toolbelt: "full", Contract: "json:inventory", MaxTurns: 12}},
+		Until: `round == 1`, MaxRounds: 1,
+	}
+}
+
 // ArtifactScript returns the script a stage should run for a mode.
 //
 // Unknown modes fall back to council rather than failing: the default is the

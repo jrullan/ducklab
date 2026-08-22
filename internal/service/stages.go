@@ -434,6 +434,15 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// stand-pat fallback: sectioned updates call Execute once per pass, and
 	// the fallback must read the pass it belongs to, never a stale one.
 	var lastArchitectTexts atomic.Pointer[[]string]
+	var inventory *agent.Inventory
+	adoptSurvey := req.Adopt
+	if req.Stage == "spec" && !req.Adopt {
+		if reqs, e := artifact.Load(projectRoot, artifact.KindRequirements); e == nil && reqs.Front.Origin == "adopted" {
+			if sp, e := artifact.Load(projectRoot, artifact.KindSpec); e == nil && len(sp.Sections) == 0 {
+				adoptSurvey = true
+			}
+		}
+	}
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot: projectRoot,
 		Stage:       stage.Name(req.Stage),
@@ -453,7 +462,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 			return ""
 		}(),
-		Adopt:  req.Adopt,
+		Adopt: adoptSurvey,
+		OnInventory: func(inv *agent.Inventory) error {
+			inventory = inv
+			data, e := json.MarshalIndent(inv, "", "  ")
+			if e != nil {
+				return e
+			}
+			if e = rs.writer.WriteInventory(data); e != nil {
+				return e
+			}
+			detail := map[string]interface{}{"items": inv.Items, "kinds": inventoryKinds(inv), "capped": inv.Capped}
+			if inv.Capped {
+				detail["detail"] = "inventory capped at 60 items"
+			}
+			return rs.writer.AppendEvent("survey_inventory", detail)
+		},
 		Extend: req.Extend,
 		Images: images,
 		// A small architect gets the engine as its working memory: below
@@ -465,6 +489,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		}(),
 		Ducklings: ducklingList(roster),
 		Critics:   critics,
+		// Critics receive the recorded survey surfaces as named targets; the
+		// final lexical coverage result is persisted after the proposal lands.
 		// The architect's earlier replies from the latest Execute, newest
 		// first, without the final one: the stand-pat fallback's memory.
 		Drafts: func() []string {
@@ -507,6 +533,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				ExecContext: ectx,
 				Runner:      s.runnerFor(cache, roster, ectx),
 				Roster:      roster,
+				InventoryUnaccounted: func() []agent.InventoryItem {
+					if !adoptSurvey || inventory == nil {
+						return nil
+					}
+					return inventory.Items
+				}(),
+				InventoryCoverage: func(raw string) []agent.InventoryItem {
+					if !adoptSurvey || inventory == nil {
+						return nil
+					}
+					doc, e := artifact.Parse(raw, stage.Name(req.Stage).Kind())
+					if e != nil {
+						return inventory.Items
+					}
+					return inventoryUnaccounted(inventory.Items, doc)
+				},
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 				},
@@ -556,6 +598,21 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		"sections": len(result.Proposed.Sections),
 		"remapped": len(result.Remapped),
 	})
+	if adoptSurvey && inventory != nil {
+		unaccounted := inventoryUnaccounted(inventory.Items, result.Proposed)
+		if rs.run.PendingData == nil {
+			rs.run.PendingData = map[string]interface{}{}
+		}
+		rs.run.PendingData["unaccounted"] = unaccounted
+		if len(unaccounted) > 0 {
+			names := make([]string, 0, len(unaccounted))
+			for _, item := range unaccounted {
+				names = append(names, item.Name)
+			}
+			rs.run.Warning = fmt.Sprintf("this adoption survey proposal leaves %d inventoried surface(s) unaccounted: %s", len(unaccounted), strings.Join(names, ", "))
+		}
+		rs.writer.AppendEvent("survey_coverage", map[string]interface{}{"unaccounted": unaccounted})
+	}
 	// What this proposal would DESTROY, said before the decision. A run asked
 	// to ADD one section replaced the whole spec with only that section —
 	// sixteen approved sections gone — and the promote asked no questions:
@@ -615,10 +672,11 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-	rs.run.PendingData = map[string]interface{}{
-		"artifact": string(result.Kind),
-		"sections": len(result.Proposed.Sections),
+	if rs.run.PendingData == nil {
+		rs.run.PendingData = map[string]interface{}{}
 	}
+	rs.run.PendingData["artifact"] = string(result.Kind)
+	rs.run.PendingData["sections"] = len(result.Proposed.Sections)
 	// In digest mode "the references were considered" is a claim about tool
 	// use, not about the prompt — so the gate names the documents no one
 	// opened, and the person weighs the draft knowing it. The same honesty
@@ -633,6 +691,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 }
 
 // sectionsBodySize totals the text a document actually carries.
+func inventoryKinds(inv *agent.Inventory) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, item := range inv.Items {
+		if !seen[item.Kind] {
+			seen[item.Kind] = true
+			out = append(out, item.Kind)
+		}
+	}
+	return out
+}
+
 func sectionsBodySize(secs []artifact.Section) int {
 	total := 0
 	for _, sec := range secs {

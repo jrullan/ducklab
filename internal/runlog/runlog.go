@@ -422,6 +422,10 @@ func (w *Writer) WriteBrief(brief string) error {
 	return os.WriteFile(path, []byte(brief), 0o644)
 }
 
+func (w *Writer) WriteInventory(data []byte) error {
+	return os.WriteFile(filepath.Join(w.runDir, "inventory.json"), data, 0o644)
+}
+
 // WriteTestHunks writes the part of the diff that touches tests (05 §5.3).
 //
 // Kept as its own file rather than recomputed from diff.patch, so what the

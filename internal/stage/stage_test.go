@@ -2,11 +2,13 @@ package stage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
@@ -57,6 +59,51 @@ func TestIntakeWritesAProposal(t *testing.T) {
 	}
 	if proposed.Front.Approved() {
 		t.Error("proposal arrived approved")
+	}
+}
+
+func TestAdoptRunsInventoryBeforeDraftAndCapsIt(t *testing.T) {
+	root := projectWith(t, nil)
+	calls := 0
+	var recorded int
+	res, err := Run(context.Background(), Params{
+		ProjectRoot: root, Stage: Intake, RunID: "r-inventory", Adopt: true,
+		OnInventory: func(inv *agent.Inventory) error { recorded = len(inv.Items); return nil },
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			calls++
+			if script.Name == "survey-inventory" {
+				items := make([]string, 61)
+				for i := range items {
+					items[i] = fmt.Sprintf(`{"name":"surface-%d","kind":"service","evidence-path":"internal/surface-%d.go"}`, i, i)
+				}
+				return fmt.Sprintf(`{"items":[%s]}`, strings.Join(items, ",")), nil
+			}
+			return "## REQ-001 — Surveyed\n\n**Priority:** must\n\nBody.\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || recorded != 60 || res == nil {
+		t.Fatalf("inventory calls=%d recorded=%d result=%v", calls, recorded, res != nil)
+	}
+}
+
+func TestNonAdoptDoesNotRunInventory(t *testing.T) {
+	root := projectWith(t, nil)
+	calls := 0
+	_, err := Run(context.Background(), Params{ProjectRoot: root, Stage: Intake, RunID: "r-normal", Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+		calls++
+		if script.Name == "survey-inventory" {
+			t.Fatal("non-adopt stage ran inventory")
+		}
+		return "## REQ-001 — Normal\n\n**Priority:** must\n\nBody.\n", nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d, want one draft", calls)
 	}
 }
 

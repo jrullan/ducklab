@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -91,6 +92,9 @@ type Params struct {
 	// Execute runs the conversation. Injected so the stage logic — prompt
 	// assembly, id assignment, the proposal — is testable without a model.
 	Execute func(ctx context.Context, script *strategy.Script, prompt string) (string, error)
+	// OnInventory records the deterministic adoption inventory produced by the first pass.
+	OnInventory func(*agent.Inventory) error
+	Inventory   *agent.Inventory
 	// Drafts returns the architect's earlier replies from the LAST Execute,
 	// newest first, excluding the final one Execute already returned. A
 	// council revise that stands pat replies in prose — "verified, no
@@ -164,12 +168,40 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		}
 		return runFragment(ctx, p, base, ask)
 	}
+	if inventoryTurn(p, current) && p.Inventory == nil {
+		raw, ierr := p.Execute(ctx, strategy.InventoryScript(), "Survey the project tree and return the inventory JSON. Each item must be {name, kind, evidence-path}; include route, handler, schema, service, client, integration, and config surfaces.")
+		if ierr != nil {
+			return nil, ierr
+		}
+		parsed, ierr := agent.ParseContract("json:inventory", raw)
+		if ierr != nil {
+			return nil, ierr
+		}
+		p.Inventory = parsed.(*agent.Inventory)
+		if len(p.Inventory.Items) > 60 {
+			p.Inventory.Items = p.Inventory.Items[:60]
+			p.Inventory.Capped = true
+		}
+		if p.OnInventory != nil {
+			if ierr := p.OnInventory(p.Inventory); ierr != nil {
+				return nil, ierr
+			}
+		}
+	}
 	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision, p.Adopt)
 	if err != nil {
 		return nil, err
 	}
 
 	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
+	if inventoryTurn(p, current) && p.Inventory != nil {
+		var checklist strings.Builder
+		checklist.WriteString("\n## Survey inventory checklist\nEvery inventoried item must be covered by a section or named in the document as deliberately out of scope.\n")
+		for _, item := range p.Inventory.Items {
+			fmt.Fprintf(&checklist, "- %s (%s) [%s]\n", item.Name, item.Kind, item.EvidencePath)
+		}
+		prompt += checklist.String()
+	}
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}
@@ -432,6 +464,23 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		kind.Prefix(), NextFree(current.Sections, kind.Prefix()))
 
 	return b.String(), nil
+}
+
+// inventoryTurn limits the extra pass to adoption intake and the first spec
+// derived from adopted requirements. Callers may set Adopt for either path;
+// the artifact check keeps direct stage users from applying it elsewhere.
+func inventoryTurn(p Params, current *artifact.Document) bool {
+	if !p.Adopt {
+		return false
+	}
+	if p.Stage == Intake {
+		return true
+	}
+	if p.Stage != Spec || current == nil || len(current.Sections) != 0 {
+		return false
+	}
+	reqs, err := artifact.Load(p.ProjectRoot, artifact.KindRequirements)
+	return err == nil && reqs != nil && reqs.Front.Origin == "adopted"
 }
 
 // approvedSections returns requirements that are not dropped.

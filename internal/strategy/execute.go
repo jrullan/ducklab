@@ -60,6 +60,12 @@ type ExecuteParams struct {
 	Diff func() (string, error)
 	// Roster maps a role to the duckling that plays it.
 	Roster map[config.Role]config.DucklingID
+	// InventoryUnaccounted is the lexical coverage gap from an adoption survey.
+	// It is shown only to document critics, so they can aim at named gaps.
+	InventoryUnaccounted []agent.InventoryItem
+	// InventoryCoverage derives lexical gaps from the architect draft before critique.
+	InventoryCoverage func(string) []agent.InventoryItem
+
 	// TurnCaps overrides how many model calls one turn of a role may chain.
 	// Absent leaves whatever the script or the mode carries.
 	//
@@ -205,6 +211,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
 			if outcome != nil {
 				result.Outcome = outcome
+				if turn.Role == config.RoleArchitect && params.InventoryCoverage != nil {
+					params.InventoryUnaccounted = params.InventoryCoverage(outcome.Text)
+				}
 			}
 			if err != nil {
 				// What it managed to say and do before it died, recorded on the
@@ -437,6 +446,12 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString("\n\n" + deliverablesContract(params.Deliverables))
 		}
 	case config.RoleReviewer:
+		if len(params.InventoryUnaccounted) > 0 {
+			b.WriteString("\n\n## Adoption survey gaps\nThe proposal does not account for these inventoried surfaces; critique the named gaps:\n")
+			for _, item := range params.InventoryUnaccounted {
+				fmt.Fprintf(&b, "- %s (%s) [%s]\n", item.Name, item.Kind, item.EvidencePath)
+			}
+		}
 		if operational != "" {
 			b.WriteString("\n\n## Operational summary\n\n```json\n" + operational + "\n```\n")
 		}

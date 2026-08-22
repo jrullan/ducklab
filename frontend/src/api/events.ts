@@ -288,6 +288,8 @@ export const KNOWN_EVENT_TYPES = [
   "budget_lifted",
   "findings_filed",
   "sections_removed",
+  "survey_inventory",
+  "survey_coverage",
   "sections_gutted",
   "task_history_rewritten",
   "advice",
