@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 9
-updated_at: 2026-08-20T16:45:43Z
-run_id: r-20260820-164040-puiq
-ducklings: [glm52, qwen38-max, atom-local, dsv4flash, terra, k3]
-based_on: 0a8c1afcb81a8064
+version: 10
+updated_at: 2026-08-22T04:01:58Z
+run_id: r-20260822-034742-disj
+ducklings: [k3, qwen38-max, atom-local, luna, terra]
+based_on: 0d42d3bbf38a6bd1
 approved_by: human
 ---
 
@@ -2126,4 +2126,51 @@ Deterministic formatting gap in the configured gate command with two known drift
 **Verification (triage recommends):** build-only — The fix edits a gate command string in project.toml; a forced test would grep that string and pin the implementation, not the behavior.
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-096 — Per-provider concurrency caps in the run queue with the reason recorded on the run
+
+**Implements:** SPEC-025, SPEC-030
+
+Give providers an optional `max_concurrent` and teach the queue to count live runs per provider, so two runs seated on a one-slot local endpoint queue honestly — with a reason that names the provider and the runs holding it — instead of serializing invisibly at inference.
+
+**Deliverables:**
+- `config.Provider` gains `MaxConcurrent int` (`toml:"max_concurrent" json:"max_concurrent,omitempty"`); zero/omitted means unlimited, and the strict TOML parser, save round-trip, and `ProviderView` (or its equivalent fleet API shape) carry it untouched.
+  - The field lives beside `Kind/BaseURL/APIKeyEnv/Headers` in `internal/config/config.go`; existing config round-trip tests in `internal/config/config_test.go` gain a case asserting a set value survives load/save and an absent key stays zero.
+- The engine applies starter defaults when no explicit `max_concurrent` is set: a provider whose `base_url` resolves to loopback/LAN/`.local` (the same locality derivation already used for scorecards) is treated as cap 1, other providers as cap 8.
+  - The default is computed at queue-consultation time from live config, not persisted, so editing `base_url` or the cap takes effect without a migration.
+- `runQueue` counts running runs per provider id and `canStart` refuses when ANY provider in the submitting run's resolved roster is at its cap.
+  - A run occupies every provider its roster seats: the set of provider ids behind the run's resolved roster ducklings (the same resolution that already lands in the run record's `roster`) is attached to the `queued` item at submit time.
+  - Counts are reserved in `reserve` and released in `done`, exactly like `perProj`; the existing global limit, per-project rule, working-tree `held` hook, chained front-jump, `poke`, `remove`, and `drain` behavior are untouched.
+- The queued reason for a provider hold names the provider and the runs holding it, in the existing style: `waiting for a slot on provider X (held by r-…)`.
+  - `submit`'s reason selection gains this third branch alongside "engine at max_concurrent_runs" and the working-tree holds; the string is produced once, in the queue, and is what both the `run_queued` event and the run record carry.
+- `runlog.Run` gains a `queued_reason` field, written to `state.json` when a run queues and cleared when it starts.
+  - `submit` already sets `Status = "queued"` and appends the `run_queued` event with the reason; the same string is now stored on the run record so `GET /v1/runs` and `GET /v1/runs/{id}` return it without replaying events.
+  - `start` clears the field before writing `running`; rehydration from disk preserves it like any other state field.
+- Go tests in `internal/service/queue_test.go` (plus config tests) assert: two runs sharing a cap-1 provider — the second queues with the provider-named reason and is promoted by `done` the moment the first finishes; runs sharing a cap-8 hosted provider start in parallel up to 8; a run whose roster spans two providers is refused when either is at cap; an explicit `max_concurrent` overrides the locality default; `queued_reason` is set on queue and cleared on start; and all pre-existing queue tests still pass unmodified.
+
+**Out of scope:** Any desktop rendering (that is T-901); per-turn or per-call provider throttling inside a running run; fairness/aging policy beyond the existing waiting-line order; persisting the waiting line across restarts; MCP surface changes.
+
+**Assumption:** The roster-to-provider resolution the run record already performs (visible as `roster` on `runlog.Run`) happens at or before queue submit time for every run kind — build, test-first, stage, chat — so a provider set can be attached to the `queued` item; where a run's seats genuinely cannot be known until later, that run contributes no provider holds rather than guessing.
+
+### T-097 — Show the queued reason in the desktop and expose provider max_concurrent in Settings
+
+**Implements:** SPEC-062, SPEC-025
+**Depends on:** T-096
+
+Make a queued run look alive: everywhere running runs already show, a queued run shows the engine's reason verbatim, and the person can see and edit the per-provider cap that produced it.
+
+**Deliverables:**
+- The frontend `Run` type in `frontend/src/api/client.ts` gains `queued_reason?: string`, matching the engine field from T-900; `docs/openapi.json` / `frontend/src/api/generated.ts` are regenerated via `make api` if the route table generation covers it, never hand-edited.
+  - **Assumption:** the run record's OpenAPI entry picks the new field up from `runlog.Run`; if the route table lists fields explicitly, the addition lands in `internal/engineapi/routes_table.go` instead.
+- Everywhere a running run renders, a queued run renders its `queued_reason` verbatim: the Now inbox, the Runs list, and the guide rail's Recent runs strip.
+  - `frontend/src/views/Runs.tsx` already filters `queued` into the running bucket; the row gains the reason text (e.g. under or beside the status chip) with no rewording — "engine at max_concurrent_runs", "another run holds this project working tree", or "waiting for a slot on provider X (held by r-…)" arrive from the engine as-is.
+  - The same string shows for queued entries in `frontend/src/views/Now.tsx` and the Recent runs rail component, following each surface's existing layout conventions for secondary text; no new status colors or chips are invented — queued keeps its current visual treatment plus the reason.
+  - The run store (`frontend/src/store/runs.ts`) needs no new derivation: the field rides the run record it already holds.
+- The provider editing surface in the desktop (the providers section of `frontend/src/views/Ducklings.tsx`, which already round-trips `ProviderView` through `client.providers()`) gains a `max_concurrent` numeric field: empty/0 means unlimited, and the form posts it through the same provider save path it uses today without wiping other fields.
+  - The field is labeled to make the semantics plain (concurrent runs this endpoint will seat at once; blank = unlimited).
+- Frontend tests assert: a queued run with `queued_reason` renders that exact string in the Runs list and in the Now inbox (extend `frontend/src/views/runs.test.tsx` and `frontend/src/views/now.test.tsx`); a queued run without the field renders as before; the provider form round-trips a `max_concurrent` value and preserves it when editing an unrelated field.
+
+**Out of scope:** Queue position indicators, per-provider live occupancy dashboards, CLI rendering of `queued_reason` (the record carries it; printing it in the CLI is a separate task), changing how `run_queued` events render in transcripts, and any engine behavior.
+
+**Assumption:** The existing provider save path used by `Ducklings.tsx` tolerates new keys on the provider object end-to-end once the engine config and API shapes accept them; no new endpoint is needed.
 

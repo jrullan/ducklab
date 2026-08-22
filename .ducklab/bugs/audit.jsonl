@@ -445,3 +445,5 @@
 {"ts":"2026-08-22T02:34:25Z","bug":"B-111","from":"open","to":"triaged","actor":"human","via":"move"}
 {"ts":"2026-08-22T02:34:25Z","bug":"B-111","from":"triaged","to":"in_progress","actor":"human","via":"move"}
 {"ts":"2026-08-22T02:34:25Z","bug":"B-111","from":"in_progress","to":"fixed","actor":"human","via":"move"}
+{"ts":"2026-08-22T03:18:41Z","bug":"B-108","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-22T03:18:41Z","bug":"B-112","from":"open","to":"triaged","actor":"engine","via":"triage"}
