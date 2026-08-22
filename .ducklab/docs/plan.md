@@ -2255,3 +2255,224 @@ The desktop shows what the engine recorded: the proposal card names unaccounted 
 
 **Out of scope:** engine-side computation of coverage (T-900); any blocking or gating on unaccounted items; MCP or CLI surfacing; restyling the existing `unread_refs` line.
 
+### T-102 — Add dev-only engine connection fallback via ?engine=&token= query params or VITE_ env when window.ducklab is absent
+
+Fixes B-108.
+
+## Reported
+
+window.ducklab (baseUrl+token) is injected only by the Wails shell, so `npm run dev` in a plain browser has no way to connect to a real or fake engine — a frontend contributor must build and install the whole desktop to see any change live, and cmd/fake-engine (built precisely so the frontend can be exercised without a model, GPU or repo) is reachable only through the playwright fixtures. A dev-only fallback — read ?engine=&token= query params (or VITE_ env) when window.ducklab is absent in dev builds — would make the induction loop: go run ./cmd/fake-engine, npm run dev, open the URL. Contributor friction found while preparing the docs for collaborators.
+
+**Deliverables:**
+- When window.ducklab is absent in a dev build, App resolves connection from ?engine= and ?token= URL query params (and/or VITE_DUCKLAB_ENGINE / VITE_DUCKLAB_TOKEN env) instead of erroring
+- The fallback is gated to dev builds (import.meta.env.DEV) so production/desktop behavior is unchanged
+- The existing 'no engine connection details' error still appears when neither window.ducklab nor query/env params are present
+- A vitest test covers: query params produce a working EngineClient; absence of both sources still surfaces the error
+- README or contributor docs gain the induction loop: go run ./cmd/fake-engine, npm run dev, open http://localhost:5173/?engine=...&token=...
+
+## Triage
+
+**Component:** frontend connection bootstrap
+**Suspected files:** frontend/src/app/App.tsx
+
+window.ducklab is injected only by the Wails shell, so npm run dev in a browser dead-ends before any engine connection, blocking the fake-engine induction loop the fix should close.
+
+**Verification (triage recommends):** test-first — Vitest render of App with window.ducklab undefined and location.search='?engine=http://x&token=t' must construct the EngineClient instead of the 'no engine connection details' error
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-103 — Apply task-id renames to body prose in PlanTaskIDs, not just Depends-on lines
+
+Fixes B-114.
+
+## Reported
+
+AssignIDs+RewriteReferences remap placeholder ids (T-900, T-901, SPEC-900) in section ids and field lines (Implements:, Depends on:) but not in running prose, so an architect who writes .that is T-901. or .the engine field from T-900. inside a deliverable ships those stale ids into the accepted document. Evidence in the CURRENT plan.md: the fresh T-096/T-097 pair arrived citing T-900/T-901 in body text (hand-patched post-accept, commit refs this bug), and the older chat-images tasks still carry the same scars around lines 1408/1806/1821/1826 — the pattern repeats on every extend that cross-references its sibling. Fix: RewriteReferences applies the remap to body text too (word-boundary replacement of mapped ids), with a test where two placeholder tasks cite each other in prose.
+
+**Deliverables:**
+- PlanTaskIDs applies the renamed map to task Body prose (word-boundary aware, so T-900 inside T-9000-like text is untouched), not only to the Depends-on field
+- A test in internal/stage/ids_test.go feeds two placeholder tasks that cite each other in body prose and asserts no placeholder id survives the renumber
+- Existing tests (TestRenumberingCarriesDependenciesWithIt, overlapping-id handling) still pass
+- Implements/Depends-on field rewriting behaviour is unchanged
+
+## Triage
+
+**Component:** stage / plan id renumbering
+**Suspected files:** internal/stage/ids.go, internal/stage/ids_test.go
+
+PlanTaskIDs renumbers tasks (T-900→T-096) but only remaps the Depends-on field via remapDeps, leaving stale placeholder ids in running prose of accepted plans; RewriteReferences never sees task-level renames.
+
+**Verification (triage recommends):** test-first — PlanTaskIDs with two produced tasks T-900/T-901 citing each other in prose: after renumber to T-096/T-097, body must not contain T-900/T-901
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-104 — Add build/test default-mode selects to Settings wired to the existing buildMode/testMode state and save path
+
+Fixes B-117.
+
+## Reported
+
+The person asked where to pick the preferred mode for test runs and build runs. Nowhere: the engine supports it end to end — Defaults.BuildMode/TestMode in config, GET/PUT /v1/defaults/modes carries build_mode/test_mode, and resolveBuildMode is the unified omitted-mode rule (settings win, then the project [modes] habit, then solo) — and Settings.tsx even LOADS the values into buildMode/testMode state and SAVES them back in the PUT... but no selector ever calls setBuildMode/setTestMode. The value round-trips invisibly; today it is editable only by hand in config.toml. Fix: two labeled selects (build runs open in / test runs open in: solo|pair|tournament|split, blank = project habit then solo) in the Settings section that already owns the modes payload, wired to the existing state and save path; a test pins that changing the select lands in the PUT body. The per-project [modes] table can stay config-only for now, but say so in the field help text.
+
+**Deliverables:**
+- Two labeled selects ("build runs open in" / "test runs open in") render in the Settings section owning the modes payload, with options solo|pair|tournament|split plus a blank choice meaning project [modes] habit then solo
+- Each select's onChange calls setBuildMode/setTestMode and marks the form touched so the shared Save button applies
+- Changing a select and saving lands the chosen value in the modeDefaultsSet PUT body as build_mode/test_mode
+- Help text on the controls states the per-project [modes] table stays config.toml-only for now
+- A frontend test asserts the select-to-PUT-body round-trip (fails before the fix, passes after)
+
+## Triage
+
+**Component:** frontend settings
+**Suspected files:** frontend/src/views/Settings.tsx
+
+The engine honors Defaults.BuildMode/TestMode end-to-end and Settings loads/saves the values, but no UI control ever calls the setters, so the preference is invisible and editable only by hand in config.toml.
+
+**Verification (triage recommends):** test-first — Render Settings with a stubbed client, change the default-build-mode select, click settings-save, assert modeDefaultsSet body carries build_mode/test_mode — budget.test.tsx already has this exact mock-and-assert pattern.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-105 — Remove the 'your team' roster section from Settings
+
+Fixes B-118.
+
+## Reported
+
+The your team section in Settings edits the GLOBAL ROLE PINS — rung 4 of seat precedence (project mode seat, project role pin, global mode seat, global role pin) — through eight dropdowns, while the Roster board is the canonical seat surface and its Common section already edits the same pins for the roles where they matter (triager, consultant, scribe, advisor). Two editors over one datum is a silent-overwrite risk (full-payload saves), and the section footer itself says role assignments are managed on the Roster board. The person asked what practical utility the section has; the honest answer was almost none, and a read-only replacement adds no value either. Scope: DELETE the team section from Settings — its dropdowns and the roster summary; move the verification card (gate + link_deps display) that currently rides at the top of that section to a sensible surviving home; change the Settings default section (team was the landing tab) to the most-used remaining one; keep the role-pin data and resolver rung untouched (Roster board Common remains its editor; non-common role pins become config-file-only, which is fine because a global implementer pin is a trap the UI should not offer). Tests: settings tests that reference the team section are rewritten with this reasoning, and a test pins that the removed dropdowns no longer ride the settings save payload so a stale form cannot wipe pins the Roster board wrote.
+
+**Deliverables:**
+- Settings renders no fn-* function rows or roster-select-* dropdowns; the 'team' nav entry is gone
+- The verification card (gate, setup, link_deps) still renders in a surviving section
+- Settings no longer lands on the removed section; the default is a remaining one
+- A rewritten test asserts the dropdowns are absent and the settings save payload never includes role pins
+- Roster board (Ducklings.tsx) remains the only UI editor of role pins; roster data and resolver rung logic untouched
+
+## Triage
+
+**Component:** settings-ui
+**Suspected files:** frontend/src/views/Settings.tsx, frontend/src/views/budget.test.tsx
+
+A second editor over the global role pins duplicates the Roster board and risks silent overwrite; the fix is a UI deletion plus card relocation, cleanly testable by asserting the removed widgets don't render or leak into the save payload.
+
+**Verification (triage recommends):** test-first — render Settings: assert fn-*/roster-select-* absent, team nav entry gone, verification card relocated to a surviving section, and the save payload carries no role-pin fields
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-106 — Move the running section to the top of the Now view
+
+Fixes B-119.
+
+## Reported
+
+The running section should be at the top of the Now view instead of at the bottom. When I open the Now view I expect to see what's currently running at the top of the view.
+
+**Deliverables:**
+- In frontend/src/views/Now.tsx the now-running section renders as the first section inside now-view, ahead of now-waiting, now-verify, now-reopened, and now-failures
+- A component test renders Now with at least one active run plus one fixed bug/waiting run and asserts now-running's DOM position precedes the other sections
+- Existing Now view tests (waiting, verify, quiet, footer) keep passing unchanged
+
+## Triage
+
+**Component:** desktop Now view
+**Suspected files:** frontend/src/views/Now.tsx
+
+The screenshot and Now.tsx both show the running section rendered last in the Now view column, after waiting/verify/reopened/failures; moving the now-running block to the top of the returned JSX is a one-spot reorder with an honest DOM-order test.
+
+**Verification (triage recommends):** test-first — Render Now with a fixed bug and an active run in the store; assert now-running precedes now-verify (compareDocumentPosition or child order of now-view).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-107 — Suggest a measurably stronger seat at FAILED-run and distress decision points when deliverable progress stalls
+
+Fixes B-120.
+
+## Reported
+
+Watching T-100 climb past 13 turns raised it: when the measurable signals say a duckling is at capacity on a task, ducklab should SUGGEST escalating to a seat whose scorecard is provably stronger — never route silently (the house law: suggested, never routed; an auto-escalation ladder is the failover pattern ducklab deliberately is not).
+
+The trap this must respect, by name: B-098. From the outside, at-capacity and badly-briefed look identical — same climbing turns, same red gates. Luna failed T-090 three times on a vague report and fixed it in one pass once the report carried anchors; naive escalation would have burned a 20x-cost seat against the same bad prompt. The suggestion therefore ALWAYS offers both diagnoses.
+
+Design:
+- WHERE: existing decision points only — the FAILED run card (beside Retry with this note) and the distress pause. Never mid-turn, never automatic.
+- WHAT IT SHOWS: evidence, side by side — the struggling seat's signals this run (turns vs the mode median, consecutive red gates, brake refusals) and the candidate's scorecard (in-seat pass rate with the Wilson floor, cost/run). Three actions: relaunch with the stronger seat; improve the task body (brief-quality failures wear the same costume); continue as-is.
+- WHAT CARRIES OVER: test-first makes escalation cheap and honest — the committed red test is the portable definition of done; the new seat starts fresh against the same red, no failed diff carried.
+- TRIGGER: thresholds over what is already measured (e.g. agent turns exceed 2x the mode median, or N consecutive red round gates), with the firing threshold named in the run event — narrated, never silent.
+- CANDIDATE RULE: only a seat measurably stronger on THIS kind of work (same-role scorecard, minimum runs, Wilson lower bound above the current seat's) — no candidate, no suggestion; the card says why when asked.
+
+Sibling of the queued capability-asymmetric-seating idea (report-card SUGGESTED pre-run); this is the same principle mid/post-run with failure evidence in hand. Reported while r-20260822-215745 (T-100) was live at 13+ turns.
+
+UPDATE (same day, verified in r-20260822-215745): the person watching the transcript spotted the sharpest trigger signal, and the record already structures it — deliverables_report events carry a `missing` array per implementer report. The run shows the exact at-capacity signature: missing [1,2,3,4,5,6] -> [4,6] -> [] -> [6] -> [6] -> [6] -> [], i.e. the checklist CONVERGED and then STUCK on one item across three consecutive reports, while the implementer hit its calls/reply cap three times and consulted the advisor five times. A stuck deliverable (same item missing in N consecutive reports) is a better escalation trigger than raw turn count: turns measure effort, a non-converging checklist measures progress. Make it the primary trigger, with turns-vs-median and red-gate streaks as secondaries — all three named in the firing event.
+
+**Deliverables:**
+- stuck-deliverable detection: same deliverable id in the missing/undelivered set across N consecutive deliverables_report events is the primary escalation trigger, with turns-vs-mode-median and consecutive red round gates as named secondaries
+- an escalation_suggestion run event fires at run FAILED and at the distress pause (never mid-turn, never automatic), naming which of the three thresholds fired and their values
+- the suggestion candidate comes from same-role scorecards ranked by Wilson lower bound with a minimum-runs floor, and is only emitted when the candidate's lower bound exceeds the current seat's; no candidate emits nothing but the card can explain why
+- the suggestion payload carries both diagnoses side by side (seat-at-capacity signals this run vs task-brief quality) and offers the three actions: relaunch with stronger seat, improve task body, continue as-is
+- tests cover: stalled-checklist run emits the event with the stuck item named; converging run at equal turn count emits nothing; no-stronger-candidate case emits no suggestion
+
+## Triage
+
+**Component:** escalation-suggestion
+**Suspected files:** internal/strategy/execute.go, internal/strategy/rubberduck.go, internal/service/candidates.go, internal/service/roster.go, internal/service/lifecycle.go
+
+New observability-plus-suggestion feature over already-recorded deliverables_report/distress events and the existing Wilson-ranked candidate machinery, with concrete trigger semantics spelled out in the report.
+
+**Verification (triage recommends):** test-first — Trigger logic is pure computation over recorded run events: feed a run record whose deliverables_report missing-arrays stall on one item across N reports and assert an escalation-suggestion event fires naming all three triggers, with a candidate drawn from RankCandidates Wilson-floor ordering.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-108 — Build a ducklab-mcp.mcpb bundle (manifest + linux binary) as a release artifact so the official MCP registry can list ducklab
+
+Fixes B-112.
+
+## Reported
+
+registry.modelcontextprotocol.io only accepts servers installable from trusted sources: npm/PyPI/NuGet/OCI, a remote URL, or an MCPB bundle attached to a GitHub release. ducklab mcp serve is a locally built Go binary, so ducklab cannot be listed yet. Path of least resistance: build an .mcpb bundle (manifest + linux binary) as a release artifact in the release flow, then publish docs/mcp-registry/server.json with mcp-publisher. The draft server.json and the full send kit are in docs/mcp-registry/.
+
+**Deliverables:**
+- A make target or script (e.g. `make mcpb`) cross-builds the linux/amd64 ducklab binary and assembles ducklab-mcp.mcpb per the MCPB spec (manifest.json + binary)
+- The bundle manifest declares `ducklab mcp serve` as the stdio command, matching internal/cli/mcp.go's invocation contract
+- An automated e2e/shell check builds the bundle, extracts it, and verifies the manifest and binary and that the binary answers the manifest's declared invocation
+- The release flow attaches the .mcpb to GitHub releases and docs/mcp-registry/server.json's vX.Y.Z placeholder and README publishing steps are updated to point at the real artifact
+
+## Triage
+
+**Component:** release packaging / MCP distribution
+**Suspected files:** Makefile, docs/mcp-registry/server.json, docs/mcp-registry/README.md, internal/cli/mcp.go
+
+ducklab mcp serve already exists as a stdio MCP server; the only gap is that no release flow produces the MCPB bundle the official registry requires, which is verifiable by building and extracting the bundle.
+
+**Verification (triage recommends):** test-first — An e2e-style shell check can run the bundle target, unzip the .mcpb, assert manifest.json plus the linux binary are present, and invoke the binary per the manifest's declared stdio command (mirroring e2e/ac_test.sh).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-109 — Export acceptance receipts and add ducklab proof verify
+
+Fixes B-113.
+
+## Reported
+
+An accept already records everything a third party would need — the committed sha, the gate command, its exit code, duration, and the clean-checkout reproduction verdict (acceptance_gate on the run record). But the only consumer is the operator who trusts their own engine: there is no artifact someone WITHOUT the engine can verify. Utility appears at trust boundaries, ranked: (1) compliance/audit evidence for client work — a payroll-logic change carries a receipt presentable to an auditor without repo access; (2) the launch-post skeptic — `ducklab proof verify` lets a stranger check the built-itself claim in one command instead of trusting committed JSONL; (3) contributor PRs — verify the gate passed on THIS exact diff without re-running a gate that cannot run in CI (local models, GPU); (4) future multi-machine swarm — the gate decider verifies runs executed elsewhere.
+
+SCOPE (deliberately the cheap core): export the acceptance data a run already records as a standalone receipt file — facts only: base/head shas, diff sha256, gate command, exit code, duration, reproduction verdict, accepted-by and when — plus `ducklab proof verify <receipt>` that re-derives the hashes against the repo and exits 0/1. OUT of scope for now, noted as extensions: GPG signatures, mock-integrity and test-mutation gates, receipts for non-accept events.
+
+Priority note: AFTER the MiEmpresa plan and parallelism phase 1 — this is a when-the-boundary-appears feature, and two of the three boundaries (contributors, swarm) just entered the roadmap. Inspired by loki-mode evidence receipts (github.com/asklokesh/loki-mode); the mechanism here reuses what acceptRun already proves.
+
+**Deliverables:**
+- Accepting a run writes a standalone receipt file containing base/head shas, diff sha256, gate command, exit code, duration, reproduction verdict, and accepted-by/timestamp
+- `ducklab proof verify <receipt>` re-derives the receipt's hashes against the repo and exits 0 on match, 1 on any mismatch or missing field
+- A tampered receipt (altered sha or exit code) makes proof verify exit 1
+- A Go test round-trips an accept-produced receipt and asserts both exit-0 and exit-1 paths
+
+## Triage
+
+**Component:** acceptance/proof
+**Suspected files:** internal/service/service.go, internal/runlog/runlog.go, cmd/ducklab/main.go
+
+Additive trust-boundary feature exporting data acceptRun already records (GateReproduced, CommitSHA, actor) as a verifiable receipt; no duplicate among open bugs and no existing proof/receipt code.
+
+**Verification (triage recommends):** test-first — Receipt write + `proof verify <receipt>` exit 0 on matching repo state and 1 on a tampered hash — round-trip is executable.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
