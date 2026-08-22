@@ -304,6 +304,10 @@ autonomy = "guarded"
 [verify]
 mode  = "auto"                      # auto | tests | build | lint | none | custom
 tests = "go test ./..."             # used when mode = tests or auto resolves here
+# Process trees also receive DUCKLAB_RUN_ID and DUCKLAB_PROJECT_ID. A project
+# such as excercise-tracker may use DATABASE_URL = "test_db_${DUCKLAB_RUN_ID}"
+# and a compose preflight may use ${DUCKLAB_PROJECT_ID} as its project name.
+# Ducklab supplies identity only; provisioning and teardown remain the project's.
 build = "go build ./..."
 lint  = ""
 custom = ""                         # used when mode = "custom"

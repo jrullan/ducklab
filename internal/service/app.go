@@ -73,10 +73,11 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	// The environment check, before the process: a failed preflight names
 	// what is missing in its own words, where a failed launch is a crash to
 	// decode from a log tail.
+	appEnv := append(os.Environ(), "DUCKLAB_RUN_ID=manual-"+fmt.Sprint(time.Now().Unix()), "DUCKLAB_PROJECT_ID="+projectID)
 	if cfg.Run.Preflight != "" {
 		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		out, perr := xplat.ShellContext(pctx, entry.Path, nil, cfg.Run.Preflight).CombinedOutput()
+		out, perr := xplat.ShellContext(pctx, entry.Path, appEnv, cfg.Run.Preflight).CombinedOutput()
 		if perr != nil {
 			msg := strings.TrimSpace(string(out))
 			if msg == "" {
@@ -102,7 +103,7 @@ func (s *Service) AppStart(ctx context.Context, projectID string) (*AppStatus, e
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
-	cmd := xplat.ShellContext(runCtx, entry.Path, nil, cfg.Run.Command)
+	cmd := xplat.ShellContext(runCtx, entry.Path, appEnv, cfg.Run.Command)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {

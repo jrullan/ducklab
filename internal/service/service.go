@@ -1525,6 +1525,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	ectx := &tools.ExecContext{
 		ProjectRoot:  entry.Path,
 		RunID:        rs.run.ID,
+		ProjectID:    rs.run.ProjectID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
 		ShellPolicy:  projCfg.Shell,
@@ -1633,7 +1634,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 
 	// Run the gate
-	gateResult, err := verify.Run(ctx, entry.Path, projCfg.Verify)
+	gateResult, err := verify.Run(ctx, entry.Path, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -2082,7 +2083,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 			"phase":  "accept",
 			"detail": "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce",
 		})
-		reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage)
+		reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 		if err != nil {
 			return err
 		}
@@ -2126,7 +2127,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		"phase":  "accept",
 		"detail": "committed " + short(sha) + "; reproducing the gate from a clean checkout — nothing lands that did not reproduce",
 	})
-	reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage)
+	reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, sha, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		// Nothing lands that did not reproduce. The commit above was ours and
 		// a moment old; leaving it on the branch made the run undecidable
@@ -2180,7 +2181,11 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 // verifyAcceptedCommit runs the configured gate from a detached worktree at
 // sha. The working tree may contain ignored files that git add deliberately
 // omitted; only this checkout can prove the recorded commit is reproducible.
-func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string) (*runlog.GateReproduction, error) {
+func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string, identities ...verify.Identity) (*runlog.GateReproduction, error) {
+	identity := verify.Identity{}
+	if len(identities) > 0 {
+		identity = identities[0]
+	}
 	cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml"))
 	if err != nil {
 		return nil, fmt.Errorf("load gate config for accepted commit: %w", err)
@@ -2204,14 +2209,14 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 	linkInstalledDeps(root, checkout, cfg.Verify.LinkDeps)
 	if cfg.Verify.Setup != "" {
 		setup := config.Verify{Mode: string(verify.GateCustom), Custom: cfg.Verify.Setup, TimeoutS: cfg.Verify.TimeoutS}
-		if result, err := verify.Run(ctx, checkout, setup); err != nil {
+		if result, err := verify.Run(ctx, checkout, setup, identity); err != nil {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance: %w", err)
 		} else if !verify.IsGreen(result) {
 			return nil, fmt.Errorf("prepare clean checkout for acceptance failed:\n%s", result.Output)
 		}
 	}
 
-	result, err := verify.Run(ctx, checkout, cfg.Verify)
+	result, err := verify.Run(ctx, checkout, cfg.Verify, identity)
 	if err != nil {
 		return nil, fmt.Errorf("run gate from clean checkout: %w", err)
 	}

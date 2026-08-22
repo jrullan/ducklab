@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,56 @@ func TestRunExecutesConfiguredCommand(t *testing.T) {
 	}
 	if res.ExitCode != 0 {
 		t.Errorf("exit = %d, want 0", res.ExitCode)
+	}
+}
+
+func TestRunStampsProcessIdentity(t *testing.T) {
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: `printf '%s/%s' "$DUCKLAB_RUN_ID" "$DUCKLAB_PROJECT_ID"`, TimeoutS: 30}, Identity{RunID: "run-test", ProjectID: "project-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(res.Output), "run-test/project-test"; got != want {
+		t.Fatalf("identity = %q, want %q", got, want)
+	}
+}
+
+// The acceptance checkout's [verify] setup uses the same Run path, so it must
+// receive the run identity just like the gate command.
+func TestRunSetupStampsProcessIdentity(t *testing.T) {
+	res, err := Run(context.Background(), t.TempDir(), config.Verify{Mode: "custom", Custom: `printf '%s/%s' "$DUCKLAB_RUN_ID" "$DUCKLAB_PROJECT_ID"`, TimeoutS: 30}, Identity{RunID: "run-setup", ProjectID: "project-setup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(res.Output), "run-setup/project-setup"; got != want {
+		t.Fatalf("setup identity = %q, want %q", got, want)
+	}
+}
+
+func TestRunConcurrentIdentitiesDoNotCross(t *testing.T) {
+	dir := t.TempDir()
+	paths := []string{filepath.Join(dir, "one"), filepath.Join(dir, "two")}
+	ids := []Identity{{RunID: "run-one", ProjectID: "project-one"}, {RunID: "run-two", ProjectID: "project-two"}}
+	var wg sync.WaitGroup
+	for i := range paths {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cmd := fmt.Sprintf(`printf '%%s' "$DUCKLAB_RUN_ID" > %s`, paths[i])
+			res, err := Run(context.Background(), dir, config.Verify{Mode: "custom", Custom: cmd, TimeoutS: 30}, ids[i])
+			if err != nil || res.ExitCode != 0 {
+				t.Errorf("run %d failed: %v (result %#v)", i, err, res)
+			}
+		}(i)
+	}
+	wg.Wait()
+	for i, path := range paths {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != ids[i].RunID {
+			t.Errorf("run %d wrote %q, want %q", i, got, ids[i].RunID)
+		}
 	}
 }
 

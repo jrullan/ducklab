@@ -12,6 +12,20 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 )
 
+func TestRunShellStampsProcessIdentity(t *testing.T) {
+	ectx := &ExecContext{ProjectRoot: t.TempDir(), RunID: "run-shell", ProjectID: "project-shell"}
+	output, exitCode, err := RunShell(context.Background(), ectx, `printf '%s/%s' "$DUCKLAB_RUN_ID" "$DUCKLAB_PROJECT_ID"`, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+	if got, want := strings.TrimSpace(output), "run-shell/project-shell"; got != want {
+		t.Fatalf("identity = %q, want %q", got, want)
+	}
+}
+
 func testExecContext(t *testing.T) *ExecContext {
 	root := t.TempDir()
 	return &ExecContext{

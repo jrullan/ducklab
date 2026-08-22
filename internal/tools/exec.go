@@ -110,7 +110,7 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	// real gate then failed on work it had been told was fine. A tool that
 	// answers a different question from the one being asked is worse than no
 	// tool.
-	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify)
+	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
 	if err != nil {
 		return ErrorResult("verify_run: %v", err), nil
 	}

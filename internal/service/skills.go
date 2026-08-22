@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -226,6 +227,8 @@ func (s *Service) SkillRun(ctx context.Context, projectID, name string, args map
 	}
 	ectx := &tools.ExecContext{
 		ProjectRoot:     entry.Path,
+		RunID:           fmt.Sprintf("manual-%d", time.Now().Unix()),
+		ProjectID:       projectID,
 		ShellPolicy:     projCfg.Shell,
 		Verify:          projCfg.Verify,
 		GlobalSkillsDir: globalSkillsDir(),

@@ -92,8 +92,24 @@ func Detect(root string) (Gate, string, error) {
 	return GateNone, "", nil
 }
 
+// Identity names the run and project whose process tree is being executed.
+type Identity struct {
+	RunID     string
+	ProjectID string
+}
+
 // Run executes the gate command in the given root.
-func Run(ctx context.Context, root string, cfg config.Verify) (*Result, error) {
+func Run(ctx context.Context, root string, cfg config.Verify, identities ...Identity) (*Result, error) {
+	identity := Identity{}
+	if len(identities) > 0 {
+		identity = identities[0]
+	}
+	if identity.RunID == "" {
+		identity.RunID = fmt.Sprintf("manual-%d", time.Now().Unix())
+	}
+	if identity.ProjectID == "" {
+		identity.ProjectID = "manual"
+	}
 	gate := Gate(cfg.Mode)
 	cmd := ""
 
@@ -157,7 +173,7 @@ func Run(ctx context.Context, root string, cfg config.Verify) (*Result, error) {
 	// A gate can start product binaries, which must not inherit the engine's
 	// registry or configuration. Give the entire gate process tree a fresh,
 	// disposable state home instead.
-	env, cleanup, err := isolatedStateEnvironment()
+	env, cleanup, err := isolatedStateEnvironment(identity)
 	if err != nil {
 		return nil, err
 	}
@@ -227,20 +243,32 @@ func IsRed(result *Result) bool {
 // isolatedStateEnvironment returns an environment whose state locations all
 // live under a new temporary directory. The directory remains available for the
 // full child process tree and is removed once the gate has exited.
-func isolatedStateEnvironment() ([]string, func(), error) {
+func isolatedStateEnvironment(identities ...Identity) ([]string, func(), error) {
+	identity := Identity{}
+	if len(identities) > 0 {
+		identity = identities[0]
+	}
+	if identity.RunID == "" {
+		identity.RunID = fmt.Sprintf("manual-%d", time.Now().Unix())
+	}
+	if identity.ProjectID == "" {
+		identity.ProjectID = "manual"
+	}
 	stateRoot, err := os.MkdirTemp("", "ducklab-verify-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("create isolated gate state: %w", err)
 	}
 
 	values := map[string]string{
-		"XDG_CONFIG_HOME": filepath.Join(stateRoot, "config"),
-		"XDG_DATA_HOME":   filepath.Join(stateRoot, "data"),
-		"XDG_STATE_HOME":  filepath.Join(stateRoot, "state"),
-		"HOME":            filepath.Join(stateRoot, "home"),
-		"USERPROFILE":     filepath.Join(stateRoot, "home"),
-		"AppData":         filepath.Join(stateRoot, "appdata"),
-		"LocalAppData":    filepath.Join(stateRoot, "localappdata"),
+		"DUCKLAB_RUN_ID":     identity.RunID,
+		"DUCKLAB_PROJECT_ID": identity.ProjectID,
+		"XDG_CONFIG_HOME":    filepath.Join(stateRoot, "config"),
+		"XDG_DATA_HOME":      filepath.Join(stateRoot, "data"),
+		"XDG_STATE_HOME":     filepath.Join(stateRoot, "state"),
+		"HOME":               filepath.Join(stateRoot, "home"),
+		"USERPROFILE":        filepath.Join(stateRoot, "home"),
+		"AppData":            filepath.Join(stateRoot, "appdata"),
+		"LocalAppData":       filepath.Join(stateRoot, "localappdata"),
 	}
 	// Isolate engine state, not content-addressed build caches. Scrubbing HOME
 	// otherwise makes every gate redownload and rebuild its toolchain.

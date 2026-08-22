@@ -167,7 +167,7 @@ func (s *Service) GateRun(ctx context.Context, projectID string) (*GateResult, e
 	if err != nil {
 		return nil, err
 	}
-	res, err := verify.Run(ctx, entry.Path, projCfg.Verify)
+	res, err := verify.Run(ctx, entry.Path, projCfg.Verify, verify.Identity{RunID: "", ProjectID: projectID})
 	if err != nil {
 		return nil, err
 	}

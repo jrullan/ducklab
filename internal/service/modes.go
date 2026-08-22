@@ -463,7 +463,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// per-role caps as every other mode.
 		TurnCaps: s.roleTurnCapsFor(mc.req.AgentTurns),
 		Gate: func(ctx context.Context) (string, string, error) {
-			res, err := verify.Run(ctx, mc.entry.Path, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, mc.entry.Path, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
 			}
@@ -516,7 +516,7 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 		Ducklings:     contestants,
 		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
-			res, err := verify.Run(ctx, root, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
 			}
@@ -553,7 +553,7 @@ func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.E
 		Ducklings:     subtaskDucklings,
 		NewWorkspace:  strategy.NewGitWorkspaceFactory(mc.entry.Path, scratch, mc.rs.run.ID),
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
-			res, err := verify.Run(ctx, root, mc.projCfg.Verify)
+			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
 			}

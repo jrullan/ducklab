@@ -183,6 +183,8 @@ how the app launches (`[run]` with a preflight), and how the project's own
 binaries are rebuilt (`[install]`) so the whole loop runs without leaving
 ducklab.
 
+Gate and shell process trees always receive `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID`. For example, excercise-tracker can use `DATABASE_URL=test_db_${DUCKLAB_RUN_ID}` in `[verify].tests`, and a compose preflight can use `${DUCKLAB_PROJECT_ID}` as its per-run project name. Ducklab guarantees identity only; provisioning and teardown remain the project's.
+
 ## Adding a model
 
 ```bash

@@ -66,6 +66,7 @@ type ExecContext struct {
 
 	ProjectRoot  string
 	RunID        string
+	ProjectID    string
 	Turn         int
 	Role         config.Role
 	Duckling     config.DucklingID
@@ -831,6 +832,13 @@ func SearchInContent(pattern, content string, maxResults int) []string {
 	return results
 }
 
+func runIdentity(id string) string {
+	if id != "" {
+		return id
+	}
+	return fmt.Sprintf("manual-%d", time.Now().Unix())
+}
+
 // RunShell runs a shell command and returns the result.
 func RunShell(ctx context.Context, ectx *ExecContext, cmd string, timeoutS int) (string, int, error) {
 	if timeoutS <= 0 {
@@ -847,7 +855,16 @@ func RunShell(ctx context.Context, ectx *ExecContext, cmd string, timeoutS int) 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS)*time.Second)
 	defer cancel()
 
-	shellCmd := xplat.ShellContext(ctx, ectx.ProjectRoot, ectx.ShellEnv, cmd)
+	env := ectx.ShellEnv
+	if env == nil {
+		env = os.Environ()
+	}
+	projectID := ectx.ProjectID
+	if projectID == "" {
+		projectID = "manual"
+	}
+	env = append(env, "DUCKLAB_RUN_ID="+runIdentity(ectx.RunID), "DUCKLAB_PROJECT_ID="+projectID)
+	shellCmd := xplat.ShellContext(ctx, ectx.ProjectRoot, env, cmd)
 	output, err := shellCmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
