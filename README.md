@@ -3,6 +3,14 @@
 A full-cycle software development harness that is **multi-LLM by default**
 and honest by construction.
 
+**In one block:** self-hosted development harness (Go engine + CLI + desktop,
+Linux first) · brief → requirements → spec → plan → build → review → release ·
+verdicts are exit codes, never model opinions · local models first (llama.cpp,
+vLLM) beside any OpenAI-compatible or Anthropic endpoint · operable by humans
+or by other agents over **MCP** with recorded, attributed decisions ·
+Apache-2.0 · develops itself (the run records in `.ducklab/` are the
+receipts). Agents: start at [`AGENTS.md`](AGENTS.md) and [`llms.txt`](llms.txt).
+
 You give it a brief. It writes requirements, a spec and a plan; builds tasks
 with one model or several arguing; runs your project's real test gate; and
 stops for you before anything is committed. Every model call is logged. No

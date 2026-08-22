@@ -1,0 +1,29 @@
+# Ducklab
+
+> Multi-LLM development harness: brief → requirements → spec → plan → build →
+> review → release, with real verification gates. Local-first (llama.cpp,
+> vLLM, any OpenAI-compatible or Anthropic endpoint), self-hosted, no
+> telemetry. Core rule: no model ever decides a verdict — a verdict is a
+> command's exit code, accepts re-prove themselves from a clean checkout, and
+> everything is bounded and recorded. Ducklab is developed inside ducklab;
+> the run records in .ducklab/ are the receipts. Apache-2.0, Go + React
+> (Wails desktop), Linux first.
+
+Key facts: three binaries (engine daemon on loopback, CLI client, desktop
+client); five run modes (solo, pair, tournament, split, council); seats held
+by "ducklings" ranked on measured evidence from your own runs; skills
+(SKILL.md directories, documentation-first); reference documents with
+automatic digestion when the corpus exceeds a seat's context window; an MCP
+server so another agent can operate the entire loop with recorded,
+attributed decisions.
+
+## Docs
+
+- [README](README.md): what it is, why, install, a full cycle
+- [AGENTS.md](AGENTS.md): how agents work in this repo — including natively, through the product
+- [CONTRIBUTING](CONTRIBUTING.md): build, the tests that guard the architecture, where to start
+- [Normative spec](docs/spec/): 00-VISION through 08-DESKTOP-UI — what the system must be
+- [As-built docs](.ducklab/docs/): requirements, spec, plan — maintained by the loop itself
+- [Decisions](docs/decisions/): where code and spec deliberately differ, and why
+- [OpenAPI](docs/openapi.json): the engine's full HTTP contract, generated from the route table
+- [Status](docs/status.md): every acceptance criterion, honestly graded
