@@ -284,9 +284,9 @@ go test ./...   # 38 packages
 cd frontend && npx vitest run
 ```
 
-**License:** not chosen yet — the repository is private today. An OSI
-license will be picked before it goes public; nothing here is intended to
-stay proprietary.
+**License:** [Apache-2.0](LICENSE). Contributions are accepted under the
+same terms (§5 of the license — no CLA). The Ducklab name and the duck are
+the maintainer's (§6).
 
 ## Specification
 

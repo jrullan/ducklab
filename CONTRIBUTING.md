@@ -113,7 +113,7 @@ every version.
 
 ## License
 
-Not chosen yet; the repository is private today and an OSI license will be
-added before it goes public. By contributing before that, you're trusting
-the maintainer to pick a real one — raise it in an issue if that matters to
-you now.
+Apache-2.0 (see [LICENSE](LICENSE)). Your contributions are licensed under
+the same terms automatically — §5 of the license, so there is no CLA to
+sign. The trademark carve-out (§6) means the Ducklab name and mark stay
+with the maintainer.
