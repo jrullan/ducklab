@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newRepo(t *testing.T) (*Git, string) {
@@ -162,6 +163,110 @@ func TestConcurrentWorktreeOperationsShareRepositoryLock(t *testing.T) {
 			t.Errorf("worktree operation %d ran concurrently: %v", i, err)
 		}
 	}
+}
+
+// Worktree locks protect only one repository's metadata. Separate repositories
+// must enter git concurrently, while aliases of one repository must share a
+// lock.
+func TestWorktreeLocksAreRepositoryScopedAndCanonical(t *testing.T) {
+	if filepath.Separator == '\\' {
+		t.Skip("fake git command is POSIX shell script")
+	}
+
+	t.Run("different repositories overlap", func(t *testing.T) {
+		bin := t.TempDir()
+		script := "#!/bin/sh\n" +
+			"mkdir \"$PWD/entered\"\n" +
+			"sleep 1\n"
+		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		repos := []string{t.TempDir(), t.TempDir()}
+		errs := make([]error, len(repos))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i, repo := range repos {
+			wg.Add(1)
+			go func(i int, repo string) {
+				defer wg.Done()
+				<-start
+				errs[i] = New(repo).WorktreeAdd(filepath.Join(repo, "worktree"), "branch")
+			}(i, repo)
+		}
+		close(start)
+
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(filepath.Join(repos[0], "entered")); err == nil {
+				if _, err := os.Stat(filepath.Join(repos[1], "entered")); err == nil {
+					break
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		for _, repo := range repos {
+			if _, err := os.Stat(filepath.Join(repo, "entered")); err != nil {
+				t.Errorf("worktree add for %q did not overlap the other repository: %v", repo, err)
+			}
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("worktree add in repository %d: %v", i, err)
+			}
+		}
+	})
+
+	t.Run("symlink aliases serialize", func(t *testing.T) {
+		g, repo := newRepo(t)
+		linked := filepath.Join(filepath.Dir(repo), "linked-"+filepath.Base(repo))
+		if err := g.WorktreeAdd(linked, "linked"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = g.WorktreeRemove(linked) })
+		alias := filepath.Join(t.TempDir(), "repo-link")
+		if err := os.Symlink(repo, alias); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		bin := t.TempDir()
+		lock := filepath.Join(t.TempDir(), "worktree-operation")
+		script := "#!/bin/sh\n" +
+			"if ! mkdir \"$DUCKLAB_WORKTREE_TEST_LOCK\" 2>/dev/null; then\n" +
+			"  echo concurrent worktree metadata operation >&2\n" +
+			"  exit 128\n" +
+			"fi\n" +
+			"sleep 0.1\n" +
+			"rmdir \"$DUCKLAB_WORKTREE_TEST_LOCK\"\n"
+		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		t.Setenv("DUCKLAB_WORKTREE_TEST_LOCK", lock)
+
+		// The primary checkout, an alias, and a linked worktree all mutate the
+		// same repository's worktree metadata.
+		roots := []string{repo + string(filepath.Separator), alias, linked}
+		errs := make([]error, len(roots))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i, root := range roots {
+			wg.Add(1)
+			go func(i int, root string) {
+				defer wg.Done()
+				<-start
+				errs[i] = New(root).WorktreeAdd(filepath.Join(repo, fmt.Sprintf("worktree-%d", i)), "branch")
+			}(i, root)
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("path spelling %q did not share the repository lock: %v", roots[i], err)
+			}
+		}
+	})
 }
 
 // Git's worktree metadata cannot safely process parallel adds. Repeat this
