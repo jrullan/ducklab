@@ -183,10 +183,11 @@ const (
 
 // Provider is a configured endpoint.
 type Provider struct {
-	Kind      ProviderKind      `toml:"kind" json:"kind"`
-	BaseURL   string            `toml:"base_url" json:"base_url"`
-	APIKeyEnv string            `toml:"api_key_env" json:"api_key_env"`
-	Headers   map[string]string `toml:"headers" json:"headers"`
+	Kind          ProviderKind      `toml:"kind" json:"kind"`
+	BaseURL       string            `toml:"base_url" json:"base_url"`
+	APIKeyEnv     string            `toml:"api_key_env" json:"api_key_env"`
+	Headers       map[string]string `toml:"headers" json:"headers"`
+	MaxConcurrent int               `toml:"max_concurrent" json:"max_concurrent,omitempty"`
 }
 
 // SamplingParams holds sampling parameters.

@@ -32,6 +32,7 @@ type Run struct {
 	RosterSources map[string]string `json:"roster_sources,omitempty"`
 	Gate          string            `json:"gate"`
 	Status        string            `json:"status"` // running|paused|done|failed|queued
+	QueuedReason  string            `json:"queued_reason,omitempty"`
 	Verdict       string            `json:"verdict"`
 	// GateReproduced records acceptance-time clean-checkout verification.
 	GateReproduced *GateReproduction `json:"acceptance_gate,omitempty"`
@@ -246,6 +247,7 @@ type Writer struct {
 	llmMu     sync.Mutex
 	llmSeq    int
 	llmF      *os.File
+	stateMu   sync.Mutex
 
 	// OnEvent, if set, is called with every event after it has been durably
 	// appended to events.jsonl. This is the single point where persisted
@@ -304,9 +306,11 @@ func openWriter(projectRoot string, run *Run, resume bool) (*Writer, error) {
 
 // Close closes the writer.
 func (w *Writer) Close() error {
+	w.stateMu.Lock()
 	w.eventsMu.Lock()
 	w.closed = true
 	w.eventsMu.Unlock()
+	w.stateMu.Unlock()
 	if w.eventsF != nil {
 		w.eventsF.Close()
 	}
@@ -330,6 +334,14 @@ func (w *Writer) Closed() bool {
 
 // WriteState writes state.json atomically.
 func (w *Writer) WriteState() error {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	w.eventsMu.Lock()
+	closed := w.closed
+	w.eventsMu.Unlock()
+	if closed {
+		return fmt.Errorf("write state: run log is closed")
+	}
 	data, err := json.MarshalIndent(w.run, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)

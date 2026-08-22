@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
+
+	"github.com/jrullan/ducklab/internal/config"
 
 	"github.com/jrullan/ducklab/internal/bus"
 )
@@ -14,11 +18,14 @@ import (
 // and visible to clients, never rejected: the user asked for the work, and
 // silently dropping it would be worse than making them wait.
 type runQueue struct {
-	mu      sync.Mutex
-	limit   int
-	running int
-	waiting []*queued
-	perProj map[string]int
+	mu          sync.Mutex
+	limit       int
+	running     int
+	waiting     []*queued
+	perProj     map[string]int
+	perProvider map[string]int
+	holders     map[string][]string
+	providerCap func(string) (int, bool)
 	// held answers "may a run for this task start in this project?" with a
 	// reason when it may not — a run paused at its gate has released its
 	// slot but its uncommitted diff still sits in the tree (and accept
@@ -42,18 +49,55 @@ type queued struct {
 	// the waiting line: the person authorized test-and-build as one unit, and
 	// letting another task's test run in between would land that test on a
 	// suite the chain has deliberately left red.
-	chained bool
+	chained   bool
+	providers []string
 }
 
 func newRunQueue(limit int) *runQueue {
 	if limit <= 0 {
 		limit = 2
 	}
-	return &runQueue{limit: limit, perProj: map[string]int{}}
+	return &runQueue{limit: limit, perProj: map[string]int{}, perProvider: map[string]int{}, holders: map[string][]string{}}
 }
 
 // submit either starts a run immediately or queues it.
 func (q *runQueue) submit(s *Service, item *queued) {
+	// Keep the lookup live: changing a provider's URL or explicit cap must
+	// affect the next queue decision without restarting or migrating state.
+	q.mu.Lock()
+	if q.providerCap == nil {
+		q.providerCap = func(id string) (int, bool) {
+			if s == nil || s.cfg == nil {
+				return 0, false
+			}
+			s.cfgMu.RLock()
+			p, ok := s.cfg.Providers[config.ProviderID(id)]
+			s.cfgMu.RUnlock()
+			if !ok {
+				return 0, false
+			}
+			if p.MaxConcurrent > 0 {
+				return p.MaxConcurrent, true
+			}
+			if IsLocalHost(p.BaseURL) {
+				return 1, true
+			}
+			return 8, true
+		}
+	}
+	q.mu.Unlock()
+	item.providers = item.providers[:0]
+	seen := map[string]bool{}
+	if s != nil && s.cfg != nil {
+		s.cfgMu.RLock()
+		for _, id := range item.rs.run.Roster {
+			if d, ok := s.cfg.Ducklings[config.DucklingID(id)]; ok && !seen[string(d.Provider)] {
+				item.providers = append(item.providers, string(d.Provider))
+				seen[string(d.Provider)] = true
+			}
+		}
+		s.cfgMu.RUnlock()
+	}
 	q.mu.Lock()
 	if q.canStart(item) {
 		q.reserve(item)
@@ -70,6 +114,9 @@ func (q *runQueue) submit(s *Service, item *queued) {
 			}
 		}
 	}
+	if p := q.providerHold(item); p != "" {
+		reason = fmt.Sprintf("waiting for a slot on provider %s (held by %s)", p, strings.Join(q.holders[p], ", "))
+	}
 	if item.chained {
 		q.waiting = append([]*queued{item}, q.waiting...)
 	} else {
@@ -78,15 +125,42 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	q.mu.Unlock()
 
 	item.rs.run.Status = "queued"
+	item.rs.run.QueuedReason = reason
 	item.rs.writer.AppendEvent("run_queued", map[string]interface{}{
 		"reason": reason,
 	})
 	item.rs.writer.WriteState()
 }
 
+func (q *runQueue) providerHold(item *queued) string {
+	for _, p := range item.providers {
+		cap := 8
+		if q.providerCap != nil {
+			if n, ok := q.providerCap(p); ok && n > 0 {
+				cap = n
+			}
+		}
+		if q.perProvider[p] >= cap {
+			return p
+		}
+	}
+	return ""
+}
+
 func (q *runQueue) canStart(item *queued) bool {
 	if q.running >= q.limit {
 		return false
+	}
+	for _, p := range item.providers {
+		cap := 8
+		if q.providerCap != nil {
+			if n, ok := q.providerCap(p); ok && n > 0 {
+				cap = n
+			}
+		}
+		if q.perProvider[p] >= cap {
+			return false
+		}
 	}
 	// One run per project unless the caller opted in: two runs editing one
 	// working tree would interleave writes — whether the other run is still
@@ -106,10 +180,15 @@ func (q *runQueue) canStart(item *queued) bool {
 func (q *runQueue) reserve(item *queued) {
 	q.running++
 	q.perProj[item.rs.run.ProjectID]++
+	for _, p := range item.providers {
+		q.perProvider[p]++
+		q.holders[p] = append(q.holders[p], item.rs.run.ID)
+	}
 }
 
 func (q *runQueue) start(s *Service, item *queued) {
 	item.rs.run.Status = "running"
+	item.rs.run.QueuedReason = ""
 	item.rs.writer.WriteState()
 	if s.bus != nil {
 		s.bus.Publish(bus.Event{
@@ -136,6 +215,17 @@ func (q *runQueue) start(s *Service, item *queued) {
 func (q *runQueue) done(s *Service, item *queued) {
 	q.mu.Lock()
 	q.running--
+	for _, p := range item.providers {
+		if n := q.perProvider[p]; n > 0 {
+			q.perProvider[p] = n - 1
+		}
+		for i, id := range q.holders[p] {
+			if id == item.rs.run.ID {
+				q.holders[p] = append(q.holders[p][:i], q.holders[p][i+1:]...)
+				break
+			}
+		}
+	}
 	if n := q.perProj[item.rs.run.ProjectID]; n > 0 {
 		q.perProj[item.rs.run.ProjectID] = n - 1
 	}

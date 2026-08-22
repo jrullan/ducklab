@@ -449,16 +449,6 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		// the answer existed and never reached the tool.
 		Answers: rs.answers(),
 	}
-	// The rubber duck reaches test-first too. This closure was wired only
-	// on the build path, so a test run's implementer asked the advisor and
-	// was told nobody is seated while the seat chip showed qwen38-max
-	// sitting right there (B-115) — the tool honest about its own view and
-	// wrong about the world. Guarded like the build path: only when a seat
-	// exists, so "nobody to ask" stays a true statement.
-	s.wireAdvisor(rs, ectx)
-	ectx.OnRosterRead = func(ctx context.Context) (string, error) {
-		return s.rosterSummary(ctx, rs.run.ProjectID)
-	}
 	rs.execCtx = ectx
 	cache := &loopCache{
 		svc: s, tracker: tracker,

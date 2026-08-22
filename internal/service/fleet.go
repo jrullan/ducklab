@@ -26,10 +26,11 @@ import (
 
 // ProviderView is a provider as a client sees it.
 type ProviderView struct {
-	ID      string            `json:"id"`
-	Kind    string            `json:"kind"`
-	BaseURL string            `json:"base_url"`
-	Headers map[string]string `json:"headers,omitempty"`
+	ID            string            `json:"id"`
+	Kind          string            `json:"kind"`
+	BaseURL       string            `json:"base_url"`
+	MaxConcurrent int               `json:"max_concurrent,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
 	// APIKeyEnv is the name of the variable the key is read from. Never the
 	// key.
 	APIKeyEnv string `json:"api_key_env,omitempty"`
@@ -73,7 +74,7 @@ func (s *Service) ProviderList() []ProviderView {
 		sort.Strings(names)
 		out = append(out, ProviderView{
 			ID: string(id), Kind: string(p.Kind), BaseURL: p.BaseURL,
-			Headers: p.Headers, APIKeyEnv: p.APIKeyEnv,
+			MaxConcurrent: p.MaxConcurrent, Headers: p.Headers, APIKeyEnv: p.APIKeyEnv,
 			KeyPresent: p.APIKeyEnv == "" || os.Getenv(p.APIKeyEnv) != "",
 			InUse:      names,
 		})
@@ -103,7 +104,7 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 
 	p := config.Provider{
 		Kind: kind, BaseURL: view.BaseURL,
-		APIKeyEnv: view.APIKeyEnv, Headers: view.Headers,
+		APIKeyEnv: view.APIKeyEnv, Headers: view.Headers, MaxConcurrent: view.MaxConcurrent,
 	}
 	// Built before it is saved. A provider whose base URL cannot produce a
 	// client is a provider that will fail on the first run instead of here,
