@@ -54,6 +54,9 @@ func Run(args []string) int {
 		case "--version":
 			fmt.Printf("ducklab %s (%s, go1.24+, %s/%s)\n", Version, Provenance, "linux", "amd64")
 			return 0
+		case "--help", "-h", "help":
+			printHelp()
+			return 0
 		default:
 			break
 		}
@@ -120,6 +123,20 @@ func Run(args []string) int {
 		}
 	}
 
+	// Commands that must work in a locked room. The discovery gate below
+	// used to run first, so `ducklab engine start` — the very command the
+	// bare hint recommends, whose implementation was correct all along —
+	// answered "engine not running", and `help` did not exist at all: a
+	// first-run user's only escape was a second terminal nobody documented
+	// (B-111).
+	switch noun {
+	case "help":
+		printHelp()
+		return 0
+	case "engine":
+		return engineCmd(verb, cmdArgs)
+	}
+
 	// Discover or auto-start engine
 	client, err := discoverEngine(noAutostart)
 	if err != nil {
@@ -129,8 +146,6 @@ func Run(args []string) int {
 	_ = client
 
 	switch noun {
-	case "engine":
-		return engineCmd(verb, cmdArgs)
 	case "mcp":
 		return mcpCmd(verb)
 	case "project":
@@ -179,9 +194,54 @@ func discoverEngine(noAutostart bool) (*engineclt.Client, error) {
 	if noAutostart {
 		return nil, fmt.Errorf("engine not running and auto-start disabled")
 	}
-	// Auto-start: spawn engine
-	// For v0.1, this is a placeholder
-	return nil, fmt.Errorf("engine not running; start with: ducklab-engine")
+	// Auto-start, for real — this was a confessed placeholder from v0.1
+	// until the first stranger install locked a fresh user out of every
+	// command (B-111). Announced on stderr: an engine appearing out of
+	// nowhere without a word is how mystery processes are born.
+	path, err := exec.LookPath("ducklab-engine")
+	if err != nil {
+		return nil, fmt.Errorf("engine not running and ducklab-engine is not on PATH; run `make install` or start the desktop app")
+	}
+	if err := daemon.StartEngine(path); err != nil {
+		return nil, fmt.Errorf("engine not running and auto-start failed: %w", err)
+	}
+	started, err := daemon.WaitReady(15 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("engine auto-started but did not become ready: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "engine auto-started: pid %d, port %d\n", started.PID, started.Port)
+	return engineclt.New(started), nil
+}
+
+// printHelp is the engineless map: every noun, one line each. Anything
+// deeper asks the engine, and the engine may not exist yet — which is
+// exactly when a person needs help the most.
+func printHelp() {
+	fmt.Print(`ducklab — multi-LLM development harness
+
+usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
+
+  engine    start | stop | restart | status | log
+  project   init | list | show | describe | set | status
+  intake    draft requirements (--from <brief>, --ref <doc|dir>, --adopt)
+  spec      draft the spec from approved requirements
+  plan      draft milestones and tasks from the spec
+  run       <task-id> | list | show | diff | accept | reject | answer
+  test      write the failing test first (test-first flow)
+  review    read an accepted task's commit
+  release   plan | cut | list
+  bug       file | list | show | triage | promote
+  task      list | show | remove
+  skill     list | show | new | run | validate
+  provider  set | list | remove        duckling  set | list | probe | test
+  roster    show | set | suggest       budget    show | set
+  trace     check requirement→spec→task coverage
+  mcp       serve (stdio MCP server exposing the loop)
+
+The first command auto-starts the engine if none is running
+(--no-autostart to refuse). Full walkthrough: README.md — a cycle end
+to end. Every command prints its own usage when called wrong.
+`)
 }
 
 func statusSummary() int {

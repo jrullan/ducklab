@@ -49,6 +49,11 @@ api-check:
 	exit $$fail
 
 frontend:
+	@# A fresh clone has no frontend/node_modules and `make` died at "tsc:
+	@# not found" 23 seconds into the first stranger install. npm ci is
+	@# deterministic (lockfile-exact), so running it when the directory is
+	@# absent keeps the README's promise that `make` just works.
+	@if [ ! -d frontend/node_modules ]; then 	  echo "  frontend/node_modules missing — running npm ci"; 	  cd frontend && npm ci; 	fi
 	cd frontend && npm run build && npx vitest run
 
 e2e:

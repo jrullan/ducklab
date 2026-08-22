@@ -144,7 +144,7 @@ a terminal:
 ```bash
 cd ~/dev/myproject
 git init                                    # ducklab needs a git repo
-ducklab project init --name MyProject
+ducklab project init --name MyProject       # auto-starts the engine if none is running
 
 ducklab intake --from brief.txt             # brief        → requirements
 ducklab spec                                # requirements → spec

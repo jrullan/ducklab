@@ -132,7 +132,7 @@ headers  = { }                          # optional extra headers
 
 [provider.aitopatom]
 kind     = "openai"
-base_url = "http://10.0.0.5:8000/v1"
+base_url = "http://192.168.1.50:8000/v1"  # e.g. a vLLM box on your LAN
 
 [provider.openrouter]
 kind        = "openai"

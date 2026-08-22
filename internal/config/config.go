@@ -939,21 +939,26 @@ func EnsureGlobal(path string) (*Global, bool, error) {
 	return cfg, true, nil
 }
 
-// StarterGlobal is the config a fresh install gets: the two local endpoints
-// from 02 §2, so a user with llama.cpp or vLLM already running can start
+// StarterGlobal is the config a fresh install gets: a local endpoint and a
+// hosted one, so a user with llama.cpp or vLLM already running can start
 // immediately, and one with neither gets a file to edit rather than a blank.
+//
+// Neutral names only. The starter used to ship the maintainer's own LAN —
+// a provider named after his inference box pointing at 10.0.0.5, and a
+// duckling named for the machine on his desk — which every fresh public
+// install then offered as if it were theirs (B-109).
 func StarterGlobal() *Global {
 	nativeFalse := false
 	ctx := 32768
 	g := DefaultGlobal()
 	g.Providers = map[ProviderID]Provider{
-		"beelink":    {Kind: ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
-		"aitopatom":  {Kind: ProviderKindOpenAI, BaseURL: "http://10.0.0.5:8000/v1"},
+		// llama.cpp's default --port; edit to wherever your server listens.
+		"local":      {Kind: ProviderKindOpenAI, BaseURL: "http://localhost:8080/v1"},
 		"openrouter": {Kind: ProviderKindOpenAI, BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"},
 	}
 	g.Ducklings = map[DucklingID]Duckling{
 		"pato-local": {
-			Provider: "beelink", Model: "local-model",
+			Provider: "local", Model: "local-model",
 			Notes: "edit model to match what your endpoint serves",
 			Caps:  Caps{NativeTools: &nativeFalse, ContextTokens: &ctx},
 		},
