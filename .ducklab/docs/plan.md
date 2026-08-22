@@ -1679,6 +1679,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-079 — Add a file-picker button beside the reference-documents input in the Cycle view
 
+**Implements:** SPEC-068
+
 Fixes B-095.
 
 ## Reported
@@ -1705,6 +1707,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-080 — Announce the accept's commit step in the run transcript before the commit runs
 
+**Implements:** SPEC-069
+
 Fixes B-096.
 
 ## Reported
@@ -1730,6 +1734,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-081 — Warn on plan proposals whose accept rewrites task bodies carrying accepted history
 
+**Implements:** SPEC-070
+
 Fixes B-094.
 
 ## Reported
@@ -1754,6 +1760,8 @@ This is the board-side counterpart to the existing sections_removed/sections_gut
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-082 — Make the accept-phase gate_started event render as a live gate turn in the transcript
+
+**Implements:** SPEC-069
 
 Fixes B-097.
 
@@ -1823,6 +1831,8 @@ The initiate-chat controls — `ChatAbout`, rendered in the guide rail, the boar
 
 ### T-085 — Classify image-input provider rejections and pre-flight the declared vision claim so an mmproj-less llama.cpp chat fails with guidance, not a raw 500
 
+**Implements:** SPEC-071
+
 Fixes B-100.
 
 ## Reported
@@ -1847,6 +1857,8 @@ The chat image path validates only the declared vision flag ('declared, not prob
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-086 — Add a consultant seat to Roster Common and pre-select it in the guide chat box
+
+**Implements:** SPEC-072
 
 Fixes B-101.
 
@@ -1901,6 +1913,8 @@ The guide rail today scrolls as one tall column and ends with the ask chatbox; a
 
 ### T-088 — Show run stage beside the task id in the Recent runs rail entries
 
+**Implements:** SPEC-073
+
 Fixes B-102.
 
 ## Reported
@@ -1953,6 +1967,8 @@ The Recent runs strip (T-087 / T-088) currently labels rows ID-first ("T-12 test
 
 ### T-090 — Emit the pre-commit gate event before staging/committing in RunAccept
 
+**Implements:** SPEC-069
+
 Fixes B-098.
 
 ## Reported
@@ -1976,6 +1992,8 @@ Service.emitGateStarted is invoked after branch creation but the event is placed
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-091 — Show the advisor's in-flight work on the ask_human question card and account it to the run's budget
+
+**Implements:** SPEC-074
 
 Fixes B-099.
 
@@ -2003,6 +2021,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-092 — Remove the reopen-task next step from the guide
 
+**Implements:** SPEC-051, SPEC-075
+
 Fixes B-103.
 
 ## Reported
@@ -2028,6 +2048,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-093 — Thread the request context through validateChatImages to the VerifyVision probe
 
+**Implements:** SPEC-071
+
 Fixes B-105.
 
 ## Reported
@@ -2052,6 +2074,8 @@ Confirmed at chat.go:61 the vision probe detaches from the caller, so it cannot 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ### T-094 — Close a superseded committing gate block with a neutral state instead of an unearned green check
+
+**Implements:** SPEC-069
 
 Fixes B-106.
 
@@ -2079,6 +2103,8 @@ This section is the triager's reading, not the reporter's. Check it rather than 
 
 ### T-095 — Add gofmt -l to the project gate and settle existing formatting drift
 
+**Implements:** SPEC-076
+
 Fixes B-107.
 
 ## Reported
@@ -2100,5 +2126,4 @@ Deterministic formatting gap in the configured gate command with two known drift
 **Verification (triage recommends):** build-only — The fix edits a gate command string in project.toml; a forced test would grep that string and pin the implementation, not the behavior.
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
-
 

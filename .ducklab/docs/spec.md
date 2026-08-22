@@ -1,10 +1,10 @@
 ---
 kind: spec
-version: 3
-updated_at: 2026-08-20T00:57:29Z
-run_id: r-20260820-002540-k6e2
-ducklings: [k3, glm52, qwen38-max, atom-local]
-based_on: 99125e4699f6b5ea
+version: 4
+updated_at: 2026-08-22T01:53:34Z
+run_id: r-20260820-205447-wbnh
+ducklings: [glm52, k3, qwen38-max, atom-local, luna]
+based_on: 869ccc65090fa833
 origin: adopted
 approved_by: human
 ---
@@ -760,11 +760,11 @@ The engine runs the project's own app as a first-class managed process (`interna
 
 **Implements:** REQ-051
 **As-built:** yes
-**Covers:** T-036, T-040
+**Covers:** T-036, T-040, T-092
 
 The engine answers "what do I do now?" per project with a computed, ordered list: `ProjectNext` in `internal/service/guide.go` gathers live state (a `projectSnapshot` of documents, tasks, bugs, paused runs) and `nextSteps` produces steps in the loop's own order — work already paid for waiting on one click, then intake → spec → plan, then the bug inbox (triage / promote), then the ONE next buildable task (test-ready, build-only, or test-first), then spec-debt to settle, and in a quiet project the brief / amend / release doors. Each step carries a stable id, the action in outcome language, the reason computed from the state that made it so, and the object (kind + ref) a client links to its own button. The guide is the single brain behind the desktop guide rail, the autopilot, and the MCP operator tools (`internal/mcp/tools.go`); clients render it, none re-derive it. An unparseable `project.toml` outranks every other suggestion, alone.
 
-A fixed bug produces ONE `verify-bug` step — "Verify B-004 — confirm the fix answers the report; reopen it if the problem remains" — with Reopen named inside it as the exception path, never as the day's plan. A `reopen-task` step appears only for accepted work still tied to an active fix context (a bug awaiting verification or a retained branch), with explicit redo consent as the reason.
+A fixed bug produces ONE `verify-bug` step — "Verify B-004 — confirm the fix answers the report; reopen it if the problem remains" — with Reopen named inside it as the exception path, never as the day's plan. Reopening accepted TASKS is not a guide step at all: `nextSteps` never returns a `reopen-task` step, in either the single or the grouped case, regardless of accepted-task state — the guide rail devotes no real estate to reopening accepted work. (Reopening a bug remains the bug loop's own step, unaffected.)
 
 ## SPEC-052 — Spend reports per mode and per duckling
 
@@ -947,4 +947,83 @@ A promoted bug moves `in_progress → fixed` only when an accepted BUILD run for
 Accepting a triage run resolves its paused siblings: a superseded triage over the same bugs — aborted mid-batch, still holding partial proposals at its gate — stops offering accept on classifications the newer run already applied, instead of waiting for a person to notice and order the reject by hand.
 
 **Assumption:** both behaviors are pinned by their accepted fixes; the exact hook call sites were not re-read for this settlement.
+
+## SPEC-068 — Native reference-file picker in the Cycle view
+
+**As-built:** yes
+**Covers:** T-079
+
+The desktop's Picker binding (the one native binding; everything else goes over HTTP) gains a `ChooseFile` sibling to `ChooseDirectory` (`cmd/ducklab-desktop/picker.go`): it opens the system file dialog filtered to `.md`/`.txt` (`AllowsOtherFileTypes(false)`), returns the chosen path as an absolute path, and treats cancel as an empty string that is not an error. Its FQN is derived from the package path via reflection (`ChooseFileFQN`) and injected into `window.ducklab.chooseFile` alongside `chooseDirectory` in `cmd/ducklab-desktop/main.go`.
+
+The frontend wraps it in `chooseFile`/`canChooseFile` (`frontend/src/lib/picker.ts`): absent the Wails bridge (browser, CLI, tests) the call returns null and no control renders. In the Cycle view's reference-documents door (`frontend/src/views/Cycle.tsx`), a "Browse…" button sits beside the refs textarea when the chooser is available; a picked path is appended as a new line to `refsText`, and typed paths keep working unchanged.
+
+## SPEC-069 — Accept-phase gate announcements in the transcript
+
+**As-built:** yes
+**Covers:** T-080, T-082, T-090, T-094
+
+Acceptance is two visible steps, announced before they run, because staging and committing can take long enough that a passed round gate otherwise reads as an unexplained pause:
+
+- `RunAccept` appends `gate_started {phase: "commit", detail: "committing accepted work before clean-checkout verification"}` BEFORE branch creation, `AddAll`, and `CommitWithTrailer` — so the event is durable even when the commit aborts acceptance. The clean-checkout reproduction is likewise announced with `phase: "accept"` before it runs.
+- `buildTurns` (`frontend/src/lib/runview.ts`) opens a live gate turn on `gate_started` regardless of round, labelled by `gatePhaseLabel` from the phase ("committing accepted work", "after commit · clean checkout"), and settles it on `gate`, `round_gate`, or `gate_reproduced` — the accept flow settles on `gate_reproduced`, not only `round_gate`.
+- A `gate_started` that supersedes a still-open gate block closes it neutrally (`gate: "done"`, no green check): superseding is a handoff, not a verdict — if the commit aborted, the transcript must not show green on a commit that never completed. The block earns green only when the superseding event carries the committed sha, or when a later `gate_reproduced` confirms the commit landed and reproduced; a failed reproduction closes the accept block red.
+
+## SPEC-070 — Plan-accept warning for rewritten accepted task bodies
+
+**As-built:** yes
+**Covers:** T-081
+
+Where `sections_removed` warns what a proposal erases from the document, a plan proposal also warns what accepting resets on the BOARD. Before the proposal gate, the engine compares each proposed task body against the current plan's normalized task-body hashes (`acceptedHistoryRewriteCount`, `internal/service/stages.go`): when a task whose accepted runs currently count has its body rewritten, the run's `Warning` gains "this proposal rewrites N task bodies whose accepted history will stop counting after acceptance" and a `task_history_rewritten {count}` event is appended. The comparison is over normalized bodies, so Implements-only traceability edits do not trigger it. Never blocked — a rewrite can be intended — only never hidden.
+
+## SPEC-071 — Chat image preflight against the declared vision claim
+
+**As-built:** yes
+**Covers:** T-085, T-093
+
+`validateChatImages` (`internal/service/chat.go`) refuses images before a text-only provider sees them, in order: the duckling must declare `caps.vision`; then `VerifyVision` probes the claim with one image request — a declared-but-absent projector fails with "model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling" instead of the chat dying as a raw `chat stream: 500`. Only then are count (≤6), per-image and total byte caps, and base64 image-data-URL shape checked. The request context threads from `ChatStart`/`ChatMessage` through `validateChatImages` into the `VerifyVision` probe, so a hung endpoint is cancelled when the caller gives up rather than leaking the probe.
+
+## SPEC-072 — Consultant seat in Roster Common, preselected in the guide chat
+
+**As-built:** yes
+**Covers:** T-086
+
+`consultant` is a mode-independent common role: `config.RoleConsultant` is a registered role, and `isCommonRole` (`internal/service/roster.go`) seats it on the Common board beside triager and scribe, so the Common scope pin resolves and validates it like the other common seats. The guide rail's "ask how & why" chat box (`frontend/src/components/GuidePanel.tsx`) takes `preselectedDuckling={consultant}` — the duckling seated as consultant is pre-selected in the guide's duckling selection, so the person asks without re-picking the seat the roster already named.
+
+## SPEC-073 — Run stage in the Recent runs rail
+
+**As-built:** yes
+**Covers:** T-088
+
+The Recent runs rail (`RecentRun`, `frontend/src/components/GuidePanel.tsx`) labels each completed entry as `<stage> <identifier>` — "test T-087", "build T-087", "triage B-098" — so a test run is distinguishable from a build run on the same task. Triage entries name the bug (or subject); test and build entries name the task; other stages use task id or subject. Entries without a stage fall back to the run id. Each entry carries a verdict glyph (passed/failed/unverified, with aria-label) beside the label.
+
+## SPEC-074 — Advisor in-flight signal and spend on a paused question
+
+**As-built:** yes
+**Implements:** REQ-053
+**Covers:** T-091
+
+A question pause names its advisor from the first moment: `pauseForQuestion` (`internal/service/lifecycle.go`) records the advisor seat into `PendingData["advisor"]` and the `human_needed` event BEFORE the asynchronous consultation starts, so the question card can show who is preparing the recommendation immediately. The question card (Board task card and RunView pending block) renders "<advisor> is preparing a recommendation" while the run is paused with no advice yet, then the drafted recommendation with the advisor's name when it lands. The consultation is real spend: its tokens and cost are recorded on the run's budget tracker and appended to `llm.jsonl` with role "advisor", like every other call the run caused.
+
+## SPEC-075 — The guide no longer offers reopening accepted tasks
+
+**As-built:** yes
+**Covers:** T-092
+
+`Next()` (`internal/service/guide.go`) never returns a step with ID `reopen-task`, in either the single or the grouped case, regardless of accepted-task state — the guide rail devotes no real estate to reopening accepted work. (Reopening a bug remains the bug loop's own step, unaffected.)
+
+## SPEC-076 — Formatting drift is gate-checked
+
+**As-built:** yes
+**Covers:** T-095
+
+The project's verification gate proves formatting as well as behaviour: the configured gate command runs `test -z "$(gofmt -l $(find . -type f -name '*.go'))"` before `go test`, the TypeScript check and the frontend suite, so a run whose Go files are not gofmt-clean fails the gate rather than landing drift. The existing drift this check was added for (misaligned struct literals in duck-authored service files) was settled in the same change.
+
+## SPEC-077 — Desktop app asset bundling
+
+**As-built:** yes
+**Implements:** REQ-026
+
+The desktop ships the frontend inside its binary: `make desktop` builds the frontend bundle (`npm run build`), replaces `cmd/ducklab-desktop/frontend/dist` with it, and compiles `cmd/ducklab-desktop` with the version/branch/commit ldflags, so the Wails app serves the assets it was built with. Because the bundled UI and the binary age independently, `make install` warns when `bin/ducklab-desktop` predates `frontend/src` — the remedy (`make desktop`) is named in the warning rather than leaving a stale bundle to silently show the previous build.
+
+**Assumption:** the embed mechanism itself (the `embed.FS` directive in the desktop main package) was not re-read for this settlement; the bundling pipeline is evidenced by the Makefile's `desktop` and `install` targets.
 
