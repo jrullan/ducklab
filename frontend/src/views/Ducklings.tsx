@@ -483,15 +483,34 @@ function ProviderSection({
   const [id, setId] = useState("");
   const [url, setUrl] = useState("");
   const [keyEnv, setKeyEnv] = useState("");
+  const [maxConcurrent, setMaxConcurrent] = useState("");
+
+  const edit = (provider: ProviderView) => {
+    setId(provider.id);
+    setUrl(provider.base_url);
+    setKeyEnv(provider.api_key_env ?? "");
+    setMaxConcurrent(provider.max_concurrent ? String(provider.max_concurrent) : "");
+    setOpen(true);
+  };
 
   const save = () => {
+    const existing = providers.find((p) => p.id === id.trim());
+    const { max_concurrent: _oldMaxConcurrent, ...existingWithoutMax } = existing ?? {};
+    const max = Number(maxConcurrent) || 0;
     void client
-      .providerSet(id.trim(), { base_url: url.trim(), api_key_env: keyEnv.trim(), kind: "openai" })
+      .providerSet(id.trim(), {
+        ...existingWithoutMax,
+        base_url: url.trim(),
+        api_key_env: keyEnv.trim(),
+        kind: existing?.kind ?? "openai",
+        ...(existing || max > 0 ? { max_concurrent: max } : {}),
+      })
       .then(() => {
         setOpen(false);
         setId("");
         setUrl("");
         setKeyEnv("");
+        setMaxConcurrent("");
         onDone();
       })
       .catch(onDone);
@@ -537,6 +556,19 @@ function ProviderSection({
             onChange={(e) => setKeyEnv(e.target.value)}
             className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
+          <label className="flex items-center gap-1 text-xs text-ink-muted">
+            concurrent runs this endpoint will seat at once (blank = unlimited)
+            <input
+              aria-label="concurrent runs this endpoint will seat at once"
+              data-testid="provider-max-concurrent"
+              type="number"
+              min="0"
+              placeholder="unlimited"
+              value={maxConcurrent}
+              onChange={(e) => setMaxConcurrent(e.target.value)}
+              className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
+            />
+          </label>
           <button
             type="button"
             onClick={save}
@@ -577,6 +609,17 @@ function ProviderSection({
               {p.in_use && p.in_use.length > 0 && (
                 <span className="text-xs text-ink-muted">used by {p.in_use.join(", ")}</span>
               )}
+              <span className="text-xs text-ink-muted">
+                {p.max_concurrent ? `${p.max_concurrent} concurrent runs` : "unlimited concurrent runs"}
+              </span>
+              <button
+                type="button"
+                data-testid={`provider-edit-${p.id}`}
+                onClick={() => edit(p)}
+                className="rounded border border-hairline px-2 py-0.5 text-xs"
+              >
+                Edit
+              </button>
               <button
                 type="button"
                 data-testid={`provider-remove-${p.id}`}

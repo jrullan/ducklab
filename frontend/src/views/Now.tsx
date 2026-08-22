@@ -408,6 +408,9 @@ function RunningRow({ run, live }: { run: Run; live?: LiveSpend }) {
         {runLabel(run)}
       </a>
       <span className="text-xs text-ink-secondary">{run.mode}</span>
+      {run.status === "queued" && run.queued_reason && (
+        <span className="w-full text-xs text-ink-secondary">{run.queued_reason}</span>
+      )}
       {live && (
         <span className="text-xs tabular-nums text-ink-muted">
           {tokens(live.tokens)}

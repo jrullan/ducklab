@@ -1347,6 +1347,9 @@
           "project_id": {
             "type": "string"
           },
+          "queued_reason": {
+            "type": "string"
+          },
           "redo_note": {
             "$ref": "#/components/schemas/RunlogRedoNote"
           },
@@ -2147,6 +2150,9 @@
           },
           "kind": {
             "type": "string"
+          },
+          "max_concurrent": {
+            "type": "integer"
           }
         },
         "required": [

@@ -300,7 +300,7 @@ ${r.output.slice(-600)}`))
 
 function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId: string }) {
   const completed = Object.values(runs)
-    .filter((run) => run.project_id === projectId && (run.status === "done" || run.status === "failed"))
+    .filter((run) => run.project_id === projectId && (run.status === "done" || run.status === "failed" || run.status === "queued"))
     .sort((a, b) => b.started_at.localeCompare(a.started_at))
     .slice(0, 10);
 
@@ -338,6 +338,9 @@ function RecentRun({ run }: { run: Run }) {
     <li className="flex items-center gap-1 text-xs">
       <RecentRunGlyph run={run} />
       <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{label}</a>
+      {run.status === "queued" && run.queued_reason && (
+        <span className="truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason}</span>
+      )}
     </li>
   );
 }
@@ -375,6 +378,9 @@ function RailRun({ run, tokensUsed }: { run: Run; tokensUsed?: number }) {
         {run.mode}
         {tokensUsed ? " \u00b7 " + tokens(tokensUsed) : ""}
       </span>
+      {run.status === "queued" && run.queued_reason && (
+        <span className="block truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason}</span>
+      )}
     </li>
   );
 }

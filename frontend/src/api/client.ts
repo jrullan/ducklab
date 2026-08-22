@@ -71,6 +71,8 @@ export interface Run {
   mode_source?: string;
   task_id: string;
   status: "running" | "queued" | "paused" | "done" | "failed";
+  /** Engine explanation for why a queued run has not been seated. */
+  queued_reason?: string;
   verdict: string;
   /** Clean-checkout gate result recorded when the accepted commit was proven. */
   acceptance_gate?: GateResult;
@@ -326,6 +328,8 @@ export type ProviderView = {
   api_key_env?: string;
   /** Whether that variable is set in the engine's environment. */
   key_present: boolean;
+  /** Maximum concurrent runs for this provider; absent or zero means unlimited. */
+  max_concurrent?: number;
   /** Ducklings that would break if this provider went away. */
   in_use?: string[];
 };

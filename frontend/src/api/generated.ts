@@ -396,6 +396,7 @@ export interface RunlogRun {
   pending_since?: string;
   prior_accepted_sha?: string;
   project_id?: string;
+  queued_reason?: string;
   redo_note?: RunlogRedoNote;
   resolution?: string;
   revert_sha?: string;
@@ -613,6 +614,7 @@ export interface ServiceProviderView {
   in_use?: string[];
   key_present?: boolean;
   kind?: string;
+  max_concurrent?: number;
 }
 
 export interface ServiceReleaseRequest {

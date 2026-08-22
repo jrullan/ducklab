@@ -116,6 +116,9 @@ export function Runs({ runs }: { runs: Run[] }) {
             <tr key={r.id} data-testid="runs-row" data-run={r.id}>
               <td className="border-b border-hairline py-1 pr-3">
                 <StatusChip role={runStatusRole(r.status)} label={r.status} />
+                {r.status === "queued" && r.queued_reason && (
+                  <p className="mt-1 text-xs text-ink-secondary">{r.queued_reason}</p>
+                )}
               </td>
               <td className="border-b border-hairline py-1 pr-3">
                 {/* Every row links, including the artifact stages. Labelling
