@@ -2148,7 +2148,7 @@ Give providers an optional `max_concurrent` and teach the queue to count live ru
   - `start` clears the field before writing `running`; rehydration from disk preserves it like any other state field.
 - Go tests in `internal/service/queue_test.go` (plus config tests) assert: two runs sharing a cap-1 provider — the second queues with the provider-named reason and is promoted by `done` the moment the first finishes; runs sharing a cap-8 hosted provider start in parallel up to 8; a run whose roster spans two providers is refused when either is at cap; an explicit `max_concurrent` overrides the locality default; `queued_reason` is set on queue and cleared on start; and all pre-existing queue tests still pass unmodified.
 
-**Out of scope:** Any desktop rendering (that is T-901); per-turn or per-call provider throttling inside a running run; fairness/aging policy beyond the existing waiting-line order; persisting the waiting line across restarts; MCP surface changes.
+**Out of scope:** Any desktop rendering (that is T-097); per-turn or per-call provider throttling inside a running run; fairness/aging policy beyond the existing waiting-line order; persisting the waiting line across restarts; MCP surface changes.
 
 **Assumption:** The roster-to-provider resolution the run record already performs (visible as `roster` on `runlog.Run`) happens at or before queue submit time for every run kind — build, test-first, stage, chat — so a provider set can be attached to the `queued` item; where a run's seats genuinely cannot be known until later, that run contributes no provider holds rather than guessing.
 
@@ -2160,7 +2160,7 @@ Give providers an optional `max_concurrent` and teach the queue to count live ru
 Make a queued run look alive: everywhere running runs already show, a queued run shows the engine's reason verbatim, and the person can see and edit the per-provider cap that produced it.
 
 **Deliverables:**
-- The frontend `Run` type in `frontend/src/api/client.ts` gains `queued_reason?: string`, matching the engine field from T-900; `docs/openapi.json` / `frontend/src/api/generated.ts` are regenerated via `make api` if the route table generation covers it, never hand-edited.
+- The frontend `Run` type in `frontend/src/api/client.ts` gains `queued_reason?: string`, matching the engine field from T-096; `docs/openapi.json` / `frontend/src/api/generated.ts` are regenerated via `make api` if the route table generation covers it, never hand-edited.
   - **Assumption:** the run record's OpenAPI entry picks the new field up from `runlog.Run`; if the route table lists fields explicitly, the addition lands in `internal/engineapi/routes_table.go` instead.
 - Everywhere a running run renders, a queued run renders its `queued_reason` verbatim: the Now inbox, the Runs list, and the guide rail's Recent runs strip.
   - `frontend/src/views/Runs.tsx` already filters `queued` into the running bucket; the row gains the reason text (e.g. under or beside the status chip) with no rewording — "engine at max_concurrent_runs", "another run holds this project working tree", or "waiting for a slot on provider X (held by r-…)" arrive from the engine as-is.
