@@ -243,6 +243,33 @@ evidence on the card and the engine's suggestions beside the seats. Coding /
 intelligence / agentic indices come from OpenRouter's benchmarks endpoint
 when a duckling lives there; your own runs supply the rest.
 
+### The fleet that built this repo
+
+Asked often enough to belong here. This is not a recommendation list — it
+is this repository's own run record (422 recorded runs, ~2,100 seat
+assignments at the time of writing), so you can see what actually held
+which seat. Any OpenAI-compatible endpoint slots in the same way.
+
+| Duckling | Model | Served by | Seats held | What the record says |
+|---|---|---|---|---|
+| `beelink-local` | Qwen3.6-35B-A3B (Q4 GGUF) | llama.cpp (Vulkan) on a Ryzen AI Max 395, on-desk | **465** — the most-seated duckling in this repo | judge (174), scribe (184), reviewer (94). Free. |
+| `luna` | gpt-5.6-luna | OpenRouter | 424 | implementer workhorse: 77% measured pass rate at ~$0.02/run. |
+| `atom-local` | Qwen3.8-27B | vLLM on a DGX Spark on the LAN | 323 | architect (161) and scribe (132) — it wrote the release notes. Free. |
+| `terra` | gpt-5.6-terra | OpenRouter | 275 | the heavier implementer, ~$0.28/run. |
+| `k3` | Kimi K3 | OpenRouter | 272 | triage and architecture drafts. |
+| `glm52` | GLM-5.2 | OpenRouter | 150 | the reviewer seat: 81% measured over 261 reviews. |
+| `qwen38-max` | Qwen3.8-Max | OpenRouter | 128 | the advisor — the rubber duck. 88% measured. |
+| `pato-sonnet` | Claude Sonnet 4.5 | OpenRouter | 7 | the expensive seat, used when cheaper ones measurably ceiling'd. |
+
+Two honest notes. First, "built with local models" here means the local
+seats held the judgment and documentation roles (judge, reviewer, scribe,
+architect) while cheap hosted models did the bulk of the typing — about a
+third of all seat assignments ran on hardware in this room, including the
+single most-seated duckling. Second, the pass rates above are **measured on
+my runs** (`ducklab duckling scorecard`, Wilson lower bound); yours will
+differ, and that is the point — the roster argues from your record, not
+from a leaderboard.
+
 <p align="center">
   <img src="docs/screenshots/council-run.png" alt="A council run mid-flight on ducklab's own spec" width="900">
   <br><em>The same machinery on real work: a council revising ducklab's own spec, 4.5M tokens in, paused once on a budget it asked to lift.</em>
