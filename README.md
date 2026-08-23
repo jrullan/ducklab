@@ -123,6 +123,22 @@ report whatever breaks.
 It warns when the desktop binary predates `frontend/src`, because it will
 happily install a stale one.
 
+## Frontend development without the desktop
+
+To exercise the frontend against the lightweight fake engine, run the engine and
+Vite in separate terminals, then open the browser with its connection details:
+
+```bash
+go run ./cmd/fake-engine --port 8787 --token fake-token
+npm run dev --prefix frontend
+# open http://localhost:5173/?engine=http://127.0.0.1:8787&token=fake-token
+```
+
+The `engine` and `token` query parameters are available only in Vite dev
+builds. They can also be supplied as `VITE_DUCKLAB_ENGINE` and
+`VITE_DUCKLAB_TOKEN` environment variables. The desktop shell continues to use
+its injected `window.ducklab` connection.
+
 ## Three binaries
 
 | | What it is |

@@ -29,6 +29,16 @@ import { loadTheme, type Theme } from "./theme";
  * major version differs. */
 const VERSION = "0.4.0";
 
+type EngineConnection = { baseUrl: string; token: string };
+
+function devEngineConnection(): EngineConnection | null {
+  if (!import.meta.env.DEV) return null;
+  const params = new URLSearchParams(window.location.search);
+  const baseUrl = params.get("engine") || import.meta.env.VITE_DUCKLAB_ENGINE;
+  const token = params.get("token") || import.meta.env.VITE_DUCKLAB_TOKEN;
+  return baseUrl && token ? { baseUrl, token } : null;
+}
+
 declare global {
   interface Window {
     ducklab?: {
@@ -132,8 +142,10 @@ export function App() {
   const [client, setClient] = useState<EngineClient | null>(null);
   // The engine this page talks to. State, not a constant: a restart hands
   // back fresh connection details and everything below rebuilds against them.
-  const [conn, setConn] = useState(() =>
-    window.ducklab ? { baseUrl: window.ducklab.baseUrl, token: window.ducklab.token } : null,
+  const [conn, setConn] = useState<EngineConnection | null>(() =>
+    window.ducklab
+      ? { baseUrl: window.ducklab.baseUrl, token: window.ducklab.token }
+      : devEngineConnection(),
   );
   // A response revealed the engine predates this app. The one action that
   // fixes it gets a button, not a sentence telling someone to open a terminal.
