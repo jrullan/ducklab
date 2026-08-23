@@ -15,6 +15,7 @@ import { StatusChip } from "../components/StatusChip";
 import { RemoveTask } from "../components/RemoveTask";
 import { ChatAbout } from "../components/ChatAbout";
 import { DecisionCard } from "../components/DecisionCard";
+import { SurveyCoverageLine, SurveyInventory, type SurveyInventoryItem } from "../components/SurveyInventory";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, tokens, duration } from "../lib/format";
@@ -481,6 +482,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const recordedFiling = findingsFiled(events);
   const filed = filedBugs ?? recordedFiling;
   const timeline = buildTimeline(events);
+  const surveyInventory = events
+    .filter((event) => event.type === "survey_inventory")
+    .flatMap((event) => Array.isArray(event.data?.items) ? event.data.items as SurveyInventoryItem[] : []);
   const chatLive =
     run?.stage === "chat" &&
     (run.status === "running" || run.status === "paused" || run.status === "queued");
@@ -1104,6 +1108,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </div>
         </section>
       )}
+      <SurveyInventory items={surveyInventory} />
+
       {run.warning && (
         <section data-testid="run-warning" className="m-2 rounded-card border border-serious p-3">
           <h2 className="mb-1 text-sm font-medium" style={{ color: "var(--status-serious)" }}>Warning</h2>
@@ -1301,6 +1307,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             redoNote={run.redo_note}
             onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
           />
+          <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
           {(() => {
             const unread = (run.pending_data?.unread_refs as string[] | undefined) ?? [];
             if (unread.length === 0) return null;

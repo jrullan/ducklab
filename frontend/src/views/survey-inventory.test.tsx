@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { EngineClient, type Run } from "../api/client";
 import { useRuns } from "../store/runs";
 import { Cycle } from "./Cycle";
@@ -38,6 +38,7 @@ function runClient(run: Run, events: unknown[] = []) {
 
 describe("adoption survey coverage on decision surfaces", () => {
   beforeEach(() => {
+    cleanup();
     useRuns.setState({ runs: {}, events: {}, deltas: {}, reasoning: {}, spend: {} });
   });
 
@@ -47,9 +48,9 @@ describe("adoption survey coverage on decision surfaces", () => {
       kind: "requirements", markdown: "", sections: [], proposal: { run_id: "r-survey", diff: "" },
     });
     render(<Cycle client={cycleClient} projectId="p" />);
-    expect((await screen.findByTestId("cycle-proposal")).textContent).toContain(
+    await waitFor(() => expect(screen.getByTestId("cycle-proposal").textContent).toContain(
       "2 surface areas unaccounted: Billing API, Admin UI",
-    );
+    ));
 
     const runClientForView = runClient(surveyRun);
     render(<RunView runId="r-survey" client={runClientForView} />);

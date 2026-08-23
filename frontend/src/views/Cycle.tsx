@@ -10,12 +10,13 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Artifact, Duckling, EngineClient, RosterEntry, Section, TraceError } from "../api/client";
+import type { Artifact, Duckling, EngineClient, RosterEntry, Run, Section, TraceError } from "../api/client";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
 import { Prose } from "../components/Prose";
 import { DecisionCard } from "../components/DecisionCard";
+import { SurveyCoverageLine } from "../components/SurveyInventory";
 import { canChooseFile, chooseFile } from "../lib/picker";
 
 const STAGES = [
@@ -205,6 +206,7 @@ export function Cycle({
   // exists to stop encoding; while they load, no button is better than a wrong
   // one.
   const [proposalNext, setProposalNext] = useState<string[]>([]);
+  const [proposalRun, setProposalRun] = useState<Run | null>(null);
   // Whether the proposing run was already decided. The lifecycle keeps a
   // rejected proposal on disk (05 §1.1: a failed attempt is a record) — and
   // this view read "file exists" as "decision pending", so a person who had
@@ -214,6 +216,7 @@ export function Cycle({
   useEffect(() => {
     if (!proposalRunId) {
       setProposalNext([]);
+      setProposalRun(null);
       return;
     }
     let cancelled = false;
@@ -222,6 +225,7 @@ export function Cycle({
       .then((d) => {
         if (cancelled) return;
         setProposalNext(d.run.next ?? []);
+        setProposalRun(d.run);
         setProposalDecided(d.run.status === "done" || d.run.status === "failed");
       })
       .catch(() => !cancelled && setProposalNext([]));
@@ -474,6 +478,7 @@ export function Cycle({
                 </button>
               }
             />
+            <SurveyCoverageLine run={proposalRun} testId="proposal-unaccounted" />
             {(artifact.proposal.unread_refs?.length ?? 0) > 0 && (
               <p data-testid="proposal-unread-refs" className="mb-2 text-xs text-warn">
                 ⚠ {artifact.proposal.unread_refs!.length} reference document
