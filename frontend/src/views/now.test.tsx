@@ -109,6 +109,36 @@ describe("Now — the inbox", () => {
     expect(f.textContent).not.toContain("stack…");
   });
 
+  it("puts running work before every other inbox section", async () => {
+    seed([
+      base,
+      { ...base, id: "r-live", task_id: "T-live", status: "running", verdict: "", pending_kind: undefined },
+      { ...base, id: "r-failed", task_id: "T-failed", status: "failed", verdict: "FAILED", pending_kind: undefined,
+        ended_at: "2026-07-31T09:10:00Z", failure: "gate failed" },
+    ]);
+    const client = clientWith({
+      bugs: vi.fn(() => Promise.resolve([
+        { id: "B-fixed", title: "A fixed report", severity: "high", status: "fixed", task_id: "T-fixed",
+          source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:35:00Z",
+          next: ["verified", "in_progress"] },
+        { id: "B-reopened", title: "A reopened report", severity: "high", status: "in_progress", task_id: "T-reopened",
+          source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z",
+          next: ["fixed"] },
+      ])),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+
+    const running = await screen.findByTestId("now-running");
+    for (const section of [
+      await screen.findByTestId("now-waiting"),
+      await screen.findByTestId("now-verify"),
+      await screen.findByTestId("now-reopened"),
+      await screen.findByTestId("now-failures"),
+    ]) {
+      expect(running.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    }
+  });
+
   it("shows live spend on a running run", async () => {
     seed([{ ...base, id: "r-live", status: "running", verdict: "", pending_kind: undefined }]);
     useRuns.setState({
