@@ -79,6 +79,13 @@ type ExecuteParams struct {
 	LiveToolEvents bool
 	// OnEvent reports progress; optional.
 	OnEvent func(kind string, data map[string]interface{})
+
+	// EscalationCandidates are optional scorecard evidence supplied by the service.
+	// A nil list preserves event-only observability; a non-nil list requires a
+	// strictly stronger same-role candidate before suggesting a reseat.
+	EscalationCandidates []EscalationCandidate
+	CurrentLowerBound    float64
+	ModeMedian           float64
 }
 
 // RoundRecord is what happened in one round.
@@ -87,6 +94,83 @@ type RoundRecord struct {
 	Gate    string
 	Verdict string
 	Choice  string
+}
+
+// EscalationCandidate is scorecard evidence for a same-role reseat.
+type EscalationCandidate struct {
+	ID          string  `json:"id"`
+	WilsonFloor float64 `json:"wilson_floor"`
+	CostPerRun  float64 `json:"cost_per_run"`
+	Why         string  `json:"why,omitempty"`
+}
+
+const stuckDeliverableReports = 3
+
+// escalationEvidence is deliberately computed from structured run evidence,
+// never from model prose.
+type escalationEvidence struct {
+	StuckItem     int
+	StuckReports  int
+	Turns         int
+	ModeMedian    float64
+	RedGates      int
+	RedGateStreak int
+}
+
+func (e escalationEvidence) fired() []string {
+	var out []string
+	if e.StuckItem > 0 && e.StuckReports >= stuckDeliverableReports {
+		out = append(out, "stuck_deliverable")
+	}
+	if e.ModeMedian > 0 && float64(e.Turns) > 2*e.ModeMedian {
+		out = append(out, "turns_over_2x_mode_median")
+	}
+	if e.RedGateStreak >= 3 {
+		out = append(out, "consecutive_red_round_gates")
+	}
+	return out
+}
+
+func emitEscalationSuggestion(params *ExecuteParams, evidence escalationEvidence, point string) {
+	triggers := evidence.fired()
+	if len(triggers) == 0 {
+		return
+	}
+	// nil means legacy/event-only callers: retain the evidence card. An
+	// explicitly empty candidate set means scorecard machinery found nobody.
+	if params.EscalationCandidates != nil {
+		stronger := false
+		for _, c := range params.EscalationCandidates {
+			if c.WilsonFloor > params.CurrentLowerBound {
+				stronger = true
+				break
+			}
+		}
+		if !stronger {
+			return
+		}
+	}
+	data := map[string]interface{}{
+		"point": point, "thresholds_fired": triggers,
+		"stuck_item": evidence.StuckItem, "stuck_reports": evidence.StuckReports,
+		"turns": evidence.Turns, "mode_median": evidence.ModeMedian,
+		"red_gate_streak": evidence.RedGateStreak,
+		"diagnoses": map[string]interface{}{
+			"seat_at_capacity":   map[string]interface{}{"turns": evidence.Turns, "mode_median": evidence.ModeMedian, "consecutive_red_gates": evidence.RedGateStreak},
+			"task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body before reseating",
+		},
+		"actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as_is"},
+	}
+	if params.EscalationCandidates != nil {
+		best := params.EscalationCandidates[0]
+		for _, c := range params.EscalationCandidates[1:] {
+			if c.WilsonFloor > best.WilsonFloor {
+				best = c
+			}
+		}
+		data["candidate"] = best
+	}
+	emit(params, "escalation_suggestion", data)
 }
 
 // ExecuteResult is the result of executing a script.
@@ -165,6 +249,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var correctiveNotes []string
 	// What the reviewer may remember of its own previous round (reviewmemory.go).
 	var lastReview *reviewMemory
+	stuck := map[int]int{}
+	redGateStreak := 0
+	var evidence escalationEvidence
 
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
@@ -193,6 +280,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				return result, err
 			}
 			duckling := resolveDuckling(params, turn)
+			if turn.Role == config.RoleImplementer {
+				evidence.Turns++
+				evidence.ModeMedian = params.ModeMedian
+				evidence.RedGateStreak = redGateStreak
+			}
 
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview)
 			if err != nil {
@@ -320,9 +412,33 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if consultRetries > 0 {
 						reportData["retry"] = consultRetries
 					}
+					reportData["missing"] = lastReport.Undelivered()
 					emit(params, "deliverables_report", reportData)
+					missing := map[int]bool{}
+					for _, id := range lastReport.Undelivered() {
+						missing[id] = true
+					}
+					for id := range stuck {
+						if !missing[id] {
+							delete(stuck, id)
+						}
+					}
+					for id := range missing {
+						stuck[id]++
+					}
+					evidence.StuckItem, evidence.StuckReports = 0, 0
+					for id, n := range stuck {
+						if n >= stuckDeliverableReports && n > evidence.StuckReports {
+							evidence.StuckItem, evidence.StuckReports = id, n
+						}
+					}
+					evidence.ModeMedian = params.ModeMedian
+					evidence.RedGateStreak = redGateStreak
 				}
 				if signals := measureDistressWithReport(outcome, lastReport); signals.Distressed() {
+					if len(evidence.fired()) > 0 {
+						emitEscalationSuggestion(params, evidence, "distress_pause")
+					}
 					if summary, ok := operationalSummaryWithReport(outcome, lastReport); ok {
 						operational = summary
 					}
@@ -375,6 +491,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// got whichever happened to come last, and the desktop's gate card
 			// showed the right thing only because of event ordering.
 			emit(params, "round_gate", map[string]interface{}{"result": gate, "round": round})
+			if gate == "red" {
+				redGateStreak++
+			} else {
+				redGateStreak = 0
+			}
+			evidence.RedGateStreak = redGateStreak
 			_ = log
 		}
 		// Whether this round actually touched the tree. It used to be hardcoded

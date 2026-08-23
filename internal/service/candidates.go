@@ -3,10 +3,12 @@ package service
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/strategy"
 )
 
 // Seat suggestions.
@@ -303,6 +305,42 @@ func RankCandidates(role string, scorecards []Scorecard, criteria []string) []Ca
 		out[i] = Candidate{ID: r.s.ID, Why: strings.Join(parts, " · ")}
 	}
 	return out
+}
+
+// escalationCandidatesFor returns only same-role seats with enough evidence whose
+// Wilson lower bound strictly exceeds the current seat's. Ranking is by the
+// bound, not raw pass rate, so sparse evidence cannot win by accident.
+func escalationCandidatesFor(role, current string, cards []Scorecard) ([]strategy.EscalationCandidate, float64) {
+	currentFloor := 0.0
+	for _, card := range cards {
+		if card.ID == current {
+			if m, ok := card.MeasuredByRole[role]; ok && m.Runs >= minRuns {
+				currentFloor = passRateEstimate(m.PassRate, m.Runs)
+			}
+			break
+		}
+	}
+	var out []strategy.EscalationCandidate
+	for _, card := range cards {
+		if card.ID == current || (len(card.Roles) > 0 && !slices.Contains(card.Roles, role)) {
+			continue
+		}
+		m, ok := card.MeasuredByRole[role]
+		if !ok || m.Runs < minRuns {
+			continue
+		}
+		floor := passRateEstimate(m.PassRate, m.Runs)
+		if floor > currentFloor {
+			out = append(out, strategy.EscalationCandidate{ID: card.ID, WilsonFloor: floor, CostPerRun: m.AvgCostPerRun, Why: fmt.Sprintf("%.0f%% over %d %s runs; Wilson floor %.1f%%", m.PassRate, m.Runs, role, floor)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WilsonFloor != out[j].WilsonFloor {
+			return out[i].WilsonFloor > out[j].WilsonFloor
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, currentFloor
 }
 
 // candidatesFor ranks for a seat under the configured criteria.

@@ -1825,6 +1825,88 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.writer.WriteState()
 }
 
+func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
+	if rs == nil || rs.writer == nil {
+		return
+	}
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		return
+	}
+	counts := map[int]int{}
+	stuckItem, stuckReports, turns, redStreak, bestRed := 0, 0, 0, 0, 0
+	modeMedian := s.modeTurnMedian(rs.run.Mode, rs.run.ID)
+	for _, e := range events {
+		switch e.Type {
+		case "turn_start":
+			if role, _ := e.Data["role"].(string); role == "implementer" {
+				turns++
+			}
+		case "deliverables_report":
+			current := map[int]bool{}
+			ids, ok := e.Data["missing"].([]interface{})
+			if !ok {
+				ids, ok = e.Data["undelivered"].([]interface{})
+			}
+			if ok {
+				for _, raw := range ids {
+					if v, ok := raw.(float64); ok {
+						current[int(v)] = true
+					}
+				}
+			}
+			for id := range counts {
+				if !current[id] {
+					delete(counts, id)
+				}
+			}
+			for id := range current {
+				counts[id]++
+			}
+			for id, n := range counts {
+				if n >= 3 && n > stuckReports {
+					stuckItem, stuckReports = id, n
+				}
+			}
+		case "round_gate":
+			if result, _ := e.Data["result"].(string); result == "red" {
+				redStreak++
+				if redStreak > bestRed {
+					bestRed = redStreak
+				}
+			} else {
+				redStreak = 0
+			}
+		}
+	}
+	// Strategy may already have emitted this at the safe distress boundary. Avoid
+	// duplicating the durable suggestion when the resulting pause is handled here.
+	for _, e := range events {
+		if e.Type == "escalation_suggestion" && e.Data["point"] == point {
+			return
+		}
+	}
+	var triggers []string
+	if stuckItem > 0 {
+		triggers = append(triggers, "stuck_deliverable")
+	}
+	if bestRed >= 3 {
+		triggers = append(triggers, "consecutive_red_round_gates")
+	}
+	if modeMedian > 0 && float64(turns) > 2*modeMedian {
+		triggers = append(triggers, "turns_over_2x_mode_median")
+	}
+	if len(triggers) == 0 {
+		return
+	}
+	cards, _ := s.Scorecards(context.Background())
+	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), rs.run.Roster[string(config.RoleImplementer)], cards)
+	if len(cands) == 0 {
+		return
+	}
+	rs.writer.AppendEvent("escalation_suggestion", map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0], "diagnoses": map[string]interface{}{"seat_at_capacity": map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body"}, "actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"}})
+}
+
 func (s *Service) failRun(rs *runState, err error) {
 	// A budget running out is a decision point, not a defect. The run did
 	// nothing wrong — the person's own ceiling stopped it — and failing it
@@ -1850,6 +1932,7 @@ func (s *Service) failRun(rs *runState, err error) {
 				"lifting the cap may feed a loop, not finish the work", rs.execCtx.ConsecGateFails)
 		}
 		rs.run.Failure = detail
+		s.emitEscalationAtDecision(rs, "distress_pause")
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
 			"kind": "budget", "detail": detail,
 		})
@@ -1876,6 +1959,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.PendingKind = "error"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error() + " — then resume: the run replays with the new settings"
+		s.emitEscalationAtDecision(rs, "distress_pause")
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
 			"kind": "error", "detail": rs.run.Failure,
 		})
@@ -1903,6 +1987,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.PendingKind = "provider"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error()
+		s.emitEscalationAtDecision(rs, "distress_pause")
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
 			"kind": "provider", "detail": err.Error(),
 		})
@@ -1932,6 +2017,7 @@ func (s *Service) failRun(rs *runState, err error) {
 		rs.run.PendingKind = "error"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 		rs.run.Failure = err.Error()
+		s.emitEscalationAtDecision(rs, "distress_pause")
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
 			"kind": "error", "detail": err.Error(),
 		})
@@ -1964,6 +2050,7 @@ func (s *Service) failRun(rs *runState, err error) {
 	rs.run.Status = "failed"
 	rs.run.Verdict = "FAILED"
 	rs.run.Failure = err.Error()
+	s.emitEscalationAtDecision(rs, "failed_run")
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	rs.writer.AppendEvent("error", map[string]interface{}{"error": err.Error()})
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})

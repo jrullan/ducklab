@@ -225,6 +225,19 @@ func TestConvergingChecklistAtEqualTurnCountDoesNotEmitEscalationSuggestion(t *t
 	}
 }
 
+func TestNoStrongerCandidateEmitsNoEscalationSuggestion(t *testing.T) {
+	var suggested bool
+	params := &ExecuteParams{
+		EscalationCandidates: []EscalationCandidate{{ID: "peer", WilsonFloor: 61}},
+		CurrentLowerBound:    61,
+		OnEvent:              func(kind string, _ map[string]interface{}) { suggested = kind == "escalation_suggestion" },
+	}
+	emitEscalationSuggestion(params, escalationEvidence{StuckItem: 2, StuckReports: 3}, "failed_run")
+	if suggested {
+		t.Fatal("equal Wilson floor must not produce an escalation suggestion")
+	}
+}
+
 func TestUnreportedDeliverablesDoNotSummonTheDuck(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green",

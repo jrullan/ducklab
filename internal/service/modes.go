@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -439,11 +440,38 @@ type modeContext struct {
 }
 
 // dispatchMode runs the requested duck mode.
+func (s *Service) modeTurnMedian(mode, exclude string) float64 {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	var turns []float64
+	for id, rs := range s.runs {
+		if id == exclude || rs == nil || rs.run == nil || rs.run.Mode != mode || rs.run.Budget.Turns <= 0 {
+			continue
+		}
+		turns = append(turns, float64(rs.run.Budget.Turns))
+	}
+	if len(turns) == 0 {
+		return 0
+	}
+	slices.Sort(turns)
+	middle := len(turns) / 2
+	if len(turns)%2 == 1 {
+		return turns[middle]
+	}
+	return (turns[middle-1] + turns[middle]) / 2
+}
+
 func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
+	cards, _ := s.Scorecards(ctx)
+	currentSeat := string(mc.roster[config.RoleImplementer])
+	escalationCandidates, currentFloor := escalationCandidatesFor(string(config.RoleImplementer), currentSeat, cards)
 	base := strategy.ExecuteParams{
-		LiveToolEvents: true,
-		ProjectRoot:    mc.entry.Path,
-		TaskID:         mc.req.TaskID,
+		LiveToolEvents:       true,
+		EscalationCandidates: escalationCandidates,
+		CurrentLowerBound:    currentFloor,
+		ModeMedian:           s.modeTurnMedian(mc.rs.run.Mode, mc.rs.run.ID),
+		ProjectRoot:          mc.entry.Path,
+		TaskID:               mc.req.TaskID,
 		// Answers the person already gave ride ON the prompt: a resumed run
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.
