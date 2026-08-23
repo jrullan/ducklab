@@ -811,6 +811,9 @@ func TestAcceptLogsCommitProgressBeforeGitMutatesTheTree(t *testing.T) {
 func TestFailingFinalGateRecordsBoundedOutputAndFailureTail(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n\nfunc Add(a, b int) int { return a - b // BUG: should be a + b\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	project, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "gate diagnostics", GitInit: true})
 	if err != nil {
 		t.Fatal(err)
@@ -819,7 +822,7 @@ func TestFailingFinalGateRecordsBoundedOutputAndFailureTail(t *testing.T) {
 	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte("## M-001 — Gate diagnostics\n\n### T-001 — Preserve the final gate failure\n\nMake the failure visible.\n"), 0o644); err != nil {
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte("## M-001 — Gate diagnostics\n\n### T-001 — fix the final gate failure\n\nMake the failure visible.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

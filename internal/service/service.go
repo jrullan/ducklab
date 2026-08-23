@@ -1663,10 +1663,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// said only exit:1 sent the person re-running the whole suite by hand
 	// to learn which test broke (B-122).
 	rs.writer.AppendEvent("gate", map[string]interface{}{
-		"gate":   string(gateResult.Gate),
-		"cmd":    gateResult.Command,
-		"exit":   gateResult.ExitCode,
-		"output": tailOf(gateResult.Output, 4000),
+		"gate":       string(gateResult.Gate),
+		"command":    gateResult.Command,
+		"exit_code":  gateResult.ExitCode,
+		"output":     tailOf(gateResult.Output, 4000),
+		"duration_s": gateResult.Duration,
 	})
 	if gateResult.ExitCode != 0 {
 		rs.run.Failure = "gate failed (exit " + strconv.Itoa(gateResult.ExitCode) + "):\n" + tailOf(gateResult.Output, 1500)
