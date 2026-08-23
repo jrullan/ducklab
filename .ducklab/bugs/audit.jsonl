@@ -479,3 +479,4 @@
 {"ts":"2026-08-23T00:42:25Z","bug":"B-122","from":"in_progress","to":"fixed","actor":"human","via":"move"}
 {"ts":"2026-08-23T00:49:53Z","bug":"B-118","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-105"}
 {"ts":"2026-08-23T00:56:19Z","bug":"B-119","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-106"}
+{"ts":"2026-08-23T02:55:53Z","bug":"B-120","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-107"}
