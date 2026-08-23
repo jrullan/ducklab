@@ -156,28 +156,39 @@ describe("buildPending", () => {
     expect(p.questionId).toBe("q1");
   });
 
-  it("shows the seated advisor preparing a recommendation only while a question has no result", () => {
+  it("opens the advisor drafting window at advice_started and closes it only for that question's result", () => {
+    const beforeStart = buildPending([
+      ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
+    ])!;
+    expect(beforeStart.advisorPending).toBeUndefined();
+
     const waiting = buildPending([
       ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
+      ev("advice_started", 2, { question_id: "q1", advisor: "pato-advisor" }),
+      // Another question resolving must not stop this question's animation.
+      ev("advice", 3, { question_id: "q2", advisor: "other-advisor", answer: "Unrelated." }),
     ])!;
     expect(waiting.advisorPending).toBe("pato-advisor");
 
     const answered = buildPending([
       ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
-      ev("advice", 2, { question_id: "q1", advisor: "pato-advisor", answer: "Use the documented contract." }),
+      ev("advice_started", 2, { question_id: "q1", advisor: "pato-advisor" }),
+      ev("advice", 3, { question_id: "q1", advisor: "pato-advisor", answer: "Use the documented contract." }),
     ])!;
     expect(answered.advisorPending).toBeUndefined();
     expect(answered.advice).toBe("Use the documented contract.");
 
     const failed = buildPending([
       ev("human_needed", 1, { kind: "question", question: "Which contract?", question_id: "q1", advisor: "pato-advisor" }),
-      ev("advice_failed", 2, { question_id: "q1", advisor: "pato-advisor", cause: "advisor offline" }),
+      ev("advice_started", 2, { question_id: "q1", advisor: "pato-advisor" }),
+      ev("advice_failed", 3, { question_id: "q1", advisor: "pato-advisor", cause: "advisor offline" }),
     ])!;
     expect(failed.advisorPending).toBeUndefined();
     expect(failed.detail).toBe("advisor offline");
 
     const gate = buildPending([
       ev("human_needed", 1, { kind: "gate", advisor: "pato-advisor" }),
+      ev("advice_started", 2, { question_id: "q1", advisor: "pato-advisor" }),
     ])!;
     expect(gate.advisorPending).toBeUndefined();
   });

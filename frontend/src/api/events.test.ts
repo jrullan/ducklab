@@ -112,6 +112,20 @@ describe("EventSubscriber", () => {
     expect(h.sub.resumeFrom).toBe(2);
   });
 
+  it("replays advice_started so an advisor drafting indicator can open live", () => {
+    const h = harness();
+    h.sub.start();
+    const src = h.sources[0]!;
+
+    src.emit("advice_started", {
+      type: "advice_started", run_id: "r-1", seq: 7,
+      data: { question_id: "q1", advisor: "pato-advisor" },
+    });
+
+    expect(h.events).toEqual([expect.objectContaining({ type: "advice_started", seq: 7 })]);
+    expect(h.sub.resumeFrom).toBe(7);
+  });
+
   // token_delta has no seq. If it moved the resume point, a reconnect would
   // skip real events.
   it("does not let token_delta advance the resume point", () => {

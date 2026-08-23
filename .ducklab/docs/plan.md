@@ -2525,4 +2525,34 @@ Confirmed in source: the final verify event at internal/service/service.go:1651-
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-112 — Emit advice_started and animate advisor drafting in the question card and seat panel
+
+Fixes B-124.
+
+## Reported
+
+While a question card shows qwen38-max is preparing a recommendation, nothing else moves: no duck-in-action, no token counter for the advisor, no way to tell drafting from hung. Cause: the advisor draft is a non-streaming one-shot with no turn events — the seat panel and streaming counters are driven by turn_start/deltas that this path never emits, and the tracker records the spend only on completion.
+
+Fix, layered: (1) emit advice_started {advisor, question_id} when the draft begins (advice / advice_failed already close the arc), and register it in events.ts; (2) the question card animates the preparing line with the house cog (cog-turn, respects prefers-reduced-motion) while advice_started is open, and stops on advice/advice_failed; (3) the run view seat panel marks the advisor seat active during that window. STRETCH, separate decision: make the one-shot use ChatStream so the +streaming token counter ticks for the advisor like any turn — worth it only if the cog alone proves insufficient, since oneShotChat (B-123) is deliberately simple.
+
+Done means: watching a question with an advisor seated, the preparing line visibly spins from the moment it appears, and stops with either the recommendation or the failure note; a person can tell drafting from dead at a glance.
+
+**Deliverables:**
+- adviseQuestion (internal/service/advisor.go) appends an advice_started event with advisor and question_id before the one-shot draft begins, on both the paused-question and inline consult paths if they share the arc
+- advice_started is registered in frontend/src/api/events.ts so it is stored and replayed
+- buildPending in frontend/src/lib/runview.ts derives advisorPending from an advice_started with no matching advice/advice_failed for that question_id (not merely from the absence of advice), so the window opens at draft start
+- the preparing line in RunView.tsx (data-testid advisor-pending) carries the cog-turn animation while that window is open and stops on advice or advice_failed
+- a Go test asserts advice_started precedes advice/advice_failed in the event log, and a runview.test.ts case asserts the pending window opens on advice_started and closes on advice/advice_failed
+
+## Triage
+
+**Component:** advisor / run view
+**Suspected files:** internal/service/advisor.go, frontend/src/api/events.ts, frontend/src/lib/runview.ts, frontend/src/views/RunView.tsx, frontend/src/app/index.css
+
+The advisor draft is a non-streaming one-shot that emits no lifecycle event until completion, so the UI has no signal to animate; adding advice_started closes that gap and the frontend layers render it.
+
+**Verification (triage recommends):** test-first — Go test asserts adviseQuestion writes advice_started before advice/advice_failed in events.jsonl; runview.test.ts asserts advisorPending derives from an open advice_started and closes on advice/advice_failed — the cog spin itself is existing CSS (cog-turn already respects prefers-reduced-motion).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 

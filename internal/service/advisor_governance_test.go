@@ -175,6 +175,45 @@ func TestAdvisorPromptIncludesProjectDocumentContext(t *testing.T) {
 	}
 }
 
+func TestAdvisorDraftStartPrecedesRecommendation(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-dos")
+	s.ducklings.RegisterProvider(&advisorTestProvider{replies: []string{"Use the documented option. It is the project contract."}})
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-advice-start", ProjectID: "p", Status: "paused", PendingKind: "question", PendingData: map[string]interface{}{}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	s.adviseQuestion(rs, &tools.PendingQuestion{ID: "q", Question: "Which option?"})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		events, _ := runlog.ReadEvents(w.RunDir())
+		advice := -1
+		started := -1
+		for i, e := range events {
+			if e.Type == "advice_started" && e.Data["question_id"] == "q" && e.Data["advisor"] == "pato-dos" {
+				started = i
+			}
+			if e.Type == "advice" && e.Data["question_id"] == "q" {
+				advice = i
+			}
+		}
+		if advice >= 0 {
+			if started < 0 {
+				t.Fatalf("advice was recorded without advice_started: %+v", events)
+			}
+			if started > advice {
+				t.Fatalf("advice_started must precede advice: %+v", events)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("advisor recommendation was not recorded")
+}
+
 func TestAdvisorFailureIsRecordedOnQuestion(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-dos")
 	s.ducklings.RegisterProvider(&advisorTestProvider{err: errors.New("advisor offline")})
@@ -190,14 +229,28 @@ func TestAdvisorFailureIsRecordedOnQuestion(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		events, _ := runlog.ReadEvents(w.RunDir())
-		for _, e := range events {
+		failed := -1
+		started := -1
+		for i, e := range events {
+			if e.Type == "advice_started" && e.Data["question_id"] == "q" && e.Data["advisor"] == "pato-dos" {
+				started = i
+			}
 			if e.Type == "advice_failed" {
+				failed = i
 				data := e.Data
 				if !strings.Contains(data["error"].(string), "advisor offline") {
 					t.Fatalf("advice_failed event lacks cause: %+v", e.Data)
 				}
-				return
 			}
+		}
+		if failed >= 0 {
+			if started < 0 {
+				t.Fatalf("advice_failed was recorded without advice_started: %+v", events)
+			}
+			if started > failed {
+				t.Fatalf("advice_started must precede advice_failed: %+v", events)
+			}
+			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
