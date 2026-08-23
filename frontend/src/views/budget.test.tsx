@@ -221,13 +221,36 @@ describe("saving the settings", () => {
 // The person who always builds in pair and tests in solo re-picked both on
 // every task. Settings records the habit; every launcher opens on it.
 describe("default phase modes in Settings", () => {
-  it("keeps the launcher mode defaults in the settings payload", async () => {
-    const client = clientWith();
+  it("lets build and test defaults be picked, explains the project fallback, and saves both choices", async () => {
+    const client = clientWith({
+      modeDefaults: vi.fn(() =>
+        Promise.resolve({
+          rounds: { pair: 5 },
+          agent_max_turns: 24,
+          build_mode: "pair",
+          test_mode: "solo",
+          script_rounds: { solo: 3, pair: 3, tournament: 1, split: 1 },
+          role_turns: {},
+          script_role_turns: { implementer: 24 },
+        }),
+      ),
+    });
     render(settings(client));
-    await waitFor(() => screen.getByTestId("settings-save"));
+
+    const build = (await screen.findByLabelText("build runs open in")) as HTMLSelectElement;
+    const test = screen.getByLabelText("test runs open in") as HTMLSelectElement;
+    expect(build.value).toBe("pair");
+    expect(test.value).toBe("solo");
+    expect([...build.options].map((option) => option.value)).toEqual(["", "solo", "pair", "tournament", "split"]);
+    expect(screen.getByTestId("config-settings").textContent).toContain("config.toml-only for now");
+
+    fireEvent.change(build, { target: { value: "tournament" } });
+    fireEvent.change(test, { target: { value: "split" } });
     fireEvent.click(screen.getByTestId("settings-save"));
+
     await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
-    expect(client.modeDefaultsSet).toHaveBeenCalled();
+    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(body).toMatchObject({ build_mode: "tournament", test_mode: "split" });
   });
 });
 
