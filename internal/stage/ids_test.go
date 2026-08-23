@@ -210,6 +210,43 @@ func TestRenumberingCarriesDependenciesWithIt(t *testing.T) {
 }
 
 // The architect is asked for dependencies, and told not to invent them.
+// Task ids in narrative prose must follow the same renumbering as task ids and
+// dependency fields. References embedded within a longer id are not references
+// to the task and must remain intact.
+func TestPlanTaskIDsRenumbersTaskReferencesInBodyProse(t *testing.T) {
+	existing := []artifact.Section{{
+		ID: "M-01",
+		Children: []artifact.Section{{ID: "T-095", Title: "Existing work"}},
+	}}
+	produced := []artifact.Section{{
+		ID: "M-02",
+		Children: []artifact.Section{
+			{
+				ID:    "T-900",
+				Title: "First new task",
+				Body:  "Coordinate with T-901. Keep T-9000 as an external fixture.",
+			},
+			{
+				ID:    "T-901",
+				Title: "Second new task",
+				Body:  "Build on T-900 before release.",
+			},
+		},
+	}}
+
+	out := PlanTaskIDs(existing, produced)
+	first, second := out[0].Children[0], out[0].Children[1]
+	if first.ID != "T-096" || second.ID != "T-097" {
+		t.Fatalf("ids = %q, %q; want T-096, T-097", first.ID, second.ID)
+	}
+	if want := "Coordinate with T-097. Keep T-9000 as an external fixture."; first.Body != want {
+		t.Errorf("first task body = %q, want %q", first.Body, want)
+	}
+	if want := "Build on T-096 before release."; second.Body != want {
+		t.Errorf("second task body = %q, want %q", second.Body, want)
+	}
+}
+
 func TestThePlanPromptAsksForDependencies(t *testing.T) {
 	for _, want := range []string{"**Depends on:**", "only where it is true"} {
 		if !strings.Contains(planInstruction, want) {
