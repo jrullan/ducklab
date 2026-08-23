@@ -1396,7 +1396,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             <div className="mt-2">
               <p className="text-ink">{pending.question}</p>
               {pending.advisorPending && (
-                <p className="mt-1 text-sm text-ink-muted" data-testid="advisor-pending">{pending.advisorPending} is preparing a recommendation</p>
+                <p className="mt-1 text-sm text-ink-muted" data-testid="advisor-pending"><span className="cog-turn" aria-hidden="true">⚙</span> {pending.advisorPending} is preparing a recommendation</p>
               )}
               {pending.detail && pending.kind === "question" && !pending.advice && (
                 <p className="mt-1 text-sm text-critical" data-testid="advice-failed">Advisor recommendation failed: {pending.detail}</p>
@@ -1447,7 +1447,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         <section data-testid="conversation" className="min-w-0">
           {rosterEntries.length > 0 && (
             <div className="mb-3" data-testid="run-seat-chips">
-              <SeatChips entries={rosterEntries} fleet={fleet} measured={measured} />
+              <SeatChips entries={rosterEntries} fleet={fleet} measured={measured} activeDuckling={pending?.advisorPending} />
             </div>
           )}
           {/* Viewport-relative, so it adapts to the window without depending on

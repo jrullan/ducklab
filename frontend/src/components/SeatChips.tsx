@@ -34,6 +34,7 @@ export function SeatChips({
   optionsFor,
   allowDefault = false,
   stack = false,
+  activeDuckling,
 }: {
   entries: SeatEntry[];
   fleet: Duckling[];
@@ -47,6 +48,7 @@ export function SeatChips({
    *  provenance and facts overflows and wraps mid-word. Stacked, each reads
    *  as a line of a seating list. */
   stack?: boolean;
+  activeDuckling?: string;
 }) {
   const colors = assignDucklingColors(fleet);
   const [open, setOpen] = useState<number | null>(null);
@@ -92,7 +94,8 @@ export function SeatChips({
             onClick={() => onPick && setOpen(i)}
             className={
               "flex items-center gap-1 rounded-full border border-hairline px-2 py-0.5 text-xs" +
-              (onPick ? " cursor-pointer hover:border-ink" : "")
+              (onPick ? " cursor-pointer hover:border-ink" : "") +
+              (activeDuckling && activeDuckling === e.duckling ? " ring-2 ring-serious" : "")
             }
             data-testid="seat-chip"
             title={onPick ? "click to pick a different duckling for this run only" : undefined}

@@ -818,25 +818,40 @@ export function chainedBuildId(events: readonly DucklabEvent[]): string {
 /** The pending human interaction, if the run is waiting on one. */
 export function buildPending(events: readonly DucklabEvent[]): PendingHuman | null {
   let latest: DucklabEvent | null = null;
-  let advice: DucklabEvent | null = null;
+  const adviceByQuestion = new Map<string, DucklabEvent>();
+  const adviceStartedByQuestion = new Map<string, DucklabEvent>();
   for (const e of events) {
     if (e.type === "human_needed") {
       latest = e;
-      advice = null;
+      adviceByQuestion.clear();
+      adviceStartedByQuestion.clear();
     }
-    if (e.type === "advice" || e.type === "advice_failed") advice = e;
+    if (e.type === "advice_started") {
+      const id = String(e.data?.question_id ?? "");
+      if (id) adviceStartedByQuestion.set(id, e);
+    }
+    if (e.type === "advice" || e.type === "advice_failed") {
+      const id = String(e.data?.question_id ?? "");
+      if (id) adviceByQuestion.set(id, e);
+    }
     // A human action clears the wait — and so does a checkpoint: resume
     // appends one, and a budget pause that was lifted and resumed went on
     // saying "waiting for you" over a run that was already working again.
     if (e.type === "human" || e.type === "run_end" || e.type === "checkpoint") {
       latest = null;
-      advice = null;
+      adviceByQuestion.clear();
+      adviceStartedByQuestion.clear();
     }
   }
   if (!latest) return null;
   const d = latest.data ?? {};
+  const questionId = String(d.question_id ?? "");
+  const advice = adviceByQuestion.get(questionId) ?? null;
+  const adviceStarted = adviceStartedByQuestion.get(questionId) ?? null;
   const a = advice?.data ?? {};
-  const adviceMatches = advice && String(a.question_id ?? "") === String(d.question_id ?? "");
+  const started = adviceStarted?.data ?? {};
+  const adviceMatches = advice !== null;
+  const startedMatches = adviceStarted !== null;
   const question = String(d.kind ?? "") === "question";
   const failed = adviceMatches && advice?.type === "advice_failed";
   return {
@@ -847,7 +862,7 @@ export function buildPending(events: readonly DucklabEvent[]): PendingHuman | nu
     detail: failed && (a.cause || a.error) ? String(a.cause ?? a.error) : d.detail ? String(d.detail) : undefined,
     advice: adviceMatches && !failed && a.answer ? String(a.answer) : undefined,
     advisor: adviceMatches && a.advisor ? String(a.advisor) : d.advisor ? String(d.advisor) : undefined,
-    advisorPending: question && !adviceMatches && d.advisor ? String(d.advisor) : undefined,
+    advisorPending: question && startedMatches && !adviceMatches && started.advisor ? String(started.advisor) : undefined,
   };
 }
 

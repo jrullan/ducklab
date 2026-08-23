@@ -123,12 +123,12 @@ func (s *Service) adviseInline(ctx context.Context, rs *runState, question strin
 		&tools.PendingQuestion{ID: tools.QuestionID(question), Question: question})
 	if err != nil {
 		rs.writer.AppendEvent("advice_failed", map[string]interface{}{
-			"advisor": advisor, "kind": "inline", "cause": adviceError(err),
+			"question_id": tools.QuestionID(question), "advisor": advisor, "kind": "inline", "cause": adviceError(err),
 		})
 		return "", err
 	}
 	rs.writer.AppendEvent("advice", map[string]interface{}{
-		"advisor": advisor, "kind": "inline", "question": firstN(question, 2000), "answer": firstN(answer, 4000),
+		"question_id": tools.QuestionID(question), "advisor": advisor, "kind": "inline", "question": firstN(question, 2000), "answer": firstN(answer, 4000),
 	})
 	return answer, nil
 }
@@ -145,6 +145,10 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	p, err := s.ducklings.Provider(advisorID)
 	if err != nil {
 		return "", "", err
+	}
+
+	if w, werr := s.ensureWriter(rs); werr == nil {
+		w.AppendEvent("advice_started", map[string]interface{}{"advisor": advisorID, "question_id": q.ID})
 	}
 
 	var b strings.Builder
