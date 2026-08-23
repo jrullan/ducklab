@@ -31,6 +31,7 @@ export function LaunchConfig({
   measured,
   defaultProvenance,
   roster,
+  defaultMode,
 }: {
   ducklings: readonly Duckling[];
   value: PhaseConfig;
@@ -40,6 +41,8 @@ export function LaunchConfig({
   showTokens?: boolean;
   measured?: MeasuredSpend;
   roster?: readonly RosterEntry[];
+  /** Mode shown while an empty mode remains omitted from the request. */
+  defaultMode?: string;
   /** Provenance for untouched empty seats; a pick is always per-run. */
   defaultProvenance?: string;
 }) {
@@ -53,7 +56,8 @@ export function LaunchConfig({
       });
     }
   }, [roster, value.mode]);
-  const seats = fixedSeats(value.mode);
+  const displayMode = value.mode || defaultMode || modes[0] || "solo";
+  const seats = fixedSeats(displayMode);
   const cols = seats > 0 ? seats : Math.max(2, value.ducklings.length, extraSeats);
   const setSeat = (i: number, id: string) => {
     const next = [...value.ducklings];
@@ -70,7 +74,7 @@ export function LaunchConfig({
         <select
           aria-label="mode"
           data-testid="cfg-mode"
-          value={value.mode}
+          value={displayMode}
           onChange={(e) => onChange({ ...value, mode: e.target.value, ducklings: value.ducklings })}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs text-ink-secondary"
         >
@@ -90,7 +94,7 @@ export function LaunchConfig({
       {ducklings.length > 0 && (
         <SeatChips
           entries={Array.from({ length: cols }, (_, i) => ({
-            role: seatLabel(value.mode, i),
+            role: seatLabel(displayMode, i),
             duckling: value.ducklings[i] ?? "",
             provenance: value.seatProvenance?.[i] ?? (value.ducklings[i] ? "picked now" : defaultProvenance),
           }))}

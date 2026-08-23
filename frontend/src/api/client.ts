@@ -780,7 +780,7 @@ export class EngineClient {
       build: chain?.thenBuild
         ? {
             task_id: taskId,
-            mode: chain.mode || "solo",
+            ...(chain.mode ? { mode: chain.mode } : {}),
             ducklings: chain.ducklings ?? [],
             ...(chain.maxTokens ? { budget: { max_tokens: chain.maxTokens } } : {}),
             ...(chain.agentTurns ? { agent_turns: chain.agentTurns } : {}),

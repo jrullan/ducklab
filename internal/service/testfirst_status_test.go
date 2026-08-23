@@ -281,6 +281,14 @@ func TestChainedBuildModeRecordsResolutionOrExplicitRequest(t *testing.T) {
 			if build == nil {
 				t.Fatal("accepting the test did not start the chained build")
 			}
+			// Check the returned record as well as state.json: mode provenance
+			// is part of the chained run's public contract.
+			if build.Mode != tc.wantMode {
+				t.Errorf("chained build mode = %q, want %q", build.Mode, tc.wantMode)
+			}
+			if build.ModeSource != tc.wantSource {
+				t.Errorf("chained build mode_source = %q, want %q", build.ModeSource, tc.wantSource)
+			}
 			state, err := os.ReadFile(filepath.Join(dir, ".ducklab", "runs", build.ID, "state.json"))
 			if err != nil {
 				t.Fatal(err)

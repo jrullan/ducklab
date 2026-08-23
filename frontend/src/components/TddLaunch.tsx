@@ -37,7 +37,8 @@ export function TddLaunch({
 }) {
   // Opening seats are empty: omitted ducklings leave the resolved roster in charge.
   const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.test, ducklings: [] }));
-  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.build, ducklings: [] }));
+  // Leave an untouched build mode empty so RunStart resolves its setting.
+  const [buildCfg, setBuildCfg] = useState<PhaseConfig>(() => ({ mode: "", ducklings: [] }));
   // Changing a mode re-resolves from the canonical roster. Saved Settings
   // line-ups are not launch defaults anymore; picks remain run-local.
   const reseat = (set: (c: PhaseConfig) => void) => (next: PhaseConfig, _prevMode: string) => {
@@ -48,9 +49,10 @@ export function TddLaunch({
   // duckling, else the roster's), and the build's measured cost when known.
   const seatFor = (cfg: PhaseConfig, role: string, index: number) =>
     cfg.ducklings[index] || (Array.isArray(roster) ? roster.find((r) => r.role === role)?.duckling : undefined) || "roster";
-  const est = estimates?.[buildCfg.mode];
+  const buildDisplayMode = buildCfg.mode || phaseDefaults.build;
+  const est = estimates?.[buildDisplayMode];
   const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
-  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildCfg.mode} · ${seatFor(buildCfg, "implementer", 0)}${buildCfg.mode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 1)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
+  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 1)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
       {/* The common case is one click; the button leads. Seats and caps are
@@ -92,6 +94,7 @@ export function TddLaunch({
               estimates={estimates}
               showTokens
               roster={roster}
+              defaultMode={phaseDefaults.build}
               defaultProvenance="roster"
             />
           </div>
