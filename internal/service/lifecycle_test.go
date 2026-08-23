@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -802,6 +803,86 @@ func TestAcceptLogsCommitProgressBeforeGitMutatesTheTree(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The final gate is the failure a person reads after a build. Its event must
+// carry the same bounded, named result as other gate records, while Failure
+// preserves the diagnostic tail for the failed-run card.
+func TestFailingFinalGateRecordsBoundedOutputAndFailureTail(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	project, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "gate diagnostics", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID := project.ID
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte("## M-001 — Gate diagnostics\n\n### T-001 — Preserve the final gate failure\n\nMake the failure visible.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const outputTail = "FINAL-GATE-DIAGNOSTIC: survey-inventory fails only in the full suite"
+	gateScript := "#!/bin/sh\nprintf 'prefix:'\nprintf '%05000d' 0 | tr '0' x\nprintf '\\n" + outputTail + "\\n'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "failing-gate.sh"), []byte(gateScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), projectID, map[string]string{
+		"verify.mode": "tests", "verify.tests": "./failing-gate.sh",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := s.RunStart(context.Background(), projectID, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	if rs == nil {
+		t.Fatal("started run was not registered")
+	}
+	select {
+	case <-rs.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("run did not reach its final gate")
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Verdict != "FAILED" {
+		t.Fatalf("verdict = %q, want FAILED (failure = %q)", detail.Run.Verdict, detail.Run.Failure)
+	}
+	if !strings.Contains(detail.Run.Failure, outputTail) {
+		t.Errorf("Failure = %q, want final gate output tail %q", detail.Run.Failure, outputTail)
+	}
+	for _, event := range detail.Events {
+		if event.Type != "gate" {
+			continue
+		}
+		for _, field := range []string{"gate", "command", "exit_code", "output", "duration_s"} {
+			if _, ok := event.Data[field]; !ok {
+				t.Errorf("final gate event missing %q: %#v", field, event.Data)
+			}
+		}
+		output, ok := event.Data["output"].(string)
+		if !ok {
+			t.Errorf("final gate output = %#v, want string", event.Data["output"])
+		} else {
+			if !strings.Contains(output, outputTail) {
+				t.Errorf("final gate output = %q, want its diagnostic tail", output)
+			}
+			if len(output) > 4003 {
+				t.Errorf("final gate output has %d bytes, want bounded tail", len(output))
+			}
+		}
+		return
+	}
+	t.Error("failing final gate did not record a gate event")
 }
 
 func TestAppendToAClosedLogFails(t *testing.T) {

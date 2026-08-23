@@ -486,3 +486,4 @@
 {"ts":"2026-08-23T11:35:34Z","bug":"B-123","from":"in_progress","to":"fixed","actor":"human","via":"move"}
 {"ts":"2026-08-23T12:07:37Z","bug":"B-113","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-109"}
 {"ts":"2026-08-23T12:29:59Z","bug":"B-124","from":"open","to":"triaged","actor":"engine","via":"triage"}
+{"ts":"2026-08-23T12:44:53Z","bug":"B-121","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-110"}
