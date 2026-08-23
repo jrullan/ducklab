@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { RunLauncher } from "./RunLauncher";
+import { TddLaunch } from "./TddLaunch";
 import type { Duckling } from "../api/client";
 
 const fleet = [
@@ -64,6 +65,55 @@ describe("the run launcher's saved line-ups", () => {
 
 // The person deciding how to run something is deciding what to spend, and that
 // number used to live in Reports, consulted after the money was gone.
+// The chained build is deliberately different from a standalone build: until
+// the person chooses its mode, the engine must resolve it from settings rather
+// than receive the mode displayed by the launcher as a request override.
+describe("the TDD chain build mode", () => {
+  it("omits the build mode until the person picks one", () => {
+    const onTdd = vi.fn();
+    render(
+      <TddLaunch
+        ducklings={fleet}
+        preferred={{}}
+        phaseDefaults={{ test: "solo", build: "pair" }}
+        busy={false}
+        onTdd={onTdd}
+        onTestOnly={() => {}}
+        onBuildOnly={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("tdd-start"));
+    expect(onTdd).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: "solo" }),
+      expect.objectContaining({ mode: "" }),
+    );
+  });
+
+  it("carries a build mode after the person explicitly chooses it", () => {
+    const onTdd = vi.fn();
+    render(
+      <TddLaunch
+        ducklings={fleet}
+        preferred={{}}
+        phaseDefaults={{ test: "solo", build: "pair" }}
+        busy={false}
+        onTdd={onTdd}
+        onTestOnly={() => {}}
+        onBuildOnly={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("tdd-tune"));
+    fireEvent.change(screen.getAllByTestId("cfg-mode")[1]!, { target: { value: "pair" } });
+    fireEvent.click(screen.getByTestId("tdd-start"));
+    expect(onTdd).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ mode: "pair" }),
+    );
+  });
+});
+
 describe("the launcher's cost estimates", () => {
   it("shows each mode's measured average beside it", () => {
     render(

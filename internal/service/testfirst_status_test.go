@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,6 +224,78 @@ func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
 	}
 	if !foundBuild {
 		t.Error("no build run was started after the commit")
+	}
+}
+
+// A chain's build mode has the same provenance contract as an ordinary
+// RunStart: absent means resolve settings; present means the person requested
+// it. Check the persisted record because it is what later explains the run.
+func TestChainedBuildModeRecordsResolutionOrExplicitRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name, requested, wantMode, wantSource string
+	}{
+		{name: "unpicked build resolves the configured default", wantMode: "pair", wantSource: "settings"},
+		{name: "picked build stays a request", requested: "solo", wantMode: "solo", wantSource: "request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := serviceWithDucklings(t, "pato-uno", "pato-dos")
+			s.cfg.Defaults.BuildMode = "pair"
+			dir := t.TempDir()
+			p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte("## M-001 — Core\n\n### T-110 — Chain mode\n\nDo it.\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			chain := map[string]interface{}{"task_id": "T-110"}
+			if tc.requested != "" {
+				chain["mode"] = tc.requested
+			}
+			testRun := &runlog.Run{ID: "r-chain-mode", ProjectID: p.ID, TaskID: "T-110", Stage: "test", Status: "paused", Verdict: "PASSED", PendingKind: "gate", StartedAt: "2026-08-06T12:00:00Z", ChainBuild: chain}
+			w, err := runlog.NewWriter(dir, testRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			s.RecoverRuns(context.Background())
+			if _, err := s.RunAccept(context.Background(), testRun.ID, "accept test"); err != nil {
+				t.Fatal(err)
+			}
+
+			runs, err := s.RunList(context.Background(), RunFilter{ProjectID: p.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var build *runlog.Run
+			for _, r := range runs {
+				if r.Stage == "build" && r.TaskID == "T-110" {
+					build = r
+					break
+				}
+			}
+			if build == nil {
+				t.Fatal("accepting the test did not start the chained build")
+			}
+			state, err := os.ReadFile(filepath.Join(dir, ".ducklab", "runs", build.ID, "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var disk map[string]interface{}
+			if err := json.Unmarshal(state, &disk); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := disk["mode"].(string); got != tc.wantMode {
+				t.Errorf("state.json mode = %q, want %q", got, tc.wantMode)
+			}
+			if got, _ := disk["mode_source"].(string); got != tc.wantSource {
+				t.Errorf("state.json mode_source = %q, want %q", got, tc.wantSource)
+			}
+		})
 	}
 }
 
