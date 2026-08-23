@@ -151,20 +151,27 @@ func remapIDs(ids []string, remap map[string]string) []string {
 // remapBody rewrites ids in the prose too, so the rendered document does not
 // contradict its own edges.
 func remapBody(body string, remap map[string]string) string {
-	if body == "" {
+	if body == "" || len(remap) == 0 {
 		return body
 	}
-	// Longest ids first: rewriting REQ-1 before REQ-10 would corrupt it.
+	// Match all ids in one pass so a replacement cannot be rewritten again.
+	// Longest ids first also keeps overlapping alternatives unambiguous.
 	froms := make([]string, 0, len(remap))
 	for from := range remap {
 		froms = append(froms, from)
 	}
 	sort.Slice(froms, func(i, j int) bool { return len(froms[i]) > len(froms[j]) })
-
-	for _, from := range froms {
-		body = strings.ReplaceAll(body, from, remap[from])
+	patterns := make([]string, len(froms))
+	for i, from := range froms {
+		patterns[i] = regexp.QuoteMeta(from)
 	}
-	return body
+	re := regexp.MustCompile(`\b(?:` + strings.Join(patterns, "|") + `)\b`)
+	return re.ReplaceAllStringFunc(body, func(id string) string {
+		if to, ok := remap[id]; ok {
+			return to
+		}
+		return id
+	})
 }
 
 // PlanTaskIDs assigns task ids across a plan's milestones, since tasks are
@@ -210,6 +217,7 @@ func PlanTaskIDs(existing, produced []artifact.Section) []artifact.Section {
 	if len(renamed) > 0 {
 		for i := range out {
 			for j := range out[i].Children {
+				out[i].Children[j].Body = remapBody(out[i].Children[j].Body, renamed)
 				remapDeps(&out[i].Children[j], renamed)
 			}
 		}

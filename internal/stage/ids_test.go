@@ -215,7 +215,7 @@ func TestRenumberingCarriesDependenciesWithIt(t *testing.T) {
 // to the task and must remain intact.
 func TestPlanTaskIDsRenumbersTaskReferencesInBodyProse(t *testing.T) {
 	existing := []artifact.Section{{
-		ID: "M-01",
+		ID:       "M-01",
 		Children: []artifact.Section{{ID: "T-095", Title: "Existing work"}},
 	}}
 	produced := []artifact.Section{{
