@@ -4,6 +4,8 @@ package vcs
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,6 +73,12 @@ func (g *Git) Init() error {
 // CurrentBranch returns the current branch name.
 func (g *Git) CurrentBranch() (string, error) {
 	out, err := g.run("rev-parse", "--abbrev-ref", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+// ParentSHA returns the first parent of a commit.
+func (g *Git) ParentSHA(sha string) (string, error) {
+	out, err := g.run("rev-parse", sha+"^1")
 	return strings.TrimSpace(out), err
 }
 
@@ -206,6 +214,23 @@ func (g *Git) CommitWithTrailer(message string, trailers map[string]string) (str
 
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+// DiffBetween returns the canonical binary diff between two commits.
+func (g *Git) DiffBetween(base, head string) ([]byte, error) {
+	cmd := exec.Command("git", "-c", "color.ui=false", "-c", "diff.external=", "diff", "--no-ext-diff", "--binary", base, head)
+	cmd.Dir = g.Root
+	return cmd.Output()
+}
+
+// DiffSHA256 returns the SHA-256 of a canonical binary commit diff.
+func (g *Git) DiffSHA256(base, head string) (string, error) {
+	data, err := g.DiffBetween(base, head)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // Diff returns the working tree diff, including files git has never seen.

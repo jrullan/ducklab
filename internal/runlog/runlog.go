@@ -4,6 +4,8 @@
 package runlog
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -150,6 +152,35 @@ type Run struct {
 }
 
 // GateReproduction is the result of proving the accepted commit in a clean checkout.
+// AcceptanceReceipt is the standalone, fact-only evidence produced by accepting a run.
+type AcceptanceReceipt struct {
+	BaseSHA             string  `json:"base_sha"`
+	HeadSHA             string  `json:"head_sha"`
+	DiffSHA256          string  `json:"diff_sha256"`
+	GateCommand         string  `json:"gate_command"`
+	ExitCode            int     `json:"exit_code"`
+	DurationS           float64 `json:"duration_s"`
+	ReproductionVerdict string  `json:"reproduction_verdict"`
+	AcceptedBy          string  `json:"accepted_by"`
+	AcceptedAt          string  `json:"accepted_at"`
+}
+
+// WriteReceipt writes the acceptance evidence beside the run state.
+func WriteReceipt(projectRoot, runID string, receipt AcceptanceReceipt) error {
+	data, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(projectRoot, ".ducklab", "runs", runID, "receipt.json")
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// DiffSHA256 computes the SHA-256 used by acceptance receipts.
+func DiffSHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 type GateReproduction struct {
 	Gate     string  `json:"gate"`
 	Command  string  `json:"command"`

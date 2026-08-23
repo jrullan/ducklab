@@ -146,6 +146,10 @@ func Run(args []string) int {
 		return mcpCmd(verb)
 	}
 
+	if noun == "proof" {
+		return proofCmd(verb, cmdArgs, repo)
+	}
+
 	// Discover or auto-start engine
 	client, err := discoverEngine(noAutostart)
 	if err != nil {
@@ -238,6 +242,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
   run       <task-id> | list | show | diff | accept | reject | answer
   test      write the failing test first (test-first flow)
   review    read an accepted task's commit
+  proof     verify <receipt>
   release   plan | cut | list
   bug       file | list | show | triage | promote
   task      list | show | remove

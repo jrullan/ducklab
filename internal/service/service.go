@@ -2230,6 +2230,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		if err := s.logResolution(rs, "accept", actor); err != nil {
 			return err
 		}
+		if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
+			return fmt.Errorf("write acceptance receipt: %w", err)
+		}
 		return nil
 	}
 
@@ -2296,6 +2299,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// went on offering Accept on a run it had already committed.
 	if err := s.logResolution(rs, "accept", actor); err != nil {
 		return err
+	}
+	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
+		return fmt.Errorf("write acceptance receipt: %w", err)
 	}
 	return nil
 }
@@ -2894,6 +2900,25 @@ func (s *Service) RunList(ctx context.Context, f RunFilter) ([]*runlog.Run, erro
 		return runs[i].ID > runs[j].ID
 	})
 	return runs, nil
+}
+
+func writeAcceptanceReceipt(root string, run *runlog.Run, actor string) error {
+	git := vcs.New(root)
+	base, err := git.ParentSHA(run.CommitSHA)
+	if err != nil {
+		// A root commit has no parent; git's canonical empty tree is its base.
+		base = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+	}
+	diff, err := git.DiffSHA256(base, run.CommitSHA)
+	if err != nil {
+		return fmt.Errorf("receipt diff: %w", err)
+	}
+	g := run.GateReproduced
+	verdict := "red"
+	if g.Green {
+		verdict = "green"
+	}
+	return runlog.WriteReceipt(root, run.ID, runlog.AcceptanceReceipt{BaseSHA: base, HeadSHA: run.CommitSHA, DiffSHA256: diff, GateCommand: g.Command, ExitCode: g.ExitCode, DurationS: g.Duration, ReproductionVerdict: verdict, AcceptedBy: actor, AcceptedAt: run.EndedAt})
 }
 
 // RunAccept accepts a run.
