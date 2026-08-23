@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -126,6 +127,104 @@ func TestUndeliveredReportSummonsTheDuckAndInformsTheReviewerAsData(t *testing.T
 
 // No report is data for the reviewer, not distress: a seat learning the
 // contract must not summon the duck every turn.
+// Three reports that leave the same item blocked are evidence that progress,
+// rather than merely effort, has stalled.  Escalation is a suggestion at the
+// decision point, not an extra turn: it records the stalled item, the other
+// measured thresholds, and both the reseat and brief-repair alternatives.
+func TestStalledDeliverableEmitsEscalationSuggestionOnlyAfterTheThirdReport(t *testing.T) {
+	rec := &recorder{}
+	var events []struct {
+		kind string
+		data map[string]interface{}
+	}
+	report := func(status string) *agent.Outcome {
+		return &agent.Outcome{Text: `{"deliverables":[{"id":1,"status":"done"},{"id":2,"status":"` + status + `"}]}`}
+	}
+	params := &ExecuteParams{
+		Prompt:       "Task T-107",
+		Deliverables: []string{"first", "stalled item"},
+		Rounds:       3,
+		Runner:       rec.runner(report("blocked"), report("blocked"), report("blocked")),
+		Gate: func(context.Context) (string, string, error) {
+			return "red", "", nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "current"},
+		OnEvent: func(kind string, data map[string]interface{}) {
+			events = append(events, struct {
+				kind string
+				data map[string]interface{}
+			}{kind, data})
+		},
+	}
+	script := &Script{
+		Name: "escalation-fixture", MaxRounds: 3, Until: "round == 99",
+		Turns: []Turn{{Role: config.RoleImplementer, Toolbelt: "full", MaxTurns: 4}},
+	}
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+
+	suggestionAt, thirdReportAt := -1, -1
+	for i, event := range events {
+		if event.kind == "deliverables_report" {
+			thirdReportAt = i
+		}
+		if event.kind == "escalation_suggestion" {
+			if suggestionAt >= 0 {
+				t.Fatalf("got more than one escalation suggestion: %+v", events)
+			}
+			suggestionAt = i
+			shown := strings.ToLower(strings.TrimSpace(fmt.Sprint(event.data)))
+			for _, want := range []string{"stuck", "2", "turn", "red", "relaunch", "improve", "continue"} {
+				if !strings.Contains(shown, want) {
+					t.Errorf("suggestion does not narrate %q: %+v", want, event.data)
+				}
+			}
+		}
+	}
+	if suggestionAt < 0 {
+		t.Fatalf("three reports with deliverable #2 blocked emitted no escalation_suggestion: %+v", events)
+	}
+	if suggestionAt <= thirdReportAt {
+		t.Fatalf("suggestion fired before the third consecutive stalled report (suggestion=%d third report=%d)", suggestionAt, thirdReportAt)
+	}
+}
+
+// Equal effort is not a capacity signal by itself: when the checklist moves,
+// the run must not propose a costly reseat just because it took three turns.
+func TestConvergingChecklistAtEqualTurnCountDoesNotEmitEscalationSuggestion(t *testing.T) {
+	rec := &recorder{}
+	var suggested bool
+	report := func(items string) *agent.Outcome {
+		return &agent.Outcome{Text: `{"deliverables":` + items + `}`}
+	}
+	params := &ExecuteParams{
+		Prompt:       "Task T-107",
+		Deliverables: []string{"first", "second", "third"},
+		Rounds:       3,
+		Runner: rec.runner(
+			report(`[{"id":1,"status":"done"},{"id":2,"status":"blocked"}]`),
+			report(`[{"id":1,"status":"done"},{"id":2,"status":"done"},{"id":3,"status":"blocked"}]`),
+			report(`[{"id":1,"status":"done"},{"id":2,"status":"done"},{"id":3,"status":"done"}]`),
+		),
+		Gate:   func(context.Context) (string, string, error) { return "green", "", nil },
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "current"},
+		OnEvent: func(kind string, _ map[string]interface{}) {
+			suggested = suggested || kind == "escalation_suggestion"
+		},
+	}
+	script := &Script{
+		Name: "converging-fixture", MaxRounds: 3, Until: "round == 99",
+		Turns: []Turn{{Role: config.RoleImplementer, Toolbelt: "full", MaxTurns: 4}},
+	}
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+	if suggested {
+		t.Fatal("a converging checklist at the same turn count suggested escalation")
+	}
+}
+
 func TestUnreportedDeliverablesDoNotSummonTheDuck(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green",
