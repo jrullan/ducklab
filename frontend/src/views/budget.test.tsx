@@ -255,11 +255,10 @@ describe("default phase modes in Settings", () => {
 });
 
 
-// The workflow has ONE question — who does what — answered at two scopes.
-// The fused table shows the function rows (triager, advisor, scribe) beside
-// the seats, each with its scope chip, saving the moment a pick is made.
-describe("the who-does-what table", () => {
-  it("shows a function row with its scope and saves on pick", async () => {
+// Role pins belong exclusively to the Roster board. Settings must neither expose
+// a second editor nor include pins when its unrelated defaults are saved.
+describe("role assignments are not editable in Settings", () => {
+  it("removes the team landing section, keeps verification visible elsewhere, and never saves role pins", async () => {
     const rosterSet = vi.fn(() => Promise.resolve({}));
     const client = clientWith({
       roster: vi.fn(() =>
@@ -271,14 +270,45 @@ describe("the who-does-what table", () => {
         }),
       ),
       rosterSet,
+      projectGate: vi.fn(() =>
+        Promise.resolve({
+          command: "go test ./...",
+          setup: "npm ci",
+          link_deps: ["frontend"],
+        }),
+      ) as never,
     } as unknown as Partial<EngineClient>);
-    render(<Settings theme="system" onTheme={() => {}} engineVersion="1" connection="open" client={client} projectId="p" />);
-    const triager = await screen.findByTestId("fn-triager");
-    expect(triager.textContent).toContain("bugs — triage");
-    expect(triager.textContent).toContain("this project");
-    expect(screen.getByTestId("fn-scribe").textContent).toContain("engine picked");
+    const { container } = render(
+      <Settings theme="system" onTheme={() => {}} engineVersion="1" connection="open" client={client} projectId="p" />,
+    );
 
-    fireEvent.change(screen.getByTestId("roster-select-triager"), { target: { value: "pato-sonnet" } });
-    await waitFor(() => expect(rosterSet).toHaveBeenCalledWith("p", "triager", "pato-sonnet"));
+    await waitFor(() => screen.getByTestId("settings-save"));
+    expect(screen.queryByTestId("settings-nav-team")).toBeNull();
+    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector('[data-testid^="fn-"]')).toBeNull();
+    expect(container.querySelector('[data-testid^="roster-select-"]')).toBeNull();
+
+    // Verification remains usable, rather than disappearing with the team panel.
+    const remainingSections = ["ducklings", "fleet", "budgets", "autopilot", "appearance", "engine"];
+    let verificationVisible = false;
+    for (const section of remainingSections) {
+      fireEvent.click(screen.getByTestId(`settings-nav-${section}`));
+      const card = screen.getByTestId("gate-preparation");
+      if (card.offsetParent !== null) {
+        verificationVisible = true;
+        expect(card.textContent).toContain("gate: go test ./...");
+        expect(card.textContent).toContain("setup: npm ci");
+        expect(card.textContent).toContain("link dependencies: frontend");
+        break;
+      }
+    }
+    expect(verificationVisible).toBe(true);
+
+    fireEvent.click(screen.getByTestId("settings-save"));
+    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
+    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(body).not.toHaveProperty("roster");
+    expect(body).not.toHaveProperty("role_pins");
+    expect(rosterSet).not.toHaveBeenCalled();
   });
 });
