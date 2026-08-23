@@ -10,6 +10,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
@@ -175,16 +176,13 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 		}
 	}
 
-	maxTok := 1200
-	resp, err := p.Chat(ctx, provider.ChatRequest{
-		Model: d.Model,
-		Messages: []provider.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: b.String()},
-		},
-		MaxTokens: &maxTok,
-	})
+	// 2000, not 1200: a terse reasoning seat can spend a few hundred tokens
+	// before the answer even with suppression applied, and an advisor cut
+	// off mid-answer fails its contract as surely as an empty one.
+	maxTok := 2000
+	resp, err := oneShotChat(ctx, p, d, systemPrompt, b.String(), maxTok)
 	if err != nil {
+		s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, err)
 		return "", string(advisorID), err
 	}
 
@@ -193,15 +191,16 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 		repairPrompt := b.String() + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
-		repair, repairErr := p.Chat(ctx, provider.ChatRequest{Model: d.Model, Messages: []provider.Message{
-			{Role: "system", Content: systemPrompt}, {Role: "user", Content: repairPrompt},
-		}, MaxTokens: &maxTok})
+		repair, repairErr := oneShotChat(ctx, p, d, systemPrompt, repairPrompt, maxTok)
 		if repairErr != nil {
+			s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, repairErr)
 			return "", string(advisorID), repairErr
 		}
 		answer = stripAdvisorThinking(answerText(repair))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
-			return "", string(advisorID), fmt.Errorf("advisor contract violation after repair: %s", violation)
+			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
+			s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, err)
+			return "", string(advisorID), err
 		}
 	}
 
@@ -233,6 +232,37 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	return strings.TrimSpace(answer), string(advisorID), nil
 }
 
+// oneShotChat is the single way a service-side one-shot call reaches a
+// provider. adviseWith used to build a raw ChatRequest — no sampling
+// params, no thinking suppression — so a seat configured with
+// disable_thinking reasoned straight into the 1200-token cap and the
+// visible answer arrived empty; the repair repeated the identical
+// conditions and the card said "empty answer" (B-123). The loop already
+// knew how to make this call correctly; one-shots now borrow exactly that.
+func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling, system, user string, maxTok int) (provider.ChatResponse, error) {
+	req := provider.ChatRequest{
+		Model: d.Model,
+		Messages: []provider.Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
+		},
+		MaxTokens: &maxTok,
+	}
+	if d.Params.Temperature != nil {
+		req.Temperature = d.Params.Temperature
+	}
+	if d.Params.TopP != nil {
+		req.TopP = d.Params.TopP
+	}
+	if d.Params.DisableThinking {
+		agent.ApplyThinkingSuppression(&req, provider.Capabilities{
+			NativeTools: d.Caps.NativeTools, JSONMode: d.Caps.JSONMode,
+			ContextTokens: d.Caps.ContextTokens, Vision: d.Caps.Vision,
+		})
+	}
+	return p.Chat(ctx, req)
+}
+
 // wireAdvisor arms ask_advisor on an ExecContext, guarded so the tool can
 // tell the model plainly when there is truly nobody to ask. Shared by the
 // build and test-first paths: it was wired on build only, and a test run's
@@ -246,6 +276,21 @@ func (s *Service) wireAdvisor(rs *runState, ectx *tools.ExecContext) {
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
 		return s.adviseInline(cctx, rs, question)
+	}
+}
+
+// logFailedOneShot puts a FAILED one-shot on the record. adviseWith only
+// appended to llm.jsonl on success, so the very calls a person needs to see
+// — the ones behind "advisor recommendation failed" — were invisible and
+// the diagnosis required guessing (B-123).
+func (s *Service) logFailedOneShot(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request string, callErr error) {
+	if w := s.llmWriter(rs, rs.tracker); w != nil {
+		w.AppendLLM(&agent.LLMCallRecord{
+			Duckling: string(seat), Provider: string(d.Provider), Model: d.Model,
+			Role:     role,
+			Request:  map[string]interface{}{"question": firstN(request, 400)},
+			Response: map[string]interface{}{"error": callErr.Error()},
+		})
 	}
 }
 

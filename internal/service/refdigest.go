@@ -266,16 +266,15 @@ func (s *Service) stageReferences(ctx context.Context, rs *runState, projCfg *co
 // refDigestCall is one distillation call, accounted like every other call
 // this run caused: on the tracker and in llm.jsonl.
 func (s *Service) refDigestCall(ctx context.Context, rs *runState, seat config.DucklingID, model string, providerID config.ProviderID, cost config.Cost, p provider.Provider, prompt string) (string, error) {
-	maxTok := 700
-	resp, err := p.Chat(ctx, provider.ChatRequest{
-		Model: model,
-		Messages: []provider.Message{
-			{Role: "system", Content: "You distill reference documents for a software team. Return only the digest."},
-			{Role: "user", Content: prompt},
-		},
-		MaxTokens: &maxTok,
-	})
+	d, derr := s.ducklings.Get(seat)
+	if derr != nil {
+		return "", derr
+	}
+	// Through the shared one-shot path: a raw ChatRequest here had the same
+	// latent B-123 bug — a disable_thinking seat reasoning into the cap.
+	resp, err := oneShotChat(ctx, p, d, "You distill reference documents for a software team. Return only the digest.", prompt, 700)
 	if err != nil {
+		s.logFailedOneShot(rs, seat, d, "librarian", prompt, err)
 		return "", err
 	}
 	calc := provider.CostCalculator{InputPerMTok: cost.InputPerMTok, OutputPerMTok: cost.OutputPerMTok}

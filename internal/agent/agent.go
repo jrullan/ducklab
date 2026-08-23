@@ -1072,6 +1072,14 @@ func readProjectMemory(root string) string {
 // Suppression is therefore only ever a request. What makes this safe is
 // stripThinking below, which removes an inline think block after the fact
 // without truncating anything.
+// ApplyThinkingSuppression is exported for the service's one-shot calls
+// (advisor drafts, reference digestion): a one-shot that skips it hands a
+// disable_thinking seat its whole token cap to reason in, and the visible
+// answer comes back empty (B-123).
+func ApplyThinkingSuppression(req *provider.ChatRequest, caps provider.Capabilities) {
+	applyThinkingSuppression(req, caps)
+}
+
 func applyThinkingSuppression(req *provider.ChatRequest, caps provider.Capabilities) {
 	if req.Extra == nil {
 		req.Extra = make(map[string]interface{})
