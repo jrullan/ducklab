@@ -504,3 +504,4 @@
 {"ts":"2026-08-23T13:41:37Z","bug":"B-122","from":"fixed","to":"verified","actor":"human","via":"move"}
 {"ts":"2026-08-23T13:41:37Z","bug":"B-123","from":"fixed","to":"verified","actor":"human","via":"move"}
 {"ts":"2026-08-23T13:45:39Z","bug":"B-124","from":"triaged","to":"in_progress","actor":"human","via":"promote","note":"T-112"}
+{"ts":"2026-08-23T14:16:11Z","bug":"B-124","from":"in_progress","to":"fixed","actor":"engine","via":"task-accepted","note":"T-112"}

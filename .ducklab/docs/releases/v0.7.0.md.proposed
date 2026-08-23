@@ -1,0 +1,51 @@
+---
+kind: release
+version: v0.7.0
+since: v0.6.3
+tasks: 15
+---
+
+# v0.7.0
+
+## Adopt surveys: see what the survey actually found
+- Proposal cards and the run view now show the survey's inventory and flag any unaccounted coverage — parts of the codebase the survey couldn't account for — so you can judge a proposal's completeness before accepting it.
+
+## Stuck and failed runs get better answers
+- When deliverable progress stalls at a FAILED-run or distress decision point, ducklab now suggests a measurably stronger seat for the work instead of retrying at the same level.
+- Gate output is now attached to the final gate event and to the failed run's record, so a run that fails at a gate shows you the actual gate output rather than just "failed".
+- TDD chain builds now resolve their build mode through the normal run-start path, fixing an issue where the mode wasn't applied as expected.
+
+## Prove and share what was accepted
+- You can now export acceptance receipts from a run and check them with the new `ducklab proof verify` command, so results are verifiable outside the app.
+- The ducklab MCP server now ships as a standard `.mcpb` bundle attached to each release, ready for installation and for the official MCP registry.
+
+## Settings and layout
+- Settings now have default build-mode and test-mode selects, so you set your preferred mode once instead of per run.
+- The "your team" roster section is gone from Settings.
+- The running section now sits at the top of the Now view.
+- When the advisor starts drafting an answer, you now see a live drafting animation in the question card and seat panel instead of the answer appearing silently.
+
+## Smaller changes
+- Renaming a task id now updates references in task body prose, not just dependency lines, so plans no longer keep stale ids after a rename.
+- Every process tree a run spawns is now stamped with `DUCKLAB_RUN_ID` and `DUCKLAB_PROJECT_ID`, so you can trace any spawned process back to its run and project.
+
+## What shipped
+
+### M-001
+
+- **T-098** Stamp every run-spawned process tree with DUCKLAB_RUN_ID and DUCKLAB_PROJECT_ID (`9389637`)
+- **T-099** Prove the per-repo worktree mutex serializes one repo and never blocks another (`d9b0a91`)
+- **T-100** Two-pass adopt survey: inventory turn, coverage diff, and run-record surfacing (`89ca88c`)
+- **T-101** Surface survey inventory and unaccounted coverage on proposal cards and the run view (`9ae27f3`)
+- **T-102** Add dev-only engine connection fallback via ?engine=&token= query params or VITE_ env when window.ducklab is absent (`082fc57`)
+- **T-103** Apply task-id renames to body prose in PlanTaskIDs, not just Depends-on lines (`f0d94c8`)
+- **T-104** Add build/test default-mode selects to Settings wired to the existing buildMode/testMode state and save path (`d2a1e4d`)
+- **T-105** Remove the 'your team' roster section from Settings (`64cb454`)
+- **T-106** Move the running section to the top of the Now view (`0b6de83`)
+- **T-107** Suggest a measurably stronger seat at FAILED-run and distress decision points when deliverable progress stalls (`d100c8e`)
+- **T-108** Build a ducklab-mcp.mcpb bundle (manifest + linux binary) as a release artifact so the official MCP registry can list ducklab (`7cea365`)
+- **T-109** Export acceptance receipts and add ducklab proof verify (`22eb067`)
+- **T-110** Leave the TDD chain build's mode empty unless explicitly picked so RunStart resolves it via resolveBuildMode (`93f1bc7`)
+- **T-111** Attach gate output to the final gate event and the failed run record (`26e2cc5`)
+- **T-112** Emit advice_started and animate advisor drafting in the question card and seat panel (`1c1b1ab`)
+
