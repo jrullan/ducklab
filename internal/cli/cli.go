@@ -101,6 +101,9 @@ func Run(args []string) int {
 				verb = remaining[1]
 				cmdArgs = remaining[2:]
 			}
+		case "mcp":
+			verb = remaining[1]
+			cmdArgs = remaining[2:]
 		case "run":
 			if runVerbs[remaining[1]] {
 				verb = remaining[1]
@@ -135,6 +138,12 @@ func Run(args []string) int {
 		return 0
 	case "engine":
 		return engineCmd(verb, cmdArgs)
+	}
+
+	// MCP stdio serving manages its own engine connection and must not trigger
+	// the ordinary CLI discovery path (which would hide its exit contract).
+	if noun == "mcp" {
+		return mcpCmd(verb)
 	}
 
 	// Discover or auto-start engine

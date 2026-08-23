@@ -8,7 +8,7 @@
 GO      ?= go
 TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 
-.PHONY: all build test test-race vet api api-check e2e frontend desktop cross clean dev-install
+.PHONY: all build test test-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
 
 all: vet test frontend
 
@@ -59,7 +59,25 @@ frontend:
 e2e:
 	sh e2e/ac_test.sh
 	sh e2e/desktop_test.sh
+	sh e2e/mcpb_test.sh
 	cd frontend && npx playwright test
+
+# Build the Linux/amd64 MCPB release artifact. MCPB files are ZIP archives
+# containing a manifest and an executable entry point; keep the staging tree
+# outside the repository so a build never leaves generated files behind.
+mcpb:
+	@set -eu; \
+	stage=$$(mktemp -d); \
+	output=$$(pwd)/dist/ducklab-mcp.mcpb; \
+	trap 'rm -rf "$$stage"' EXIT; \
+	mkdir -p "$$stage" "$$(dirname "$$output")"; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o "$$stage/ducklab-linux-amd64" ./cmd/ducklab; \
+	chmod 755 "$$stage/ducklab-linux-amd64"; \
+	version=$$(git describe --tags --always 2>/dev/null || echo dev); \
+	dir_token='$${__dirname}'; \
+	printf '%s\n' "{\"manifest_version\":\"0.2\",\"name\":\"ducklab\",\"version\":\"$$version\",\"description\":\"ducklab MCP server\",\"server\":{\"type\":\"stdio\",\"entry_point\":\"ducklab-linux-amd64\",\"mcp_config\":{\"command\":\"$$dir_token/ducklab-linux-amd64\",\"args\":[\"mcp\",\"serve\"]}}}" > "$$stage/manifest.json"; \
+	( cd "$$stage" && zip -q -X "$$output" manifest.json ducklab-linux-amd64 ); \
+	echo "  built dist/ducklab-mcp.mcpb"
 
 desktop:
 	cd frontend && npm run build

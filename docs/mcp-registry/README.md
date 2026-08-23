@@ -23,14 +23,13 @@ submit the repo directly at https://glama.ai/mcp/servers (Add server).
 Submit the repo URL at https://mcp.so (Submit button). Suggested blurb:
 the repository description, verbatim.
 
-## 4. Official MCP registry (blocked on an artifact — tracked)
+## 4. Official MCP registry (release artifact ready)
 
 registry.modelcontextprotocol.io only lists servers installable from a
 trusted source: npm/PyPI/NuGet/OCI, a remote URL, or an **MCPB bundle
-attached to a GitHub release**. Ducklab's MCP server is `ducklab mcp
-serve` — a locally built Go binary — so none exist yet. The path of least
-resistance is attaching an MCPB bundle to the next release; tracked on the
-board. `server.json` here is the ready draft: fill the release URL, then
+attached to a GitHub release**. Releases now attach `ducklab-mcp.mcpb`,
+built by `make mcpb`, and `server.json` points at the versioned release
+asset. For a new release, update its version and asset URL together, then
 
 ```bash
 mcp-publisher login github     # proves io.github.jrullan namespace

@@ -10,7 +10,7 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/jrullan/ducklab/releases/download/vX.Y.Z/ducklab-mcp.mcpb",
+      "identifier": "https://github.com/jrullan/ducklab/releases/download/v0.6.2/ducklab-mcp.mcpb",
       "transport": { "type": "stdio" }
     }
   ]
