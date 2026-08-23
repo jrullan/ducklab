@@ -150,6 +150,19 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   return (
     <div className="mx-auto max-w-3xl p-4" data-testid="now-view">
+      {/* The rail carries the always-visible pulse; this is the fuller view
+          with live spend, in the inbox's own flow. */}
+      {active.length > 0 && (
+        <section data-testid="now-running">
+          <h2 className="text-sm text-ink-muted">running</h2>
+          <ul className="mt-2 space-y-1">
+            {active.map((r) => (
+              <RunningRow key={r.id} run={r} live={spend[r.id]} />
+            ))}
+          </ul>
+        </section>
+      )}
+
       {waiting.length > 0 && (
         <section data-testid="now-waiting">
           <h2 className="text-sm text-ink-muted">waiting for you</h2>
@@ -278,19 +291,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                   Open it to see what it did and run it again with changed settings.
                 </p>
               </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* The rail carries the always-visible pulse; this is the fuller view
-          with live spend, in the inbox's own flow. */}
-      {active.length > 0 && (
-        <section className="mt-4" data-testid="now-running">
-          <h2 className="text-sm text-ink-muted">running</h2>
-          <ul className="mt-2 space-y-1">
-            {active.map((r) => (
-              <RunningRow key={r.id} run={r} live={spend[r.id]} />
             ))}
           </ul>
         </section>
