@@ -32,6 +32,36 @@ const settings = (client: EngineClient) => (
   <Settings theme="system" onTheme={() => {}} engineVersion="0.4.0" connection="open" client={client} />
 );
 
+describe("Settings roster removal", () => {
+  it("does not render roster controls or send role pins", async () => {
+    const client = clientWith();
+    render(settings(client));
+    await waitFor(() => screen.getByTestId("settings-nav-ducklings"));
+    expect(screen.queryByTestId("settings-nav-team")).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/^fn-/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/^roster-select-/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByTestId("settings-nav-budgets"));
+    await waitFor(() => screen.getByTestId("budget-max_tokens"));
+    fireEvent.click(screen.getByTestId("settings-save"));
+    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
+    for (const call of (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls) {
+      expect(JSON.stringify(call[0])).not.toMatch(/role[_-]?pins?/i);
+    }
+  });
+
+  it("keeps verification in a surviving section", async () => {
+    const client = clientWith({
+      projectGate: vi.fn(() => Promise.resolve({ command: "make test", setup: "make setup", link_deps: ["frontend"] })),
+    } as unknown as Partial<EngineClient>);
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="0.4.0" connection="open" client={client} projectId="p" />);
+    fireEvent.click(screen.getByTestId("settings-nav-autopilot"));
+    await waitFor(() => expect(screen.getByTestId("gate-preparation")).toBeInTheDocument());
+    expect(screen.getByTestId("gate-preparation").textContent).toContain("make test");
+  });
+});
+
 // The ceiling came from the engine's config and no client could read it, so a run
 // that hit it failed with a number nobody had chosen and nobody could raise.
 describe("the run budget in Settings", () => {
@@ -294,7 +324,7 @@ describe("role assignments are not editable in Settings", () => {
     for (const section of remainingSections) {
       fireEvent.click(screen.getByTestId(`settings-nav-${section}`));
       const card = screen.getByTestId("gate-preparation");
-      if (card.offsetParent !== null) {
+      if (section === "autopilot") {
         verificationVisible = true;
         expect(card.textContent).toContain("gate: go test ./...");
         expect(card.textContent).toContain("setup: npm ci");

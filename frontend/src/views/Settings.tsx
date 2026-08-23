@@ -4,12 +4,7 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
-import type { BudgetView, EngineClient, GateStatus, ModeDefaultsView, RosterEntry } from "../api/client";
-
-/** Every engine-honored roster role appears here, so project.toml pins never
- * become invisible state. The task-mode selectors describe launch shape; these
- * rows describe the role defaults those launches resolve to. */
-const FUNCTION_ORDER = ["architect", "implementer", "reviewer", "judge", "triager", "advisor", "scribe"];
+import type { BudgetView, EngineClient, GateStatus, ModeDefaultsView } from "../api/client";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -28,20 +23,9 @@ function ScopeChip({ scope }: { scope: "all projects" | "this project" | "engine
   );
 }
 
-const WORKFLOW_ROWS: Record<string, { stage: string; help: string }> = {
-  architect: { stage: "documents — architecture", help: "shapes the project's technical direction" },
-  implementer: { stage: "tasks — implementation", help: "writes and verifies the change" },
-  reviewer: { stage: "tasks — review", help: "checks the implementation" },
-  judge: { stage: "tasks — verdict", help: "adjudicates between implementer and reviewer" },
-  triager: { stage: "bugs — triage", help: "classifies reports: severity, duplicates, promotability" },
-  advisor: { stage: "gates — advice", help: "drafts an answer while a paused run waits for you" },
-  scribe: { stage: "releases — notes", help: "writes the release notes from the accepted work" },
-};
-
 /** One titled card per concern. The page was a flat column of ten unrelated
  * headings — a cognitive disaster to scan (the user's words). Cards group by
- * task, ordered by how often each is touched: team first, budgets second,
- * appearance and engine last. */
+ * task, ordered by how often each is touched. */
 function SettingsCard({ title, desc, children, testid }: {
   title: string;
   desc?: string;
@@ -61,10 +45,9 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
-type SettingsSection = "team" | "ducklings" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
+type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "team", label: "your team" },
   { id: "ducklings", label: "my ducklings" },
   { id: "fleet", label: "providers" },
   { id: "budgets", label: "budgets & limits" },
@@ -95,7 +78,7 @@ export function Settings({
     saveTheme(t);
     onTheme(t);
   };
-  const [section, setSection] = useState<SettingsSection>("team");
+  const [section, setSection] = useState<SettingsSection>("ducklings");
   return (
     <div className="flex gap-6 p-4" data-testid="settings">
       {/* The sub-menu: one concern on screen at a time (the user's own
@@ -119,11 +102,11 @@ export function Settings({
       </nav>
 
       <div className="min-w-0 max-w-3xl flex-1">
-      {/* The member cards are their own section: inside "your team" they
-          buried the who-does-what table a full screen down, and the table is
-          what that section exists to answer. */}
       {section === "ducklings" && client && (
-        <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
+        <>
+          <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
+          <a href="#/roster" role="link" className="ml-4 text-sm text-ink underline">Roster board</a>
+        </>
       )}
       {client && <ConfigSection client={client} section={section} projectId={projectId} />}
       {section === "fleet" && client && (
@@ -251,7 +234,6 @@ function QuackToggle() {
 function ConfigSection({ client, section, projectId }: { client: EngineClient; section: SettingsSection; projectId?: string }) {
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
-  const [fleet, setFleet] = useState<string[]>([]);
   // Drafts, so nothing is sent until Save and a half-typed number is never a
   // ceiling of zero.
   const [b, setB] = useState<Record<string, string>>({});
@@ -273,11 +255,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   // loading early-return: a hook below a conditional return renders a
   // different hook count per pass, which React rejects wholesale.
   const [ap, setAp] = useState<{ max_tasks: string; max_fails: string; autonomy: string } | null>(null);
-  // The per-project function assignments (triager, advisor, scribe), fused
-  // into the same "who does what" table as the global seats — the workflow
-  // has ONE question, answered at two scopes, and showing them as two
-  // unrelated widgets was the confusion itself.
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
   // The project's own autonomy — the level runs and triage consult FIRST.
   // It had no control anywhere; the guidance was "edit the TOML".
   const [projAutonomy, setProjAutonomy] = useState<string | null>(null);
@@ -297,15 +274,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       .then((r) => setProjAutonomy(r.autonomy))
       .catch(() => {});
   }, [client, projectId]);
-  const loadRoster = () => {
-    if (!projectId) return;
-    Promise.resolve()
-      .then(() => client.roster(projectId))
-      .then((r) => setRoster(r.entries))
-      .catch(() => {});
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(loadRoster, [client, projectId]);
   useEffect(() => {
     Promise.resolve()
       .then(() => client.autopilotDefaults())
@@ -345,10 +313,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const load = () => {
     client.budgetDefaults().then(applyBudget).catch((e) => setState({ kind: "error", message: String(e) }));
     client.modeDefaults().then(applyModes).catch((e) => setState({ kind: "error", message: String(e) }));
-    client
-      .ducklings()
-      .then((ds) => setFleet(ds.map((d) => d.id)))
-      .catch(() => setFleet([]));
   };
 
   useEffect(load, [client]);
@@ -435,7 +399,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
   return (
     <div data-testid="config-settings">
-      <div className={section === "team" ? "" : "hidden"}>
+      <div>
       {gate && (
         <SettingsCard
           title="verification"
@@ -447,84 +411,6 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
           {gate.link_deps?.length ? (
             <p className="mt-1 text-sm text-ink-secondary">link dependencies: {gate.link_deps.join(", ")}</p>
           ) : null}
-        </SettingsCard>
-      )}
-      {fleet.length > 1 && (
-        <SettingsCard
-          title="your team"
-          desc="who does what, in the order the workflow asks it"
-        >
-          {/* ONE table, ordered by the workflow itself: documents, tasks,
-              bugs, gates, releases. Each stage is a row with a strong name,
-              its plain-words detail, and a scope PILL on the right edge —
-              the previous draft set every label in the same muted size and
-              the page read as fog (the user's verdict: horrible). */}
-          <div className="divide-y divide-hairline">
-
-            <section className="py-3 first:pt-0" data-testid="stage-documents">
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm font-medium text-ink">documents</span>
-                <span className="text-xs text-ink-muted">intake → spec → plan</span>
-                <ScopeChip scope="all projects" />
-              </div>
-              <a
-                href="#/roster"
-                role="link"
-                className="text-sm text-ink underline"
-              >
-                Roster board
-              </a>
-            </section>
-
-            {/* Positional mode seats belong to the Roster board; Settings keeps only role defaults. */}
-            {FUNCTION_ORDER.map((role) => {
-              const e = roster.find((r) => r.role === role);
-              if (!e || !WORKFLOW_ROWS[role]) return null;
-              const row = WORKFLOW_ROWS[role]!;
-              return (
-                <section key={role} className="py-3" data-testid={`fn-${role}`}>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-medium text-ink">{row.stage.split(" — ")[0]}</span>
-                    <span className="text-xs text-ink-muted">{row.stage.split(" — ")[1]}</span>
-                    {/* Hidden text keeps the stage's full name greppable and
-                        pinned ("bugs — triage") while the visible header
-                        splits it into name and detail. */}
-                    <span className="sr-only">{row.stage}</span>
-                    <ScopeChip scope={e.source === "project" ? "this project" : "engine picked"} />
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-                    <span className="w-24 shrink-0" title={row.help}>{e.role}</span>
-                    <span data-testid={`roster-value-${e.role}`}>
-                      {e.source === "project" && e.default && e.default !== e.duckling
-                        ? `${e.default} — overridden for ${projectId}: ${e.duckling} (project)`
-                        : e.duckling}
-                    </span>
-                    <select
-                      aria-label={`duckling for ${e.role}`}
-                      data-testid={`roster-select-${e.role}`}
-                      value={e.duckling}
-                      onChange={(ev) =>
-                        void client
-                          .rosterSet(projectId!, e.role, ev.target.value)
-                          .then(loadRoster)
-                          .catch(() => {})
-                      }
-                      className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-                    >
-                      {fleet.map((id) => (
-                        <option key={id} value={id}>{id}</option>
-                      ))}
-                    </select>
-                    <span className="text-xs text-ink-muted">{row.help}</span>
-                  </div>
-                </section>
-              );
-            })}
-            </div>
-
-          <p className="mt-3 text-xs text-ink-muted">
-            Role assignments are managed on the Roster board; launcher seat picks apply only to their run.
-          </p>
         </SettingsCard>
       )}
       </div>
@@ -712,7 +598,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
       {/* One button, at the end, after everything it carries. The page used to
           have two, and the second sat in the middle of its own fields. */}
-      <div className={`mt-3 flex items-center gap-3 ${section === "team" || section === "budgets" || section === "autopilot" ? "" : "hidden"}`}>
+      <div className={`mt-3 flex items-center gap-3 ${section === "budgets" || section === "autopilot" ? "" : "hidden"}`}>
         <button
           type="button"
           onClick={save}
