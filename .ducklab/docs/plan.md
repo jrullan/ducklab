@@ -2475,4 +2475,54 @@ Additive trust-boundary feature exporting data acceptRun already records (GateRe
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-110 — Leave the TDD chain build's mode empty unless explicitly picked so RunStart resolves it via resolveBuildMode
+
+Fixes B-121.
+
+## Reported
+
+T-101: the person has Defaults.BuildMode=pair (verified via GET /v1/defaults/modes), yet the TDD-chained build r-20260822-235346 ran SOLO with mode_source=request — the desktop test launcher fills ChainBuild.Mode explicitly (apparently with its own test-phase mode or a hardcoded default) instead of leaving it empty, so RunStart never consults resolveBuildMode and the person's setting is silently overridden. An unchained RunStart with no mode (T-098) correctly resolved to pair. Fix: the chain config leaves Build.Mode empty unless the person explicitly picked a mode for the build leg in the launcher; mode_source on the run record already proves which path answered, so the regression test can assert a chain launched without an explicit pick lands with mode_source=settings, not request.
+
+**Deliverables:**
+- TddLaunch/Board/Now only put an explicit mode on the chain build request when the person picked one in the launcher; the build leg defaults to empty mode
+- accepting a TDD test whose chain build carries no explicit mode produces a chained build run with mode resolved via resolveBuildMode and mode_source=settings (or project/fallback), never a hardcoded solo with mode_source=request
+- an explicit build-leg pick in the launcher still lands on the chained run with mode_source=request
+- a regression test asserts the chained run's mode/mode_source in both the unpicked and picked cases
+
+## Triage
+
+**Component:** tdd chain launch
+**Suspected files:** frontend/src/components/TddLaunch.tsx, frontend/src/views/Board.tsx, frontend/src/views/Now.tsx, internal/service/testfirst.go, internal/service/service.go
+
+TddLaunch seeds buildCfg.mode from the settings default, so the chain always marks the build leg as an explicit request; RunStart then never consults resolveBuildMode and silently overrides the person's BuildMode with whatever the launcher prefilled.
+
+**Verification (triage recommends):** test-first — TDD-chain a test run with Defaults.BuildMode=pair and no explicit build-mode pick, accept it, then read the chained build run's state.json: mode should be pair with mode_source=settings, not solo with mode_source=request.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-111 — Attach gate output to the final gate event and the failed run record
+
+Fixes B-122.
+
+## Reported
+
+Build r-20260822-235346 (T-101) failed its final gate (exit 1) and the gate event payload carries only {cmd, exit, gate} — no output field — so the desktop showed a FAILED run with nothing to explain it (verify: no output). The round_gate and the accept reproduction (gate_reproduced) both carry output; the final verify is the odd one out, and it is precisely the event a person reads when a run dies. Fix: the final gate event carries the gate output like its siblings (bounded the same way), and the run record failure field gets the tail so the FAILED card can quote it. The diagnosis that required re-running the whole suite by hand today — survey-inventory.test.tsx failing only in full-suite company — should have been one glance at the card.
+
+**Deliverables:**
+- the final-gate AppendEvent("gate", …) in internal/service/service.go (~line 1651) includes the bounded gate output, matching the shape of the gate_reproduced events (gate, command, exit_code, output, duration_s)
+- output is bounded the same way sibling gate outputs are bounded (no unbounded event payloads)
+- when the final verdict is FAILED, rs.run.Failure carries the tail of the gate output so the FAILED card can quote it
+- a test drives a run with a failing final gate and asserts both the gate event's output field and the run record's Failure tail
+
+## Triage
+
+**Component:** run gate events / verification
+**Suspected files:** internal/service/service.go, internal/service/testfirst.go
+
+Confirmed in source: the final verify event at internal/service/service.go:1651-1655 records only {gate, cmd, exit} while gate_reproduced (service.go:2099/2159) records full output, so a FAILED run explains nothing.
+
+**Verification (triage recommends):** test-first — Run a build whose final gate exits 1; assert the persisted "gate" event data carries "output" and the failed run's Failure field quotes the output tail (sibling gate_reproduced test at lifecycle_test.go:606 is the pattern).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
