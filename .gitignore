@@ -19,7 +19,14 @@ fake-engine-bin
 frontend/test-results/
 frontend/playwright-report/
 
-.ducklab/runs/
+# Run records stay local — except the receipt, which is the whole point:
+# a stranger cloning this repo must be able to `ducklab proof verify` the
+# built-itself claim without trusting anyone. The negation dance is git's
+# required incantation for unignoring inside an ignored tree.
+.ducklab/runs/*
+!.ducklab/runs/*/
+.ducklab/runs/*/*
+!.ducklab/runs/*/receipt.json
 .ducklab/ducklab.db
 .ducklab/ducklab.db-wal
 .ducklab/ducklab.db-shm
