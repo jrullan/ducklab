@@ -66,20 +66,36 @@ assumes **several cheap models and trusts none of them**:
 </p>
 
 And the existence proof: **ducklab is developed inside ducklab.** The plan,
-the bugs, the releases and the last ninety-plus accepted tasks went through
-its own loop, driven by the same local and hosted models it measures — most
-recent features (the multimodal chat, the consultant seat, the guide rail's
-run history) were built by the duck, gated by a person.
+the bugs, the releases and 111 accepted tasks went through its own loop,
+driven by the same local and hosted models it measures — most recent
+features (the escalation suggestions, the acceptance receipts, the MCPB
+release packaging, the multimodal chat) were built by the duck, gated by a
+person. Don't take the claim on faith:
+
+```bash
+git clone https://github.com/jrullan/ducklab && cd ducklab
+go build -o ducklab-cli ./cmd/ducklab
+for r in .ducklab/runs/*/receipt.json; do ./ducklab-cli proof verify "$r"; done
+```
+
+Receipts ship with every accept since v0.7.0: the committed sha, the gate
+command, its exit code, and the clean-checkout reproduction verdict —
+facts a third party re-derives, never assessments.
 
 ## Status
 
-**v0.6.1+**, moving fast. Seven stages, five modes, the roster board with
-evidence and suggestions, reference documents with automatic digestion,
-skills managed from the desktop, a seated consultant you can chat with
-(images included, vision verified before they are sent), bugs with
-screenshot evidence, releases, autopilot, a CLI, a desktop app, and an
-**MCP server** that lets another model operate the whole loop with
-recorded, attributed decisions.
+**v0.7.0**, moving fast — seven releases in the first three weeks. Seven
+stages, five modes, the roster board with evidence and suggestions,
+reference documents with automatic digestion, skills managed from the
+desktop, a seated consultant you can chat with (images included, vision
+verified before they are sent), bugs with screenshot evidence, adopt
+surveys with a deterministic coverage check at the gate, provider-aware
+queueing that says why a run waits, escalation suggestions when a seat
+measurably hits its ceiling, **exportable acceptance receipts** with
+`ducklab proof verify`, releases, autopilot, a CLI, a desktop app, and an
+**MCP server** — in the [official MCP registry](https://registry.modelcontextprotocol.io)
+as `io.github.jrullan/ducklab` — that lets another model operate the whole
+loop with recorded, attributed decisions.
 
 [`docs/status.md`](docs/status.md) tracks all acceptance criteria and does
 not round up. Where code and spec differ, the difference is recorded in
