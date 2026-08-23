@@ -638,6 +638,36 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         Currently {budget.max_tokens.toLocaleString()} per run.
       </p>
 
+      <h3 className="mt-4 text-xs text-ink-muted">default phase modes</h3>
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {[
+          ["build runs open in", buildMode, setBuildMode],
+          ["test runs open in", testMode, setTestMode],
+        ].map(([label, value, setter]) => (
+          <label key={label as string} className="flex flex-col gap-0.5 text-xs text-ink-muted">
+            {label as string}
+            <select
+              aria-label={label as string}
+              data-testid={`default-${(label as string).split(" ")[0]}-mode`}
+              value={value as string}
+              onChange={(e) => {
+                (setter as (value: string) => void)(e.target.value);
+                touched();
+              }}
+              className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink-secondary"
+            >
+              <option value="">project habit, then solo</option>
+              {["solo", "pair", "tournament", "split"].map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-ink-muted">
+        Leave blank to use the project's [modes] habit, then solo. The per-project [modes] table stays config.toml-only for now.
+      </p>
+
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
         {Object.keys(modes.script_rounds ?? {})
