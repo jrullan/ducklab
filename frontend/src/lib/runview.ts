@@ -709,6 +709,8 @@ export function gatePhaseLabel(phase: string): string {
       return "baseline";
     case "after":
       return "over the new test";
+    case "final":
+      return "the full gate — verdict";
     case "commit":
       return "committing accepted work";
     case "accept":

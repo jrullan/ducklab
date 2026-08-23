@@ -14,6 +14,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1641,18 +1642,35 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 
-	// Run the gate
+	// Run the gate — announced first. The final verify ran 27 unannounced
+	// seconds after the last round gate, then the green, the committing and
+	// the reproduction all landed in one 23ms frame: the person read the
+	// silence as the commit being slow and the commit as pre-finished, when
+	// the mute stretch was THIS verify (the timestamps of r-...-w54v are the
+	// evidence). Every other verify announces itself; the verdict's own
+	// could not stay the exception.
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "final",
+		"detail": "running the full gate — the verdict is its exit code",
+	})
 	gateResult, err := verify.Run(ctx, entry.Path, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
 	}
 	rs.writer.WriteVerify(gateResult.Output)
+	// The output rides the event, bounded: a FAILED run whose gate event
+	// said only exit:1 sent the person re-running the whole suite by hand
+	// to learn which test broke (B-122).
 	rs.writer.AppendEvent("gate", map[string]interface{}{
-		"gate": string(gateResult.Gate),
-		"cmd":  gateResult.Command,
-		"exit": gateResult.ExitCode,
+		"gate":   string(gateResult.Gate),
+		"cmd":    gateResult.Command,
+		"exit":   gateResult.ExitCode,
+		"output": tailOf(gateResult.Output, 4000),
 	})
+	if gateResult.ExitCode != 0 {
+		rs.run.Failure = "gate failed (exit " + strconv.Itoa(gateResult.ExitCode) + "):\n" + tailOf(gateResult.Output, 1500)
+	}
 
 	// A run with no gate ends UNVERIFIED, which is honest and easy to miss.
 	// Said here, once, with the fix — rather than leaving someone to wonder on
@@ -1952,6 +1970,15 @@ func (s *Service) failRun(rs *runState, err error) {
 	restoreAfterUnaccepted(rs)
 	rs.writer.WriteState()
 	s.autopilotOnFail(rs.run)
+}
+
+// tailOf keeps the end of a long output — the part where test runners put
+// the verdicts — bounded for an event payload.
+func tailOf(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
 }
 
 // acceptRun accepts a run and commits.
