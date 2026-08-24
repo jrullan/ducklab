@@ -7,6 +7,7 @@ import { ConversationTurn } from "../components/ConversationLane";
 import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
+import { EscalationSuggestionCard } from "../components/EscalationSuggestionCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -230,6 +231,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [anyway, setAnyway] = useState(false);
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
+  const [escalationCandidate, setEscalationCandidate] = useState<string | null>(null);
   // The accept-and-fix chain: one click accepts the green work and starts a
   // follow-up run with the reviewer's findings riding its prompt.
   const [fixBusy, setFixBusy] = useState(false);
@@ -522,6 +524,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   };
   const triage = buildTriage(events);
   const triageFailed = buildTriageFailures(events);
+  // Suggestions are emitted at the pause boundary. Keep each one beside the
+  // decision surface rather than burying it in the generic event timeline.
+  const escalations = events.filter((event) => event.type === "escalation_suggestion");
   // The live figures while the run is GOING, the recorded ones once it is
   // not — by status, not by which happens to exist. The last streamed budget
   // event can predate the final turn's accounting by a moment, and a paused
@@ -605,6 +610,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // instead: a fresh launch and a re-run are different intents, and each
   // panel says which one it serves.)
   const relaunchDucklings = seatsFromRoster(run.mode, run.roster);
+  const suggestedDucklings = escalationCandidate
+    ? [escalationCandidate, ...relaunchDucklings.filter((id) => id !== escalationCandidate)].slice(0, relaunchDucklings.length)
+    : relaunchDucklings;
 
   const relaunch = async (opts: LaunchOpts) => {
     setActionError(null);
@@ -892,7 +900,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           looking at the run that just failed. Doing it meant leaving for the
           board and finding the task by hand, which is enough friction that a
           re-run tends to carry the settings that just failed. */}
-      {canRelaunch && (
+      {escalations.map((event, index) => (
+        <EscalationSuggestionCard
+          key={event.seq ?? index}
+          event={event}
+          onRelaunch={(candidate) => setEscalationCandidate(candidate)}
+          onOpenTask={() => setTaskOpen(true)}
+          onContinue={() => { void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }}
+        />
+      ))}
+
+      {(canRelaunch || escalationCandidate !== null) && (
         <section
           data-testid="relaunch"
           className="m-2 rounded-card border border-hairline p-3"
@@ -932,10 +950,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             // steps (a run_start event, then the resync), and a launcher that
             // read initialMode from the first was offering "solo" to relaunch a
             // pair — the read-a-prop-once disease, again.
-            key={`${run.id}:${run.mode}`}
+            key={`${run.id}:${run.mode}:${escalationCandidate ?? ""}`}
             ducklings={fleet}
             initialMode={run.mode}
-            initialDucklings={relaunchDucklings}
+            initialDucklings={suggestedDucklings}
             preferred={preferred}
             estimates={estimates}
             label="Run again"
