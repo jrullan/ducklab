@@ -1,7 +1,7 @@
 # Ducklab
 
-A full-cycle software development harness that is **multi-LLM by default**
-and honest by construction.
+A self-hosted harness that runs a project's full development cycle with
+several LLMs in fixed roles, under test gates that only you sign.
 
 **In one block:** self-hosted development harness (Go engine + CLI + desktop,
 Linux first) · brief → requirements → spec → plan → build → review → release ·
@@ -21,10 +21,10 @@ model ever decides a verdict.
   <br><em>A real council intake, recorded live and sped up: the architect streams the draft, a different model reviews it, the budget ticks in cents — and the run stops at <strong>your</strong> gate. Total cost of what you just watched: $0.07.</em>
 </p>
 
-It was built for **local models first** — the two that built most of it are a
-vLLM box on the LAN and a llama.cpp server on localhost, both priced at zero —
-and hosted models sit beside them in the same roster, measured by the same
-evidence.
+It was built for local models first. Two of the seats that built most of it
+are a vLLM box on the LAN and a llama.cpp server on localhost, both priced
+at zero; hosted models sit beside them in the same roster, measured by the
+same evidence.
 
 ## Why this exists
 
@@ -65,12 +65,11 @@ assumes **several cheap models and trusts none of them**:
   <br><em>The record does not round up: every run with its verdict, its cost, and whether its accept <strong>reproduced green from a clean checkout</strong>.</em>
 </p>
 
-And the existence proof: **ducklab is developed inside ducklab.** The plan,
-the bugs, the releases and 111 accepted tasks went through its own loop,
-driven by the same local and hosted models it measures — most recent
-features (the escalation suggestions, the acceptance receipts, the MCPB
-release packaging, the multimodal chat) were built by the duck, gated by a
-person. Don't take the claim on faith:
+Ducklab is developed inside ducklab. The plan, the bugs, the releases and
+the accepted tasks went through its own loop, driven by the same local and
+hosted models it measures; recent features (per-run worktrees, the
+merge-proof accept, the acceptance receipts, the governance write guard)
+were built by the duck and gated by a person. To check the claim yourself:
 
 ```bash
 git clone https://github.com/jrullan/ducklab && cd ducklab
@@ -84,18 +83,22 @@ facts a third party re-derives, never assessments.
 
 ## Status
 
-**v0.7.0**, moving fast — seven releases in the first three weeks. Seven
-stages, five modes, the roster board with evidence and suggestions,
+v0.7.0 plus the phase-3 work now on main: every build and test run
+executes in its own git worktree (your checkout is never touched),
+acceptance rebases the run branch, re-runs the gate on the rebased commit
+and merges fast-forward only, and an operator can re-close a finished run
+as `landed` when its work reached main outside the engine. Before that:
+seven stages, five modes, the roster board with measured scorecards,
 reference documents with automatic digestion, skills managed from the
-desktop, a seated consultant you can chat with (images included, vision
-verified before they are sent), bugs with screenshot evidence, adopt
-surveys with a deterministic coverage check at the gate, provider-aware
-queueing that says why a run waits, escalation suggestions when a seat
-measurably hits its ceiling, **exportable acceptance receipts** with
-`ducklab proof verify`, releases, autopilot, a CLI, a desktop app, and an
-**MCP server** — in the [official MCP registry](https://registry.modelcontextprotocol.io)
-as `io.github.jrullan/ducklab` — that lets another model operate the whole
-loop with recorded, attributed decisions.
+desktop, a seated consultant chat (vision verified before images are
+sent), bug reports with screenshot evidence, adopt surveys with a
+deterministic coverage check, provider-aware queueing that states why a
+run waits, escalation suggestions when a seat measurably hits its
+ceiling, acceptance receipts (`ducklab proof verify`), releases,
+autopilot, a CLI, a desktop app, and an MCP server — in the
+[official MCP registry](https://registry.modelcontextprotocol.io) as
+`io.github.jrullan/ducklab` — so another model can operate the loop with
+recorded, attributed decisions.
 
 [`docs/status.md`](docs/status.md) tracks all acceptance criteria and does
 not round up. Where code and spec differ, the difference is recorded in
@@ -234,7 +237,7 @@ is written to config, sent over the API, or kept in shell history.
 
 <p align="center">
   <img src="docs/screenshots/roster.png" alt="The roster board: flock with scorecards, seats per mode, engine suggestions" width="900">
-  <br><em>Seats are argued with evidence: pass rates from your own runs, cost per run, coding index — suggestions justified, never imposed.</em>
+  <br><em>Seat suggestions come with their evidence: pass rates from your own runs, cost per run, coding index. You decide.</em>
 </p>
 
 The desktop's **Roster** view is where seats are assigned: drag from the
@@ -245,30 +248,29 @@ when a duckling lives there; your own runs supply the rest.
 
 ### The fleet that built this repo
 
-Asked often enough to belong here. This is not a recommendation list — it
-is this repository's own run record (422 recorded runs, ~2,100 seat
-assignments at the time of writing), so you can see what actually held
-which seat. Any OpenAI-compatible endpoint slots in the same way.
+This is not a recommendation list. It is this repository's own run record
+(454 recorded runs, ~2,300 seat assignments as of 2026-08-24), so you can
+see what actually held which seat. Any OpenAI-compatible endpoint slots in
+the same way.
 
 | Duckling | Model | Served by | Seats held | What the record says |
 |---|---|---|---|---|
-| `beelink-local` | Qwen3.6-35B-A3B (Q4 GGUF) | llama.cpp (Vulkan) on a Ryzen AI Max 395, on-desk | **465** — the most-seated duckling in this repo | judge (174), scribe (184), reviewer (94). Free. |
-| `luna` | gpt-5.6-luna | OpenRouter | 424 | implementer workhorse: 77% measured pass rate at ~$0.02/run. |
-| `atom-local` | Qwen3.8-27B | vLLM on a DGX Spark on the LAN | 323 | architect (161) and scribe (132) — it wrote the release notes. Free. |
-| `terra` | gpt-5.6-terra | OpenRouter | 275 | the heavier implementer, ~$0.28/run. |
-| `k3` | Kimi K3 | OpenRouter | 272 | triage and architecture drafts. |
-| `glm52` | GLM-5.2 | OpenRouter | 150 | the reviewer seat: 81% measured over 261 reviews. |
-| `qwen38-max` | Qwen3.8-Max | OpenRouter | 128 | the advisor — the rubber duck. 88% measured. |
-| `pato-sonnet` | Claude Sonnet 4.5 | OpenRouter | 7 | the expensive seat, used when cheaper ones measurably ceiling'd. |
+| `beelink-local` | Qwen3.6-35B-A3B (Q4 GGUF) | llama.cpp (Vulkan) on a Ryzen AI Max 395, on-desk | 465 (the most-seated duckling in this repo) | judge, scribe, reviewer. Free. |
+| `luna` | gpt-5.6-luna | OpenRouter | 455 | implementer workhorse: 77% measured pass rate at ~$0.02/run. |
+| `atom-local` | Qwen3.8-27B | vLLM on a DGX Spark on the LAN | 352 | architect and scribe; it wrote the release notes. Free. |
+| `k3` | Kimi K3 | OpenRouter | 348 | triage, architecture drafts, question advisor. |
+| `terra` | gpt-5.6-terra | OpenRouter | 303 | the heavier implementer, ~$0.28/run. |
+| `glm52` | GLM-5.2 | OpenRouter | 160 | the reviewer seat: 81% measured over 261 reviews. |
+| `qwen38-max` | Qwen3.8-Max | OpenRouter | 140 | the advisor (the rubber duck). 88% measured. |
+| `pato-sonnet` | Claude Sonnet 4.5 | OpenRouter | 7 | the expensive seat, used when cheaper ones measurably hit a ceiling. |
 
-Two honest notes. First, "built with local models" here means the local
-seats held the judgment and documentation roles (judge, reviewer, scribe,
-architect) while cheap hosted models did the bulk of the typing — about a
-third of all seat assignments ran on hardware in this room, including the
-single most-seated duckling. Second, the pass rates above are **measured on
-my runs** (`ducklab duckling scorecard`, Wilson lower bound); yours will
-differ, and that is the point — the roster argues from your record, not
-from a leaderboard.
+Two notes for accuracy. First, "built with local models" here means the
+local seats held judgment and documentation roles (judge, reviewer,
+scribe, architect) while cheap hosted models did most of the typing;
+about a third of all seat assignments ran on hardware in this room.
+Second, the pass rates above are measured on my runs (`ducklab duckling
+scorecard`, Wilson lower bound). Yours will differ, and that is the
+point: the roster works from your record, not from a leaderboard.
 
 <p align="center">
   <img src="docs/screenshots/council-run.png" alt="A council run mid-flight on ducklab's own spec" width="900">
@@ -289,17 +291,18 @@ from a leaderboard.
 
 ## What it will not do
 
-These are load-bearing, not preferences.
+Invariants, enforced in code:
 
-- **A model never decides a verdict.** A gate is a command's exit code.
-- **A green candidate is applied byte-for-byte.** Nothing is re-generated
+- A model never decides a verdict. A gate is a command's exit code.
+- A green candidate is applied byte-for-byte; nothing is re-generated
   after it passed.
-- **A reviewer never learns who wrote the code.**
-- **Nothing lands that did not reproduce** from a clean checkout.
-- **A reject undoes what the run wrote, and nobody else's work.**
-- **Nothing is unbounded.**
-- **Secrets never touch project state.**
-- **The engine is loopback-only.** There is no remote mode.
+- A reviewer never learns who wrote the code.
+- Nothing lands that did not reproduce from a clean checkout of the
+  commit being merged.
+- A reject undoes what the run wrote, and nobody else's work.
+- Every budget (tokens, cost, turns, wallclock) has a ceiling you can see.
+- Secrets never touch project state.
+- The engine is loopback-only. There is no remote mode.
 
 ## Skills
 
@@ -334,7 +337,7 @@ instead of hallucinating an answer.
 
 <p align="center">
   <img src="docs/screenshots/consultant-chat.png" alt="The consultant chat: luna answering 'convince me to use Ducklab'" width="900">
-  <br><em>Asked to sell the product, the seated consultant read the repo and wrote this pitch itself. We kept it.</em>
+  <br><em>The seated consultant answering a question about the repo it reads.</em>
 </p>
 
 ## Operating ducklab from another model
@@ -354,7 +357,7 @@ start. The short version:
 
 ```bash
 make            # vet, test, build the frontend
-go test ./...   # 38 packages
+go test ./...   # 39 packages
 cd frontend && npx vitest run
 ```
 
