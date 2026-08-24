@@ -210,8 +210,14 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 		Note:             req.Note,
 		PriorAcceptedSHA: priorAcceptedSHA,
 	}
+	if err := s.createRunWorktree(run, entry.Path); err != nil {
+		return nil, err
+	}
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
+		if cleanupErr := vcs.New(entry.Path).WorktreeRemove(run.WorktreePath); cleanupErr != nil {
+			return nil, fmt.Errorf("create test run writer: %w (also could not remove worktree %s: %v)", err, run.WorktreePath, cleanupErr)
+		}
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -254,8 +260,8 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	// their test runs over one working tree, gates measuring each other's
 	// half-written files.
 	s.queue.submit(s, &queued{
-		rs: rs, ctx: runCtx,
-		exec: func(c context.Context) { s.executeTestFirst(c, rs, entry.Path, projCfg, req) },
+		rs: rs, ctx: runCtx, parallel: true,
+		exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(run, entry.Path), projCfg, req) },
 	})
 	return run, nil
 }
@@ -354,9 +360,10 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 }
 
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
-	defer recoverRun(rs)
-	defer close(rs.done)
 	defer rs.writer.Close()
+	defer s.cleanupRunWorktree(rs, rs.projectPath)
+	defer close(rs.done)
+	defer recoverRun(rs)
 
 	// The tree before the test is written — what abort, reject and failure
 	// restore. The build path always took this; test-first never did, so an
@@ -473,7 +480,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Runner:      s.runnerFor(cache, roster, ectx),
 		Roster:      roster,
 		TurnCaps:    s.roleTurnCapsFor(req.AgentTurns),
-		Diff:        func() (string, error) { return vcs.New(projectRoot).Diff() },
+		Diff:        func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
 		OnEvent:     func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
@@ -523,7 +530,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase": "after",
 	})
 
-	diff, _ := vcs.New(projectRoot).Diff()
+	diff, _ := vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...)
 	rs.writer.WriteDiff(diff)
 	rs.writer.WriteVerify(after.Output)
 

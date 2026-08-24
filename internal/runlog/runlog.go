@@ -41,6 +41,13 @@ type Run struct {
 	Accepted       bool              `json:"accepted"`
 	CommitSHA      string            `json:"commit_sha"`
 	Branch         string            `json:"branch,omitempty"`
+	// WorktreePath and BaseSHA identify the isolated checkout this run used.
+	WorktreePath string `json:"worktree_path,omitempty"`
+	BaseSHA      string `json:"base_sha,omitempty"`
+	// WorktreeCleanupFailure names a checkout that could not be removed.
+	WorktreeCleanupFailure string `json:"worktree_cleanup_failure,omitempty"`
+	// LinkedDeps are runtime symlinks excluded from candidate diffs.
+	LinkedDeps []string `json:"-"`
 	// Note is what the person told this run beyond the task body — typically
 	// the previous run's outstanding reviewer findings. On the record because
 	// what a run was ASKED is part of what it did.

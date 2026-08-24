@@ -262,7 +262,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		_ = json.Unmarshal(data, &run.StageRequest)
 	}
 
-	go s.executeStage(runCtx, rs, entry.Path, req)
+	// Document stages still operate in the person's checkout. Unlike build and
+	// test-first worktrees, they must retain the queue's per-project tree hold.
+	s.queue.submit(s, &queued{
+		rs: rs, ctx: runCtx,
+		exec: func(c context.Context) { s.executeStage(c, rs, entry.Path, req) },
+	})
 	return run, nil
 }
 

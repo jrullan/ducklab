@@ -1,13 +1,59 @@
 package runlog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
 func newRun(id string) *Run {
 	return &Run{ID: id, ProjectID: "p", Status: "running", Mode: "solo"}
+}
+
+// Worktree metadata is part of the persisted run/API contract. The desktop
+// needs all three values to locate and explain an isolated build/test run.
+func TestRunPersistsWorktreeMetadata(t *testing.T) {
+	root := t.TempDir()
+	run := newRun("r-worktree")
+	run.Stage = "build"
+	values := map[string]string{
+		"WorktreePath": "/home/test/.local/state/ducklab/worktrees/p/r-worktree",
+		"Branch":       "ducklab/T-113-r-worktree",
+		"BaseSHA":      "0123456789abcdef",
+	}
+	v := reflect.ValueOf(run).Elem()
+	for field, value := range values {
+		f := v.FieldByName(field)
+		if !f.IsValid() || f.Kind() != reflect.String {
+			t.Fatalf("run record has no %s string field", field)
+		}
+		f.SetString(value)
+	}
+	w, err := NewWriter(root, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	data, err := os.ReadFile(filepath.Join(w.RunDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]interface{}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"worktree_path": values["WorktreePath"],
+		"branch":        values["Branch"],
+		"base_sha":      values["BaseSHA"],
+	} {
+		if got, ok := state[key].(string); !ok || got != want {
+			t.Errorf("persisted %q = %#v, want %q", key, state[key], want)
+		}
+	}
 }
 
 func TestAppendEventAssignsMonotonicSeq(t *testing.T) {

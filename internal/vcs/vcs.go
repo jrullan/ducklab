@@ -243,6 +243,13 @@ func (g *Git) DiffSHA256(base, head string) (string, error) {
 // The intent-to-add is what makes them visible. DiffAgainst already did this
 // and said why; this one did not.
 func (g *Git) Diff() (string, error) {
+	return g.DiffExcluding()
+}
+
+// DiffExcluding returns the working-tree diff while excluding generated paths.
+// Dependency links in an isolated checkout are runtime inputs, not candidate
+// changes, even when a project does not ignore their directory.
+func (g *Git) DiffExcluding(excluded ...string) (string, error) {
 	if _, err := g.run("add", "-AN"); err != nil {
 		return "", err
 	}
@@ -251,7 +258,13 @@ func (g *Git) Diff() (string, error) {
 	// it — T-097's reviewer then flagged, CRITICAL, that the diff "loosens
 	// harness safety constraints without task justification". It was right
 	// about everything except whose change it was.
-	return g.run("diff", "HEAD", "--", ".", ":^.ducklab")
+	paths := []string{".", ":^.ducklab"}
+	for _, path := range excluded {
+		if path != "" {
+			paths = append(paths, ":^"+filepath.ToSlash(path))
+		}
+	}
+	return g.run(append([]string{"diff", "HEAD", "--"}, paths...)...)
 }
 
 // DiffStat returns the diff stat, including untracked files.
@@ -285,6 +298,41 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	defer lock.Unlock()
 	_, err := g.run("worktree", "add", path, "-b", branch)
 	return err
+}
+
+// WorktreeAddAt creates a branch worktree at rev. The caller supplies the
+// exact base rather than inheriting the current checkout's potentially dirty HEAD.
+func (g *Git) WorktreeAddAt(path, branch, rev string) error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
+	_, err := g.run("worktree", "add", "-b", branch, path, rev)
+	return err
+}
+
+// DefaultBranchHead returns the configured default branch's current commit.
+func (g *Git) DefaultBranchHead() (string, error) {
+	out, err := g.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err == nil && strings.TrimSpace(out) != "" {
+		return g.revParse(strings.TrimSpace(out))
+	}
+	// Local repositories commonly have no origin. Prefer the conventional
+	// default names rather than accidentally branching from a feature checkout.
+	for _, ref := range []string{"refs/heads/main", "refs/heads/master"} {
+		if sha, err := g.revParse(ref); err == nil {
+			return sha, nil
+		}
+	}
+	branch, branchErr := g.CurrentBranch()
+	if branchErr != nil {
+		return "", branchErr
+	}
+	return g.revParse(branch)
+}
+
+func (g *Git) revParse(rev string) (string, error) {
+	out, err := g.run("rev-parse", rev)
+	return strings.TrimSpace(out), err
 }
 
 // WorktreeAddDetached checks out a commit without changing a branch. It is

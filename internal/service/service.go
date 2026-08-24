@@ -1150,9 +1150,16 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		run.Autonomy = "guarded"
 	}
 
+	if err := s.createRunWorktree(run, entry.Path); err != nil {
+		return nil, err
+	}
+
 	// Create writer
 	writer, err := runlog.NewWriter(entry.Path, run)
 	if err != nil {
+		if cleanupErr := vcs.New(entry.Path).WorktreeRemove(run.WorktreePath); cleanupErr != nil {
+			return nil, fmt.Errorf("create run writer: %w (also could not remove worktree %s: %v)", err, run.WorktreePath, cleanupErr)
+		}
 		return nil, err
 	}
 
@@ -1188,7 +1195,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// Submit to the queue: it starts the run now, or marks it queued and
 	// starts it when a slot frees (AC-25).
 	s.queue.submit(s, &queued{
-		rs: rs, ctx: ctx, parallel: req.Parallel, chained: req.chained,
+		rs: rs, ctx: ctx, parallel: true, chained: req.chained,
 		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
 	})
 
@@ -1294,8 +1301,9 @@ func (s *Service) QueueStats() (running, waiting, limit int) {
 
 // executeDryRun renders prompts without calling any model. Synchronous.
 func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req RunRequest) {
-	defer close(rs.done)
 	defer rs.writer.Close()
+	defer s.cleanupRunWorktree(rs, entry.Path)
+	defer close(rs.done)
 
 	// Load project config
 	ducklabDir := filepath.Join(entry.Path, ".ducklab")
@@ -1320,7 +1328,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 
 	// Build exec context
 	ectx := &tools.ExecContext{
-		ProjectRoot:  entry.Path,
+		ProjectRoot:  runRoot(rs.run, entry.Path),
 		RunID:        rs.run.ID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
@@ -1458,8 +1466,9 @@ func verifyOverride(cfg config.Verify, command string) config.Verify {
 }
 
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
-	defer close(rs.done)
 	defer rs.writer.Close()
+	defer s.cleanupRunWorktree(rs, entry.Path)
+	defer close(rs.done)
 	defer recoverRun(rs)
 
 	// Load project config
@@ -1532,7 +1541,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	recordLimits(rs, &b)
 
 	ectx := &tools.ExecContext{
-		ProjectRoot:  entry.Path,
+		ProjectRoot:  runRoot(rs.run, entry.Path),
 		RunID:        rs.run.ID,
 		ProjectID:    rs.run.ProjectID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
@@ -1656,7 +1665,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"phase":  "final",
 		"detail": "running the full gate — the verdict is its exit code",
 	})
-	gateResult, err := verify.Run(ctx, entry.Path, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	gateResult, err := verify.Run(ctx, runRoot(rs.run, entry.Path), projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -1690,8 +1699,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
 
 	// Get diff
-	git := vcs.New(entry.Path)
-	diff, _ := git.Diff()
+	git := vcs.New(runRoot(rs.run, entry.Path))
+	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
 	rs.writer.WriteDiff(diff)
 	governanceCallouts := governanceCallouts(diff)
 	if len(governanceCallouts) > 0 {
@@ -2391,7 +2400,7 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 // project into a clean checkout. Best effort by design: a missing link just
 // means the gate pays the install, and a gate that cannot install fails with
 // the package manager's own words.
-func linkInstalledDeps(root, checkout string, declared []string) {
+func linkInstalledDeps(root, checkout string, declared []string) []string {
 	deps := []struct {
 		rel     string
 		markers []string
@@ -2411,6 +2420,7 @@ func linkInstalledDeps(root, checkout string, declared []string) {
 			markers []string
 		}{rel: rel})
 	}
+	linked := make([]string, 0, len(deps))
 	for _, d := range deps {
 		src := filepath.Join(root, d.rel)
 		dst := filepath.Join(checkout, d.rel)
@@ -2433,8 +2443,11 @@ func linkInstalledDeps(root, checkout string, declared []string) {
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			continue
 		}
-		_ = os.Symlink(src, dst)
+		if os.Symlink(src, dst) == nil {
+			linked = append(linked, d.rel)
+		}
 	}
+	return linked
 }
 
 // missingGatePath returns the first relative path named by a gate that is not
@@ -2728,8 +2741,19 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
+	wasQueued := rs.run.Status == "queued"
+	wasActive := rs.run.Status == "running"
 	if rs.cancel != nil {
 		rs.cancel()
+	}
+	// A terminal abort must not return while the isolated checkout is still
+	// being used: callers commonly tear down the project immediately afterward.
+	// Queued runs have no goroutine (and thus no done close) until promoted.
+	if !wasQueued && rs.done != nil && (rs.run.Stage == "build" || rs.run.Stage == "test") {
+		select {
+		case <-rs.done:
+		case <-ctx.Done():
+		}
 	}
 	w, err := s.ensureWriter(rs)
 	if err != nil {
@@ -2744,12 +2768,18 @@ func (s *Service) RunAbort(ctx context.Context, id string) error {
 	// cancellation cannot reach failRun. Restore those runs here. For an active
 	// run, leave restoration to failRun after its last write; restoring while it
 	// is still running would race the model's final filesystem operation.
+	if wasQueued {
+		s.cleanupRunWorktree(rs, rs.projectPath)
+	}
 	if rs.done == nil {
 		restoreAfterUnaccepted(rs)
 	} else {
 		select {
 		case <-rs.done:
 			restoreAfterUnaccepted(rs)
+			if !wasActive {
+				s.cleanupRunWorktree(rs, rs.projectPath)
+			}
 		default:
 		}
 	}
@@ -3103,6 +3133,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
 	err = w.WriteState()
+	if rs.run.WorktreePath != "" {
+		s.cleanupRunWorktree(rs, rs.projectPath)
+	}
 	// The rejection restored the tree; whatever queued behind its hold can go.
 	s.queue.poke(s)
 	return err

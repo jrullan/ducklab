@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -76,6 +77,82 @@ func writeRun(t *testing.T, projectPath, projectID, runID, status string) {
 	w.AppendEvent("run_start", map[string]interface{}{"mode": "solo"})
 	w.AppendEvent("turn_start", map[string]interface{}{"turn": 0})
 	w.Close()
+}
+
+// Build runs are isolated from the person's checkout, and their persisted record
+// tells the desktop exactly where the isolated execution happened.
+func TestBuildDryRunUsesRecordedExternalWorktree(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keep.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Isolation\n\n### T-113 — isolated build\n\nRun outside the checkout.\n"
+	if err := os.MkdirAll(filepath.Dir(artifact.Path(dir, artifact.KindPlan)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "isolated", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, "keep.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := s.RunStart(context.Background(), p.ID, RunRequest{TaskID: "T-113", Mode: "solo", DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	select {
+	case <-rs.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dry run did not finish")
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "keep.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("build dry run changed the person's working tree")
+	}
+
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := reflect.ValueOf(detail.Run).Elem()
+	for field, want := range map[string]string{
+		"WorktreePath": filepath.Join("worktrees", p.ID, run.ID),
+		"Branch":       "ducklab/T-113-",
+		"BaseSHA":      "nonempty",
+	} {
+		f := values.FieldByName(field)
+		if !f.IsValid() || f.Kind() != reflect.String {
+			t.Fatalf("run record has no %s string field", field)
+		}
+		got := f.String()
+		switch field {
+		case "WorktreePath":
+			if !filepath.IsAbs(got) || !strings.Contains(got, want) {
+				t.Errorf("worktree_path = %q, want absolute path containing %q", got, want)
+			}
+		case "Branch":
+			if got == "" || !strings.HasPrefix(got, want) {
+				t.Errorf("branch = %q, want %s*", got, want)
+			}
+		case "BaseSHA":
+			if got == "" {
+				t.Error("base_sha was not recorded")
+			}
+		}
+	}
 }
 
 // AC-10: an engine that died mid-run leaves the run resumable, not orphaned.
@@ -830,6 +907,12 @@ func TestFailingFinalGateRecordsBoundedOutputAndFailureTail(t *testing.T) {
 	gateScript := "#!/bin/sh\nprintf 'prefix:'\nprintf '%05000d' 0 | tr '0' x\nprintf '\\n" + outputTail + "\\n'\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(dir, "failing-gate.sh"), []byte(gateScript), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "failing-gate.sh").CombinedOutput(); err != nil {
+		t.Fatalf("stage gate script: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "commit", "-m", "add failing gate").CombinedOutput(); err != nil {
+		t.Fatalf("commit gate script: %v: %s", err, out)
 	}
 	if _, err := s.ProjectUpdate(context.Background(), projectID, map[string]string{
 		"verify.mode": "tests", "verify.tests": "./failing-gate.sh",

@@ -375,11 +375,9 @@ func TestQueueDefaultLimit(t *testing.T) {
 	}
 }
 
-// Test-first arrived after the queue and was never wired in: launching
-// several TDD tasks at once raced their test runs over one working tree.
-// Now it queues like every run that writes the tree — here, behind a build
-// paused at its gate whose diff the person has not yet decided on.
-func TestATestFirstQueuesBehindAPausedBuild(t *testing.T) {
+// Test-first runs use isolated worktrees, so a paused in-tree legacy run does
+// not block their independent checkout.
+func TestATestFirstUsesAnIndependentWorktree(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	dir := t.TempDir()
 	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
@@ -407,8 +405,8 @@ func TestATestFirstQueuesBehindAPausedBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != "queued" {
-		t.Errorf("status = %q, want queued — the paused build's diff still owns the tree", run.Status)
+	if run.Status != "running" {
+		t.Errorf("status = %q, want running — test-first uses an independent worktree", run.Status)
 	}
 }
 
