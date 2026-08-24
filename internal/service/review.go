@@ -90,6 +90,9 @@ func (s *Service) ReviewStart(ctx context.Context, projectID string, req ReviewR
 	s.runs[run.ID] = rs
 	s.runsMu.Unlock()
 
+	if callouts := governanceCallouts(diff); len(callouts) > 0 {
+		run.GovernanceModified = true
+	}
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"stage": "review", "mode": mode, "task_id": req.TaskID, "commit": short(sha),
 	})
@@ -190,9 +193,17 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 	rs.run.PendingData = map[string]interface{}{
 		"review": path, "verdict": verdictWord(verdict),
 	}
-	rs.writer.AppendEvent("human_needed", map[string]interface{}{
+	if callouts := governanceCallouts(diff); len(callouts) > 0 {
+		rs.run.GovernanceModified = true
+		rs.run.PendingData["governance_callouts"] = callouts
+	}
+	gateData := map[string]interface{}{
 		"kind": "gate", "verdict": verdictWord(verdict), "review": path,
-	})
+	}
+	if callouts, ok := rs.run.PendingData["governance_callouts"]; ok {
+		gateData["governance_callouts"] = callouts
+	}
+	rs.writer.AppendEvent("human_needed", gateData)
 	rs.writer.WriteState()
 }
 
@@ -218,6 +229,14 @@ func reviewPrompt(taskID, diff string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Review %s\n\n", taskID)
 	b.WriteString("This change has already been accepted and committed. Read it and report what you find.\n\n")
+	if callouts := governanceCallouts(diff); len(callouts) > 0 {
+		b.WriteString("## Governance changes\n\n")
+		for _, callout := range callouts {
+			b.WriteString(callout)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("## The diff\n\n```diff\n")
 	// Compacted per file, like every diff a prompt carries (T-067).
 	b.WriteString(strings.TrimRight(conv.CompactDiff(diff), "\n"))

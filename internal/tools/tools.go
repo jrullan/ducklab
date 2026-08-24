@@ -483,13 +483,23 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		return ErrorResult("jail: %v", err)
 	}
 
-	// 2. Test-first runs write tests and nothing else.
+	// 2. A run may not alter project governance through filesystem tools.
+	// Project settings are changed only through the project API, where the
+	// change is recorded and surfaced at the human gate.
+	if ectx.Role == config.RoleImplementer && isProjectGovernancePath(ectx.ProjectRoot, absPath) {
+		if ectx.OnDistress != nil {
+			ectx.OnDistress("governance_write_refused", map[string]interface{}{"path": path})
+		}
+		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", path)
+	}
+
+	// 3. Test-first runs write tests and nothing else.
 	if ectx.TestPathsOnly && !verify.IsTestPath(path, ectx.Verify.TestGlobs) {
 		return ErrorResult("this run writes tests only, and %s is not one. "+
 			"Write the failing test; the implementation is the next run's job.", path)
 	}
 
-	// 3. Denylist
+	// 4. Denylist
 	denylist := []string{
 		".git",
 		".ducklab/runs",
@@ -515,7 +525,7 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 3. Marker guard (can be disabled with --unsafe-writes)
+	// 5. Marker guard (can be disabled with --unsafe-writes)
 	if !ectx.UnsafeWrites {
 		contentStr := string(content)
 		lines := strings.Split(contentStr, "\n")
@@ -553,7 +563,7 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 4. Truncation guard (only for existing files, only for fs_write)
+	// 6. Truncation guard (only for existing files, only for fs_write)
 	if isWrite && !ectx.UnsafeWrites {
 		if existing, err := os.ReadFile(absPath); err == nil {
 			oldSize := len(existing)
@@ -565,19 +575,28 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 		}
 	}
 
-	// 5. Binary guard
+	// 7. Binary guard
 	for _, b := range content {
 		if b == 0 {
 			return ErrorResult("binary guard: content contains NUL bytes")
 		}
 	}
 
-	// 6. Size guard
+	// 8. Size guard
 	if len(content) > 1024*1024 {
 		return ErrorResult("size guard: write over 1 MB refused")
 	}
 
 	return nil
+}
+
+// isProjectGovernancePath reports whether abs is the project's governance file.
+func isProjectGovernancePath(root, abs string) bool {
+	rootAbs, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		rootAbs = root
+	}
+	return filepath.Clean(abs) == filepath.Join(rootAbs, ".ducklab", "project.toml")
 }
 
 // countProtocolMarkers counts lines carrying a Dialect B text-protocol fence

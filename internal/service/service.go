@@ -1544,12 +1544,15 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		GlobalSkillsDir: globalSkillsDir(),
 	}
 
-	// Tool-level brakes are not persisted run-log events; bridge them to the
-	// operator notification bus for the webhook subscriber.
+	// Tool-level brakes notify the operator. Governance refusals are also kept
+	// on the run: a rejected project-settings edit is itself gate-relevant.
 	ectx.OnDistress = func(reason string, data map[string]interface{}) {
 		payload := map[string]interface{}{"reason": reason}
 		for key, value := range data {
 			payload[key] = value
+		}
+		if reason == "governance_write_refused" {
+			rs.writer.AppendEvent(reason, payload)
 		}
 		s.publishTransition(rs, "distress", payload)
 	}
@@ -1690,6 +1693,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	git := vcs.New(entry.Path)
 	diff, _ := git.Diff()
 	rs.writer.WriteDiff(diff)
+	governanceCallouts := governanceCallouts(diff)
+	if len(governanceCallouts) > 0 {
+		rs.run.GovernanceModified = true
+	}
 
 	// A run that touched nothing is a distinct outcome, and every mode used to
 	// invent its own: pair recorded PASSED, tournament died applying an empty
@@ -1735,20 +1742,20 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.Status = "paused"
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-			rs.writer.AppendEvent("human_needed", map[string]interface{}{
-				"kind":    "gate",
-				"verdict": verdict,
-			})
+			rs.run.PendingData = map[string]interface{}{"verdict": verdict}
+			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict}
+			if len(governanceCallouts) > 0 {
+				rs.run.PendingData["governance_callouts"] = governanceCallouts
+				gateData["governance_callouts"] = governanceCallouts
+			}
+			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
 			s.bus.Publish(bus.Event{
 				Type:      "human_needed",
 				RunID:     rs.run.ID,
 				ProjectID: rs.run.ProjectID,
 				TS:        time.Now(),
-				Data: map[string]interface{}{
-					"kind":    "gate",
-					"verdict": verdict,
-				},
+				Data:      gateData,
 			})
 			return
 		}

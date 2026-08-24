@@ -76,10 +76,11 @@ type Run struct {
 	Autonomy     string                 `json:"autonomy"`
 	// Origin says who started the run when it was not a person at a button:
 	// "autopilot" today. Empty means human-initiated.
-	Origin        string      `json:"origin,omitempty"`
-	Budget        BudgetState `json:"budget"`
-	Resolution    string      `json:"resolution,omitempty"` // tournament resolution
-	TestsModified bool        `json:"tests_modified"`
+	Origin             string      `json:"origin,omitempty"`
+	Budget             BudgetState `json:"budget"`
+	Resolution         string      `json:"resolution,omitempty"` // tournament resolution
+	TestsModified      bool        `json:"tests_modified"`
+	GovernanceModified bool        `json:"governance_modified"`
 	// NoChanges is true when the run finished without touching a file.
 	//
 	// It happens when the work was already in the tree — usually because an
