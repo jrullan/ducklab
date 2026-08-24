@@ -6,11 +6,7 @@ id = "ducklab"
 name = "ducklab"
 describe = ""
 created = "2026-08-03T13:35:24Z"
-autonomy = "yolo"
-
-[install]
-  command = "make desktop && make install"
-  timeout_s = 600
+autonomy = "guarded"
 
 [verify]
   mode = "tests"
@@ -22,11 +18,24 @@ autonomy = "yolo"
   setup = ""
   timeout_s = 900
 
+[install]
+  command = "make desktop && make install"
+  timeout_s = 600
+
+[references]
+  per_file_chars = 0
+  total_chars = 0
+  max_files = 0
+
 [roster]
 
 [roster_seats]
 
 [mode_seats]
+  [mode_seats.council]
+    advisor = ["terra"]
+  [mode_seats.pair]
+    advisor = ["k3"]
 
 [modes]
 

@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 12
-updated_at: 2026-08-22T21:56:51Z
-run_id: r-20260822-213956-viko
-ducklings: [terra, k3, qwen38-max, atom-local, luna]
-based_on: c8f89e0a38e99d65
+version: 13
+updated_at: 2026-08-23T21:49:47Z
+run_id: r-20260823-213904-mem2
+ducklings: [atom-local, luna, k3, terra, qwen38-max]
+based_on: 286522acd735bbab
 approved_by: human
 ---
 
@@ -2552,6 +2552,238 @@ Done means: watching a question with an advisor seated, the preparing line visib
 The advisor draft is a non-streaming one-shot that emits no lifecycle event until completion, so the UI has no signal to animate; adding advice_started closes that gap and the frontend layers render it.
 
 **Verification (triage recommends):** test-first — Go test asserts adviseQuestion writes advice_started before advice/advice_failed in events.jsonl; runview.test.ts asserts advisorPending derives from an open advice_started and closes on advice/advice_failed — the cog spin itself is existing CSS (cog-turn already respects prefers-reduced-motion).
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-113 — Run build and test-first stages in per-run git worktrees outside the repo
+
+**Implements:** SPEC-033, SPEC-025, SPEC-008
+
+Make every build/test-first run execute in its own worktree and branch so the person's working tree never contains unsigned work, and free the queue to run builds in parallel. Document stages keep today's serialized in-tree path (D3).
+
+**Deliverables:**
+- RunStart/TestStart for build and test-first stages create a worktree at `~/.local/state/ducklab/worktrees/<project-id>/<run-id>/` on branch `ducklab/<task-id>-<run-id-suffix>` (D4: outside the repo).
+  - Creation goes through the existing per-repo worktree mutex (`vcs.Git.WorktreeAdd`, T-099); base is current default-branch HEAD, recorded on the run as its base sha.
+  - Run record persists worktree path, branch, and base sha, exposed through the run API for the desktop.
+- The run's ExecContext roots fs, shell, and verify in the worktree.
+  - `[verify] link_deps` and `setup` populate the worktree exactly as the accept checkout does today (reuse the SPEC-060 machinery); run-identity stamping (T-098) is unchanged.
+- The queue drops the one-run-per-working-tree hold for worktree-capable runs only.
+  - Provider caps (T-096/097) and `max_concurrent_runs` still govern; document stages keep the working-tree hold and the serialized in-tree path.
+- Cleanup failure leaves evidence: a worktree that cannot be removed is logged and named on the run record, never silently orphaned.
+- Tests assert:
+  - a build run writes nothing to the person's working tree (byte-identical before/after while live);
+  - two builds from the same repo run concurrently under the mutex without corrupting `.git/worktrees`;
+  - a document stage still acquires the working-tree hold and serializes against other tree users.
+
+**Out of scope:** accept-path changes (T-901); document stages in worktrees; converging tournament/split contestant workspaces onto this lifecycle; cross-machine workers.
+
+**Assumption:** `~/.local/state/ducklab/` follows the existing engine state-dir convention; if a config override for state dir exists, the worktree root honors it.
+
+### T-114 — Accept becomes a merge proof: rebase, gate the rebased sha, ff-only merge
+
+**Implements:** SPEC-060, SPEC-008, SPEC-009, SPEC-020
+
+(Dependency note, night operator 2026-08-24: T-113's contract landed on main in three verified slices — df7d72e, 5b74a84, f6e6e58 — outside the accept record, because the running engine refuses isolated-run acceptance until this very task ships. The depends-on line is released so this task can start; the dependency itself is satisfied in substance.)
+
+Enforce D1: nothing lands that did not reproduce AS MERGED. acceptRun for a worktree run rebases the run branch onto current default HEAD and runs the gate from a clean checkout of the rebased sha; only green merges. Textual rebase success alone never lands work.
+
+**Deliverables:**
+- acceptRun for a worktree run: commit in the worktree branch, rebase onto current default HEAD, run the gate from a clean checkout of the rebased sha (reuse `verifyAcceptedCommit`), and on green fast-forward-only merge into the default branch.
+  - Acceptance receipt names the rebased sha; a non-ff merge is refused, never forced.
+  - Stage polarity preserved: build accept requires green; test-first accept requires the committed test's assertion-red — reproduced on the rebased sha.
+- Fast path: when default HEAD equals the run's recorded base sha, the rebase is trivial and skipped — the existing clean-checkout reproduction already covers the merged result, and no second gate run is added beyond today's.
+- Red after rebase: the merge does not happen; the run pauses at the human gate with the full gate output attached (B-122 style) and the divergence named — base sha vs default sha.
+- Rebase conflict (D2, human-decides): abort the rebase cleanly, recovering any stale `REBASE_HEAD`/`MERGE_HEAD` state; the run pauses at the gate naming the conflicting files and both shas.
+  - The paused card offers exactly: resolve by hand in the worktree (path shown) or reject. NO automatic agent resolution loop.
+- REJECT for a worktree run drops the worktree and branch with no restore surgery — the person's tree was never touched.
+- Tests pin the law:
+  - two parallel builds from the same base where the second semantically conflicts with the first (no textual conflict) goes RED at its merge gate and never lands on default;
+  - a textual conflict pauses at the human gate with files named and leaves no `REBASE_HEAD`/`MERGE_HEAD` behind;
+  - reject leaves the person's tree byte-identical;
+  - the fast path (default unmoved) adds no second gate run;
+  - the receipt carries the rebased sha, not the pre-rebase sha.
+
+**Out of scope:** automatic conflict resolution (possible phase 3.1, only as an explicit button with a re-run gate, never silent); changing the document-stage accept path; tournament/split contestant mechanics.
+
+### T-115 — Worktree hygiene on engine start and the desktop worktree surface
+
+**Implements:** SPEC-033, SPEC-062, SPEC-025
+
+(Dependency note, night operator 2026-08-24: T-113 landed on main — df7d72e, 5b74a84, f6e6e58 — and T-114 as 80e8e29, outside the accept record; depends-on released, dependency satisfied in substance.)
+
+Keep worktree state honest across crashes and restarts, and make the desktop show where a run actually lives. Hygiene patterns studied from wallfacer's git-worktrees internals (MIT) — credit in comments; the merge-proof discipline remains ours.
+
+**Deliverables:**
+- Engine-start hygiene: prune worktrees not matching any known run and run `git worktree prune`; reattach with `--force` when a directory vanished but its branch persists; GC worktrees of decided (accepted/rejected) runs.
+  - Hygiene operations take the per-repo worktree mutex (T-099) like every other worktree mutation; comments credit wallfacer (MIT) for the pattern.
+- The desktop run card for a worktree run shows a worktree badge with branch and worktree path while the run is live.
+- The paused-conflict card renders the conflicting files, both shas, and the two lawful options (resolve by hand at the shown path, or reject).
+- Queue reason strings stay truthful: a build no longer reports waiting on the working tree; a document stage still does.
+- Tests assert:
+  - startup prunes an orphaned worktree directory and reattaches a vanished-directory branch with `--force`;
+  - a decided run's worktree and branch are GC'd;
+  - one build and one document stage CAN run simultaneously and the document stage still holds the tree (queue reasons pinned);
+  - desktop vitest: badge renders branch/path for a worktree run, and the conflict card lists files with both options.
+
+**Out of scope:** cross-machine workers; converging tournament/split workspaces onto this lifecycle (later phase); any change to queued-run persistence across restarts.
+
+### T-116 — Block run implementers from writing .ducklab/project.toml and surface governance-key changes at review and the human gate
+
+Fixes B-138.
+
+## Reported
+
+Commit da96e60 (2026-08-16, 'ducklab: T-033', run r-20260816-203213-ppe3) contains, buried in the diff of a task whose contract was 'Thread the contract through applySampling and enforce its output cap' (SPEC-042 — sampling, nothing else):
+
+  -autonomy = "guarded"
+  +autonomy = "yolo"
+
+in .ducklab/project.toml. The change is unrelated to the task's deliverables, was not requested, and passed review and the human gate unnoticed. Consequence: for EIGHT DAYS every run resolving autonomy from project settings ran unattended — including r-20260824-003539-zdln, where the operator went to answer an ask_human question and found the advisor had auto-answered in their name (B-137). The operator's statement 'I never selected unattended' is literally true.
+
+Remediated 2026-08-24: autonomy restored to guarded via PATCH /v1/projects/ducklab.
+
+The defect to fix is the missing guard, in two layers:
+1. WRITE: .ducklab/project.toml is the project's GOVERNANCE config (autonomy, verify command, budgets, seats). A run's implementer should not be able to write it at all (same spirit as tests_modified tracking and the reviewer toolbelt: structural, not advisory). If a task legitimately needs a config change, it should go through a declared channel that surfaces at the gate.
+2. DIFF/GATE: any candidate diff touching governance keys must be called out at review and at the human gate in plain words — 'this diff changes project autonomy from guarded to yolo' — the way tests_modified already is. A one-line TOML change in a 40-file diff is invisible; the harness knows the semantics and must speak them.
+
+Evidence: git show da96e60 -- .ducklab/project.toml; git log -S 'autonomy = "yolo"' -- .ducklab/project.toml (single introduction).
+
+Related: B-137 (what the silent yolo did downstream), B-129 (how unnoticed config drives seat surprises).
+
+**Deliverables:**
+- The fs_write tool (write guard in internal/tools) refuses writes to .ducklab/project.toml during runs, the same structural way tests_modified/harness paths are handled, with the refusal message naming the declared channel (PATCH /v1/projects) instead
+- A test asserts an implementer-role fs_write of .ducklab/project.toml is refused and that the refusal is recorded on the run
+- Candidate-diff analysis detects changes to governance keys (autonomy, verify, budgets, seats) in .ducklab/project.toml and produces a plain-words callout (e.g. 'this diff changes project autonomy from guarded to yolo') the way tests_modified is produced
+- The governance callout is present in both the reviewer payload and the human-gate/accept surface for the run
+- A test asserts a diff flipping autonomy guarded->yolo in project.toml yields the callout in the gate payload
+
+## Triage
+
+**Component:** write-guard / gate diff surfacing
+**Suspected files:** internal/tools/fs.go, internal/tools/tools.go, internal/config/config.go, internal/service/candidates.go, internal/service/gate.go, internal/service/modes.go
+
+A silent one-line autonomy flip in project.toml rode an unrelated task diff through review and the human gate and ran the project unattended for eight days; the fix is a structural write block plus semantic surfacing of governance keys at the gate — B-137 is the downstream symptom, not a duplicate, and exact file placement of the guard vs. gate annotation is inferred (search tooling was partially unresponsive) but the write guard clearly lives in internal/tools (fs.go/tools.go, IsHarnessPath) and gate/diff assembly in internal/service.
+
+**Verification (triage recommends):** test-first — Both layers are assertable: fs_write of .ducklab/project.toml from an implementer turn must be refused, and a candidate diff flipping autonomy must appear as a plain-words governance warning in the review/gate payload — both are unit-testable against the write guard and the diff annotation code.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-117 — Make scorecard pass_rate count ACCEPTED as success for document stages
+
+Fixes B-127.
+
+## Reported
+
+atom-local has written the release notes for all seven shipped releases and drafted accepted requirements/spec sections — and its scorecard says 4.76% overall (architect 12%, consultant 0%), because stage runs end UNVERIFIED by design (their gate is a human decision, not a test) and pass_rate counts anything that is not PASSED as a failure. The metric is honest for build/test seats (atom-local implementer 0/8 is real signal: long tool-chains at ~630s/run do not converge before caps) and defamatory for document seats, where the meaningful outcome is ACCEPTED, not PASSED.
+
+Fix: pass_rate becomes stage-aware — for runs whose stage cannot produce a gate verdict (intake/spec/plan/release/chat/triage), the success signal is accepted (and superseded-by-revision counts as neither, like aborted), while build/test keep the gate verdict. measured_by_role already splits by role, so the seat suggestions and the Roster cards inherit the honest number automatically. A test pins: a scribe with seven accepted release runs and zero PASSED verdicts scores high, not 4.76%; an implementer with 0/8 green gates still scores 0.
+
+Found while drafting an honest comment about Qwen3.8-27B from real scorecard data — the board called the release-notes author a 5% model, and the number was the lie.
+
+**Deliverables:**
+- Row pass_rate in internal/report no longer treats UNVERIFIED document-stage runs (intake/spec/plan/release/chat/triage) as failures: for those stages, run.Accepted is the success signal
+- Document-stage runs resolved as superseded are excluded from both numerator and denominator, as aborted runs are
+- Build/test stages continue to use the gate verdict (PASSED/FAILED/UNVERIFIED) unchanged
+- Measured and MeasuredByRole scorecards (internal/service/scorecard.go) return the corrected rate, so Roster cards and seat suggestions (internal/service/roster.go, RosterSuggest) inherit it
+- A test pins: scribe with seven accepted release runs scores high (not ~4.76%); an implementer with 0/8 green gates scores 0
+
+## Triage
+
+**Component:** scorecard/report pass_rate
+**Suspected files:** internal/report/report.go, internal/service/scorecard.go, internal/service/roster.go, internal/report/comparable_test.go, internal/service/scorecard_evidence_test.go, internal/service/candidates.go
+
+The report aggregation run-by-stage logic and scorecard/roster readers are the defamation source: for gate-free stages the honest outcome is ACCEPTED, and superseded/aborted must be neutral, while build/test keep gate verdicts — all pure arithmetic, testable.
+
+**Verification (triage recommends):** test-first — Build report rows from synthetic runs: a scribe with 7 accepted release runs and verdict UNVERIFIED must score ~100%, not 4.76%; an implementer 0/8 green gates stays 0; a superseded run counts in neither numerator nor denominator.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-118 — Clear board state on project switch and render fetch failure instead of stale cross-project rows
+
+Fixes B-128.
+
+## Reported
+
+Opening MiEmpresa showed two triaged reports that talk about ducklab — they are ducklab's B-125 and B-126 (the only two triaged bugs anywhere), while GET /v1/projects/mitimesheet/bugs returns {items: [], total: 0}. Cause in Board.tsx load(): the fetch is correctly keyed by projectId, but on a project switch the PREVIOUS project's bugs/tasks state stays mounted until the new fetch resolves — and if that fetch REJECTS, the failure branch only appends a problem line while the stale arrays keep rendering, so another project's bugs sit under the new project's name indefinitely. Cross-project data under the wrong header is the worst kind of stale. Fix: clear tasks/bugs (and show the loading state) synchronously when projectId changes, before fetching; on fetch failure render the failure INSTEAD of stale foreign data, never alongside it. A test pins: switch project while the second fetch is pending or failing — the board never shows rows from the first project under the second's name.
+
+**Deliverables:**
+- When projectId changes, tasks and bugs (and any selection pointing at them) are cleared synchronously before the new fetch, so the board shows its loading state rather than the previous project's rows
+- When the tasks/bugs fetch rejects, the failure message renders INSTEAD of the card columns — no stale rows from any project remain on screen alongside the error
+- A fetch that resolves after projectId has already changed does not write its results into the now-current project's board (stale-generation guard or equivalent)
+- A test in board.test.tsx switches projectId while the second project's fetch is pending, and asserts the first project's cards are gone before and after the second fetch settles
+- A test asserts the rejection branch shows board-error and no board-cards from the previous project
+
+## Triage
+
+**Component:** frontend Board view
+**Suspected files:** frontend/src/views/Board.tsx, frontend/src/views/board.test.tsx
+
+Board.load() never clears tasks/bugs on a projectId change and its rejection branch only appends a problem line, so another project's rows render under the new project's name indefinitely — verified by reading the component.
+
+**Verification (triage recommends):** test-first — Render Board with project A resolved, rerender with projectId B whose tasks/bugs fetch is pending then rejects: assert A's cards never appear under B and board-error shows with zero stale cards.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-119 — Stop offer­ing apr­ovals shell policy cannot honor: fix the not-in-allow­list message and the ask guidance
+
+Fixes B-139.
+
+## Reported
+
+r-20260824-031558-hznm: the implementer asked 'may I run git cherry-pick with approval?', the human answered approved, the implementer retried, and the static shell allowlist blocked it again — producing a SECOND identical question. The question's own options ('Approve `git cherry-pick ...`') promise an approval that changes nothing: there is no mechanism by which a human answer extends the shell policy for a command, one run, or one invocation.
+
+Two coherent fixes, pick one deliberately:
+1. Honor the promise: an approved-commands channel — the answer flow can whitelist an exact command string for this run (recorded on the run, one-shot, exact match), so 'approved' means executable.
+2. Keep the invariant (REQ-008/SPEC-008: git mutations are the engine's exclusive job) and make the QUESTION honest: when the asked-about command is permanently outside policy, the question card should say so ('this command is never runnable by a model; ask for the outcome instead') and the ask_advisor/ask_human prompt guidance should steer models to ask for OUTCOMES (files recovered, state provided) rather than command approvals.
+
+Either way, the current shape — an approval option that is a no-op — burns a human round-trip and teaches models that approval is noise. Night instance resolved by the operator materializing the needed content into the run worktree by hand.
+
+**Deliverables:**
+- ShellPolicyCheck's not-in-allowlist error no longer invites ask-for-approval; it says the command is not runnable by a model in this policy and to ask for the outcome/decision instead
+- AskHuman.Description says asking is for decisions the task underdetermines, not for shell-command approvals
+- Implementer prompt ask guidance steers toward outcome/decision questions rather than command approvals
+- Unit tests in tools_test.go/exec_test.go assert the corrected message/guidance wording and reject the old promise
+- Fix option chosen deliberately per the bug: keep the invariant, make the question honest (option 2), not the approved-commands channel (option 1)
+
+## Triage
+
+**Component:** tools/shell-policy + ask_human guidance
+**Suspected files:** internal/tools/tools.go, internal/tools/exec.go, internal/agent/agent.go, internal/tools/tools_test.go, internal/tools/exec_test.go
+
+The shell policy error and ask guidance promise an approval channel that does not exist, burning human round-trips; the honest fix is to make the message tell models to ask for outcomes, and the invariant stays.
+
+**Verification (triage recommends):** test-first — ShellPolicyCheck on a guarded policy with a non-allowed command must return a message that names 'not model-runnable' and does not say 'ask the human for approval'; AskHuman.Description must not extend the same promise; assertible as deterministic string tests.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-120 — Add a 'landed' terminal resolution so operator-landed rejects stop counting as FAILED
+
+Fixes B-140.
+
+## Reported
+
+Night of 2026-08-23/24: the installed engine refuses isolated-run acceptance (pre-T-114), so the operator landed accepted work manually — diff audited, full gate reproduced from a clean checkout, commit on main with the Ducklab-Run trailer — and closed each run with reject + a landing note. Consequences visible this morning:
+
+1. The Runs board shows a wall of x failed for runs whose code is on main (T-116: 971cf8c; T-113 slices: df7d72e, 5b74a84, f6e6e58). The reject reason says 'ACCEPTED in substance' but no surface reads reasons.
+2. Scorecards count these as in-seat failures: terra's implementer pass rate takes hits for landed work, and gemini37flash's reviewer record shows 0% over 6 runs where most 'failures' were landings. Evidence-based seating (the roster suggestions) is being fed corrupted evidence — B-127's skew in a new costume.
+
+Fix direction: a distinct terminal resolution — e.g. 'landed' (or reject with resolution=landed) — that (a) renders on the board as its own state, not x failed; (b) counts as a PASS (or at least not a failure) in per-seat scorecard math; (c) records the landing commit sha so the trailer link is bidirectional. The night's landing notes all begin 'Work ACCEPTED in substance and landed on main' and name the commit — enough to backfill these runs once the state exists.
+
+**Deliverables:**
+- A way to close a run as landed (reject accepting a resolution value or equivalent) that records resolution=landed instead of verdict=FAILED
+- Run record stores the landing commit sha so the trailer link is bidirectional
+- report PassRate/scorecard math treats landed runs as pass (or excluded) rather than failure
+- The runs list/board renders landed as its own state, not 'x failed'
+- A test pins: a run closed with resolution=landed does not lower the seat's pass rate
+
+## Triage
+
+**Component:** run lifecycle / scorecards
+**Suspected files:** internal/service/service.go, internal/report/report.go, internal/service/scorecard.go, internal/engineapi/engineapi.go, internal/engineclt/engineclt.go, internal/cli/cli.go
+
+Reported normal; reproduces deterministically as RunReject setting FAILED which report.PassRate counts against every seat; distinct from B-127's stage-aware pass_rate fix.
+
+**Verification (triage recommends):** test-first — A run closed via reject-with-landed-resolution must record resolution=landed, keep Verdict non-FAILED (counted as pass or excluded), and scorecard PassRate must not drop — all assertable on service + report layers.
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
