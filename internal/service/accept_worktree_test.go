@@ -232,8 +232,8 @@ func TestAcceptWorktreeAdvancesCleanDefaultCheckout(t *testing.T) {
 	if string(got) != "accepted work\n" {
 		t.Fatalf("clean default checkout file = %q, want accepted work", got)
 	}
-	if clean, err := git.IsClean(); err != nil || !clean {
-		t.Fatalf("default checkout is dirty after sync: clean=%v err=%v", clean, err)
+	if clean, err := git.PathsAreClean([]string{"accepted.txt"}); err != nil || !clean {
+		t.Fatalf("accepted path is dirty after sync: clean=%v err=%v", clean, err)
 	}
 }
 

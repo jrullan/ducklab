@@ -1002,6 +1002,7 @@ type RunDetail struct {
 // AcceptResult is the result of accepting a run.
 type AcceptResult struct {
 	CommitSHA string `json:"commit_sha"`
+	Warning   string `json:"warning,omitempty"`
 }
 
 // RunFilter is a run filter.
@@ -2360,7 +2361,8 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 }
 
 // acceptWorktreeRun proves exactly the commit that will be fast-forwarded into
-// the default branch. The person's checkout is never staged or restored here.
+// the default branch. A clean registered checkout on that branch is advanced
+// after the ref so its files continue to match its HEAD.
 func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string) error {
 	if rs.run.WorktreePath == "" || rs.run.Branch == "" || rs.run.BaseSHA == "" {
 		return fmt.Errorf("worktree acceptance is missing its path, branch, or base sha")
@@ -2426,8 +2428,37 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		_ = rs.writer.WriteState()
 		return verifyErr
 	}
+	// Check before update-ref: after it moves, the checkout's index appears
+	// dirty against the new HEAD even when it was clean before acceptance.
+	onDefault, err := defaultGit.OnDefaultBranch()
+	if err != nil {
+		return fmt.Errorf("check registered checkout branch: %w", err)
+	}
+	var touched []string
+	clean := true
+	if onDefault {
+		touched, err = defaultGit.ChangedPaths(defaultSHA, rebasedSHA)
+		if err != nil {
+			return fmt.Errorf("list accepted paths: %w", err)
+		}
+		clean, err = defaultGit.PathsAreClean(touched)
+		if err != nil {
+			return fmt.Errorf("check registered checkout paths: %w", err)
+		}
+	}
 	if err := defaultGit.FastForwardDefault(rs.run.Branch, defaultSHA); err != nil {
 		return fmt.Errorf("fast-forward-only merge of rebased %s: %w", short(rebasedSHA), err)
+	}
+	// update-ref above intentionally does not alter the person's checkout. When
+	// it was on the landed branch, move its files too unless candidate paths have
+	// local changes that the fast-forward could overwrite.
+	if onDefault {
+		if !clean {
+			rs.run.Warning = fmt.Sprintf("main advanced to %s; your checkout is behind and was left untouched", rebasedSHA)
+			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
+		} else if err := defaultGit.SyncPathsToRevision(rebasedSHA, touched); err != nil {
+			return fmt.Errorf("advance registered checkout to %s: %w", short(rebasedSHA), err)
+		}
 	}
 	defer s.continueChain(ctx, rs)
 	rs.run.Accepted, rs.run.CommitSHA, rs.run.Status = true, rebasedSHA, "done"
@@ -3123,7 +3154,7 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	// queue must be told the world changed. After continueChain (deferred
 	// inside acceptRun), so a chained build is already at the line's front.
 	s.queue.poke(s)
-	return &AcceptResult{CommitSHA: rs.run.CommitSHA}, nil
+	return &AcceptResult{CommitSHA: rs.run.CommitSHA, Warning: rs.run.Warning}, nil
 }
 
 // RunReject rejects a run.

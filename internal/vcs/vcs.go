@@ -240,6 +240,21 @@ func (g *Git) DiffSHA256(base, head string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// ChangedPaths lists paths changed between two revisions.
+func (g *Git) ChangedPaths(base, head string) ([]string, error) {
+	out, err := g.run("diff", "--name-only", base, head)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, path := range strings.Split(strings.TrimSpace(out), "\n") {
+		if path = strings.TrimSpace(path); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
 // Diff returns the working tree diff, including files git has never seen.
 //
 // `git diff HEAD` alone shows nothing for a file that was created rather than
@@ -361,6 +376,20 @@ func (g *Git) DefaultBranchHead() (string, error) {
 	return g.revParse(ref)
 }
 
+// OnDefaultBranch reports whether this checkout is currently on the branch
+// that acceptance will advance. It must be checked before that ref moves.
+func (g *Git) OnDefaultBranch() (bool, error) {
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return false, err
+	}
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		return false, err
+	}
+	return ref == "refs/heads/"+branch, nil
+}
+
 func (g *Git) revParse(rev string) (string, error) {
 	out, err := g.run("rev-parse", rev)
 	return strings.TrimSpace(out), err
@@ -386,6 +415,32 @@ func (g *Git) RebaseOnto(rev string) ([]string, error) {
 func (g *Git) AbortIntegration() {
 	_, _ = g.run("rebase", "--abort")
 	_, _ = g.run("merge", "--abort")
+}
+
+// PathsAreClean reports whether none of paths has staged, unstaged, or
+// untracked changes in this checkout.
+func (g *Git) PathsAreClean(paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return true, nil
+	}
+	args := append([]string{"status", "--porcelain", "--"}, paths...)
+	out, err := g.run(args...)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "", nil
+}
+
+// SyncPathsToRevision updates paths from rev without disturbing local changes
+// outside them. It is used after update-ref has advanced a branch but left this
+// checkout's index and working files at the old commit.
+func (g *Git) SyncPathsToRevision(rev string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"checkout", rev, "--"}, paths...)
+	_, err := g.run(args...)
+	return err
 }
 
 // FastForwardDefault advances the default branch only when branch descends
