@@ -444,6 +444,12 @@ func (s *Service) RosterSuggest(ctx context.Context, projectID string) ([]Sugges
 		if r == nil || r.Verdict == "" {
 			continue
 		}
+		documentStage := isDocumentStage(r.Stage)
+		// A superseded document was replaced rather than accepted or rejected,
+		// so it is neutral evidence.
+		if documentStage && r.Resolution == "superseded" {
+			continue
+		}
 		for role, id := range r.Roster {
 			if id == "" {
 				continue
@@ -457,7 +463,7 @@ func (s *Service) RosterSuggest(ctx context.Context, projectID string) ([]Sugges
 				byRole[role][id] = st
 			}
 			st.runs++
-			if r.Verdict == "PASSED" {
+			if (documentStage && r.Accepted) || (!documentStage && r.Verdict == "PASSED") {
 				st.passed++
 			}
 		}
@@ -527,6 +533,14 @@ func (s *Service) projectConfig(projectID string) (*config.Project, error) {
 		return nil, err
 	}
 	return config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+}
+
+func isDocumentStage(stage string) bool {
+	switch stage {
+	case "intake", "spec", "plan", "release", "chat", "triage":
+		return true
+	}
+	return false
 }
 
 func validRole(r config.Role) bool {

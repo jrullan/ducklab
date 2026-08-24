@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,6 +57,48 @@ func projectWithConfig(t *testing.T, s *Service, name string) (string, string) {
 
 // The roster must report what will actually be used, including roles the
 // project never declared — otherwise it looks emptier than the runs behave.
+func TestRosterSuggestUsesDocumentAcceptanceAndBuildVerdicts(t *testing.T) {
+	s := serviceWithDucklings(t, "scribe", "implementer")
+	projectID, _ := projectWithConfig(t, s, "suggestions")
+	for i := range 7 {
+		s.runs[fmt.Sprintf("release-%d", i)] = &runState{run: &runlog.Run{
+			ID: fmt.Sprintf("release-%d", i), ProjectID: projectID,
+			Stage: "release", Verdict: "UNVERIFIED", Accepted: true,
+			Roster: map[string]string{"scribe": "scribe"},
+		}}
+	}
+	// This revision replaced the preceding document, so it is neutral evidence.
+	s.runs["superseded"] = &runState{run: &runlog.Run{
+		ID: "superseded", ProjectID: projectID, Stage: "release",
+		Verdict: "UNVERIFIED", Resolution: "superseded",
+		Roster: map[string]string{"scribe": "scribe"},
+	}}
+	for i := range 8 {
+		s.runs[fmt.Sprintf("build-%d", i)] = &runState{run: &runlog.Run{
+			ID: fmt.Sprintf("build-%d", i), ProjectID: projectID,
+			Stage: "build", Verdict: "FAILED", Accepted: true,
+			Roster: map[string]string{"implementer": "implementer"},
+		}}
+	}
+
+	suggestions, err := s.RosterSuggest(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suggestion := range suggestions {
+		switch suggestion.Role {
+		case "scribe":
+			if suggestion.Duckling != "scribe" || suggestion.Runs != 7 || suggestion.PassRate != 100 {
+				t.Errorf("scribe suggestion = %+v, want 7 accepted releases at 100%%", suggestion)
+			}
+		case "implementer":
+			if suggestion.Duckling != "implementer" || suggestion.Runs != 8 || suggestion.PassRate != 0 {
+				t.Errorf("implementer suggestion = %+v, want 0/8 green gates", suggestion)
+			}
+		}
+	}
+}
+
 func TestRosterGetShowsResolvedAssignmentsAndSource(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno", "pato-dos")
 	projectID, _ := projectWithConfig(t, s, "proj")

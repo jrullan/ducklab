@@ -37,6 +37,9 @@ type Row struct {
 	// pass rate is always zero and comparing it against a build mode's is a
 	// category error dressed up as a measurement.
 	Builds int `json:"builds"`
+	// Excluded counts document runs superseded by a revision. They are neutral
+	// evidence and are left out of the pass-rate denominator.
+	Excluded int `json:"excluded,omitempty"`
 	// NoChanges counts runs that finished without touching a file, because the
 	// work was already in the tree.
 	//
@@ -58,17 +61,11 @@ func (r Row) Comparable() bool { return r.Builds > 0 }
 
 // Effective is the runs that carry information about whether a mode works:
 // the ones that actually attempted something.
-func (r Row) Effective() int { return r.Runs - r.NoChanges }
+func (r Row) Effective() int { return r.Runs - r.NoChanges - r.Excluded }
 
-// PassRate is the share of attempts that reached PASSED.
-//
-// UNVERIFIED is deliberately NOT counted as a pass: nothing was executed, and
-// counting it would inflate exactly the number the project is trying to
-// measure honestly (P3).
-//
-// Runs that changed no file are left out of both sides. They passed because
-// the work was already there, which says nothing about the mode — and one such
-// run was half of pair's reported 100%.
+// PassRate is the share of attempts that succeeded. Document stages use
+// human acceptance; executable stages use the gate verdict. Superseded
+// document runs and runs that changed no file are left out of both sides.
 func (r Row) PassRate() float64 {
 	if r.Effective() == 0 {
 		return 0
@@ -169,6 +166,12 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 				groups[key] = g
 			}
 			g.Runs++
+			documentStage := isDocumentStage(r.Stage)
+			// A superseded document was replaced rather than accepted or
+			// rejected, so it is neutral evidence.
+			if documentStage && r.Resolution == "superseded" {
+				g.Excluded++
+			}
 			// Only a build run could have passed. An artifact stage ends
 			// UNVERIFIED by design, and counting its zero against a build
 			// mode's rate is a category error dressed as a measurement.
@@ -177,22 +180,36 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			}
 			// A run that touched nothing passed because the work was already
 			// there. Counted, and kept out of the rate.
-			if r.NoChanges {
+			if r.NoChanges && !(documentStage && r.Resolution == "superseded") {
 				g.NoChanges++
 				if r.Verdict == "PASSED" || r.Resolution == "landed" {
 					g.NoChangePasses++
 				}
 			}
-			switch r.Verdict {
-			case "PASSED":
-				g.Passed++
-			case "UNVERIFIED":
-				g.Unverified++
-			default:
-				if r.Resolution == "landed" {
+			if documentStage {
+				// These stages deliberately have no executable gate.
+				if r.Resolution != "superseded" {
+					if r.Accepted {
+						g.Passed++
+					} else {
+						g.Failed++
+					}
+				}
+				if r.Verdict == "UNVERIFIED" {
+					g.Unverified++
+				}
+			} else {
+				switch r.Verdict {
+				case "PASSED":
 					g.Passed++
-				} else {
-					g.Failed++
+				case "UNVERIFIED":
+					g.Unverified++
+				default:
+					if r.Resolution == "landed" {
+						g.Passed++
+					} else {
+						g.Failed++
+					}
 				}
 			}
 			// Grouped by duckling, the numbers are that duckling's share.
@@ -281,6 +298,14 @@ func computeDeltas(rows []Row) []Delta {
 		})
 	}
 	return out
+}
+
+func isDocumentStage(stage string) bool {
+	switch stage {
+	case "intake", "spec", "plan", "release", "chat", "triage":
+		return true
+	}
+	return false
 }
 
 func keysFor(r *runlog.Run, by string) []string {
