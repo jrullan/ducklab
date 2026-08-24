@@ -439,6 +439,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	if req.Duckling != "" {
 		rs.run.RosterSources[string(config.RoleImplementer)] = "request"
 	}
+	s.emitLaunchEscalation(rs)
 	if warning != "" {
 		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})

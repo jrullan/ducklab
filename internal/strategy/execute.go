@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -115,6 +116,9 @@ type escalationEvidence struct {
 	ModeMedian    float64
 	RedGates      int
 	RedGateStreak int
+	// UnansweredDeath records a turn that exhausted its reply loop or budget
+	// before producing an answer; it is structured distress evidence itself.
+	UnansweredDeath bool
 }
 
 func (e escalationEvidence) fired() []string {
@@ -127,6 +131,9 @@ func (e escalationEvidence) fired() []string {
 	}
 	if e.RedGateStreak >= 3 {
 		out = append(out, "consecutive_red_round_gates")
+	}
+	if e.UnansweredDeath {
+		out = append(out, "unanswered_death")
 	}
 	return out
 }
@@ -314,6 +321,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// times left a transcript of four events, and the only way to
 				// see the work was to read llm.jsonl by hand. The failure is
 				// exactly when that record is worth most.
+				if errors.Is(err, agent.ErrNoAnswer) || errors.Is(err, agent.ErrBudgetExceeded) {
+					evidence.UnansweredDeath = true
+					reason := "budget_exceeded"
+					if errors.Is(err, agent.ErrNoAnswer) {
+						reason = "no_answer"
+					}
+					emit(params, "distress_evidence", map[string]interface{}{
+						"kind": "unanswered_death", "role": string(turn.Role), "reason": reason,
+					})
+					emitEscalationSuggestion(params, evidence, "failed_run")
+				}
 				if outcome != nil {
 					emitMessage(params, round, i, turn.Role, duckling, outcome)
 					emit(params, "turn_end", map[string]interface{}{

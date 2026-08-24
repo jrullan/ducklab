@@ -77,6 +77,39 @@ func TestAFailedTurnStillRecordsWhatItDid(t *testing.T) {
 }
 
 // A turn that finished is not marked incomplete, or the flag would mean nothing.
+func TestTurnExhaustionEmitsUnansweredDeathEvidence(t *testing.T) {
+	var distress, suggestion map[string]interface{}
+	params := &ExecuteParams{
+		Prompt: "Do the thing.",
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "k3"},
+		Runner: func(context.Context, *Turn, config.DucklingID, string, []string, TurnContext) (*agent.Outcome, error) {
+			return nil, agent.ErrNoAnswer
+		},
+		OnEvent: func(kind string, data map[string]interface{}) {
+			switch kind {
+			case "distress_evidence":
+				distress = data
+			case "escalation_suggestion":
+				suggestion = data
+			}
+		},
+	}
+
+	if _, err := ExecuteScript(context.Background(), SoloScript(), params); !errors.Is(err, agent.ErrNoAnswer) {
+		t.Fatalf("err = %v, want ErrNoAnswer", err)
+	}
+	if distress == nil || distress["kind"] != "unanswered_death" || distress["reason"] != "no_answer" {
+		t.Errorf("distress evidence = %#v", distress)
+	}
+	if suggestion == nil {
+		t.Fatal("unanswered death did not trigger an escalation suggestion")
+	}
+	triggers, _ := suggestion["thresholds_fired"].([]string)
+	if len(triggers) != 1 || triggers[0] != "unanswered_death" {
+		t.Errorf("triggers = %#v, want unanswered_death", suggestion["thresholds_fired"])
+	}
+}
+
 func TestACompletedTurnIsNotMarkedIncomplete(t *testing.T) {
 	var turnEnd map[string]interface{}
 	params := &ExecuteParams{

@@ -1631,6 +1631,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, req.Seats)
+	s.emitLaunchEscalation(rs)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
 		// legitimate experiment, but reports must be able to segment it.
@@ -1967,6 +1968,14 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 		}
 	}
 	var triggers []string
+	for _, e := range events {
+		if e.Type == "distress_evidence" {
+			if kind, _ := e.Data["kind"].(string); kind == "unanswered_death" {
+				triggers = append(triggers, "unanswered_death")
+				break
+			}
+		}
+	}
 	if stuckItem > 0 {
 		triggers = append(triggers, "stuck_deliverable")
 	}
@@ -1985,6 +1994,44 @@ func (s *Service) emitEscalationAtDecision(rs *runState, point string) {
 		return
 	}
 	rs.writer.AppendEvent("escalation_suggestion", map[string]interface{}{"point": point, "thresholds_fired": triggers, "stuck_item": stuckItem, "stuck_reports": stuckReports, "turns": turns, "mode_median": modeMedian, "red_gate_streak": bestRed, "current_wilson_floor": floor, "candidate": cands[0], "diagnoses": map[string]interface{}{"seat_at_capacity": map[string]interface{}{"turns": turns, "red_gate_streak": bestRed, "stuck_item": stuckItem}, "task_brief_quality": "at-capacity and badly-briefed look identical; improve the task body"}, "actions": []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"}})
+}
+
+// emitLaunchEscalation warns before this run's first model call when the same
+// task and stage have already failed twice, irrespective of which seat ran them.
+func (s *Service) emitLaunchEscalation(rs *runState) {
+	if rs == nil || rs.writer == nil || rs.run.TaskID == "" {
+		return
+	}
+	failures := 0
+	s.runsMu.RLock()
+	for id, prior := range s.runs {
+		if id == rs.run.ID || prior == nil || prior.run == nil {
+			continue
+		}
+		r := prior.run
+		if r.ProjectID == rs.run.ProjectID && r.TaskID == rs.run.TaskID && r.Stage == rs.run.Stage &&
+			(r.Verdict == "FAILED" || r.Verdict == "ABORTED") {
+			failures++
+		}
+	}
+	s.runsMu.RUnlock()
+	if failures < 2 {
+		return
+	}
+	cards, _ := s.Scorecards(context.Background())
+	cands, floor := escalationCandidatesFor(string(config.RoleImplementer), rs.run.Roster[string(config.RoleImplementer)], cards)
+	data := map[string]interface{}{
+		"point": "launch", "thresholds_fired": []string{"repeated_task_stage_failure"},
+		"prior_failed_or_aborted_runs": failures, "current_wilson_floor": floor,
+		"diagnoses": map[string]interface{}{"task_brief_quality": "this task has failed here twice; improve the task body before reseating"},
+		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
+	}
+	// A stronger candidate is useful reseating evidence, but its absence must
+	// not silence the task-level warning: improving the brief remains actionable.
+	if len(cands) > 0 {
+		data["candidate"] = cands[0]
+	}
+	rs.writer.AppendEvent("escalation_suggestion", data)
 }
 
 func (s *Service) failRun(rs *runState, err error) {
@@ -2012,6 +2059,7 @@ func (s *Service) failRun(rs *runState, err error) {
 				"lifting the cap may feed a loop, not finish the work", rs.execCtx.ConsecGateFails)
 		}
 		rs.run.Failure = detail
+		rs.writer.AppendEvent("distress_evidence", map[string]interface{}{"kind": "unanswered_death", "reason": "budget_exceeded"})
 		s.emitEscalationAtDecision(rs, "distress_pause")
 		rs.writer.AppendEvent("human_needed", map[string]interface{}{
 			"kind": "budget", "detail": detail,
