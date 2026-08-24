@@ -1420,12 +1420,35 @@ func (s *Server) handleRunAccept(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var body struct {
-		Reason string `json:"reason"`
-	}
+	var body rejectRequest
 	json.NewDecoder(r.Body).Decode(&body)
+	if body.Resolution == "landed" {
+		if err := s.svc.RunLand(r.Context(), id, body.CommitSHA, "human", body.Reason); err != nil {
+			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if body.Resolution != "" {
+		s.error(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("unknown resolution %q", body.Resolution))
+		return
+	}
 	if err := s.svc.RunReject(r.Context(), id, body.Reason); err != nil {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRunLand(w http.ResponseWriter, r *http.Request) {
+	var body landRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.RunLand(r.Context(), r.PathValue("id"), body.CommitSHA, "human", body.Note); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

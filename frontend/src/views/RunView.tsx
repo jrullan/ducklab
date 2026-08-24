@@ -108,6 +108,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const live = useRuns((s) => s.spend[runId]);
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [landingSHA, setLandingSHA] = useState("");
+  const [landingNote, setLandingNote] = useState("");
 
   // Fetch the run's history on open.
   //
@@ -564,6 +566,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             : "commits the diff to the project";
   const outcome = (() => {
     if (isWorking) return "";
+    if (run.resolution === "landed") {
+      return run.commit_sha ? `landed · ${run.commit_sha.slice(0, 7)}` : "landed";
+    }
     if (run.accepted) {
       return run.commit_sha ? `accepted · ${run.commit_sha.slice(0, 7)}` : "accepted";
     }
@@ -728,6 +733,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <StatusChip role="muted" label={isWorking ? "conversing" : "conversation ended"} />
         ) : run.no_changes ? (
           <StatusChip role="muted" label="no changes — already in the tree" />
+        ) : run.resolution === "landed" ? (
+          <StatusChip role="good" label="landed" />
         ) : (
           <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${verdictLabel(run.verdict as Verdict)} · reproduced green at accept` : verdictLabel(run.verdict as Verdict)} />
         )}
@@ -757,13 +764,43 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             // What became of it, in the space the buttons used to occupy: the
             // question "is there anything for me to do here" is answered
             // either way, never by an absence.
-            run.accepted ? (
+            run.accepted || run.resolution === "landed" ? (
               <span data-testid="run-outcome"><StatusChip role="good" label={outcome} /></span>
             ) : (
               <span className="text-sm text-ink-secondary" data-testid="run-outcome">
                 {outcome}
               </span>
             )
+          )}
+          {run.status === "done" && !run.accepted && run.resolution !== "landed" && (
+            <form
+              className="flex items-center gap-1"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setActionError(null);
+                void client.land(runId, landingSHA, landingNote)
+                  .then(() => client.run(runId))
+                  .then((detail) => useRuns.getState().resyncRun(detail.run, detail.events as DucklabEvent[]))
+                  .catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+              }}
+            >
+              <input
+                aria-label="landing commit sha"
+                value={landingSHA}
+                onChange={(event) => setLandingSHA(event.target.value)}
+                placeholder="landing commit SHA"
+                required
+                className="w-36 rounded border border-hairline bg-surface2 px-2 py-1 text-xs font-mono"
+              />
+              <input
+                aria-label="landing note"
+                value={landingNote}
+                onChange={(event) => setLandingNote(event.target.value)}
+                placeholder="landing note"
+                className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+              />
+              <button type="submit" className="rounded border border-good px-2 py-1 text-xs text-good">Mark landed</button>
+            </form>
           )}
           {liveNow && nowTick - lastSignal.current > 30000 && (
             <span className="text-xs text-ink-muted" data-testid="quiet-chip" title="no events, tokens or thinking since then — a slow model is normal; provider retries land in the lane as they happen">

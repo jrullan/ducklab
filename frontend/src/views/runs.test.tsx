@@ -56,8 +56,14 @@ describe("Runs", () => {
     const legacy = screen.getAllByTestId("runs-row").find((row) => row.dataset.run === "r-legacy-queue")!;
     expect(legacy.textContent).not.toContain("undefined");
   });
-});
 
+  it("renders landed work as landed, not failed", () => {
+    render(<Runs runs={[mk({ id: "r-landed", verdict: "FAILED", resolution: "landed" })]} />);
+    const row = screen.getByTestId("runs-row");
+    expect(row.textContent).toContain("landed");
+    expect(row.textContent).not.toContain("failed");
+  });
+});
 
 // What each run spent, in the list where runs are compared — live for a
 // running one, ~ when built on estimated counts, and silence over a zero.

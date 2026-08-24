@@ -189,7 +189,11 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			case "UNVERIFIED":
 				g.Unverified++
 			default:
-				g.Failed++
+				if r.Resolution == "landed" {
+					g.Passed++
+				} else {
+					g.Failed++
+				}
 			}
 			// Grouped by duckling, the numbers are that duckling's share.
 			// Adding the run's total to every row was what made the rows

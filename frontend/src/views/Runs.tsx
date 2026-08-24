@@ -17,12 +17,13 @@ import { money } from "../lib/format";
 import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
 
-const FILTERS = ["all", "waiting", "running", "done", "failed"] as const;
+const FILTERS = ["all", "waiting", "running", "done", "landed", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
 
 /** A run's wall time, compact: the tracker's own wallclock when recorded,
  * else the started→ended span, else started→now for one still going. */
 function verdictText(r: Run): string {
+  if (r.resolution === "landed") return "landed";
   if (r.verdict && r.acceptance_gate?.green) return `${verdictLabel(r.verdict as Verdict)} · reproduced green at accept`;
   return r.verdict ? verdictLabel(r.verdict as Verdict) : "—";
 }
@@ -57,13 +58,15 @@ export function Runs({ runs }: { runs: Run[] }) {
           case "running":
             return r.status === "running" || r.status === "queued";
           case "done":
-            return r.status === "done";
+            return r.status === "done" && r.resolution !== "landed";
+          case "landed":
+            return r.resolution === "landed";
           case "failed":
             // By outcome, not by status field. A test-first that concluded
             // cleanly with verdict FAILED (its test never landed red) wears
             // status "done" — filtering on status alone hid exactly the runs
             // a person hunting T-110's failed tests was told to relaunch.
-            return r.status === "failed" || r.verdict === "FAILED" || r.verdict === "ABORTED";
+            return r.resolution !== "landed" && (r.status === "failed" || r.verdict === "FAILED" || r.verdict === "ABORTED");
           default:
             return true;
         }
@@ -115,7 +118,7 @@ export function Runs({ runs }: { runs: Run[] }) {
           {shown.map((r) => (
             <tr key={r.id} data-testid="runs-row" data-run={r.id}>
               <td className="border-b border-hairline py-1 pr-3">
-                <StatusChip role={runStatusRole(r.status)} label={r.status} />
+                <StatusChip role={r.resolution === "landed" ? "good" : runStatusRole(r.status)} label={r.resolution === "landed" ? "landed" : r.status} />
                 {r.status === "queued" && r.queued_reason && (
                   <p className="mt-1 text-xs text-ink-secondary">{r.queued_reason}</p>
                 )}
@@ -133,7 +136,7 @@ export function Runs({ runs }: { runs: Run[] }) {
                     as successes when the one word that says otherwise is the
                     quietest thing in the row. */}
                 {r.verdict ? (
-                  <StatusChip role={verdictStatus(r.verdict as Verdict)} label={verdictText(r)} />
+                  <StatusChip role={r.resolution === "landed" ? "good" : verdictStatus(r.verdict as Verdict)} label={verdictText(r)} />
                 ) : (
                   <span className="text-ink-secondary">—</span>
                 )}

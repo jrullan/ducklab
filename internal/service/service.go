@@ -3225,6 +3225,35 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 	_ = w.WriteState()
 }
 
+// RunLand records that an operator manually landed the work represented by a
+// completed run. It deliberately preserves the original verdict: historical
+// landings were first rejected, and resolution is the auditable correction.
+func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) error {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	rs, ok := s.runs[id]
+	if !ok {
+		return fmt.Errorf("run %q not found", id)
+	}
+	if rs.run.Status != "done" {
+		return fmt.Errorf("run %q is %s; only done runs may be landed", id, rs.run.Status)
+	}
+	if sha == "" {
+		return fmt.Errorf("landing commit sha is required")
+	}
+	if actor == "" {
+		actor = "human"
+	}
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		return err
+	}
+	rs.run.Resolution = "landed"
+	rs.run.CommitSHA = sha
+	w.AppendEvent("human", map[string]interface{}{"action": "landed", "actor": actor, "reason": note, "commit_sha": sha})
+	return w.WriteState()
+}
+
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]

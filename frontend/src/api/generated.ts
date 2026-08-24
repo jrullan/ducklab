@@ -237,12 +237,19 @@ export interface EngineapihealthResponse {
   version?: string;
 }
 
+export interface EngineapilandRequest {
+  commit_sha?: string;
+  note?: string;
+}
+
 export interface EngineapiliftRequest {
   kind?: string;
 }
 
 export interface EngineapirejectRequest {
+  commit_sha?: string;
   reason?: string;
+  resolution?: string;
 }
 
 export interface EngineapirenderedResponse {
@@ -376,6 +383,7 @@ export interface RunlogRun {
   accepted?: boolean;
   agent_turns?: number;
   autonomy?: string;
+  base_sha?: string;
   branch?: string;
   budget?: RunlogBudgetState;
   chain_build?: Record<string, unknown>;
@@ -384,6 +392,7 @@ export interface RunlogRun {
   ended_at?: string;
   failure?: string;
   gate?: string;
+  governance_modified?: boolean;
   id?: string;
   mode?: string;
   mode_source?: string;
@@ -419,6 +428,8 @@ export interface RunlogRun {
   verdict?: string;
   wallclock_ms?: number;
   warning?: string;
+  worktree_cleanup_failure?: string;
+  worktree_path?: string;
 }
 
 export interface ServiceAcceptResult {
@@ -868,6 +879,7 @@ export const OPERATIONS = [
   { id: "ChatEnd", method: "POST", path: "/v1/runs/{id}/chat/end" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },
   { id: "RunFileFindings", method: "POST", path: "/v1/runs/{id}/findings/file" },
+  { id: "RunLand", method: "POST", path: "/v1/runs/{id}/land" },
   { id: "RunLLM", method: "GET", path: "/v1/runs/{id}/llm" },
   { id: "RunReject", method: "POST", path: "/v1/runs/{id}/reject" },
   { id: "RunReseat", method: "POST", path: "/v1/runs/{id}/reseat" },

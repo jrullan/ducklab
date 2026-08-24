@@ -1090,6 +1090,9 @@ export class EngineClient {
   reject(id: string, reason = "") {
     return this.request<void>("POST", `/v1/runs/${id}/reject`, { reason });
   }
+  land(id: string, commitSha: string, note = "") {
+    return this.request<void>("POST", `/v1/runs/${id}/land`, { commit_sha: commitSha, note });
+  }
   abort(id: string) {
     return this.request<void>("POST", `/v1/runs/${id}/abort`);
   }

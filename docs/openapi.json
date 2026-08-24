@@ -825,6 +825,20 @@
         ],
         "type": "object"
       },
+      "EngineapilandRequest": {
+        "properties": {
+          "commit_sha": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha"
+        ],
+        "type": "object"
+      },
       "EngineapiliftRequest": {
         "properties": {
           "kind": {
@@ -838,7 +852,13 @@
       },
       "EngineapirejectRequest": {
         "properties": {
+          "commit_sha": {
+            "type": "string"
+          },
           "reason": {
+            "type": "string"
+          },
+          "resolution": {
             "type": "string"
           }
         },
@@ -1282,6 +1302,9 @@
           "autonomy": {
             "type": "string"
           },
+          "base_sha": {
+            "type": "string"
+          },
           "branch": {
             "type": "string"
           },
@@ -1306,6 +1329,9 @@
           },
           "gate": {
             "type": "string"
+          },
+          "governance_modified": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"
@@ -1425,6 +1451,12 @@
           },
           "warning": {
             "type": "string"
+          },
+          "worktree_cleanup_failure": {
+            "type": "string"
+          },
+          "worktree_path": {
+            "type": "string"
           }
         },
         "required": [
@@ -1435,6 +1467,7 @@
           "dry_run",
           "ended_at",
           "gate",
+          "governance_modified",
           "id",
           "mode",
           "project_id",
@@ -6365,6 +6398,45 @@
           }
         ],
         "summary": "File the run's final reviewer findings as bug reports, with provenance"
+      }
+    },
+    "/v1/runs/{id}/land": {
+      "post": {
+        "operationId": "RunLand",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapilandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record a manual landing"
       }
     },
     "/v1/runs/{id}/llm": {

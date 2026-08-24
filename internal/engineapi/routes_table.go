@@ -57,7 +57,14 @@ type restartRequest struct {
 }
 
 type rejectRequest struct {
-	Reason string `json:"reason"`
+	Reason     string `json:"reason"`
+	Resolution string `json:"resolution,omitempty"`
+	CommitSHA  string `json:"commit_sha,omitempty"`
+}
+
+type landRequest struct {
+	CommitSHA string `json:"commit_sha"`
+	Note      string `json:"note,omitempty"`
 }
 
 type answerRequest struct {
@@ -383,6 +390,9 @@ func routeTable() []Route {
 		{Method: "POST", Path: "/v1/runs/{id}/reject", Auth: true,
 			Request: rejectRequest{}, Summary: "Reject", ClientMethod: "RunReject",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunReject }},
+		{Method: "POST", Path: "/v1/runs/{id}/land", Auth: true,
+			Request: landRequest{}, Summary: "Record a manual landing", ClientMethod: "RunLand",
+			handler: func(s *Server) http.HandlerFunc { return s.handleRunLand }},
 		{Method: "POST", Path: "/v1/runs/{id}/abort", Auth: true,
 			Summary: "Abort", ClientMethod: "RunAbort",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAbort }},
