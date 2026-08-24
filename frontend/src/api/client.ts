@@ -116,7 +116,7 @@ export interface Run {
   agent_turns?: number;
   /** A test-first's pre-authorized build, straight off the record — what a
    * relaunch must carry so the chain survives the retry. */
-  chain_build?: { mode?: string; ducklings?: string[]; agent_turns?: number; budget?: { max_tokens?: number } };
+  chain_build?: { mode?: string; ducklings?: string[]; seats?: Record<string, string>; agent_turns?: number; budget?: { max_tokens?: number } };
   /** Per-duckling spend, attributed as each call lands. Served live for an
    * active run, so a view opened mid-run starts from the truth instead of
    * zeros. */

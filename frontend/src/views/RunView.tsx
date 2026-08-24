@@ -636,7 +636,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               note: opts.note,
               mode: chain?.mode || "solo",
               ducklings: chain?.ducklings ?? [],
-              seats: roleSeats(chain?.mode || "solo", chain?.ducklings ?? []),
+              seats: chain?.seats ?? roleSeats(chain?.mode || "solo", chain?.ducklings ?? []),
               maxTokens: chain?.budget?.max_tokens,
               agentTurns: chain?.agent_turns,
               // The relaunch panel already states the caveat when the task

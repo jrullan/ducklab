@@ -328,7 +328,31 @@ describe("relaunching a failed test-first", () => {
     // The promised build keeps ITS recorded seats and settings.
     expect(chain.mode).toBe("pair");
     expect(chain.ducklings).toEqual(["glm52", "qwen38-max"]);
+    // PRE-T-130 chains had no seat record, so retain their positional projection.
+    expect(chain.seats).toEqual({ implementer: "glm52", advisor: "qwen38-max" });
     expect(chain.agentTurns).toBe(-1);
+  });
+
+  it("preserves recorded build seats instead of re-projecting them", async () => {
+    const recordedSeats = { implementer: "glm52", reviewer: "qwen38-max" };
+    const failedWithSeats: Run = {
+      ...failedTest,
+      chain_build: { ...failedTest.chain_build!, seats: recordedSeats },
+    };
+    const testStart = vi.fn(() => Promise.resolve({ id: "r-4" }));
+    const client = clientWith({
+      run: vi.fn(() => Promise.resolve({ run: failedWithSeats, events: [] })),
+      testStart,
+      tasks: vi.fn(() =>
+        Promise.resolve([{ id: "T-076", title: "x", milestone: "M-08", status: "blocked" }]),
+      ),
+    } as unknown as Partial<EngineClient>);
+    useRuns.setState({ runs: { "r-t": failedWithSeats }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    render(<RunView runId="r-t" client={client} />);
+    fireEvent.click(await screen.findByTestId("run-start"));
+    await waitFor(() => expect(testStart).toHaveBeenCalled());
+    const [, , , chain] = testStart.mock.calls[0]! as unknown as [string, string, string, Record<string, unknown>];
+    expect(chain.seats).toEqual(recordedSeats);
   });
 });
 
