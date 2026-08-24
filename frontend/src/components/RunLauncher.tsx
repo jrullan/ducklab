@@ -12,6 +12,18 @@ export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
+/** Project the canonical roster into the positional seats sent to the engine.
+ * Roster responses are role-ordered, not seat-ordered. */
+function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
+  const count = fixedSeats(mode);
+  if (count > 0) {
+    return Array.from({ length: count }, (_, i) =>
+      roster.find((entry) => entry.role === seatLabel(mode, i))?.duckling ?? "",
+    );
+  }
+  return roster.map((entry) => entry.duckling);
+}
+
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
 export type PhaseConfig = { mode: string; ducklings: string[]; seatProvenance?: string[]; maxTokens?: number; agentTurns?: number };
 
@@ -51,11 +63,15 @@ export function LaunchConfig({
     if (roster?.length && value.ducklings.length === 0) {
       onChange({
         ...value,
-        ducklings: roster.map((e) => e.duckling),
-        seatProvenance: roster.map((e) => e.source === "project pin" ? "project" : "global"),
+        ducklings: rosterSeats(displayMode, roster),
+        seatProvenance: rosterSeats(displayMode, roster).map((_, i) => {
+          const role = seatLabel(displayMode, i);
+          const entry = roster.find((e) => e.role === role);
+          return entry?.source === "project pin" ? "project" : "global";
+        }),
       });
     }
-  }, [roster, value.mode]);
+  }, [roster, value.mode, defaultMode]);
   const displayMode = value.mode || defaultMode || modes[0] || "solo";
   const seats = fixedSeats(displayMode);
   const cols = seats > 0 ? seats : Math.max(2, value.ducklings.length, extraSeats);
@@ -230,8 +246,12 @@ export function RunLauncher({
   const cols = seats > 0 ? seats : Math.max(2, chosen.length, extraSeats);
   useEffect(() => {
     if (!changed.current && resolved.length) {
-      setChosen(resolved.map((e) => e.duckling));
-      setSeatProvenance(resolved.map((e) => e.source === "project pin" ? "project" : "global"));
+      const seatsForMode = rosterSeats(mode, resolved);
+      setChosen(seatsForMode);
+      setSeatProvenance(seatsForMode.map((_, i) => {
+        const entry = resolved.find((e) => e.role === seatLabel(mode, i));
+        return entry?.source === "project pin" ? "project" : "global";
+      }));
     }
   }, [roster, mode]);
   const setSeat = (i: number, id: string) => {
@@ -241,7 +261,7 @@ export function RunLauncher({
       const next = [...cur];
       while (next.length <= i) next.push("");
       next[i] = id;
-      onDucklingsChange?.(next.filter(Boolean));
+      onDucklingsChange?.(next);
       return next;
     });
   };
@@ -357,7 +377,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen.filter(Boolean), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
+            onLaunch({ mode, ducklings: chosen, maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
           }
           disabled={busy}
           data-testid="run-start"
