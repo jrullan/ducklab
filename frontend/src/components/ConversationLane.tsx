@@ -201,6 +201,13 @@ export function ConversationTurn({
         <FoldedReport items={report.items} done={reportDone} texts={deliverableTexts} />
       )}
 
+      {isGate && block.done && block.gateExitCode !== undefined && (
+        <div className="mt-1 text-sm text-ink-secondary" data-testid="gate-result">
+          exit code {block.gateExitCode}{block.gateDurationS !== undefined ? ` · ${block.gateDurationS}s` : ""}
+          {block.gateCommand && <div className="break-all font-mono text-xs">{block.gateCommand}</div>}
+          {block.gateOutput && <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs">{block.gateOutput}</pre>}
+        </div>
+      )}
       {!collapsed && block.toolCalls.length > 0 && (
         <ul className="mt-1">
           {block.toolCalls.map((c) => (

@@ -15,7 +15,7 @@ export function GateCard({ gate, stage }: { gate: GateState | null; stage?: stri
     return (
       <div className="rounded-card border border-hairline p-3" data-testid="gate-card" data-gate="pending">
         <div className="text-sm text-ink-muted">gate</div>
-        <div className="text-ink-secondary">not run yet</div>
+        <div className="text-ink-secondary">no final gate yet</div>
       </div>
     );
   }
@@ -41,6 +41,8 @@ export function GateCard({ gate, stage }: { gate: GateState | null; stage?: stri
           <StatusChip role={gate.role} label={gate.label} />
         )}
       </div>
+      {gate.exitCode !== undefined && <div className="mt-1 text-xs text-ink-secondary">exit code {gate.exitCode}{gate.durationS !== undefined ? ` · ${gate.durationS}s` : ""}</div>}
+      {gate.output && <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap font-mono text-xs text-ink-secondary">{gate.output}</pre>}
     </div>
   );
 }

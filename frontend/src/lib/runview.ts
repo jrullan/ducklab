@@ -92,6 +92,11 @@ export interface TurnBlock {
   gate?: "running" | "green" | "red" | string;
   /** The lifecycle phase that opened a harness gate. */
   gatePhase?: string;
+  /** Recorded completion details for the gate that opened this block. */
+  gateExitCode?: number;
+  gateCommand?: string;
+  gateOutput?: string;
+  gateDurationS?: number;
   /** The turn's recorded thinking, consolidated at turn end. The live deltas
    * are display state and die with the window; this is what a relaunched
    * desktop reads instead of showing the thinking gone. */
@@ -237,6 +242,8 @@ export interface GateState {
   gate: string;
   exitCode?: number;
   cmd?: string;
+  output?: string;
+  durationS?: number;
   role: StatusRole;
   label: string;
   /** True when nothing executable existed, so this can never read as success. */
@@ -546,11 +553,17 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         break;
       }
       case "gate": {
-        // Test-first's settled gate (phase before/after) closes the turn its
-        // announcement opened; build rounds close via round_gate instead.
-        if (openGate && !openGate.done && d.phase) {
+        // The service puts phase on gate_started, not on the final completion.
+        // Correlate that completion with its open final announcement; round_gate
+        // has its own event type and must never settle this card.
+        if (openGate && !openGate.done && (openGate.gatePhase === "final" || String(d.phase ?? "") === openGate.gatePhase)) {
+          const exitCode = typeof d.exit_code === "number" ? d.exit_code : typeof d.exit === "number" ? d.exit : undefined;
           openGate.done = true;
-          openGate.gate = (typeof d.exit === "number" ? d.exit : 1) === 0 ? "green" : "red";
+          openGate.gate = exitCode === 0 ? "green" : "red";
+          openGate.gateExitCode = exitCode;
+          openGate.gateCommand = typeof d.command === "string" ? d.command : typeof d.cmd === "string" ? d.cmd : undefined;
+          openGate.gateOutput = typeof d.output === "string" ? d.output : undefined;
+          openGate.gateDurationS = typeof d.duration_s === "number" ? d.duration_s : undefined;
           openGate = null;
         }
         break;
@@ -720,21 +733,41 @@ export function gatePhaseLabel(phase: string): string {
 }
 
 export function buildGate(events: readonly DucklabEvent[]): GateState | null {
-  let latest: DucklabEvent | null = null;
+  // The service names the phase on gate_started, while its final `gate` result
+  // has exit_code/command/output/duration_s but no phase. Carry that identity
+  // across the two events rather than letting a preceding round decide the rail.
+  let latestFinal: DucklabEvent | null = null;
+  let latestLegacy: DucklabEvent | null = null;
+  let finalStarted = false;
   for (const e of events) {
-    if (e.type === "gate") latest = e;
+    if (e.type === "gate_started" && e.data?.phase === "final") {
+      finalStarted = true;
+      continue;
+    }
+    if (e.type !== "gate") continue;
+    if (e.data?.phase === "final" || finalStarted) {
+      latestFinal = e;
+      finalStarted = false;
+    // Retain pre-split streams that never announced a phase. round_gate is
+    // deliberately excluded because it has its own event type.
+    } else {
+      latestLegacy = e;
+    }
   }
+  const latest = latestFinal ?? (finalStarted ? null : latestLegacy);
   if (!latest) return null;
 
   const d = latest.data ?? {};
-  const gate = String(d.gate ?? "none");
-  const exit = typeof d.exit === "number" ? d.exit : undefined;
-  const cmd = d.cmd ? String(d.cmd) : undefined;
+  const gate = String(d.gate ?? "tests");
+  const exit = typeof d.exit_code === "number" ? d.exit_code : typeof d.exit === "number" ? d.exit : undefined;
+  const cmd = typeof d.command === "string" ? d.command : typeof d.cmd === "string" ? d.cmd : undefined;
+  const output = typeof d.output === "string" ? d.output : undefined;
+  const durationS = typeof d.duration_s === "number" ? d.duration_s : undefined;
   const phase = d.phase ? String(d.phase) : "";
 
   if (gate === "none") {
     return {
-      gate, exitCode: exit, cmd,
+      gate, exitCode: exit, cmd, output, durationS,
       role: "warning",
       label: "unverified — nothing executable to run",
       unverified: true,
@@ -745,7 +778,7 @@ export function buildGate(events: readonly DucklabEvent[]): GateState | null {
   // read as a judgment of work that had not happened yet.
   const phaseWord = phase === "before" ? "baseline " : "";
   return {
-    gate, exitCode: exit, cmd,
+    gate, exitCode: exit, cmd, output, durationS,
     role: green ? "good" : "critical",
     label: green ? `${phaseWord}${gate} passed` : `${phaseWord}${gate} failed`,
     unverified: false,

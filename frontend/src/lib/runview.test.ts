@@ -55,6 +55,14 @@ describe("buildTurns", () => {
     const turns = buildTurns([ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "a" })]);
     expect(turns[0]!.done).toBe(false);
   });
+
+  it("settles the final gate announcement from its gate event", () => {
+    const turns = buildTurns([
+      ev("gate_started", 1, { phase: "final", detail: "running the full gate" }),
+      ev("gate", 2, { exit_code: 0, command: "npm test", output: "pass tail", duration_s: 4 }),
+    ]);
+    expect(turns[0]).toMatchObject({ done: true, gate: "green", gateExitCode: 0, gateCommand: "npm test", gateOutput: "pass tail", gateDurationS: 4 });
+  });
 });
 
 describe("anonymiseTurns", () => {
@@ -144,6 +152,31 @@ describe("buildGate", () => {
 
   it("returns null before any gate has run", () => {
     expect(buildGate([ev("turn_start", 1)])).toBeNull();
+  });
+
+  it("keys the rail gate on final rather than failed round gates", () => {
+    const events = [
+      ev("round_gate", 1, { result: "red" }),
+      ev("round_gate", 2, { result: "red" }),
+      ev("round_gate", 3, { result: "red" }),
+      ev("gate_started", 4, { phase: "final" }),
+      ev("gate", 5, { gate: "tests", exit_code: 0, command: "npm test", output: "all passed", duration_s: 12 }),
+    ];
+    const gate = buildGate(events)!;
+    expect(gate.role).toBe("good");
+    expect(gate.exitCode).toBe(0);
+    expect(gate.cmd).toBe("npm test");
+    expect(gate.output).toBe("all passed");
+    expect(gate.durationS).toBe(12);
+    expect(buildGate(events.slice(0, 3))).toBeNull();
+  });
+
+  it("uses a red final gate after green rounds", () => {
+    expect(buildGate([
+      ev("round_gate", 1, { result: "green" }),
+      ev("gate_started", 2, { phase: "final" }),
+      ev("gate", 3, { gate: "tests", exit_code: 1 }),
+    ])!.role).toBe("critical");
   });
 });
 

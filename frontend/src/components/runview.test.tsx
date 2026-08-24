@@ -211,9 +211,23 @@ describe("GateCard", () => {
     expect(screen.getByTestId("gate-card").textContent).toContain("passed");
   });
 
-  it("says not run yet before a gate exists", () => {
+  it("says no final gate yet before a gate exists", () => {
     render(<GateCard gate={null} />);
-    expect(screen.getByTestId("gate-card").textContent).toContain("not run yet");
+    expect(screen.getByTestId("gate-card").textContent).toContain("no final gate yet");
+  });
+
+  it("renders a resulted final gate's outcome and output", () => {
+    const events = [
+      ev("round_gate", 1, { result: "red" }), ev("round_gate", 2, { result: "red" }), ev("round_gate", 3, { result: "red" }),
+      ev("gate_started", 4, { phase: "final", detail: "running the full gate" }),
+      ev("gate", 5, { gate: "tests", exit_code: 0, command: "npm test", output: "pass tail", duration_s: 7 }),
+    ];
+    render(<GateCard gate={buildGate(events)} />);
+    const card = screen.getByTestId("gate-card");
+    expect(card.dataset.gate).toBe("tests");
+    expect(card.textContent).toContain("passed");
+    expect(card.textContent).toContain("exit code 0 · 7s");
+    expect(card.textContent).toContain("pass tail");
   });
 });
 
