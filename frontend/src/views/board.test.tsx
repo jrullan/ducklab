@@ -14,7 +14,7 @@ const TASKS: Task[] = [
   },
 ];
 
-function clientWith(handler: (path: string) => Response) {
+function clientWith(handler: (path: string) => Response | Promise<Response>) {
   return new EngineClient({
     baseUrl: "http://engine",
     token: "t",
@@ -26,7 +26,11 @@ function clientWith(handler: (path: string) => Response) {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-const okClient = () => clientWith((p) => (p.includes("/tasks") ? json({ items: TASKS, total: TASKS.length }) : json({}, 404)));
+const okClient = () => clientWith((p) => {
+  if (p.includes("/tasks")) return json({ items: TASKS, total: TASKS.length });
+  if (p.includes("/bugs")) return json({ items: [], total: 0 });
+  return json({}, 404);
+});
 
 describe("Board", () => {
   it("puts each task in the column its run history says it is in", async () => {
@@ -107,10 +111,52 @@ describe("Board", () => {
     await waitFor(() => expect(screen.getByTestId("board-error").textContent).toContain("engine exploded"));
   });
 
-  // One board failing must not blank the other: a project whose bugs cannot be
-  // read still has tasks worth looking at, and losing both to one error tells
-  // the reader less than showing what survived.
-  it("keeps the tasks when only the bugs fail to load", async () => {
+  it("clears first-project cards while the next project loads", async () => {
+    let resolveSecondTasks!: (response: Response) => void;
+    let resolveSecondBugs!: (response: Response) => void;
+    const secondTasks = new Promise<Response>((resolve) => { resolveSecondTasks = resolve; });
+    const secondBugs = new Promise<Response>((resolve) => { resolveSecondBugs = resolve; });
+    const client = clientWith((path) => {
+      if (path.includes("/projects/a/") && (path.includes("/tasks") || path.includes("/bugs"))) {
+        return json({ items: TASKS, total: TASKS.length });
+      }
+      if (path.includes("/tasks")) return secondTasks;
+      if (path.includes("/bugs")) return secondBugs;
+      return json({}, 404);
+    });
+    const view = render(<Board client={client} projectId="a" />);
+    await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));
+
+    view.rerender(<Board client={client} projectId="b" />);
+    expect(screen.getByTestId("board-loading")).toBeTruthy();
+    expect(screen.queryByTestId("board-card")).toBeNull();
+
+    resolveSecondTasks(json({ items: [], total: 0 }));
+    resolveSecondBugs(json({ items: [], total: 0 }));
+    await waitFor(() => expect(screen.queryByTestId("board-loading")).toBeNull());
+    expect(screen.queryByTestId("board-card")).toBeNull();
+  });
+
+  it("shows a fetch rejection instead of cards from the previous project", async () => {
+    const client = clientWith((path) => {
+      if (path.includes("/projects/a/") && (path.includes("/tasks") || path.includes("/bugs"))) {
+        return json({ items: TASKS, total: TASKS.length });
+      }
+      if (path.includes("/projects/b/") && (path.includes("/tasks") || path.includes("/bugs"))) {
+        return Promise.reject(new Error("project b is unavailable"));
+      }
+      return json({}, 404);
+    });
+    const view = render(<Board client={client} projectId="a" />);
+    await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));
+
+    view.rerender(<Board client={client} projectId="b" />);
+    await waitFor(() => expect(screen.getByTestId("board-error").textContent).toContain("project b is unavailable"));
+    expect(screen.queryByTestId("board-cards")).toBeNull();
+    expect(screen.queryByTestId("board-card")).toBeNull();
+  });
+
+  it("does not render tasks when the bugs fetch fails", async () => {
     const client = clientWith((p) =>
       p.includes("/bugs")
         ? json({ error: { message: "bug table is locked" } }, 500)
@@ -118,11 +164,12 @@ describe("Board", () => {
     );
     render(<Board client={client} projectId="p" />);
 
-    await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));
+    await waitFor(() => expect(screen.getByTestId("board-error")).toBeTruthy());
     const err = screen.getByTestId("board-error").textContent ?? "";
     expect(err).toContain("bugs");
     expect(err).toContain("bug table is locked");
     expect(err).not.toContain("tasks:");
+    expect(screen.queryByTestId("board-cards")).toBeNull();
   });
 });
 

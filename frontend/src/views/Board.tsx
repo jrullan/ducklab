@@ -8,7 +8,7 @@
  * running the task, so `Run` is the action the rail offers.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
@@ -151,6 +151,7 @@ export function Board({
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const generation = useRef(0);
   // The selection belongs to the board that made it: keeping it across a
   // switch would leave the rail describing a task while the bugs are on
   // screen. On board change — from the toggle or the Work subnav alike.
@@ -161,7 +162,8 @@ export function Board({
   const [severity, setSeverity] = useState("");
   const [query, setQuery] = useState("");
 
-  const load = useCallback(async (summary = false) => {
+  const load = useCallback(async (summary = false, requestGeneration = generation.current) => {
+    if (requestGeneration !== generation.current) return;
     setLoading(true);
     setFailure(null);
 
@@ -208,6 +210,7 @@ export function Board({
       .catch(() => {});
     const [t, b] = await Promise.allSettled([client.tasks(projectId, summary), client.bugs(projectId, false, summary)]);
     const problems: string[] = [];
+    if (requestGeneration !== generation.current) return;
     if (t.status === "fulfilled") setTasks(t.value);
     else problems.push(`tasks: ${String(t.reason?.message ?? t.reason)}`);
     if (b.status === "fulfilled") setBugs(b.value);
@@ -217,8 +220,17 @@ export function Board({
     setLoading(false);
   }, [client, projectId]);
 
-  useEffect(() => {
-    void load();
+  // Clear the old project before the new request can paint. The generation
+  // makes a late response from the old project harmless.
+  useLayoutEffect(() => {
+    generation.current += 1;
+    setTasks([]);
+    setBugs([]);
+    setSelected(null);
+    setNext(null);
+    setFailure(null);
+    setLoading(true);
+    void load(false, generation.current);
   }, [load]);
 
   // Runs started, paused or finished ANYWHERE — the CLI, an MCP operator,
@@ -321,6 +333,7 @@ export function Board({
   return (
     <div data-testid="board-view" className="flex items-start gap-4">
       <div className="min-w-0 flex-1">
+        {loading && <div data-testid="board-loading" className="mb-3 text-sm text-ink-muted">Loading board…</div>}
         {failure && (
           <div data-testid="board-error" className="mb-3 text-sm text-critical">
             {failure}
@@ -588,6 +601,7 @@ export function Board({
           </p>
         )}
 
+        {!loading && !failure && <>
         {/* A board with nothing in flight says so in one line instead of
             drawing five empty strips and a scrollbar: the only thing on it
             is the archive's door. */}
@@ -614,7 +628,7 @@ export function Board({
           const archived = (isBugs ? shownBugs : shownTasks).filter((it) => it.status === archiveKey);
           if (working.length === 0 && archived.length > ARCHIVE_FOLD_AT && !archiveOpen) return null;
           return (
-        <div className="flex max-h-[calc(100vh-16rem)] items-start gap-2 overflow-x-auto pb-2">
+        <div data-testid="board-cards" className="flex max-h-[calc(100vh-16rem)] items-start gap-2 overflow-x-auto pb-2">
           {(isBugs ? BUG_COLUMNS : COLUMNS).map((col) => {
             const items = isBugs
               ? shownBugs.filter((b) => b.status === col.key)
@@ -764,6 +778,7 @@ export function Board({
             </ul>
           </details>
         )}
+        </>}
       </div>
 
       {/* Sticky, scrolling on its own: clicking a task at the bottom of a
