@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jrullan/ducklab/internal/skill"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/skill"
 )
 
 // FSList lists directory contents.
@@ -676,6 +678,14 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	absPath, err := PathJail(ectx.ProjectRoot, a.Path)
 	if err != nil {
 		return ErrorResult("jail: %v", err), nil
+	}
+	// Deleting the governance file is a write to it. fs_delete calls no
+	// WriteGuard (there is no content to guard), so the rule lives here too.
+	if ectx.Role == config.RoleImplementer && isProjectGovernancePath(ectx.ProjectRoot, absPath) {
+		if ectx.OnDistress != nil {
+			ectx.OnDistress("governance_write_refused", map[string]interface{}{"path": a.Path})
+		}
+		return ErrorResult("governance config %s cannot be changed by a run; use PATCH /v1/projects", a.Path), nil
 	}
 	info, err := os.Stat(absPath)
 	if err != nil {

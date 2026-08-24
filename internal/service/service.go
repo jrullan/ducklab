@@ -1807,14 +1807,17 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "dissent": dv, "detail": detail}
-			rs.writer.AppendEvent("human_needed", map[string]interface{}{
-				"kind": "gate", "verdict": verdict, "detail": detail,
-			})
+			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail}
+			if len(governanceCallouts) > 0 {
+				rs.run.PendingData["governance_callouts"] = governanceCallouts
+				gateData["governance_callouts"] = governanceCallouts
+			}
+			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
 			s.bus.Publish(bus.Event{
 				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
 				TS:   time.Now(),
-				Data: map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail},
+				Data: gateData,
 			})
 			return
 		}
@@ -1848,10 +1851,18 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "gate"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-		rs.writer.AppendEvent("human_needed", map[string]interface{}{
+		gateData := map[string]interface{}{
 			"kind":    "gate",
 			"verdict": verdict,
-		})
+		}
+		if len(governanceCallouts) > 0 {
+			if rs.run.PendingData == nil {
+				rs.run.PendingData = map[string]interface{}{}
+			}
+			rs.run.PendingData["governance_callouts"] = governanceCallouts
+			gateData["governance_callouts"] = governanceCallouts
+		}
+		rs.writer.AppendEvent("human_needed", gateData)
 		rs.writer.WriteState()
 		return
 	}

@@ -53,6 +53,12 @@ func TestImplementerCannotWriteProjectGovernance(t *testing.T) {
 			tool: &FSPatch{},
 			args: `{"path":".ducklab/project.toml","edits":[{"search":"autonomy = \"guarded\"","replace":"autonomy = \"yolo\""}]}`,
 		},
+		{
+			// Deleting the file is the same change wearing a different tool.
+			name: "fs_delete",
+			tool: &FSDelete{},
+			args: `{"path":".ducklab/project.toml"}`,
+		},
 	}
 	for _, attempt := range attempts {
 		t.Run(attempt.name, func(t *testing.T) {

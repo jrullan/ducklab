@@ -1152,6 +1152,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
       <SurveyInventory items={surveyInventory} />
 
+      {/* A governance edit is one TOML line in a possibly huge diff: said in
+          plain words at the decision, or it rides through unseen (B-138). */}
+      {run.pending_kind === "gate" && Array.isArray(run.pending_data?.governance_callouts) && (
+        <section data-testid="governance-callouts" className="m-2 rounded-card border border-serious p-3">
+          <h2 className="text-sm font-medium text-serious">Governance change</h2>
+          <ul className="mt-1 list-disc pl-5 text-sm text-ink">
+            {(run.pending_data?.governance_callouts as unknown[]).map((c, i) => <li key={i}>{String(c)}</li>)}
+          </ul>
+          <p className="mt-2 text-sm text-ink-muted">Project settings change through PATCH /v1/projects, not a task diff — accepting this run commits them.</p>
+        </section>
+      )}
       {run.pending_kind === "gate" && Array.isArray(run.pending_data?.conflicting_files) && (
         <section data-testid="worktree-conflict" className="m-2 rounded-card border border-serious p-3">
           <h2 className="text-sm font-medium text-serious">Rebase conflict</h2>
