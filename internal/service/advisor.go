@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -190,20 +191,20 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 		return "", string(advisorID), err
 	}
 
-	answer := stripAdvisorThinking(answerText(resp))
+	answer := truncateAdvisorAnswer(stripAdvisorThinking(answerText(resp)))
 	if violation := advisorViolation(answer); violation != "" {
 		repairPrompt := b.String() + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
 		repair, repairErr := oneShotChat(ctx, p, d, systemPrompt, repairPrompt, maxTok)
 		if repairErr != nil {
-			s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, repairErr)
+			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, answer, repairErr)
 			return "", string(advisorID), repairErr
 		}
-		answer = stripAdvisorThinking(answerText(repair))
+		answer = truncateAdvisorAnswer(stripAdvisorThinking(answerText(repair)))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
-			s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, err)
+			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, answer, err)
 			return "", string(advisorID), err
 		}
 	}
@@ -288,12 +289,20 @@ func (s *Service) wireAdvisor(rs *runState, ectx *tools.ExecContext) {
 // — the ones behind "advisor recommendation failed" — were invisible and
 // the diagnosis required guessing (B-123).
 func (s *Service) logFailedOneShot(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request string, callErr error) {
+	s.logFailedAdvisorAnswer(rs, seat, d, role, request, "", callErr)
+}
+
+// logFailedAdvisorAnswer records rejected provider output as well as its cause,
+// so an operator can audit a contract discard.
+func (s *Service) logFailedAdvisorAnswer(rs *runState, seat config.DucklingID, d *duckling.Duckling, role, request, answer string, callErr error) {
 	if w := s.llmWriter(rs, rs.tracker); w != nil {
+		response := map[string]interface{}{"error": callErr.Error()}
+		if answer != "" {
+			response["content"] = firstN(answer, 2000)
+		}
 		w.AppendLLM(&agent.LLMCallRecord{
 			Duckling: string(seat), Provider: string(d.Provider), Model: d.Model,
-			Role:     role,
-			Request:  map[string]interface{}{"question": firstN(request, 400)},
-			Response: map[string]interface{}{"error": callErr.Error()},
+			Role: role, Request: map[string]interface{}{"question": firstN(request, 400)}, Response: response,
 		})
 	}
 }
@@ -427,44 +436,92 @@ func advisorViolation(text string) string {
 	if text == "" {
 		return "empty answer"
 	}
-	lower := strings.ToLower(text)
-	if strings.Contains(lower, "we need") || strings.Contains(lower, "i recommend") {
-		return "preamble or deliberation"
-	}
-	sentences := advisorSentenceCount(text)
-	if sentences < 2 || sentences > 8 {
-		return fmt.Sprintf("expected 2-8 sentences, got %d", sentences)
+	if sentences := advisorSentenceCount(text); sentences > 16 {
+		return fmt.Sprintf("expected 2-8 sentences (hard limit 16), got %d", sentences)
 	}
 	return ""
 }
 
-// Some existing providers return a terse single-sentence recommendation even
-// after being asked to repair. Keep that usable answer rather than dropping a
-// previously available draft; deliberation, emptiness, and overlong replies
-// remain rejected.
+// Terse answers remain useful; only empty answers and runaways are rejected.
 func advisorPostRepairViolation(text string) string {
 	text = stripAdvisorThinking(text)
 	if text == "" {
 		return "empty answer"
 	}
-	lower := strings.ToLower(text)
-	if strings.Contains(lower, "we need") || strings.Contains(lower, "i recommend") {
-		return "preamble or deliberation"
-	}
-	if sentences := advisorSentenceCount(text); sentences > 8 {
-		return fmt.Sprintf("expected 2-8 sentences, got %d", sentences)
+	if sentences := advisorSentenceCount(text); sentences > 16 {
+		return fmt.Sprintf("expected 2-8 sentences (hard limit 16), got %d", sentences)
 	}
 	return ""
 }
 
-func advisorSentenceCount(text string) int {
-	sentences := 0
-	for _, r := range text {
-		if r == '.' || r == '!' || r == '?' {
-			sentences++
+// advisorSentenceBoundaries returns sentence-ending byte offsets. Dots in code
+// and path-like tokens are not prose boundaries.
+func advisorSentenceBoundaries(text string) []int {
+	masked := make([]bool, len(text))
+	for start := 0; start < len(text); {
+		if text[start] == '`' {
+			end := strings.IndexByte(text[start+1:], '`')
+			if end >= 0 {
+				end += start + 2
+				for i := start; i < end; i++ {
+					masked[i] = true
+				}
+				start = end
+				continue
+			}
+		}
+		if unicode.IsSpace(rune(text[start])) {
+			start++
+			continue
+		}
+		end := start
+		for end < len(text) && !unicode.IsSpace(rune(text[end])) {
+			end++
+		}
+		tokenEnd := end
+		for tokenEnd > start && strings.ContainsRune(".!?", rune(text[tokenEnd-1])) {
+			tokenEnd--
+		}
+		token := text[start:tokenEnd]
+		pathLike := strings.Contains(token, "/") || strings.Contains(token, ".")
+		if strings.EqualFold(text[start:end], "e.g.") || strings.EqualFold(text[start:end], "i.e.") {
+			pathLike = true
+			tokenEnd = end
+		}
+		if pathLike {
+			for i := start; i < tokenEnd; i++ {
+				masked[i] = true
+			}
+		}
+		start = end
+	}
+
+	var boundaries []int
+	for i := 0; i < len(text); i++ {
+		if masked[i] || !strings.ContainsRune(".!?", rune(text[i])) {
+			continue
+		}
+		j := i + 1
+		for j < len(text) && unicode.IsSpace(rune(text[j])) {
+			j++
+		}
+		if j == len(text) || (j > i+1 && unicode.IsUpper(rune(text[j]))) {
+			boundaries = append(boundaries, i+1)
 		}
 	}
-	return sentences
+	return boundaries
+}
+
+func advisorSentenceCount(text string) int { return len(advisorSentenceBoundaries(text)) }
+
+// truncateAdvisorAnswer preserves useful answers that only exceed the requested
+// cap. More than twice the cap remains a runaway and is rejected by validation.
+func truncateAdvisorAnswer(text string) string {
+	boundaries := advisorSentenceBoundaries(text)
+	if len(boundaries) <= 8 || len(boundaries) > 16 {
+		return text
+	}
+	return strings.TrimSpace(text[:boundaries[7]])
 }
 
 func answerText(resp provider.ChatResponse) string {

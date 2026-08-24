@@ -45,10 +45,10 @@ func (p *advisorTestProvider) ChatStream(context.Context, provider.ChatRequest, 
 }
 func (p *advisorTestProvider) Models(context.Context) ([]string, error) { return nil, nil }
 
-func TestAdvisorRepairsAndStripsDeliberation(t *testing.T) {
+func TestAdvisorStripsDeliberationAndKeepsTerseAdvice(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-dos")
 	p := &advisorTestProvider{replies: []string{
-		"We need answer the user's request.\n\n<think>First I should weigh both options.</think>\n\nUse PostgreSQL.",
+		"<think>First I should weigh both options.</think>\n\nUse PostgreSQL.",
 		"Use PostgreSQL. It is the project's established entrypoint contract.",
 	}}
 	s.ducklings.RegisterProvider(p)
@@ -65,27 +65,101 @@ func TestAdvisorRepairsAndStripsDeliberation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(strings.ToLower(answer), "think") || strings.Contains(answer, "We need") {
-		t.Fatalf("advisor returned deliberation/preamble: %q", answer)
+	if strings.Contains(strings.ToLower(answer), "think") {
+		t.Fatalf("advisor returned deliberation: %q", answer)
 	}
 	if n := len(strings.Fields(answer)); n == 0 {
 		t.Fatal("advisor returned an empty answer")
 	}
-	if sentences := strings.Count(answer, "."); sentences < 2 || sentences > 8 {
-		t.Errorf("answer has %d sentences, want 2-8: %q", sentences, answer)
+	if sentences := advisorSentenceCount(answer); sentences != 1 {
+		t.Errorf("answer has %d sentence boundaries, want 1: %q", sentences, answer)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.calls) != 2 {
-		t.Fatalf("provider calls = %d, want initial reply plus one repair", len(p.calls))
-	}
-	if !strings.Contains(strings.ToLower(p.calls[1].Messages[len(p.calls[1].Messages)-1].Content), "violation") {
-		t.Error("repair prompt did not name the contract violation")
+	if len(p.calls) != 1 {
+		t.Fatalf("provider calls = %d, want terse initial reply without repair", len(p.calls))
 	}
 }
 
 // A question pauses before its advisor call completes, but that call still
 // belongs to the paused run rather than disappearing from its per-duckling spend.
+func TestAdvisorSentenceCountUsesProseBoundaries(t *testing.T) {
+	tests := []struct {
+		name, text string
+		want       int
+	}{
+		{"dotted identifiers", "Use fs_read on lifecycle_test.go. Run go test ./internal/service. Inspect service.go:1182 and rs.done. This is the final recommendation.", 4},
+		{"inline code and abbreviations", "Read `service.go:1182`. Keep e.g. existing behavior. Choose the documented option.", 3},
+		{"punctuation boundaries", "Choose A! It matches the spec? Confirm with the test.", 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := advisorSentenceCount(tt.text); got != tt.want {
+				t.Errorf("advisorSentenceCount(%q) = %d, want %d", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdvisorAllowsRecommendationVocabularyAndTruncatesOverlength(t *testing.T) {
+	text := "I recommend option A. Keep the queue tests we need. One. Two. Three. Four. Five. Six. Nine."
+	if violation := advisorViolation(text); violation != "" {
+		t.Fatalf("advisor rejected useful recommendation: %s", violation)
+	}
+	if got := advisorSentenceCount(truncateAdvisorAnswer(text)); got != 8 {
+		t.Fatalf("truncated sentence count = %d, want 8", got)
+	}
+}
+
+func TestFailedOneShotPreservesCallerRole(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-dos")
+	d, err := s.ducklings.Get("pato-dos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-librarian-failure", ProjectID: "p"}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir()}
+	s.logFailedOneShot(rs, "pato-dos", d, "librarian", "digest this", errors.New("offline"))
+	data, err := os.ReadFile(filepath.Join(w.RunDir(), "llm.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"role":"librarian"`) {
+		t.Fatalf("failed one-shot role was not preserved: %s", data)
+	}
+}
+
+func TestAdvisorRejectedAnswerIsRecorded(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-dos")
+	p := &advisorTestProvider{replies: []string{
+		"One. Two. Three. Four. Five. Six. Seven. Eight. Nine. Ten. Eleven. Twelve. Thirteen. Fourteen. Fifteen. Sixteen. Seventeen.",
+		"One. Two. Three. Four. Five. Six. Seven. Eight. Nine. Ten. Eleven. Twelve. Thirteen. Fourteen. Fifteen. Sixteen. Seventeen.",
+	}}
+	s.ducklings.RegisterProvider(p)
+	dir := t.TempDir()
+	run := &runlog.Run{ID: "r-advisor-rejected", ProjectID: "p", Status: "paused", Roster: map[string]string{"advisor": "pato-dos"}}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which option?"}); err == nil {
+		t.Fatal("runaway advisor response was accepted")
+	}
+	data, err := os.ReadFile(filepath.Join(w.RunDir(), "llm.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Seventeen.") || !strings.Contains(string(data), "advisor contract violation") {
+		t.Fatalf("rejected answer was not auditable in llm log: %s", data)
+	}
+}
+
 func TestPausedQuestionAdvisorSpendIsAttributedToTheRun(t *testing.T) {
 	s := serviceWithDucklings(t, "fast-advisor")
 	s.ducklings.RegisterProvider(&advisorTestProvider{
