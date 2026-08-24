@@ -179,7 +179,20 @@ func (g *Git) Add(paths ...string) error {
 
 // AddAll stages all changes.
 func (g *Git) AddAll() error {
-	_, err := g.run("add", "-A")
+	return g.AddAllExcluding()
+}
+
+// AddAllExcluding stages all changes except runtime-only paths. Callers use it
+// for linked dependency trees that are available in an isolated checkout but
+// must never become repository content.
+func (g *Git) AddAllExcluding(excluded ...string) error {
+	args := []string{"add", "-A", "--", "."}
+	for _, path := range excluded {
+		if path != "" {
+			args = append(args, ":^"+filepath.ToSlash(path))
+		}
+	}
+	_, err := g.run(args...)
 	return err
 }
 

@@ -174,6 +174,58 @@ func TestAcceptWorktreeFastPathDoesNotRebase(t *testing.T) {
 	}
 }
 
+func TestAcceptChainedTestStaysOnRunBranchAndExcludesLinkedDeps(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, dir, `link_deps = ["tools/fake"]
+mode = "tests"
+tests = "false"`)
+	git := gitProject(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "tools", "fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "fake", "runtime"), []byte("runtime\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := mustHead(t, git)
+	run := &runlog.Run{ID: "r-chained-red", ProjectID: id, TaskID: "T-001", Stage: "test", Status: "paused", Verdict: "PASSED", PendingKind: "gate", StartedAt: time.Now().UTC().Format(time.RFC3339), ChainBuild: map[string]interface{}{"task_id": "T-001", "mode": "solo"}}
+	if err := s.createRunWorktree(run, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "red_test.txt"), []byte("red test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RunAccept(context.Background(), run.ID, "chained: the test landed red")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustHead(t, git); got != before {
+		t.Fatalf("default HEAD = %s, want unchanged %s", got, before)
+	}
+	branchHead, err := vcs.New(run.WorktreePath).HeadSHA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branchHead != result.CommitSHA {
+		t.Fatalf("run branch = %s, accepted SHA = %s", branchHead, result.CommitSHA)
+	}
+	diff, err := git.ShowCommit(result.CommitSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "tools/fake") {
+		t.Fatalf("chain commit contains linked dependency: %s", diff)
+	}
+}
+
 func TestAcceptWorktreeRedAfterRebasePausesWithoutLanding(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

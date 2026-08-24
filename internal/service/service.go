@@ -988,6 +988,8 @@ type RunRequest struct {
 	// the second half of a TDD chain and jumps the project's waiting line, so
 	// the chain runs as the one unit the person authorized.
 	chained bool
+	// chainBase is the accepted red test on the preceding run branch.
+	chainBase string
 	// resumed is set only by RunResume: the run keeps its recorded ceilings
 	// (including lifted ones) and its ledger continues from what it spent.
 	resumed bool
@@ -1161,7 +1163,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 		run.Autonomy = "guarded"
 	}
 
-	if err := s.createRunWorktree(run, entry.Path); err != nil {
+	if err := s.createRunWorktreeAt(run, entry.Path, req.chainBase); err != nil {
 		return nil, err
 	}
 
@@ -2256,8 +2258,8 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// Persist the work branch with the acceptance record. This is the provenance
 	// that lets status distinguish accepted work from work shipped on main.
 	rs.run.Branch, _ = git.CurrentBranch()
-	// Stage all changes
-	if err := git.AddAll(); err != nil {
+	// Stage candidate work, never runtime dependency links.
+	if err := stageRun(git, rs.run, entry.Path); err != nil {
 		s.failRun(rs, fmt.Errorf("git add: %w", err))
 		return err
 	}
@@ -2393,7 +2395,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
 	}
 	workGit := vcs.New(rs.run.WorktreePath)
-	if err := workGit.AddAll(); err != nil {
+	if err := stageRun(workGit, rs.run, entry.Path); err != nil {
 		return fmt.Errorf("stage worktree: %w", err)
 	}
 	if clean, err := workGit.IsClean(); err != nil {
@@ -2402,6 +2404,36 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if _, err := workGit.CommitWithTrailer(message, map[string]string{"Ducklab-Run": rs.run.ID, "Duckling": "implementer"}); err != nil {
 			return fmt.Errorf("commit worktree: %w", err)
 		}
+	}
+
+	// The chained red test remains solely on its run branch. Its build may
+	// later land the combined history through the normal acceptance path.
+	if rs.run.Stage == "test" && rs.run.ChainBuild != nil {
+		sha, err := workGit.HeadSHA()
+		if err != nil {
+			return fmt.Errorf("read chained test worktree HEAD: %w", err)
+		}
+		rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing chained red test " + short(sha) + " from a clean checkout"})
+		reproduction, err := verifyAcceptedCommit(ctx, defaultGit, entry.Path, sha, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		if reproduction != nil {
+			rs.run.GateReproduced = reproduction
+			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
+		}
+		if err != nil {
+			return err
+		}
+		rs.run.Accepted, rs.run.CommitSHA, rs.run.Status = true, sha, "done"
+		rs.run.Resolution = "accepted by " + actor
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		clearPending(rs.run)
+		if err := s.logResolution(rs, "accept", actor); err != nil {
+			return err
+		}
+		if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
+			return fmt.Errorf("write acceptance receipt: %w", err)
+		}
+		s.continueChain(ctx, rs)
+		return nil
 	}
 
 	defaultSHA, err := defaultGit.DefaultBranchHead()
@@ -2570,6 +2602,17 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 		return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return reproduction, nil
+}
+
+// linkedDependencyPaths reports every dependency path that can be linked into
+// a run checkout. It is also used by staging after a run is recovered, when
+// LinkedDeps itself is intentionally absent from persisted state.
+func linkedDependencyPaths(root string) []string {
+	paths := []string{"node_modules", filepath.Join("frontend", "node_modules"), ".venv"}
+	if cfg, err := config.LoadProject(filepath.Join(root, ".ducklab", "project.toml")); err == nil {
+		paths = append(paths, cfg.Verify.LinkDeps...)
+	}
+	return paths
 }
 
 // linkInstalledDeps symlinks installed dependency trees from the live
@@ -3215,6 +3258,7 @@ func (s *Service) continueChain(ctx context.Context, rs *runState) {
 	// build goes first, so no other test lands on the suite this chain has
 	// deliberately left red.
 	build.chained = true
+	build.chainBase = rs.run.CommitSHA
 	run, err := s.RunStart(context.Background(), rs.run.ProjectID, build)
 	if err != nil {
 		if w, wErr := s.ensureWriter(rs); wErr == nil {
@@ -3341,6 +3385,17 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	return err
 }
 
+// stageRun is the sole staging path for a run. LinkedDeps are runtime
+// symlinks supplied to an isolated checkout and must never enter a commit.
+func stageRun(git *vcs.Git, run *runlog.Run, projectRoot string) error {
+	// LinkedDeps is runtime-only and deliberately omitted from persisted run
+	// state. Reconstruct its configured paths too, so an accept after restart
+	// has the same staging boundary as an in-memory chain.
+	excluded := append([]string(nil), run.LinkedDeps...)
+	excluded = append(excluded, linkedDependencyPaths(projectRoot)...)
+	return git.AddAllExcluding(excluded...)
+}
+
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
@@ -3359,6 +3414,8 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 			return err
 		}
 	}
+	// Rejecting the test revokes the pre-authorized build.
+	rs.run.ChainBuild = nil
 	rs.run.Status = "done"
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)

@@ -125,6 +125,44 @@ func TestAnAcceptedTestFirstIsNotAFinishedTask(t *testing.T) {
 // must be the chain, not the build: the definition of done never landed, so
 // "run" first would build against nothing. The person aborted T-019's test,
 // found it in Blocked, and the rail gave them no way to restart test+build.
+func TestRejectingChainedTestDoesNotStartBuild(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	gitProject(t, dir)
+	run := &runlog.Run{
+		ID: "r-rejected-chain", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate", StartedAt: time.Now().UTC().Format(time.RFC3339),
+		ChainBuild: map[string]interface{}{"task_id": "T-001", "mode": "solo"},
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RunReject(context.Background(), run.ID, "needs another test"); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.RunList(context.Background(), RunFilter{ProjectID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range runs {
+		if got.TaskID == run.TaskID && got.Stage == "build" {
+			t.Fatalf("rejected test started chained build %s", got.ID)
+		}
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.ChainBuild != nil {
+		t.Fatal("rejected test retained its build chain")
+	}
+}
+
 func TestAFailedTestRunOffersTheChainAgain(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

@@ -16,14 +16,22 @@ import (
 
 // createRunWorktree creates the clean, isolated checkout used by build and test runs.
 func (s *Service) createRunWorktree(run *runlog.Run, projectRoot string) error {
+	return s.createRunWorktreeAt(run, projectRoot, "")
+}
+
+// createRunWorktreeAt creates a run checkout at base, or the default head when
+// base is empty. A chained build starts from its committed red-test run branch.
+func (s *Service) createRunWorktreeAt(run *runlog.Run, projectRoot, base string) error {
 	state, err := xplat.StateDir()
 	if err != nil {
 		return fmt.Errorf("worktree state directory: %w", err)
 	}
 	path := filepath.Join(state, "worktrees", run.ProjectID, run.ID)
-	base, err := vcs.New(projectRoot).DefaultBranchHead()
-	if err != nil {
-		return fmt.Errorf("read default branch HEAD: %w", err)
+	if base == "" {
+		base, err = vcs.New(projectRoot).DefaultBranchHead()
+		if err != nil {
+			return fmt.Errorf("read default branch HEAD: %w", err)
+		}
 	}
 	suffix := run.ID
 	if i := strings.LastIndex(suffix, "-"); i >= 0 {
