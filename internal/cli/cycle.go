@@ -479,13 +479,19 @@ func reviewCmd(args []string, repo string) int {
 
 // releaseCmd implements `ducklab release plan|cut` (05 §9.1).
 func releaseCmd(verb string, args []string, repo string) int {
+	if verb == "" {
+		fmt.Fprintln(os.Stderr, "usage: ducklab release plan [--bump major|minor|patch]")
+		fmt.Fprintln(os.Stderr, "       ducklab release cut <version>")
+		return 2
+	}
+
 	client, projectID, code := project(repo)
 	if code != 0 {
 		return code
 	}
 
 	switch verb {
-	case "", "plan":
+	case "plan":
 		bump := "minor"
 		for i := 0; i < len(args); i++ {
 			if args[i] == "--bump" && i+1 < len(args) {

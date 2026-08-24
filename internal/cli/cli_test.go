@@ -81,6 +81,88 @@ func TestTaskRemoveUsesTheTaskDeleteRouteAndPrintsItsRefusal(t *testing.T) {
 	}
 }
 
+func TestReleaseRequiresAnExplicitVerb(t *testing.T) {
+	repo := t.TempDir()
+	var planCalls int
+	var planBump string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects":
+			if r.Method != http.MethodGet {
+				t.Fatalf("project lookup method = %s, want GET", r.Method)
+			}
+			_, _ = w.Write([]byte(`{"items":[{"id":"calc","path":"` + filepath.ToSlash(repo) + `"}]}`))
+		case "/v1/projects/calc/releases":
+			if r.Method != http.MethodPost {
+				t.Fatalf("release plan method = %s, want POST", r.Method)
+			}
+			planCalls++
+			var req map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			planBump = req["bump"]
+			_, _ = w.Write([]byte(`{"id":"r-1"}`))
+		case "/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"run_end\",\"run_id\":\"r-1\",\"data\":{\"verdict\":\"PASSED\"}}\n\n"))
+		default:
+			t.Fatalf("unexpected engine request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(endpoint.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	enginePath, err := daemon.EngineJSONPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(enginePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine, _ := json.Marshal(daemon.EngineInfo{Port: port, Token: "test"})
+	if err := os.WriteFile(enginePath, engine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldErr := os.Stderr
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = write
+	code := releaseCmd("", nil, repo)
+	_ = write.Close()
+	os.Stderr = oldErr
+	out, _ := io.ReadAll(read)
+	_ = read.Close()
+	if code != 2 {
+		t.Errorf("bare release exit code = %d, want 2", code)
+	}
+	if got := string(out); !strings.Contains(got, "ducklab release plan [--bump major|minor|patch]") || !strings.Contains(got, "ducklab release cut <version>") {
+		t.Errorf("bare release usage = %q", got)
+	}
+	if planCalls != 0 {
+		t.Errorf("bare release started %d plan(s)", planCalls)
+	}
+
+	if code := releaseCmd("plan", []string{"--bump", "patch"}, repo); code != 0 {
+		t.Errorf("release plan exit code = %d, want 0", code)
+	}
+	if planCalls != 1 || planBump != "patch" {
+		t.Errorf("release plan calls = %d, bump = %q; want 1, patch", planCalls, planBump)
+	}
+}
+
 func TestVersionPrintsInstalledProvenance(t *testing.T) {
 	oldArgs, oldVersion := os.Args, Version
 	defer func() { os.Args, Version = oldArgs, oldVersion }()
