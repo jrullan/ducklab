@@ -354,7 +354,11 @@ describe("Board — starting the work", () => {
       expect(client.runStart).toHaveBeenCalledWith("p", "T-001", {
         mode: "pair",
         ducklings: [],
+        seats: {},
         maxTokens: undefined,
+        note: undefined,
+        agentTurns: undefined,
+        yes: undefined,
       }),
     );
     expect((await screen.findByTestId("run-link")).getAttribute("href")).toBe("#/runs/r-9");
@@ -379,6 +383,7 @@ describe("Board — starting the work", () => {
       expect(client.runStart).toHaveBeenCalledWith("p", "T-001", {
         mode: "tournament",
         ducklings: ["pato-sonnet", "pato-local"],
+        seats: { "contestant 1": "pato-sonnet", "contestant 2": "pato-local" },
         maxTokens: undefined,
       }),
     );
@@ -400,6 +405,7 @@ describe("Board — starting the work", () => {
       expect(client.runStart).toHaveBeenCalledWith("p", "T-001", {
         mode: "solo",
         ducklings: [],
+        seats: {},
         maxTokens: 1500000,
       }),
     );
@@ -1028,9 +1034,12 @@ describe("the rail follows the contract's order", () => {
         thenBuild: true,
         testMode: "solo",
         testDucklings: ["pato-local"],
+        testSeats: { implementer: "pato-local" },
         mode: "pair",
         ducklings: ["pato-sonnet", "pato-local"],
+        seats: { implementer: "pato-sonnet", advisor: "pato-local" },
         maxTokens: undefined,
+        agentTurns: undefined,
       }),
     );
   });

@@ -12,9 +12,9 @@
 export function fixedSeats(mode: string): number {
   switch (mode) {
     case "solo":
-      return 1;
-    case "pair":
       return 2;
+    case "pair":
+      return 3;
   }
   return 0;
 }
@@ -35,9 +35,9 @@ export function seatsFromRoster(
   const r = roster ?? {};
   switch (mode) {
     case "solo":
-      return [r.implementer].filter(Boolean) as string[];
+      return [r.implementer, r.advisor].filter(Boolean) as string[];
     case "pair":
-      return [r.implementer, r.reviewer].filter(Boolean) as string[];
+      return [r.implementer, r.advisor, r.reviewer].filter(Boolean) as string[];
   }
   return Object.values(r).filter((id, i, all) => !!id && all.indexOf(id) === i);
 }
@@ -46,9 +46,9 @@ export function seatsFromRoster(
 export function seatLabel(mode: string, i: number): string {
   switch (mode) {
     case "solo":
-      return "implementer";
+      return i === 0 ? "implementer" : "advisor";
     case "pair":
-      return i === 0 ? "implementer" : "reviewer";
+      return i === 0 ? "implementer" : i === 1 ? "advisor" : "reviewer";
     case "council":
       // Named for the ROLE, verb attached: this seat runs as "architect"
       // everywhere else — transcripts, roster, the plan panels' chips — and

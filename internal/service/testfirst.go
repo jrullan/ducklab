@@ -54,6 +54,8 @@ type TestFirstRequest struct {
 	// Ducklings seats the test phase positionally: writer, then reviewer.
 	// Overrides Duckling when present.
 	Ducklings []string `json:"ducklings,omitempty"`
+	// Seats names per-run role overrides. Empty seats defer to the roster.
+	Seats map[string]string `json:"seats,omitempty"`
 	// ThenBuild chains the flow the person already decided on: when the test
 	// lands red, it is committed — pre-authorized by this very request — and
 	// the build starts against it at once. Four interactions per task became
@@ -412,21 +414,28 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	if req.Duckling != "" {
 		roster[config.RoleImplementer] = config.DucklingID(req.Duckling)
 	}
-	// The test phase's own seats: writer first, reviewer second. Independent
-	// of the build's — a person who pairs the build does not owe the test a
-	// pair too, and vice versa.
-	if len(req.Ducklings) > 0 && req.Ducklings[0] != "" {
-		roster[config.RoleImplementer] = config.DucklingID(req.Ducklings[0])
-	}
-	if len(req.Ducklings) > 1 && req.Ducklings[1] != "" {
-		roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
+	// Role-keyed seats supersede the legacy writer/reviewer positions. A pair
+	// role-keyed lineup puts advisor at index 1, so applying both contracts
+	// would silently seat that advisor as reviewer.
+	if len(req.Seats) > 0 {
+		assignChosenSeats(roster, req.Seats)
+	} else {
+		// The test phase's own seats: writer first, reviewer second. Independent
+		// of the build's — a person who pairs the build does not owe the test a
+		// pair too, and vice versa.
+		if len(req.Ducklings) > 0 && req.Ducklings[0] != "" {
+			roster[config.RoleImplementer] = config.DucklingID(req.Ducklings[0])
+		}
+		if len(req.Ducklings) > 1 && req.Ducklings[1] != "" {
+			roster[config.RoleReviewer] = config.DucklingID(req.Ducklings[1])
+		}
 	}
 	if roster[config.RoleImplementer] == "" {
 		s.failRun(rs, fmt.Errorf("no implementer seated to write the test for %s — assign one on the Roster board (or pass ducklings on the launch)", rs.run.Mode))
 		return
 	}
 	rs.run.Roster = rosterStrings(roster)
-	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, req.Seats)
 	if req.Duckling != "" {
 		rs.run.RosterSources[string(config.RoleImplementer)] = "request"
 	}

@@ -952,13 +952,16 @@ func (s *Service) DucklingTest(ctx context.Context, id, prompt string, stream bo
 
 // RunRequest is a run request.
 type RunRequest struct {
-	TaskID    string         `json:"task_id"`
-	Mode      string         `json:"mode"`
-	Ducklings []string       `json:"ducklings"`
-	Rounds    int            `json:"rounds"`
-	Verify    string         `json:"verify"`
-	Budget    *budget.Budget `json:"budget"`
-	Autonomy  string         `json:"autonomy"`
+	TaskID    string   `json:"task_id"`
+	Mode      string   `json:"mode"`
+	Ducklings []string `json:"ducklings"`
+	// Seats names per-run role overrides. An empty value leaves that role to the
+	// resolved roster; Ducklings remains the legacy positional/list contract.
+	Seats    map[string]string `json:"seats,omitempty"`
+	Rounds   int               `json:"rounds"`
+	Verify   string            `json:"verify"`
+	Budget   *budget.Budget    `json:"budget"`
+	Autonomy string            `json:"autonomy"`
 	// Origin marks a run started by the autopilot rather than a person.
 	Origin string `json:"origin,omitempty"`
 	// Redo is the explicit consent to start fresh work on a task that was
@@ -1606,7 +1609,14 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// had no way to tell: the picker sits right there in the desktop offering a
 	// choice that did nothing. Applied before the roster is recorded, so the
 	// run says who actually ran.
-	assignChosenDucklings(roster, rs.run.Mode, req.Ducklings)
+	// Role-keyed seats supersede the legacy positional lineup. In particular,
+	// pair's legacy index 1 is reviewer while the role-keyed lineup's index 1
+	// is advisor; applying both would silently seat the advisor as reviewer.
+	if len(req.Seats) > 0 {
+		assignChosenSeats(roster, req.Seats)
+	} else {
+		assignChosenDucklings(roster, rs.run.Mode, req.Ducklings)
+	}
 	// Recomputed, not reused: a pick can put one duckling on both sides of a
 	// pair, and the warning resolveRoster produced was decided against the
 	// roster before the pick. It can also separate two that were the same, in
@@ -1620,7 +1630,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 	rs.run.Roster = rosterStrings(roster)
-	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings)
+	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, req.Seats)
 	if rosterWarning != "" {
 		// Recorded, not fatal: running both sides on one duckling is a
 		// legitimate experiment, but reports must be able to segment it.

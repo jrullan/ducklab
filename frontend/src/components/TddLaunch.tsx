@@ -52,7 +52,7 @@ export function TddLaunch({
   const buildDisplayMode = buildCfg.mode || phaseDefaults.build;
   const est = estimates?.[buildDisplayMode];
   const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
-  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 1)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
+  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
       {/* The common case is one click; the button leads. Seats and caps are

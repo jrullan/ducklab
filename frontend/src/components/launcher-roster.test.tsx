@@ -58,7 +58,7 @@ const unseatedPairRoster: RosterEntry[] = pairRoster.map((e) =>
 
 function launchCall(onLaunch: ReturnType<typeof vi.fn>) {
   expect(onLaunch).toHaveBeenCalledTimes(1);
-  return onLaunch.mock.calls[0]![0] as { mode: string; ducklings: string[] };
+  return onLaunch.mock.calls[0]![0] as { mode: string; ducklings: string[]; seats?: Record<string, string> };
 }
 
 describe("the run launcher seating from the canonical roster", () => {
@@ -77,7 +77,7 @@ describe("the run launcher seating from the canonical roster", () => {
     // Seat 0 is the implementer, seat 1 the reviewer. Positional seeding
     // would send the advisor and the architect — entries[0] and entries[1].
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["terra", "glm52"] }),
+      expect.objectContaining({ mode: "pair", ducklings: ["terra", "qwen38-max", "glm52"], seats: { implementer: "terra", advisor: "qwen38-max", reviewer: "glm52" } }),
     );
   });
 
@@ -94,7 +94,7 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "solo", ducklings: ["terra"] }),
+      expect.objectContaining({ mode: "solo", ducklings: ["terra", "qwen38-max"], seats: { implementer: "terra", advisor: "qwen38-max" } }),
     );
   });
 
@@ -112,7 +112,7 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["terra", "glm52"] }),
+      expect.objectContaining({ mode: "pair", ducklings: ["terra", "qwen38-max", "glm52"], seats: { implementer: "terra", advisor: "qwen38-max", reviewer: "glm52" } }),
     );
   });
 
@@ -132,16 +132,16 @@ describe("the run launcher seating from the canonical roster", () => {
     // into the implementer's seat.
     fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
     fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "" } });
-    fireEvent.click(screen.getAllByTestId("seat-chip")[1]!);
-    fireEvent.change(screen.getByTestId("seat-pick-1"), { target: { value: "luna" } });
+    fireEvent.click(screen.getAllByTestId("seat-chip")[2]!);
+    fireEvent.change(screen.getByTestId("seat-pick-2"), { target: { value: "luna" } });
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["", "luna"] }),
+      expect.objectContaining({ mode: "pair", ducklings: ["", "qwen38-max", "luna"], seats: { implementer: "", advisor: "qwen38-max", reviewer: "luna" } }),
     );
   });
 
-  it("keeps both seats empty when both are left on default", () => {
+  it("keeps all seats empty when left on default", () => {
     const onLaunch = vi.fn();
     render(
       <RunLauncher
@@ -153,11 +153,11 @@ describe("the run launcher seating from the canonical roster", () => {
     );
     fireEvent.click(screen.getByTestId("run-start"));
 
-    // Nothing picked: the whole line-up defers to the engine's roster, so
-    // the request carries no seat assignments — and certainly not the
-    // advisor/architect that positional seeding would have invented.
-    const ducklings = launchCall(onLaunch).ducklings;
-    expect(ducklings.every((d) => d === "")).toBe(true);
+    // Nothing picked: the whole line-up defers to the engine's roster.
+    // The advisor is now a real pair seat and is represented as default too.
+    const launch = launchCall(onLaunch);
+    expect(launch.ducklings).toEqual(["", "qwen38-max", ""]);
+    expect(launch.seats).toEqual({ implementer: "", advisor: "qwen38-max", reviewer: "" });
   });
 });
 
@@ -182,8 +182,10 @@ describe("the chained launcher's per-phase seating", () => {
     expect(onTdd).toHaveBeenCalledTimes(1);
     const [testCfg, buildCfg] = onTdd.mock.calls[0]! as [PhaseConfig, PhaseConfig];
     expect(testCfg.ducklings[0]).toBe("terra");
+    expect(testCfg.ducklings[1]).toBe("qwen38-max");
     expect(buildCfg.ducklings[0]).toBe("terra");
-    expect(buildCfg.ducklings[1]).toBe("glm52");
+    expect(buildCfg.ducklings[1]).toBe("qwen38-max");
+    expect(buildCfg.ducklings[2]).toBe("glm52");
   });
 });
 
@@ -204,6 +206,6 @@ describe("the seat configurator's roster prefill", () => {
     // would report the first two entries — the advisor and the architect.
     expect(onChange).toHaveBeenCalled();
     const seeded = onChange.mock.calls.map((c) => (c[0] as PhaseConfig).ducklings);
-    expect(seeded[seeded.length - 1]).toEqual(["terra", "glm52"]);
+    expect(seeded[seeded.length - 1]).toEqual(["terra", "qwen38-max", "glm52"]);
   });
 });

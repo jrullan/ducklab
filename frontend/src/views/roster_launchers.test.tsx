@@ -56,25 +56,27 @@ describe("Roster launchers", () => {
     const client = runClient();
     await openRunner(client);
 
-    await waitFor(() => expect(screen.getAllByTestId("seat-chip")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("seat-chip")).toHaveLength(3));
     const chips = screen.getAllByTestId("seat-chip");
     expect(chips[0]!.textContent).toContain("luna");
     expect(chips[0]!.textContent).toMatch(/project/i);
-    expect(chips[1]!.textContent).toContain("glm52");
-    expect(chips[1]!.textContent).toMatch(/global/i);
+    expect(chips[1]!.textContent).toContain("advisor");
+    expect(chips[1]!.textContent).toContain("default");
+    expect(chips[2]!.textContent).toContain("glm52");
+    expect(chips[2]!.textContent).toMatch(/global/i);
   });
 
   it("keeps a task-runner seat pick local to the run", async () => {
     const client = runClient();
     await openRunner(client);
 
-    await waitFor(() => expect(screen.getAllByTestId("seat-chip")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId("seat-chip")).toHaveLength(3));
     fireEvent.click(screen.getAllByTestId("seat-chip")[0]!);
     fireEvent.change(screen.getByTestId("seat-pick-0"), { target: { value: "nova" } });
     expect(screen.getAllByTestId("seat-chip")[0]!.textContent).toMatch(/picked now/i);
     fireEvent.click(screen.getByTestId("run-start"));
 
-    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-065", expect.objectContaining({ ducklings: ["nova", "glm52"] })));
+    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-065", expect.objectContaining({ ducklings: ["nova", "", "glm52"], seats: { implementer: "nova", advisor: "", reviewer: "glm52" } })));
     expect(client.RosterSetManyMode).not.toHaveBeenCalled();
     expect(client.GlobalRosterSet).not.toHaveBeenCalled();
   });

@@ -15,7 +15,7 @@ import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
-import { RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
 import { money, tokens, waitingFor } from "../lib/format";
@@ -122,9 +122,11 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       const run = await client.testStart(projectId, next.id, "", {
         thenBuild: true,
         testMode: test.mode,
-        testDucklings: test.ducklings.filter(Boolean),
+        testDucklings: test.ducklings,
+        testSeats: roleSeats(test.mode, test.ducklings),
         mode: build.mode,
-        ducklings: build.ducklings.filter(Boolean),
+        ducklings: build.ducklings,
+        seats: roleSeats(build.mode, build.ducklings),
         maxTokens: build.maxTokens,
         agentTurns: build.agentTurns,
       });
@@ -140,7 +142,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       const run = await client.testStart(projectId, next.id, "", {
         thenBuild: false,
         testMode: test.mode,
-        testDucklings: test.ducklings.filter(Boolean),
+        testDucklings: test.ducklings,
+        testSeats: roleSeats(test.mode, test.ducklings),
       });
       setStarted(run.id);
     } catch (e) {
@@ -328,7 +331,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
-                      void launch({ mode: b.mode, ducklings: b.ducklings.filter(Boolean), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                      void launch({ mode: b.mode, ducklings: b.ducklings, seats: roleSeats(b.mode, b.ducklings), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
                     }
                   />
                 ) : (

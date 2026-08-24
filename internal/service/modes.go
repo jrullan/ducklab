@@ -681,7 +681,7 @@ func rosterStrings(r map[config.Role]config.DucklingID) map[string]string {
 	return out
 }
 
-func (s *Service) rosterSources(projCfg *config.Project, mode string, chosen []string) map[string]string {
+func (s *Service) rosterSources(projCfg *config.Project, mode string, chosen []string, seats map[string]string) map[string]string {
 	_, sources := s.resolveCanonicalRoster(projCfg, mode)
 	out := make(map[string]string, len(sources))
 	for role, source := range sources {
@@ -693,6 +693,11 @@ func (s *Service) rosterSources(projCfg *config.Project, mode string, chosen []s
 	for i, role := range []config.Role{config.RoleImplementer, config.RoleReviewer} {
 		if i < len(chosen) && chosen[i] != "" {
 			out[string(role)] = "request"
+		}
+	}
+	for role, id := range seats {
+		if id != "" {
+			out[role] = "request"
 		}
 	}
 	return out
@@ -781,6 +786,19 @@ func recordSpend(rs *runState, tracker *budget.Tracker) {
 // Positional, matching split: first is the implementer, second the reviewer. A
 // solo run uses one duckling, so extra picks are the person's business and not
 // an error worth refusing a run over.
+func assignChosenSeats(roster map[config.Role]config.DucklingID, seats map[string]string) {
+	valid := make(map[config.Role]bool)
+	for _, role := range config.ValidRoles() {
+		valid[role] = true
+	}
+	for role, id := range seats {
+		key := config.Role(role)
+		if id != "" && valid[key] {
+			roster[key] = config.DucklingID(id)
+		}
+	}
+}
+
 func assignChosenDucklings(roster map[config.Role]config.DucklingID, mode string, chosen []string) {
 	if len(chosen) == 0 || roster == nil {
 		return

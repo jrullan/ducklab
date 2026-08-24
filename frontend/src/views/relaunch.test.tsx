@@ -70,7 +70,11 @@ describe("relaunching from the run view", () => {
       expect(client.runStart).toHaveBeenCalledWith("p", "T-015", {
         mode: "solo",
         ducklings: ["dsv4flash", "pato-sonnet"],
+        seats: { implementer: "dsv4flash", advisor: "pato-sonnet" },
         maxTokens: 1500000,
+        note: undefined,
+        agentTurns: undefined,
+        yes: undefined,
         // The relaunch panel's caveat states the situation when the task was
         // finished by a later run; clicking past it is the explicit consent
         // the engine's accepted-task door asks for.

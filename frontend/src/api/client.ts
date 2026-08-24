@@ -714,6 +714,7 @@ export class EngineClient {
     opts: {
       mode?: string;
       ducklings?: string[];
+      seats?: Record<string, string>;
       rounds?: number;
       yes?: boolean;
       /** Raise this one run's token ceiling above the configured default,
@@ -735,6 +736,7 @@ export class EngineClient {
       task_id: taskId,
       mode: opts.mode || "solo",
       ducklings: opts.ducklings ?? [],
+      seats: opts.seats ?? {},
       rounds: opts.rounds ?? 0,
       note: opts.note || undefined,
       agent_turns: opts.agentTurns || undefined,
@@ -762,8 +764,10 @@ export class EngineClient {
        * because a person who pairs the build does not owe the test a pair. */
       testMode?: string;
       testDucklings?: string[];
+      testSeats?: Record<string, string>;
       mode?: string;
       ducklings?: string[];
+      seats?: Record<string, string>;
       maxTokens?: number;
       agentTurns?: number;
       /** A run-specific instruction carried into the build retry. */
@@ -777,6 +781,7 @@ export class EngineClient {
       duckling,
       mode: chain?.testMode ?? "",
       ducklings: chain?.testDucklings ?? [],
+      seats: chain?.testSeats ?? {},
       then_build: chain?.thenBuild ?? false,
       note: chain?.note || undefined,
       redo: chain?.redo || undefined,
@@ -785,6 +790,7 @@ export class EngineClient {
             task_id: taskId,
             ...(chain.mode ? { mode: chain.mode } : {}),
             ducklings: chain.ducklings ?? [],
+            seats: chain.seats ?? {},
             ...(chain.maxTokens ? { budget: { max_tokens: chain.maxTokens } } : {}),
             ...(chain.agentTurns ? { agent_turns: chain.agentTurns } : {}),
           }

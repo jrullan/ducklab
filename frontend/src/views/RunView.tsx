@@ -21,6 +21,7 @@ import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
 import { seatsFromRoster, rolesForMode } from "../lib/seats";
+import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
 
@@ -623,9 +624,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               thenBuild: !!chain,
               testMode: opts.mode,
               testDucklings: opts.ducklings,
+              testSeats: opts.seats,
               note: opts.note,
               mode: chain?.mode || "solo",
               ducklings: chain?.ducklings ?? [],
+              seats: roleSeats(chain?.mode || "solo", chain?.ducklings ?? []),
               maxTokens: chain?.budget?.max_tokens,
               agentTurns: chain?.agent_turns,
               // The relaunch panel already states the caveat when the task
@@ -1002,6 +1005,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                       client.runStart(run.project_id, run.task_id, {
                         mode: run.mode,
                         ducklings: seatsFromRoster(run.mode, run.roster),
+                        seats: roleSeats(run.mode, seatsFromRoster(run.mode, run.roster)),
                         note,
                         // The accept a moment ago made this task "accepted";
                         // the fix-forward run is authorized by that same click.
@@ -1374,7 +1378,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             }}
             revisionRun={revisionRun}
             redoNote={run.redo_note}
-            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
+            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, seats: roleSeats(run.mode, relaunchDucklings), note })}
           />
           <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
           {(() => {

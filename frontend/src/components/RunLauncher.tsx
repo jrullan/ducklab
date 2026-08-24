@@ -8,7 +8,7 @@ import { SeatChips, type MeasuredSpend } from "./SeatChips";
 export type ModeEstimates = Record<string, { usd: number; runs: number }>;
 
 /** What a launch asks for. Anything unset falls back to the engine's defaults. */
-export type LaunchOpts = { mode: string; ducklings: string[]; maxTokens?: number; note?: string; agentTurns?: number; yes?: boolean };
+export type LaunchOpts = { mode: string; ducklings: string[]; seats?: Record<string, string>; maxTokens?: number; note?: string; agentTurns?: number; yes?: boolean };
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
@@ -22,6 +22,10 @@ function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
     );
   }
   return roster.map((entry) => entry.duckling);
+}
+
+export function roleSeats(mode: string, ducklings: readonly string[]): Record<string, string> {
+  return Object.fromEntries(ducklings.map((id, i) => [seatLabel(mode, i), id]));
 }
 
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
@@ -377,7 +381,7 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen, maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
+            onLaunch({ mode, ducklings: chosen, seats: roleSeats(mode, chosen), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
           }
           disabled={busy}
           data-testid="run-start"

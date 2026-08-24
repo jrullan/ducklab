@@ -72,6 +72,23 @@ func TestAPickThatPutsOneDucklingOnBothSidesStillWarns(t *testing.T) {
 
 // And it can remove one: a warning that outlived its cause reads as a defect
 // that is not there.
+func TestRequestSeatsCanChooseAnAdvisor(t *testing.T) {
+	roster := rosterOf("pato-atom", "pato-local")
+	assignChosenSeats(roster, map[string]string{"advisor": "pato-sonnet"})
+	if got := roster[config.RoleAdvisor]; got != "pato-sonnet" {
+		t.Errorf("advisor = %q, want pato-sonnet", got)
+	}
+}
+
+func TestEmptyRequestSeatLeavesResolvedAdvisor(t *testing.T) {
+	roster := rosterOf("pato-atom", "pato-local")
+	roster[config.RoleAdvisor] = "pato-sonnet"
+	assignChosenSeats(roster, map[string]string{"advisor": ""})
+	if got := roster[config.RoleAdvisor]; got != "pato-sonnet" {
+		t.Errorf("advisor = %q, want resolved pato-sonnet", got)
+	}
+}
+
 func TestAPickThatSeparatesTheSidesClearsTheWarning(t *testing.T) {
 	roster := rosterOf("pato-atom", "pato-atom")
 	if bothSidesWarning(roster) == "" {
