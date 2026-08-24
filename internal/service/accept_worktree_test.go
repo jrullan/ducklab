@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,6 +207,95 @@ func TestAcceptWorktreeConflictPausesCleanly(t *testing.T) {
 			t.Fatalf("stale %s remains: %v", name, err)
 		}
 	}
+}
+
+func TestAcceptWorktreeAdvancesCleanDefaultCheckout(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-update-clean-checkout")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "accepted.txt"), []byte("accepted work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustHead(t, git); got != result.CommitSHA {
+		t.Fatalf("default checkout HEAD = %s, accepted SHA = %s", got, result.CommitSHA)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "accepted.txt"))
+	if err != nil {
+		t.Fatalf("clean default checkout did not receive accepted file: %v", err)
+	}
+	if string(got) != "accepted work\n" {
+		t.Fatalf("clean default checkout file = %q, want accepted work", got)
+	}
+	if clean, err := git.IsClean(); err != nil || !clean {
+		t.Fatalf("default checkout is dirty after sync: clean=%v err=%v", clean, err)
+	}
+}
+
+func TestAcceptWorktreeLeavesDirtyTouchedCheckoutBehindWithWarning(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-leave-dirty-checkout")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "shared.txt"), []byte("accepted work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// This is a candidate-touched path, so accepting must not overwrite it.
+	if err := os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("person's local work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWarning := "main advanced to " + result.CommitSHA + "; your checkout is behind and was left untouched"
+	if got := acceptResultWarning(t, result); got != wantWarning {
+		t.Fatalf("accept warning = %q, want %q", got, wantWarning)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "shared.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "person's local work\n" {
+		t.Fatalf("dirty checkout was changed to %q", got)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Warning != wantWarning {
+		t.Fatalf("run warning = %q, want %q", detail.Run.Warning, wantWarning)
+	}
+	found := false
+	for _, event := range detail.Events {
+		if event.Type == "warning" && event.Data["detail"] == wantWarning {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warning event %q was not recorded", wantWarning)
+	}
+}
+
+// acceptResultWarning reads the public JSON contract so this test remains
+// compilable until AcceptResult grows the required warning field.
+func acceptResultWarning(t *testing.T, result *AcceptResult) string {
+	t.Helper()
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload["warning"]
 }
 
 func TestRejectWorktreeLeavesPersonTreeUnchanged(t *testing.T) {
