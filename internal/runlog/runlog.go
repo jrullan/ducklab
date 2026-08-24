@@ -88,6 +88,7 @@ type Run struct {
 	Resolution         string      `json:"resolution,omitempty"` // tournament resolution
 	TestsModified      bool        `json:"tests_modified"`
 	GovernanceModified bool        `json:"governance_modified"`
+	DesktopStale       bool        `json:"desktop_stale"`
 	// NoChanges is true when the run finished without touching a file.
 	//
 	// It happens when the work was already in the tree — usually because an

@@ -1724,6 +1724,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	if len(governanceCallouts) > 0 {
 		rs.run.GovernanceModified = true
 	}
+	rs.run.DesktopStale = desktopStale(diff)
 
 	// A run that touched nothing is a distinct outcome, and every mode used to
 	// invent its own: pair recorded PASSED, tournament died applying an empty
@@ -1775,6 +1776,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				rs.run.PendingData["governance_callouts"] = governanceCallouts
 				gateData["governance_callouts"] = governanceCallouts
 			}
+			if rs.run.DesktopStale {
+				rs.run.PendingData["desktop_stale"] = desktopStaleMessage
+				gateData["desktop_stale"] = desktopStaleMessage
+			}
 			rs.writer.AppendEvent("human_needed", gateData)
 			// Acceptance later commits and proves this isolated checkout.
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
@@ -1813,6 +1818,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				rs.run.PendingData["governance_callouts"] = governanceCallouts
 				gateData["governance_callouts"] = governanceCallouts
 			}
+			if rs.run.DesktopStale {
+				rs.run.PendingData["desktop_stale"] = desktopStaleMessage
+				gateData["desktop_stale"] = desktopStaleMessage
+			}
 			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
 			s.bus.Publish(bus.Event{
@@ -1835,14 +1844,17 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
 			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
-			rs.writer.AppendEvent("human_needed", map[string]interface{}{
-				"kind": "gate", "verdict": verdict, "detail": detail,
-			})
+			gateData := map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail}
+			if rs.run.DesktopStale {
+				rs.run.PendingData["desktop_stale"] = desktopStaleMessage
+				gateData["desktop_stale"] = desktopStaleMessage
+			}
+			rs.writer.AppendEvent("human_needed", gateData)
 			rs.writer.WriteState()
 			s.bus.Publish(bus.Event{
 				Type: "human_needed", RunID: rs.run.ID, ProjectID: rs.run.ProjectID,
 				TS:   time.Now(),
-				Data: map[string]interface{}{"kind": "gate", "verdict": verdict, "detail": detail},
+				Data: gateData,
 			})
 		}
 		return
@@ -1862,6 +1874,13 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			}
 			rs.run.PendingData["governance_callouts"] = governanceCallouts
 			gateData["governance_callouts"] = governanceCallouts
+		}
+		if rs.run.DesktopStale {
+			if rs.run.PendingData == nil {
+				rs.run.PendingData = map[string]interface{}{}
+			}
+			rs.run.PendingData["desktop_stale"] = desktopStaleMessage
+			gateData["desktop_stale"] = desktopStaleMessage
 		}
 		rs.writer.AppendEvent("human_needed", gateData)
 		rs.writer.WriteState()

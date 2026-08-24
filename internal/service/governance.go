@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const desktopStaleMessage = "this diff changes the frontend source but not the shipped bundle; the desktop will not show it until make desktop runs"
+
 // governanceCallouts describes changes to settings that control how a project
 // is run. It reads only project.toml hunks, so similarly named source settings
 // cannot create a gate warning.
@@ -87,6 +89,33 @@ func governanceCallouts(diff string) []string {
 	}
 	flush()
 	return callouts
+}
+
+// desktopStale reports whether a candidate changes desktop source without its
+// shipped bundle. It examines diff headers so content mentioning these paths
+// cannot create a false warning.
+func desktopStale(diff string) bool {
+	var source, bundle bool
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "diff --git ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		for _, path := range fields[2:4] {
+			path = strings.TrimPrefix(path, "a/")
+			path = strings.TrimPrefix(path, "b/")
+			if strings.HasPrefix(path, "frontend/src/") {
+				source = true
+			}
+			if strings.HasPrefix(path, "cmd/ducklab-desktop/frontend/dist/") {
+				bundle = true
+			}
+		}
+	}
+	return source && !bundle
 }
 
 func governanceKey(section, key string) string {

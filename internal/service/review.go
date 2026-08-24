@@ -93,6 +93,7 @@ func (s *Service) ReviewStart(ctx context.Context, projectID string, req ReviewR
 	if callouts := governanceCallouts(diff); len(callouts) > 0 {
 		run.GovernanceModified = true
 	}
+	run.DesktopStale = desktopStale(diff)
 	writer.AppendEvent("run_start", map[string]interface{}{
 		"stage": "review", "mode": mode, "task_id": req.TaskID, "commit": short(sha),
 	})
@@ -197,11 +198,17 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		rs.run.GovernanceModified = true
 		rs.run.PendingData["governance_callouts"] = callouts
 	}
+	if rs.run.DesktopStale {
+		rs.run.PendingData["desktop_stale"] = desktopStaleMessage
+	}
 	gateData := map[string]interface{}{
 		"kind": "gate", "verdict": verdictWord(verdict), "review": path,
 	}
 	if callouts, ok := rs.run.PendingData["governance_callouts"]; ok {
 		gateData["governance_callouts"] = callouts
+	}
+	if stale, ok := rs.run.PendingData["desktop_stale"]; ok {
+		gateData["desktop_stale"] = stale
 	}
 	rs.writer.AppendEvent("human_needed", gateData)
 	rs.writer.WriteState()
@@ -236,6 +243,11 @@ func reviewPrompt(taskID, diff string) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+	}
+	if desktopStale(diff) {
+		b.WriteString("## Desktop bundle\n\n")
+		b.WriteString(desktopStaleMessage)
+		b.WriteString("\n\n")
 	}
 	b.WriteString("## The diff\n\n```diff\n")
 	// Compacted per file, like every diff a prompt carries (T-067).
