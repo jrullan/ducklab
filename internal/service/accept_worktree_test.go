@@ -174,6 +174,57 @@ func TestAcceptWorktreeFastPathDoesNotRebase(t *testing.T) {
 	}
 }
 
+// A paused test-first run must retain its isolated checkout until its human
+// gate is decided. The accepted assertion-red test then lands on the default
+// branch, and only then is the worktree removed.
+func TestAcceptPausedTestFirstRetainsWorktreeAndLandsRedTest(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.mode": "tests", "verify.tests": "false",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	git := gitProject(t, dir)
+	run := &runlog.Run{
+		ID: "r-paused-test-first", ProjectID: id, TaskID: "T-001", Stage: "test",
+		Status: "paused", Verdict: "PASSED", PendingKind: "gate",
+		PendingData: map[string]interface{}{"kind": "test_first", "retain_worktree": true},
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.createRunWorktree(run, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "red_test.txt"), []byte("red test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(run.WorktreePath); err != nil {
+		t.Fatalf("paused test-first worktree was removed: %v", err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("accept paused assertion-red test: %v", err)
+	}
+	if got := mustHead(t, git); got != result.CommitSHA {
+		t.Fatalf("default HEAD = %s, accepted test commit = %s", got, result.CommitSHA)
+	}
+	if diff, err := git.ShowCommit(result.CommitSHA); err != nil || !strings.Contains(diff, "red_test.txt") {
+		t.Fatalf("accepted red test is absent: diff=%q err=%v", diff, err)
+	}
+	if _, err := os.Stat(run.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree remains after accepting test-first run: %v", err)
+	}
+}
+
 func TestAcceptChainedTestStaysOnRunBranchAndExcludesLinkedDeps(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
@@ -210,12 +261,8 @@ tests = "false"`)
 	if got := mustHead(t, git); got != before {
 		t.Fatalf("default HEAD = %s, want unchanged %s", got, before)
 	}
-	branchHead, err := vcs.New(run.WorktreePath).HeadSHA()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if branchHead != result.CommitSHA {
-		t.Fatalf("run branch = %s, accepted SHA = %s", branchHead, result.CommitSHA)
+	if _, err := os.Stat(run.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("chained test worktree remains after acceptance: %v", err)
 	}
 	diff, err := git.ShowCommit(result.CommitSHA)
 	if err != nil {

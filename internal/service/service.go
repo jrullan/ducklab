@@ -2433,6 +2433,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			return fmt.Errorf("write acceptance receipt: %w", err)
 		}
 		s.continueChain(ctx, rs)
+		s.cleanupRunWorktree(rs, entry.Path)
 		return nil
 	}
 

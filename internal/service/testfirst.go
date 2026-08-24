@@ -361,7 +361,8 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
 	defer rs.writer.Close()
-	defer s.cleanupRunWorktree(rs, rs.projectPath)
+	// A worktree remains available at a human gate: acceptance must commit and
+	// prove its isolated red test. Accept and reject remove it after deciding.
 	defer close(rs.done)
 	defer recoverRun(rs)
 
@@ -560,7 +561,10 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-	rs.run.PendingData = map[string]interface{}{"kind": "test_first", "detail": detail}
+	rs.run.PendingData = map[string]interface{}{
+		"kind": "test_first", "detail": detail,
+		"retain_worktree": rs.run.WorktreePath != "",
+	}
 	if req.ThenBuild && verdict == "PASSED" {
 		// The chain: commit the red test, start the build. No pause — the
 		// person authorized this path when they clicked it.
@@ -729,6 +733,10 @@ func (s *Service) chainBuild(ctx context.Context, rs *runState, req TestFirstReq
 		rs.run.Status = "paused"
 		rs.run.PendingKind = "gate"
 		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		if rs.run.PendingData == nil {
+			rs.run.PendingData = map[string]interface{}{}
+		}
+		rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
 		rs.writer.AppendEvent("warning", map[string]interface{}{
 			"detail": fmt.Sprintf("tdd chain: accept failed (%v); decide this run by hand", err),
 		})
