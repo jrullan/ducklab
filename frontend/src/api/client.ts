@@ -78,6 +78,9 @@ export interface Run {
   acceptance_gate?: GateResult;
   accepted?: boolean;
   commit_sha?: string;
+  /** Isolated checkout retained until this run's terminal decision. */
+  branch?: string;
+  worktree_path?: string;
   /** Set when an accepted test-first's commit was later retired (reverted). */
   revert_sha?: string;
   /** What a taskless run was about — the bug(s) a triage read. */

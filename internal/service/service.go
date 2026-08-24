@@ -1275,7 +1275,9 @@ func (s *Service) projectHeld(projectID, taskID string) string {
 		if r.ProjectID != projectID {
 			continue
 		}
-		if r.Status == "paused" && (r.Stage == "build" || r.Stage == "test" || r.Stage == "document") {
+		// Build and test runs retain private worktrees while awaiting a decision;
+		// only a document-stage pause holds the person's checkout.
+		if r.Status == "paused" && (r.Stage == "document" || (r.WorktreePath == "" && (r.Stage == "build" || r.Stage == "test"))) {
 			return "another run holds this project's working tree"
 		}
 		if r.Accepted && r.TaskID != "" {

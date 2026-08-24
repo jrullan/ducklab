@@ -15,6 +15,7 @@ import (
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // pauseWaitPerRun bounds how long a graceful stop waits for one in-flight run
@@ -175,6 +176,7 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 				continue
 			}
 		}
+		s.hygieneWorktrees(entry.Path, entry.ID)
 	}
 
 	if recovered > 0 && s.bus != nil {
@@ -188,6 +190,52 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 		})
 	}
 	return nil
+}
+
+// hygieneWorktrees reconciles persistent run records with git at engine start.
+// The prune/reattach pattern is credited to wallfacer's git-worktrees internals (MIT).
+func (s *Service) hygieneWorktrees(projectRoot, projectID string) {
+	git := vcs.New(projectRoot)
+	s.runsMu.RLock()
+	var runs []*runState
+	for _, rs := range s.runs {
+		if rs.run.ProjectID == projectID && rs.run.WorktreePath != "" {
+			runs = append(runs, rs)
+		}
+	}
+	s.runsMu.RUnlock()
+	known := make(map[string]*runState, len(runs))
+	for _, rs := range runs {
+		known[filepath.Clean(rs.run.WorktreePath)] = rs
+	}
+	worktrees, err := git.WorktreeList()
+	if err == nil {
+		for _, path := range worktrees {
+			path = filepath.Clean(path)
+			if path == filepath.Clean(projectRoot) || known[path] != nil {
+				continue
+			}
+			_ = git.WorktreeRemove(path)
+		}
+	}
+	// Prune stale metadata before --force reattaches a retained paused run.
+	_ = git.PruneWorktrees()
+	for _, rs := range runs {
+		decided := rs.run.Accepted || rs.run.Status == "failed" || (rs.run.Status == "done" && !rs.run.Accepted)
+		if decided {
+			// Recovered records have no open writer; cleanup may need to record a
+			// removal warning, so restore it before mutating the worktree.
+			if _, err := s.ensureWriter(rs); err == nil {
+				s.cleanupRunWorktree(rs, projectRoot)
+			}
+			continue
+		}
+		// A retained paused run may have lost its directory in a crash. Only
+		// reattach when its branch remains; a vanished branch is not recoverable.
+		if _, err := os.Stat(rs.run.WorktreePath); os.IsNotExist(err) && rs.run.Branch != "" && git.BranchExists(rs.run.Branch) {
+			_ = git.WorktreeAddForce(rs.run.WorktreePath, rs.run.Branch)
+		}
+	}
 }
 
 // markEngineRestart moves an orphaned run to paused so it can be resumed.

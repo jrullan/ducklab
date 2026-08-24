@@ -698,6 +698,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </button>
         )}
         <span className="text-ink-secondary" title={run.mode_source ? `mode source: ${run.mode_source}` : undefined}>{run.mode}{run.mode_source ? ` (${run.mode_source})` : ""}</span>
+        {isWorking && run.worktree_path && (
+          <span data-testid="worktree-badge" className="rounded border border-hairline px-2 py-0.5 font-mono text-xs text-ink-secondary" title={run.worktree_path}>
+            worktree · {run.branch ?? "branch"} · {run.worktree_path}
+          </span>
+        )}
         {/* The cycle map places a stage run in its pipeline; a triage or a
             chat is not IN the pipeline, and "unverified" is its loudest chip
             for what is simply a run with no gate by design. Their headers
@@ -1110,6 +1115,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
       <SurveyInventory items={surveyInventory} />
 
+      {run.pending_kind === "gate" && Array.isArray(run.pending_data?.conflicting_files) && (
+        <section data-testid="worktree-conflict" className="m-2 rounded-card border border-serious p-3">
+          <h2 className="text-sm font-medium text-serious">Rebase conflict</h2>
+          <p className="mt-1 text-sm text-ink">resolve by hand at <code>{String(run.pending_data?.worktree ?? run.worktree_path ?? "the worktree")}</code>, then resume; or reject this run.</p>
+          <p className="mt-1 font-mono text-xs text-ink-muted">base {String(run.pending_data?.base_sha ?? "—")} · default {String(run.pending_data?.default_sha ?? "—")}</p>
+          <ul className="mt-2 list-disc pl-5 font-mono text-sm text-ink-secondary">
+            {(run.pending_data?.conflicting_files as unknown[]).map((file) => <li key={String(file)}>{String(file)}</li>)}
+          </ul>
+          <p className="mt-2 text-sm text-ink-muted">Lawful options: resolve by hand at the shown path, or reject.</p>
+        </section>
+      )}
       {run.warning && (
         <section data-testid="run-warning" className="m-2 rounded-card border border-serious p-3">
           <h2 className="mb-1 text-sm font-medium" style={{ color: "var(--status-serious)" }}>Warning</h2>

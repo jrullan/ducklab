@@ -149,6 +149,23 @@ func TestQueueAllowsConcurrentWorktreeRunsWithinAProject(t *testing.T) {
 
 // A document stage retains the shared-checkout hold, but cannot block an
 // isolated build that has its own worktree.
+func TestQueueReasonsNameOnlyTheSharedWorkingTreeHolder(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	s.runsMu.Lock()
+	s.runs["build"] = &runState{run: &runlog.Run{ID: "build", ProjectID: projectID, Stage: "build", Status: "paused", WorktreePath: "/isolated/build"}}
+	s.runsMu.Unlock()
+	if reason := s.projectHeld(projectID, "T-115"); reason != "" {
+		t.Fatalf("worktree build held the shared tree: %q", reason)
+	}
+	s.runsMu.Lock()
+	s.runs["document"] = &runState{run: &runlog.Run{ID: "document", ProjectID: projectID, Stage: "document", Status: "paused"}}
+	s.runsMu.Unlock()
+	if reason := s.projectHeld(projectID, "T-115"); reason != "another run holds this project's working tree" {
+		t.Fatalf("document hold reason = %q", reason)
+	}
+}
+
 func TestQueueKeepsDocumentHoldWhileAllowingWorktreeRun(t *testing.T) {
 	q := newRunQueue(2)
 	document := &queued{rs: fakeRunState("r-document", "proj")}

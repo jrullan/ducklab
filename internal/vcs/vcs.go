@@ -307,6 +307,16 @@ func (g *Git) WorktreeAdd(path, branch string) error {
 	return err
 }
 
+// WorktreeAddForce reattaches a branch whose registered worktree directory
+// disappeared. --force is deliberately limited to this recovery path.
+func (g *Git) WorktreeAddForce(path, branch string) error {
+	lock := worktreeLock(g.Root)
+	lock.Lock()
+	defer lock.Unlock()
+	_, err := g.run("worktree", "add", "--force", path, branch)
+	return err
+}
+
 // WorktreeAddAt creates a branch worktree at rev. The caller supplies the
 // exact base rather than inheriting the current checkout's potentially dirty HEAD.
 func (g *Git) WorktreeAddAt(path, branch, rev string) error {
@@ -617,6 +627,12 @@ func ensureTrailingNewline(s string) string {
 		return s
 	}
 	return s + "\n"
+}
+
+// BranchExists reports whether a local branch still exists.
+func (g *Git) BranchExists(name string) bool {
+	_, err := g.run("show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
 }
 
 // DeleteBranch removes a branch, ignoring the case where it is already gone.
