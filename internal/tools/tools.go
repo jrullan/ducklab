@@ -651,7 +651,7 @@ func ShellPolicyCheck(ectx *ExecContext, cmd string) *Result {
 		}
 	}
 	if !matched {
-		return ErrorResult("shell policy: command not in allowlist. Ask the human for approval, or use a different command.")
+		return ErrorResult("shell policy: command not in allowlist. This command is not model-runnable under this policy; ask for the needed outcome or decision instead, or use a different command.")
 	}
 
 	return nil

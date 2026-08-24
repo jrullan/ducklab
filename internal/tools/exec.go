@@ -269,9 +269,11 @@ func (t *AskHuman) Mutating() bool { return false }
 func (t *AskHuman) Description() string {
 	return "Ask the human ONE precise question when the task leaves a decision you cannot " +
 		"infer from the repo or its docs — a boundary (where does a week start?), a format, " +
-		"an external contract. Offer 2-4 concrete options when you can. One question costs " +
-		"a pause; a wrong guess costs the whole run. Decisions the task does determine, and " +
-		"internals nobody outside would notice, are yours — never ask about those."
+		"an external contract. Ask for a needed outcome or decision, not approval to run a " +
+		"shell command: approval cannot change shell policy. Offer 2-4 concrete options when " +
+		"you can. One question costs a pause; a wrong guess costs the whole run. Decisions " +
+		"the task does determine, and internals nobody outside would notice, are yours — never " +
+		"ask about those."
 }
 
 // Schema returns the argument schema.

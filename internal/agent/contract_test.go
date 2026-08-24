@@ -275,10 +275,13 @@ func TestTriageRejectsAnUnknownSeverity(t *testing.T) {
 // both ways: user-observable decisions the task left open get asked; internals
 // never do, or every task would pause on trivia.
 func TestTheImplementerIsToldWhenToAsk(t *testing.T) {
-	for _, want := range []string{"ask_human", "do not guess", "never ask about those"} {
+	for _, want := range []string{"ask_human", "do not guess", "needed outcome or decision", "never approval to run a shell command", "never ask about those"} {
 		if !strings.Contains(implementerPrompt, want) {
 			t.Errorf("the implementer prompt does not say %q", want)
 		}
+	}
+	if strings.Contains(strings.ToLower(implementerPrompt), "ask the human for approval") {
+		t.Errorf("the implementer prompt must not promise shell-command approval: %q", implementerPrompt)
 	}
 }
 

@@ -174,9 +174,19 @@ func TestShellPolicyCheck(t *testing.T) {
 		t.Error("rm -rf / should be denied")
 	}
 
-	// Not in allowlist
+	// Not in allowlist: asking for approval cannot make the command runnable.
 	if guard := ShellPolicyCheck(ectx, "curl http://example.com"); guard == nil {
 		t.Error("curl should not be allowed in guarded mode")
+	} else {
+		if !strings.Contains(guard.Content, "not model-runnable") {
+			t.Errorf("allowlist refusal must say the command is not model-runnable: %q", guard.Content)
+		}
+		if !strings.Contains(guard.Content, "needed outcome or decision") {
+			t.Errorf("allowlist refusal must direct the model to an outcome or decision: %q", guard.Content)
+		}
+		if strings.Contains(strings.ToLower(guard.Content), "ask the human for approval") {
+			t.Errorf("allowlist refusal must not promise approval: %q", guard.Content)
+		}
 	}
 
 	// Free mode

@@ -59,10 +59,13 @@ func TestVerifyRunReportsAFailingGateAsAnError(t *testing.T) {
 // line is.
 func TestAskHumanSaysWhenAskingWins(t *testing.T) {
 	d := (&AskHuman{}).Description()
-	for _, want := range []string{"ONE precise question", "wrong guess costs the whole run", "never ask about those"} {
+	for _, want := range []string{"ONE precise question", "needed outcome or decision", "not approval to run a shell command", "wrong guess costs the whole run", "never ask about those"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("ask_human's description does not say %q", want)
 		}
+	}
+	if strings.Contains(strings.ToLower(d), "ask the human for approval") {
+		t.Errorf("ask_human's description must not promise shell-command approval: %q", d)
 	}
 }
 
