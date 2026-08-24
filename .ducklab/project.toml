@@ -14,7 +14,7 @@ autonomy = "guarded"
   build = ""
   lint = ""
   custom = ""
-  link_deps = [".venv"]
+  link_deps = [".venv", "frontend/node_modules"]
   setup = ""
   timeout_s = 900
 
