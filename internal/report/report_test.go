@@ -125,6 +125,26 @@ func TestGroupByDuckling(t *testing.T) {
 	}
 }
 
+// A manual landing is accepted work even when the engine's ordinary accept
+// path could not make the commit. It must not poison the scorecard of every
+// duckling that participated merely because its original close was a reject.
+func TestLandedResolutionDoesNotLowerPassRate(t *testing.T) {
+	landed := run("solo", "FAILED", nil)
+	landed.Resolution = "landed"
+	landed.CommitSHA = "971cf8c"
+	landed.Spend = map[string]runlog.DucklingSpend{
+		"terra": {Calls: 1, Tokens: 500, CostUSD: 0.01},
+	}
+
+	rep := Build([]*runlog.Run{landed}, Options{By: "duckling"})
+	if len(rep.Rows) != 1 {
+		t.Fatalf("rows = %+v, want terra's landed run", rep.Rows)
+	}
+	if got := rep.Rows[0].PassRate(); got != 100 {
+		t.Errorf("landed pass rate = %.1f, want 100; a manual landing must not count as a failure", got)
+	}
+}
+
 func TestTournamentResolutionsAreCounted(t *testing.T) {
 	a := run("tournament", "PASSED", nil)
 	a.Resolution = "short_circuit"
