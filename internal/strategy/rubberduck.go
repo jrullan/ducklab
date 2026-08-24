@@ -167,6 +167,10 @@ type advice struct {
 // run — advice is optional, the work is not.
 const adviceContract = "json:advice"
 
+// consultAdvisorDefaultTurns allows the advisor enough calls to investigate the
+// implementer's distress before it replies. TurnCaps may override or lift it.
+const consultAdvisorDefaultTurns = 6
+
 func parseAdvice(outcome *agent.Outcome) advice {
 	if outcome == nil {
 		return advice{Action: "none"}
@@ -202,7 +206,10 @@ func parseAdvice(outcome *agent.Outcome) advice {
 // and *AdvisorStop when the duck says stop. A missing advisor seat is not an
 // error: the consult is skipped and the record says so.
 func consultAdvisor(ctx context.Context, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, round, index int, implementer config.DucklingID, outcome *agent.Outcome, signals distressSignals) (string, *AdvisorStop, error) {
-	turn := Turn{Role: config.RoleAdvisor, Toolbelt: "full", Contract: adviceContract, MaxTurns: 6}
+	turn := Turn{
+		Role: config.RoleAdvisor, Toolbelt: "full", Contract: adviceContract,
+		MaxTurns: CapFor(params.TurnCaps, config.RoleAdvisor, consultAdvisorDefaultTurns),
+	}
 	advisor := resolveDuckling(params, turn)
 	if advisor == "" {
 		emit(params, "advisor_consult", map[string]interface{}{

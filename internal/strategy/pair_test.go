@@ -18,6 +18,7 @@ type recorder struct {
 	roles     []config.Role
 	ducklings []config.DucklingID
 	belts     [][]string
+	maxTurns  []int
 }
 
 func (r *recorder) runner(outcomes ...*agent.Outcome) TurnRunner {
@@ -27,6 +28,7 @@ func (r *recorder) runner(outcomes ...*agent.Outcome) TurnRunner {
 		r.roles = append(r.roles, t.Role)
 		r.ducklings = append(r.ducklings, d)
 		r.belts = append(r.belts, belt)
+		r.maxTurns = append(r.maxTurns, t.MaxTurns)
 		var out *agent.Outcome
 		if i < len(outcomes) {
 			out = outcomes[i]
@@ -268,6 +270,44 @@ func TestPairDoesNotSummonTheDuckForAMerelyRoughTurn(t *testing.T) {
 
 // The duck's third answer: stop. The run ends with the reason and the
 // reshuffle suggestion on the record, before the reviewer spends a turn.
+// The advisor turn is fabricated after the script has been walked, so it must
+// resolve its cap directly from TurnCaps. The service fills these from
+// defaults.role_turns and from the per-run AgentTurns override.
+func TestPairAdvisorConsultHonorsTurnCaps(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		caps map[config.Role]int
+		want int
+	}{
+		{name: "configured advisor cap", caps: map[config.Role]int{config.RoleAdvisor: 20}, want: 20},
+		{name: "consult default", want: consultAdvisorDefaultTurns},
+		{name: "per-run no-cap lift", caps: map[config.Role]int{config.RoleAdvisor: agent.UncappedTurns}, want: agent.UncappedTurns},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recorder{}
+			params := pairParams(rec, "green",
+				&agent.Outcome{Text: "stuck", ToolCalls: []agent.ToolCallRecord{{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: brake"}}}},
+				&agent.Outcome{Parsed: map[string]interface{}{"action": "none"}},
+				verdictOutcome("approve"),
+			)
+			params.Roster[config.RoleAdvisor] = "pato-duck"
+			params.TurnCaps = tc.caps
+			if _, err := ExecutePair(context.Background(), params); err != nil {
+				t.Fatal(err)
+			}
+			for i, role := range rec.roles {
+				if role == config.RoleAdvisor {
+					if rec.maxTurns[i] != tc.want {
+						t.Errorf("advisor MaxTurns = %d, want %d", rec.maxTurns[i], tc.want)
+					}
+					return
+				}
+			}
+			t.Errorf("advisor consult did not run; roles = %v", rec.roles)
+		})
+	}
+}
+
 func TestPairAdvisorStopEndsTheRunBeforeTheReviewer(t *testing.T) {
 	rec := &recorder{}
 	calls := make([]agent.ToolCallRecord, 6)
