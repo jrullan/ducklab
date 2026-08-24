@@ -179,7 +179,7 @@ func Build(runs []*runlog.Run, opts Options) *Report {
 			// there. Counted, and kept out of the rate.
 			if r.NoChanges {
 				g.NoChanges++
-				if r.Verdict == "PASSED" {
+				if r.Verdict == "PASSED" || r.Resolution == "landed" {
 					g.NoChangePasses++
 				}
 			}

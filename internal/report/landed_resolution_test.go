@@ -19,13 +19,11 @@ func TestLandedResolutionDoesNotLowerPassRate(t *testing.T) {
 			Resolution: "accepted",
 		},
 		{
-			Mode:  "solo",
-			Stage: "build",
-			// This is the shape of an historical manual landing before it is
-			// re-resolved: its old reject verdict remains, but resolution says
-			// what actually happened.
+			Mode:       "solo",
+			Stage:      "build",
 			Verdict:    "FAILED",
 			Resolution: "landed",
+			NoChanges:  true,
 			Spend:      map[string]runlog.DucklingSpend{"terra": {Calls: 1}},
 		},
 	}
@@ -43,5 +41,8 @@ func TestLandedResolutionDoesNotLowerPassRate(t *testing.T) {
 	}
 	if row.Failed != 0 {
 		t.Errorf("landed run counted as failed: %+v", row)
+	}
+	if row.NoChangePasses != 1 {
+		t.Errorf("landed no-change run was not excluded from the pass-rate denominator: %+v", row)
 	}
 }

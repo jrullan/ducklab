@@ -827,14 +827,22 @@ func runCmd(verb string, args []string, repo string) int {
 		return 0
 	case "reject":
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: ducklab run reject <run-id> [--reason <text>]")
+			fmt.Fprintln(os.Stderr, "usage: ducklab run reject <run-id> [--reason <text>] | --landed <commit-sha> [--reason <text>]")
 			return 2
 		}
-		reason := ""
+		reason, landedSHA := "", ""
 		for i := 1; i < len(args); i++ {
-			if args[i] == "--reason" && i+1 < len(args) {
-				reason = args[i+1]
-				i++
+			switch args[i] {
+			case "--reason":
+				if i+1 < len(args) {
+					reason = args[i+1]
+					i++
+				}
+			case "--landed":
+				if i+1 < len(args) {
+					landedSHA = args[i+1]
+					i++
+				}
 			}
 		}
 		info, err := daemon.ReadEngineJSON()
@@ -843,6 +851,14 @@ func runCmd(verb string, args []string, repo string) int {
 			return 9
 		}
 		client := engineclt.New(info)
+		if landedSHA != "" {
+			if err := client.RunLand(args[0], landedSHA, reason); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				return 1
+			}
+			fmt.Printf("landed: commit %s\n", landedSHA)
+			return 0
+		}
 		if err := client.RunReject(args[0], reason); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

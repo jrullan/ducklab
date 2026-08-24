@@ -3237,8 +3237,8 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 }
 
 // RunLand records that an operator manually landed the work represented by a
-// completed run. It deliberately preserves the original verdict: historical
-// landings were first rejected, and resolution is the auditable correction.
+// completed run. A landing is accepted work, so it replaces an earlier reject
+// verdict as well as recording the auditable landing resolution.
 func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) error {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
@@ -3246,8 +3246,8 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	if !ok {
 		return fmt.Errorf("run %q not found", id)
 	}
-	if rs.run.Status != "done" {
-		return fmt.Errorf("run %q is %s; only done runs may be landed", id, rs.run.Status)
+	if rs.run.Status != "done" && (rs.run.Status != "paused" || rs.run.PendingKind != "gate") {
+		return fmt.Errorf("run %q is %s; only done runs or paused gates may be landed", id, rs.run.Status)
 	}
 	if sha == "" {
 		return fmt.Errorf("landing commit sha is required")
@@ -3260,9 +3260,23 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 		return err
 	}
 	rs.run.Resolution = "landed"
+	rs.run.Verdict = "PASSED"
 	rs.run.CommitSHA = sha
+	if rs.run.Status == "paused" {
+		rs.run.Status = "done"
+		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+		clearPending(rs.run)
+	}
 	w.AppendEvent("human", map[string]interface{}{"action": "landed", "actor": actor, "reason": note, "commit_sha": sha})
-	return w.WriteState()
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": "PASSED", "resolution": "landed"})
+	err = w.WriteState()
+	if rs.run.WorktreePath != "" {
+		s.cleanupRunWorktree(rs, rs.projectPath)
+	}
+	// Landing resolves a gate just like acceptance or rejection, so queued work
+	// held behind it must be reconsidered.
+	s.queue.poke(s)
+	return err
 }
 
 func (s *Service) RunReject(ctx context.Context, id, reason string) error {

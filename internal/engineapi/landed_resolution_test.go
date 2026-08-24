@@ -94,6 +94,9 @@ func TestLandedResolutionCanRecloseOnlyDoneRuns(t *testing.T) {
 	if detail.Run.Resolution != "landed" {
 		t.Errorf("resolution = %q, want landed", detail.Run.Resolution)
 	}
+	if detail.Run.Verdict != "PASSED" {
+		t.Errorf("verdict = %q, want PASSED for a landed run", detail.Run.Verdict)
+	}
 	if detail.Run.CommitSHA != "971cf8c" {
 		t.Errorf("landing commit = %q, want 971cf8c", detail.Run.CommitSHA)
 	}

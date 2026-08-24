@@ -620,9 +620,9 @@ func (c *Client) RunReject(id, reason string) error {
 	return c.post("/v1/runs/"+id+"/reject", map[string]string{"reason": reason}, nil)
 }
 
-// RunLand records an operator's manual landing of a completed run.
+// RunLand records an operator's manual landing through the reject resolution.
 func (c *Client) RunLand(id, sha, note string) error {
-	return c.post("/v1/runs/"+id+"/land", map[string]string{"commit_sha": sha, "note": note}, nil)
+	return c.post("/v1/runs/"+id+"/reject", map[string]string{"reason": note, "resolution": "landed", "commit_sha": sha}, nil)
 }
 
 // RunAbort aborts a run.
