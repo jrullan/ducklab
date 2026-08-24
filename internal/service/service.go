@@ -2546,7 +2546,7 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 	}
 	if !verify.IsGreen(result) {
 		if missing := missingGatePath(checkout, result.Command); missing != "" {
-			return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout: the gate references %s/, which the commit does not include — declare it in setup or link_deps\n%s", short(sha), missing, result.Output)
+			return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout: the gate references %s/, which the commit does not include — declare it in setup or link_deps (verify.link_deps); gate command: %s\n%s", short(sha), missing, result.Command, result.Output)
 		}
 		return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
@@ -2628,6 +2628,18 @@ func missingGatePath(checkout, command string) string {
 		parts := strings.Split(filepath.ToSlash(token), "/")
 		if len(parts) < 2 || parts[0] == ".." || parts[0] == "." {
 			continue
+		}
+		// Executables conventionally live below a dependency's bin/. Reporting
+		// that dependency, rather than its broad top-level directory, makes the
+		// missing link_deps entry directly actionable.
+		for i, part := range parts {
+			if i > 0 && (part == "bin" || part == ".bin") {
+				dep := filepath.Join(parts[:i]...)
+				if _, err := os.Lstat(filepath.Join(checkout, dep)); os.IsNotExist(err) {
+					return filepath.ToSlash(dep)
+				}
+				break
+			}
 		}
 		if _, err := os.Lstat(filepath.Join(checkout, filepath.FromSlash(parts[0]))); os.IsNotExist(err) {
 			return parts[0]

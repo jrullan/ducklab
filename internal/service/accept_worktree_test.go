@@ -78,6 +78,64 @@ func TestAcceptWorktreeReceiptNamesRebasedSHA(t *testing.T) {
 	}
 }
 
+// Acceptance must reproduce from the detached checkout, where this fake tool
+// exists only when verify.link_deps explicitly borrows it from the live tree.
+func TestAcceptWorktreeCleanCheckoutLinksDeclaredDependency(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, dir, `link_deps = ["tools/fake"]
+mode = "custom"
+custom = "test -f tools/fake/bin/runner"`)
+	gitProject(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "tools", "fake", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "fake", "bin", "runner"), []byte("tool\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-accept-linked-dep")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "run.txt"), []byte("run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatalf("accept did not reproduce the gate with its declared dependency: %v", err)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.GateReproduced == nil || !detail.Run.GateReproduced.Green {
+		t.Fatal("acceptance gate was not green from the clean checkout")
+	}
+}
+
+func TestAcceptWorktreeNamesUndeclaredLinkedDependency(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, dir, `mode = "custom"
+custom = "test -f tools/fake/bin/runner"`)
+	gitProject(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "tools", "fake", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "fake", "bin", "runner"), []byte("tool\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-accept-missing-dep")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "run.txt"), []byte("run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := s.RunAccept(context.Background(), run.ID, "")
+	if err == nil {
+		t.Fatal("accept unexpectedly reproduced without the undeclared dependency")
+	}
+	if !strings.Contains(err.Error(), "tools/fake/") || !strings.Contains(err.Error(), "verify.link_deps") {
+		t.Fatalf("accept error = %q, want the missing dependency and verify.link_deps guidance", err)
+	}
+}
+
 func TestAcceptWorktreeFastPathDoesNotRebase(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
