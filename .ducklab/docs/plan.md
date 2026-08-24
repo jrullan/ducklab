@@ -2787,4 +2787,29 @@ Reported normal; reproduces deterministically as RunReject setting FAILED which 
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-121 — Run launcher seats the wrong ducklings: roster entries mapped positionally into mode seats, and filter(Boolean) shifts seats on 'default'
+
+Fixes B-129.
+
+## Reported
+
+T-113's runs seated implementer/reviewer with ducklings from OTHER roles, while the correctly configured pair seats (implementer=terra via project mode seat, reviewer=glm52 via global mode seat) were never used. roster_sources on the runs says implementer/reviewer came from 'request' — the launcher sent them.
+
+Evidence from the record:
+- r-20260823-220227-536j and r-20260823-221035-lxa7: implementer=qwen38-max (the pair ADVISOR), reviewer=k3 (the ARCHITECT).
+- r-20260823-225333-eopp and r-20260823-230731-j7xi: implementer=luna (the CONSULTANT), reviewer=terra (the configured IMPLEMENTER, seated as reviewer).
+
+Two compounding defects, one root cause — the launcher treats the roster entries array as if it were already in mode-seat order:
+
+1. Prefill maps positionally from role-ALPHABETICAL entries. GET /v1/projects/{id}/roster?mode=pair returns 8 entries ordered advisor, architect, consultant, implementer, judge, reviewer, scribe, triager. Both prefills seed chips with roster.map(e => e.duckling): frontend/src/components/RunLauncher.tsx:54 (PhaseConfig effect) and frontend/src/components/RunLauncher.tsx:233 (LaunchConfig effect). For pair (seat 0 = implementer, seat 1 = reviewer per frontend/src/lib/seats.ts:46-51), chip 0 gets entries[0] = the advisor and chip 1 gets entries[1] = the architect. That is exactly runs 536j/lxa7.
+
+2. 'default' shifts the seats instead of deferring to the engine. onLaunch sends ducklings: chosen.filter(Boolean) (frontend/src/components/RunLauncher.tsx, the run-start button). Clearing both chips to 'default' leaves chosen = ['', '', luna, terra, '', glm52, ...]; filter(Boolean) compacts it and the engine receives [luna, terra, ...] — consultant and implementer slide into seats 0 and 1. That is exactly runs eopp/j7xi. The engine already does the right thing with an EMPTY position (internal/service/testfirst.go:421-425 skips '' and falls back to the resolved roster), so filter(Boolean) is precisely what breaks 'default'.
+
+Fix direction:
+- Seed chips by projecting entries into mode-seat order: for each seat i, find the entry whose role == seatLabel(mode, i) (or use rolesForMode) — never by array position.
+- Preserve positions on launch: send '' for a defaulted seat instead of filtering it out, so the engine resolves that seat from the roster as designed.
+- A test that launches pair from a full 8-role roster and asserts the request carries the implementer/reviewer entries (or empties), not entries[0]/entries[1], would have caught both.
+
+Engine is NOT at fault: resolution precedence (internal/service/modes.go:157-211) and the positional request contract behave as documented; roster_sources correctly recorded 'request'.
+
 
