@@ -260,7 +260,7 @@ func (s *Service) TestStart(ctx context.Context, projectID string, req TestFirst
 	// their test runs over one working tree, gates measuring each other's
 	// half-written files.
 	s.queue.submit(s, &queued{
-		rs: rs, ctx: runCtx, parallel: true,
+		rs: rs, ctx: runCtx,
 		exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(run, entry.Path), projCfg, req) },
 	})
 	return run, nil

@@ -587,3 +587,35 @@ func TestDiffExcludesTheHarnessDirectory(t *testing.T) {
 		t.Error("harness state rode the task diff")
 	}
 }
+
+// Linked dependency directories are runtime inputs for an isolated run. Their
+// symlink target may expose an operator path, so candidate diffs must omit them
+// while retaining the task's real files.
+func TestDiffExcludingLinkedDependency(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	deps := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(deps, filepath.Join(dir, "frontend", "node_modules")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real.go"), []byte("package real\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := g.DiffExcluding("frontend/node_modules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "real.go") {
+		t.Errorf("real task file is missing from diff:\n%s", diff)
+	}
+	if strings.Contains(diff, "node_modules") || strings.Contains(diff, deps) {
+		t.Errorf("linked dependency appeared in diff:\n%s", diff)
+	}
+}

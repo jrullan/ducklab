@@ -162,11 +162,10 @@ func (q *runQueue) canStart(item *queued) bool {
 			return false
 		}
 	}
-	// One run per project unless the caller opted in: two runs editing one
-	// working tree would interleave writes — whether the other run is still
-	// executing (counted in perProj) or paused at a gate with its diff
-	// waiting in the tree (reported by held).
-	if !item.parallel {
+	// Only runs that share the person's checkout need the project tree hold.
+	// Build and test-first runs have private worktrees; global and provider
+	// limits above still apply to them.
+	if !item.parallel && !worktreeCapable(item) {
 		if q.perProj[item.rs.run.ProjectID] > 0 {
 			return false
 		}
@@ -175,6 +174,15 @@ func (q *runQueue) canStart(item *queued) bool {
 		}
 	}
 	return true
+}
+
+// worktreeCapable is true once lifecycle has created an isolated checkout.
+// Stage recognition keeps queue-level callers correct before path persistence.
+func worktreeCapable(item *queued) bool {
+	if item == nil || item.rs == nil || item.rs.run == nil {
+		return false
+	}
+	return item.rs.run.WorktreePath != "" || item.rs.run.Stage == "build" || item.rs.run.Stage == "test"
 }
 
 func (q *runQueue) reserve(item *queued) {

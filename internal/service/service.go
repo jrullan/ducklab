@@ -1195,7 +1195,7 @@ func (s *Service) RunStart(ctx context.Context, projectID string, req RunRequest
 	// Submit to the queue: it starts the run now, or marks it queued and
 	// starts it when a slot frees (AC-25).
 	s.queue.submit(s, &queued{
-		rs: rs, ctx: ctx, parallel: true, chained: req.chained,
+		rs: rs, ctx: ctx, chained: req.chained,
 		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
 	})
 
@@ -1265,7 +1265,7 @@ func (s *Service) projectHeld(projectID, taskID string) string {
 		if r.ProjectID != projectID {
 			continue
 		}
-		if r.Status == "paused" && (r.Stage == "build" || r.Stage == "test") {
+		if r.Status == "paused" && (r.Stage == "build" || r.Stage == "test" || r.Stage == "document") {
 			return "another run holds this project's working tree"
 		}
 		if r.Accepted && r.TaskID != "" {

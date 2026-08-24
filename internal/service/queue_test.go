@@ -88,13 +88,15 @@ func TestQueueLimitsConcurrencyAndPromotesWaiting(t *testing.T) {
 	}
 }
 
-// One run per project unless the caller opts in: two runs editing one working
-// tree would interleave writes.
-func TestQueueSerialisesRunsWithinAProject(t *testing.T) {
+// Document stages use the shared checkout and serialize within a project.
+func TestQueueSerialisesDocumentStagesWithinAProject(t *testing.T) {
 	q := newRunQueue(4)
 	a := &queued{rs: fakeRunState("r-1", "proj")}
+	a.rs.run.Stage = "document"
 	b := &queued{rs: fakeRunState("r-2", "proj")}
+	b.rs.run.Stage = "document"
 	c := &queued{rs: fakeRunState("r-3", "other")}
+	c.rs.run.Stage = "document"
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -107,9 +109,100 @@ func TestQueueSerialisesRunsWithinAProject(t *testing.T) {
 		t.Error("a run in a different project was blocked")
 	}
 
-	b.parallel = true
-	if !q.canStart(b) {
-		t.Error("--parallel did not override the per-project limit")
+}
+
+// Build and test-first are both isolated worktree users. They must be able to
+// occupy the same project concurrently without requiring an explicit escape
+// hatch intended for callers that knowingly share the checkout.
+func TestQueueDoesNotSerializeBuildAndTestFirst(t *testing.T) {
+	q := newRunQueue(4)
+	build := &queued{rs: fakeRunState("r-build", "proj")}
+	build.rs.run.Stage = "build"
+	testFirst := &queued{rs: fakeRunState("r-test", "proj")}
+	testFirst.rs.run.Stage = "test"
+
+	q.mu.Lock()
+	q.reserve(build)
+	allowed := q.canStart(testFirst)
+	q.mu.Unlock()
+	if !allowed {
+		t.Fatal("test-first was serialized behind an isolated build")
+	}
+}
+
+// Build and test-first runs have private worktrees, so they do not consume the
+// project checkout hold. Provider and global limits still apply.
+func TestQueueAllowsConcurrentWorktreeRunsWithinAProject(t *testing.T) {
+	q := newRunQueue(2)
+	build := &queued{rs: fakeRunState("r-build", "proj")}
+	build.rs.run.Stage = "build"
+	testFirst := &queued{rs: fakeRunState("r-test", "proj")}
+	testFirst.rs.run.Stage = "test"
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.reserve(build)
+	if !q.canStart(testFirst) {
+		t.Fatal("test-first run was blocked by a build in the same project")
+	}
+}
+
+// A document stage retains the shared-checkout hold, but cannot block an
+// isolated build that has its own worktree.
+func TestQueueKeepsDocumentHoldWhileAllowingWorktreeRun(t *testing.T) {
+	q := newRunQueue(2)
+	document := &queued{rs: fakeRunState("r-document", "proj")}
+	document.rs.run.Stage = "document"
+	build := &queued{rs: fakeRunState("r-build", "proj")}
+	build.rs.run.Stage = "build"
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.reserve(document)
+	if !q.canStart(build) {
+		t.Fatal("worktree build was blocked by an in-tree document stage")
+	}
+}
+
+// Document stages use the shared checkout and therefore serialize even when the
+// global queue has capacity. This is an execution-level assertion rather than
+// only inspecting queue counters.
+func TestDocumentStagesSerializeAgainstEachOther(t *testing.T) {
+	q := newRunQueue(2)
+	s := &Service{}
+	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	first := queuedRun(t, "r-document-1", "proj", func() {
+		close(firstStarted)
+		<-release
+	})
+	first.rs.run.Stage = "document"
+	q.submit(s, first)
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first document stage did not start")
+	}
+
+	second := queuedRun(t, "r-document-2", "proj", func() { close(secondStarted) })
+	second.rs.run.Stage = "document"
+	q.submit(s, second)
+	if second.rs.run.Status != "queued" {
+		t.Fatalf("second document stage status = %q, want queued", second.rs.run.Status)
+	}
+	select {
+	case <-secondStarted:
+		t.Fatal("document stages ran concurrently in one working tree")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("queued document stage was not promoted")
 	}
 }
 
@@ -125,6 +218,7 @@ func TestAHeldTreeBlocksTheQueueUntilPoked(t *testing.T) {
 
 	started := make(chan struct{})
 	item := queuedRun(t, "r-1", "proj", func() { close(started) })
+	item.rs.run.Stage = "document"
 	q.submit(s, item)
 
 	if item.rs.run.Status != "queued" {
@@ -169,12 +263,15 @@ func TestAChainedBuildJumpsTheWaitingLine(t *testing.T) {
 	release := make(chan struct{})
 	wg.Add(3)
 	occupier := queuedRun(t, "r-test-a", "proj", func() { <-release; wg.Done() })
+	occupier.rs.run.Stage = "document"
 	q.submit(s, occupier)
 
 	otherTest := queuedRun(t, "r-test-b", "proj", record("other-test"))
+	otherTest.rs.run.Stage = "document"
 	q.submit(s, otherTest)
 
 	chained := queuedRun(t, "r-build-a", "proj", record("chained-build"))
+	chained.rs.run.Stage = "document"
 	chained.chained = true
 	q.submit(s, chained)
 
@@ -472,7 +569,7 @@ func TestAbortingThePausedHolderWakesTheQueue(t *testing.T) {
 
 	// The holder: a paused build — projectHeld reports the tree busy.
 	hold := &runlog.Run{
-		ID: "r-hold", ProjectID: projectID, Stage: "build", TaskID: "T-1",
+		ID: "r-hold", ProjectID: projectID, Stage: "document", TaskID: "T-1",
 		Status: "paused", PendingKind: "error", StartedAt: "2026-08-11T00:44:00Z",
 	}
 	wh, err := runlog.NewWriter(entry.Path, hold)
@@ -487,7 +584,7 @@ func TestAbortingThePausedHolderWakesTheQueue(t *testing.T) {
 	// The relaunch: queues behind the held tree.
 	started := make(chan struct{})
 	wait := &runlog.Run{
-		ID: "r-wait", ProjectID: projectID, Stage: "build", TaskID: "T-1",
+		ID: "r-wait", ProjectID: projectID, Stage: "document", TaskID: "T-1",
 		Status: "running", StartedAt: "2026-08-11T00:46:00Z",
 	}
 	ww, err := runlog.NewWriter(entry.Path, wait)
