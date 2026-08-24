@@ -72,6 +72,9 @@ type Service struct {
 	apMu       sync.Mutex
 	appMu      sync.Mutex
 	apps       map[string]*appState
+	// afterRunDiff is a lifecycle observation seam used by tests that must
+	// inspect an isolated checkout before its normal cleanup.
+	afterRunDiff func(*runState)
 }
 
 type projectState struct {
@@ -372,9 +375,18 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 			if !isImplPrompt {
 				return nil
 			}
+			// A fake provider is shared by concurrent runs. Identify the current
+			// conversation from its tool result rather than its global call count.
+			hasToolResult := false
+			for _, m := range req.Messages {
+				if m.Role == "tool" || (m.Role == "user" && strings.HasPrefix(m.Content, "Tool result for ")) {
+					hasToolResult = true
+					break
+				}
+			}
 			// Dialect B: no tools in request, respond with text protocol
 			if len(req.Tools) == 0 {
-				if callCount == 1 {
+				if !hasToolResult {
 					return &provider.ChatResponse{
 						Choices: []provider.Choice{{
 							Message: provider.Message{
@@ -394,9 +406,8 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 					Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 20},
 				}
 			}
-			// Dialect A: native tool calls
-			switch callCount {
-			case 1, 2: // may be retried after repair
+			// Dialect A: native tool calls.
+			if !hasToolResult {
 				return &provider.ChatResponse{
 					Choices: []provider.Choice{{
 						Message: provider.Message{
@@ -417,14 +428,13 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 					}},
 					Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 50},
 				}
-			default:
-				return &provider.ChatResponse{
-					Choices: []provider.Choice{{
-						Message:      provider.Message{Role: "assistant", Content: "Fixed add.go: changed a - b to a + b."},
-						FinishReason: provider.FinishStop,
-					}},
-					Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 20},
-				}
+			}
+			return &provider.ChatResponse{
+				Choices: []provider.Choice{{
+					Message:      provider.Message{Role: "assistant", Content: "Fixed add.go: changed a - b to a + b."},
+					FinishReason: provider.FinishStop,
+				}},
+				Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 20},
 			}
 		}
 		return fake, nil
@@ -1702,6 +1712,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	git := vcs.New(runRoot(rs.run, entry.Path))
 	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
 	rs.writer.WriteDiff(diff)
+	if s.afterRunDiff != nil {
+		s.afterRunDiff(rs)
+	}
 	governanceCallouts := governanceCallouts(diff)
 	if len(governanceCallouts) > 0 {
 		rs.run.GovernanceModified = true

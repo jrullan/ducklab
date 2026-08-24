@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -45,6 +46,48 @@ func newTestProject(t *testing.T, s *Service, name string) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// snapshotFixtureTree records the person's source files, excluding git internals
+// and engine run logs. The latter are service metadata, not candidate work.
+func snapshotFixtureTree(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	got := map[string][]byte{}
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) || rel == filepath.Join(".ducklab", "runs") || strings.HasPrefix(rel, filepath.Join(".ducklab", "runs")+string(filepath.Separator)) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		got[rel] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func assertFixtureTreeEqual(t *testing.T, want, got map[string][]byte) {
+	t.Helper()
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("person's working tree changed:\nwant %#v\ngot %#v", want, got)
+	}
 }
 
 func newTestService(t *testing.T) *Service {
@@ -151,6 +194,167 @@ func TestBuildDryRunUsesRecordedExternalWorktree(t *testing.T) {
 			if got == "" {
 				t.Error("base_sha was not recorded")
 			}
+		}
+	}
+}
+
+// A real implementer tool call must only change the isolated checkout. Holding
+// cleanup at the captured diff makes this a live proof, not a post-cleanup one.
+func TestBuildRunWritesOnlyItsLiveWorktree(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n\nfunc Add(a, b int) int { return a - b // BUG: should be a + b\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte("## M-001 — Isolation\n\n### T-001 — write in worktree\n\nImplement the fix.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "live isolation", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{"verify.mode": "tests", "verify.tests": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotFixtureTree(t, dir)
+	observed := make(chan *runState, 1)
+	release := make(chan struct{})
+	s.afterRunDiff = func(rs *runState) { observed <- rs; <-release }
+	run, err := s.RunStart(context.Background(), p.ID, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rs *runState
+	select {
+	case rs = <-observed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not capture its candidate diff")
+	}
+	if rs.run.ID != run.ID {
+		t.Fatalf("observed %q, want %q", rs.run.ID, run.ID)
+	}
+	written, err := os.ReadFile(filepath.Join(rs.run.WorktreePath, "add.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(written, []byte("return a + b")) {
+		t.Fatalf("implementer write missing from worktree: %s", written)
+	}
+	assertFixtureTreeEqual(t, before, snapshotFixtureTree(t, dir))
+	diff, err := s.RunDiff(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "return a + b") {
+		t.Fatalf("candidate diff omitted tool write: %s", diff)
+	}
+	close(release)
+	select {
+	case <-rs.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not finish")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("worktree %q was not cleaned up", rs.run.WorktreePath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assertFixtureTreeEqual(t, before, snapshotFixtureTree(t, dir))
+}
+
+// Concurrent isolated builds may queue briefly on git's worktree mutex, but
+// both run at once and leave git's shared worktree metadata valid after cleanup.
+func TestConcurrentBuildWorktreesLeaveGitMetadataClean(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n\nfunc Add(a, b int) int { return a - b // BUG: should be a + b\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Concurrent isolation\n\n### T-001 — first build\n\nfix it.\n\n### T-002 — second build\n\nfix it.\n"
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindPlan), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "concurrent isolation", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), p.ID, map[string]string{"verify.mode": "tests", "verify.tests": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	// The test is about queue worktree isolation, not a one-slot fake provider.
+	s.cfgMu.Lock()
+	s.cfg.Providers["fake"] = config.Provider{Kind: config.ProviderKindOpenAI, BaseURL: "fake://", MaxConcurrent: 2}
+	s.cfgMu.Unlock()
+	observed := make(chan *runState, 2)
+	release := make(chan struct{})
+	s.afterRunDiff = func(rs *runState) { observed <- rs; <-release }
+	a, err := s.RunStart(context.Background(), p.ID, RunRequest{TaskID: "T-001", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.RunStart(context.Background(), p.ID, RunRequest{TaskID: "T-002", Mode: "solo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var states []*runState
+	for range 2 {
+		select {
+		case rs := <-observed:
+			states = append(states, rs)
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent builds did not both reach candidate diff")
+		}
+	}
+	for _, rs := range states {
+		if rs.run.Status != "running" {
+			t.Errorf("%s status = %q, want running", rs.run.ID, rs.run.Status)
+		}
+	}
+	close(release)
+	for _, rs := range states {
+		select {
+		case <-rs.done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("concurrent build did not finish")
+		}
+		// done closes before the deferred worktree cleanup; wait for it so this
+		// test does not race testing.T's TempDir cleanup.
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("worktree %q was not cleaned up", rs.run.WorktreePath)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git worktree list failed: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "worktree "+dir) {
+		t.Fatalf("git worktree list did not report main checkout: %s", out)
+	}
+	for _, id := range []string{a.ID, b.ID} {
+		detail, err := s.RunGet(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Run.WorktreeCleanupFailure != "" {
+			t.Errorf("%s cleanup failure = %q", id, detail.Run.WorktreeCleanupFailure)
 		}
 	}
 }
