@@ -54,6 +54,11 @@ func runNext(r *runlog.Run) []string {
 			}
 			return []string{"abort"}
 		case "gate":
+			// A rebase conflict is deliberately not an agent retry: the only
+			// choices are to resolve it in the recorded worktree or discard it.
+			if _, conflict := r.PendingData["conflicting_files"]; conflict {
+				return []string{"resolve_by_hand", "reject"}
+			}
 			var out []string
 			// A FAILED verdict has nothing to accept; offering the button and
 			// disabling it is the client's courtesy, offering the action is not

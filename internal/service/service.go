@@ -1477,7 +1477,9 @@ func verifyOverride(cfg config.Verify, command string) config.Verify {
 
 func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, req RunRequest) {
 	defer rs.writer.Close()
-	defer s.cleanupRunWorktree(rs, entry.Path)
+	// A worktree remains available at a human gate: acceptance must commit and
+	// prove its isolated changes, and a rebase conflict is resolved there by
+	// hand. Accept and reject remove it after recording their terminal decision.
 	defer close(rs.done)
 	defer recoverRun(rs)
 
@@ -1771,6 +1773,8 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 				gateData["governance_callouts"] = governanceCallouts
 			}
 			rs.writer.AppendEvent("human_needed", gateData)
+			// Acceptance later commits and proves this isolated checkout.
+			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
 			rs.writer.WriteState()
 			s.bus.Publish(bus.Event{
 				Type:      "human_needed",
@@ -1824,6 +1828,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.PendingKind = "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 			rs.run.PendingData = map[string]interface{}{"verdict": verdict, "detail": detail}
+			rs.run.PendingData["retain_worktree"] = rs.run.WorktreePath != ""
 			rs.writer.AppendEvent("human_needed", map[string]interface{}{
 				"kind": "gate", "verdict": verdict, "detail": detail,
 			})
@@ -2184,6 +2189,11 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	}
 
 	git := vcs.New(entry.Path)
+	// Isolated runs own a branch, never the person's checkout. Their acceptance
+	// is therefore a proof about the rebased branch followed by an ff-only land.
+	if rs.run.WorktreePath != "" {
+		return s.acceptWorktreeRun(ctx, rs, entry, git, message, actor)
+	}
 	// Test-first acceptance records the red-test promise even for projects that
 	// have not initialized git yet; the chained BUILD will enforce the normal
 	// repository requirement when it starts.
@@ -2333,6 +2343,96 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
 		return fmt.Errorf("write acceptance receipt: %w", err)
 	}
+	return nil
+}
+
+// acceptWorktreeRun proves exactly the commit that will be fast-forwarded into
+// the default branch. The person's checkout is never staged or restored here.
+func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string) error {
+	if rs.run.WorktreePath == "" || rs.run.Branch == "" || rs.run.BaseSHA == "" {
+		return fmt.Errorf("worktree acceptance is missing its path, branch, or base sha")
+	}
+	if _, err := os.Stat(rs.run.WorktreePath); err != nil {
+		return fmt.Errorf("worktree acceptance cannot find %s: %w", rs.run.WorktreePath, err)
+	}
+	if message == "" {
+		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
+	}
+	workGit := vcs.New(rs.run.WorktreePath)
+	if err := workGit.AddAll(); err != nil {
+		return fmt.Errorf("stage worktree: %w", err)
+	}
+	if clean, err := workGit.IsClean(); err != nil {
+		return err
+	} else if !clean {
+		if _, err := workGit.CommitWithTrailer(message, map[string]string{"Ducklab-Run": rs.run.ID, "Duckling": "implementer"}); err != nil {
+			return fmt.Errorf("commit worktree: %w", err)
+		}
+	}
+
+	defaultSHA, err := defaultGit.DefaultBranchHead()
+	if err != nil {
+		return fmt.Errorf("read default HEAD: %w", err)
+	}
+	if defaultSHA != rs.run.BaseSHA {
+		files, rebaseErr := workGit.RebaseOnto(defaultSHA)
+		if rebaseErr != nil {
+			workGit.AbortIntegration()
+			detail := fmt.Sprintf("rebase conflict from base %s onto default %s; conflicting files: %s. Resolve by hand in the worktree %s, or reject.", short(rs.run.BaseSHA), short(defaultSHA), strings.Join(files, ", "), rs.run.WorktreePath)
+			if len(files) == 0 {
+				detail = fmt.Sprintf("rebase from base %s onto default %s failed: %v. Resolve by hand in the worktree %s, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr, rs.run.WorktreePath)
+			}
+			rs.run.Status, rs.run.PendingKind = "paused", "gate"
+			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+			rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "conflicting_files": files, "worktree": rs.run.WorktreePath, "retain_worktree": true}
+			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail})
+			_ = rs.writer.WriteState()
+			return fmt.Errorf("%s", detail)
+		}
+	}
+	rebasedSHA, err := workGit.HeadSHA()
+	if err != nil {
+		return fmt.Errorf("read rebased worktree HEAD: %w", err)
+	}
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
+	reproduction, verifyErr := verifyAcceptedCommit(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	if reproduction != nil {
+		rs.run.GateReproduced = reproduction
+		rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
+	}
+	if verifyErr != nil {
+		output := ""
+		if reproduction != nil {
+			output = reproduction.Output
+		}
+		detail := fmt.Sprintf("rebased commit %s failed its gate after base %s diverged to default %s: %v", short(rebasedSHA), short(rs.run.BaseSHA), short(defaultSHA), verifyErr)
+		rs.run.Status, rs.run.PendingKind = "paused", "gate"
+		rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+		rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "output": output, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "retain_worktree": true}
+		rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail, "output": output})
+		_ = rs.writer.WriteState()
+		return verifyErr
+	}
+	if err := defaultGit.FastForwardDefault(rs.run.Branch, defaultSHA); err != nil {
+		return fmt.Errorf("fast-forward-only merge of rebased %s: %w", short(rebasedSHA), err)
+	}
+	defer s.continueChain(ctx, rs)
+	rs.run.Accepted, rs.run.CommitSHA, rs.run.Status = true, rebasedSHA, "done"
+	rs.run.Resolution = "accepted by " + actor
+	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	clearPending(rs.run)
+	if rs.run.Stage == "build" {
+		if id, err := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); err == nil && id != "" {
+			rs.writer.AppendEvent("bug_fixed", map[string]interface{}{"bug": id, "task": rs.run.TaskID})
+		}
+	}
+	if err := s.logResolution(rs, "accept", actor); err != nil {
+		return err
+	}
+	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
+		return fmt.Errorf("write acceptance receipt: %w", err)
+	}
+	s.cleanupRunWorktree(rs, entry.Path)
 	return nil
 }
 
@@ -3134,10 +3234,12 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
-	// Reject means no. Restore before changing the run record: a refusal to
-	// clean up must leave the gate decision available for the operator.
-	if err := restoreAfterUnaccepted(rs); err != nil {
-		return err
+	// A worktree run never touched the person's checkout; rejection simply
+	// drops its isolated branch and checkout. Shared-tree runs retain restore.
+	if rs.run.WorktreePath == "" {
+		if err := restoreAfterUnaccepted(rs); err != nil {
+			return err
+		}
 	}
 	rs.run.Status = "done"
 	rs.run.Verdict = "FAILED"

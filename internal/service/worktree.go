@@ -72,9 +72,17 @@ func (s *Service) cleanupRunWorktree(rs *runState, projectRoot string) {
 	if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
 		return
 	}
-	if err := vcs.New(projectRoot).WorktreeRemove(rs.run.WorktreePath); err != nil {
+	git := vcs.New(projectRoot)
+	if err := git.WorktreeRemove(rs.run.WorktreePath); err != nil {
 		rs.run.WorktreeCleanupFailure = rs.run.WorktreePath
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": "could not remove run worktree " + rs.run.WorktreePath + ": " + err.Error()})
 		rs.writer.WriteState()
+		return
+	}
+	if rs.run.Branch != "" {
+		if err := git.DeleteBranch(rs.run.Branch); err != nil {
+			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": "could not delete run branch " + rs.run.Branch + ": " + err.Error()})
+			_ = rs.writer.WriteState()
+		}
 	}
 }

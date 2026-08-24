@@ -257,13 +257,20 @@ func TestBuildRunWritesOnlyItsLiveWorktree(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("run did not finish")
 	}
+	// A manual gate retains its isolated candidate until ACCEPT or REJECT.
+	if _, err := os.Lstat(rs.run.WorktreePath); err != nil {
+		t.Fatalf("worktree %q was removed before its human gate: %v", rs.run.WorktreePath, err)
+	}
+	if err := s.RunReject(context.Background(), run.ID, "test cleanup"); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("worktree %q was not cleaned up", rs.run.WorktreePath)
+			t.Fatalf("worktree %q was not cleaned up after reject", rs.run.WorktreePath)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -328,15 +335,21 @@ func TestConcurrentBuildWorktreesLeaveGitMetadataClean(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatal("concurrent build did not finish")
 		}
-		// done closes before the deferred worktree cleanup; wait for it so this
-		// test does not race testing.T's TempDir cleanup.
+		// Human-gated isolated runs survive until a decision, then reject removes
+		// both their worktrees without touching the default checkout.
+		if _, err := os.Lstat(rs.run.WorktreePath); err != nil {
+			t.Fatalf("worktree %q was removed before its human gate: %v", rs.run.WorktreePath, err)
+		}
+		if err := s.RunReject(context.Background(), rs.run.ID, "test cleanup"); err != nil {
+			t.Fatal(err)
+		}
 		deadline := time.Now().Add(10 * time.Second)
 		for {
 			if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("worktree %q was not cleaned up", rs.run.WorktreePath)
+				t.Fatalf("worktree %q was not cleaned up after reject", rs.run.WorktreePath)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}

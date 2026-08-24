@@ -88,6 +88,13 @@ func (g *Git) HeadSHA() (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// GitPath resolves a git-internal path for this worktree. Linked worktrees use
+// a .git file, so callers must not assume .git is a directory.
+func (g *Git) GitPath(name string) (string, error) {
+	out, err := g.run("rev-parse", "--git-path", name)
+	return strings.TrimSpace(out), err
+}
+
 // UncommitOwn undoes a commit this process made a moment ago, keeping its
 // changes in the working tree and index. It refuses unless sha is HEAD: the
 // only commit that is safe to take back is the one nobody could have built
@@ -310,29 +317,81 @@ func (g *Git) WorktreeAddAt(path, branch, rev string) error {
 	return err
 }
 
-// DefaultBranchHead returns the configured default branch's current commit.
-func (g *Git) DefaultBranchHead() (string, error) {
+// defaultBranchRef returns the local ref that acceptance may advance. Remote
+// origin/HEAD identifies the default by name, but is not itself mergeable.
+func (g *Git) defaultBranchRef() (string, error) {
 	out, err := g.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
 	if err == nil && strings.TrimSpace(out) != "" {
-		return g.revParse(strings.TrimSpace(out))
-	}
-	// Local repositories commonly have no origin. Prefer the conventional
-	// default names rather than accidentally branching from a feature checkout.
-	for _, ref := range []string{"refs/heads/main", "refs/heads/master"} {
-		if sha, err := g.revParse(ref); err == nil {
-			return sha, nil
+		name := strings.TrimPrefix(strings.TrimSpace(out), "origin/")
+		ref := "refs/heads/" + name
+		if _, err := g.revParse(ref); err == nil {
+			return ref, nil
 		}
 	}
-	branch, branchErr := g.CurrentBranch()
-	if branchErr != nil {
-		return "", branchErr
+	// Local repositories commonly have no origin. Prefer the conventional
+	// default names rather than accidentally accepting into a feature checkout.
+	for _, ref := range []string{"refs/heads/main", "refs/heads/master"} {
+		if _, err := g.revParse(ref); err == nil {
+			return ref, nil
+		}
 	}
-	return g.revParse(branch)
+	branch, err := g.CurrentBranch()
+	if err != nil {
+		return "", err
+	}
+	return "refs/heads/" + branch, nil
+}
+
+// DefaultBranchHead returns the configured default branch's current commit.
+func (g *Git) DefaultBranchHead() (string, error) {
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return "", err
+	}
+	return g.revParse(ref)
 }
 
 func (g *Git) revParse(rev string) (string, error) {
 	out, err := g.run("rev-parse", rev)
 	return strings.TrimSpace(out), err
+}
+
+// RebaseOnto rebases the current worktree branch onto rev. ConflictedPaths
+// is non-empty only when git left the rebase stopped on conflicts.
+func (g *Git) RebaseOnto(rev string) ([]string, error) {
+	if _, err := g.run("rebase", rev); err != nil {
+		out, _ := g.run("diff", "--name-only", "--diff-filter=U")
+		var paths []string
+		for _, path := range strings.Split(strings.TrimSpace(out), "\n") {
+			if path = strings.TrimSpace(path); path != "" {
+				paths = append(paths, path)
+			}
+		}
+		return paths, err
+	}
+	return nil, nil
+}
+
+// AbortIntegration clears a rebase or merge left by an interrupted operation.
+func (g *Git) AbortIntegration() {
+	_, _ = g.run("rebase", "--abort")
+	_, _ = g.run("merge", "--abort")
+}
+
+// FastForwardDefault advances the default branch only when branch descends
+// from the observed default commit. update-ref's old value makes a concurrent
+// advance fail rather than forcing over it, and leaves the person's checkout
+// (which may be on another branch) untouched.
+func (g *Git) FastForwardDefault(branch, expectedDefault string) error {
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return err
+	}
+	if _, err := g.run("merge-base", "--is-ancestor", expectedDefault, branch); err != nil {
+		return fmt.Errorf("refuse non-fast-forward merge: %w", err)
+	}
+	_, err = g.run("update-ref", ref, branch, expectedDefault)
+	return err
 }
 
 // WorktreeAddDetached checks out a commit without changing a branch. It is
