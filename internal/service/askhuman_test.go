@@ -192,6 +192,53 @@ func TestRunAnswerRejectsARunNotWaiting(t *testing.T) {
 	}
 }
 
+func TestRunAnswerRecordsAdvisorAuthorOnlyForAutoAnswers(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+	for _, id := range []string{"r-advisor-author", "r-human-author"} {
+		writeRun(t, entry.Path, projectID, id, "running")
+	}
+	s.RecoverRuns(context.Background())
+	pauseQuestion := func(id string) {
+		rs := s.runs[id]
+		rs.run.Status = "paused"
+		rs.run.PendingKind = "question"
+		rs.run.PendingData = map[string]interface{}{"question_id": "q", "question": "Which?"}
+		// This test asserts the durable answer event. Make resume reject before it
+		// starts a background strategy against t.TempDir, which races its cleanup.
+		rs.run.Stage = "spec"
+	}
+	pauseQuestion("r-advisor-author")
+	pauseQuestion("r-human-author")
+
+	if err := s.runAnswer(context.Background(), "r-advisor-author", "q", "the advisor answer", "advisor:k3 (yolo)"); err == nil {
+		t.Fatal("expected resume to reject the test-only stage")
+	}
+	if err := s.RunAnswer(context.Background(), "r-human-author", "q", "human answer"); err == nil {
+		t.Fatal("expected resume to reject the test-only stage")
+	}
+	answerAuthor := func(id string) interface{} {
+		events, err := runlog.ReadEvents(s.runs[id].runDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			if e.Type == "human" && e.Data["action"] == "answer" {
+				return e.Data["author"]
+			}
+		}
+		t.Fatalf("%s recorded no answer event", id)
+		return nil
+	}
+	if got := answerAuthor("r-advisor-author"); got != "advisor:k3 (yolo)" {
+		t.Errorf("advisor author = %#v", got)
+	}
+	if got := answerAuthor("r-human-author"); got != nil {
+		t.Errorf("human answer author = %#v, want absent", got)
+	}
+}
+
 func TestRunAnswerUnknownRun(t *testing.T) {
 	s := newTestService(t)
 	if err := s.RunAnswer(context.Background(), "r-nope", "q", "a"); err == nil {

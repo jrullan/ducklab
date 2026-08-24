@@ -3,7 +3,7 @@ import { EngineClient, type Project } from "../api/client";
 import { EventSubscriber, type DucklabEvent } from "../api/events";
 import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
-import { interruptions, deliver, setBadge } from "../lib/attention";
+import { interruptions, advisorAutoAnswerInterruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { AppControl } from "../components/AppControl";
@@ -365,12 +365,21 @@ export function App() {
   // NOT per-view: attention is app state, and a person on any screen (or none)
   // is owed the same call.
   const prevRuns = useRef<Record<string, Run> | null>(null);
+  const runEvents = useRuns((s) => s.events);
+  const prevEvents = useRef<DucklabEvent[] | null>(null);
   useEffect(() => {
     for (const i of interruptions(prevRuns.current, runs)) {
       deliver(i);
     }
     prevRuns.current = runs;
   }, [runs]);
+  useEffect(() => {
+    const current = Object.values(runEvents).flat();
+    for (const i of advisorAutoAnswerInterruptions(prevEvents.current, current, runs)) {
+      deliver(i);
+    }
+    prevEvents.current = current;
+  }, [runEvents, runs]);
   useEffect(() => {
     setBadge(waitingCount);
   }, [waitingCount]);

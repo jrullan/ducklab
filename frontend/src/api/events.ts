@@ -315,6 +315,8 @@ export const KNOWN_EVENT_TYPES = [
   "decomposition",
   "resolution",
   "human",
+  // An advisor auto-answer is an operator-facing correction opportunity.
+  "notification",
   "human_needed",
   "checkpoint",
   "warning",

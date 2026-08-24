@@ -120,7 +120,9 @@ export function ConversationTurn({
             {collapsed ? "›" : "⌄"}
           </span>
         )}
-        {isGate ? (
+        {block.author ? (
+          <span aria-label="advisor avatar" role="img" title={block.author}>🦆</span>
+        ) : isGate ? (
           /* Turning while the suite runs, for the same reason the ducks bob:
              movement is how this UI says "working", and a still cog under a
              minutes-long gate read as a hang. */
@@ -141,8 +143,8 @@ export function ConversationTurn({
         ) : (
           <DuckAvatar id={block.duckling} roster={roster} color={color} bobbing={!block.done} />
         )}
-        <span style={{ color: tint }}>{isGate ? "gate" : who}</span>
-        <span className="text-ink-muted">{isGate ? "verify" : block.role}</span>
+        <span style={{ color: tint }}>{block.author ? block.author.replace(/ \(yolo\)$/, "") : isGate ? "gate" : who}</span>
+        <span className="text-ink-muted">{block.author ? "answered under yolo" : isGate ? "verify" : block.role}</span>
         {/* The gate's own state, right in the header: running with a pulse,
             then the round's outcome. This is the moment between "approve"
             and the verdict that used to read as a hang. */}
@@ -256,6 +258,11 @@ export function ConversationTurn({
       {/* Raw while tokens are still arriving — a half-written fence or bold
           marker cannot be parsed without guessing at what comes next — and
           rendered once the turn has settled. */}
+      {!collapsed && block.author && (
+        <p className="mt-1 text-xs text-ink-muted" data-testid="advisor-yolo-answer">
+          answered by {block.author.replace(/^advisor:/, "").replace(" (yolo)", "")} under yolo
+        </p>
+      )}
       {!collapsed && (block.done && block.text && !block.verdict ? (
         <div data-testid="turn-text">
           {human ? (

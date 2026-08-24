@@ -3432,11 +3432,17 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	return err
 }
 
-// RunAnswer records a human's answer and resumes the run.
+// RunAnswer records a person's answer and resumes the run.
 //
 // The run replays its turn with the answer available, so the ask_human call
 // that paused it now resolves instead of pausing again.
 func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) error {
+	return s.runAnswer(ctx, id, questionID, answer, "")
+}
+
+// runAnswer records an answer with its actual author when automation supplied
+// it. An empty author deliberately remains an ordinary human answer.
+func (s *Service) runAnswer(ctx context.Context, id, questionID, answer, author string) error {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
@@ -3465,12 +3471,24 @@ func (s *Service) RunAnswer(ctx context.Context, id, questionID, answer string) 
 	if err != nil {
 		return err
 	}
-	w.AppendEvent("human", map[string]interface{}{
+	event := map[string]interface{}{
 		"action":      "answer",
 		"question_id": questionID,
 		"question":    questionText,
 		"answer":      answer,
-	})
+	}
+	if author != "" {
+		event["author"] = author
+	}
+	w.AppendEvent("human", event)
+	if author != "" {
+		// This is an attention event, not another human decision: unattended
+		// runs continue, but the operator can inspect and correct the answer.
+		w.AppendEvent("notification", map[string]interface{}{
+			"kind": "advisor_auto_answer", "question_id": questionID,
+			"question": questionText, "answer": answer, "author": author,
+		})
+	}
 
 	_, err = s.RunResume(ctx, id)
 	return err

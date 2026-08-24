@@ -27,11 +27,14 @@ func (s *Service) startNotifier() {
 	}
 	secret := s.cfg.Notify.Secret
 	interesting := map[string]bool{
-		"human_needed":    true,
-		"run_end":         true,
-		"autopilot":       true,
-		"run_paused":      true,
-		"question_asked":  true,
+		"human_needed":   true,
+		"run_end":        true,
+		"autopilot":      true,
+		"run_paused":     true,
+		"question_asked": true,
+		// An advisor answer under yolo is an automated decision the operator
+		// needs an opportunity to correct while the run continues.
+		"notification":    true,
 		"distress":        true,
 		"failure_streak":  true,
 		"repetition_loop": true,

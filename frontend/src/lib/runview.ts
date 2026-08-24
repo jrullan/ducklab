@@ -68,6 +68,8 @@ export interface TurnBlock {
    * wearing the consultant's coordinates rendered the consultant's thinking
    * twice. */
   messageOnly?: boolean;
+  /** The recorded author of an automated answer, never inferred as human. */
+  author?: string;
   /** Anonymous label used instead of `duckling` when the turn is hidden. */
   label?: string;
   toolCalls: ToolCall[];
@@ -366,6 +368,21 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           if (d.incomplete === true) b.incomplete = true;
         }
         open.delete(b ?? ({} as TurnBlock));
+        break;
+      }
+      case "human": {
+        // Answers are human events for replay compatibility, but automated
+        // answers carry their recorded author and must never borrow the human
+        // avatar without that attribution.
+        if (d.action === "answer") {
+          blocks.push({
+            key: `human:${e.seq ?? blocks.length}`,
+            round: Number(d.round ?? 1), turn: Number(d.turn ?? 0), role: "human", duckling: "",
+            toolCalls: [], text: String(d.answer ?? ""), done: true, messageOnly: true,
+            subject: d.question ? String(d.question) : undefined,
+            author: d.author ? String(d.author) : undefined,
+          });
+        }
         break;
       }
       case "message": {

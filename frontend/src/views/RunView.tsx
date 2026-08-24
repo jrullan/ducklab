@@ -446,6 +446,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const gate = buildGate(events);
   const deliverables = buildDeliverables(events);
   const pending = buildPending(events);
+  // Yolo resumes immediately, so its answer cannot remain in the paused
+  // question card. Keep the recorded notification visible while work continues.
+  const advisorAutoAnswers = events.filter(
+    (event) => event.type === "notification" && event.data?.kind === "advisor_auto_answer",
+  );
   // A green gate over an unconvinced reviewer must not be silent (T-028:
   // three straight request-changes verdicts under "tests passed").
   const dissent = run.verdict === "PASSED" ? reviewerDissent(turns) : null;
@@ -1435,6 +1440,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           committed {acceptState.sha.slice(0, 8)}
         </p>
       )}
+
+      {/* Yolo resumes immediately after an advisor answer. This is deliberately
+          not a human question card: it records who answered and leaves the
+          question and answer visible for the operator to inspect. */}
+      {advisorAutoAnswers.map((event) => {
+        const data = event.data ?? {};
+        const author = String(data.author ?? "advisor").replace(/^advisor:/, "").replace(" (yolo)", "");
+        return (
+          <section key={`${event.seq ?? ""}:${String(data.question_id ?? "")}`} className="m-2 rounded-card border border-warn p-3" data-testid="advisor-auto-answer">
+            <StatusChip role="warning" label={`answered by ${author} under yolo`} />
+            <p className="mt-2 text-sm text-ink">{String(data.question ?? "")}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-ink-secondary">{String(data.answer ?? "")}</p>
+          </section>
+        );
+      })}
 
       {/* The chat's composer does NOT live here: it is pinned to the bottom
           of the view, where the conversation grows toward it — the reply box

@@ -25,6 +25,17 @@ describe("ConversationTurn avatars", () => {
     expect(screen.queryByTestId("duck-avatar")).not.toBeInTheDocument();
   });
 
+  it("renders an advisor auto-answer as a distinct yolo state", () => {
+    const block = turn("human");
+    block.author = "advisor:k3 (yolo)";
+    render(<ConversationTurn block={block} roster={[]} />);
+
+    expect(screen.getByRole("img", { name: "advisor avatar" })).toBeInTheDocument();
+    expect(screen.getByText("advisor:k3")).toBeInTheDocument();
+    expect(screen.getByText("answered under yolo")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "human avatar" })).not.toBeInTheDocument();
+  });
+
   it("renders a duck avatar for duckling transcript turns", () => {
     render(<ConversationTurn block={turn("implementer")} roster={["implementer-1"]} />);
 

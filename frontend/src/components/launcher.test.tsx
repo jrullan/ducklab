@@ -144,6 +144,13 @@ describe("the launcher's cost estimates", () => {
 // use. The wire carries -1 — the engine reads negative as "lift this run's
 // cap", with the token and cost budgets still guarding every call. A number
 // typed and then capped away must not survive the checkbox.
+describe("the unattended consent", () => {
+  it("discloses advisor auto-answers in the unattended tooltip", () => {
+    render(<RunLauncher ducklings={fleet} onLaunch={() => {}} />);
+    expect(screen.getByTestId("run-yolo").closest("label")).toHaveAttribute("title", expect.stringContaining("ask_human questions are auto-answered by the question advisor"));
+  });
+});
+
 describe("the launcher's calls/reply no-cap", () => {
   it("sends -1 when checked, whatever the box said before", () => {
     const onLaunch = vi.fn();

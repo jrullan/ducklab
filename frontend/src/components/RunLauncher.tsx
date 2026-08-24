@@ -345,7 +345,7 @@ export function RunLauncher({
             axes. */}
         <label
           className="flex items-center gap-1 text-xs text-ink-muted"
-          title="unattended: a green gate accepts itself; reviewer dissent and UNVERIFIED still wait for you"
+          title="unattended: a green gate accepts itself; reviewer dissent and UNVERIFIED still wait for you. ask_human questions are auto-answered by the question advisor and recorded as advisor answers, not yours"
         >
           <input
             type="checkbox"

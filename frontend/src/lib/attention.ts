@@ -8,6 +8,7 @@
  * has something to say, and it is the only moment worth interrupting for.
  */
 import type { Run } from "../api/client";
+import type { DucklabEvent } from "../api/events";
 
 /** One thing worth interrupting a person for. */
 export type Interruption = {
@@ -66,6 +67,29 @@ export function interruptions(
     }
   }
   return out;
+}
+
+/** Advisor auto-answers are not state transitions: yolo resumes the run before
+ * the next snapshot. Notice the new recorded notification independently. */
+export function advisorAutoAnswerInterruptions(
+  prev: readonly DucklabEvent[] | null,
+  next: readonly DucklabEvent[],
+  runs: Record<string, Run>,
+): Interruption[] {
+  if (prev === null) return [];
+  const seen = new Set(prev.map((event) => `${event.run_id ?? ""}:${event.seq ?? ""}`));
+  return next.flatMap((event) => {
+    const key = `${event.run_id ?? ""}:${event.seq ?? ""}`;
+    if (seen.has(key) || event.type !== "notification" || event.data?.kind !== "advisor_auto_answer") return [];
+    const run = runs[event.run_id ?? ""];
+    const label = run?.task_id || run?.stage || event.run_id || "run";
+    const author = String(event.data?.author ?? "advisor").replace(/^advisor:/, "").replace(" (yolo)", "");
+    return [{
+      runId: event.run_id ?? "",
+      title: `${label} auto-answered under yolo`,
+      body: `${author} answered: ${String(event.data?.question ?? "a question")} — ${String(event.data?.answer ?? "")}`.slice(0, 240),
+    }];
+  });
 }
 
 const byName = () => window.wails?.Call?.ByName;

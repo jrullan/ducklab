@@ -40,6 +40,15 @@ describe("buildTurns", () => {
     expect(turns[0]!.toolCalls).toHaveLength(40);
   });
 
+  it("attributes advisor auto-answers rather than rendering them as human words", () => {
+    const turns = buildTurns([
+      ev("human", 1, { action: "answer", question: "Which contract?", answer: "Use v2.", author: "advisor:k3 (yolo)" }),
+      ev("human", 2, { action: "answer", question: "Proceed?", answer: "Yes." }),
+    ]);
+    expect(turns[0]).toMatchObject({ role: "human", author: "advisor:k3 (yolo)", subject: "Which contract?" });
+    expect(turns[1]!.author).toBeUndefined();
+  });
+
   it("marks a policy violation so it can be expanded by default", () => {
     const turns = buildTurns([
       ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "a" }),

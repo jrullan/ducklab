@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { interruptions, quack } from "./attention";
+import { advisorAutoAnswerInterruptions, interruptions, quack } from "./attention";
 import type { Run } from "../api/client";
 
 const run = (over: Partial<Run>): Run =>
@@ -66,6 +66,20 @@ describe("what merits interrupting the person", () => {
       "r-9": run({ id: "r-9", task_id: "", stage: "triage", status: "paused", pending_kind: "gate" }),
     };
     expect(interruptions(before, after)[0]!.title).toContain("triage");
+  });
+});
+
+describe("advisor auto-answer attention", () => {
+  it("interrupts for a newly recorded yolo answer even though the run remains running", () => {
+    const before = [{ type: "advice", seq: 1, run_id: "r-1" }];
+    const after = [...before, {
+      type: "notification", seq: 2, run_id: "r-1",
+      data: { kind: "advisor_auto_answer", author: "advisor:k3 (yolo)", question: "Delete it?", answer: "No." },
+    }];
+    const got = advisorAutoAnswerInterruptions(before, after, { "r-1": run({}) });
+    expect(got).toHaveLength(1);
+    expect(got[0]!.title).toContain("auto-answered under yolo");
+    expect(got[0]!.body).toContain("Delete it?");
   });
 });
 
