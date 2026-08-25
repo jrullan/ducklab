@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,7 +22,10 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+	allowOrigin := flag.String("allow-origin", "", "allow this browser origin for local development (opt-in)")
+	versionFlag := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *versionFlag || len(os.Args) > 1 && (os.Args[1] == "version") {
 		fmt.Printf("ducklab-engine %s (%s)\n", build.Semver(), build.Provenance())
 		return
 	}
@@ -101,7 +105,7 @@ func main() {
 	}
 
 	// Create server
-	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance())
+	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance(), *allowOrigin)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
 		Handler: server,

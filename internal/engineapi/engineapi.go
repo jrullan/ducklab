@@ -30,12 +30,13 @@ import (
 
 // Server is the engine API server.
 type Server struct {
-	svc        *service.Service
-	bus        *bus.Bus
-	token      string
-	version    string
-	provenance string
-	mux        *http.ServeMux
+	svc         *service.Service
+	bus         *bus.Bus
+	token       string
+	version     string
+	provenance  string
+	allowOrigin string
+	mux         *http.ServeMux
 
 	// OnShutdown, if set, is invoked by POST /v1/shutdown. The daemon owns
 	// the actual stop sequence; the API only requests it.
@@ -52,7 +53,7 @@ type Server struct {
 }
 
 // New creates a new engine API server.
-func New(svc *service.Service, b *bus.Bus, token, version, provenance string) *Server {
+func New(svc *service.Service, b *bus.Bus, token, version, provenance string, allowOrigins ...string) *Server {
 	p := provenance
 	if p == "" {
 		p = "unknown@unknown"
@@ -63,7 +64,13 @@ func New(svc *service.Service, b *bus.Bus, token, version, provenance string) *S
 		token:      token,
 		version:    version,
 		provenance: p,
-		mux:        http.NewServeMux(),
+		allowOrigin: func() string {
+			if len(allowOrigins) > 0 {
+				return allowOrigins[0]
+			}
+			return ""
+		}(),
+		mux: http.NewServeMux(),
 	}
 	s.runDirFn = func(runID string) string { return svc.RunDir(runID) }
 	s.projectIDFn = func(runID string) string {
@@ -85,7 +92,7 @@ func New(svc *service.Service, b *bus.Bus, token, version, provenance string) *S
 // sent. The desktop app cannot talk to the engine at all without this.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
-		setCORS(w, r)
+		s.setCORS(w, r)
 		if w.Header().Get("Access-Control-Allow-Origin") == "" {
 			// Unknown origin: refuse rather than answer a preflight we would
 			// not honour anyway.
@@ -96,7 +103,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	setCORS(w, r)
+	s.setCORS(w, r)
 	s.mux.ServeHTTP(w, r)
 }
 
@@ -144,18 +151,22 @@ var allowedOrigins = map[string]bool{
 }
 
 func setCORS(w http.ResponseWriter, r *http.Request) {
+	(&Server{}).setCORS(w, r)
+}
+
+func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return // non-browser client; no CORS headers needed
 	}
-	if !allowedOrigins[origin] {
+	if !allowedOrigins[origin] && (s.allowOrigin == "" || s.allowOrigin != origin) {
 		// A refused origin is the single hardest failure to diagnose from the
 		// client side: the browser reports only "Load failed" and never says
 		// which origin was rejected. Say it here.
 		log.Printf("cors: refused origin %q (allowed: %s)", origin, allowedOriginList())
 		return
 	}
-	if allowedOrigins[origin] {
+	if allowedOrigins[origin] || (s.allowOrigin != "" && s.allowOrigin == origin) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		// X-Ducklab-Client must be listed: the engine REQUIRES it for version
@@ -1655,7 +1666,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	setCORS(w, r)
+	s.setCORS(w, r)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

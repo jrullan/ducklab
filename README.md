@@ -144,14 +144,27 @@ happily install a stale one.
 
 ## Frontend development without the desktop
 
-To exercise the frontend against the lightweight fake engine, run the engine and
-Vite in separate terminals, then open the browser with its connection details:
+To exercise the frontend in a browser, run the engine and Vite in separate
+terminals, then open the browser with its connection details. The fake engine is
+the quickest option; the same flow can use a real engine with its opt-in CORS
+flag:
 
 ```bash
+# Fast, scripted data (recommended for UI work)
 go run ./cmd/fake-engine --port 8787 --token fake-token
 npm run dev --prefix frontend
 # open http://localhost:5173/?engine=http://127.0.0.1:8787&token=fake-token
+
+# Or use real engine data (development only; keep the origin explicit)
+go run ./cmd/ducklab-engine --allow-origin http://localhost:5173
+npm run dev --prefix frontend
+# open http://localhost:5173/?engine=http://127.0.0.1:<engine-port>&token=<engine-token>
 ```
+
+The real engine remains same-origin restricted by default. `--allow-origin`
+enables exactly one browser origin and is intended for local frontend development
+and visual audits; it does not change authentication or the loopback bind. Without
+this flag, a browser's cross-origin failure can look like a dead session.
 
 The `engine` and `token` query parameters are available only in Vite dev
 builds. They can also be supplied as `VITE_DUCKLAB_ENGINE` and
