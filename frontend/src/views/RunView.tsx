@@ -547,6 +547,20 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // used a quarter of its budget.
   const limit = (runIsLive ? live?.limit : run.budget?.limit ?? live?.limit) ??
     run.budget?.limit ?? { tokens: 400000, usd: 2, turns: 24, wallclock_s: 3600 };
+  // Wall clock is the operator's cost, not just another model budget. The
+  // engine records it in milliseconds; while a run is live, use the start
+  // timestamp so the spent figure does not wait for the terminal record.
+  const recordedWallclockMs = run.wallclock_ms;
+  const elapsedMs = runIsLive && run.started_at
+    ? Math.max(0, nowTick - Date.parse(run.started_at))
+    : Number.isFinite(recordedWallclockMs)
+      ? Math.max(0, recordedWallclockMs ?? 0)
+      : Number.isFinite(budget?.wallclock_s)
+        ? Math.max(0, (budget?.wallclock_s ?? 0) * 1000)
+        : run.ended_at
+          ? Math.max(0, Date.parse(run.ended_at) - Date.parse(run.started_at))
+          : 0;
+  const elapsedLabel = `${Math.floor(elapsedMs / 60_000)}m`;
 
   // A run is still working while it runs or waits its turn, and while it is
   // paused — a pause is a waiting state, not an ending (01 §7.1).
@@ -1832,7 +1846,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                what it actually spent, spenders beneath. */
             <div className="rounded-card border border-hairline p-3" data-testid="spent-line">
               <div className="text-sm text-ink-muted">spent</div>
-              <div className="mt-1 text-sm text-ink tabular-nums">{money(budget.usd)} · {tokens(budget.tokens)} tokens · {Math.round(budget.turns)} turn{Math.round(budget.turns) === 1 ? "" : "s"}</div>
+              <div className="mt-1 text-sm text-ink tabular-nums" data-testid="spent-header">{money(budget.usd)} · {tokens(budget.tokens)} tokens · {Math.round(budget.turns)} turn{Math.round(budget.turns) === 1 ? "" : "s"} · {elapsedLabel}</div>
               <dl className="mt-2 border-t border-hairline pt-2 text-xs" data-testid="spend-by-duckling-done">
                 {perDuckling.filter(([, v]) => (v?.calls ?? 0) > 0).map(([id, v]) => (
                   <div key={id} className="flex justify-between gap-2">
@@ -1846,6 +1860,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {budget && !finished && (
             <div className="rounded-card border border-hairline p-3">
               <div className="text-sm text-ink-muted">budget</div>
+              <div className="mt-1 text-sm text-ink tabular-nums" data-testid="budget-header">{money(budget.usd)} · {tokens(budget.tokens)} tokens · {Math.round(budget.turns)} turn{Math.round(budget.turns) === 1 ? "" : "s"} · {elapsedLabel}</div>
               <div className="mt-2 flex flex-col gap-2">
                 {/* While the run lives, each cap carries its own "no cap"
                     checkbox: a run near a ceiling gets headroom in place —

@@ -100,6 +100,8 @@ export interface Run {
   no_changes?: boolean;
   started_at: string;
   ended_at?: string;
+  /** Recorded wall-clock duration of the run, in milliseconds. */
+  wallclock_ms?: number;
   roster?: Record<string, string>;
   /** Where each seated role came from: project, settings, request, or spread. */
   roster_sources?: Record<string, string>;

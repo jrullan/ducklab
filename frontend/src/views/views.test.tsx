@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Settings } from "./Settings";
 import { RunView } from "./RunView";
 import { useRuns } from "../store/runs";
@@ -195,6 +195,34 @@ describe("RunView", () => {
     const turn = screen.getByTestId("conversation-turn");
     expect(turn.getAttribute("data-anonymous")).toBe("true");
     expect(container.querySelector('[data-testid="conversation"]')!.innerHTML).not.toContain("pato-uno");
+  });
+
+  it("shows recorded wall clock in the spent header", () => {
+    useRuns.getState().setRun({
+      ...run,
+      status: "done",
+      wallclock_ms: 47 * 60 * 1000,
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.getByTestId("spent-header").textContent).toContain("· 47m");
+  });
+
+  it("ticks the live budget header wall clock", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-26T12:00:00Z"));
+      useRuns.getState().setRun({
+        ...run,
+        status: "running",
+        started_at: "2026-07-26T12:00:00Z",
+      });
+      render(<RunView runId="r-1" client={okClient()} />);
+      expect(screen.getByTestId("budget-header").textContent).toContain("· 0m");
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(screen.getByTestId("budget-header").textContent).toContain("· 1m");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
