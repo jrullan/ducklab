@@ -80,6 +80,9 @@ func TestProjectRecoveryDoors(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			s := serviceWithDucklings(t, "pato-uno")
 			id, dir, sha := acceptedOrphan(t, s)
+			// Git commit timestamps have second resolution. Crossing that boundary
+			// makes an unpinned cherry-pick produce a different object ID.
+			time.Sleep(1100 * time.Millisecond)
 			if err := s.RecoverRuns(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -94,10 +97,9 @@ func TestProjectRecoveryDoors(t *testing.T) {
 			if err != nil || string(got) != "orphaned work\n" {
 				t.Fatalf("recovered file = %q, %v", got, err)
 			}
-			// Cherry-pick normally creates a commit with the same identity as the
-			// orphan, but its committer timestamp is wall-clock dependent. Under
-			// concurrent gate load it can cross a second and produce a different
-			// SHA; the recovered content above is the stable contract.
+			if action == "cherry-pick-chain" && landed != sha {
+				t.Fatalf("cherry-pick recovery SHA = %s, want original orphan SHA %s", landed, sha)
+			}
 			if action == "restore-as-fresh-commit" && landed == sha {
 				t.Fatal("fresh recovery reused original commit")
 			}
