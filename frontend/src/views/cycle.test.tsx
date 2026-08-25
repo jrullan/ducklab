@@ -141,6 +141,42 @@ describe("Cycle", () => {
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
     await waitFor(() => expect(asked.some((p) => p.includes("/artifacts/plan"))).toBe(true));
   });
+
+  it("filters mixed stages and does not render an overlapping section twice", async () => {
+    const mixed = {
+      ...REQUIREMENTS,
+      sections: [
+        { id: "REQ-001", title: "Accepted requirement", body: "Keep this." },
+        { id: "SPEC-008", title: "Spec detail", body: "Do not leak this." },
+        { id: "M-001", title: "Plan milestone", body: "Do not leak this either." },
+      ],
+      proposal: {
+        diff: "",
+        run_id: "r-1",
+        sections: [
+          { id: "REQ-001", title: "Accepted requirement", body: "Keep this." },
+          { id: "SPEC-008", title: "Spec detail", body: "Do not leak this." },
+        ],
+      },
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/")) return json(mixed);
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    const proposal = await screen.findByTestId("cycle-proposal");
+    expect(proposal).toHaveTextContent("REQ-001");
+    expect(proposal).not.toHaveTextContent("SPEC-008");
+    expect(proposal).not.toHaveTextContent("M-001");
+    expect(screen.getAllByText("REQ-001", { exact: true })).toHaveLength(1);
+    expect(screen.queryByText("SPEC-008", { exact: true })).toBeNull();
+
+    fireEvent.click(screen.getByTestId("cycle-tab-spec"));
+    await waitFor(() => expect(screen.getAllByText("SPEC-008", { exact: true })).toHaveLength(1));
+    expect(screen.queryByText("REQ-001", { exact: true })).toBeNull();
+  });
 });
 
 const PLAN = {

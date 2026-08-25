@@ -360,7 +360,14 @@ export function Cycle({
     }
   }
 
-  const sections = artifact?.sections ?? [];
+  // Artifact responses can contain sections from more than one lifecycle
+  // stage (for example, a mixed fixture or a document assembled from several
+  // sources). A tab must show only its own namespace; using the document kind
+  // here is not enough because the response's sections are the rendered data.
+  // Also collapse repeated ids: an id is the stable identity of a section, so
+  // rendering it twice creates contradictory cards and duplicate React keys.
+  const sections = sectionsForStage(artifact?.sections ?? [], active.stage);
+  const proposalSections = sectionsForStage(artifact?.proposal?.sections ?? [], active.stage);
   // Only the breaks this stage can answer for: showing a plan's dangling
   // references while the user is reading requirements is noise.
   //
@@ -534,10 +541,17 @@ export function Cycle({
             )}
             {proposalAsDiff ? (
               <DiffView files={parseDiff(artifact.proposal.diff)} />
-            ) : artifact.proposal.sections && artifact.proposal.sections.length > 0 ? (
+            ) : proposalSections.length > 0 ? (
               <ol className="space-y-3" data-testid="proposal-sections">
-                {artifact.proposal.sections.map((s) => (
-                  <SectionCard key={s.id} section={s} broken={new Set()} />
+                {proposalSections.map((s) => (
+                  <SectionCard
+                    key={s.id}
+                    section={s}
+                    broken={new Set()}
+                    tasks={tasks}
+                    traceDown={traceDown[s.id]}
+                    isPlan={active.stage === "plan"}
+                  />
                 ))}
               </ol>
             ) : artifact.proposal.markdown ? (
@@ -956,11 +970,16 @@ export function Cycle({
           </section>
         )}
 
-        <ol className="space-y-3">
-          {sections.map((s) => (
-            <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} />
-          ))}
-        </ol>
+        {/* When a proposal includes parsed sections, it is the document being
+            decided on. Do not print the approved copy underneath it as well:
+            the same stable section id would appear twice on the page. */}
+        {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
+          <ol className="space-y-3">
+            {sections.map((s) => (
+              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} />
+            ))}
+          </ol>
+        )}
       </div>
 
       <aside data-testid="trace-rail" className="w-72 shrink-0">
@@ -1066,6 +1085,24 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }:
       )}
     </li>
   );
+}
+
+function sectionsForStage(sections: readonly Section[], stage: string): Section[] {
+  const seen = new Set<string>();
+  const belongsToStage = (id: string) =>
+    stage === "intake"
+      ? id.startsWith("REQ-")
+      : stage === "spec"
+        ? id.startsWith("SPEC-")
+        : id.startsWith("M-") || id.startsWith("T-");
+  const filter = (items: readonly Section[]): Section[] => items.flatMap((section) => {
+    // Section ids are the engine's stage attribution. Do not let a mixed
+    // artifact leak spec/plan material into the Requirements tab.
+    if (!belongsToStage(section.id) || seen.has(section.id)) return [];
+    seen.add(section.id);
+    return [{ ...section, children: section.children ? filter(section.children) : section.children }];
+  });
+  return filter(sections);
 }
 
 function taskIdsFromTrace(value: unknown): string[] {
