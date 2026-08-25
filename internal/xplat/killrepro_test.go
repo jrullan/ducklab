@@ -2,7 +2,9 @@ package xplat
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +17,7 @@ import (
 // of the contract: the call RETURNS promptly at timeout, and the whole
 // process GROUP is dead afterwards.
 func TestShellContextKillsTheWholeGroupAtTimeout(t *testing.T) {
-	marker := "xplat_killrepro_sleeper"
+	marker := "xplat_killrepro_sleeper_" + strconv.Itoa(os.Getpid())
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 	c := ShellContext(ctx, t.TempDir(), nil,
