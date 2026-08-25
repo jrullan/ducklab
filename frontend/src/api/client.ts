@@ -550,9 +550,17 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** Request context is diagnostic detail, not part of the user-facing sentence. */
+    readonly method?: string,
+    readonly path?: string,
   ) {
     super(message);
     this.name = "ApiError";
+  }
+
+  /** String coercion is used by a few legacy call sites; never expose the JS error label. */
+  override toString() {
+    return this.message;
   }
 }
 
@@ -655,8 +663,11 @@ export class EngineClient {
         this.stale = "older";
         this.opts.onStale?.("older");
         throw new ApiError(
-          `the engine does not know ${method} ${path} — it is older than this app. Restart the engine.`,
+          "it is older than this app. Restart the engine.",
           res.status,
+          undefined,
+          method,
+          path,
         );
       }
       // The inverse: the engine was restarted OUTSIDE the app, this window's
@@ -692,9 +703,11 @@ export class EngineClient {
         );
       }
       throw new ApiError(
-        err?.message ?? `${method} ${path} failed (${res.status}${text ? `: ${text.slice(0, 120)}` : ""})`,
+        err?.message ?? (text ? `${text.slice(0, 120)} (${res.status})` : `The engine could not complete that request. (${res.status})`),
         res.status,
         err?.code,
+        method,
+        path,
       );
     }
     return parsed as T;

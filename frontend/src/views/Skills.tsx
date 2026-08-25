@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { EngineClient, SkillSummary, SkillDetail } from "../api/client";
+import { ErrorCard } from "../components/ErrorCard";
 
 /** The skills loop's desktop surface (spec 08 §4.9, AC-57). The engine, CLI
  * and tool belt have carried skills since v0.5 while the desktop showed
@@ -12,7 +13,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
   const [skills, setSkills] = useState<SkillSummary[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newRunnable, setNewRunnable] = useState(false);
@@ -28,7 +29,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
     client
       .skills(projectId)
       .then((r: { items?: SkillSummary[] }) => setSkills(r.items ?? []))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(e));
   }, [client, projectId]);
   useEffect(() => {
     setSkills(null);
@@ -53,7 +54,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
     client
       .skillGet(projectId, name)
       .then(setDetail)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => setError(e));
   };
 
   const create = async () => {
@@ -64,7 +65,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       setNewName("");
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e);
     }
   };
 
@@ -80,7 +81,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       const d = await client.skillGet(projectId, name);
       setDetail(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e);
     } finally {
       setSaving(false);
     }
@@ -94,7 +95,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       setDetail(null);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e);
     }
   };
 
@@ -108,7 +109,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       const r = await client.skillRun(projectId, sk.name ?? "", args);
       setRunOut({ name: sk.name ?? "", output: r.output ?? "", failed: r.failed ?? false });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e);
     } finally {
       setRunning(false);
     }
@@ -141,11 +142,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
         </button>
       </div>
 
-      {error && (
-        <p className="mb-2 text-xs text-warn" data-testid="skills-error">
-          {error}
-        </p>
-      )}
+      {error ? <ErrorCard error={error} testId="skills-error" /> : null}
 
       {creating && (
         <section className="mb-4 rounded-card border border-hairline bg-surface2 p-3" data-testid="skill-new">
@@ -184,7 +181,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
         </section>
       )}
 
-      {skills === null ? (
+      {error ? null : skills === null ? (
         <p className="text-sm text-ink-muted">Loading…</p>
       ) : skills.length === 0 ? (
         <p className="text-sm text-ink-muted" data-testid="skills-empty">
