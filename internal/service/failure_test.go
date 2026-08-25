@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -48,6 +51,36 @@ func TestAFailedRunSaysWhyItFailed(t *testing.T) {
 
 // The reason belongs to failed runs. A paused run is waiting, not broken, and a
 // red banner on one would read as a failure that never happened.
+func TestConfigShapedFailureEmitsDoctorFinding(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend", "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{ID: "r-config", ProjectID: id, TaskID: "T-001", Status: "running", StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	writer, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: run, writer: writer, runDir: writer.RunDir(), projectPath: dir, done: make(chan struct{})}
+	s.failRun(rs, fmt.Errorf("acceptance checkout lacks frontend/node_modules"))
+	writer.Close()
+
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == "config_amendment" && event.Data["key"] == "verify.link_deps" && event.Data["new"] == "frontend/node_modules" {
+			return
+		}
+	}
+	t.Fatal("config-shaped failure did not emit verify.link_deps amendment")
+}
+
 func TestASucceedingRunCarriesNoFailure(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

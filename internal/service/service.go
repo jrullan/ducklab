@@ -2339,11 +2339,45 @@ func (s *Service) failRun(rs *runState, err error) {
 	rs.run.Failure = err.Error()
 	s.emitEscalationAtDecision(rs, "failed_run")
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	// A configuration-shaped failure needs a door to the consultant, not just
+	// its raw error. The finding is recorded on this failed run so the desktop
+	// can seed that consultation without changing configuration on its own.
+	if finding, ok := configFindingForFailure(rs.projectPath, err); ok {
+		old := ""
+		if cfg, loadErr := config.LoadProject(filepath.Join(rs.projectPath, ".ducklab", "project.toml")); loadErr == nil {
+			old, _ = config.ValueKey(cfg, finding.Key)
+		}
+		rs.writer.AppendEvent("config_amendment", map[string]interface{}{
+			"key": finding.Key, "old": old, "new": finding.Proposed, "why": finding.Reason,
+		})
+	}
 	rs.writer.AppendEvent("error", map[string]interface{}{"error": err.Error()})
 	rs.writer.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})
 	restoreAfterUnaccepted(rs)
 	rs.writer.WriteState()
 	s.autopilotOnFail(rs.run)
+}
+
+// configFindingForFailure connects a failure to a deterministic doctor finding
+// only when the failure names that setting or its proposed value. A project can
+// have unrelated doctor findings; surfacing one of those would misdiagnose the
+// run and send the consultant an invented premise.
+func configFindingForFailure(projectPath string, err error) (config.Finding, bool) {
+	if projectPath == "" || err == nil {
+		return config.Finding{}, false
+	}
+	findings, doctorErr := config.Doctor(projectPath)
+	if doctorErr != nil {
+		return config.Finding{}, false
+	}
+	detail := strings.ToLower(err.Error())
+	for _, finding := range findings {
+		if strings.Contains(detail, strings.ToLower(finding.Key)) ||
+			(len(finding.Proposed) > 3 && strings.Contains(detail, strings.ToLower(finding.Proposed))) {
+			return finding, true
+		}
+	}
+	return config.Finding{}, false
 }
 
 // tailOf keeps the end of a long output — the part where test runners put
