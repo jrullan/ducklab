@@ -80,8 +80,6 @@ func TestProjectRecoveryDoors(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			s := serviceWithDucklings(t, "pato-uno")
 			id, dir, sha := acceptedOrphan(t, s)
-			// Git commit timestamps have second resolution. Crossing that boundary
-			// makes an unpinned cherry-pick produce a different object ID.
 			time.Sleep(1100 * time.Millisecond)
 			if err := s.RecoverRuns(context.Background()); err != nil {
 				t.Fatal(err)
