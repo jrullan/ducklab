@@ -63,7 +63,37 @@ const ACTIONABLE = new Set(["now", "board", "cycle", "runs", "run", "release"]);
  * Collapsible to a thin counted strip, and the choice survives: guidance
  * for the first weeks, a pulse for after.
  */
-export function GuideRail({ client, projectId, view = "now" }: { client: EngineClient; projectId: string; view?: string }) {
+export function AutopilotControl({ client, projectId }: { client: EngineClient; projectId: string }) {
+  const [ap, setAp] = useState<AutopilotState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!projectId) return;
+    client.autopilot(projectId).then(setAp).catch(() => setAp(null));
+  }, [client, projectId]);
+  useEffect(() => {
+    if (!projectId || !ap?.on) return;
+    const t = setInterval(() => client.autopilot(projectId).then(setAp).catch(() => {}), 4000);
+    return () => clearInterval(t);
+  }, [client, projectId, ap?.on]);
+  const toggle = () => {
+    setBusy(true);
+    client.autopilotSet(projectId, !(ap?.on ?? false)).then(setAp).catch(() => {}).finally(() => setBusy(false));
+  };
+  return (
+    <section data-testid="sidebar-autopilot" className="border-t border-hairline pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-ink-muted">autopilot</span>
+        <button type="button" data-testid="autopilot-toggle" disabled={busy} onClick={toggle} className={`rounded border px-2 py-0.5 text-xs ${ap?.on ? "border-good text-good" : "border-hairline text-ink-muted"}`}>
+          {ap?.on ? "on — stop" : "start"}
+        </button>
+      </div>
+      {ap?.on && <p className="mt-1 text-xs text-ink-muted" data-testid="autopilot-status">{ap.started}/{ap.max_tasks} tasks started · {ap.last_action || "…"}</p>}
+      {!ap?.on && ap?.stopped_reason && <p className="mt-1 text-xs text-serious" data-testid="autopilot-stopped">{ap.stopped_reason}</p>}
+    </section>
+  );
+}
+
+export function GuideRail({ client, projectId, view = "now", section = "all", embedded = false }: { client: EngineClient; projectId: string; view?: string; section?: "all" | "steps" | "recent"; embedded?: boolean }) {
   const [steps, setSteps] = useState<NextStep[]>([]);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [consultant, setConsultant] = useState("");
@@ -97,6 +127,7 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   }, [client]);
   useEffect(() => {
     if (!projectId) return;
+    if (typeof client.RosterGet !== "function") return;
     client.RosterGet(projectId, "common")
       .then((roster) => {
         const entry = roster.entries.find((item) => item.role === "consultant");
@@ -104,32 +135,6 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
       })
       .catch(() => setConsultant(""));
   }, [client, projectId]);
-  // The autopilot's state, refreshed on the same pulse as the guide: its
-  // whole point is acting between the person's glances.
-  const [ap, setAp] = useState<AutopilotState | null>(null);
-  const [apBusy, setApBusy] = useState(false);
-  useEffect(() => {
-    if (!projectId) return;
-    client.autopilot(projectId).then(setAp).catch(() => setAp(null));
-  }, [client, projectId, runs]);
-  // While the loop is ON its state changes between run events — "starting"
-  // becomes "needs you: …" with no run to pulse the rail — so it polls.
-  useEffect(() => {
-    if (!projectId || !ap?.on) return;
-    const t = setInterval(() => {
-      client.autopilot(projectId).then(setAp).catch(() => {});
-    }, 4000);
-    return () => clearInterval(t);
-  }, [client, projectId, ap?.on]);
-  const toggleAutopilot = () => {
-    if (!ap && !projectId) return;
-    setApBusy(true);
-    client
-      .autopilotSet(projectId, !(ap?.on ?? false))
-      .then(setAp)
-      .catch(() => {})
-      .finally(() => setApBusy(false));
-  };
 
   // The live pulse, above the plan: what is happening outranks what is next,
   // and the rail is the one place both survive every view change.
@@ -138,7 +143,8 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   );
   const live = useRuns((s) => s.spend);
 
-  if (steps.length === 0 && active.length === 0) return null;
+  if (section === "steps" && steps.length === 0) return null;
+  if (section !== "recent" && steps.length === 0 && active.length === 0) return null;
 
   if (!open) {
     return (
@@ -161,9 +167,11 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
   return (
     <aside
       data-testid="guide-rail"
-      className="flex h-full max-h-full w-60 shrink-0 flex-col border-r border-hairline p-3"
+      className={`${embedded ? "flex w-full" : "absolute left-full top-0 z-20 w-60"} max-h-full shrink-0 flex-col border-r border-hairline bg-page p-3 shadow`}
     >
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      {(section === "all" || section === "steps") && (
+      <>
       {/* First thing in the panel, because it acts on ALL of it — parked
           beside "next steps" it read as hiding that one section. */}
       <div className="mb-2 flex justify-end">
@@ -195,33 +203,6 @@ export function GuideRail({ client, projectId, view = "now" }: { client: EngineC
           guide's own next step whenever that step is mechanical, and idles —
           saying why — when a human gate stands. Off with a reason: the rail
           says what stopped it instead of showing a silently cleared toggle. */}
-      <section data-testid="rail-autopilot" className="mb-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-ink-muted">autopilot</span>
-          <button
-            type="button"
-            data-testid="autopilot-toggle"
-            disabled={apBusy}
-            onClick={toggleAutopilot}
-            className={`rounded border px-2 py-0.5 text-xs ${
-              ap?.on ? "border-good text-good" : "border-hairline text-ink-muted"
-            }`}
-          >
-            {ap?.on ? "on — stop" : "start"}
-          </button>
-        </div>
-        {ap?.on && (
-          <p className="mt-1 text-xs text-ink-muted" data-testid="autopilot-status">
-            {ap.started}/{ap.max_tasks} tasks started · {ap.last_action || "…"}
-          </p>
-        )}
-        {!ap?.on && ap?.stopped_reason && (
-          <p className="mt-1 text-xs text-serious" data-testid="autopilot-stopped">
-            {ap.stopped_reason}
-          </p>
-        )}
-      </section>
-
       <h2 className="text-xs text-ink-muted">next steps</h2>
       {/* The first step is THE next step: headline and why. The rest are one
           line each — verb and object, the sentence on hover — capped at
@@ -292,13 +273,15 @@ ${r.output.slice(-600)}`))
           preselectedDuckling={consultant}
         />
       </div>
+      </>
+      )}
       </div>
-      <RecentRuns runs={runs} projectId={projectId} />
+      {(section === "all" || section === "recent") && <RecentRuns runs={runs} projectId={projectId} />}
     </aside>
   );
 }
 
-function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId: string }) {
+export function RecentRuns({ runs, projectId }: { runs: Record<string, Run>; projectId: string }) {
   const completed = Object.values(runs)
     .filter((run) => run.project_id === projectId && (run.status === "done" || run.status === "failed" || run.status === "queued"))
     .sort((a, b) => b.started_at.localeCompare(a.started_at))

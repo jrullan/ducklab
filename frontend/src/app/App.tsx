@@ -11,7 +11,6 @@ import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
-import { GuideRail } from "../components/GuidePanel";
 import { Cycle } from "../views/Cycle";
 import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
@@ -103,8 +102,10 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
     { label: "Releases", route: { name: "release" } },
     { label: "Bench", route: { name: "bench" } },
   ],
+
   Config: [
     { label: "Settings", route: { name: "settings" } },
+    { label: "Ducklings", route: { name: "ducklings" } },
     { label: "Roster", route: { name: "roster" } },
     { label: "Skills", route: { name: "skills" } },
     { label: "Projects", route: { name: "projects" } },
@@ -461,10 +462,8 @@ export function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* The guide rail lives beside every view, not inside one: following
-            a step changes the view, and a thread you can only see from one
-            room is not a thread. */}
-        {client && projectId && <GuideRail client={client} projectId={projectId} view={route.name} />}
+        {/* The utility drawer is anchored to the sidebar; content owns the
+            full-width workspace without a second permanent rail. */}
         <main
           aria-readonly={stale ? "true" : undefined}
           data-testid={stale ? "stale-read-only" : undefined}

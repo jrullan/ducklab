@@ -22,6 +22,7 @@ import { moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
+import { GuideRail } from "../components/GuidePanel";
 
 export function Now({ client, projectId }: { client: EngineClient; projectId: string }) {
   const runs = useRuns((s) => s.runs);
@@ -156,7 +157,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   };
 
   return (
-    <div className="mx-auto max-w-3xl p-4" data-testid="now-view">
+    <div className="relative mx-auto max-w-3xl p-4" data-testid="now-view">
+      {client && projectId && <GuideRail client={client} projectId={projectId} section="steps" embedded />}
       {/* The rail carries the always-visible pulse; this is the fuller view
           with live spend, in the inbox's own flow. */}
       {active.length > 0 && (

@@ -16,6 +16,7 @@ import { runLabel } from "../lib/runview";
 import { money } from "../lib/format";
 import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
+import { RecentRuns } from "../components/GuidePanel";
 
 const FILTERS = ["all", "waiting", "running", "done", "landed", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -80,6 +81,7 @@ export function Runs({ runs }: { runs: Run[] }) {
 
   return (
     <div data-testid="runs-view">
+      <RecentRuns runs={Object.fromEntries(runs.map((r) => [r.id, r]))} projectId={runs[0]?.project_id ?? ""} />
       <div className="mb-3 flex items-center gap-2">
         {FILTERS.map((f) => (
           <button
