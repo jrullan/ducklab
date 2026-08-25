@@ -130,6 +130,12 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects/{id}", f.auth(f.project))
 	f.mux.HandleFunc("GET /v1/projects/{id}/status", f.auth(f.projectStatus))
 	f.mux.HandleFunc("GET /v1/ducklings", f.auth(f.ducklings))
+	f.mux.HandleFunc("GET /v1/providers", f.auth(f.providers))
+	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
+	f.mux.HandleFunc("GET /v1/projects/{id}/roster", f.auth(f.roster))
+	f.mux.HandleFunc("GET /v1/projects/{id}/skills", f.auth(f.skills))
+	f.mux.HandleFunc("GET /v1/projects/{id}/tasks", f.auth(f.tasks))
+	f.mux.HandleFunc("GET /v1/projects/{id}/bugs", f.auth(f.bugs))
 	f.mux.HandleFunc("GET /v1/runs", f.auth(f.runs))
 	f.mux.HandleFunc("GET /v1/runs/{id}", f.auth(f.runGet))
 	f.mux.HandleFunc("GET /v1/runs/{id}/diff", f.auth(f.runDiff))
@@ -364,6 +370,36 @@ func (f *fakeEngine) ducklings(w http.ResponseWriter, r *http.Request) {
 				"cost": map[string]interface{}{"input_per_mtok": 0.2, "output_per_mtok": 0.6}},
 		}, "total": 2,
 	})
+}
+
+func (f *fakeEngine) providers(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{
+		{"id": "beelink", "kind": "openai", "base_url": "http://127.0.0.1:8080", "api_key_env": "BEELINK_API_KEY", "key_present": true},
+		{"id": "openrouter", "kind": "openai", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "key_present": true},
+	}, "total": 2})
+}
+
+func (f *fakeEngine) budgetDefaults(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"max_usd": 10.0, "max_tokens": 400000, "max_turns": 20, "max_wallclock_s": 1800})
+}
+
+func (f *fakeEngine) roster(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"entries": []map[string]interface{}{
+		{"role": "implementer", "duckling": "pato-uno", "source": "default"},
+		{"role": "reviewer", "duckling": "pato-dos", "source": "default"},
+	}, "warning": "fake roster for mode " + r.URL.Query().Get("mode")})
+}
+
+func (f *fakeEngine) skills(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{{"name": "example", "description": "A scripted example skill", "scope": "project"}}, "total": 1})
+}
+
+func (f *fakeEngine) tasks(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{{"id": "T-001", "title": "Implement the example", "milestone": "M-001", "status": "todo"}}, "total": 1})
+}
+
+func (f *fakeEngine) bugs(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{{"id": "B-001", "title": "Example issue", "status": "open", "severity": "medium"}}, "total": 1})
 }
 
 func (f *fakeEngine) runs(w http.ResponseWriter, r *http.Request) {
