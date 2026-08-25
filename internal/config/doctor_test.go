@@ -26,6 +26,9 @@ func TestDoctorFindingsAndDeterminism(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "frontend", "package.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,7 @@ build = "pair"
 	want := []Finding{
 		{Key: "verify.link_deps", Proposed: "frontend/node_modules", Reason: "frontend is present but its node_modules is not linked into acceptance checkouts"},
 		{Key: "github.enabled", Proposed: "true", Reason: "a git remote is configured but no remote or github configuration declares how ducklab should use it"},
-		{Key: "verify.tests", Proposed: "", Reason: "the selected verify mode has no command"},
+		{Key: "verify.tests", Proposed: "npm test", Reason: "the selected verify mode has no command"},
 		{Key: "budget.max_usd", Proposed: "5", Reason: "the project budget is zero"},
 		{Key: "shell.allow_prefixes", Proposed: "npm ", Reason: "the project toolchain is not allowed by shell policy"},
 		{Key: "mode_seats.pair.implementer", Proposed: "", Reason: "a mode in use has no configured required seat"},

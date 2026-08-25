@@ -141,7 +141,7 @@ func defaultVerifyCommand(root string) string {
 func detectedTools(root string) []string {
 	tools := []string{}
 	for _, x := range []struct{ file, tool string }{{"go.mod", "go "}, {"package.json", "npm "}, {"frontend/package.json", "npm "}, {"Cargo.toml", "cargo "}, {"pyproject.toml", "python "}, {"Makefile", "make "}} {
-		if _, err := os.Stat(filepath.Join(root, x.file)); err == nil {
+		if _, err := os.Stat(filepath.Join(root, x.file)); err == nil && !contains(tools, x.tool) {
 			tools = append(tools, x.tool)
 		}
 	}
