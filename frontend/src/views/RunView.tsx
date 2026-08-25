@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer } from "../api/client";
+import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer, Section } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
 import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
@@ -29,6 +29,39 @@ import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from 
 import { runLabel } from "../lib/runview";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
+
+type TraceCrumb = { id: string; kind?: string; title?: string; body?: string };
+
+type TraceNode = TraceCrumb & { up?: string[]; down?: string[] };
+
+/** traceShow returns one node: its neighbours are ids, not embedded crumbs.
+ * Keep the walk here so the panel tells the truth about the spine the engine
+ * found instead of mistaking the neighbour ids for document text. */
+function traceNode(value: unknown): TraceNode | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.id !== "string") return null;
+  return {
+    id: v.id,
+    kind: typeof v.kind === "string" ? v.kind : undefined,
+    title: typeof v.title === "string" ? v.title : undefined,
+    body: typeof v.body === "string" ? v.body : undefined,
+    up: Array.isArray(v.up) ? v.up.filter((id): id is string => typeof id === "string") : [],
+    down: Array.isArray(v.down) ? v.down.filter((id): id is string => typeof id === "string") : [],
+  };
+}
+
+function traceKind(crumb: TraceCrumb): string {
+  const kind = (crumb.kind ?? "").toLowerCase();
+  if (kind) return kind;
+  return crumb.id.toLowerCase().split("-")[0] ?? "";
+}
+
+function traceHref(crumb: TraceCrumb): string {
+  const kind = traceKind(crumb);
+  const stage = kind.includes("require") || kind === "req" ? "intake" : kind.includes("spec") ? "spec" : "plan";
+  return `#/cycle/${stage}?section=${encodeURIComponent(crumb.id)}`;
+}
 
 /** The Run view: conversation lanes, gate and budget, tool timeline, tabs. */
 /** Where this run sits in the development cycle, at a glance.
@@ -235,6 +268,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // `accepted: false` — it was never accepted — so the relaunch panel sat on
   // every old failure in the project's history offering to redo finished work.
   const [task, setTask] = useState<Task | null>(null);
+  const [originTrace, setOriginTrace] = useState<TraceCrumb[] | null>(null);
   const [anyway, setAnyway] = useState(false);
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
@@ -297,6 +331,45 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       .tasks(projectId)
       .then((all) => setTask(all.find((t) => t.id === taskId) ?? null))
       .catch(() => setTask(null));
+  }, [client, projectId, taskId]);
+
+  // traceShow returns one node at a time. Follow its upstream ids until the
+  // requirement, then read the requirement artifact for the actual sentence.
+  useEffect(() => {
+    let live = true;
+    if (!projectId || !taskId) {
+      setOriginTrace([]);
+      return () => { live = false; };
+    }
+    setOriginTrace(null);
+    void (async () => {
+      try {
+        const seen = new Set<string>();
+        const chain: TraceCrumb[] = [];
+        let id: string | undefined = taskId;
+        while (id && !seen.has(id) && chain.length < 20) {
+          seen.add(id);
+          const node = traceNode(await client.traceShow(projectId, id));
+          if (!node) break;
+          chain.push(node);
+          if ((traceKind(node).includes("require") || traceKind(node) === "req") || node.id.toLowerCase().startsWith("req")) break;
+          id = node.up?.[0];
+        }
+        const requirement = chain.find((crumb) => traceKind(crumb).includes("require") || traceKind(crumb) === "req" || crumb.id.toLowerCase().startsWith("req"));
+        if (requirement && !requirement.body) {
+          try {
+            const artifact = await client.artifact(projectId, "requirements");
+            const flatten = (sections: Section[] | null | undefined): Section[] => (sections ?? []).flatMap((section) => [section, ...flatten(section.children)]);
+            const section = flatten(artifact.sections)?.find((candidate) => candidate.id === requirement.id);
+            if (section) requirement.body = section.body;
+          } catch { /* title remains an honest fallback when the document is unavailable */ }
+        }
+        if (live) setOriginTrace(chain.length > 1 ? chain.reverse() : []);
+      } catch {
+        if (live) setOriginTrace([]);
+      }
+    })();
+    return () => { live = false; };
   }, [client, projectId, taskId]);
 
   useEffect(() => {
@@ -1857,6 +1930,34 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           >
             hide
           </button>
+          {originTrace !== null && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-origin-panel">
+              {originTrace.length === 0 ? (
+                <p className="text-sm text-ink-muted" data-testid="run-origin-none">this run has no document behind it — worth knowing</p>
+              ) : (() => {
+                const requirement = originTrace.find((crumb) => {
+                  const kind = traceKind(crumb);
+                  return kind.includes("require") || kind === "req" || crumb.id.toLowerCase().startsWith("req");
+                }) ?? originTrace[originTrace.length - 1];
+                const sentence = (requirement?.body ?? requirement?.title ?? "").trim();
+                const firstSentence = sentence.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() || sentence;
+                return (
+                  <>
+                    <h2 className="text-sm font-medium text-ink">why this run exists</h2>
+                    {firstSentence && <blockquote className="mt-2 text-sm italic text-ink" data-testid="run-origin-requirement">“{firstSentence}”</blockquote>}
+                    <nav className="mt-3 flex flex-wrap items-center gap-1 text-xs" aria-label="document chain" data-testid="run-origin-breadcrumb">
+                      {originTrace.map((crumb, index) => (
+                        <span key={crumb.id} className="flex items-center gap-1">
+                          {index > 0 && <span className="text-ink-muted" aria-hidden="true">←</span>}
+                          <a className="text-ink-secondary underline decoration-hairline underline-offset-2" href={traceHref(crumb)}>{crumb.title || crumb.id}</a>
+                        </span>
+                      ))}
+                    </nav>
+                  </>
+                );
+              })()}
+            </section>
+          )}
           {budget && finished && (
             /* A finished run's meters measure nothing any more; one line of
                what it actually spent, spenders beneath. */
