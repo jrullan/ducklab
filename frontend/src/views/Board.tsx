@@ -21,6 +21,7 @@ import type { MeasuredSpend } from "../components/SeatChips";
 import { TddLaunch } from "../components/TddLaunch";
 import { ChatAbout } from "../components/ChatAbout";
 import { RemoveTask } from "../components/RemoveTask";
+import { OriginLine } from "../components/OriginLine";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -675,6 +676,7 @@ export function Board({
                         {/* Scanned, not read: three lines at most, the whole title
                             on hover and in the detail. */}
                         <div className={"text-sm text-ink" + (isBugs ? " line-clamp-3" : "")} title={isBugs ? it.title : undefined}>{it.title}</div>
+                        {!isBugs && <OriginLine client={client} projectId={projectId} task={it as Task} />}
                         {isBugs ? (
                           <div className="mt-1 text-[11px] text-ink-muted" data-testid="bug-card-meta" title={`reported ${(it as Bug).created_at ?? ""} by ${(it as Bug).reporter ?? "?"}`}>
                             {[ageOf((it as Bug).created_at), (it as Bug).reporter?.split(":")[0]].filter(Boolean).join(" · ")}
