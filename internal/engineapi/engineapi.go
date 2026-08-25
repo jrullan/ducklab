@@ -1070,7 +1070,9 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	project, err := s.svc.ProjectUpdate(r.Context(), r.PathValue("id"), keys)
+	source := keys["_source"]
+	delete(keys, "_source")
+	project, err := s.svc.ProjectUpdate(r.Context(), r.PathValue("id"), keys, source)
 	if err != nil {
 		// An unknown or mistyped key is the caller's mistake, not a server
 		// fault, and it must say which key.
@@ -1356,6 +1358,15 @@ func (s *Server) handleConfigDoctor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, findings)
+}
+
+func (s *Server) handleConfigDiagnostics(w http.ResponseWriter, r *http.Request) {
+	diagnostics, err := s.svc.ConfigDiagnostics(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, diagnostics)
 }
 
 func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {

@@ -10,7 +10,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Artifact, Duckling, EngineClient, RosterEntry, Run, Section, TraceError } from "../api/client";
+import type { Artifact, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, TraceError } from "../api/client";
+import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
 import { parseDiff } from "../lib/runview";
@@ -77,6 +78,7 @@ export function Cycle({
   const [planAction, setPlanAction] = useState<"" | "extend" | "amend">("");
   // The fleet, for seat chips and the vision check.
   const [fleet, setFleet] = useState<Duckling[]>([]);
+  const [adoptFinding, setAdoptFinding] = useState<ConfigFinding | null>(null);
   // The amendment's own seat: the solo roster's architect.
   const [amendSeat, setAmendSeat] = useState<RosterEntry | null>(null);
   // Per-run seat picks from clicked chips, keyed panel:index. A pick changes
@@ -321,6 +323,9 @@ export function Cycle({
       });
       setStartedRun(run.id);
       setBrief("");
+      if (adopt && typeof client.configDoctor === "function") {
+        void client.configDoctor(projectId).then((findings) => setAdoptFinding(findings[0] ?? null)).catch(() => {});
+      }
       // The run is where the work is visible. Not navigated to automatically:
       // someone who just wrote a brief may want to read it back, and a view
       // that jumps out from under them is a view that lost their place.
@@ -884,6 +889,12 @@ export function Cycle({
                       ? "Draft it"
                       : "Redraft"}
               </button>
+              {adoptFinding && fleet.length > 0 && (
+                <div className="rounded border border-warning p-2 text-xs" data-testid="adopt-config-offer">
+                  <p><code>{adoptFinding.key}</code> needs attention: {adoptFinding.reason}</p>
+                  <ChatAbout client={client} projectId={projectId} aboutKind="ducklab" aboutId="configuration" ducklings={fleet} label="Ask the configuration consultant" initialMessage={`The adoption is complete. Please prioritize this configuration finding and explain the safe amendment: ${adoptFinding.key} → ${adoptFinding.proposed}. Reason: ${adoptFinding.reason}`} />
+                </div>
+              )}
               {startedRun && (
                 <a
                   href={`#/runs/${startedRun}`}

@@ -334,4 +334,5 @@ export const KNOWN_EVENT_TYPES = [
   "heartbeat",
   "overflow",
   "engine_recovered",
+  "config_amendment",
 ] as const;

@@ -14,6 +14,9 @@ export function ChatAbout({
   label = "chat about this",
   placeholder,
   preselectedDuckling = "",
+  /** A finding can open a consultation with its evidence already in the draft. */
+  initialMessage = "",
+  startOpen = false,
 }: {
   client: EngineClient;
   projectId: string;
@@ -27,10 +30,12 @@ export function ChatAbout({
   placeholder?: string;
   /** The resolved Common consultant, when the roster pins one. */
   preselectedDuckling?: string;
+  initialMessage?: string;
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [duckling, setDuckling] = useState(preselectedDuckling);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(initialMessage);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<{ name: string; data: string }[]>([]);

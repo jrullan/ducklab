@@ -23,6 +23,49 @@ import (
 // Identity fields are not settable. `project set id foo` would rewrite
 // project.toml while the engine registry kept the old id, leaving a project
 // that answers to one name on disk and another in the daemon.
+// ValueKey returns a settable dotted key's current value in the same encoding
+// SetKey accepts. It lets advisory UI show the actual recorded value without a
+// second, inevitably incomplete switch over configuration fields.
+func ValueKey(cfg *Project, key string) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("nil project config")
+	}
+	parts := strings.Split(key, ".")
+	v := reflect.ValueOf(cfg).Elem()
+	for i, part := range parts {
+		field, ok := fieldByTOML(v, part)
+		if !ok {
+			return "", fmt.Errorf("unknown key %q", key)
+		}
+		if i == len(parts)-1 {
+			return valueString(field), nil
+		}
+		if field.Kind() == reflect.Map && i+1 == len(parts)-1 {
+			item := field.MapIndex(reflect.ValueOf(parts[i+1]).Convert(field.Type().Key()))
+			if !item.IsValid() {
+				return "", nil
+			}
+			return valueString(item), nil
+		}
+		if field.Kind() != reflect.Struct {
+			return "", fmt.Errorf("key %q: %q is not a section", key, part)
+		}
+		v = field
+	}
+	return "", fmt.Errorf("empty key")
+}
+
+func valueString(v reflect.Value) string {
+	if v.Kind() == reflect.Slice {
+		items := make([]string, v.Len())
+		for i := range items {
+			items[i] = fmt.Sprint(v.Index(i).Interface())
+		}
+		return strings.Join(items, ",")
+	}
+	return fmt.Sprint(v.Interface())
+}
+
 func SetKey(cfg *Project, key, value string) error {
 	if cfg == nil {
 		return fmt.Errorf("nil project config")

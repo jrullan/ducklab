@@ -19,7 +19,15 @@ export interface Project {
   /** The tree holds committed files beyond .ducklab: a codebase to adopt,
    * not an idea to interview. Decides the Cycle empty state's doors. */
   has_code?: boolean;
+  /** Current project configuration, returned by project open/update. */
+  config?: Record<string, unknown>;
 }
+
+/** A deterministic, read-only configuration diagnosis. */
+export type ConfigFinding = { key: string; proposed: string; reason: string };
+
+/** Read-only host checks for the project's configured remote tooling. */
+export type ConfigDiagnostics = { remote_reachable: string; gh_auth: string; credential_helper: string };
 
 /** A gate that was actually run. Mirrors service.GateResult. */
 export type GateResult = {
@@ -704,10 +712,23 @@ export class EngineClient {
       git_init: gitInit,
     });
   }
+  /** Read a project's current configuration for pre-filled settings drafts. */
+  projectGet(id: string) {
+    return this.request<Project>("GET", `/v1/projects/${id}`);
+  }
   /** Change what the engine records about a project. Keys are the same ones
    * `ducklab project set` takes. */
-  projectUpdate(id: string, keys: Record<string, string>) {
-    return this.request<Project>("PATCH", `/v1/projects/${id}`, keys);
+  /** source records the human affordance that requested this explicit update. */
+  projectUpdate(id: string, keys: Record<string, string>, source?: string) {
+    return this.request<Project>("PATCH", `/v1/projects/${id}`, source ? { ...keys, _source: source } : keys);
+  }
+  /** Read-only doctor findings; amendments still require projectUpdate. */
+  configDoctor(id: string) {
+    return this.request<ConfigFinding[]>("GET", `/v1/projects/${id}/doctor`);
+  }
+  /** Read-only host diagnostics. This route deliberately has no setter. */
+  configDiagnostics(id: string) {
+    return this.request<ConfigDiagnostics>("GET", `/v1/projects/${id}/diagnostics`);
   }
   /** Explicit remote actions: callers must name an actor; the engine refuses autopilot/yolo. */
   projectPull(id: string, actor = "desktop") {

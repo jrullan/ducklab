@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -728,6 +729,49 @@ func (s *Service) ProjectGet(ctx context.Context, id string) (*Project, error) {
 	return &Project{ID: id, Path: entry.Path, Name: cfg.Name, Config: cfg, Autonomy: string(cfg.Autonomy)}, nil
 }
 
+// ConfigDiagnostics is a read-only snapshot of the local tools used for remote work.
+type ConfigDiagnostics struct {
+	RemoteReachable  string `json:"remote_reachable"`
+	GHAuth           string `json:"gh_auth"`
+	CredentialHelper string `json:"credential_helper"`
+}
+
+// ConfigDiagnostics checks configured remote tooling without changing project state.
+func (s *Service) ConfigDiagnostics(ctx context.Context, id string) (ConfigDiagnostics, error) {
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		return ConfigDiagnostics{}, err
+	}
+	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return ConfigDiagnostics{}, err
+	}
+	out := ConfigDiagnostics{RemoteReachable: "no named remote configured", GHAuth: "gh is not installed", CredentialHelper: "not configured"}
+	if cfg.Remote.Name != "" {
+		cmd := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", cfg.Remote.Name)
+		cmd.Dir = entry.Path
+		if err := cmd.Run(); err == nil {
+			out.RemoteReachable = "reachable"
+		} else {
+			out.RemoteReachable = "unreachable"
+		}
+	}
+	if _, err := exec.LookPath("gh"); err == nil {
+		cmd := exec.CommandContext(ctx, "gh", "auth", "status")
+		if err := cmd.Run(); err == nil {
+			out.GHAuth = "authenticated"
+		} else {
+			out.GHAuth = "not authenticated"
+		}
+	}
+	cmd := exec.CommandContext(ctx, "git", "config", "--get", "credential.helper")
+	cmd.Dir = entry.Path
+	if value, err := cmd.Output(); err == nil && strings.TrimSpace(string(value)) != "" {
+		out.CredentialHelper = "configured"
+	}
+	return out, nil
+}
+
 // ConfigDoctor reports deterministic, read-only configuration findings.
 func (s *Service) ConfigDoctor(ctx context.Context, id string) ([]config.Finding, error) {
 	entry, err := s.registry.Get(id)
@@ -741,7 +785,7 @@ func (s *Service) ConfigDoctor(ctx context.Context, id string) ([]config.Finding
 //
 // Keys are applied to a copy and written only if every one of them is valid,
 // so a typo in the second key cannot leave the first half-applied.
-func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]string) (*Project, error) {
+func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]string, sources ...string) (*Project, error) {
 	entry, err := s.registry.Get(id)
 	if err != nil {
 		return nil, err
@@ -759,6 +803,12 @@ func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]
 	}
 	if err := config.SaveProject(path, &updated); err != nil {
 		return nil, err
+	}
+	if len(sources) > 0 && sources[0] != "" {
+		if receipt, receiptErr := os.OpenFile(filepath.Join(entry.Path, ".ducklab", "config-audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); receiptErr == nil {
+			_ = json.NewEncoder(receipt).Encode(map[string]interface{}{"actor": "human", "source": sources[0], "keys": sortedKeys(keys), "ts": time.Now().UTC().Format(time.RFC3339)})
+			_ = receipt.Close()
+		}
 	}
 	// The registry carries the display name too, so a rename that only reached
 	// project.toml would leave `project list` showing the old one.

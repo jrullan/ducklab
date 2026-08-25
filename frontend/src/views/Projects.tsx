@@ -11,7 +11,8 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { AppStatus, EngineClient, GateStatus, Project } from "../api/client";
+import type { AppStatus, ConfigFinding, Duckling, EngineClient, GateStatus, Project } from "../api/client";
+import { ChatAbout } from "../components/ChatAbout";
 
 type RemoteStatus = { ahead?: number; behind?: number };
 import { canChooseDirectory, chooseDirectory } from "../lib/picker";
@@ -41,6 +42,10 @@ export function Projects({
   const [remoteNotice, setRemoteNotice] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
+  // Opening a project with a known configuration concern offers explanation;
+  // it never changes the recorded configuration.
+  const [configFindings, setConfigFindings] = useState<Record<string, ConfigFinding[]>>({});
+  const [consultants, setConsultants] = useState<Duckling[]>([]);
 
   const load = useCallback(() => {
     client
@@ -63,12 +68,19 @@ export function Projects({
             .projectStatus(p.id)
             .then((status) => setRemotes((cur) => ({ ...cur, [p.id]: status })))
             .catch(() => {});
+          if (typeof client.configDoctor === "function") {
+            client.configDoctor(p.id).then((findings) => setConfigFindings((cur) => ({ ...cur, [p.id]: findings }))).catch(() => {});
+          }
         }
       })
       .catch((err) => setFailure(err instanceof Error ? err.message : String(err)));
   }, [client]);
 
   useEffect(load, [load]);
+  useEffect(() => {
+    if (typeof client.ducklings !== "function") return;
+    void client.ducklings().then(setConsultants).catch(() => {});
+  }, [client]);
 
   // Said before it is sent. `~` is a shell feature the engine cannot expand
   // for you, and a relative path means nothing to a daemon — one real session
@@ -294,6 +306,15 @@ export function Projects({
                 <div className="mt-0.5 truncate font-mono text-xs text-ink-muted" title={p.path}>
                   {p.path}
                 </div>
+                {(() => {
+                  const finding = configFindings[p.id]?.[0];
+                  if (!finding || consultants.length === 0) return null;
+                  const initialMessage = `Please prioritize this configuration finding and explain the safe amendment: ${finding.key} → ${finding.proposed}. Reason: ${finding.reason}`;
+                  return <div className="mt-2 rounded border border-warning p-2 text-xs" data-testid={`project-config-offer-${p.id}`}>
+                    <p><code>{finding.key}</code> needs attention: {finding.reason}</p>
+                    <ChatAbout client={client} projectId={p.id} aboutKind="ducklab" aboutId="configuration" ducklings={consultants} label="Ask the configuration consultant" initialMessage={initialMessage} />
+                  </div>;
+                })()}
                 {/* Config rows: label · value · edit, one per line. Commands
                     truncate with the full text on hover; editors open below
                     at full width. */}

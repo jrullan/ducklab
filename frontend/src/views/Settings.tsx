@@ -4,7 +4,7 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
-import type { BudgetView, EngineClient, GateStatus, ModeDefaultsView } from "../api/client";
+import type { BudgetView, ConfigDiagnostics, EngineClient, GateStatus, ModeDefaultsView } from "../api/client";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -45,13 +45,14 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
-type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "appearance" | "engine";
+type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "remote" | "appearance" | "engine";
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "ducklings", label: "my ducklings" },
   { id: "fleet", label: "providers" },
   { id: "budgets", label: "budgets & limits" },
   { id: "autopilot", label: "autopilot & autonomy" },
+  { id: "remote", label: "remote & git" },
   { id: "appearance", label: "appearance & alerts" },
   { id: "engine", label: "engine" },
 ];
@@ -112,6 +113,7 @@ export function Settings({
       {section === "fleet" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
       )}
+      {section === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
 
       <div className={section === "appearance" ? "" : "hidden"}>
       <SettingsCard
@@ -183,6 +185,70 @@ export function Settings({
       </div>
     </div>
   );
+}
+
+/** Project-scoped remote controls deliberately save through ProjectUpdate: no
+ * field mutates while it is being typed, and every write is an explicit person
+ * action. Diagnostics has no controls or setter wiring. */
+function RemoteGitSection({ client, projectId }: { client: EngineClient; projectId: string }) {
+  const [draft, setDraft] = useState<Record<string, string>>({
+    "remote.name": "", "remote.fetch_on_open": "false", "remote.allow_mcp_verbs": "",
+    "github.pr_base": "", "github.pr_draft": "false", "github.pr_tool": "", "github.pr_body_by_scribe": "false",
+    "shell.allow_prefixes": "", "shell.deny": "", "git.protected_paths": "", "verify.link_deps": "",
+  });
+  const [state, setState] = useState("");
+  const [findings, setFindings] = useState<{ key: string; reason: string }[]>([]);
+  const [diagnostics, setDiagnostics] = useState<ConfigDiagnostics | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (typeof client.configDoctor === "function") {
+      void client.configDoctor(projectId).then(setFindings).catch(() => {}).finally(() => setLoaded(true));
+    } else setLoaded(true);
+    if (typeof client.configDiagnostics === "function") {
+      void client.configDiagnostics(projectId).then(setDiagnostics).catch(() => {});
+    }
+    // Settings never re-asks for values the project already records.
+    if (typeof client.projectGet !== "function") return;
+    void client.projectGet(projectId).then((project) => {
+      const c = project.config ?? {};
+      const section = (name: string) => (c[name] ?? {}) as Record<string, unknown>;
+      const remote = section("remote"), github = section("github"), shell = section("shell"), git = section("git"), verify = section("verify");
+      const value = (v: unknown) => Array.isArray(v) ? v.join(",") : v === undefined || v === null ? "" : String(v);
+      setDraft({
+        "remote.name": value(remote.name), "remote.fetch_on_open": value(remote.fetch_on_open), "remote.allow_mcp_verbs": value(remote.allow_mcp_verbs),
+        "github.pr_base": value(github.pr_base), "github.pr_draft": value(github.pr_draft), "github.pr_tool": value(github.pr_tool), "github.pr_body_by_scribe": value(github.pr_body_by_scribe),
+        "shell.allow_prefixes": value(shell.allow_prefixes), "shell.deny": value(shell.deny), "git.protected_paths": value(git.protected_paths), "verify.link_deps": value(verify.link_deps),
+      });
+    }).catch(() => {});
+  }, [client, projectId]);
+  const update = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
+  const list = (key: string, label: string) => <label className="flex flex-col gap-0.5 text-sm text-ink-secondary">{label}<span className="text-xs text-ink-muted">one item per line</span><textarea data-testid={`slice-${key}`} value={(draft[key] ?? "").replaceAll(",", "\n")} onChange={(e) => update(key, e.target.value.split("\n").filter(Boolean).join(","))} className="rounded border border-hairline bg-surface2 px-2 py-1" /></label>; 
+  const save = () => {
+    setState("saving…");
+    void client.projectUpdate(projectId, draft, "settings_remote_git").then(() => setState("saved")).catch((e) => setState(String(e)));
+  };
+  const text = (key: string, label: string, hint?: string) => (
+    <label className="flex flex-col gap-0.5 text-sm text-ink-secondary">
+      {label}{hint && <span className="text-xs text-ink-muted">{hint}</span>}
+      <input data-testid={`remote-${key}`} value={draft[key]} onChange={(e) => update(key, e.target.value)} className="rounded border border-hairline bg-surface2 px-2 py-1" />
+    </label>
+  );
+  return <>
+    <SettingsCard title="remote & pull requests" desc="how this project uses its one named git remote; fetching remains opt-in" testid="remote-git-settings">
+      <div className="grid gap-3">{text("remote.name", "remote name")}{text("remote.fetch_on_open", "fetch on open", "true or false")}
+      {text("github.pr_base", "pull request base branch")}{text("github.pr_draft", "create draft pull requests", "true or false")}{text("github.pr_tool", "pull request tool")}{text("github.pr_body_by_scribe", "scribe writes PR body", "true or false")}</div>
+    </SettingsCard>
+    <SettingsCard title="lists & safety rules" desc="one item per comma; these lists constrain commands, protected files, and acceptance checkouts" testid="slice-key-editors">
+      <div className="grid gap-3">{list("shell.allow_prefixes", "allowed shell prefixes")}{list("shell.deny", "denied shell commands")}{list("git.protected_paths", "protected paths")}{list("verify.link_deps", "linked verification dependencies")}{list("remote.allow_mcp_verbs", "remote MCP verbs")}</div>
+      <button type="button" data-testid="save-remote-git-settings" onClick={save} className="mt-3 rounded border border-hairline px-2 py-1 text-sm">Save remote & git settings</button>
+      {state && <span className="ml-2 text-xs text-ink-muted" data-testid="remote-git-state">{state}</span>}
+    </SettingsCard>
+    <SettingsCard title="connection diagnostics" desc="read-only checks from the engine; no setting is changed here" testid="remote-diagnostics">
+      {findings.length > 0 && <p className="mb-2 text-xs text-warning" data-testid="config-findings">Configuration needs attention: {findings.map((f) => f.key).join(", ")}</p>}
+      {!loaded && <p className="text-xs text-ink-muted">checking diagnostics…</p>}
+      <dl className="space-y-1 text-sm text-ink-secondary"><div><dt className="inline">remote reachable: </dt><dd className="inline" data-testid="diagnostic-remote">{diagnostics?.remote_reachable ?? "not available"}</dd></div><div><dt className="inline">gh authentication: </dt><dd className="inline" data-testid="diagnostic-gh">{diagnostics?.gh_auth ?? "not available"}</dd></div><div><dt className="inline">credential helper: </dt><dd className="inline" data-testid="diagnostic-credential-helper">{diagnostics?.credential_helper ?? "not available"}</dd></div></dl>
+    </SettingsCard>
+  </>;
 }
 
 /** The quack: on by default, silenced here — a sound that cannot be turned

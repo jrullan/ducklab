@@ -8,6 +8,8 @@ import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
 import { EscalationSuggestionCard } from "../components/EscalationSuggestionCard";
+import { ConfigAmendmentCard } from "../components/ConfigAmendmentCard";
+import { ConfigFailureCard } from "../components/ConfigFailureCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -529,6 +531,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // Suggestions are emitted at the pause boundary. Keep each one beside the
   // decision surface rather than burying it in the generic event timeline.
   const escalations = events.filter((event) => event.type === "escalation_suggestion");
+  // Proposal events are advisory data emitted by the consultant/scribe; rendering
+  // them never writes config. The card owns the one explicit human Apply action.
+  const configProposals = events.filter((event) => event.type === "config_amendment");
+  const configFailure = (run.status === "failed" || run.verdict === "FAILED") ? configProposals[0] : undefined;
   // The live figures while the run is GOING, the recorded ones once it is
   // not — by status, not by which happens to exist. The last streamed budget
   // event can predate the final turn's accounting by a moment, and a paused
@@ -912,6 +918,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           onContinue={() => { void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }}
         />
       ))}
+      {configFailure && (() => {
+        const data = configFailure.data ?? {};
+        const key = typeof data.key === "string" ? data.key : "";
+        const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
+        const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
+        return key ? <ConfigFailureCard client={client} projectId={run.project_id} ducklings={fleet} finding={{ key, proposed, reason }} /> : null;
+      })()}
+      {configProposals.map((event, index) => {
+        const data = event.data ?? {};
+        const key = typeof data.key === "string" ? data.key : "";
+        const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
+        const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
+        if (!key) return null;
+        return <ConfigAmendmentCard key={event.seq ?? index} client={client} projectId={run.project_id} finding={{ key, proposed, reason }} old={typeof data.old === "string" ? data.old : ""} why={reason} />;
+      })}
 
       {(canRelaunch || escalationCandidate !== null) && (
         <section
