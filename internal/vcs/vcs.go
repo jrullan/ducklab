@@ -654,6 +654,26 @@ func (g *Git) Fetch(remote string) error {
 	return err
 }
 
+// Push sends branch to a configured remote. Authentication is deliberately
+// delegated to git's credential helper; no credential enters Ducklab.
+func (g *Git) Push(remote, branch string) error {
+	_, err := g.run("push", shellEscape(remote), shellEscape(branch))
+	return err
+}
+
+// FastForwardOnly advances the current branch only when no merge commit or
+// conflict resolution is required.
+func (g *Git) FastForwardOnly(ref string) error {
+	_, err := g.run("merge", "--ff-only", shellEscape(ref))
+	return err
+}
+
+// RemoteURL returns the configured URL without exposing any credential.
+func (g *Git) RemoteURL(remote string) (string, error) {
+	out, err := g.run("remote", "get-url", shellEscape(remote))
+	return strings.TrimSpace(out), err
+}
+
 var gitObjectSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$`)
 
 func safeGitObjectSHA(sha string) (string, error) {

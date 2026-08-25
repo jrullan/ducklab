@@ -767,6 +767,11 @@ func (s *Service) ProjectUpdate(ctx context.Context, id string, keys map[string]
 			return nil, err
 		}
 	}
+	// Active projects cache their configuration. Drop that cache so remote
+	// actions immediately use settings updated through this API.
+	s.projMu.Lock()
+	delete(s.projects, id)
+	s.projMu.Unlock()
 	return s.ProjectOpen(ctx, entry.Path)
 }
 

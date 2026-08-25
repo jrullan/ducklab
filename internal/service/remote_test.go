@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,5 +132,113 @@ func TestRemoteAuditFailureWarnsWithoutBlockingRecovery(t *testing.T) {
 		case <-deadline:
 			t.Fatal("missing audit failure warning")
 		}
+	}
+}
+
+func remoteReadyProject(t *testing.T) (*Service, string, string) {
+	t.Helper()
+	s := serviceWithDucklings(t, "scribe")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	opened, err := s.ProjectOpen(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id = opened.ID
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	cmd := exec.Command("git", "init", "--bare", remote)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init remote: %v: %s", err, out)
+	}
+	for _, args := range [][]string{{"remote", "add", "origin", remote}, {"push", "-u", "origin", "master"}} {
+		cmd = exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"remote.name": "origin"}); err != nil {
+		t.Fatal(err)
+	}
+	return s, id, dir
+}
+
+func TestPullDivergenceRequestsPersonDecisionAndRecordsActor(t *testing.T) {
+	s, id, dir := remoteReadyProject(t)
+	// Commit locally, then advance the shared branch from an independent clone.
+	if err := os.WriteFile(filepath.Join(dir, "local.txt"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "local.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	cmd = exec.Command("git", "commit", "-m", "local")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatal(string(out))
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	// Use a worktree clone of the configured bare remote instead.
+	remote, _ := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	if out, err := exec.Command("git", "clone", strings.TrimSpace(string(remote)), clone).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v: %s", err, out)
+	}
+	for _, args := range [][]string{{"config", "user.email", "t@t"}, {"config", "user.name", "t"}, {"commit", "--allow-empty", "-m", "shared"}, {"push"}} {
+		cmd = exec.Command("git", args...)
+		cmd.Dir = clone
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("shared git %v: %s", args, out)
+		}
+	}
+	out, err := s.Pull(context.Background(), id, RemoteRequest{Actor: "person"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "decision_required" || !strings.Contains(out.Prompt, "Nothing was merged") {
+		t.Fatalf("pull = %+v", out)
+	}
+	receipt, err := os.ReadFile(filepath.Join(dir, ".ducklab", "remote-actions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(receipt), `"actor":"person"`) {
+		t.Fatalf("receipt = %s", receipt)
+	}
+}
+
+func TestPushRequiresRemoteAndRefusesAutopilot(t *testing.T) {
+	s := serviceWithDucklings(t, "scribe")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	opened, err := s.ProjectOpen(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id = opened.ID
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"remote.name": ""}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Push(context.Background(), id, RemoteRequest{Actor: "person"}); err == nil || !strings.Contains(err.Error(), "no [remote]") {
+		t.Fatalf("missing remote error = %v", err)
+	}
+	s, id, _ = remoteReadyProject(t)
+	if _, err := s.Push(context.Background(), id, RemoteRequest{Actor: "person", Origin: "autopilot"}); err == nil || !strings.Contains(err.Error(), "explicit person") {
+		t.Fatalf("autopilot error = %v", err)
+	}
+}
+
+func TestPRFallsBackToCompareURL(t *testing.T) {
+	s, id, _ := remoteReadyProject(t)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{"github.pr_tool": "none", "github.repo": "example/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.PR(context.Background(), id, RemoteRequest{Actor: "person", Title: "Ready"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compare_url" || !strings.Contains(out.CompareURL, "/compare/") || out.Actor != "person" {
+		t.Fatalf("pr = %+v", out)
 	}
 }

@@ -1020,6 +1020,50 @@ func (s *Server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, project)
 }
 
+func (s *Server) remoteRequest(r *http.Request) (service.RemoteRequest, error) {
+	var req service.RemoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return req, err
+	}
+	return req, nil
+}
+func (s *Server) handleProjectPull(w http.ResponseWriter, r *http.Request) {
+	req, err := s.remoteRequest(r)
+	if err == nil {
+		var out *service.RemoteResult
+		out, err = s.svc.Pull(r.Context(), r.PathValue("id"), req)
+		if err == nil {
+			s.json(w, http.StatusOK, out)
+			return
+		}
+	}
+	s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+}
+func (s *Server) handleProjectPush(w http.ResponseWriter, r *http.Request) {
+	req, err := s.remoteRequest(r)
+	if err == nil {
+		var out *service.RemoteResult
+		out, err = s.svc.Push(r.Context(), r.PathValue("id"), req)
+		if err == nil {
+			s.json(w, http.StatusOK, out)
+			return
+		}
+	}
+	s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+}
+func (s *Server) handleProjectPR(w http.ResponseWriter, r *http.Request) {
+	req, err := s.remoteRequest(r)
+	if err == nil {
+		var out *service.RemoteResult
+		out, err = s.svc.PR(r.Context(), r.PathValue("id"), req)
+		if err == nil {
+			s.json(w, http.StatusOK, out)
+			return
+		}
+	}
+	s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+}
+
 func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	var keys map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&keys); err != nil {

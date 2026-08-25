@@ -41,6 +41,9 @@ type fakeEngine struct {
 	budgetLifted        string
 	resumeCount         int
 	projectStatus       map[string]interface{}
+	project             map[string]interface{}
+	remoteAction        string
+	remoteRequest       map[string]string
 	lastRosterProject   string
 	lastRosterRole      string
 	lastRosterDucklings []string
@@ -54,6 +57,24 @@ func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
 func (f *fakeEngine) ConfigDoctor(string) ([]engineclt.Finding, error) { return nil, nil }
 func (f *fakeEngine) ProjectStatus(string) (map[string]interface{}, error) {
 	return f.projectStatus, nil
+}
+func (f *fakeEngine) ProjectGet(string) (map[string]interface{}, error) {
+	if f.project != nil {
+		return f.project, nil
+	}
+	return map[string]interface{}{"config": map[string]interface{}{"remote": map[string]interface{}{"allow_mcp_verbs": []interface{}{}}}}, nil
+}
+func (f *fakeEngine) ProjectPull(_ string, req map[string]string) (map[string]interface{}, error) {
+	f.remoteAction, f.remoteRequest = "pull", req
+	return map[string]interface{}{"action": "pull"}, nil
+}
+func (f *fakeEngine) ProjectPush(_ string, req map[string]string) (map[string]interface{}, error) {
+	f.remoteAction, f.remoteRequest = "push", req
+	return map[string]interface{}{"action": "push"}, nil
+}
+func (f *fakeEngine) ProjectPR(_ string, req map[string]string) (map[string]interface{}, error) {
+	f.remoteAction, f.remoteRequest = "pr", req
+	return map[string]interface{}{"action": "pr"}, nil
 }
 func (f *fakeEngine) RosterSet(projectID, role, duckling string) (map[string]interface{}, error) {
 	return f.RosterSetMany(projectID, role, []string{duckling})

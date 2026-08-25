@@ -38,6 +38,7 @@ export function Projects({
   const [gates, setGates] = useState<Record<string, GateStatus>>({});
   const [apps, setApps] = useState<Record<string, AppStatus>>({});
   const [remotes, setRemotes] = useState<Record<string, RemoteStatus>>({});
+  const [remoteNotice, setRemoteNotice] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
 
@@ -200,6 +201,11 @@ export function Projects({
           {failure}
         </p>
       )}
+      {remoteNotice && (
+        <p className="rounded-card border border-hairline p-3 text-sm text-ink" data-testid="remote-action-notice">
+          {remoteNotice}
+        </p>
+      )}
 
       <section className="rounded-card border border-hairline p-3">
         <h3 className="mb-2 text-ink">Projects</h3>
@@ -256,6 +262,11 @@ export function Projects({
                       </button>
                       {p.missing && <StatusChip role="critical" label="folder is gone" />}
                       {remotes[p.id] && <span className="text-xs text-ink-muted" data-testid={`remote-status-${p.id}`}>↑{remotes[p.id]?.ahead ?? 0} ↓{remotes[p.id]?.behind ?? 0}</span>}
+                      <span className="flex gap-1">
+                        <button type="button" data-testid={`project-pull-${p.id}`} onClick={() => void client.projectPull(p.id).then((result) => { setRemoteNotice(result.prompt ?? "Pull complete."); load(); }).catch((e) => setFailure(String(e)))} className="rounded border border-hairline px-2 py-0.5 text-xs">Pull</button>
+                        <button type="button" data-testid={`project-push-${p.id}`} onClick={() => void client.projectPush(p.id).then((result) => { setRemoteNotice(`Pushed ${result.branch}.`); load(); }).catch((e) => setFailure(String(e)))} className="rounded border border-hairline px-2 py-0.5 text-xs">Push</button>
+                        <button type="button" data-testid={`project-pr-${p.id}`} onClick={() => void client.projectPR(p.id).then((result) => { setRemoteNotice(result.pr_url ? `Pull request created: ${result.pr_url}` : result.compare_url ? `Your branch is ready. Open this compare page to create the pull request: ${result.compare_url}` : "Your branch is ready for a pull request."); load(); }).catch((e) => setFailure(String(e)))} className="rounded border border-hairline px-2 py-0.5 text-xs">Create PR</button>
+                      </span>
                       <span className="ml-auto flex gap-1">
                         <button
                           type="button"

@@ -66,6 +66,13 @@ type recoveryResponse struct {
 	CommitSHA string `json:"commit_sha"`
 }
 
+type remoteRequest struct {
+	Actor  string `json:"actor"`
+	Origin string `json:"origin,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	Title  string `json:"title,omitempty"`
+}
+
 type rejectRequest struct {
 	Reason     string `json:"reason"`
 	Resolution string `json:"resolution,omitempty"`
@@ -228,6 +235,9 @@ func routeTable() []Route {
 			Summary:      "Stop the managed app (kills the whole process group)",
 			ClientMethod: "AppStop",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleAppStop }},
+		{Method: "POST", Path: "/v1/projects/{id}/pull", Auth: true, Request: remoteRequest{}, Response: service.RemoteResult{}, Summary: "Explicitly fetch then fast-forward only; divergence always asks the person", ClientMethod: "ProjectPull", handler: func(s *Server) http.HandlerFunc { return s.handleProjectPull }},
+		{Method: "POST", Path: "/v1/projects/{id}/push", Auth: true, Request: remoteRequest{}, Response: service.RemoteResult{}, Summary: "Explicitly push the current or named branch using the user's git credentials", ClientMethod: "ProjectPush", handler: func(s *Server) http.HandlerFunc { return s.handleProjectPush }},
+		{Method: "POST", Path: "/v1/projects/{id}/pr", Auth: true, Request: remoteRequest{}, Response: service.RemoteResult{}, Summary: "Explicitly push and create a PR, or return a compare URL when gh is unavailable", ClientMethod: "ProjectPR", handler: func(s *Server) http.HandlerFunc { return s.handleProjectPR }},
 		{Method: "GET", Path: "/v1/projects/{id}/status", Auth: true,
 			Response: service.Status{}, Summary: "Project status", ClientMethod: "ProjectStatus",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectStatus }},

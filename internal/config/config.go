@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/jrullan/ducklab/internal/xplat"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/jrullan/ducklab/internal/xplat"
 )
 
 // ID is a validated identifier.
@@ -359,9 +359,15 @@ type Remote struct {
 
 // GitHub holds GitHub configuration.
 type GitHub struct {
-	Enabled    bool   `toml:"enabled" json:"enabled"`
-	Repo       string `toml:"repo" json:"repo"`
-	MirrorBugs bool   `toml:"mirror_bugs" json:"mirror_bugs"`
+	// Legacy issue settings remain supported; PR settings are intentionally
+	// credentials-free and can be edited through ProjectUpdate.
+	Enabled        bool   `toml:"enabled" json:"enabled"`
+	Repo           string `toml:"repo" json:"repo"`
+	MirrorBugs     bool   `toml:"mirror_bugs" json:"mirror_bugs"`
+	PRBase         string `toml:"pr_base" json:"pr_base"`
+	PRDraft        bool   `toml:"pr_draft" json:"pr_draft"`
+	PRTool         string `toml:"pr_tool" json:"pr_tool"`
+	PRBodyByScribe bool   `toml:"pr_body_by_scribe" json:"pr_body_by_scribe"`
 }
 
 // Project is the project configuration.
@@ -757,6 +763,7 @@ func DefaultProject(id, name string) *Project {
 			CommitTrailer: true,
 		},
 		Remote: Remote{Name: "origin", FetchOnOpen: false, AllowMCPVerbs: []string{}},
+		GitHub: GitHub{PRTool: "gh"},
 		Shell: ShellPolicy{
 			Mode: "guarded",
 			Deny: []string{"rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="},

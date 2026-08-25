@@ -709,6 +709,16 @@ export class EngineClient {
   projectUpdate(id: string, keys: Record<string, string>) {
     return this.request<Project>("PATCH", `/v1/projects/${id}`, keys);
   }
+  /** Explicit remote actions: callers must name an actor; the engine refuses autopilot/yolo. */
+  projectPull(id: string, actor = "desktop") {
+    return this.request<{ status: string; prompt?: string }>("POST", `/v1/projects/${id}/pull`, { actor });
+  }
+  projectPush(id: string, branch = "", actor = "desktop") {
+    return this.request<{ status: string; branch: string }>("POST", `/v1/projects/${id}/push`, { actor, branch });
+  }
+  projectPR(id: string, title = "", branch = "", actor = "desktop") {
+    return this.request<{ status: string; pr_url?: string; compare_url?: string }>("POST", `/v1/projects/${id}/pr`, { actor, title, branch });
+  }
   /** Start a build run. Returns immediately; the work is watched on the run. */
   runStart(
     projectId: string,

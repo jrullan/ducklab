@@ -56,6 +56,10 @@ type Engine interface {
 	AppStop(projectID string) error
 	ProjectNext(projectID string) ([]map[string]interface{}, error)
 	ProjectStatus(projectID string) (map[string]interface{}, error)
+	ProjectGet(projectID string) (map[string]interface{}, error)
+	ProjectPull(projectID string, req map[string]string) (map[string]interface{}, error)
+	ProjectPush(projectID string, req map[string]string) (map[string]interface{}, error)
+	ProjectPR(projectID string, req map[string]string) (map[string]interface{}, error)
 	RosterSet(projectID, role, ducklingID string) (map[string]interface{}, error)
 	RosterSetMany(projectID, role string, ducklings []string) (map[string]interface{}, error)
 	RosterSetManyMode(projectID, mode, role string, ducklings []string) (map[string]interface{}, error)
@@ -146,7 +150,7 @@ func (s *Server) dispatch(req *rpcRequest) (interface{}, *rpcError) {
 	case "ping":
 		return map[string]interface{}{}, nil
 	case "tools/list":
-		return map[string]interface{}{"tools": toolList()}, nil
+		return map[string]interface{}{"tools": s.toolList()}, nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`

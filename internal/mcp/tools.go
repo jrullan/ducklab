@@ -282,6 +282,57 @@ func toolList() []map[string]interface{} {
 	}
 }
 
+// toolList advertises a remote verb only when at least one opened project
+// explicitly allows it. Calls are checked again for their named project.
+func (s *Server) toolList() []map[string]interface{} {
+	tools := toolList()
+	projects, err := s.eng.ProjectList()
+	if err != nil {
+		return tools
+	}
+	for _, verb := range []string{"pull", "push", "pr"} {
+		for _, project := range projects {
+			id, _ := project["id"].(string)
+			if s.remoteVerbAllowed(id, verb) {
+				tools = append(tools, remoteTool(verb))
+				break
+			}
+		}
+	}
+	return tools
+}
+
+func remoteTool(name string) map[string]interface{} {
+	props := map[string]interface{}{
+		"project_id": map[string]interface{}{"type": "string", "description": "the project id"},
+		"branch":     map[string]interface{}{"type": "string", "description": "optional branch; defaults to the current branch"},
+	}
+	if name == "pr" {
+		props["title"] = map[string]interface{}{"type": "string", "description": "optional PR title; defaults to the branch name"}
+	}
+	return map[string]interface{}{
+		"name":        name,
+		"description": "Explicit remote action. It is never available to autopilot or yolo.",
+		"inputSchema": map[string]interface{}{"type": "object", "properties": props, "required": []string{"project_id"}},
+	}
+}
+
+func (s *Server) remoteVerbAllowed(projectID, verb string) bool {
+	project, err := s.eng.ProjectGet(projectID)
+	if err != nil {
+		return false
+	}
+	config, _ := project["config"].(map[string]interface{})
+	remote, _ := config["remote"].(map[string]interface{})
+	verbs, _ := remote["allow_mcp_verbs"].([]interface{})
+	for _, value := range verbs {
+		if name, _ := value.(string); name == verb {
+			return true
+		}
+	}
+	return false
+}
+
 type args map[string]interface{}
 
 func (a args) str(k string) string {
@@ -349,6 +400,36 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 	}
 	switch name {
+	case "pull", "push", "pr":
+		projectID := a.str("project_id")
+		if !s.remoteVerbAllowed(projectID, name) {
+			return nil, fmt.Errorf("MCP %s is not allowed for project %q; add it to remote.allow_mcp_verbs", name, projectID)
+		}
+		actor := s.client
+		if actor == "" {
+			actor = "operator"
+		}
+		req := map[string]string{"actor": "mcp:" + actor, "origin": "mcp"}
+		if branch := a.str("branch"); branch != "" {
+			req["branch"] = branch
+		}
+		if title := a.str("title"); title != "" {
+			req["title"] = title
+		}
+		var out map[string]interface{}
+		var err error
+		switch name {
+		case "pull":
+			out, err = s.eng.ProjectPull(projectID, req)
+		case "push":
+			out, err = s.eng.ProjectPush(projectID, req)
+		case "pr":
+			out, err = s.eng.ProjectPR(projectID, req)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "config_doctor":
 		out, err := s.eng.ConfigDoctor(a.str("project_id"))
 		if err != nil {

@@ -25,6 +25,13 @@ function clientWith(initial: Project[]) {
       state.splice(state.findIndex((x) => x.id === id), 1);
       return Promise.resolve({});
     }),
+    projectPull: vi.fn(() => Promise.resolve({ status: "up_to_date" })),
+    projectPush: vi.fn(() => Promise.resolve({ status: "pushed", branch: "main" })),
+    projectPR: vi.fn(() => Promise.resolve({ status: "created" })),
+    projectStatus: vi.fn(() => Promise.resolve({ ahead: 0, behind: 0 })),
+    appStatus: vi.fn(() => Promise.resolve({ configured: false, running: false })),
+    projectGate: vi.fn(() => Promise.resolve({ mode: "none", command: "", detected: "none", adoptable: false, best_verdict: "UNVERIFIED" })),
+
   } as unknown as EngineClient;
 }
 
@@ -61,6 +68,27 @@ describe("Projects", () => {
     fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/repos/x" } });
     fireEvent.click(screen.getByTestId("project-create"));
     expect((await screen.findByTestId("projects-error")).textContent).toContain("not a git repository");
+  });
+
+  it("pulls the project when Pull is clicked", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("project-pull-alpha"));
+    await waitFor(() => expect(client.projectPull).toHaveBeenCalledWith("alpha"));
+  });
+
+  it("pushes the project when Push is clicked", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("project-push-alpha"));
+    await waitFor(() => expect(client.projectPush).toHaveBeenCalledWith("alpha"));
+  });
+
+  it("creates a PR when Create PR is clicked", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    fireEvent.click(await screen.findByTestId("project-pr-alpha"));
+    await waitFor(() => expect(client.projectPR).toHaveBeenCalledWith("alpha"));
   });
 
   it("renames in place", async () => {

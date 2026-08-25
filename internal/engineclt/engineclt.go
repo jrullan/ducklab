@@ -608,6 +608,21 @@ func (c *Client) ReviewStart(projectID, taskID, mode string) (map[string]interfa
 	return result, err
 }
 
+func (c *Client) remote(projectID, action string, req map[string]string) (map[string]interface{}, error) {
+	var out map[string]interface{}
+	err := c.post("/v1/projects/"+projectID+"/"+action, req, &out)
+	return out, err
+}
+func (c *Client) ProjectPull(projectID string, req map[string]string) (map[string]interface{}, error) {
+	return c.remote(projectID, "pull", req)
+}
+func (c *Client) ProjectPush(projectID string, req map[string]string) (map[string]interface{}, error) {
+	return c.remote(projectID, "push", req)
+}
+func (c *Client) ProjectPR(projectID string, req map[string]string) (map[string]interface{}, error) {
+	return c.remote(projectID, "pr", req)
+}
+
 // ProjectUpdate applies dotted config keys to a project.
 func (c *Client) ProjectUpdate(id string, keys map[string]string) (map[string]interface{}, error) {
 	var result map[string]interface{}
