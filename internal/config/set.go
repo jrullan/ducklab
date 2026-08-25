@@ -40,12 +40,8 @@ func ValueKey(cfg *Project, key string) (string, error) {
 		if i == len(parts)-1 {
 			return valueString(field), nil
 		}
-		if field.Kind() == reflect.Map && i+1 == len(parts)-1 {
-			item := field.MapIndex(reflect.ValueOf(parts[i+1]).Convert(field.Type().Key()))
-			if !item.IsValid() {
-				return "", nil
-			}
-			return valueString(item), nil
+		if field.Kind() == reflect.Map {
+			return mapValueKey(field, parts[i+1:], key)
 		}
 		if field.Kind() != reflect.Struct {
 			return "", fmt.Errorf("key %q: %q is not a section", key, part)
@@ -86,10 +82,7 @@ func SetKey(cfg *Project, key, value string) error {
 			return assign(field, key, value)
 		}
 		if field.Kind() == reflect.Map {
-			if i+1 == len(parts)-1 {
-				return assignMapValue(field, parts[i+1], key, value)
-			}
-			return fmt.Errorf("key %q: %q is not a section", key, part)
+			return assignMapPath(field, parts[i+1:], key, value)
 		}
 		if field.Kind() != reflect.Struct {
 			return fmt.Errorf("key %q: %q is not a section", key, part)
@@ -142,6 +135,14 @@ func walk(t reflect.Type, prefix string, out *[]string) {
 // maps deliberately remain absent: accepting arbitrary dotted keys would turn a
 // typo into persisted configuration.
 func walkMap(t reflect.Type, prefix string, out *[]string) {
+	if t == modeSeatsMapType {
+		for _, mode := range ValidModes() {
+			for _, role := range ValidRoles() {
+				*out = append(*out, prefix+"."+string(mode)+"."+string(role))
+			}
+		}
+		return
+	}
 	var keys []string
 	switch t.Key() {
 	case reflect.TypeOf(Role("")):
@@ -238,9 +239,65 @@ func commaSeparated(value string) ([]string, error) {
 	return items, nil
 }
 
+var (
+	modeSeatsMapType = reflect.TypeOf(map[string]map[string][]string{})
+	roleSeatsMapType = reflect.TypeOf(map[string][]string{})
+)
+
+func mapValueKey(field reflect.Value, parts []string, key string) (string, error) {
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty key")
+	}
+	mapKey := reflect.ValueOf(parts[0]).Convert(field.Type().Key())
+	if !mapKeyAllowed(field.Type(), mapKey) {
+		return "", fmt.Errorf("unknown key %q", key)
+	}
+	item := field.MapIndex(mapKey)
+	if !item.IsValid() {
+		if len(parts) == 1 {
+			return "", nil
+		}
+		return mapValueKey(reflect.Zero(field.Type().Elem()), parts[1:], key)
+	}
+	if len(parts) == 1 {
+		return valueString(item), nil
+	}
+	if item.Kind() != reflect.Map {
+		return "", fmt.Errorf("key %q: %q is not a section", key, parts[0])
+	}
+	return mapValueKey(item, parts[1:], key)
+}
+
+func assignMapPath(field reflect.Value, parts []string, key, value string) error {
+	if len(parts) == 0 {
+		return fmt.Errorf("empty key")
+	}
+	if len(parts) == 1 {
+		return assignMapValue(field, parts[0], key, value)
+	}
+	mapKey := reflect.ValueOf(parts[0]).Convert(field.Type().Key())
+	if !mapKeyAllowed(field.Type(), mapKey) {
+		return fmt.Errorf("unknown key %q; try one of: %s", key, strings.Join(Keys(), ", "))
+	}
+	if field.Type().Elem().Kind() != reflect.Map {
+		return fmt.Errorf("key %q: %q is not a section", key, parts[0])
+	}
+	entry := reflect.New(field.Type().Elem()).Elem()
+	if current := field.MapIndex(mapKey); current.IsValid() {
+		entry.Set(current)
+	}
+	if err := assignMapPath(entry, parts[1:], key, value); err != nil {
+		return err
+	}
+	copy := cloneMap(field)
+	copy.SetMapIndex(mapKey, entry)
+	field.Set(copy)
+	return nil
+}
+
 func assignMapValue(field reflect.Value, name, key, value string) error {
 	mapKey := reflect.ValueOf(name).Convert(field.Type().Key())
-	if !mapKeyAllowed(field.Type().Key(), mapKey) {
+	if !mapKeyAllowed(field.Type(), mapKey) {
 		return fmt.Errorf("unknown key %q; try one of: %s", key, strings.Join(Keys(), ", "))
 	}
 	entry := reflect.New(field.Type().Elem()).Elem()
@@ -249,22 +306,29 @@ func assignMapValue(field reflect.Value, name, key, value string) error {
 	}
 	// Copy before writing: ProjectUpdate starts with a shallow struct copy, and
 	// changing a shared map would violate its all-or-nothing update contract.
-	copy := reflect.MakeMapWithSize(field.Type(), field.Len()+1)
-	iter := field.MapRange()
-	for iter.Next() {
-		copy.SetMapIndex(iter.Key(), iter.Value())
-	}
+	copy := cloneMap(field)
 	copy.SetMapIndex(mapKey, entry)
 	field.Set(copy)
 	return nil
 }
 
+func cloneMap(field reflect.Value) reflect.Value {
+	copy := reflect.MakeMapWithSize(field.Type(), field.Len()+1)
+	iter := field.MapRange()
+	for iter.Next() {
+		copy.SetMapIndex(iter.Key(), iter.Value())
+	}
+	return copy
+}
+
 func mapKeyAllowed(t reflect.Type, key reflect.Value) bool {
 	switch t {
-	case reflect.TypeOf(Role("")):
-		return ValidateRole(key.Interface().(Role)) == nil
-	case reflect.TypeOf(Stage("")):
-		return ValidateStage(key.Interface().(Stage)) == nil
+	case reflect.TypeOf(Roster{}), reflect.TypeOf(map[Role][]DucklingID{}), roleSeatsMapType:
+		return ValidateRole(Role(key.String())) == nil
+	case reflect.TypeOf(Modes{}):
+		return ValidateStage(Stage(key.String())) == nil
+	case modeSeatsMapType:
+		return ValidateMode(Mode(key.String())) == nil
 	default:
 		return false
 	}

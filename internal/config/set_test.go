@@ -47,6 +47,7 @@ func TestSetKeyWritesSlicesAndMapLeavesRoundTrip(t *testing.T) {
 	for _, tc := range []struct{ key, value string }{
 		{"roster.implementer", "worker"},
 		{"modes.build", "pair"},
+		{"mode_seats.pair.implementer", "worker,backup"},
 	} {
 		if err := SetKey(cfg, tc.key, tc.value); err != nil {
 			t.Fatalf("SetKey(%q): %v", tc.key, err)
@@ -68,6 +69,9 @@ func TestSetKeyWritesSlicesAndMapLeavesRoundTrip(t *testing.T) {
 	}
 	if loaded.Roster[RoleImplementer] != DucklingID("worker") || loaded.Modes[StageBuild] != ModePair {
 		t.Errorf("map leaves did not survive round trip: roster=%#v modes=%#v", loaded.Roster, loaded.Modes)
+	}
+	if got, err := ValueKey(loaded, "mode_seats.pair.implementer"); err != nil || got != "worker,backup" {
+		t.Errorf("doctor finding key did not round trip: got %q, err %v", got, err)
 	}
 }
 
