@@ -11,6 +11,8 @@ export interface Project {
   id: string;
   path: string;
   name: string;
+  /** Current checked-out branch when supplied by the engine. */
+  branch?: string;
   gate?: string;
   autonomy?: string;
   /** The directory is gone. Selecting one of these silently produced an empty

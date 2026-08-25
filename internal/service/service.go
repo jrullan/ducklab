@@ -458,9 +458,11 @@ func createProvider(id config.ProviderID, cfg config.Provider) (provider.Provide
 
 // Project represents a project.
 type Project struct {
-	ID       string          `json:"id"`
-	Path     string          `json:"path"`
-	Name     string          `json:"name"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	Name string `json:"name"`
+	// Branch is the current checked-out branch, when the project is a git worktree.
+	Branch   string          `json:"branch,omitempty"`
 	Config   *config.Project `json:"config"`
 	Gate     string          `json:"gate"`
 	Autonomy string          `json:"autonomy"`
@@ -698,6 +700,7 @@ func (s *Service) ProjectList(ctx context.Context) ([]*Project, error) {
 			Missing: e.Missing,
 		}
 		if !e.Missing {
+			p.Branch, _ = vcs.New(e.Path).CurrentBranch()
 			p.HasCode = projectHasCode(e.Path)
 		}
 		projects = append(projects, p)
@@ -731,7 +734,8 @@ func (s *Service) ProjectGet(ctx context.Context, id string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Project{ID: id, Path: entry.Path, Name: cfg.Name, Config: cfg, Autonomy: string(cfg.Autonomy)}, nil
+	branch, _ := vcs.New(entry.Path).CurrentBranch()
+	return &Project{ID: id, Path: entry.Path, Name: cfg.Name, Branch: branch, Config: cfg, Autonomy: string(cfg.Autonomy)}, nil
 }
 
 // ConfigDiagnostics is a read-only snapshot of the local tools used for remote work.

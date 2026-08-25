@@ -5,8 +5,7 @@ import { DeltaBatcher, mergeDeltas } from "../api/batcher";
 import { useRuns, pendingForHuman } from "../store/runs";
 import { interruptions, advisorAutoAnswerInterruptions, deliver, setBadge } from "../lib/attention";
 import type { Run } from "../api/client";
-import { StatusChip } from "../components/StatusChip";
-import { AppControl } from "../components/AppControl";
+import { Sidebar } from "../components/Sidebar";
 import { Now } from "../views/Now";
 import { Bench } from "../views/Bench";
 import { Runs } from "../views/Runs";
@@ -352,10 +351,6 @@ export function App() {
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).
   const degraded = connection === "reconnecting" || connection === "closed";
-  // The chip already carries the ✓; "engine ✓ ✓" said it twice.
-  const streamBadge = connection === "open"
-    ? "engine"
-    : `engine · stream ${connection}`;
   const waitingCount = pendingForHuman(runs).length;
 
   // The attention surface. The store sees every state change; this is the one
@@ -406,87 +401,21 @@ export function App() {
   // long run pushed the nav off the top of the window, and getting back to it
   // meant scrolling past everything the run had said.
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-page text-ink">
-      <header className="flex items-center gap-4 border-b border-hairline px-4 py-2">
-        <span className="text-md">🦆 ducklab</span>
-        <nav className="flex gap-3">
-          {ZONES.map((z) => (
-            <a
-              key={z.label}
-              href={routeHref(z.home)}
-              data-testid={z.testid}
-              className={z.members.includes(route.name) ? "text-ink" : "text-ink-muted"}
-            >
-              {z.label}
-              {/* The waiting count on the inbox, which is where the waiting is. */}
-              {z.label === "Now" && waitingCount > 0 && (
-                <span className="ml-1 text-serious" data-testid="nav-badge">
-                  ● {waitingCount}
-                </span>
-              )}
-            </a>
-          ))}
-          <a
-            href={routeHref({ name: "settings" })}
-            data-testid="nav-config"
-            title="Settings, ducklings and projects"
-            className={CONFIG_MEMBERS.includes(route.name) ? "text-ink" : "text-ink-muted"}
-          >
-            ⚙
-          </a>
-        </nav>
-        <span className="ml-auto" />
-        {client && projectId && <AppControl client={client} projectId={projectId} />}
-        {projects.length > 0 && (
-          <select
-            data-testid="project-select"
-            className="bg-page text-ink border border-hairline rounded px-2 py-1 text-sm"
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
-              localStorage.setItem("ducklab.project", e.target.value);
-            }}
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {(p.name || p.id) + (p.missing ? " (missing)" : "")}
-              </option>
-            ))}
-          </select>
-        )}
-      </header>
-
-      {/* The zone's rooms, when it has more than one. A person inside Work or
-          Records should see where they are and step sideways without a map. */}
-      {(() => {
-        const zone =
-          ZONES.find((z) => z.members.includes(route.name) && z.members.length > 1)?.label ??
-          (CONFIG_MEMBERS.includes(route.name) ? "Config" : "");
-        const rooms = SUBNAV[zone];
-        if (!rooms) return null;
-        const activeRoom = (r: Route) =>
-          r.name === route.name &&
-          (r.name !== "board" ||
-            ("tab" in r ? r.tab : undefined) === ("tab" in route ? route.tab : undefined));
-        return (
-          <div
-            className="flex gap-3 border-b border-hairline px-4 py-1 text-sm"
-            data-testid="subnav"
-          >
-            {rooms.map((r) => (
-              <a
-                key={r.label}
-                href={routeHref(r.route)}
-                data-testid={`subnav-${r.label.toLowerCase()}`}
-                className={activeRoom(r.route) ? "text-ink" : "text-ink-muted"}
-              >
-                {r.label}
-              </a>
-            ))}
-          </div>
-        );
-      })()}
-
+    <div className="flex h-screen overflow-hidden bg-page text-ink">
+      <Sidebar
+        route={route}
+        zones={ZONES}
+        configMembers={CONFIG_MEMBERS}
+        subnav={SUBNAV}
+        project={projects.find((p) => p.id === projectId)}
+        projects={projects}
+        projectId={projectId}
+        onProject={(id) => { setProjectId(id); localStorage.setItem("ducklab.project", id); }}
+        client={client}
+        waitingCount={waitingCount}
+        connection={connection}
+      />
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col">
       {/* The plumbing banner. A stale engine used to be a sentence buried in
           whichever view hit it first, telling the person to open a terminal;
           now the one action that fixes it is the button next to the words. */}
@@ -638,23 +567,7 @@ export function App() {
       </main>
       </div>
 
-      <footer className="flex items-center gap-3 border-t border-hairline px-4 py-1 text-sm">
-        {/* "connecting" is the normal first second of the app's life, not a
-            failure. Painting it critical told every user that something was
-            broken before anything had a chance to go wrong. Only "closed" —
-            we gave up — is critical. */}
-        <StatusChip
-          role={
-            connection === "open"
-              ? "good"
-              : connection === "closed"
-                ? "critical"
-                : "warning"
-          }
-          label={streamBadge}
-        />
-        {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}
-      </footer>
+    </div>
     </div>
   );
 }
