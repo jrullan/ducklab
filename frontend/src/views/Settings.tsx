@@ -51,19 +51,39 @@ function SettingsCard({ title, desc, children, testid }: {
 type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "remote" | "appearance" | "engine";
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "ducklings", label: "my ducklings" },
+  { id: "ducklings", label: "ducklings" },
   { id: "fleet", label: "providers" },
   { id: "budgets", label: "budgets & limits" },
   { id: "autopilot", label: "autopilot & autonomy" },
-  { id: "remote", label: "remote & git" },
+  { id: "remote", label: "repo, remote & git" },
   { id: "appearance", label: "appearance & alerts" },
   { id: "engine", label: "engine" },
 ];
 
 const SETTINGS_ROOMS = [
-  { name: "roster" as const, label: "Roster" },
+  { name: "roster" as const, label: "Roster board" },
   { name: "skills" as const, label: "Skills" },
-  { name: "projects" as const, label: "Projects" },
+  { name: "projects" as const, label: "Project management" },
+];
+
+/** The three questions are the information architecture; the existing rooms
+ * remain separate routes and views. This is deliberately only navigation: it
+ * keeps bookmarks and each room's implementation intact. */
+const SETTINGS_GROUPS: { label: string; sectionIds?: SettingsSection[]; rooms?: typeof SETTINGS_ROOMS[number]["name"][] }[] = [
+  {
+    label: "Who works for you — and how far they may go",
+    sectionIds: ["ducklings", "fleet", "budgets", "autopilot"],
+    rooms: ["roster", "skills"],
+  },
+  {
+    label: "Your projects",
+    sectionIds: ["remote"],
+    rooms: ["projects"],
+  },
+  {
+    label: "Your preferences",
+    sectionIds: ["appearance", "engine"],
+  },
 ];
 
 export function Settings({
@@ -97,29 +117,42 @@ export function Settings({
           mock). Nothing unmounts except the fleet — config state and its
           one Save survive switching via CSS visibility. */}
       <nav className="w-44 shrink-0 space-y-1" data-testid="settings-nav">
-        {SETTINGS_SECTIONS.map((sec) => (
-          <button
-            key={sec.id}
-            type="button"
-            data-testid={`settings-nav-${sec.id}`}
-            aria-pressed={section === sec.id}
-            onClick={() => setSection(sec.id)}
-            className={`block w-full rounded px-2 py-1 text-left text-sm ${
-              section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
-            }`}
-          >
-            {sec.label}
-          </button>
-        ))}
-        {SETTINGS_ROOMS.map((room) => (
-          <a
-            key={room.name}
-            href={routeHref({ name: room.name })}
-            data-testid={`settings-nav-${room.name}`}
-            className="block rounded px-2 py-1 text-sm text-ink-muted"
-          >
-            {room.label}
-          </a>
+        {SETTINGS_GROUPS.map((group) => (
+          <section key={group.label} className="mb-3" aria-label={group.label}>
+            <h2 className="px-2 pb-1 text-xs font-medium text-ink">{group.label}</h2>
+            <div className="space-y-1">
+              {(group.sectionIds ?? []).map((id) => {
+                const sec = SETTINGS_SECTIONS.find((item) => item.id === id)!;
+                return (
+                  <button
+                    key={sec.id}
+                    type="button"
+                    data-testid={`settings-nav-${sec.id}`}
+                    aria-pressed={section === sec.id}
+                    onClick={() => setSection(sec.id)}
+                    className={`block w-full rounded px-2 py-1 text-left text-sm ${
+                      section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
+                    }`}
+                  >
+                    {sec.label}
+                  </button>
+                );
+              })}
+              {(group.rooms ?? []).map((name) => {
+                const room = SETTINGS_ROOMS.find((item) => item.name === name)!;
+                return (
+                  <a
+                    key={room.name}
+                    href={routeHref({ name: room.name })}
+                    data-testid={`settings-nav-${room.name}`}
+                    className="block rounded px-2 py-1 text-sm text-ink-muted"
+                  >
+                    {room.label}
+                  </a>
+                );
+              })}
+            </div>
+          </section>
         ))}
       </nav>
 
@@ -127,7 +160,7 @@ export function Settings({
       {section === "ducklings" && client && (
         <>
           <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
-          <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Roster board</a>
+          <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
         </>
       )}
       {client && <ConfigSection client={client} section={section} projectId={projectId} />}

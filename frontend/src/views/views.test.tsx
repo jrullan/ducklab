@@ -47,6 +47,32 @@ describe("Settings", () => {
     expect(screen.getByTestId("theme-dark").getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByTestId("theme-light").getAttribute("aria-pressed")).toBe("false");
   });
+
+  it("keeps every grouped settings entry reachable", () => {
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="" connection="open" />);
+
+    for (const label of [
+      "Who works for you — and how far they may go",
+      "Your projects",
+      "Your preferences",
+    ]) {
+      expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
+    }
+    for (const testid of [
+      "settings-nav-ducklings",
+      "settings-nav-fleet",
+      "settings-nav-budgets",
+      "settings-nav-autopilot",
+      "settings-nav-roster",
+      "settings-nav-skills",
+      "settings-nav-remote",
+      "settings-nav-projects",
+      "settings-nav-appearance",
+      "settings-nav-engine",
+    ]) {
+      expect(screen.getByTestId(testid)).toBeInTheDocument();
+    }
+  });
 });
 
 describe("RunView", () => {
