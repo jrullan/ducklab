@@ -850,6 +850,21 @@
         ],
         "type": "object"
       },
+      "EngineapirejectReceipt": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "message"
+        ],
+        "type": "object"
+      },
       "EngineapirejectRequest": {
         "properties": {
           "commit_sha": {
@@ -1082,6 +1097,9 @@
           },
           "estimated": {
             "type": "boolean"
+          },
+          "excluded": {
+            "type": "integer"
           },
           "failed": {
             "type": "integer"
@@ -1318,6 +1336,9 @@
           "commit_sha": {
             "type": "string"
           },
+          "desktop_stale": {
+            "type": "boolean"
+          },
           "dry_run": {
             "type": "boolean"
           },
@@ -1464,6 +1485,7 @@
           "autonomy",
           "budget",
           "commit_sha",
+          "desktop_stale",
           "dry_run",
           "ended_at",
           "gate",
@@ -1487,6 +1509,9 @@
       "ServiceAcceptResult": {
         "properties": {
           "commit_sha": {
+            "type": "string"
+          },
+          "warning": {
             "type": "string"
           }
         },
@@ -2335,6 +2360,12 @@
           "rounds": {
             "type": "integer"
           },
+          "seats": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "task_id": {
             "type": "string"
           },
@@ -2692,6 +2723,12 @@
           },
           "redo": {
             "type": "boolean"
+          },
+          "seats": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
           },
           "task_id": {
             "type": "string"
@@ -6492,8 +6529,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "no content"
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapirejectReceipt"
+                }
+              }
+            },
+            "description": "ok"
           },
           "401": {
             "description": "missing or invalid credentials"
@@ -6504,7 +6548,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Reject"
+        "summary": "Reject; a reasoned document discard returns the request-changes signpost"
       }
     },
     "/v1/runs/{id}/reseat": {

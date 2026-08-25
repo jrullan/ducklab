@@ -246,6 +246,11 @@ export interface EngineapiliftRequest {
   kind?: string;
 }
 
+export interface EngineapirejectReceipt {
+  action?: string;
+  message?: string;
+}
+
 export interface EngineapirejectRequest {
   commit_sha?: string;
   reason?: string;
@@ -318,6 +323,7 @@ export interface ReportRow {
   builds?: number;
   cost_usd?: number;
   estimated?: boolean;
+  excluded?: number;
   failed?: number;
   key?: string;
   no_change_passes?: number;
@@ -388,6 +394,7 @@ export interface RunlogRun {
   budget?: RunlogBudgetState;
   chain_build?: Record<string, unknown>;
   commit_sha?: string;
+  desktop_stale?: boolean;
   dry_run?: boolean;
   ended_at?: string;
   failure?: string;
@@ -434,6 +441,7 @@ export interface RunlogRun {
 
 export interface ServiceAcceptResult {
   commit_sha?: string;
+  warning?: string;
 }
 
 export interface ServiceAppStatus {
@@ -670,6 +678,7 @@ export interface ServiceRunRequest {
   parallel?: boolean;
   redo?: boolean;
   rounds?: number;
+  seats?: Record<string, string>;
   task_id?: string;
   unsafe_writes?: boolean;
   verify?: string;
@@ -765,6 +774,7 @@ export interface ServiceTestFirstRequest {
   note?: string;
   origin?: string;
   redo?: boolean;
+  seats?: Record<string, string>;
   task_id?: string;
   then_build?: boolean;
   verify?: string;
