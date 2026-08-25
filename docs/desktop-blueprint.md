@@ -24,7 +24,12 @@ Sidebar, top to bottom:
   base"), because that is when it changes decisions.
 - Primary nav: Now (waiting badge) · Work · Records · Settings — four
   words, four questions. Subnav renders visually attached to its own
-  parent, never adjacent to a sibling heading.
+  parent, never adjacent to a sibling heading. **Settings is the
+  exception: it expands NO sidebar subnav** — its rooms (ducklings,
+  providers, roster, skills, projects, budgets, …) navigate exclusively
+  through the category side-menu INSIDE the Settings view. One door in
+  the sidebar; all corridors inside. The rule-6 reachability test walks
+  through that internal menu for settings rooms.
 - Footer: the system-truth zone — engine status and the waiting
   summary, plain words. **Update availability lives here, as
   exception-state**: silent when current; one worded line when a newer
@@ -36,7 +41,10 @@ Sidebar, top to bottom:
 
 The Settings consolidation (four entries → one, organized by the
 user's three questions) is specified in its own proposal and lands as
-its own arc; this blueprint only fixes the target: ONE settings entry.
+its own arc; this blueprint only fixes the target: ONE settings entry,
+zero sidebar subnav for it, and **one control surface per piece of
+state** — the legacy seat-dropdown roster embedded in the Ducklings
+room is retired; the Roster board is the only roster UI.
 
 ## 2. Documents: index + detail, never a scroll-wall
 
