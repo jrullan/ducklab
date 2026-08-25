@@ -184,15 +184,26 @@ func (g *Git) AddAll() error {
 
 // AddAllExcluding stages all changes except runtime-only paths. Callers use it
 // for linked dependency trees that are available in an isolated checkout but
-// must never become repository content.
+// must never become repository content. Excluded paths are explicitly removed
+// from the index after add: pathspec exclusion alone can leave a newly linked
+// path staged, which makes a later rebase refuse the dirty index.
 func (g *Git) AddAllExcluding(excluded ...string) error {
 	args := []string{"add", "-A", "--", "."}
+	var paths []string
 	for _, path := range excluded {
 		if path != "" {
-			args = append(args, ":^"+filepath.ToSlash(path))
+			path = filepath.ToSlash(path)
+			args = append(args, ":^"+path)
+			paths = append(paths, path)
 		}
 	}
-	_, err := g.run(args...)
+	if _, err := g.run(args...); err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err := g.run(append([]string{"rm", "-r", "--cached", "--ignore-unmatch", "--"}, paths...)...)
 	return err
 }
 

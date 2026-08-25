@@ -110,6 +110,54 @@ custom = "test -f tools/fake/bin/runner"`)
 	}
 }
 
+// A linked dependency can be staged by an earlier add operation despite the
+// exclusion pathspec. Acceptance must unstage it before rebasing a moved
+// default branch, while leaving it out of the landed commit.
+func TestAcceptWorktreeRebasesWithLinkedDependencyUnstaged(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	appendVerifyPreparation(t, dir, `link_deps = ["tools/fake"]
+mode = "custom"
+custom = "test -f tools/fake/runtime"`)
+	git := gitProject(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "tools", "fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tools", "fake", "runtime"), []byte("runtime\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-rebase-linked-dep")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "run.txt"), []byte("run\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the ordinary AddAll that first staged the link. stageRun must
+	// remove this entry from the index, not merely omit it from its next add.
+	if err := vcs.New(run.WorktreePath).AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "default.txt"), []byte("default moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("default.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("default moved"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("accept rebased worktree with linked dependency: %v", err)
+	}
+	diff, err := git.ShowCommit(result.CommitSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "tools/fake") {
+		t.Fatalf("landed commit contains linked dependency: %s", diff)
+	}
+}
+
 func TestAcceptWorktreeNamesUndeclaredLinkedDependency(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
