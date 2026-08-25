@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { EngineClient, Project } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { AppControl } from "./AppControl";
@@ -39,7 +38,6 @@ export function Sidebar({
   waitingCount: number;
   connection: "open" | "connecting" | "reconnecting" | "closed";
 }) {
-  const [utilityOpen, setUtilityOpen] = useState(() => localStorage.getItem("ducklab.utility-drawer") !== "off");
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
   // Configuration remains one destination until the settings consolidation
   // lands; engine-domain rooms (including Ducklings) belong behind Settings.
@@ -78,27 +76,6 @@ export function Sidebar({
       {client && projectId && <>
         <div className="mt-3"><AppControl client={client} projectId={projectId} /></div>
         <div className="mt-3"><AutopilotControl client={client} projectId={projectId} /></div>
-        <button
-          type="button"
-          data-testid="utility-drawer-toggle"
-          onClick={() => setUtilityOpen((open) => {
-            const next = !open;
-            localStorage.setItem("ducklab.utility-drawer", next ? "on" : "off");
-            return next;
-          })}
-          className="mt-3 self-start text-xs text-ink-muted underline"
-          aria-expanded={utilityOpen}
-        >
-          {utilityOpen ? "hide utility drawer" : "show utility drawer"}
-        </button>
-        {utilityOpen && (
-          <div data-testid="utility-drawer" className="absolute left-full top-0 z-20 w-60 border border-hairline bg-page p-3 shadow">
-            <p className="text-xs text-ink-muted">Utilities</p>
-            <a href={routeHref({ name: "now" })} className="mt-2 block text-sm text-ink underline">next steps on Now</a>
-            <a href={routeHref({ name: "runs" })} className="mt-1 block text-sm text-ink underline">recent runs in Records</a>
-            <p className="mt-3 border-t border-hairline pt-2 text-xs text-ink-muted">Ask how & why from the command palette.</p>
-          </div>
-        )}
       </>}
       <footer className="mt-4 flex flex-col gap-1 border-t border-hairline pt-3 text-sm" data-testid="sidebar-footer">
         <StatusChip role={connection === "open" ? "good" : connection === "closed" ? "critical" : "warning"} label={connection === "open" ? "engine" : `engine · stream ${connection}`} />

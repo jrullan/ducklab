@@ -10,7 +10,7 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useState } from "react";
-import type { Bug, Duckling, EngineClient, Run, Task, RosterEntry } from "../api/client";
+import type { Bug, Duckling, EngineClient, NextStep, Run, Task, RosterEntry } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
@@ -22,7 +22,15 @@ import { moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
-import { GuideRail } from "../components/GuidePanel";
+
+function nextStepHref(step: NextStep): string {
+  if (step.kind === "run" && step.ref) return routeHref({ name: "run", id: step.ref });
+  if (step.kind === "stage") return routeHref({ name: "cycle", stage: step.ref || undefined });
+  if (step.kind === "bug") return routeHref({ name: "board", tab: "bugs" });
+  if (step.kind === "task") return routeHref({ name: "board" });
+  if (step.kind === "release") return routeHref({ name: "release" });
+  return routeHref({ name: "cycle" });
+}
 
 export function Now({ client, projectId }: { client: EngineClient; projectId: string }) {
   const runs = useRuns((s) => s.runs);
@@ -30,6 +38,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const acceptState = useRuns((s) => s.acceptState);
 
   const [next, setNext] = useState<Task | null>(null);
+  const [nextSteps, setNextSteps] = useState<NextStep[]>([]);
   const [fleet, setFleet] = useState<Duckling[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
@@ -48,6 +57,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   useEffect(() => {
     if (!projectId) return;
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
+    client.projectNext(projectId).then(setNextSteps).catch(() => setNextSteps([]));
     client
       .bugs(projectId)
       .then((all) => setBugs(all))
@@ -158,9 +168,25 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   return (
     <div className="relative mx-auto max-w-3xl p-4" data-testid="now-view">
-      {client && projectId && <GuideRail client={client} projectId={projectId} section="steps" embedded />}
-      {/* The rail carries the always-visible pulse; this is the fuller view
+      {/* Running work is owned by Now; the retired guide rail no longer duplicates it. */}
+      {/* The inbox's own live section carries the fuller view
           with live spend, in the inbox's own flow. */}
+      {nextSteps.length > 0 && (
+        <section className="mb-4" data-testid="now-next-steps">
+          <h2 className="text-sm text-ink-muted">next steps</h2>
+          <ol className="mt-2 space-y-1.5">
+            {nextSteps.map((step, index) => (
+              <li key={`${step.id}:${step.ref ?? index}`} data-testid="now-next-step">
+                <a href={nextStepHref(step)} title={`${step.action} — ${step.reason}`} className="text-sm text-ink underline">
+                  {step.action.split(" — ")[0]!.replace(/\s*\([^)]*\)\s*$/, "").trim()}
+                </a>
+                {index === 0 && <p className="text-xs text-ink-muted">{step.reason}</p>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {active.length > 0 && (
         <section data-testid="now-running">
           <h2 className="text-sm text-ink-muted">running</h2>

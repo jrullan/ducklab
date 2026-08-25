@@ -462,8 +462,6 @@ export function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* The utility drawer is anchored to the sidebar; content owns the
-            full-width workspace without a second permanent rail. */}
         <main
           aria-readonly={stale ? "true" : undefined}
           data-testid={stale ? "stale-read-only" : undefined}
