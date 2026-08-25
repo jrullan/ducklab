@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +29,67 @@ func TestSetKeyWritesNestedValues(t *testing.T) {
 
 // An unknown key must fail loudly. A `project set` that accepts a typo and
 // changes nothing leaves the user believing a setting was applied.
+func TestSetKeyWritesSlicesAndMapLeavesRoundTrip(t *testing.T) {
+	cfg := DefaultProject("p", "P")
+	for _, tc := range []struct {
+		key, value string
+		want       []string
+	}{
+		{"verify.link_deps", "node_modules,vendor", []string{"node_modules", "vendor"}},
+		{"shell.allow_prefixes", "go ,make ", []string{"go ", "make "}},
+		{"shell.deny", "shutdown,reboot", []string{"shutdown", "reboot"}},
+		{"git.protected_paths", ".github,docs", []string{".github", "docs"}},
+	} {
+		if err := SetKey(cfg, tc.key, tc.value); err != nil {
+			t.Fatalf("SetKey(%q): %v", tc.key, err)
+		}
+	}
+	for _, tc := range []struct{ key, value string }{
+		{"roster.implementer", "worker"},
+		{"modes.build", "pair"},
+	} {
+		if err := SetKey(cfg, tc.key, tc.value); err != nil {
+			t.Fatalf("SetKey(%q): %v", tc.key, err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "project.toml")
+	if err := SaveProject(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(loaded.Verify.LinkDeps, []string{"node_modules", "vendor"}) ||
+		!slices.Equal(loaded.Shell.AllowPrefixes, []string{"go ", "make "}) ||
+		!slices.Equal(loaded.Shell.Deny, []string{"shutdown", "reboot"}) ||
+		!slices.Equal(loaded.Git.ProtectedPaths, []string{".github", "docs"}) {
+		t.Errorf("slice values did not survive round trip: %#v", loaded)
+	}
+	if loaded.Roster[RoleImplementer] != DucklingID("worker") || loaded.Modes[StageBuild] != ModePair {
+		t.Errorf("map leaves did not survive round trip: roster=%#v modes=%#v", loaded.Roster, loaded.Modes)
+	}
+}
+
+func TestSetKeyClearsSliceAndRejectsMalformedMapLeaf(t *testing.T) {
+	cfg := DefaultProject("p", "P")
+	if err := SetKey(cfg, "shell.deny", ""); err != nil {
+		t.Fatalf("clear slice: %v", err)
+	}
+	if len(cfg.Shell.Deny) != 0 {
+		t.Fatal("empty value did not clear slice")
+	}
+	for _, key := range []string{"shell.deny", "roster.typo", "modes.typo"} {
+		value := "a,,b"
+		if key != "shell.deny" {
+			value = "worker"
+		}
+		if err := SetKey(cfg, key, value); err == nil {
+			t.Errorf("SetKey(%q, %q) was accepted", key, value)
+		}
+	}
+}
+
 func TestSetKeyRejectsUnknownKeys(t *testing.T) {
 	cfg := DefaultProject("p", "P")
 	err := SetKey(cfg, "verify.timout_s", "42")

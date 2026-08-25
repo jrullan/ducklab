@@ -9,7 +9,8 @@ import (
 )
 
 // SetKey assigns a dotted key in a project config: `verify.timeout_s`,
-// `budget.max_usd`, `autonomy` (03 §3.2).
+// `budget.max_usd`, `autonomy` (03 §3.2). String slices use comma-separated
+// values; an empty value clears the slice.
 //
 // It walks the toml tags rather than a hand-written switch so a new field is
 // settable the moment it is declared. A hand-written switch is a list that
@@ -40,6 +41,12 @@ func SetKey(cfg *Project, key, value string) error {
 		}
 		if i == len(parts)-1 {
 			return assign(field, key, value)
+		}
+		if field.Kind() == reflect.Map {
+			if i+1 == len(parts)-1 {
+				return assignMapValue(field, parts[i+1], key, value)
+			}
+			return fmt.Errorf("key %q: %q is not a section", key, part)
 		}
 		if field.Kind() != reflect.Struct {
 			return fmt.Errorf("key %q: %q is not a section", key, part)
@@ -80,9 +87,33 @@ func walk(t reflect.Type, prefix string, out *[]string) {
 		switch f.Type.Kind() {
 		case reflect.Struct:
 			walk(f.Type, name, out)
-		case reflect.String, reflect.Int, reflect.Int64, reflect.Float64, reflect.Bool:
+		case reflect.Map:
+			walkMap(f.Type, name, out)
+		case reflect.String, reflect.Int, reflect.Int64, reflect.Float64, reflect.Bool, reflect.Slice:
 			*out = append(*out, name)
 		}
+	}
+}
+
+// walkMap expands maps whose key type has a closed, public vocabulary. Free-form
+// maps deliberately remain absent: accepting arbitrary dotted keys would turn a
+// typo into persisted configuration.
+func walkMap(t reflect.Type, prefix string, out *[]string) {
+	var keys []string
+	switch t.Key() {
+	case reflect.TypeOf(Role("")):
+		for _, role := range ValidRoles() {
+			keys = append(keys, string(role))
+		}
+	case reflect.TypeOf(Stage("")):
+		for _, stage := range ValidStages() {
+			keys = append(keys, string(stage))
+		}
+	default:
+		return
+	}
+	for _, key := range keys {
+		*out = append(*out, prefix+"."+key)
 	}
 }
 
@@ -129,9 +160,69 @@ func assign(field reflect.Value, key, value string) error {
 			return fmt.Errorf("key %q wants a number, got %q", key, value)
 		}
 		field.SetFloat(f)
+	case reflect.Slice:
+		if field.Type().Elem().Kind() != reflect.String {
+			return fmt.Errorf("key %q holds a %s, which `project set` cannot write", key, field.Kind())
+		}
+		items, err := commaSeparated(value)
+		if err != nil {
+			return fmt.Errorf("key %q wants comma-separated values, got %q", key, value)
+		}
+		out := reflect.MakeSlice(field.Type(), len(items), len(items))
+		for i, item := range items {
+			out.Index(i).SetString(item)
+		}
+		field.Set(out)
 	default:
 		return fmt.Errorf("key %q holds a %s, which `project set` cannot write",
 			key, field.Kind())
 	}
 	return nil
+}
+
+// commaSeparated is the project-set encoding for string lists. An empty value
+// clears the list; otherwise every comma-delimited item must be non-empty.
+func commaSeparated(value string) ([]string, error) {
+	if value == "" {
+		return []string{}, nil
+	}
+	items := strings.Split(value, ",")
+	for _, item := range items {
+		if item == "" {
+			return nil, fmt.Errorf("empty item")
+		}
+	}
+	return items, nil
+}
+
+func assignMapValue(field reflect.Value, name, key, value string) error {
+	mapKey := reflect.ValueOf(name).Convert(field.Type().Key())
+	if !mapKeyAllowed(field.Type().Key(), mapKey) {
+		return fmt.Errorf("unknown key %q; try one of: %s", key, strings.Join(Keys(), ", "))
+	}
+	entry := reflect.New(field.Type().Elem()).Elem()
+	if err := assign(entry, key, value); err != nil {
+		return err
+	}
+	// Copy before writing: ProjectUpdate starts with a shallow struct copy, and
+	// changing a shared map would violate its all-or-nothing update contract.
+	copy := reflect.MakeMapWithSize(field.Type(), field.Len()+1)
+	iter := field.MapRange()
+	for iter.Next() {
+		copy.SetMapIndex(iter.Key(), iter.Value())
+	}
+	copy.SetMapIndex(mapKey, entry)
+	field.Set(copy)
+	return nil
+}
+
+func mapKeyAllowed(t reflect.Type, key reflect.Value) bool {
+	switch t {
+	case reflect.TypeOf(Role("")):
+		return ValidateRole(key.Interface().(Role)) == nil
+	case reflect.TypeOf(Stage("")):
+		return ValidateStage(key.Interface().(Stage)) == nil
+	default:
+		return false
+	}
 }
