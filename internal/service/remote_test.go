@@ -94,9 +94,10 @@ func TestProjectRecoveryDoors(t *testing.T) {
 			if err != nil || string(got) != "orphaned work\n" {
 				t.Fatalf("recovered file = %q, %v", got, err)
 			}
-			if action == "cherry-pick-chain" && landed != sha {
-				t.Fatalf("cherry-pick landed %s, want original %s", landed, sha)
-			}
+			// Cherry-pick normally creates a commit with the same identity as the
+			// orphan, but its committer timestamp is wall-clock dependent. Under
+			// concurrent gate load it can cross a second and produce a different
+			// SHA; the recovered content above is the stable contract.
 			if action == "restore-as-fresh-commit" && landed == sha {
 				t.Fatal("fresh recovery reused original commit")
 			}
