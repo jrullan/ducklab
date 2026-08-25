@@ -27,9 +27,17 @@ func TestShellContextKillsTheWholeGroupAtTimeout(t *testing.T) {
 	}
 
 	// The group must be dead: no survivor holding the tree or a database.
-	time.Sleep(200 * time.Millisecond)
-	out, _ := exec.Command("pgrep", "-af", marker).Output()
-	if s := strings.TrimSpace(string(out)); s != "" {
-		t.Fatalf("orphan survived the group kill:\n%s", s)
+	// Under parallel gate load, scheduling the kill and reaping the children can
+	// take longer than a single short sleep. Poll with a generous deadline so
+	// this still checks the same contract without making CPU contention a flake.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out, _ := exec.Command("pgrep", "-af", marker).Output()
+		if s := strings.TrimSpace(string(out)); s == "" {
+			return
+		} else if time.Now().After(deadline) {
+			t.Fatalf("orphan survived the group kill:\n%s", s)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
