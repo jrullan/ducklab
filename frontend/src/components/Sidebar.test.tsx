@@ -31,6 +31,8 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("subnav-skills")).toHaveAttribute("href", routeHref({ name: "skills" }));
     expect(screen.getByTestId("subnav-projects")).toHaveAttribute("href", routeHref({ name: "projects" }));
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
+    expect(screen.queryByTestId("utility-drawer")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("utilities-drawer")).not.toBeInTheDocument();
   });
 
   it("removes app identity and keeps project selection as the only project control", () => {

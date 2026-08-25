@@ -15,10 +15,12 @@ const RUNS: Run[] = [
 ];
 
 describe("Runs", () => {
-  it("is its own view, newest first", () => {
+  it("is its own view, newest first, with a native records table", () => {
     render(<Runs runs={RUNS} />);
     const order = screen.getAllByTestId("runs-row").map((r) => r.dataset.run);
     expect(order).toEqual(["r-new", "r-stage", "r-old"]);
+    expect(screen.getByTestId("runs-view").querySelector("table")).toBeInTheDocument();
+    expect(screen.queryByTestId("recent-runs")).toBeNull();
   });
 
   // Rows were labelled with task_id alone, so the artifact stages — the only

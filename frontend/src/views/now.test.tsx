@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { Now } from "./Now";
 import { useRuns } from "../store/runs";
 import type { EngineClient, Run } from "../api/client";
@@ -153,6 +153,10 @@ describe("Now — the inbox", () => {
     render(<Now client={client} projectId="p" />);
 
     const running = await screen.findByTestId("now-running");
+    expect(screen.getAllByTestId("now-running")).toHaveLength(1);
+    expect(within(running).getAllByRole("list")).toHaveLength(1);
+    expect(screen.getAllByTestId("now-running-row")).toHaveLength(1);
+    expect(screen.queryByTestId("utility-drawer")).toBeNull();
     for (const section of [
       await screen.findByTestId("now-waiting"),
       await screen.findByTestId("now-verify"),
@@ -209,6 +213,18 @@ describe("Now — the inbox", () => {
     await waitFor(() =>
       expect(client.runStart).toHaveBeenCalledWith("p", "T-028", expect.anything()),
     );
+  });
+
+  it("renders next steps as a native Now section", async () => {
+    const client = clientWith({
+      projectNext: vi.fn(() => Promise.resolve([
+        { kind: "task", id: "T-029", action: "start T-029", reason: "it is ready" },
+      ])),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const nextSteps = await screen.findByTestId("now-next-steps");
+    expect(nextSteps.tagName).toBe("SECTION");
+    expect(screen.getAllByTestId("now-next-steps")).toHaveLength(1);
   });
 
   it("says when nothing is ready either, which is itself the answer", async () => {
