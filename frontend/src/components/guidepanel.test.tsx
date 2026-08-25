@@ -85,7 +85,9 @@ describe("the guide rail", () => {
       events: {}, deltas: {}, reasoning: {}, spend: {},
     });
     render(<GuideRail client={clientWith([])} projectId="p" />);
-    expect((await screen.findByTestId("rail-running")).textContent).toContain("engine at max_concurrent_runs");
+    const rail = await screen.findByTestId("rail-running");
+    expect(rail.textContent).toContain("engine at max_concurrent_runs");
+    expect(Array.from(rail.querySelectorAll("a")).find((a) => a.textContent === "engine at max_concurrent_runs")).toHaveAttribute("href", "#/settings?section=engine");
   });
 
   it("shows running work at the top, even with no steps to offer", async () => {

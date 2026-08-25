@@ -19,6 +19,8 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
       }),
     ),
     modeDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
+    engineDefaults: vi.fn(() => Promise.resolve({ max_concurrent_runs: 2, cpu_ceiling: 8 })),
+    engineDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
     ducklings: vi.fn(() =>
       Promise.resolve([
         { id: "pato-atom", provider: "aitopatom", model: "q" },
@@ -128,6 +130,24 @@ describe("the run budget in Settings", () => {
 // The round counts lived inside the scripts — pair three, council two,
 // tournament one — so changing how many times a reviewer got to push back meant
 // editing Go and rebuilding.
+describe("engine concurrency in Settings", () => {
+  it("round-trips a raised engine cap through the settings save path", async () => {
+    const client = clientWith();
+    render(settings(client));
+    fireEvent.click(screen.getByTestId("settings-nav-engine"));
+    await waitFor(() => screen.getByTestId("engine-max-concurrent"));
+    expect((screen.getByTestId("engine-max-concurrent") as HTMLInputElement).value).toBe("2");
+    expect(screen.getByTestId("engine-concurrency").textContent).toContain("CPU ceiling is 8");
+    fireEvent.change(screen.getByTestId("engine-max-concurrent"), { target: { value: "6" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+    await waitFor(() => expect(client.engineDefaultsSet).toHaveBeenCalledWith({
+      max_concurrent_runs: 6,
+      cpu_ceiling: 8,
+    }));
+    expect((screen.getByTestId("engine-max-concurrent") as HTMLInputElement).value).toBe("6");
+  });
+});
+
 describe("rounds and turns in Settings", () => {
   it("shows the configured count and the script's own as the placeholder", async () => {
     render(settings(clientWith()));

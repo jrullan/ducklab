@@ -100,7 +100,6 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 	}
 
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
 
 	p := config.Provider{
 		Kind: kind, BaseURL: view.BaseURL,
@@ -111,6 +110,7 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 	// where the person is looking at the form they just filled in.
 	prov, err := createProvider(config.ProviderID(id), p)
 	if err != nil {
+		s.cfgMu.Unlock()
 		return fmt.Errorf("provider %q: %w", id, err)
 	}
 
@@ -120,10 +120,16 @@ func (s *Service) ProviderSet(id string, view ProviderView) error {
 	s.cfg.Providers[config.ProviderID(id)] = p
 	if err := s.saveConfig(); err != nil {
 		delete(s.cfg.Providers, config.ProviderID(id))
+		s.cfgMu.Unlock()
 		return err
 	}
 	s.providers[config.ProviderID(id)] = prov
 	s.ducklings.RegisterProvider(prov)
+	s.cfgMu.Unlock()
+	// Provider caps are consulted live; wake queued work when a cap is raised.
+	if s.queue != nil {
+		s.queue.poke(s)
+	}
 	return nil
 }
 

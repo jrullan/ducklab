@@ -314,6 +314,23 @@ func (s *Server) handleProviderList(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
 }
 
+func (s *Server) handleEngineDefaults(w http.ResponseWriter, r *http.Request) {
+	s.json(w, http.StatusOK, s.svc.EngineDefaults())
+}
+
+func (s *Server) handleEngineDefaultsSet(w http.ResponseWriter, r *http.Request) {
+	var view service.EngineDefaultsView
+	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err := s.svc.EngineDefaultsSet(view); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, s.svc.EngineDefaults())
+}
+
 func (s *Server) handleBudgetDefaults(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, s.svc.BudgetDefaults())
 }

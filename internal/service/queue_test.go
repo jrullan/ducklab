@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -85,6 +86,36 @@ func TestQueueLimitsConcurrencyAndPromotesWaiting(t *testing.T) {
 	defer mu.Unlock()
 	if len(order) != 1 || order[0] != "r-1" {
 		t.Errorf("execution order = %v", order)
+	}
+}
+
+// A live engine settings write raises the cap and wakes queued work without a restart.
+func TestQueueAdmitsWaitingRunAfterLiveEngineCapRaise(t *testing.T) {
+	s := newTestService(t)
+	s.configPath = filepath.Join(t.TempDir(), "config.toml")
+	s.cfgMu.Lock()
+	s.cfg.Engine.MaxConcurrentRuns = 1
+	s.cfgMu.Unlock()
+
+	first := &queued{rs: fakeRunState("r-live-first", "proj")}
+	secondStarted := make(chan struct{})
+	second := queuedRun(t, "r-live-second", "other", func() { close(secondStarted) })
+
+	s.queue.mu.Lock()
+	s.queue.reserve(first)
+	s.queue.mu.Unlock()
+	s.queue.submit(s, second)
+	if second.rs.run.Status != "queued" {
+		t.Fatalf("status = %q, want queued", second.rs.run.Status)
+	}
+
+	if err := s.EngineDefaultsSet(EngineDefaultsView{MaxConcurrentRuns: 2}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued run was not admitted after raising the engine cap")
 	}
 }
 

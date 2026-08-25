@@ -162,6 +162,11 @@ export interface SamplingParams {
  * max_tokens counts prompt AND completion, every round. Each model call
  * re-sends the whole conversation, so the same context is counted again on each
  * one — a run can spend most of its budget on input without writing much. */
+export interface EngineDefaultsView {
+  max_concurrent_runs: number;
+  cpu_ceiling: number;
+}
+
 export interface BudgetView {
   max_usd: number;
   max_tokens: number;
@@ -985,6 +990,12 @@ export class EngineClient {
   }
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);
+  }
+  engineDefaults() {
+    return this.request<EngineDefaultsView>("GET", "/v1/defaults/engine");
+  }
+  engineDefaultsSet(body: EngineDefaultsView) {
+    return this.request<EngineDefaultsView>("PUT", "/v1/defaults/engine", body);
   }
   /** The budget every run starts with. It was invisible and immutable: a run
    * that hit the ceiling failed with a number nobody had chosen. */

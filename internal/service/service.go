@@ -214,6 +214,11 @@ func New(cfg *config.Global, opts Options) (*Service, error) {
 		apps:                    make(map[string]*appState),
 	}
 	s.queue.held = s.projectHeld
+	s.queue.limitFn = func() int {
+		s.cfgMu.RLock()
+		defer s.cfgMu.RUnlock()
+		return s.cfg.Engine.MaxConcurrentRuns
+	}
 	s.queue.providerCap = func(id string) (int, bool) {
 		s.cfgMu.RLock()
 		defer s.cfgMu.RUnlock()

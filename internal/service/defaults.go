@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
@@ -16,6 +17,43 @@ import (
 // reason that is not obvious: every model call re-sends the whole conversation,
 // so the prompt tokens are counted again each round. One real run spent 420k of
 // its 436k on input and 16k on output.
+
+// EngineDefaultsView exposes the global admission cap and the host context.
+type EngineDefaultsView struct {
+	MaxConcurrentRuns int `json:"max_concurrent_runs"`
+	CPUCeiling        int `json:"cpu_ceiling"`
+}
+
+func (s *Service) EngineDefaults() EngineDefaultsView {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return EngineDefaultsView{MaxConcurrentRuns: s.cfg.Engine.MaxConcurrentRuns, CPUCeiling: runtime.NumCPU()}
+}
+
+func (s *Service) EngineDefaultsSet(v EngineDefaultsView) error {
+	if err := s.canWriteConfig(); err != nil {
+		return err
+	}
+	if v.MaxConcurrentRuns <= 0 {
+		return fmt.Errorf("max_concurrent_runs must be greater than zero; got %d", v.MaxConcurrentRuns)
+	}
+	s.cfgMu.Lock()
+	previous := s.cfg.Engine.MaxConcurrentRuns
+	s.cfg.Engine.MaxConcurrentRuns = v.MaxConcurrentRuns
+	if err := s.saveConfig(); err != nil {
+		s.cfg.Engine.MaxConcurrentRuns = previous
+		s.cfgMu.Unlock()
+		return err
+	}
+	s.cfgMu.Unlock()
+	// A cap raise changes admission without a run completing. Recheck the
+	// waiting line now rather than leaving queued work asleep until the next
+	// unrelated queue event. Small service test fixtures may not install a queue.
+	if s.queue != nil {
+		s.queue.poke(s)
+	}
+	return nil
+}
 
 // BudgetView is the default budget a run starts with.
 type BudgetView struct {

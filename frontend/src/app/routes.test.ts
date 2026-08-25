@@ -10,6 +10,7 @@ describe("routing", () => {
     expect(parseRoute("#/runs")).toEqual({ name: "runs" });
     expect(parseRoute("#/ducklings")).toEqual({ name: "ducklings" });
     expect(parseRoute("#/settings")).toEqual({ name: "settings" });
+    expect(parseRoute("#/settings?section=engine")).toEqual({ name: "settings" });
   });
 
   // A pop-out window opens a run route directly (08 §1.3).

@@ -339,7 +339,7 @@ function RecentRun({ run }: { run: Run }) {
       <RecentRunGlyph run={run} />
       <a href={routeHref({ name: "run", id: run.id })} className="truncate text-ink underline">{label}</a>
       {run.status === "queued" && run.queued_reason && (
-        <span className="truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason}</span>
+        <span className="truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{run.queued_reason}</a> : run.queued_reason}</span>
       )}
     </li>
   );
@@ -379,7 +379,7 @@ function RailRun({ run, tokensUsed }: { run: Run; tokensUsed?: number }) {
         {tokensUsed ? " \u00b7 " + tokens(tokensUsed) : ""}
       </span>
       {run.status === "queued" && run.queued_reason && (
-        <span className="block truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason}</span>
+        <span className="block truncate text-ink-secondary" title={run.queued_reason}>{run.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{run.queued_reason}</a> : run.queued_reason}</span>
       )}
     </li>
   );

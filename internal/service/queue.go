@@ -26,6 +26,8 @@ type runQueue struct {
 	perProvider map[string]int
 	holders     map[string][]string
 	providerCap func(string) (int, bool)
+	// limitFn keeps the engine cap live after a settings write.
+	limitFn func() int
 	// held answers "may a run for this task start in this project?" with a
 	// reason when it may not — a run paused at its gate has released its
 	// slot but its uncommitted diff still sits in the tree (and accept
@@ -106,7 +108,13 @@ func (q *runQueue) submit(s *Service, item *queued) {
 		return
 	}
 	reason := "engine at max_concurrent_runs"
-	if q.running < q.limit {
+	limit := q.limit
+	if q.limitFn != nil {
+		if n := q.limitFn(); n > 0 {
+			limit = n
+		}
+	}
+	if q.running < limit {
 		reason = "another run holds this project's working tree"
 		if q.held != nil {
 			if r := q.held(item.rs.run.ProjectID, item.rs.run.TaskID); r != "" {
@@ -148,7 +156,13 @@ func (q *runQueue) providerHold(item *queued) string {
 }
 
 func (q *runQueue) canStart(item *queued) bool {
-	if q.running >= q.limit {
+	limit := q.limit
+	if q.limitFn != nil {
+		if n := q.limitFn(); n > 0 {
+			limit = n
+		}
+	}
+	if q.running >= limit {
 		return false
 	}
 	for _, p := range item.providers {

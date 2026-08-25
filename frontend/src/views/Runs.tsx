@@ -120,7 +120,7 @@ export function Runs({ runs }: { runs: Run[] }) {
               <td className="border-b border-hairline py-1 pr-3">
                 <StatusChip role={r.resolution === "landed" ? "good" : runStatusRole(r.status)} label={r.resolution === "landed" ? "landed" : r.status} />
                 {r.status === "queued" && r.queued_reason && (
-                  <p className="mt-1 text-xs text-ink-secondary">{r.queued_reason}</p>
+                  <p className="mt-1 text-xs text-ink-secondary">{r.queued_reason === "engine at max_concurrent_runs" ? <a href="#/settings?section=engine" className="underline">{r.queued_reason}</a> : r.queued_reason}</p>
                 )}
               </td>
               <td className="border-b border-hairline py-1 pr-3">

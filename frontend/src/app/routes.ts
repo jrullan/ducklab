@@ -19,7 +19,8 @@ export type Route =
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\//, "");
-  const [head, arg] = path.split("/");
+  const pathWithoutQuery = path.split("?")[0] ?? "";
+  const [head, arg] = pathWithoutQuery.split("/");
   switch (head) {
     case "now":
       return { name: "now" };

@@ -4,7 +4,7 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
-import type { BudgetView, ConfigDiagnostics, EngineClient, GateStatus, ModeDefaultsView } from "../api/client";
+import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView } from "../api/client";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -79,7 +79,9 @@ export function Settings({
     saveTheme(t);
     onTheme(t);
   };
-  const [section, setSection] = useState<SettingsSection>("ducklings");
+  const [section, setSection] = useState<SettingsSection>(() =>
+    typeof window !== "undefined" && window.location.hash.includes("section=engine") ? "engine" : "ducklings",
+  );
   return (
     <div className="flex gap-6 p-4" data-testid="settings">
       {/* The sub-menu: one concern on screen at a time (the user's own
@@ -300,6 +302,8 @@ function QuackToggle() {
 function ConfigSection({ client, section, projectId }: { client: EngineClient; section: SettingsSection; projectId?: string }) {
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
+  const [engine, setEngine] = useState<EngineDefaultsView | null>(null);
+  const [engineDraft, setEngineDraft] = useState("");
   // Drafts, so nothing is sent until Save and a half-typed number is never a
   // ceiling of zero.
   const [b, setB] = useState<Record<string, string>>({});
@@ -359,6 +363,10 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       max_wallclock_s: String(v.max_wallclock_s),
     });
   };
+  const applyEngine = (v: EngineDefaultsView) => {
+    setEngine(v);
+    setEngineDraft(String(v.max_concurrent_runs));
+  };
   const applyModes = (v: ModeDefaultsView) => {
     setModes(v);
     const r: Record<string, string> = {};
@@ -379,6 +387,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const load = () => {
     client.budgetDefaults().then(applyBudget).catch((e) => setState({ kind: "error", message: String(e) }));
     client.modeDefaults().then(applyModes).catch((e) => setState({ kind: "error", message: String(e) }));
+    if (typeof client.engineDefaults === "function") client.engineDefaults().then(applyEngine).catch(() => {});
   };
 
   useEffect(load, [client]);
@@ -419,6 +428,9 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         max_turns: Number(b.max_turns) || 0,
         max_wallclock_s: Number(b.max_wallclock_s) || 0,
       }),
+      engine && typeof client.engineDefaultsSet === "function"
+        ? client.engineDefaultsSet({ ...engine, max_concurrent_runs: Number(engineDraft) || 0 })
+        : Promise.resolve(null),
       client.modeDefaultsSet({
         rounds: numbersOnly(rounds),
         agent_max_turns: Number(agentTurns) || 0,
@@ -428,11 +440,12 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         role_turns: numbersOnly(roleTurns),
       }),
     ])
-      .then(([savedAp, savedBudget, savedModes]) => {
+      .then(([savedAp, savedBudget, savedEngine, savedModes]) => {
         if (savedAp) {
           setAp({ max_tasks: String(savedAp.max_tasks), max_fails: String(savedAp.max_fails), autonomy: savedAp.autonomy });
         }
         applyBudget(savedBudget);
+        if (savedEngine) applyEngine(savedEngine);
         applyModes(savedModes);
         setState({ kind: "saved" });
       })
@@ -465,6 +478,12 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
   return (
     <div data-testid="config-settings">
+      <div className={section === "engine" ? "" : "hidden"}>
+        {engine && <SettingsCard title="concurrency" desc="Live queue admission limits; changes take effect without restarting the engine." testid="engine-concurrency">
+          {num(engineDraft, setEngineDraft, "maximum concurrent runs", "engine-max-concurrent", String(engine.cpu_ceiling))}
+          <p className="mt-1 text-xs text-ink-muted">The host CPU ceiling is {engine.cpu_ceiling}; this is context, not a hard limit.</p>
+        </SettingsCard>}
+      </div>
       <div>
       {gate && (
         <SettingsCard
@@ -664,7 +683,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
 
       {/* One button, at the end, after everything it carries. The page used to
           have two, and the second sat in the middle of its own fields. */}
-      <div className={`mt-3 flex items-center gap-3 ${section === "budgets" || section === "autopilot" ? "" : "hidden"}`}>
+      <div className={`mt-3 flex items-center gap-3 ${section === "budgets" || section === "autopilot" || section === "engine" ? "" : "hidden"}`}>
         <button
           type="button"
           onClick={save}
