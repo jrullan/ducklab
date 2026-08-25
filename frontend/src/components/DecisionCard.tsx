@@ -32,6 +32,7 @@ export function DecisionCard({
   revisionRun,
   redoNote,
   onRetry,
+  documentGate,
 }: {
   /** The engine's list of legal actions. Buttons render from this and only
    * this. */
@@ -56,6 +57,8 @@ export function DecisionCard({
   /** An advisor recommendation shown as an editable retry draft. */
   redoNote?: { draft: string; advisor: string; editable: boolean };
   onRetry?: (note: string) => void;
+  /** Document gates revise; their other exit is explicitly a discard. */
+  documentGate?: boolean;
 }) {
   const [note, setNote] = useState("");
   const [redoDraft, setRedoDraft] = useState(redoNote?.draft ?? "");
@@ -121,7 +124,7 @@ export function DecisionCard({
               data-testid="reject-button"
               className="rounded border border-hairline px-3 py-1 text-sm"
             >
-              Reject
+              {documentGate ? "Discard draft" : "Reject"}
             </button>
           )}
         </div>
@@ -165,7 +168,7 @@ export function DecisionCard({
               onClick={() => void ask()}
               disabled={asking || !note.trim()}
               data-testid="request-changes-button"
-              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+              className="rounded border border-good bg-good px-2 py-1 text-sm text-page disabled:opacity-40"
             >
               {asking ? "Asking…" : "Request changes"}
             </button>

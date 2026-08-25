@@ -141,7 +141,7 @@ func stageCmd(stage string, args []string, repo string) int {
 	if yes {
 		return promoteArtifact(client, projectID, kind)
 	}
-	fmt.Printf("\naccept with:  ducklab %s accept\nreject with:  ducklab %s reject\n", stage, stage)
+	fmt.Printf("\naccept with:  ducklab %s accept\nrevise with:  ducklab %s revise \"what to change\"\nreject with:  ducklab %s reject\n", stage, stage, stage)
 	return code
 }
 

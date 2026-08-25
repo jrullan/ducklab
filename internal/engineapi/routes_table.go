@@ -62,6 +62,11 @@ type rejectRequest struct {
 	CommitSHA  string `json:"commit_sha,omitempty"`
 }
 
+type rejectReceipt struct {
+	Message string `json:"message"`
+	Action  string `json:"action"`
+}
+
 type landRequest struct {
 	CommitSHA string `json:"commit_sha"`
 	Note      string `json:"note,omitempty"`
@@ -388,7 +393,7 @@ func routeTable() []Route {
 			Summary: "Accept and commit", ClientMethod: "RunAccept",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunAccept }},
 		{Method: "POST", Path: "/v1/runs/{id}/reject", Auth: true,
-			Request: rejectRequest{}, Summary: "Reject", ClientMethod: "RunReject",
+			Request: rejectRequest{}, Response: rejectReceipt{}, Summary: "Reject; a reasoned document discard returns the request-changes signpost", ClientMethod: "RunReject",
 			handler: func(s *Server) http.HandlerFunc { return s.handleRunReject }},
 		{Method: "POST", Path: "/v1/runs/{id}/land", Auth: true,
 			Request: landRequest{}, Summary: "Record a manual landing", ClientMethod: "RunLand",

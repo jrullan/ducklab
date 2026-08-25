@@ -31,6 +31,8 @@ func TestWhatARunOffersMatchesItsState(t *testing.T) {
 		// new run.
 		{"a stage's gate", runlog.Run{Status: "paused", PendingKind: "gate", Verdict: "UNVERIFIED", Stage: "spec"},
 			[]string{"accept", "request_changes", "reject"}},
+		{"a release draft gate", runlog.Run{Status: "paused", PendingKind: "gate", Verdict: "UNVERIFIED", Stage: "release"},
+			[]string{"accept", "request_changes", "reject"}},
 		{"a question", runlog.Run{Status: "paused", PendingKind: "question"}, []string{"answer", "abort"}},
 		// The states RunResume accepts, and nothing else.
 		{"paused by a restart", runlog.Run{Status: "paused", PendingKind: "engine_restart"}, []string{"resume", "abort"}},

@@ -466,6 +466,7 @@ export function Cycle({
               onReject={() => void reject()}
               onRequestChanges={requestChanges}
               revisionRun={startedRun}
+              documentGate
               extraAction={
                 <button
                   type="button"

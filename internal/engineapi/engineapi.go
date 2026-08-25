@@ -1422,6 +1422,15 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body rejectRequest
 	json.NewDecoder(r.Body).Decode(&body)
+	// Keep reject a discard. A detailed note on a document gate is commonly an
+	// accidental use of that verb, though, so capture the stage before the
+	// discard closes the run and return a receipt that names the revision door.
+	var rejected *runlog.Run
+	if strings.TrimSpace(body.Reason) != "" && body.Resolution == "" {
+		if detail, err := s.svc.RunGet(r.Context(), id); err == nil {
+			rejected = detail.Run
+		}
+	}
 	if body.Resolution == "landed" {
 		if err := s.svc.RunLand(r.Context(), id, body.CommitSHA, "human", body.Reason); err != nil {
 			s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -1438,7 +1447,30 @@ func (s *Server) handleRunReject(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	if receipt := documentRejectReceipt(rejected, body.Reason); receipt != nil {
+		// A 204 is defined to have no body. This is deliberately 200: the
+		// discard happened, and the receipt is the additional information.
+		s.json(w, http.StatusOK, receipt)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// documentRejectReceipt warns only after an explicit document discard. It is
+// intentionally a receipt, not a redirect or a changed rejection semantic.
+func documentRejectReceipt(run *runlog.Run, reason string) map[string]string {
+	if run == nil || strings.TrimSpace(reason) == "" {
+		return nil
+	}
+	switch run.Stage {
+	case "intake", "spec", "plan", "release":
+		return map[string]string{
+			"message": "draft discarded; a reason this detailed usually means request-changes — that door is request_changes",
+			"action":  "request_changes",
+		}
+	default:
+		return nil
+	}
 }
 
 func (s *Server) handleRunLand(w http.ResponseWriter, r *http.Request) {
