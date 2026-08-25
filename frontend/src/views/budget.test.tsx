@@ -129,8 +129,37 @@ describe("the run budget in Settings", () => {
     await waitFor(() => expect(screen.getByTestId("budget-money")).toBeInTheDocument());
     expect(screen.getByTestId("budget-hits").textContent).toContain("3 runs hit this ceiling in the last 30 days (tokens)");
     expect(screen.getByTestId("budget-hits").textContent).toContain("Suggested adjustment: consider raising the tokens ceiling.");
-    expect(screen.getByTestId("budget-money").textContent).toContain("accepted work $1.25 / rejected work $0.75 / failed runs $0.50");
+    expect(screen.getByTestId("budget-money").textContent).toContain("accepted work $1.25 / rejected work $0.7500 / failed runs $0.5000");
     expect(screen.getByTestId("budget-activity").textContent).toContain("Figures cover finished runs in the last 30 days.");
+  });
+
+  it("hides zero-hit ceilings and gates suggestions until two hits", async () => {
+    const client = clientWith({
+      runs: vi.fn(() => Promise.resolve([{
+        id: "one-hit",
+        project_id: "p",
+        stage: "build",
+        mode: "solo",
+        task_id: "T-1",
+        status: "done",
+        verdict: "rejected",
+        started_at: new Date().toISOString(),
+        budget: {
+          usd: 0,
+          tokens: 400000,
+          turns: 1,
+          wallclock_s: 1,
+          limit: { usd: 2, tokens: 400000, turns: 24, wallclock_s: 3600 },
+        },
+      }])) ,
+    } as Partial<EngineClient>);
+    render(settings(client));
+    fireEvent.click(screen.getByTestId("settings-nav-budgets"));
+
+    await waitFor(() => expect(screen.getByTestId("budget-hits")).toBeInTheDocument());
+    expect(screen.getByTestId("budget-hits").textContent).toContain("1 runs hit this ceiling in the last 30 days (tokens)");
+    expect(screen.getByTestId("budget-hits").textContent).not.toContain("0 runs hit this ceiling");
+    expect(screen.getByTestId("budget-hits").textContent).not.toContain("Suggested adjustment");
   });
 
   it("shows the engine's refusal", async () => {

@@ -3,6 +3,7 @@ import { Ducklings } from "./Ducklings";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
+import { moneyOrZero } from "../lib/format";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
@@ -417,19 +418,19 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
     turns: recent.filter((r) => r.budget?.limit && r.budget.turns >= r.budget.limit.turns).length,
     wallclock_s: recent.filter((r) => r.budget?.limit && r.budget.wallclock_s >= r.budget.limit.wallclock_s).length,
   };
-  const money = recent.reduce((totals, run) => {
+  const spend = recent.reduce((totals, run) => {
     const amount = run.budget?.usd ?? 0;
     if (run.status === "failed") totals.failed += amount;
     else if (run.status === "done" && (run.accepted === true || /accept|land/i.test(run.verdict))) totals.accepted += amount;
     else if (run.status === "done") totals.rejected += amount;
     return totals;
   }, { accepted: 0, rejected: 0, failed: 0 });
-  const ceilingActivity = (label: string, count: number) => (
+  const ceilingActivity = (label: string, count: number) => count > 0 ? (
     <div key={label}>
       <p>{count} runs hit this ceiling in the last 30 days ({label}).</p>
-      {count > 0 && <p className="text-xs text-warning">Suggested adjustment: consider raising the {label} ceiling.</p>}
+      {count >= 2 && <p className="text-xs text-warning">Suggested adjustment: consider raising the {label} ceiling.</p>}
     </div>
-  );
+  ) : null;
 
   const numbersOnly = (o: Record<string, string>) =>
     Object.fromEntries(
@@ -647,7 +648,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
             {ceilingActivity("time", hitCounts.wallclock_s)}
           </div>
           <p className="mt-3 font-medium text-ink">where the money went</p>
-          <p data-testid="budget-money">accepted work ${money.accepted.toFixed(2)} / rejected work ${money.rejected.toFixed(2)} / failed runs ${money.failed.toFixed(2)}</p>
+          <p data-testid="budget-money">accepted work {moneyOrZero(spend.accepted)} / rejected work {moneyOrZero(spend.rejected)} / failed runs {moneyOrZero(spend.failed)}</p>
           <p className="mt-1 text-xs text-ink-muted">Figures cover finished runs in the last 30 days.</p>
         </div>
       )}
