@@ -24,6 +24,8 @@ const knownUnwired: Record<string, string> = {
     "an attributed restart REQUEST that checkpoints live runs; issued by the supervising Go shell through engineclt, not by this webview — the window cannot restart the engine it stands in, only resume the runs a restart left checkpointed",
   projectInstall:
     "project installation was previously exposed by the retired guide rail; the shell now requires installation outside the two-zone desktop surface",
+  rosterSet:
+    "seat assignments are managed exclusively by the Roster board; the Ducklings fleet room intentionally has no roster controls",
 };
 
 function collect(dir: string, out: string[] = []): string[] {

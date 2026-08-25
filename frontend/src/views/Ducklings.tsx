@@ -12,40 +12,30 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Duckling, EngineClient, ProviderView, RosterEntry } from "../api/client";
+import type { Duckling, EngineClient, ProviderView } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
 import { assignDucklingColors } from "../lib/colors";
 
+// Declared capabilities on a duckling, not seat assignments. The Roster board
+// remains the only surface that chooses who occupies a seat.
 const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
 
-/** What each role is for, in the words of the prompt each one actually gets.
- *
- * Taken from the system prompts in internal/agent, not invented here: a
- * description that drifts from what the model is told is worse than none,
- * because it is believed. */
-const ROLE_HELP: Record<string, string> = {
-  architect:
-    "Turns intent into a written artifact another model, with no memory of the conversation, can act on. Read-only: requirements, spec and plan.",
-  implementer: "Changes the code until the task is done and the gate passes. The only role that writes.",
-  reviewer:
-    "Reads a change it did not write, and is told not to be agreeable. The tests have already run; their result is given to it and is not its to dispute.",
-  judge:
-    "Picks between candidates labelled A, B, … in a tournament. It is not told who wrote them and must not ask.",
-  triager: "Classifies a bug report: severity, suspected files, whether it duplicates another.",
-  scribe: "Writes release notes and changelog entries from the list of accepted work.",
-};
-
-export function Ducklings({ client, projectId, only }: {
+/**
+ * `projectId` remains in the public props for callers that render the fleet
+ * inside the settings shell. Seat state belongs exclusively to the Roster
+ * board, so this room intentionally does not read or write it.
+ */
+export function Ducklings({ client, only, projectId }: {
   client: EngineClient;
   projectId: string;
-  /** Render one slice: "ducklings" (the member cards), "providers" (the
-   * plumbing, its own section) or "roster" (this project's responsibilities,
-   * composed into the settings' functions group). Absent renders everything
-   * — the standalone view's shape. */
-  only?: "ducklings" | "providers" | "roster";
+  /** Render one slice: "ducklings" (the member cards) or "providers" (the
+   * plumbing, its own section). Absent renders everything — the standalone
+   * view's shape. */
+  only?: "ducklings" | "providers";
 }) {
+  void projectId;
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -160,99 +150,10 @@ export function Ducklings({ client, projectId, only }: {
       </section>
       )}
 
-      {(only === undefined || only === "roster") && projectId && (
-        <RosterSection client={client} projectId={projectId} ducklings={ducklings} />
-      )}
     </div>
   );
 }
 
-/** Which duckling plays which role in this project.
- *
- * Shown as it will actually be used, not as the file declares it: an
- * undeclared role still gets a duckling, and hiding that would make the roster
- * look emptier than the runs behave. The source of each assignment is marked,
- * because a person needs to know which ones are theirs. */
-function RosterSection({
-  client,
-  projectId,
-  ducklings,
-}: {
-  client: EngineClient;
-  projectId: string;
-  ducklings: readonly Duckling[];
-}) {
-  const [entries, setEntries] = useState<RosterEntry[]>([]);
-  const [warning, setWarning] = useState<string | undefined>();
-  const [failure, setFailure] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    client
-      .roster(projectId)
-      .then((r) => {
-        setEntries(r.entries);
-        setWarning(r.warning);
-      })
-      .catch(() => {});
-  }, [client, projectId]);
-
-  useEffect(load, [load]);
-
-  if (entries.length === 0) return null;
-
-  return (
-    <section className="rounded-card border border-hairline p-3" data-testid="roster-section">
-      <h3 className="mb-2 text-ink">Roster for this project</h3>
-      {warning && (
-        // Running both sides on one duckling measures self-consistency, not
-        // review (05 §3.2). Recorded, not blocked.
-        <p className="mb-2 text-sm text-serious" data-testid="roster-warning">
-          {warning}
-        </p>
-      )}
-      {failure && <p className="mb-2 text-sm text-critical">{failure}</p>}
-      <ul className="space-y-3">
-        {entries.map((e) => (
-          <li key={e.role} className="text-sm" data-testid={`roster-${e.role}`}>
-            <div className="flex items-center gap-2">
-              <span className="w-28 text-ink-secondary">{e.role}</span>
-            <select
-              aria-label={`duckling for ${e.role}`}
-              data-testid={`roster-select-${e.role}`}
-              value={e.duckling}
-              onChange={(ev) =>
-                void client
-                  .rosterSet(projectId, e.role, ev.target.value)
-                  .then(load)
-                  .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
-              }
-              className="rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-            >
-              {ducklings.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.id}
-                </option>
-              ))}
-            </select>
-              <span className="text-xs text-ink-muted">
-                {e.source === "project" ? "yours" : "chosen by the engine"}
-              </span>
-            </div>
-            {/* What the role is for, said next to the choice rather than in
-                documentation elsewhere. Deciding which model should review is
-                a different question from deciding which should implement, and
-                the names alone do not carry that. */}
-            {ROLE_HELP[e.role] && (
-              <p className="ml-28 pl-2 text-xs text-ink-muted" data-testid={`roster-help-${e.role}`}>
-                {ROLE_HELP[e.role]}
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
 
 function DucklingCard({
   duckling: d,
