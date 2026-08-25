@@ -409,6 +409,53 @@ func (g *Git) defaultBranchRef() (string, error) {
 	return "refs/heads/" + branch, nil
 }
 
+// TrailerCommitOnDefault finds the newest commit reachable from the default
+// branch whose commit message contains the exact run trailer.
+func (g *Git) TrailerCommitOnDefault(key, value string) (string, error) {
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return "", err
+	}
+	out, err := g.run("log", ref, "--format=%H%x1f%B%x1e")
+	if err != nil {
+		return "", err
+	}
+	needle := key + ": " + value
+	for _, record := range strings.Split(out, "\x1e") {
+		parts := strings.SplitN(record, "\x1f", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		for _, line := range strings.Split(parts[1], "\n") {
+			if strings.TrimSpace(line) == needle {
+				return strings.TrimSpace(parts[0]), nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// IsReachableFromDefault verifies that a commit exists and is an ancestor of
+// the configured default branch. It deliberately reports a useful distinction
+// to callers rather than allowing arbitrary object ids to become evidence.
+func (g *Git) IsReachableFromDefault(sha string) error {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return fmt.Errorf("landing commit sha is required")
+	}
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return err
+	}
+	if _, err := g.revParse(sha + "^{commit}"); err != nil {
+		return fmt.Errorf("landing commit %q does not exist", sha)
+	}
+	if _, err := g.run("merge-base", "--is-ancestor", sha, ref); err != nil {
+		return fmt.Errorf("landing commit %q is not reachable from the default branch", sha)
+	}
+	return nil
+}
+
 // DefaultBranchHead returns the configured default branch's current commit.
 func (g *Git) DefaultBranchHead() (string, error) {
 	ref, err := g.defaultBranchRef()

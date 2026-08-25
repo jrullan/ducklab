@@ -1164,8 +1164,14 @@ type RunRequest struct {
 
 // RunDetail is a run detail.
 type RunDetail struct {
-	Run    *runlog.Run     `json:"run"`
-	Events []*runlog.Event `json:"events,omitempty"`
+	Run          *runlog.Run     `json:"run"`
+	Events       []*runlog.Event `json:"events,omitempty"`
+	LandingOffer *LandingOffer   `json:"landing_offer,omitempty"`
+}
+
+type LandingOffer struct {
+	CommitSHA string `json:"commit_sha"`
+	Evidence  string `json:"evidence"`
 }
 
 // AcceptResult is the result of accepting a run.
@@ -3357,6 +3363,12 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	}
 	events, _ := runlog.ReadEvents(s.RunDir(id))
 	run := rs.snapshotRun()
+	var offer *LandingOffer
+	if run.Status == "done" && !run.Accepted && run.Resolution != "landed" {
+		if sha, err := vcs.New(rs.projectPath).TrailerCommitOnDefault("Ducklab-Run", run.ID); err == nil && sha != "" {
+			offer = &LandingOffer{CommitSHA: sha, Evidence: fmt.Sprintf("default branch commit %s carries Ducklab-Run: %s", sha, run.ID)}
+		}
+	}
 	// Runs that failed before the reason was recorded on the run still have it
 	// in their event stream, and the events are already in hand here.
 	if run.Status == "failed" && run.Failure == "" {
@@ -3374,8 +3386,7 @@ func (s *Service) RunGet(ctx context.Context, id string) (*RunDetail, error) {
 	// the rules.
 	run.Next = runNext(run)
 	return &RunDetail{
-		Run:    run,
-		Events: events,
+		Run: run, Events: events, LandingOffer: offer,
 	}, nil
 }
 
@@ -3617,8 +3628,8 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	if rs.run.Status != "done" && (rs.run.Status != "paused" || rs.run.PendingKind != "gate") {
 		return fmt.Errorf("run %q is %s; only done runs or paused gates may be landed", id, rs.run.Status)
 	}
-	if sha == "" {
-		return fmt.Errorf("landing commit sha is required")
+	if err := vcs.New(rs.projectPath).IsReachableFromDefault(sha); err != nil {
+		return err
 	}
 	if actor == "" {
 		actor = "human"
@@ -3635,8 +3646,16 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 		rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
 		clearPending(rs.run)
 	}
-	w.AppendEvent("human", map[string]interface{}{"action": "landed", "actor": actor, "reason": note, "commit_sha": sha})
-	w.AppendEvent("run_end", map[string]interface{}{"verdict": "PASSED", "resolution": "landed"})
+	evidence := strings.TrimSpace(note)
+	if evidence == "" {
+		evidence = "manual attestation (no Ducklab-Run trailer)"
+	} else if evidence == "trailer match" {
+		evidence = fmt.Sprintf("trailer match: default branch commit %s carries Ducklab-Run: %s", sha, id)
+	} else {
+		evidence = "manual attestation: " + evidence
+	}
+	w.AppendEvent("human", map[string]interface{}{"action": "landed", "actor": actor, "reason": evidence, "commit_sha": sha, "evidence": evidence})
+	w.AppendEvent("run_end", map[string]interface{}{"verdict": "PASSED", "resolution": "landed", "evidence": evidence})
 	err = w.WriteState()
 	if rs.run.WorktreePath != "" {
 		s.cleanupRunWorktree(rs, rs.projectPath)

@@ -224,6 +224,21 @@ describe("RunView", () => {
       vi.useRealTimers();
     }
   });
+
+  it("keeps landing fields hidden when no trailer offer exists", () => {
+    useRuns.getState().setRun({
+      ...run,
+      status: "done",
+      accepted: false,
+      resolution: undefined,
+      next: [],
+    });
+    render(<RunView runId="r-1" client={okClient()} />);
+
+    expect(screen.queryByTestId("landing-offer")).toBeNull();
+    expect(screen.queryByTestId("landing-more-actions")).toBeNull();
+    expect(screen.getByTestId("landing-more-actions-door")).toBeTruthy();
+  });
 });
 
 // A gate is only worth what the tests are worth. When a run edits tests the

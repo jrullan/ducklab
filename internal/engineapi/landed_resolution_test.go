@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -52,6 +54,21 @@ func writeLandedResolutionRun(t *testing.T, project, projectID, id, status, verd
 // decision. Live runs are deliberately not eligible for this backfill action.
 func TestLandedResolutionCanRecloseOnlyDoneRuns(t *testing.T) {
 	s, projectID, project := landedResolutionService(t)
+	if err := os.WriteFile(filepath.Join(project, "landed.txt"), []byte("landed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "landed.txt"}, {"-c", "user.name=test", "-c", "user.email=test@test", "commit", "-m", "landed work\n\nDucklab-Run: r-done"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = project
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	shaOut, err := exec.Command("git", "-C", project, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	landingSHA := string(bytes.TrimSpace(shaOut))
 	writeLandedResolutionRun(t, project, projectID, "r-done", "done", "FAILED")
 	writeLandedResolutionRun(t, project, projectID, "r-running", "running", "")
 	if err := s.RecoverRuns(context.Background()); err != nil {
@@ -65,7 +82,7 @@ func TestLandedResolutionCanRecloseOnlyDoneRuns(t *testing.T) {
 		body, err := json.Marshal(map[string]string{
 			"reason":     "Work ACCEPTED in substance and landed on main",
 			"resolution": "landed",
-			"commit_sha": "971cf8c",
+			"commit_sha": landingSHA,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -97,8 +114,8 @@ func TestLandedResolutionCanRecloseOnlyDoneRuns(t *testing.T) {
 	if detail.Run.Verdict != "PASSED" {
 		t.Errorf("verdict = %q, want PASSED for a landed run", detail.Run.Verdict)
 	}
-	if detail.Run.CommitSHA != "971cf8c" {
-		t.Errorf("landing commit = %q, want 971cf8c", detail.Run.CommitSHA)
+	if detail.Run.CommitSHA != landingSHA {
+		t.Errorf("landing commit = %q, want %s", detail.Run.CommitSHA, landingSHA)
 	}
 	events, err := runlog.ReadEvents(s.RunDir("r-done"))
 	if err != nil {

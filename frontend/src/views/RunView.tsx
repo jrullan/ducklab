@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task } from "../api/client";
+import type { EngineClient, Candidate, Duckling, LLMCall, Run, Task, LandingOffer } from "../api/client";
 import { useRuns } from "../store/runs";
 import type { DucklabEvent } from "../api/events";
 import { buildTurns, anonymiseTurns, buildTimeline, buildGate, buildPending, buildTriage, buildTriageFailures, parseDiff, reviewerDissent, finalVerdict, findingsFiled, chainedBuildId, buildDeliverables } from "../lib/runview";
@@ -116,6 +116,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [actionError, setActionError] = useState<string | null>(null);
   const [landingSHA, setLandingSHA] = useState("");
   const [landingNote, setLandingNote] = useState("");
+  const [landingOffer, setLandingOffer] = useState<LandingOffer | null>(null);
+  const [landingManualOpen, setLandingManualOpen] = useState(false);
 
   // Fetch the run's history on open.
   //
@@ -140,6 +142,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       .run(runId)
       .then((d) => {
         if (!cancelled) {
+          setLandingOffer(d.landing_offer ?? null);
           useRuns.getState().resyncRun(d.run, d.events as DucklabEvent[]);
         }
       })
@@ -815,35 +818,44 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               </span>
             )
           )}
+          {run.status === "done" && !run.accepted && run.resolution !== "landed" && landingOffer && (
+            <section className="basis-full rounded-card border border-good p-3" data-testid="landing-offer">
+              <div className="text-sm text-ink">This run’s work appears on the default branch as <code className="font-mono">{landingOffer.commit_sha}</code>.</div>
+              <div className="mt-1 text-xs text-ink-secondary">Evidence: {landingOffer.evidence}</div>
+              <button
+                type="button"
+                className="mt-2 rounded border border-good px-2 py-1 text-xs text-good"
+                onClick={() => {
+                  setActionError(null);
+                  void client.land(runId, landingOffer.commit_sha, "trailer match")
+                    .then(() => client.run(runId))
+                    .then((detail) => { setLandingOffer(detail.landing_offer ?? null); useRuns.getState().resyncRun(detail.run, detail.events as DucklabEvent[]); })
+                    .catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+                }}
+              >Mark landed</button>
+            </section>
+          )}
           {run.status === "done" && !run.accepted && run.resolution !== "landed" && (
-            <form
-              className="flex items-center gap-1"
-              onSubmit={(event) => {
-                event.preventDefault();
-                setActionError(null);
-                void client.land(runId, landingSHA, landingNote)
-                  .then(() => client.run(runId))
-                  .then((detail) => useRuns.getState().resyncRun(detail.run, detail.events as DucklabEvent[]))
-                  .catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
-              }}
-            >
-              <input
-                aria-label="landing commit sha"
-                value={landingSHA}
-                onChange={(event) => setLandingSHA(event.target.value)}
-                placeholder="landing commit SHA"
-                required
-                className="w-36 rounded border border-hairline bg-surface2 px-2 py-1 text-xs font-mono"
-              />
-              <input
-                aria-label="landing note"
-                value={landingNote}
-                onChange={(event) => setLandingNote(event.target.value)}
-                placeholder="landing note"
-                className="w-32 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-              />
-              <button type="submit" className="rounded border border-good px-2 py-1 text-xs text-good">Mark landed</button>
-            </form>
+            <details className="basis-full text-xs" data-testid="landing-more-actions-door" onToggle={(event) => setLandingManualOpen(event.currentTarget.open)}>
+              <summary className="cursor-pointer text-ink-secondary">more actions</summary>
+              {landingManualOpen && <form
+                data-testid="landing-more-actions"
+                className="mt-2 flex flex-wrap items-center gap-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setActionError(null);
+                  void client.land(runId, landingSHA, landingNote)
+                    .then(() => client.run(runId))
+                    .then((detail) => { setLandingOffer(detail.landing_offer ?? null); useRuns.getState().resyncRun(detail.run, detail.events as DucklabEvent[]); })
+                    .catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+                }}
+              >
+                <input aria-label="landing commit sha" value={landingSHA} onChange={(event) => setLandingSHA(event.target.value)} placeholder="commit SHA reachable from the default branch" required className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-xs font-mono" />
+                <input aria-label="landing note" value={landingNote} onChange={(event) => setLandingNote(event.target.value)} placeholder="why this landed without a Ducklab-Run trailer" className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-xs" />
+                <button type="submit" className="rounded border border-good px-2 py-1 text-xs text-good">Mark landed manually</button>
+              </form>}
+              <p className="mt-1 text-ink-muted">Use this only when the landing has no Ducklab-Run trailer. The commit must exist and be reachable from the default branch.</p>
+            </details>
           )}
           {liveNow && nowTick - lastSignal.current > 30000 && (
             <span className="text-xs text-ink-muted" data-testid="quiet-chip" title="no events, tokens or thinking since then — a slow model is normal; provider retries land in the lane as they happen">

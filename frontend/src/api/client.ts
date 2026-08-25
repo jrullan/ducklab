@@ -70,6 +70,8 @@ export interface AppStatus {
   log_tail?: string;
 }
 
+export interface LandingOffer { commit_sha: string; evidence: string }
+
 export interface Run {
   id: string;
   project_id: string;
@@ -1086,7 +1088,7 @@ export class EngineClient {
     return this.request<{ items: Run[] }>("GET", `/v1/runs${q}`).then((r) => r.items ?? []);
   }
   run(id: string) {
-    return this.request<{ run: Run; events: unknown[] }>("GET", `/v1/runs/${id}`);
+    return this.request<{ run: Run; events: unknown[]; landing_offer?: LandingOffer }>("GET", `/v1/runs/${id}`);
   }
   /** Ask the live engine to checkpoint work before its caller replaces it. */
   restart(requester: string) {
