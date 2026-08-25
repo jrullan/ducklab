@@ -5,7 +5,7 @@ import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
-import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView } from "../api/client";
+import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -301,6 +301,7 @@ function QuackToggle() {
  */
 function ConfigSection({ client, section, projectId }: { client: EngineClient; section: SettingsSection; projectId?: string }) {
   const [budget, setBudget] = useState<BudgetView | null>(null);
+  const [recentRuns, setRecentRuns] = useState<Run[] | null>(null);
   const [modes, setModes] = useState<ModeDefaultsView | null>(null);
   const [engine, setEngine] = useState<EngineDefaultsView | null>(null);
   const [engineDraft, setEngineDraft] = useState("");
@@ -391,6 +392,12 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   };
 
   useEffect(load, [client]);
+  useEffect(() => {
+    // The run log is the source of truth. Only fetch it while this panel is
+    // visible: the other settings sections have no use for this read.
+    if (section !== "budgets" || typeof client.runs !== "function") return;
+    void client.runs(projectId).then(setRecentRuns).catch(() => setRecentRuns([]));
+  }, [client, projectId, section]);
 
   if (!budget || !modes) {
     return (
@@ -399,6 +406,30 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       </section>
     );
   }
+
+  const recent = (recentRuns ?? []).filter((run) => {
+    const started = Date.parse(run.started_at);
+    return Number.isFinite(started) && started >= Date.now() - 30 * 24 * 60 * 60 * 1000;
+  });
+  const hitCounts = {
+    tokens: recent.filter((r) => r.budget?.limit && r.budget.tokens >= r.budget.limit.tokens).length,
+    usd: recent.filter((r) => r.budget?.limit && r.budget.usd >= r.budget.limit.usd).length,
+    turns: recent.filter((r) => r.budget?.limit && r.budget.turns >= r.budget.limit.turns).length,
+    wallclock_s: recent.filter((r) => r.budget?.limit && r.budget.wallclock_s >= r.budget.limit.wallclock_s).length,
+  };
+  const money = recent.reduce((totals, run) => {
+    const amount = run.budget?.usd ?? 0;
+    if (run.status === "failed") totals.failed += amount;
+    else if (run.status === "done" && (run.accepted === true || /accept|land/i.test(run.verdict))) totals.accepted += amount;
+    else if (run.status === "done") totals.rejected += amount;
+    return totals;
+  }, { accepted: 0, rejected: 0, failed: 0 });
+  const ceilingActivity = (label: string, count: number) => (
+    <div key={label}>
+      <p>{count} runs hit this ceiling in the last 30 days ({label}).</p>
+      {count > 0 && <p className="text-xs text-warning">Suggested adjustment: consider raising the {label} ceiling.</p>}
+    </div>
+  );
 
   const numbersOnly = (o: Record<string, string>) =>
     Object.fromEntries(
@@ -606,6 +637,20 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         conversation — so a long task spends most of its budget on input.
         Currently {budget.max_tokens.toLocaleString()} per run.
       </p>
+      {recentRuns !== null && (
+        <div className="mt-3 rounded border border-hairline p-3 text-sm text-ink-secondary" data-testid="budget-activity">
+          <p className="font-medium text-ink">Recently</p>
+          <div data-testid="budget-hits" className="space-y-1">
+            {ceilingActivity("tokens", hitCounts.tokens)}
+            {ceilingActivity("USD", hitCounts.usd)}
+            {ceilingActivity("turns", hitCounts.turns)}
+            {ceilingActivity("time", hitCounts.wallclock_s)}
+          </div>
+          <p className="mt-3 font-medium text-ink">where the money went</p>
+          <p data-testid="budget-money">accepted work ${money.accepted.toFixed(2)} / rejected work ${money.rejected.toFixed(2)} / failed runs ${money.failed.toFixed(2)}</p>
+          <p className="mt-1 text-xs text-ink-muted">Figures cover finished runs in the last 30 days.</p>
+        </div>
+      )}
 
       <h3 className="mt-4 text-xs text-ink-muted">default phase modes</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
