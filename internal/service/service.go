@@ -716,6 +716,15 @@ func (s *Service) ProjectGet(ctx context.Context, id string) (*Project, error) {
 	return s.ProjectOpen(ctx, entry.Path)
 }
 
+// ConfigDoctor reports deterministic, read-only configuration findings.
+func (s *Service) ConfigDoctor(ctx context.Context, id string) ([]config.Finding, error) {
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	return config.Doctor(entry.Path)
+}
+
 // ProjectUpdate applies dotted keys to a project's config and saves it.
 //
 // Keys are applied to a copy and written only if every one of them is valid,

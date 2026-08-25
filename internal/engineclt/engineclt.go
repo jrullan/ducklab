@@ -399,6 +399,20 @@ func (c *Client) AppStop(projectID string) error {
 	return c.post("/v1/projects/"+projectID+"/app/stop", nil, nil)
 }
 
+// Finding is one deterministic configuration problem and its optional fix.
+type Finding struct {
+	Key      string `json:"key"`
+	Proposed string `json:"proposed"`
+	Reason   string `json:"reason"`
+}
+
+// ConfigDoctor reads deterministic configuration findings for a project.
+func (c *Client) ConfigDoctor(projectID string) ([]Finding, error) {
+	var result []Finding
+	err := c.get("/v1/projects/"+projectID+"/doctor", &result)
+	return result, err
+}
+
 // ProjectGate reports the configured gate and the detectable one.
 func (c *Client) ProjectGate(projectID string) (map[string]interface{}, error) {
 	var result map[string]interface{}

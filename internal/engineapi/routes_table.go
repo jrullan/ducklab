@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/report"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -176,6 +177,9 @@ func routeTable() []Route {
 			Request: service.InitRequest{}, Response: service.Project{},
 			Summary: "Open or initialise a project", ClientMethod: "ProjectInit",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectCreate }},
+		{Method: "GET", Path: "/v1/projects/{id}/doctor", Auth: true,
+			Response: []config.Finding{}, Summary: "Deterministic project configuration findings", ClientMethod: "ConfigDoctor",
+			handler: func(s *Server) http.HandlerFunc { return s.handleConfigDoctor }},
 		{Method: "GET", Path: "/v1/projects/{id}/gate", Auth: true,
 			Response:     service.GateStatus{},
 			Summary:      "The configured gate beside the one detection finds today",

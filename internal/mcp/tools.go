@@ -26,6 +26,11 @@ func toolList() []map[string]interface{} {
 	}
 	return []map[string]interface{}{
 		{
+			"name":        "config_doctor",
+			"description": "Read deterministic configuration findings; this never changes the project.",
+			"inputSchema": obj(map[string]interface{}{"project_id": str("the project id")}, "project_id"),
+		},
+		{
 			"name":        "roster",
 			"description": "Read or edit canonical roster seats. get resolves provenance; set replaces ordered ducklings; unpin restores Global inheritance.",
 			"inputSchema": obj(map[string]interface{}{"action": str("get | set | unpin"), "scope": str("global | project"), "project_id": str("project id"), "mode": str("mode"), "role": str("role"), "ducklings": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}}, "action", "scope"),
@@ -344,6 +349,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 		}
 	}
 	switch name {
+	case "config_doctor":
+		out, err := s.eng.ConfigDoctor(a.str("project_id"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(out), nil
 	case "roster":
 		return s.roster(a)
 	case "status":

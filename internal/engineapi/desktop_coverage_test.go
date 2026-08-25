@@ -34,6 +34,7 @@ var knownGaps = map[string]string{
 	"POST /v1/projects/{id}/roster/suggest": "same",
 	"GET /v1/runs/{id}/transcript":          "the conversation is rebuilt from events; the engine's own rendering is unreachable",
 	"GET /v1/engine":                        "engine version and paths; Settings shows a version it gets from the event stream",
+	"GET /v1/projects/{id}/doctor":          "findings panel lands with T-142; MCP and engineclt reach it today",
 }
 
 var notInTheDesktop = map[string]string{

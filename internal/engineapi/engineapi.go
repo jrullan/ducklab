@@ -1299,6 +1299,15 @@ func (s *Server) handleProjectForget(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleConfigDoctor(w http.ResponseWriter, r *http.Request) {
+	findings, err := s.svc.ConfigDoctor(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, findings)
+}
+
 func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	project, err := s.svc.ProjectGet(r.Context(), id)

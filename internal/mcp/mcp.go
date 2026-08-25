@@ -22,11 +22,13 @@ import (
 	"io"
 
 	"github.com/jrullan/ducklab/internal/build"
+	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 // Engine is the slice of the engine client the operator surface needs.
 type Engine interface {
 	ProjectList() ([]map[string]interface{}, error)
+	ConfigDoctor(projectID string) ([]engineclt.Finding, error)
 	RunList(projectID string) ([]map[string]interface{}, error)
 	RunGet(id string) (map[string]interface{}, error)
 	RunDiff(id string) (diff, tests, warning string, err error)

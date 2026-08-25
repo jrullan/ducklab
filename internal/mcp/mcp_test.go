@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/build"
+	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
 // fakeEngine records what the operator did and answers from fixtures.
@@ -50,6 +51,7 @@ type fakeEngine struct {
 func (f *fakeEngine) ProjectList() ([]map[string]interface{}, error) {
 	return []map[string]interface{}{{"id": "calc", "name": "Calculator"}}, nil
 }
+func (f *fakeEngine) ConfigDoctor(string) ([]engineclt.Finding, error) { return nil, nil }
 func (f *fakeEngine) ProjectStatus(string) (map[string]interface{}, error) {
 	return f.projectStatus, nil
 }
