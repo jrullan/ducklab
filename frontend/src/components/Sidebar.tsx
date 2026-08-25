@@ -41,6 +41,9 @@ export function Sidebar({
 }) {
   const [utilityOpen, setUtilityOpen] = useState(() => localStorage.getItem("ducklab.utility-drawer") !== "off");
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
+  // Configuration remains one destination until the settings consolidation
+  // lands; engine-domain rooms (including Ducklings) belong behind Settings.
+  const settingsEntry = (subnav.Config ?? []).find((r) => r.route.name === "settings");
   const activeRoom = (r: Route) =>
     r.name === route.name &&
     (r.name !== "board" || ("tab" in r ? r.tab : undefined) === ("tab" in route ? route.tab : undefined));
@@ -70,7 +73,7 @@ export function Sidebar({
         })}
       </nav>
       <nav className="mt-auto flex flex-col gap-1 border-t border-hairline pt-4" aria-label="Settings">
-        {(subnav.Config ?? []).map((r) => <a key={r.label} href={routeHref(r.route)} data-testid={`nav-${r.label.toLowerCase()}`} className={`rounded px-2 py-1.5 ${configMembers.includes(route.name) && route.name === r.route.name ? "bg-surface2 text-ink" : "text-ink-muted"}`}>{r.label}</a>)}
+        {settingsEntry && <a key={settingsEntry.label} href={routeHref(settingsEntry.route)} data-testid={`nav-${settingsEntry.label.toLowerCase()}`} className={`rounded px-2 py-1.5 ${configMembers.includes(route.name) && route.name === settingsEntry.route.name ? "bg-surface2 text-ink" : "text-ink-muted"}`}>{settingsEntry.label}</a>}
       </nav>
       {client && projectId && <>
         <div className="mt-3"><AppControl client={client} projectId={projectId} /></div>

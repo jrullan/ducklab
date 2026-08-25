@@ -16,15 +16,19 @@ const config = [
 ];
 
 describe("desktop sidebar rail", () => {
-  it("keeps primary navigation, settings, and footer status reachable", () => {
-    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={["settings", "roster", "skills", "projects"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={2} connection="open" />);
+  it("keeps primary navigation, one settings entry, and footer status reachable", () => {
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={["settings", "roster", "skills", "projects", "ducklings"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={2} connection="open" />);
 
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.getByTestId("nav-now")).toHaveTextContent("Now");
     expect(screen.getByTestId("nav-work")).toHaveTextContent("Work");
     expect(screen.getByTestId("nav-records")).toHaveTextContent("Records");
     expect(screen.getByTestId("nav-badge")).toHaveTextContent("2");
-    for (const item of config) expect(screen.getByTestId(`nav-${item.label.toLowerCase()}`)).toHaveAttribute("href", routeHref(item.route));
+    expect(screen.getByTestId("nav-settings")).toHaveAttribute("href", routeHref({ name: "settings" }));
+    expect(screen.queryByTestId("nav-ducklings")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-roster")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-skills")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nav-projects")).not.toBeInTheDocument();
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
   });
 
@@ -47,7 +51,7 @@ describe("desktop sidebar rail", () => {
   });
 
   it("does not duplicate settings as config room navigation", () => {
-    render(<Sidebar route={{ name: "settings" }} zones={zones} configMembers={["settings", "roster", "skills", "projects"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    render(<Sidebar route={{ name: "settings" }} zones={zones} configMembers={["settings", "roster", "skills", "projects", "ducklings"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
     expect(screen.queryByTestId("subnav")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("nav-settings")).toHaveLength(1);
   });
