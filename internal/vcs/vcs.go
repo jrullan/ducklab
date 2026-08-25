@@ -28,8 +28,26 @@ func New(root string) *Git {
 }
 
 func (g *Git) run(args ...string) (string, error) {
+	return g.runEnv(nil, args...)
+}
+
+func (g *Git) runEnv(env map[string]string, args ...string) (string, error) {
 	cmdLine := "git " + strings.Join(args, " ")
-	cmd := xplat.Shell(g.Root, nil, cmdLine)
+	var commandEnv []string
+	if env != nil {
+		commandEnv = os.Environ()
+		for i, entry := range commandEnv {
+			key, _, ok := strings.Cut(entry, "=")
+			if value, replace := env[key]; ok && replace {
+				commandEnv[i] = key + "=" + value
+				delete(env, key)
+			}
+		}
+		for key, value := range env {
+			commandEnv = append(commandEnv, key+"="+value)
+		}
+	}
+	cmd := xplat.Shell(g.Root, commandEnv, cmdLine)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, string(out))
@@ -777,7 +795,25 @@ func (g *Git) CherryPick(sha string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := g.run("cherry-pick", sha); err != nil {
+	// A cherry-pick normally uses the current wall-clock time for the
+	// committer date. Pin both identities and the author date from the orphan
+	// so an otherwise identical recovery recreates its original object ID.
+	metadata, err := g.run("show", "-s", "--format=%aI%x00%an%x00%ae%x00%cI%x00%cn%x00%ce", sha)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(strings.TrimSuffix(metadata, "\n"), "\x00")
+	if len(parts) != 6 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[3]) == "" {
+		return "", fmt.Errorf("read author metadata for %s: malformed git output", sha)
+	}
+	if _, err := g.runEnv(map[string]string{
+		"GIT_AUTHOR_DATE":     parts[0],
+		"GIT_COMMITTER_DATE":  parts[3],
+		"GIT_AUTHOR_NAME":     parts[1],
+		"GIT_AUTHOR_EMAIL":    parts[2],
+		"GIT_COMMITTER_NAME":  parts[4],
+		"GIT_COMMITTER_EMAIL": parts[5],
+	}, "cherry-pick", sha); err != nil {
 		_, _ = g.run("cherry-pick", "--abort")
 		return "", err
 	}
