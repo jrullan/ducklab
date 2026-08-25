@@ -88,6 +88,23 @@ func (g *Git) HeadSHA() (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// HeadHasTrailer reports whether HEAD carries the exact trailer written for a
+// run acceptance commit. It distinguishes a retry's existing commit from an
+// otherwise clean worktree.
+func (g *Git) HeadHasTrailer(key, value string) (bool, error) {
+	out, err := g.run("log", "-1", "--format="+shellEscape("%B"))
+	if err != nil {
+		return false, err
+	}
+	needle := key + ": " + value
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == needle {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // GitPath resolves a git-internal path for this worktree. Linked worktrees use
 // a .git file, so callers must not assume .git is a directory.
 func (g *Git) GitPath(name string) (string, error) {

@@ -2471,6 +2471,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if _, err := workGit.CommitWithTrailer(message, map[string]string{"Ducklab-Run": rs.run.ID, "Duckling": "implementer"}); err != nil {
 			return fmt.Errorf("commit worktree: %w", err)
 		}
+	} else if committed, err := workGit.HeadHasTrailer("Ducklab-Run", rs.run.ID); err != nil {
+		return fmt.Errorf("inspect worktree HEAD for run commit: %w", err)
+	} else if committed {
+		// A prior accept may have committed this run before its rebase failed.
+		// Its clean, tagged HEAD is already the candidate; do not commit it again.
 	}
 
 	// The chained red test remains solely on its run branch. Its build may

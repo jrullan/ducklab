@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -411,6 +412,63 @@ func TestAcceptWorktreeConflictPausesCleanly(t *testing.T) {
 		if _, err := os.Stat(strings.TrimSpace(out)); !os.IsNotExist(err) {
 			t.Fatalf("stale %s remains: %v", name, err)
 		}
+	}
+}
+
+// A failed rebase happens after the run commit exists. Once its blocker is
+// cleared, retrying must reuse that tagged, clean HEAD instead of attempting an
+// empty commit before it can rebase or land.
+func TestAcceptWorktreeRetryReusesCommitAfterFailedRebase(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-retry-reuse-commit")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("default conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil {
+		t.Fatal("conflicting rebase accepted")
+	}
+	workGit := vcs.New(run.WorktreePath)
+	firstCommit := mustHead(t, workGit)
+	if has, err := workGit.HeadHasTrailer("Ducklab-Run", run.ID); err != nil || !has {
+		t.Fatalf("failed accept did not leave its run commit: has=%v err=%v", has, err)
+	}
+	cmd := exec.Command("git", "reset", "--hard", run.BaseSHA)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clear rebase blocker: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "default.txt"), []byte("default moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("default.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("cleared blocker with unrelated default change"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("retry after clearing rebase blocker: %v", err)
+	}
+	if result.CommitSHA == firstCommit {
+		t.Fatal("retry did not rebase the existing run commit onto the moved default")
+	}
+	if has, err := vcs.New(dir).HeadHasTrailer("Ducklab-Run", run.ID); err != nil || !has {
+		t.Fatalf("landed rebased commit is not the reused run commit: has=%v err=%v", has, err)
+	}
+	if got := mustHead(t, git); got != result.CommitSHA {
+		t.Fatalf("default HEAD = %s, want landed rebased commit %s", got, result.CommitSHA)
 	}
 }
 
