@@ -11,6 +11,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -188,6 +189,12 @@ func (s *Service) RecoverRuns(ctx context.Context) error {
 				"runs_repaired":  repaired,
 			},
 		})
+	}
+	for _, entry := range entries {
+		cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+		if err == nil {
+			s.auditRemote(ctx, entry.ID, entry.Path, cfg.Remote.Name)
+		}
 	}
 	return nil
 }

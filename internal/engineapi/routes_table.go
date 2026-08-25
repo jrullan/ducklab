@@ -57,6 +57,15 @@ type restartRequest struct {
 	Requester string `json:"requester"`
 }
 
+type recoveryRequest struct {
+	CommitSHA string `json:"commit_sha"`
+	Requester string `json:"requester"`
+}
+
+type recoveryResponse struct {
+	CommitSHA string `json:"commit_sha"`
+}
+
 type rejectRequest struct {
 	Reason     string `json:"reason"`
 	Resolution string `json:"resolution,omitempty"`
@@ -223,7 +232,7 @@ func routeTable() []Route {
 			Response: service.Status{}, Summary: "Project status", ClientMethod: "ProjectStatus",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectStatus }},
 		{Method: "POST", Path: "/v1/projects/{id}/recover/{action}", Auth: true,
-			Summary: "Clean or commit the working tree", ClientMethod: "ProjectRecover",
+			Request: recoveryRequest{}, Response: recoveryResponse{}, Summary: "Person-initiated orphan recovery: cherry-pick-chain or restore-as-fresh-commit", ClientMethod: "ProjectRecover",
 			handler: func(s *Server) http.HandlerFunc { return s.handleProjectRecover }},
 
 		// Ducklings

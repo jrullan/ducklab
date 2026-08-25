@@ -241,6 +241,25 @@
         ],
         "type": "object"
       },
+      "ConfigFinding": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "proposed": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "proposed",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ConfigGit": {
         "properties": {
           "base_branch": {
@@ -350,6 +369,9 @@
           "references": {
             "$ref": "#/components/schemas/ConfigReferences"
           },
+          "remote": {
+            "$ref": "#/components/schemas/ConfigRemote"
+          },
           "roster": {
             "additionalProperties": {
               "type": "string"
@@ -390,6 +412,7 @@
           "modes",
           "name",
           "references",
+          "remote",
           "roster",
           "run",
           "schema",
@@ -410,6 +433,28 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "ConfigRemote": {
+        "properties": {
+          "allow_mcp_verbs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fetch_on_open": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allow_mcp_verbs",
+          "fetch_on_open",
+          "name"
+        ],
         "type": "object"
       },
       "ConfigRunApp": {
@@ -847,6 +892,32 @@
         },
         "required": [
           "kind"
+        ],
+        "type": "object"
+      },
+      "EngineapirecoveryRequest": {
+        "properties": {
+          "commit_sha": {
+            "type": "string"
+          },
+          "requester": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha",
+          "requester"
+        ],
+        "type": "object"
+      },
+      "EngineapirecoveryResponse": {
+        "properties": {
+          "commit_sha": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha"
         ],
         "type": "object"
       },
@@ -1356,6 +1427,9 @@
           },
           "id": {
             "type": "string"
+          },
+          "local_only": {
+            "type": "boolean"
           },
           "mode": {
             "type": "string"
@@ -2562,6 +2636,12 @@
             "type": "integer"
           },
           "active_runs": {
+            "type": "integer"
+          },
+          "ahead": {
+            "type": "integer"
+          },
+          "behind": {
             "type": "integer"
           },
           "budget_spent_today": {
@@ -4380,6 +4460,45 @@
         "summary": "Start a conversation with a chosen duckling about a bug or task, with its history as context"
       }
     },
+    "/v1/projects/{id}/doctor": {
+      "get": {
+        "operationId": "ConfigDoctor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConfigFinding"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Deterministic project configuration findings"
+      }
+    },
     "/v1/projects/{id}/gate": {
       "get": {
         "operationId": "ProjectGate",
@@ -4594,9 +4713,26 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapirecoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "204": {
-            "description": "no content"
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineapirecoveryResponse"
+                }
+              }
+            },
+            "description": "ok"
           },
           "401": {
             "description": "missing or invalid credentials"
@@ -4607,7 +4743,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Clean or commit the working tree"
+        "summary": "Person-initiated orphan recovery: cherry-pick-chain or restore-as-fresh-commit"
       }
     },
     "/v1/projects/{id}/releases": {

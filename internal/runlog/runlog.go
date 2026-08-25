@@ -40,7 +40,9 @@ type Run struct {
 	GateReproduced *GateReproduction `json:"acceptance_gate,omitempty"`
 	Accepted       bool              `json:"accepted"`
 	CommitSHA      string            `json:"commit_sha"`
-	Branch         string            `json:"branch,omitempty"`
+	// LocalOnly is set by the remote audit when an accepted commit is absent from remote refs.
+	LocalOnly bool   `json:"local_only,omitempty"`
+	Branch    string `json:"branch,omitempty"`
 	// WorktreePath and BaseSHA identify the isolated checkout this run used.
 	WorktreePath string `json:"worktree_path,omitempty"`
 	BaseSHA      string `json:"base_sha,omitempty"`

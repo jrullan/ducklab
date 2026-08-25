@@ -57,16 +57,18 @@ function cycleStation(stage: string): string | null {
   return (CYCLE as readonly string[]).includes(stage) ? stage : null;
 }
 
-function RecoveryControls({ client, projectId }: { client: EngineClient; projectId: string }) {
+function RecoveryControls({ client, projectId, commitSHA }: { client: EngineClient; projectId: string; commitSHA?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const recover = (action: "clean" | "commit") => {
+  if (!commitSHA) return null;
+  const recover = (action: "cherry-pick-chain" | "restore-as-fresh-commit") => {
     setBusy(action); setError(null);
-    void client.projectRecover(projectId, action).catch((e) => setError(e instanceof Error ? e.message : String(e))).finally(() => setBusy(null));
+    void client.projectRecover(projectId, action, commitSHA, "desktop").catch((e) => setError(e instanceof Error ? e.message : String(e))).finally(() => setBusy(null));
   };
-  return <div className="mt-2 flex gap-2 text-sm" data-testid="retire-recovery">
-    <button type="button" disabled={busy !== null} onClick={() => recover("clean")} className="rounded border border-hairline px-2 py-1">{busy === "clean" ? "Cleaning…" : "Clean working tree"}</button>
-    <button type="button" disabled={busy !== null} onClick={() => recover("commit")} className="rounded border border-hairline px-2 py-1">{busy === "commit" ? "Committing…" : "Commit changes"}</button>
+  return <div className="mt-2 flex gap-2 text-sm" data-testid="orphan-recovery">
+    <span className="text-critical">Commit is orphaned.</span>
+    <button type="button" disabled={busy !== null} onClick={() => recover("cherry-pick-chain")} className="rounded border border-hairline px-2 py-1">{busy === "cherry-pick-chain" ? "Recovering…" : "Cherry-pick chain"}</button>
+    <button type="button" disabled={busy !== null} onClick={() => recover("restore-as-fresh-commit")} className="rounded border border-hairline px-2 py-1">{busy === "restore-as-fresh-commit" ? "Restoring…" : "Restore as fresh commit"}</button>
     {error && <span className="text-critical" role="alert">{error}</span>}
   </div>;
 }
@@ -581,7 +583,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       return run.commit_sha ? `landed · ${run.commit_sha.slice(0, 7)}` : "landed";
     }
     if (run.accepted) {
-      return run.commit_sha ? `accepted · ${run.commit_sha.slice(0, 7)}` : "accepted";
+      const badge = run.local_only ? " · local only" : "";
+      return run.commit_sha ? `accepted · ${run.commit_sha.slice(0, 7)}${badge}` : `accepted${badge}`;
     }
     if (run.status === "failed" || run.verdict === "FAILED") return "not accepted";
     return "finished";
@@ -1220,8 +1223,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </h2>
           <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
           {run.stage === "test" && /retire-test|working tree is dirty|commit or clean/i.test(run.failure) && (
-            <RecoveryControls client={client} projectId={run.project_id} />
+            <a className="mt-2 inline-block text-sm underline" href={routeHref({ name: "projects" })}>Clean or commit the workspace</a>
           )}
+          {run.local_only && <RecoveryControls client={client} projectId={run.project_id} commitSHA={run.commit_sha} />}
         </section>
       )}
 

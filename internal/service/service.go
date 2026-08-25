@@ -471,6 +471,8 @@ type Project struct {
 
 // Status is the project status.
 type Status struct {
+	Ahead              int               `json:"ahead,omitempty"`
+	Behind             int               `json:"behind,omitempty"`
 	StageProgress      map[string]string `json:"stage_progress"`
 	WorkingTreeDirty   bool              `json:"working_tree_dirty,omitempty"`
 	TaskCounts         map[string]int    `json:"task_counts"`
@@ -554,6 +556,12 @@ func (s *Service) ProjectOpen(ctx context.Context, path string) (*Project, error
 	if err := s.RecoverRuns(ctx); err != nil {
 		return nil, fmt.Errorf("recover the project's runs: %w", err)
 	}
+	if cfg.Remote.FetchOnOpen {
+		if err := vcs.New(absPath).Fetch(cfg.Remote.Name); err != nil {
+			s.remoteWarning(id, "fetch failed: "+err.Error(), nil)
+		}
+	}
+	s.auditRemote(ctx, id, absPath, cfg.Remote.Name)
 	return &Project{
 		ID:       id,
 		Path:     absPath,
@@ -713,7 +721,11 @@ func (s *Service) ProjectGet(ctx context.Context, id string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.ProjectOpen(ctx, entry.Path)
+	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err != nil {
+		return nil, err
+	}
+	return &Project{ID: id, Path: entry.Path, Name: cfg.Name, Config: cfg, Autonomy: string(cfg.Autonomy)}, nil
 }
 
 // ConfigDoctor reports deterministic, read-only configuration findings.
@@ -804,24 +816,101 @@ func (s *Service) ProjectForget(ctx context.Context, id string) error {
 	return s.registry.Unregister(id)
 }
 
-// ProjectRecover performs an explicit working-tree recovery action.
-func (s *Service) ProjectRecover(ctx context.Context, id, action string) error {
+// ProjectRecover restores an orphaned accepted commit only after a person explicitly chooses a door.
+func (s *Service) ProjectRecover(ctx context.Context, id, action, sha, actor string) (string, error) {
+	if sha == "" || actor == "" {
+		return "", fmt.Errorf("commit_sha and requester are required")
+	}
 	entry, err := s.registry.Get(id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	git := vcs.New(entry.Path)
+	var landed string
 	switch action {
-	case "clean":
-		return git.Clean()
-	case "commit":
-		if err := git.AddAll(); err != nil {
-			return err
-		}
-		_, err := git.Commit("ducklab: recover working tree")
-		return err
+	case "cherry-pick-chain":
+		landed, err = git.CherryPick(sha)
+	case "restore-as-fresh-commit":
+		landed, err = git.RestoreAsFreshCommit(sha)
 	default:
-		return fmt.Errorf("unknown recovery action %q", action)
+		return "", fmt.Errorf("unknown recovery door %q", action)
+	}
+	if err != nil {
+		return "", err
+	}
+	s.runsMu.RLock()
+	var recoveredRuns []*runState
+	for _, rs := range s.runs {
+		if rs.run.ProjectID == id && rs.run.CommitSHA == sha {
+			recoveredRuns = append(recoveredRuns, rs)
+		}
+	}
+	s.runsMu.RUnlock()
+	for _, rs := range recoveredRuns {
+		w, e := s.ensureWriter(rs)
+		if e != nil {
+			continue
+		}
+		_ = w.AppendEvent("recovery", map[string]interface{}{"action": action, "actor": actor, "commit_sha": sha, "landed_sha": landed})
+		// The recovered commit is now on a branch. Clear the audit badge and
+		// persist it so the recovery door cannot be offered again after reload.
+		s.runsMu.Lock()
+		rs.run.LocalOnly = false
+		s.runsMu.Unlock()
+		_ = w.WriteState()
+	}
+	return landed, nil
+}
+
+// auditRemote marks accepted commits absent from remote refs and warns loudly about commits
+// no branch (local or remote) retains. Audit faults are warnings, never startup blockers.
+func (s *Service) auditRemote(ctx context.Context, projectID, root, remote string) {
+	git := vcs.New(root)
+	if remote == "" {
+		remote = "origin"
+	}
+	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
+	if err != nil {
+		s.remoteWarning(projectID, "orphan audit failed: "+err.Error(), nil)
+		return
+	}
+	var orphans []string
+	for _, run := range runs {
+		if !run.Accepted || run.CommitSHA == "" {
+			continue
+		}
+		remoteOK, err := git.RemoteContains(remote, run.CommitSHA)
+		if err != nil {
+			s.remoteWarning(projectID, "orphan audit failed for "+run.CommitSHA+": "+err.Error(), []string{run.CommitSHA})
+			continue
+		}
+		reachable, err := git.AnyBranchContains(run.CommitSHA)
+		if err != nil {
+			s.remoteWarning(projectID, "orphan audit failed for "+run.CommitSHA+": "+err.Error(), []string{run.CommitSHA})
+			continue
+		}
+		s.runsMu.Lock()
+		rs := s.runs[run.ID]
+		if rs != nil && rs.run.LocalOnly != !remoteOK {
+			rs.run.LocalOnly = !remoteOK
+			if w, e := s.ensureWriter(rs); e == nil {
+				_ = w.WriteState()
+			}
+		}
+		s.runsMu.Unlock()
+		if !reachable {
+			orphans = append(orphans, run.CommitSHA)
+		}
+	}
+	if len(orphans) > 0 {
+		sort.Strings(orphans)
+		s.remoteWarning(projectID, "ORPHANED ACCEPTED COMMITS: "+strings.Join(orphans, ", "), orphans)
+	}
+}
+
+func (s *Service) remoteWarning(projectID, message string, shas []string) {
+	if s.bus != nil {
+		s.bus.Publish(bus.Event{Type: "remote_warning", ProjectID: projectID, TS: s.now(), Data: map[string]interface{}{"warning": message, "commit_shas": shas}})
 	}
 }
 
@@ -860,10 +949,16 @@ func (s *Service) ProjectStatus(ctx context.Context, id string) (*Status, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Status{
-		StageProgress: stageProgress(entry.Path), TaskCounts: taskCounts, ActiveRuns: active,
-		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance(),
-	}, nil
+	st := &Status{StageProgress: stageProgress(entry.Path), TaskCounts: taskCounts, ActiveRuns: active,
+		AcceptedUnreleased: accepted, UnreleasedBranches: branches, Provenance: build.Provenance()}
+	cfg, err := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
+	if err == nil {
+		branch, berr := vcs.New(entry.Path).CurrentBranch()
+		if berr == nil {
+			st.Ahead, st.Behind, _ = vcs.New(entry.Path).AheadBehind(cfg.Remote.Name, branch)
+		}
+	}
+	return st, nil
 }
 
 // acceptedUnreleased counts accepted task commits not included in the latest

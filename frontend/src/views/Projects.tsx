@@ -12,6 +12,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { AppStatus, EngineClient, GateStatus, Project } from "../api/client";
+
+type RemoteStatus = { ahead?: number; behind?: number };
 import { canChooseDirectory, chooseDirectory } from "../lib/picker";
 import { StatusChip } from "../components/StatusChip";
 import { ShellCmd } from "../components/ShellCmd";
@@ -35,6 +37,7 @@ export function Projects({
   const [gitInit, setGitInit] = useState(true);
   const [gates, setGates] = useState<Record<string, GateStatus>>({});
   const [apps, setApps] = useState<Record<string, AppStatus>>({});
+  const [remotes, setRemotes] = useState<Record<string, RemoteStatus>>({});
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameTo, setRenameTo] = useState("");
 
@@ -54,6 +57,10 @@ export function Projects({
           client
             .appStatus(p.id)
             .then((a) => setApps((cur) => ({ ...cur, [p.id]: a })))
+            .catch(() => {});
+          client
+            .projectStatus(p.id)
+            .then((status) => setRemotes((cur) => ({ ...cur, [p.id]: status })))
             .catch(() => {});
         }
       })
@@ -248,6 +255,7 @@ export function Projects({
                         {p.name || p.id}
                       </button>
                       {p.missing && <StatusChip role="critical" label="folder is gone" />}
+                      {remotes[p.id] && <span className="text-xs text-ink-muted" data-testid={`remote-status-${p.id}`}>↑{remotes[p.id]?.ahead ?? 0} ↓{remotes[p.id]?.behind ?? 0}</span>}
                       <span className="ml-auto flex gap-1">
                         <button
                           type="button"

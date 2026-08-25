@@ -584,11 +584,17 @@ func (s *Server) handleRunLLM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectRecover(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.ProjectRecover(r.Context(), r.PathValue("id"), r.PathValue("action")); err != nil {
+	var req recoveryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	sha, err := s.svc.ProjectRecover(r.Context(), r.PathValue("id"), r.PathValue("action"), req.CommitSHA, req.Requester)
+	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	s.json(w, http.StatusOK, recoveryResponse{CommitSHA: sha})
 }
 
 func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {

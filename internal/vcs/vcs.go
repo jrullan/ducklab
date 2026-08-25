@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -645,6 +646,93 @@ func (g *Git) RevListAfter(ref string) ([]string, error) {
 		}
 	}
 	return shas, nil
+}
+
+// Fetch refreshes one configured remote. Callers must make this an explicit or opted-in action.
+func (g *Git) Fetch(remote string) error {
+	_, err := g.run("fetch", shellEscape(remote))
+	return err
+}
+
+var gitObjectSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$`)
+
+func safeGitObjectSHA(sha string) (string, error) {
+	if !gitObjectSHA.MatchString(sha) {
+		return "", fmt.Errorf("invalid git object sha %q", sha)
+	}
+	return shellEscape(sha), nil
+}
+
+// RemoteContains reports whether sha is reachable from a ref under remote.
+func (g *Git) RemoteContains(remote, sha string) (bool, error) {
+	sha, err := safeGitObjectSHA(sha)
+	if err != nil {
+		return false, err
+	}
+	out, err := g.run("branch", "-r", "--contains", sha)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), remote+"/") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// AnyBranchContains reports whether sha remains reachable from any local or remote branch.
+func (g *Git) AnyBranchContains(sha string) (bool, error) {
+	sha, err := safeGitObjectSHA(sha)
+	if err != nil {
+		return false, err
+	}
+	out, err := g.run("branch", "-a", "--contains", sha)
+	return strings.TrimSpace(out) != "", err
+}
+
+// AheadBehind reports HEAD's divergence from the remote tracking ref for branch.
+func (g *Git) AheadBehind(remote, branch string) (ahead, behind int, err error) {
+	ref := shellEscape(remote + "/" + branch + "...HEAD")
+	out, err := g.run("rev-list", "--left-right", "--count", ref)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err = fmt.Sscanf(strings.TrimSpace(out), "%d %d", &behind, &ahead); err != nil {
+		return 0, 0, err
+	}
+	return ahead, behind, nil
+}
+
+// CherryPick applies a recorded commit as a new commit on the current branch.
+func (g *Git) CherryPick(sha string) (string, error) {
+	sha, err := safeGitObjectSHA(sha)
+	if err != nil {
+		return "", err
+	}
+	if _, err := g.run("cherry-pick", sha); err != nil {
+		_, _ = g.run("cherry-pick", "--abort")
+		return "", err
+	}
+	return g.HeadSHA()
+}
+
+// RestoreAsFreshCommit applies sha's patch but deliberately records a new commit.
+func (g *Git) RestoreAsFreshCommit(sha string) (string, error) {
+	sha, err := safeGitObjectSHA(sha)
+	if err != nil {
+		return "", err
+	}
+	if _, err := g.run("cherry-pick", "--no-commit", sha); err != nil {
+		_, _ = g.run("cherry-pick", "--abort")
+		return "", err
+	}
+	out, err := g.run("show", "-s", "--format=%s", sha)
+	if err != nil {
+		_, _ = g.run("cherry-pick", "--abort")
+		return "", err
+	}
+	return g.Commit("ducklab: restore " + strings.TrimSpace(out))
 }
 
 // IsAncestor reports whether ancestor is reachable from descendant.

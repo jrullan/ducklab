@@ -78,6 +78,8 @@ export interface Run {
   acceptance_gate?: GateResult;
   accepted?: boolean;
   commit_sha?: string;
+  /** Accepted commit is absent from all configured remote refs. */
+  local_only?: boolean;
   /** Isolated checkout retained until this run's terminal decision. */
   branch?: string;
   worktree_path?: string;
@@ -930,10 +932,10 @@ export class EngineClient {
     return this.request<unknown>("DELETE", `/v1/projects/${id}`);
   }
   projectStatus(id: string) {
-    return this.request<Record<string, unknown>>("GET", `/v1/projects/${id}/status`);
+    return this.request<{ ahead?: number; behind?: number }>("GET", `/v1/projects/${id}/status`);
   }
-  projectRecover(id: string, action: "clean" | "commit") {
-    return this.request<void>("POST", `/v1/projects/${id}/recover/${action}`);
+  projectRecover(id: string, action: "cherry-pick-chain" | "restore-as-fresh-commit", commitSha: string, requester: string) {
+    return this.request<{ commit_sha: string }>("POST", `/v1/projects/${id}/recover/${action}`, { commit_sha: commitSha, requester });
   }
   /** Configured providers. Carries the *name* of the key's environment
    * variable and whether it is set — never a key (I10). */

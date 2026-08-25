@@ -350,6 +350,13 @@ type Git struct {
 	ProtectedPaths []string `toml:"protected_paths" json:"protected_paths"`
 }
 
+// Remote declares the remote surface Ducklab observes. Fetching is opt-in.
+type Remote struct {
+	Name          string   `toml:"name" json:"name"`
+	FetchOnOpen   bool     `toml:"fetch_on_open" json:"fetch_on_open"`
+	AllowMCPVerbs []string `toml:"allow_mcp_verbs" json:"allow_mcp_verbs"`
+}
+
 // GitHub holds GitHub configuration.
 type GitHub struct {
 	Enabled    bool   `toml:"enabled" json:"enabled"`
@@ -386,6 +393,7 @@ type Project struct {
 	Modes     Modes                          `toml:"modes" json:"modes"`
 	Budget    Budget                         `toml:"budget" json:"budget"`
 	Git       Git                            `toml:"git" json:"git"`
+	Remote    Remote                         `toml:"remote" json:"remote"`
 	GitHub    GitHub                         `toml:"github" json:"github"`
 	Shell     ShellPolicy                    `toml:"shell" json:"shell"`
 	Run       RunApp                         `toml:"run" json:"run"`
@@ -748,6 +756,7 @@ func DefaultProject(id, name string) *Project {
 			BaseBranch:    "main",
 			CommitTrailer: true,
 		},
+		Remote: Remote{Name: "origin", FetchOnOpen: false, AllowMCPVerbs: []string{}},
 		Shell: ShellPolicy{
 			Mode: "guarded",
 			Deny: []string{"rm -rf /", "shutdown", "reboot", "mkfs", ":(){", "curl * | sh", "dd if="},

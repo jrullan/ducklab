@@ -75,6 +75,12 @@ export interface ConfigExternalIndex {
   source?: string;
 }
 
+export interface ConfigFinding {
+  key?: string;
+  proposed?: string;
+  reason?: string;
+}
+
 export interface ConfigGit {
   base_branch?: string;
   branch_prefix?: string;
@@ -106,6 +112,7 @@ export interface ConfigProject {
   modes?: Record<string, string>;
   name?: string;
   references?: ConfigReferences;
+  remote?: ConfigRemote;
   roster?: Record<string, string>;
   roster_seats?: Record<string, string[]>;
   run?: ConfigRunApp;
@@ -118,6 +125,12 @@ export interface ConfigReferences {
   max_files?: number;
   per_file_chars?: number;
   total_chars?: number;
+}
+
+export interface ConfigRemote {
+  allow_mcp_verbs?: string[];
+  fetch_on_open?: boolean;
+  name?: string;
 }
 
 export interface ConfigRunApp {
@@ -244,6 +257,15 @@ export interface EngineapilandRequest {
 
 export interface EngineapiliftRequest {
   kind?: string;
+}
+
+export interface EngineapirecoveryRequest {
+  commit_sha?: string;
+  requester?: string;
+}
+
+export interface EngineapirecoveryResponse {
+  commit_sha?: string;
 }
 
 export interface EngineapirejectReceipt {
@@ -401,6 +423,7 @@ export interface RunlogRun {
   gate?: string;
   governance_modified?: boolean;
   id?: string;
+  local_only?: boolean;
   mode?: string;
   mode_source?: string;
   next?: string[];
@@ -730,6 +753,8 @@ export interface ServiceStageRequest {
 export interface ServiceStatus {
   accepted_unreleased?: number;
   active_runs?: number;
+  ahead?: number;
+  behind?: number;
   budget_spent_today?: number;
   provenance?: string;
   stage_progress?: Record<string, string>;
@@ -837,6 +862,7 @@ export const OPERATIONS = [
   { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
   { id: "ChatStart", method: "POST", path: "/v1/projects/{id}/chats" },
+  { id: "ConfigDoctor", method: "GET", path: "/v1/projects/{id}/doctor" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
