@@ -14,12 +14,9 @@ import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
 import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
-import { Projects } from "../views/Projects";
 import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
 import { Settings } from "../views/Settings";
-import { Roster } from "../views/Roster";
-import { Skills } from "../views/Skills";
 import { parseRoute, routeHref, type Route } from "./routes";
 import { loadTheme, type Theme } from "./theme";
 
@@ -531,33 +528,19 @@ export function App() {
           ) : (
             <NoProject />
           ))}
-        {route.name === "projects" && client && (
-          <div className="p-4">
-            <Projects
-              client={client}
-              selected={projectId}
-              onSelect={(id) => {
-                setProjectId(id);
-                localStorage.setItem("ducklab.project", id);
-              }}
-              onChanged={() => {
-                client.projects().then(setProjects).catch(() => {});
-              }}
-            />
-          </div>
-        )}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
-        {route.name === "roster" && client && projectId && (
-          <div className="h-full p-4"><Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} /></div>
-        )}
-        {route.name === "skills" && client && projectId && (
-          <div className="h-full overflow-y-auto p-4"><Skills client={client} projectId={projectId} /></div>
-        )}
-        {route.name === "settings" && (
+        {(route.name === "settings" || route.name === "roster" || route.name === "skills" || route.name === "projects") && (
           <Settings
             projectId={projectId}
+            projectName={projects.find((p) => p.id === projectId)?.name}
+            room={route.name === "settings" ? undefined : route.name}
             theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection}
             client={client ?? undefined}
+            onProjectSelect={(id) => {
+              setProjectId(id);
+              localStorage.setItem("ducklab.project", id);
+            }}
+            onProjectsChanged={() => { void client?.projects().then(setProjects); }}
             onEngine={(a) => void superviseEngine(a)} engineBusy={restarting} engineError={restartError}
           />
         )}

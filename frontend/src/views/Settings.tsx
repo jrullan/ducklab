@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { Ducklings } from "./Ducklings";
+import { Roster } from "./Roster";
+import { Skills } from "./Skills";
+import { Projects } from "./Projects";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
@@ -69,25 +72,28 @@ const SETTINGS_ROOMS = [
 /** The three questions are the information architecture; the existing rooms
  * remain separate routes and views. This is deliberately only navigation: it
  * keeps bookmarks and each room's implementation intact. */
-const SETTINGS_GROUPS: { label: string; sectionIds?: SettingsSection[]; rooms?: typeof SETTINGS_ROOMS[number]["name"][] }[] = [
+const SETTINGS_GROUPS: { label: string; shortLabel: string; sectionIds?: SettingsSection[]; rooms?: typeof SETTINGS_ROOMS[number]["name"][] }[] = [
   {
     label: "Who works for you — and how far they may go",
+    shortLabel: "People & autonomy",
     sectionIds: ["ducklings", "fleet", "budgets", "autopilot"],
     rooms: ["roster", "skills"],
   },
   {
     label: "Your projects",
+    shortLabel: "Projects",
     sectionIds: ["remote"],
     rooms: ["projects"],
   },
   {
     label: "Your preferences",
+    shortLabel: "Preferences",
     sectionIds: ["appearance", "engine"],
   },
 ];
 
 export function Settings({
-  theme, onTheme, engineVersion, connection, client, projectId, onEngine, engineBusy, engineError,
+  theme, onTheme, engineVersion, connection, client, projectId, projectName, onEngine, engineBusy, engineError, room, onProjectSelect, onProjectsChanged,
 }: {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -102,6 +108,11 @@ export function Settings({
   onEngine?: (action: "restart" | "reconnect") => void;
   engineBusy?: boolean;
   engineError?: string | null;
+  room?: "roster" | "skills" | "projects";
+  /** Display name for the selected project in the roster scope control. */
+  projectName?: string;
+  onProjectSelect?: (id: string) => void;
+  onProjectsChanged?: () => void;
 }) {
   const change = (t: Theme) => {
     applyTheme(t);
@@ -112,14 +123,14 @@ export function Settings({
     typeof window !== "undefined" && window.location.hash.includes("section=engine") ? "engine" : "ducklings",
   );
   return (
-    <div className="flex gap-6 p-4" data-testid="settings">
+    <div className="flex h-full min-h-0 gap-6 overflow-hidden p-4" data-testid="settings">
       {/* The sub-menu: one concern on screen at a time (the user's own
           mock). Nothing unmounts except the fleet — config state and its
           one Save survive switching via CSS visibility. */}
-      <nav className="w-44 shrink-0 space-y-1" data-testid="settings-nav">
+      <nav className="w-52 shrink-0 space-y-1 overflow-y-auto border-r border-hairline pr-4" data-testid="settings-nav">
         {SETTINGS_GROUPS.map((group) => (
           <section key={group.label} className="mb-3" aria-label={group.label}>
-            <h2 className="px-2 pb-1 text-xs font-medium text-ink">{group.label}</h2>
+            <h2 className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-muted" aria-label={group.label} title={group.label}>{group.shortLabel}</h2>
             <div className="space-y-1">
               {(group.sectionIds ?? []).map((id) => {
                 const sec = SETTINGS_SECTIONS.find((item) => item.id === id)!;
@@ -131,7 +142,7 @@ export function Settings({
                     aria-pressed={section === sec.id}
                     onClick={() => setSection(sec.id)}
                     className={`block w-full rounded px-2 py-1 text-left text-sm ${
-                      section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
+                      !room && section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
                     }`}
                   >
                     {sec.label}
@@ -139,15 +150,15 @@ export function Settings({
                 );
               })}
               {(group.rooms ?? []).map((name) => {
-                const room = SETTINGS_ROOMS.find((item) => item.name === name)!;
+                const roomItem = SETTINGS_ROOMS.find((item) => item.name === name)!;
                 return (
                   <a
-                    key={room.name}
-                    href={routeHref({ name: room.name })}
-                    data-testid={`settings-nav-${room.name}`}
-                    className="block rounded px-2 py-1 text-sm text-ink-muted"
+                    key={roomItem.name}
+                    href={routeHref({ name: roomItem.name })}
+                    data-testid={`settings-nav-${roomItem.name}`}
+                    className={`block whitespace-nowrap rounded px-2 py-1 text-sm ${room === roomItem.name ? "bg-surface2 text-ink" : "text-ink-muted"}`}
                   >
-                    {room.label}
+                    {roomItem.label}
                   </a>
                 );
               })}
@@ -156,20 +167,35 @@ export function Settings({
         ))}
       </nav>
 
-      <div className="min-w-0 max-w-3xl flex-1">
-      {section === "ducklings" && client && (
+      <div className="min-w-0 max-w-3xl flex-1 overflow-y-auto" data-testid="settings-content">
+      {room === "roster" && client && projectId && (
+        <div className="h-full overflow-y-auto p-4" data-testid="settings-room-roster">
+          <Roster client={client} projectId={projectId} projectName={projectName} />
+        </div>
+      )}
+      {room === "skills" && client && projectId && (
+        <div className="h-full overflow-y-auto p-4" data-testid="settings-room-skills">
+          <Skills client={client} projectId={projectId} />
+        </div>
+      )}
+      {room === "projects" && client && (
+        <div className="h-full overflow-y-auto p-4" data-testid="settings-room-projects">
+          <Projects client={client} selected={projectId ?? ""} onSelect={onProjectSelect ?? (() => {})} onChanged={onProjectsChanged ?? (() => {})} />
+        </div>
+      )}
+      {!room && section === "ducklings" && client && (
         <>
           <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
           <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
         </>
       )}
-      {client && <ConfigSection client={client} section={section} projectId={projectId} />}
-      {section === "fleet" && client && (
+      {!room && client && <ConfigSection client={client} section={section} projectId={projectId} />}
+      {!room && section === "fleet" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
       )}
-      {section === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
+      {!room && section === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
 
-      <div className={section === "appearance" ? "" : "hidden"}>
+      {!room && <div className={section === "appearance" ? "" : "hidden"}>
       <SettingsCard
         title="appearance & alerts"
         desc="how ducklab looks, and when it speaks up"
@@ -191,9 +217,9 @@ export function Settings({
         <QuackToggle />
         <ChipFactsPicker />
       </SettingsCard>
-      </div>
+      </div>}
 
-      <div className={section === "engine" ? "" : "hidden"}>
+      {!room && <div className={section === "engine" ? "" : "hidden"}>
       <SettingsCard
         title="engine"
         desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
@@ -231,7 +257,7 @@ export function Settings({
           </div>
         )}
       </SettingsCard>
-      </div>
+      </div>}
       </div>
     </div>
   );

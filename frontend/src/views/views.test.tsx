@@ -73,6 +73,25 @@ describe("Settings", () => {
       expect(screen.getByTestId(testid)).toBeInTheDocument();
     }
   });
+
+  it("keeps the settings frame when a room is open", () => {
+    const client = {
+      ducklings: vi.fn().mockResolvedValue([]),
+      globalRosterGet: vi.fn().mockResolvedValue({ entries: [] }),
+      providers: vi.fn().mockResolvedValue([]),
+      Scorecards: vi.fn().mockResolvedValue([]),
+    };
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="" connection="open" client={client as any} projectId="p" room="roster" projectName="Demo" />);
+    expect(screen.getByTestId("settings-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-content")).toContainElement(screen.getByTestId("roster-view"));
+  });
+
+  it("uses labels for groups, not links", () => {
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="" connection="open" />);
+    for (const heading of screen.getAllByRole("heading")) {
+      expect(heading.closest("a")).toBeNull();
+    }
+  });
 });
 
 describe("RunView", () => {
