@@ -93,3 +93,7 @@ The traceability rail is retired. Its information lives in three homes:
    for the user?" — a zone without an answer is removed.
 5. Landing a surface change requires a real-render pass against the
    live engine with real project data, not only a green gate.
+6. **Every routed view keeps a door**: any view reachable by route must
+   be reachable from the sidebar tree. Hiding an entry without re-homing
+   its destination is a regression; a vitest reachability test walks the
+   sidebar tree and asserts every registered route appears.
