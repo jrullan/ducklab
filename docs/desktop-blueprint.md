@@ -25,7 +25,14 @@ Sidebar, top to bottom:
 - Primary nav: Now (waiting badge) · Work · Records · Settings — four
   words, four questions. Subnav renders visually attached to its own
   parent, never adjacent to a sibling heading.
-- Footer: engine status and the waiting summary, plain words.
+- Footer: the system-truth zone — engine status and the waiting
+  summary, plain words. **Update availability lives here, as
+  exception-state**: silent when current; one worded line when a newer
+  desktop exists ("update ready — 0.9.1 · restart when idle") whose
+  action uses the engine's checkpointed restart so nothing in flight is
+  lost. A blocking version mismatch (engine older than the app,
+  features failing) remains a banner — broken-now interrupts,
+  available-later does not.
 
 The Settings consolidation (four entries → one, organized by the
 user's three questions) is specified in its own proposal and lands as
