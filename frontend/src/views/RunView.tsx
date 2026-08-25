@@ -535,6 +535,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // them never writes config. The card owns the one explicit human Apply action.
   const configProposals = events.filter((event) => event.type === "config_amendment");
   const configFailure = (run.status === "failed" || run.verdict === "FAILED") ? configProposals[0] : undefined;
+  // A terminal configuration failure leads with understanding. Do not also
+  // offer the mutation card for the same finding; amendments from chat or the
+  // consultant remain actionable on non-failure runs.
+  const actionableConfigProposals = configFailure ? [] : configProposals;
   // The live figures while the run is GOING, the recorded ones once it is
   // not — by status, not by which happens to exist. The last streamed budget
   // event can predate the final turn's accounting by a moment, and a paused
@@ -939,7 +943,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
         return key ? <ConfigFailureCard client={client} projectId={run.project_id} ducklings={fleet} finding={{ key, proposed, reason }} /> : null;
       })()}
-      {configProposals.map((event, index) => {
+      {actionableConfigProposals.map((event, index) => {
         const data = event.data ?? {};
         const key = typeof data.key === "string" ? data.key : "";
         const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";

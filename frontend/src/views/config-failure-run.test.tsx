@@ -35,6 +35,7 @@ describe("RunView configuration failures", () => {
 
     render(<RunView runId="r-config" client={client} />);
     await waitFor(() => expect(screen.getByTestId("config-failure-card")).toHaveTextContent("verify.link_deps"));
+    expect(screen.queryByTestId("config-amendment-card")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("chat-about"));
     fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "consultant" } });
     fireEvent.click(screen.getByTestId("chat-start"));
