@@ -52,6 +52,30 @@ describe("Now — the inbox", () => {
     expect(card.textContent).toContain("see the evidence");
   });
 
+  it("explains each pending card variant in plain language", async () => {
+    const variants = [
+      { pending_kind: "gate", verdict: "PASSED", text: "finished and passed its tests" },
+      { pending_kind: "question", verdict: "", text: "paused to ask you a question" },
+      { pending_kind: "dissent", verdict: "PASSED", text: "a reviewer disagreed" },
+      { pending_kind: "gate", verdict: "UNVERIFIED", text: "finished without verified tests" },
+    ];
+    for (const [index, variant] of variants.entries()) {
+      seed([{ ...base, id: `r-${index}`, pending_kind: variant.pending_kind, verdict: variant.verdict }]);
+      const { unmount } = render(<Now client={clientWith()} projectId="p" />);
+      const card = await screen.findByTestId("now-waiting-card");
+      expect(card.textContent).toContain(variant.text);
+      unmount();
+    }
+  });
+
+  it("explains a warning as a passed-with-caveat result", async () => {
+    seed([{ ...base, warning: "tests ran in a fallback environment" }]);
+    render(<Now client={clientWith()} projectId="p" />);
+    const card = await screen.findByTestId("now-waiting-card");
+    expect(card.textContent).toContain("passed with caveat");
+    expect(screen.getByLabelText("passed with caveat: tests ran in a fallback environment")).toBeTruthy();
+  });
+
   it("accepts without leaving the inbox, never optimistically", async () => {
     seed([base]);
     const client = clientWith();
@@ -215,6 +239,13 @@ describe("the inbox's footer", () => {
     expect(footer.textContent).toContain("today $1.50");
     expect(footer.textContent).toContain("all time $10.50");
     expect(footer.textContent).toContain("1/2 passed");
+  });
+
+  it("formats zero spend as two decimal places", async () => {
+    seed([{ ...base, budget: { usd: 0, tokens: 0, turns: 0, wallclock_s: 0 } }]);
+    render(<Now client={clientWith()} projectId="p" />);
+    expect((await screen.findByTestId("now-footer")).textContent).toContain("$0.00");
+    expect(screen.getByTestId("now-waiting-card").textContent).not.toContain("$0.0000");
   });
 
   it("shows nothing before any run exists", async () => {

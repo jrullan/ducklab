@@ -4,6 +4,23 @@ import { routeHref } from "../app/routes";
 import { runLabel } from "../lib/runview";
 import { waitingFor, money } from "../lib/format";
 
+function cardMoney(usd: number): string {
+  return usd === 0 ? "$0.00" : money(usd);
+}
+
+function waitingExplanation(run: Run): string {
+  if (run.pending_kind === "question") {
+    return "This task paused to ask you a question — it is waiting for your answer.";
+  }
+  if (run.pending_kind === "dissent") {
+    return "This task finished, but a reviewer disagreed — it is waiting for your decision.";
+  }
+  if (run.verdict === "UNVERIFIED") {
+    return "This task finished without verified tests — it is waiting for your decision.";
+  }
+  return "This task finished and passed its tests — it is waiting for your decision.";
+}
+
 /** A run waiting at its gate, decidable in place: buttons from the engine's
  * next list, verdict and cost as the minimum evidence, and the run linked for
  * the scrutiny that needs the diff. Shared by Now's inbox and the board's
@@ -34,16 +51,36 @@ export function WaitingCard({
           {runLabel(run)}
         </a>
         <span className="text-xs text-ink-secondary">{run.mode}</span>
-        {run.verdict && <StatusChip role="warning" label={run.verdict.toLowerCase()} />}
+        {run.verdict && (
+          <>
+            <StatusChip
+              role={run.verdict === "UNVERIFIED" ? "warning" : "good"}
+              label={run.verdict.toLowerCase()}
+            />
+            {run.warning && (
+              <span
+                className="text-xs"
+                style={{ color: "var(--status-serious)" }}
+                title={`passed with caveat: ${run.warning}`}
+                aria-label={`passed with caveat: ${run.warning}`}
+              >
+                ⚠ passed with caveat
+              </span>
+            )}
+          </>
+        )}
         <span className="text-xs text-ink-muted">
           waiting {run.pending_since ? waitingFor(run.pending_since) : ""}
         </span>
         {run.budget && run.budget.usd > 0 && (
           <span className="ml-auto text-xs tabular-nums text-ink-secondary">
-            {money(run.budget.usd)}
+            {cardMoney(run.budget.usd)}
           </span>
         )}
       </div>
+      <p className="mt-2 text-sm text-ink-secondary" data-testid="waiting-explanation">
+        {waitingExplanation(run)}
+      </p>
       {/* The reason the run stopped, where the decision is offered. A card
           saying "waiting — error" with the error a click away taught the
           person the card could not be trusted to say why. */}
