@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Sidebar } from "./Sidebar";
 import { routeHref } from "../app/routes";
@@ -26,6 +26,24 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("nav-badge")).toHaveTextContent("2");
     for (const item of config) expect(screen.getByTestId(`nav-${item.label.toLowerCase()}`)).toHaveAttribute("href", routeHref(item.route));
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
+  });
+
+  it("removes app identity and keeps project selection as the only project control", () => {
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} project={{ id: "p", name: "ducklab", path: ".", branch: "main" }} projects={[{ id: "p", name: "ducklab", path: ".", branch: "main" }]} projectId="p" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    expect(screen.queryByText("ducklab", { selector: ".text-md" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("project-select")).toBeInTheDocument();
+    expect(screen.queryByText("on branch")).not.toBeInTheDocument();
+  });
+
+  it("words only a non-base branch", () => {
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} project={{ id: "p", name: "ducklab", path: ".", branch: "chore/release-0.3.48", base_branch: "main" }} projects={[{ id: "p", name: "ducklab", path: ".", branch: "chore/release-0.3.48", base_branch: "main" }]} projectId="p" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    expect(screen.getByText("on branch chore/release-0.3.48 — not the base")).toBeInTheDocument();
+  });
+
+  it("attaches each subnav to its own parent", () => {
+    render(<Sidebar route={{ name: "cycle" }} zones={zones} configMembers={[]} subnav={{ Work: [{ label: "Documents", route: { name: "cycle" } }] }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
+    const work = screen.getByTestId("nav-work");
+    expect(within(work.parentElement as HTMLElement).getByTestId("subnav-documents")).toBeInTheDocument();
   });
 
   it("does not duplicate settings as config room navigation", () => {

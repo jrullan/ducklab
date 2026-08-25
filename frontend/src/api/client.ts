@@ -13,6 +13,8 @@ export interface Project {
   name: string;
   /** Current checked-out branch when supplied by the engine. */
   branch?: string;
+  /** Project's configured base branch, when supplied by the engine. */
+  base_branch?: string;
   gate?: string;
   autonomy?: string;
   /** The directory is gone. Selecting one of these silently produced an empty
