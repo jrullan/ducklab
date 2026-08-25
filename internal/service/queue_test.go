@@ -427,6 +427,44 @@ func TestQueueHonorsExplicitProviderCap(t *testing.T) {
 	close(release)
 }
 
+// ProviderSet changes the live provider cap and must poke the queue so a run
+// waiting only on that provider is admitted without an engine restart.
+func TestProviderSetAdmitsWaitingRunAfterLiveProviderCapRaise(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	s.configPath = filepath.Join(t.TempDir(), "config.toml")
+	s.cfg.Providers["fake"] = config.Provider{
+		Kind: config.ProviderKindOpenAI, BaseURL: "https://api.example.test/v1", MaxConcurrent: 1,
+	}
+	s.queue = newRunQueue(16)
+
+	release := make(chan struct{})
+	first := queuedRun(t, "r-provider-cap-holder", "one", func() { <-release })
+	first.parallel = true
+	first.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+	s.queue.submit(s, first)
+
+	secondStarted := make(chan struct{})
+	second := queuedRun(t, "r-provider-cap-waiter", "two", func() { close(secondStarted) })
+	second.parallel = true
+	second.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
+	s.queue.submit(s, second)
+	if second.rs.run.Status != "queued" {
+		t.Fatalf("status = %q, want queued at provider cap 1", second.rs.run.Status)
+	}
+
+	if err := s.ProviderSet("fake", ProviderView{
+		Kind: "openai", BaseURL: "https://api.example.test/v1", MaxConcurrent: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued run was not admitted after ProviderSet raised the provider cap")
+	}
+	close(release)
+}
+
 func setProviderMaxConcurrent(t *testing.T, p *config.Provider, cap int) {
 	t.Helper()
 	field := reflect.ValueOf(p).Elem().FieldByName("MaxConcurrent")
