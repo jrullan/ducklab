@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { saveChipFacts } from "../lib/chipfacts";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -46,6 +46,19 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 describe("Cycle", () => {
+  it("narrates the three stages in house voice", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/")) return json({ ...REQUIREMENTS, sections: [] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+    const narrative = await screen.findByTestId("cycle-stage-narrative");
+    expect(narrative).toHaveTextContent("you write this; nobody codes from it");
+    expect(narrative).toHaveTextContent("ducklings draft; you agree behavior");
+    expect(narrative).toHaveTextContent("cut into tasks; you birth them");
+  });
+
   it("lists sections and marks the ones the spine reports broken", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
@@ -149,17 +162,35 @@ const PLAN = {
 };
 
 describe("Cycle, plan tab", () => {
-  const client = () =>
+  const client = (trace: unknown = { down: ["T-001"] }, taskItems: unknown[] = [
+    { id: "T-001", title: "Authentication", milestone: "M-001", status: "done" },
+    { id: "T-002", title: "Orphan work", milestone: "M-001", status: "queued" },
+  ]) =>
     clientWith((p) => {
       if (p.includes("/artifacts/plan")) return json(PLAN);
       if (p.includes("/artifacts/")) return json({ ...REQUIREMENTS, sections: null });
       if (p.includes("/trace/check"))
         return json({ errors: [{ kind: "unjustified_task", id: "T-002", detail: "task implements no spec section" }] });
+      if (p.includes("/trace/M-001")) return json(trace);
+      if (p.includes("/tasks")) return json({ items: taskItems });
       return json({}, 404);
     });
 
   // A task's Implements line is the edge that makes the plan traceable. Showing
   // only id and title made the tab look like the plan referenced nothing.
+  it("shows live task state from the Down walk and task status", async () => {
+    render(<Cycle client={client()} projectId="p" />);
+    fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    await waitFor(() => expect(screen.getByTestId("cycle-live-state")).toHaveTextContent("T-001 landed"));
+    expect(screen.getByTestId("cycle-live-state").dataset.traceLoaded).toBe("true");
+  });
+
+  it("shows no task born yet when the Down walk has no tasks", async () => {
+    render(<Cycle client={client({ down: [] }, [])} projectId="p" />);
+    fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    await waitFor(() => expect(screen.getByTestId("cycle-live-state")).toHaveTextContent("no task born yet"));
+  });
+
   it("shows what each task implements", async () => {
     render(<Cycle client={client()} projectId="p" />);
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
@@ -425,6 +456,8 @@ describe("Cycle — reading a proposal", () => {
     expect(proposal.textContent).toContain("REQ-001");
     expect(proposal.textContent).toContain("The tool shall record a sighting.");
     expect(screen.getByTestId("proposal-sections")).toBeTruthy();
+    expect(proposal).toHaveTextContent("A run proposes changing this section — read it and decide");
+    expect(screen.getByTestId("proposal-coverage-line")).toHaveTextContent("Every normative section has work behind it.");
   });
 
   // The diff answers a different question — what changed — which matters on a

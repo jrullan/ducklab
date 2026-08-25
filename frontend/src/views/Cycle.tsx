@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Artifact, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, TraceError } from "../api/client";
+import type { Artifact, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { DiffView } from "../components/DiffView";
@@ -21,9 +21,9 @@ import { SurveyCoverageLine } from "../components/SurveyInventory";
 import { canChooseFile, chooseFile } from "../lib/picker";
 
 const STAGES = [
-  { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ" },
-  { stage: "spec", kind: "spec", label: "Spec", prefix: "SPEC" },
-  { stage: "plan", kind: "plan", label: "Plan", prefix: "M" },
+  { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ", story: "you write this; nobody codes from it" },
+  { stage: "spec", kind: "spec", label: "Spec", prefix: "SPEC", story: "ducklings draft; you agree behavior" },
+  { stage: "plan", kind: "plan", label: "Plan", prefix: "M", story: "cut into tasks; you birth them" },
 ] as const;
 
 type StageDef = (typeof STAGES)[number];
@@ -46,6 +46,8 @@ export function Cycle({
   // approved artifact. Without this the rail cannot say whether a break is in
   // what you are deciding on or in what you accepted last week.
   const [checkedProposed, setCheckedProposed] = useState<string[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [traceDown, setTraceDown] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
   const [promoting, setPromoting] = useState(false);
@@ -177,13 +179,35 @@ export function Cycle({
   }, [load]);
 
   useEffect(() => {
-    // Deferred a tick so a partial test client without tasks() rejects
-    // instead of throwing synchronously in the effect.
+    // Tasks are the live record; traceShow supplies the Down walk used to keep
+    // this thread anchored to the engine's links rather than guessed by the UI.
     Promise.resolve()
       .then(() => client.tasks(projectId))
-      .then((ts) => setDebtCount(ts.filter((t) => t.spec_debt).length))
-      .catch(() => setDebtCount(0));
+      .then((ts) => {
+        setTasks(ts);
+        setDebtCount(ts.filter((t) => t.spec_debt).length);
+      })
+      .catch(() => {
+        setTasks([]);
+        setDebtCount(0);
+      });
   }, [client, projectId, startedRun]);
+
+  useEffect(() => {
+    if (active.stage !== "plan" || !artifact?.sections?.length) {
+      setTraceDown({});
+      return;
+    }
+    let cancelled = false;
+    const planSections = artifact.sections;
+    Promise.all(planSections.map((s) =>
+      typeof client["traceShow"] === "function" ? client["traceShow"](projectId, s.id).catch(() => null) : Promise.resolve(null),
+    ))
+      .then((walks) => {
+        if (!cancelled) setTraceDown(Object.fromEntries(planSections.map((s, i) => [s.id, walks[i]])));
+      });
+    return () => { cancelled = true; };
+  }, [active.stage, artifact, client, projectId]);
 
   // Who will actually do it. A button that says only "Draft it" hides the two
   // things worth knowing before spending minutes and tokens: which models, and
@@ -374,6 +398,17 @@ export function Cycle({
             </button>
           ))}
         </div>
+        <section data-testid="cycle-stage-narrative" className="mb-5">
+          <h1 className="text-lg font-medium text-ink">The document chain</h1>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {STAGES.map((s) => (
+              <div key={s.kind} data-testid={`cycle-stage-${s.stage}`} className={"rounded-card border p-2 " + (s.kind === active.kind ? "border-ink" : "border-hairline")}>
+                <div className="text-sm font-medium text-ink">{s.label}</div>
+                <p className="text-xs text-ink-secondary">{s.story}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {failure && (
           <div data-testid="cycle-error" className="mb-4 text-sm text-critical">
@@ -459,7 +494,7 @@ export function Cycle({
           <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
             <DecisionCard
               next={proposalNext}
-              title="Proposal awaiting your decision"
+              title="A run proposes changing this section — read it and decide"
               subtitle={
                 artifact.proposal.ducklings
                   ? `from ${artifact.proposal.ducklings.join(", ")}`
@@ -484,6 +519,9 @@ export function Cycle({
                 </button>
               }
             />
+            <p data-testid="proposal-coverage-line" className="mb-2 text-xs text-ink-secondary">
+              {coverageLine(errors)}
+            </p>
             <SurveyCoverageLine run={proposalRun} testId="proposal-unaccounted" />
             {(artifact.proposal.unread_refs?.length ?? 0) > 0 && (
               <p data-testid="proposal-unread-refs" className="mb-2 text-xs text-warn">
@@ -920,7 +958,7 @@ export function Cycle({
 
         <ol className="space-y-3">
           {sections.map((s) => (
-            <SectionCard key={s.id} section={s} broken={broken} />
+            <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} />
           ))}
         </ol>
       </div>
@@ -931,6 +969,11 @@ export function Cycle({
           <p data-testid="trace-scope" className="text-xs text-ink-muted mb-2">
             Checking the proposed {checkedProposed.join(", ")} — this is what you are
             about to accept.
+          </p>
+        )}
+        {!artifact?.proposal && (
+          <p data-testid="coverage-line" className="mb-2 text-xs text-ink-secondary">
+            {coverageLine(errors)}
           </p>
         )}
         {errors.length === 0 ? (
@@ -957,7 +1000,24 @@ export function Cycle({
   );
 }
 
-function SectionCard({ section, broken }: { section: Section; broken: Set<string> }) {
+function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean }) {
+  // The Down walk is the engine's link, not a UI guess based on where a task
+  // happens to be printed. Keep only task ids found in that walk, then use the
+  // task record for its live state.
+  const linkedIds = new Set(taskIdsFromTrace(traceDown));
+  const childTasks = tasks.filter((task) => linkedIds.has(task.id));
+  // The engine calls delivered work "accepted"; "done" is retained for
+  // older task fixtures and responses. Both mean the change is in the tree.
+  const landedTask = childTasks.find((task) => ["accepted", "done"].includes(task.status.toLowerCase()));
+  const liveState = isPlan
+    ? childTasks.length === 0
+      ? "no task born yet"
+      : childTasks.some((task) => task.blocked || task.waiting || ["queued", "paused"].includes(task.status.toLowerCase()))
+        ? "waiting at its gate"
+        : landedTask
+          ? `${landedTask.id} landed`
+          : "work is in progress"
+    : undefined;
   return (
     <li
       data-testid="cycle-section"
@@ -971,6 +1031,11 @@ function SectionCard({ section, broken }: { section: Section; broken: Set<string
         <span className="font-mono text-xs text-ink-muted">{section.id}</span>
         <span className="text-sm font-medium text-ink">{section.title}</span>
       </div>
+      {liveState && (
+        <p data-testid="cycle-live-state" data-trace-loaded={traceDown ? "true" : "false"} className="mt-1 text-xs text-ink-secondary">
+          {liveState}
+        </p>
+      )}
       {section.implements && section.implements.length > 0 && (
         <div className="mt-1 text-xs text-ink-muted">
           implements {section.implements.join(", ")}
@@ -1001,6 +1066,33 @@ function SectionCard({ section, broken }: { section: Section; broken: Set<string
       )}
     </li>
   );
+}
+
+function taskIdsFromTrace(value: unknown): string[] {
+  const ids: string[] = [];
+  function walk(v: unknown) {
+    if (typeof v === "string") {
+      if (/^T-\d+$/.test(v)) ids.push(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (v && typeof v === "object") Object.values(v).forEach(walk);
+  }
+  walk(value);
+  return ids;
+}
+
+function coverageLine(errors: TraceError[]): string {
+  // A trace check reports several kinds of breaks. Only a missing downstream
+  // task is honest to describe as a section without work; orphan requirements
+  // and unjustified tasks are different facts shown in the rail below.
+  const missing = errors.filter((e) => e.kind === "unimplemented_spec" || /(?:no|missing).*task/i.test(e.detail));
+  return missing.length === 0
+    ? "Every normative section has work behind it."
+    : `${missing.length} sections have no task yet.`;
 }
 
 /** Drops the frontmatter a document carries for machines.
