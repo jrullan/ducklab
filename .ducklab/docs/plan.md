@@ -1,10 +1,10 @@
 ---
 kind: plan
-version: 13
-updated_at: 2026-08-23T21:49:47Z
-run_id: r-20260823-213904-mem2
-ducklings: [atom-local, luna, k3, terra, qwen38-max]
-based_on: 286522acd735bbab
+version: 14
+updated_at: 2026-08-25T11:31:39Z
+run_id: r-20260825-112559-6ex6
+ducklings: [k3, terra, atom-local, luna, glm52]
+based_on: bccf4dbbbfe129bc
 approved_by: human
 ---
 
@@ -2812,4 +2812,462 @@ Fix direction:
 
 Engine is NOT at fault: resolution precedence (internal/service/modes.go:157-211) and the positional request contract behave as documented; roster_sources correctly recorded 'request'.
 
+### T-122 — Sync the person's checkout with the ref when acceptWorktreeRun advances the default branch
+
+Fixes B-148.
+
+## Reported
+
+Found chasing 'adjust seats still shows wrong models after T-121': the T-121 accept fast-forwarded main to 61df20f, but the person's checkout (which IS on main) kept its pre-accept FILES. Consequences observed:
+1. make desktop compiled the OLD RunLauncher.tsx while -ldflags stamped the binary main@61df20f — false build provenance; the operator installed twice and both binaries showed the pre-fix behavior with a post-fix version string.
+2. The divergence accumulated silently across native accepts (T-121's frontend files, and service.go/fs.go/governance_guard_test.go from another accepted run) until the working tree was ~370 lines behind its own HEAD.
+3. git status shows the drift as staged modifications, which reads as local work — inviting an accidental commit that would REVERT accepted work.
+
+B-144's chain commit had the same shape (ref moved, tree not); this is the accept-path twin.
+
+Fix: when the registered project checkout is on the default branch and CLEAN for the touched paths, acceptWorktreeRun updates the working tree along with the ref (a guarded 'git -C <checkout> merge --ff-only' / checkout of the new sha); when the checkout is dirty on those paths, do not touch it — announce on the accept result and the run card: 'main advanced to <sha>; your checkout is behind and was left untouched'. A test pins: after a worktree accept, a clean default-branch checkout contains the accepted files; a dirty one is untouched but the accept result carries the warning.
+
+Operator remediation applied: git checkout HEAD -- <paths>, desktop rebuilt from true source.
+
+**Deliverables:**
+- When the registered checkout is on the default branch and clean for the touched paths, the accept path advances the working tree to the new sha (guarded ff-only merge or checkout), not just the ref
+- When the checkout is dirty on those paths, the accept leaves the tree untouched and the accept result carries a warning naming the new sha and stating the checkout was left behind
+- The warning is recorded on the run record/event stream so the run card can surface it
+- A test asserts the clean-checkout case: after a worktree accept, the default-branch checkout contains the accepted files
+- A test asserts the dirty-checkout case: files are untouched and the accept result carries the warning
+
+## Triage
+
+**Component:** run accept / worktree landing
+**Suspected files:** internal/service/service.go, internal/service/worktree.go, internal/vcs/vcs.go
+
+Accept fast-forwards main without updating a clean checkout on that branch, producing stale-source builds stamped with the new sha and silent drift that reads as local work; B-144 is the chain-commit twin on a different path, not a duplicate. Note: search output was heavily polluted by .ducklab/runs logs, so the exact file holding RunAcceptAs/acceptWorktreeRun (service.go vs a dedicated accept file) is unconfirmed — worktree.go and vcs.go are confirmed relevant.
+
+**Verification (triage recommends):** test-first — Accept a worktree run in a fixture project whose checkout sits on main: assert the clean checkout contains the accepted files after accept, and that a dirty checkout is untouched with the warning carried on the accept result
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-123 — Flag diffs that touch frontend/src without a dist rebuild as desktop_stale on the run record and surface them at the human gate
+
+Fixes B-147.
+
+## Reported
+
+T-121 (the launcher seat-projection fix, commit 61df20f) changed frontend/src/components/RunLauncher.tsx only. The accept landed, the engine was restarted, and the operator still saw the OLD behavior in 'adjust seats & caps' — because the desktop serves the committed dist bundle, whose last rebuild was T-115's (e75d45d), and the installed ducklab-desktop predated the accept. Nothing in the run, the review, or the gate said 'this change is invisible until the bundle is rebuilt'.
+
+The repo's convention is deliberate 'desktop: rebuild bundle' commits, and make install already warns when the installed desktop predates frontend/src — but that warning fires at INSTALL time on the operator's machine, not at the gate where the decision is made.
+
+Fix direction, mirroring governance_modified (T-116): when a candidate diff touches frontend/src without touching cmd/ducklab-desktop/frontend/dist, set a flag on the run record (e.g. desktop_stale) and carry it into the reviewer payload and the human gate's pending data in plain words: 'this diff changes the frontend source but not the shipped bundle; the desktop will not show it until make desktop runs'. Optionally the same detector powers a post-accept reminder on the run card. A test pins: a diff touching only frontend/src sets the flag; a diff touching both does not.
+
+Related: B-142 (gate surfaces), the desktop-surface house rule (a feature ships WITH its visible surface — this is its build-artifact corollary).
+
+**Deliverables:**
+- runlog.Run gains a DesktopStale bool field serialized as desktop_stale
+- a detector (sibling to governanceCallouts) returns true when the candidate diff touches frontend/src but not cmd/ducklab-desktop/frontend/dist, and is wired into the run-completion diff handling in service.go (and review.go like governanceModified)
+- when set, the human gate's PendingData and human_needed event data carry plain-words text: the diff changes frontend source but not the shipped bundle, and the desktop will not show it until make desktop runs
+- tests assert: diff touching only frontend/src sets the flag; diff touching both frontend/src and cmd/ducklab-desktop/frontend/dist does not; diff touching neither does not
+- tests assert the flag reaches PendingData/human_needed gate data at the paused-gate branch
+
+## Triage
+
+**Component:** gate / run record (service)
+**Suspected files:** internal/service/governance.go, internal/service/service.go, internal/service/review.go, internal/runlog/runlog.go, internal/service/governance_gate_test.go
+
+T-121 landed invisibly because nothing at the gate said the committed dist bundle predated the frontend change; this mirrors the existing governanceModified mechanism, is unit-testable at the detector and gate-payload level, and is a surfacing gap (normal severity), not a duplicate of B-142's rendering bug.
+
+**Verification (triage recommends):** test-first — Unit-testable detector mirroring governanceCallouts: a diff touching only frontend/src/... must set desktop_stale; a diff also touching cmd/ducklab-desktop/frontend/dist must not; the run-completion path must carry the flag into PendingData and the human_needed event.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-124 — Confirm verifyAcceptedCommit populates linked deps and setup before the gate, or close as fixed
+
+Fixes B-146.
+
+## Reported
+
+r-20260824-073421-zstm (T-120): worktree gate green, but RunAccept's clean-checkout reproduction failed with npx unable to find tsc — the acceptance checkout has no frontend/node_modules. createRunWorktree populates deps via linkInstalledDeps (cfg.Verify.LinkDeps) but verifyAcceptedCommit's detached checkout never gets the same call. The asymmetry stayed hidden because the only prior native accept (r-20260824-070527-kpzx) took the fast path, which skips the second gate run; the operator's manual landings always symlinked deps by hand before gating.
+
+The withdraw-on-red machinery behaved correctly (nothing landed) — the defect is only the missing population step.
+
+Fix: verifyAcceptedCommit populates the acceptance checkout exactly as createRunWorktree does (same linkInstalledDeps + setup hook), before running the gate. Test: accept a worktree run whose gate requires a linked dep; reproduction must be green from the clean checkout.
+
+**Deliverables:**
+- verifyAcceptedCommit calls linkInstalledDeps with cfg.Verify.LinkDeps before the gate
+- verifyAcceptedCommit runs cfg.Verify.Setup before the gate, same as createRunWorktree
+- an accept-path test exercises a gate requiring a linked dep from the clean checkout
+
+## Triage
+
+**Component:** accept/clean-checkout reproduction
+**Suspected files:** internal/service/service.go, internal/service/worktree.go, internal/service/clean_checkout_deps_test.go
+
+Current source already calls linkInstalledDeps(cfg.Verify.LinkDeps) and the setup hook inside verifyAcceptedCommit (service.go:2469-2477) with covering tests in clean_checkout_deps_test.go, so the reported defect appears already fixed; reproduce before treating as open.
+
+**Verification (triage recommends):** test-first — accept a run whose gate needs a linked dep; reproduction must be green from the clean checkout (asserted by TestAcceptedCheckoutLinksDeclaredDependency / TestAcceptedCheckoutRunsDeclaredSetupBeforeGate)
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-125 — Cancel a test-first run's then_build chain on reject, land the chained red-test commit on the run branch, and exclude linked deps from every commit stager
+
+Fixes B-144.
+
+## Reported
+
+Sequence on 2026-08-24 ~07:14: test run r-20260824-071217-re6j (T-120, then_build:true) PASSED its stage and was REJECTED by the operator with a request for one more test. Thirty seconds later the chained build r-20260824-071442-aibo started anyway, and its chain step committed 07696bb 'chained: the test landed red' containing (a) the REJECTED test file and (b) frontend/node_modules — the link_deps symlink again (B-143's second door) — directly onto the main REF while the person's working tree stayed at the previous content, leaving HEAD==main==07696bb with the tree diverging (test file 'modified', symlink 'deleted').
+
+Three defects:
+1. Rejecting a test-first run must CANCEL its then_build chain. A rejected test is not a contract; building against it wastes a run and, worse, lands it.
+2. The chain's red-test commit went to the person's branch ref from the run worktree's content. Under the worktree regime the committed-red-test step must live on the RUN's branch (like every other run commit post-T-114), reaching default only through acceptance.
+3. The chain's commit staged link_deps artifacts — same fix as B-143: one staging helper that excludes run.LinkedDeps, used by EVERY stager (accept, chain, any future committer).
+
+Remediation applied: aborted aibo, reset local main to 3d2d27d (07696bb was never pushed), bug audit preserved. Tests pin: reject cancels the chain (no build run appears); the chain commit for a fresh test-first lands on the run branch, not default; no linked path in any chain commit.
+
+**Deliverables:**
+- RunReject (or the reject path) clears/neutralizes ChainBuild so no chained build is started for a rejected test-first run; a test asserts no build run appears after reject
+- chainBuild's red-test accept commits to the run's worktree branch (via acceptWorktreeRun path), not the default ref; a test asserts the chained test commit lands on the run branch and default stays put
+- one shared staging helper that always excludes run.LinkedDeps, used by the worktree accept stager and every other committer; a test asserts a linked-dep path is absent from any chain commit
+- existing accept/chain tests (accept_worktree_test.go, bug_loop_test.go, testfirst_status_test.go) still pass
+
+## Triage
+
+**Component:** service/testfirst chain + accept
+**Suspected files:** internal/service/testfirst.go, internal/service/service.go, internal/service/worktree.go, internal/vcs/vcs.go
+
+A rejected test-first run still fired its then_build chain and committed the rejected red test plus the link_deps symlink onto main, diverging the ref from the working tree — three related defects in the test-first chain/accept path that are reproducible as automated tests.
+
+**Verification (triage recommends):** test-first — Rejecting a then_build test-first run must produce no chained build run; a chained red-test commit must land on the run branch not default; no LinkedDeps path appears in a chain commit.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-126 — Stop executeTestFirst from cleaning up the worktree when pausing at a gate
+
+Fixes B-145.
+
+## Reported
+
+r-20260824-072822-ydvp (T-120 test stage) paused UNVERIFIED at its gate; RunAccept then failed with 'worktree acceptance cannot find .../r-20260824-072822-ydvp' — the worktree was already gone.
+
+Cause: T-114 removed the deferred cleanup from executeRun (worktrees are retained at human gates; accept/reject clean up after the decision) but executeTestFirst kept its 'defer cleanupRunWorktree' from slice A (internal/service/testfirst.go, executeTestFirst). When the test-first goroutine returns at a pause, the defer removes the worktree and the pending gate becomes undecidable.
+
+Fix: mirror the build path — executeTestFirst must not clean up when pausing at a gate (retain_worktree), and the test-first accept/reject paths clean up after the decision. Test: a test-first run paused at its gate still has its worktree; accepting it lands the committed red test per stage polarity.
+
+T-114's pinned tests covered build runs only; this is the test-first twin they missed.
+
+**Deliverables:**
+- executeTestFirst (internal/service/testfirst.go:364) no longer defers cleanupRunWorktree into a gate pause: a paused test-first run's worktree survives the goroutine's return
+- the test-first pause paths (testfirst.go ~560 and the chainBuild fallback ~729) record retain_worktree in PendingData, mirroring the build path at service.go:1779/1833
+- RunAccept on a paused test-first worktree run reaches acceptWorktreeRun, lands the committed red test, and cleans up the worktree after the decision; RunReject cleans up via the shared path at service.go:3283
+- a regression test asserts: test-first run paused at its gate still has its worktree, and accepting it lands the commit per stage polarity (the test-first twin of T-114's build-run pins)
+
+## Triage
+
+**Component:** test-first worktree lifecycle
+**Suspected files:** internal/service/testfirst.go, internal/service/service.go, internal/service/worktree.go
+
+Confirmed in source: executeTestFirst keeps `defer s.cleanupRunWorktree` (testfirst.go:364) while its gate pause (testfirst.go:560-574) omits retain_worktree, so the defer deletes the worktree and acceptWorktreeRun (service.go:2357) fails with exactly the reported 'worktree acceptance cannot find' error; not a duplicate of B-143/B-144/B-146, which are distinct accept-path defects.
+
+**Verification (triage recommends):** test-first — Run a test-first run to its UNVERIFIED gate pause, assert the worktree still exists on disk, then RunAccept and assert the red-test commit lands per stage polarity — mirrors the T-114 build-run pins.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-127 — Render the phase:final gate result on its card and key the sidebar gate box on the final gate event
+
+Fixes B-142.
+
+## Reported
+
+r-20260824-054151-2d2n (T-115): the record says gate_started phase:final -> gate exit_code:0 -> verdict PASSED. The desktop showed: three red round gates (the B-135 false reds), the final gate card stuck on its announcement ('running the full gate - the verdict is its exit code') with NO result ever rendered on it, and the sidebar gate box saying 'x tests failed' - while the run header says passed. The operator cannot reconcile the screen with the verdict without opening events.jsonl.
+
+Two surface defects:
+1. The final gate card must render its outcome (exit code, green/red, duration) when the gate event lands - B-122 put the output on the event; the card never consumes it.
+2. The sidebar gate box reads the wrong source - it reflects a round_gate (red) instead of the phase:final gate. The code comment in strategy/execute.go:487 warned exactly about consumers taking 'whichever happened to come last' under the round_gate/gate split; the sidebar is that consumer.
+
+Fix: the final card consumes its own gate event (result + output tail); the sidebar box keys on the phase:final gate event, falling back to 'no final gate yet' while rounds are in flight. A vitest pins: run with three red round gates then a green final renders a green gate box and a resulted final card.
+
+Related: B-122 (final gate announcement/output), B-131 (engine decisions with no surface), B-135 (why the round reds were false tonight).
+
+**Deliverables:**
+- The final gate card settles and renders its outcome (exit code, pass/fail colour, duration, output tail) when the phase:final 'gate' event lands, instead of staying on its gate_started announcement
+- buildGate/the gate reducer consumes the field names the service actually emits on the final gate event (exit_code, command, output, duration_s — not exit/cmd) and distinguishes the phase:final gate from round_gate events
+- The sidebar gate box keys on the phase:final gate event and shows a 'no final gate yet' state while only round_gate events have landed, so red rounds under a PASSED verdict no longer read as a failed run
+- A vitest pins: three red round_gate events followed by a green phase:final gate event renders a resulted final card and a green sidebar gate box (and the inverse: red final after green rounds reads red)
+
+## Triage
+
+**Component:** desktop run view gate surfaces
+**Suspected files:** frontend/src/lib/runview.ts, frontend/src/components/GateCard.tsx, frontend/src/views/RunView.tsx, frontend/src/components/ConversationLane.tsx
+
+The engine emits the final verdict as a 'gate' event (service.go:1691, with exit_code/command/output/duration_s and a phase:final gate_started), but buildGate in runview.ts reads mismatched fields (d.exit/d.cmd), the lane settles gates only on round_gate, and the sidebar takes whichever gate-ish event came last — so a PASSED run shows a stuck final card and a red gate box; directly reproducible as a vitest over the event stream.
+
+**Verification (triage recommends):** test-first — Vitest: feed gate_started{phase:final} plus a gate event{exit_code:0, command, duration_s} after three red round_gate events; expect the final card green with exit code/duration and the sidebar box green instead of 'x tests failed'.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-128 — Advisor contract counts dots, not sentences: useful answers discarded over file paths, 'I recommend' is banned, and the discarded text is not logged
+
+Fixes B-133.
+
+## Reported
+
+r-20260824-000718-5wkp: ask_advisor failed with 'advisor contract violation after repair: expected 2-8 sentences, got 9; proceed with your best judgement' — the implementer lost its lifeline at exactly the distress moment that summons the duck, and paid for two advisor calls whose output was thrown away.
+
+Four defects in internal/service/advisor.go:
+
+1. advisorSentenceCount (advisor.go:460-467) counts every '.', '!', '?' rune. In this codebase an advisor answer is dense with dotted identifiers: 'Use fs_read on lifecycle_test.go.' counts as THREE sentences; 'go test ./internal/service', 'service.go:1182', 'rs.done', 'e.g.' all inflate the count. A genuinely 4-sentence note easily 'counts' 9+, and which seats survive the contract is a function of their path-citing style, not their verbosity. (Interface-first: qwen38-max passed for weeks by luck; k3 cites paths and died on arrival.)
+
+2. advisorViolation (advisor.go:431) rejects any answer containing the substrings 'we need' or 'i recommend' as 'preamble or deliberation'. An ADVISOR whose job is recommending is banned from saying 'I recommend', and 'we need' occurs naturally mid-advice ('...the queue tests we need to keep...'). Overbroad substring ban on the seat's core vocabulary.
+
+3. The discarded answer is not persisted: llm.jsonl seq 131 records only {"error": "advisor contract violation after repair: ..."} with the question — the overlong text that was rejected is nowhere, so the operator cannot audit what was lost or judge whether the contract was right to reject it. (B-123's logFailedOneShot pattern covers chat one-shots; this path drops the text.)
+
+4. The penalty lands on the wrong party: the implementer gets 'proceed with your best judgement' — the harness converts a formality miss by seat A into lost help for seat B mid-task.
+
+Fix direction:
+- Count sentence BOUNDARIES: terminator followed by whitespace-plus-capital or end of text, after masking inline code spans, paths (tokens containing '/' or an extension), and 'e.g./i.e.'. A test table with dotted-identifier prose belongs next to it.
+- Soft enforcement on overlength: accept-with-warning (or truncate at the 8th boundary) for up to ~2x the cap; hard-reject only empties and runaways. A one-sentence overage should never outrank having an answer.
+- Drop the 'i recommend'/'we need' substring ban or scope it to a leading-preamble check (first sentence only, with actual deliberation markers).
+- Persist the rejected text on the failure record (the B-123 pattern), so the discard is auditable.
+
+### T-129 — Yolo auto-answers ask_human via the advisor, but the consent surface never says so and the answer is recorded as an unattributed 'human' event
+
+Fixes B-137.
+
+## Reported
+
+r-20260824-003539-zdln: the implementer asked a question (delete the node_modules symlink?), the operator went to answer it, and the run had already continued — advisor k3's draft was auto-submitted 2ms after drafting (advice -> advice_taken -> human, seq 1191-1193). internal/service/advisor.go:78-92 is explicit design: 'Under yolo the draft IS the answer... with the decider on the record.'
+
+Three gaps:
+
+1. CONSENT: the yolo checkbox tooltip promises only gate behavior ('a green gate accepts itself; reviewer dissent and UNVERIFIED still wait for you' — frontend RunLauncher). It never discloses that ask_human questions are auto-answered by a model. The operator opted into unattended accepts, not into a model answering in their name.
+
+2. ATTRIBUTION: the submitted answer lands as event type 'human' with {action: 'answer'} and NO author field. advice_taken (adjacent event) holds the truth, but any consumer of the human event — including the desktop's question card and the transcript — shows the answer as the person's. For a product whose credo is recorded, ATTRIBUTED decisions, a model speaking under the 'human' event type unmarked is an integrity defect. Fix: author/by field on the answer event ('advisor:k3 (yolo)') propagated to every surface that renders answers.
+
+3. QUALITY EXPOSURE: the auto-answer contained a false premise — 'because it's untracked it never appears in the run's diff' — disproven by r-20260824-000718-5wkp whose diff contains exactly that untracked symlink (B-136). An attended human could catch that; unattended, the implementer inherits the error. Mitigation: the auto-answer path should at least surface the question+answer as a notification so the operator can correct it while the run continues, and the question card should render 'answered by <advisor> under yolo' as a distinct state.
+
+Related: B-136 (the symlink in the diff), B-131 (invisible escalation events — same pattern of engine-side decisions with no desktop surface).
+
+### T-130 — The advisor seat cannot be chosen (or seen) at launch: pair/solo launchers render no advisor chip and the positional RunRequest.Ducklings cannot carry one
+
+Fixes B-132.
+
+## Reported
+
+Launching T-113 from the run-again card with terra/gemini37flash, the operator could not seat an advisor and concluded nobody was seated. The engine in fact resolved advisor=k3 via 'project mode seat' (r-20260824-000718-5wkp, roster_sources) — the rubber duck was on duty, invisibly. Two gaps, one per layer:
+
+1. UI: the launcher renders exactly fixedSeats(mode) chips — pair=2, solo=1 (frontend/src/lib/seats.ts:12-19), with seatLabel defining only implementer/reviewer for pair (seats.ts:46-51). But the advisor is a real seat of every task mode (rolesForMode, seats.ts:71-91: solo [implementer, advisor], pair [implementer, advisor, reviewer], tournament includes advisor). There is no affordance to see or pick it at launch, and no indication of what the roster will resolve for it.
+
+2. Wire: RunRequest.Ducklings is positional and only positions 0 (implementer) and 1 (reviewer) mean anything (internal/service/testfirst.go:410-414; tournament/split read the list as contestants in internal/service/modes.go). An advisor pick cannot be expressed in the request at all.
+
+Fix direction — same root as B-129 and best fixed together: make the launch request carry role-keyed seats (e.g. seats: {implementer, reviewer, advisor}) instead of a positional list, keep '' meaning 'roster resolves'. Then the launcher shows the advisor chip on task modes, prefilled with what the roster WOULD resolve (so silent resolution becomes visible), with 'default' preserved. The run-again card inherits it for free.
+
+Workaround meanwhile: the advisor is configurable only via the Roster board (mode seats / role pins), not per-run.
+
+### T-131 — escalation_suggestion events have no desktop surface: the run emits them, the person never sees them
+
+Fixes B-131.
+
+## Reported
+
+r-20260823-230731-j7xi emitted THREE escalation_suggestion events (stuck_deliverable twice, turns_over_2x_mode_median once, all at distress_pause points) and the operator watching the run in the desktop concluded escalation had never fired. The only frontend reference to the event type is the vocabulary entry in frontend/src/api/events.ts:276 — no component renders it, so the suggestion (thresholds fired, diagnoses, candidate, actions relaunch_with_stronger_seat / improve_task_body / continue_as_is) is invisible outside events.jsonl.
+
+This breaks the feature's purpose (a suggestion nobody sees suggests nothing) and the desktop-surface rule: every feature ships with its desktop surface in the same arc. T-107 shipped the engine half only.
+
+Fix direction: render escalation_suggestion in the run view as an evidence card at the pause boundary — thresholds fired, the diagnoses map (seat_at_capacity vs task_brief_quality vs the third cause B-129 exposed: mis-seated), the candidate with its Wilson floor when present, and the three actions as affordances (relaunch prefilled with the stronger seat, open task body, continue). Related: B-130 (escalation blind to runs that die without evidence).
+
+### T-132 — Escalation is blind to the loudest distress: runs that die of turn/budget exhaustion produce no trigger evidence, and cross-run failure repetition on one task is not a trigger at all
+
+Fixes B-130.
+
+## Reported
+
+T-113 accumulated four runs — two hard failures by the same seat, then a pass only after an (accidental, B-129) reseat — and no escalation_suggestion was ever emitted. The operator expected one; the design cannot produce one for this shape of failure.
+
+Why it stayed silent, from the code:
+- All three triggers are INTRA-run and read structured evidence from the run's own event stream (internal/strategy/execute.go:107-132, re-derived at the run boundary in internal/service/service.go:1932-1950): a deliverable item reported stuck 3x in the same run, 3 consecutive red round gates in the same run, or run turns > 2x the mode median.
+- r-20260823-220227-536j FAILED with 'implementer used all 24 of its turns calling tools and never answered (28 tool calls, no text)'. It never reported deliverables and never reached a round gate — zero trigger evidence. Note the 24 is the per-reply call loop, not the run-level Turns the median trigger measures (that budget shows turns=1), so turn-loop exhaustion is invisible to all three triggers.
+- r-20260823-221035-lxa7 ABORTED on wallclock (1807s >= 1800s). Budget deaths likewise emit none of the evidence escalation reads.
+- Nothing anywhere counts FAILED RUNS PER TASK across runs — the exact pattern the operator saw. B-129 compounds it: each relaunch changed the implementer seat, so even a per-seat cross-run counter would have been reset by the accidental reseat.
+- Independent silencer, working as designed: escalationCandidatesFor (internal/service/candidates.go:313-344) requires a same-role candidate whose Wilson floor strictly exceeds the current seat's with minRuns evidence. With luna seated (77% over 456 implementer runs, the fleet's highest floor) nobody qualifies, so for the current run silence is correct.
+
+Suggested direction:
+- Treat a run that dies without answering (turn-loop exhaustion, budget/wallclock exceeded mid-stage) as distress evidence in itself — it is the loudest signal a seat can send, and today it is the one signal escalation cannot hear.
+- Add a cross-run trigger evaluated at LAUNCH time: N (say 2) failed/aborted runs of the same task+stage, regardless of seat, surfaces the suggestion — 'this task has failed here twice; strongest implementer by Wilson floor is X, or improve the task body' — before the next run spends money, not after it dies.
+- Keep the stronger-candidate gate as is; it correctly separates 'escalate' from 'reseat/rebrief'.
+
+### T-133 — Make bare `ducklab release` print usage instead of starting a plan run
+
+Fixes B-126.
+
+## Reported
+
+Typing `ducklab release` with no verb launched a release plan run (r-20260823-150403, rejected and cleaned) — discovered while checking the CLI syntax for the README. The run command already learned this lesson: a typo should not cost tokens, unknown run subcommands print usage instead of starting a model run. The release noun (and any other noun whose empty verb currently defaults to an action that spends) should do the same: bare noun prints its verbs, spending requires saying so.
+
+**Deliverables:**
+- releaseCmd with verb "" prints usage (plan and cut forms) to stderr and returns exit code 2
+- releaseCmd no longer calls client.ReleasePlan when the verb is empty
+- Explicit `ducklab release plan [--bump …]` and `release cut <version>` keep their current behavior
+- A test in internal/cli asserts the empty-verb usage path and that the plan verb is unchanged
+
+## Triage
+
+**Component:** cli
+**Suspected files:** internal/cli/cycle.go
+
+In internal/cli/cycle.go releaseCmd treats an empty verb the same as "plan", launching a token-spending release run, while the bug report and run precedent demand a bare noun print usage.
+
+**Verification (triage recommends):** test-first — Calling releaseCmd with an empty verb must exit with usage code and not call ReleasePlan; table-testable like the runCmd usage paths.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-134 — Route the rubber-duck consult cap through role_turns/TurnCaps and reconcile the advertised advisor default
+
+Fixes B-125.
+
+## Reported
+
+The person asked where the calls/reply 6 came from on T-112. Answer: internal/strategy/rubberduck.go consultAdvisor builds its Turn inline with MaxTurns: 6, hardcoded. Three problems: (1) configured [defaults] role_turns never applies — applyRoleTurns walks SCRIPT turns and the consult turn is fabricated at distress time, so the knob and the no-cap tick are both ineffective for consults (the same inline-path-bypasses-the-rule family as B-115 and B-123); (2) ScriptRoleTurns advertises advisor: 1 and Settings shows it as what each role gets — the display says 1, consults run 6; (3) the number is reasonable (the advisor investigates with tools before advising) but reasonable-and-hidden is still hidden. Fix: consultAdvisor derives its cap through the same turnsFor(advisor, default) path as script turns so config and the calls-lift apply; reconcile ScriptRoleTurns advisor entry with the consult default so Settings shows the truth; a test pins that a configured role_turns.advisor reaches the consult turn.
+
+**Deliverables:**
+- consultAdvisor no longer hardcodes MaxTurns: 6; it derives the cap via strategy.CapFor(params.TurnCaps, RoleAdvisor, consultDefault) so configured role_turns.advisor and a per-run AgentTurns override (including the negative no-cap tick) both reach the consult turn
+- ScriptRoleTurns["advisor"] is reconciled with the consult default (both 6, or a single shared constant) so the Settings display matches what consults actually run
+- A test pins that a configured role_turns.advisor value reaches the consult turn (e.g. advisor=20 ⇒ consult MaxTurns=20; default ⇒ 6)
+- A test pins that a per-run AgentTurns override / no-cap lift flowing through params.TurnCaps applies to the advisor consult turn
+- Existing consult behaviour is unchanged otherwise: missing advisor seat still skips, duck failure still degrades to no-op for the run
+
+## Triage
+
+**Component:** strategy/rubberduck
+**Suspected files:** internal/strategy/rubberduck.go, internal/service/defaults.go, internal/service/roleturns_test.go, internal/strategy/execute.go
+
+The consult turn is fabricated at distress time (rubberduck.go:205) so applyRoleTurns' script walk never sees it, making role_turns.advisor and the calls-lift dead knobs for consults while Settings advertises advisor: 1 against a real cap of 6 — hidden but harmless-valued, hence low.
+
+**Verification (triage recommends):** test-first — Set defaults.role_turns.advisor=20, trigger a distressed implementer turn with a stub runner, assert the consult turn's MaxTurns is 20 (and that params.TurnCaps no-cap lift applies); today it stays 6.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-135 — Legacy chain_build records relaunched via RunView reinterpret positional ducklings through the new role mapping
+
+Fixes B-149.
+
+## Reported
+
+Residual minor from T-130's reviewer (approved with this finding on record): Run.chain_build's type omits seats, so relaunching a PRE-T-130 test-stage record maps its positional ducklings through the new role projection — pair index 1 becomes advisor instead of reviewer, silently dropping the reviewer. Fix per the reviewer: add seats?: Record<string,string> to the chain_build type (frontend/src/api/client.ts:119) and prefer chain.seats over roleSeats(chain.mode, chain.ducklings) in RunView's test-stage relaunch when present. Only affects relaunches of historical records.
+
+### T-136 — Signpost discard on document-stage reject with a reason and surface the revise verb in next[], MCP/CLI, and desktop
+
+Fixes B-150.
+
+## Reported
+
+Incident: the v0.8.0 release draft (r-20260824-182104-tmr7) was returned with a detailed revision note — through POST /v1/runs/{id}/reject. The run died FAILED, no revise spawned, and only the .proposed surviving on disk allowed recovery via release cut. The operator's note was a textbook request-changes; the API accepted it as a discard reason with a silent 204. Any operator — human, MCP client, or CLI — can repeat this: reject takes free text, and writing a long reason FEELS like requesting changes.
+
+Guards, layered:
+1. API: when /reject on a DOCUMENT-stage run (intake/spec/plan/release) carries a non-empty reason, the response body states plainly: 'draft discarded; a reason this detailed usually means request-changes — that door is <action>'. Not a refusal, a signpost on the receipt.
+2. Discoverability: the paused document run's next[] must name the revision action explicitly (today the operator must know the stage-specific revise flow exists); MCP and CLI surfaces render all three verbs.
+3. Desktop: on draft gates the primary affordance is Request changes; the reject button reads 'Discard draft' — the verb says the consequence.
+4. Optional test pins: rejecting a document run with a reason returns the signpost; next[] on a paused document gate includes the revise action.
+
+Not in scope: changing reject's semantics — explicit verbs stay explicit; the fix is making the right verb findable and the wrong one self-describing.
+
+**Deliverables:**
+- Rejecting a paused document-stage run (intake/spec/plan/release) with a non-empty reason still discards, but the response is no longer a bare 204: the body states the draft was discarded and names the stage's request-changes door (the revise action); reject semantics are unchanged
+- runNext (internal/service/service.go:3172) includes the stage-specific revise action in Next for paused document-stage gates, so run_get over MCP and the CLI render accept/revise/reject without the operator knowing the flow
+- Desktop draft gates make Request changes the primary affordance and label the reject button 'Discard draft' (exact desktop component file not verified during triage — suspected under frontend/src run-detail/gate components)
+- A Go test asserts the signpost body on reasoned document-stage reject and its absence (or plain 204) on reasonless reject and non-document stages
+- A Go test asserts next[] on a paused document gate contains the revise action
+
+## Triage
+
+**Component:** run gate verbs (reject vs revise) on document stages
+**Suspected files:** internal/engineapi/engineapi.go, internal/service/service.go, internal/runlog/runlog.go, internal/engineclt/engineclt.go, internal/mcp/tools.go, internal/cli/cycle.go
+
+Confirmed in code: handleRunReject (engineapi.go:1421) discards via Service.RunReject (service.go:3458) and answers 204 with no body regardless of stage or reason, while Next is derived centrally by runNext (service.go:3172) and revise exists only as a hidden CLI/MCP stage flow (cli/cycle.go, mcp/tools.go:774) — a reproducible, recoverable UX trap, so normal severity with testable API/next[] pins and an eyeballed desktop relabel.
+
+**Verification (triage recommends):** test-first — Guard 4 names the pins: POST /v1/runs/{id}/reject with a non-empty reason on a paused intake/spec/plan/release run returns the signpost body, and a paused document gate's next[] includes the revise action — both assertable at service/handler level.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-138 — Config API writes slices and tables
+
+The project configuration API (`project set` / PATCH) currently refuses any non-scalar key because `config.SetKey`'s reflection walk only registers scalar kinds and `assign()` rejects the rest. This teaches it to write slice-valued and table-valued keys, which is the foundation every later config-editing surface depends on. Fixes B-152 gap 0.
+
+**Deliverables:**
+- Slice-valued keys are settable through `SetKey` on the CLI, the HTTP PATCH, and the MCP project-set path
+  - `verify.link_deps`, `shell.allow_prefixes`, `shell.deny`, `git.protected_paths`, and the `[remote]` lists (e.g. `remote.allow_mcp_verbs`) name the initial set; `walk()` registers `[]string` fields and `assign()` parses one documented encoding (comma-separated) rather than failing "holds a slice"
+  - emptying a slice is possible and distinct from a typo (e.g. `key ""` clears, missing value errors)
+- Table-valued (map-kind) keys are settable leaf-by-leaf
+  - `roster.<role>` and `modes.<stage>` walk into map fields; a role or stage typo is still rejected with the full key list
+- The strict-parsing contract holds: unknown keys, malformed values, and reserved identity fields keep their exact refusal behavior
+- Round-trip tests assert each named list and each map leaf above writes, persists to `project.toml`, and reloads; plus a test that scalar-only behavior is unchanged
+
+**Out of scope:** adding or removing configuration keys themselves (T-140 owns `[remote]`, T-141 owns `[github]` revival); the doctor; any desktop surface. **Assumption:** `[remote]`/`[github]` leaf shapes may land in later tasks; this task only removes the "slice/table cannot be written" refusal so it composes.
+
+### T-139 — Config doctor: deterministic findings
+
+A pure engine check that reads the project config and the repo and emits structured findings — exact key, proposed value, reason — with no model involvement and fully deterministic output. It closes B-153 part 1 and gives the consultant (T-142) and the Settings surface (T-142) something honest to read.
+
+**Deliverables:**
+- A `config.Doctor` (or `service`) function returning an ordered `[]Finding{Key, Proposed, Reason}` closed over the enumerated rules:
+  - frontend present but `verify.link_deps` missing its `node_modules`
+  - a git remote configured but no `[remote]` or `[github]` sections
+  - `[github]` section present but unconsumed (no PR/remote verb uses it)
+  - verify command empty
+  - budgets zero
+  - shell allowlist missing the project's detected toolchain
+  - seats unconfigured for modes in use
+- HTTP surface: a route with request/response on `routes_table.go` plus an engine-client method, and an MCP `config_doctor` tool returning the same findings
+- Each finding carries the exact dotted key and the proposed value, not free text; a finding with no proposed fix is still structured with `Proposed` empty
+- Tests assert every rule fires on a fabricated project, that output is byte-identical across two runs (determinism), and that a clean project returns an empty list
+
+**Out of scope:** applying any fix (that is the T-142 proposal-card path, via the T-138 API); new findings beyond the closed list; consulting the seat. **Implements:** SPEC-024, SPEC-021
+
+### T-140 — Remote awareness, orphan audit, and recovery
+
+**Depends on:** T-138
+
+A new `[remote]` config section and the engine's awareness of it: ahead/behind in the project header, a local-only badge on accepts unreachable from remote refs, an orphan audit with a loud warning, and a recovery door that runs only on the person's click. Implements B-151 layers 1–2 and B-152 gaps 1–2.
+
+**Deliverables:**
+- `[remote]` section on the project config: `name`, `fetch_on_open` (default false), `allow_mcp_verbs` list — writable through the T-138 extended API and readable through the normal load path
+- Ahead/behind counts relative to the configured remote surface on the project header/status response; fetch happens only when `fetch_on_open` is true or on explicit verb
+- A `local_only` badge field on accepted runs whose `commit_sha` is unreachable from remote refs, computed by the audit
+- An orphan audit at engine start and project open: every accepted run's `commit_sha` is checked for reachability from any branch; orphaned shas produce a loud warning event naming the shas
+- A recovery endpoint offering exactly two doors — cherry-pick chain or restore-as-fresh-commit — executed only on an explicit person-initiated call; its decision is recorded and attributed
+- Tests: a fabricated orphaned accept is flagged; reachability drives the badge; each recovery door lands the expected commit shape; audit failure warns without blocking startup
+
+**Out of scope:** pull/push/PR verbs (T-141); doctor rule authoring (T-139); any fetch that the person did not ask for. **Implements:** SPEC-008
+
+### T-141 — Remote verbs: pull, push, PR with receipts
+
+**Depends on:** T-140
+
+First-class but explicitly human-initiated remote actions: pull as fetch plus ff-only, push of the current or a task branch, PR creation via `gh` with a push-plus-compare-URL fallback, and scribe-drafted PR bodies from the run record. Implements B-151 layers 3–4 and the scribe half of B-153.
+
+**Deliverables:**
+- `pull`: fetch then ff-only merge; divergence is presented to the person, never merged automatically; the result is recorded with actor attribution
+- `push`: pushes the current branch or an named task branch; refusal when no `[remote]` is configured
+- `pr`: uses `gh` when authenticated; otherwise falls back to push plus a compare URL; `[github]` is revived as PR settings — `pr_base` defaulting to `git.base_branch`, `pr_draft`, `pr_tool`, `pr_body_by_scribe` — writable via the T-138 API
+- `pr_body_by_scribe` true routes drafting through the scribe seat reading the run record (task titles, deliverables, receipt shas); the draft is attached to the PR request
+- Guardrails enforced in the verb handlers: every remote action requires an explicit call; autopilot and yolo paths cannot reach them; credentials come only from the user's git credential helper or `gh auth` and are never persisted
+- MCP exposure of the three verbs is gated on `remote.allow_mcp_verbs` naming them; absent the list, MCP cannot call any remote verb
+- Tests: divergence returns a person-decision prompt rather than a merge; attribution is recorded on each verb; compare-URL fallback fires when `gh` is unavailable; autopilot-originated requests are refused
+
+**Out of scope:** Settings editors (T-142); automatic periodic fetch; any server-side credential storage. **Implements:** SPEC-008, SPEC-036, SPEC-021
+
+### T-142 — Consultant as configuration expert, and the settings surface
+
+**Depends on:** T-138, T-139
+
+The consultant reads `config_doctor` findings and the config and becomes the configuration expert: proactive at adopt-end, on project-open-with-findings, and on config-shaped run failures; it proposes amendment cards that apply only on the person's click through the T-138 API. Settings gains the remote/git editor and a read-only diagnostics panel. Implements B-153 layers 2–3 and B-152 gaps 4–5.
+
+**Deliverables:**
+- Consultant prompt gains access to `config_doctor` findings (T-139) and the current project config, and prioritizes findings in chat with reasons
+- Proactive entry points: adopt-end offer, project-open-with-nonempty-findings offer, and a config-shaped run failure card that pre-seeds the finding into the chat
+- Config amendment proposal cards rendered in desktop chat: `key`, `old`, `new`, `why` (the why drafted by the scribe seat); the Apply control is a person click that calls the T-138 config API and is recorded with attribution — never auto-applied
+- Desktop Settings gains a remote/git section editor (name, fetch_on_open, allow_mcp_verbs, PR settings `[github]`) written through the T-138 API, plus a read-only diagnostics panel: remote reachable, `gh` auth status, credential helper status
+- A reusable slice-valued key editor pattern in Settings (list editing of `shell.allow_prefixes`, `shell.deny`, `git.protected_paths`, `verify.link_deps`, `remote.allow_mcp_verbs`) routed through the same API
+- Tests: a proposal-card click applies exactly through the config API and writes the audit attribution; diagnostics is read-only (no setter wiring); a failure card with a config finding pre-seeds the consultant chat
+
+**Out of scope:** free-form config chat that mutates without a card; restructuring Settings beyond the remote/git section and the diagnostics panel; new doctor rules. **Implements:** SPEC-054, SPEC-024, SPEC-062
+
+**Assumption:** across the milestone — `[remote]` holds a single named remote (multi-remote `[[remote]]` tables are not required), and the doctor's closed rule list is the seven findings enumerated in the amendment.
 
