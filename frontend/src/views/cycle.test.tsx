@@ -283,6 +283,72 @@ describe("Cycle, plan tab", () => {
   });
 });
 
+describe("Cycle — verified detail pane", () => {
+  it("shows missing requirement claims as breaks consistently in card and index", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/spec")) return json({
+        kind: "spec", version: 1, approved: true, markdown: "",
+        sections: [{ id: "SPEC-001", title: "A behavior", body: "The tool records it.", implements: ["REQ-008", "SPEC-001"] }],
+      });
+      if (p.includes("/artifacts/requirements")) return json({
+        ...REQUIREMENTS, sections: [{ id: "REQ-001", title: "Existing", body: "It exists." }],
+      });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" />);
+
+    const card = await waitFor(() => screen.getByTestId("cycle-section"));
+    expect(card.dataset.broken).toBe("true");
+    fireEvent.click(screen.getByText("More detail"));
+    expect(card).toHaveTextContent("claims REQ-008 — no such requirement exists");
+    expect(card).toHaveTextContent("implements SPEC-001");
+    expect(screen.getByTestId("cycle-index-row")).toHaveTextContent("break");
+  });
+
+  it("shows one summary sentence and keeps detail behind disclosure", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json({
+        ...REQUIREMENTS,
+        sections: [{ id: "REQ-001", title: "Timesheets", body: "The app records hours. As-built: yes\nInternal implementation notes." }],
+      });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    const card = await waitFor(() => screen.getByTestId("cycle-section"));
+    expect(screen.getByTestId("cycle-section-summary")).toHaveTextContent("The app records hours.");
+    expect(screen.getByTestId("cycle-section-summary")).not.toHaveTextContent("As-built");
+    expect(screen.getByTestId("cycle-section-summary")).not.toHaveTextContent("Internal implementation notes");
+    expect(card.querySelector("details")).toBeTruthy();
+    expect(card.querySelector("details")?.open).toBe(false);
+  });
+
+  it("computes the redraft line from the seated models' measured spend", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json({ ...REQUIREMENTS, sections: [] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      if (p.includes("/roster")) return json({ entries: [
+        { role: "architect", duckling: "k3", source: "project" },
+        { role: "reviewer", duckling: "glm52", source: "project" },
+      ] });
+      if (p.includes("/report")) return json({ rows: [
+        { key: "k3", cost_usd: 0.4, runs: 1 },
+        { key: "glm52", cost_usd: 0.6, runs: 1 },
+      ] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    const start = await waitFor(() => screen.getByTestId("cycle-start"));
+    expect(start.querySelector("summary")?.textContent).toBe("k3 drafts, glm52 critiques until it approves — about $1");
+    expect(start.querySelector("summary")?.textContent).not.toContain("round");
+    expect(start.querySelector("summary")?.textContent).not.toContain("cap");
+    expect(start.querySelector("details")).toBeNull();
+  });
+});
+
 describe("Cycle — starting a stage", () => {
   const client = (over: Record<string, unknown> = {}) =>
     ({

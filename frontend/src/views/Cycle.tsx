@@ -151,6 +151,7 @@ export function Cycle({
   const [indexQuery, setIndexQuery] = useState("");
   const [indexFilter, setIndexFilter] = useState<"all" | "breaks" | "no-task">("all");
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
   const detailRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -177,6 +178,24 @@ export function Cycle({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const source = active.stage === "intake"
+      ? Promise.resolve(artifact)
+      : client.artifact(projectId, "requirements").catch(() => null);
+    source.then((a) => {
+      if (cancelled) return;
+      const ids = new Set<string>();
+      const collect = (items: readonly Section[] | null | undefined) => items?.forEach((s) => {
+        if (s.id.startsWith("REQ-")) ids.add(s.id);
+        collect(s.children);
+      });
+      collect(a?.sections);
+      setRequirementIds(ids);
+    });
+    return () => { cancelled = true; };
+  }, [active.stage, artifact, client, projectId]);
 
   useEffect(() => {
     // Tasks are the live record; traceShow supplies the Down walk used to keep
@@ -376,12 +395,13 @@ export function Cycle({
   // tasks (T-), so a prefix test meant a task implementing nothing was never
   // marked on the one tab that could show it.
   const broken = new Set<string>();
-  for (const s of sections) {
+  const addBreaks = (items: readonly Section[]) => items.forEach((s) => {
     if (errors.some((e) => e.id === s.id)) broken.add(s.id);
-    for (const c of s.children ?? []) {
-      if (errors.some((e) => e.id === c.id)) broken.add(c.id);
-    }
-  }
+    if ((s.implements ?? []).some((claim) => claim.startsWith("REQ-") && !requirementIds.has(claim))) broken.add(s.id);
+    addBreaks(s.children ?? []);
+  });
+  addBreaks(sections);
+  addBreaks(proposalSections);
 
   useEffect(() => {
     if (!selectedSection) return;
@@ -626,11 +646,12 @@ export function Cycle({
                   <SectionCard
                     key={s.id}
                     section={s}
-                    broken={new Set()}
+                    broken={broken}
                     tasks={tasks}
                     traceDown={traceDown[s.id]}
                     isPlan={active.stage === "plan"}
                     proposalPending
+                    requirementIds={requirementIds}
                   />
                 ))}
               </ol>
@@ -652,14 +673,14 @@ export function Cycle({
         {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
           <ol className="order-3 space-y-3" data-testid="cycle-sections">
             {sections.map((s) => (
-              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} />
+              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} />
             ))}
           </ol>
         )}
 
         {!loading && (!artifact?.proposal || proposalDecided) && (
           <details data-testid="cycle-start" className="order-4 mb-6 rounded-card border border-hairline p-3">
-            <summary className="cursor-pointer text-sm text-ink">{sections.length === 0 ? `Draft the ${active.label.toLowerCase()}` : `Redraft the ${active.label.toLowerCase()}`}</summary>
+            <summary className="cursor-pointer text-sm text-ink">{redraftSummary(mode, roster, measured)}</summary>
             <div className="pt-2">
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the
@@ -699,8 +720,7 @@ export function Cycle({
                 </div>
                 {planAction === "" && (
                   <p className="mb-2 text-xs text-ink-muted" data-testid="plan-actions-hint">
-                    Extend redrafts the plan with the council; Amend adds one to three tasks
-                    for a quick change, no redesign.
+                    Extend grows the plan with the group; Amend adds one to three tasks for a quick change.
                   </p>
                 )}
               </>
@@ -758,7 +778,7 @@ export function Cycle({
                   placeholder={
                     sections.length === 0
                       ? "What do you want built? A paragraph is enough. A file path works too."
-                      : "Describe the new feature. Existing requirements survive with their ids; the diff at the gate shows exactly what was added."
+                      : "Describe the new feature. Existing requirements survive while the new one is added."
                   }
                   value={brief}
                   onChange={(e) => setBrief(e.target.value)}
@@ -767,7 +787,7 @@ export function Cycle({
                 <p className="mb-2 text-xs text-ink-muted">
                   {sections.length === 0
                     ? "Leave it empty and the council will interview you instead, asking questions you answer in the run."
-                    : "Accept the new requirements, then run spec and plan the same way — each stage extends its document and the new tasks arrive with full traceability."}
+                    : "Accept the new requirements, then continue to spec and plan — each stage extends its document and the new tasks arrive with full traceability."}
                 </p>
               </>
             )}
@@ -1052,7 +1072,7 @@ export function Cycle({
                 // the proposal is accepted, and a person about to click a
                 // button on work they already approved deserves to know that.
                 <span className="text-xs text-ink-muted">
-                  leaves the accepted document alone until you accept the proposal
+                  leaves the accepted document alone until you accept the new draft
                 </span>
               )}
             </div>
@@ -1069,7 +1089,7 @@ export function Cycle({
   );
 }
 
-function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean }) {
+function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false, requirementIds = new Set<string>() }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean; requirementIds?: Set<string> }) {
   // The Down walk is the engine's link, not a UI guess based on where a task
   // happens to be printed. Keep only task ids found in that walk, then use the
   // task record for its live state.
@@ -1112,12 +1132,24 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
           {liveState}
         </p>
       )}
-      {section.implements && section.implements.length > 0 && (
-        <div className="mt-1 text-xs text-ink-muted">
-          implements {section.implements.join(", ")}
+      <p data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
+        {summarySentence(section)}
+      </p>
+      <details className="mt-2" data-testid="cycle-section-details">
+        <summary className="cursor-pointer text-xs text-ink-muted">More detail</summary>
+        <div className="pt-1">
+          {section.implements && section.implements.length > 0 && (
+            <div className="text-xs text-ink-muted">
+              {section.implements.map((claim) => claim.startsWith("REQ-")
+                ? requirementIds.has(claim)
+                  ? <span key={claim} className="mr-2">implements {claim}</span>
+                  : <span key={claim} data-testid="cycle-invalid-claim" className="mr-2 text-serious">claims {claim} — no such requirement exists</span>
+                : <span key={claim} className="mr-2">implements {claim}</span>)}
+            </div>
+          )}
+          <Prose body={cleanSectionBody(section.body)} className="mt-1 space-y-2 text-sm text-ink-secondary" />
         </div>
-      )}
-      <Prose body={section.body} className="mt-2 space-y-2 text-sm text-ink-secondary" />
+      </details>
       {section.children && section.children.length > 0 && (
         <ul className="mt-2 space-y-1 pl-3 border-l border-hairline">
           {section.children.map((c) => (
@@ -1132,11 +1164,12 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
               <span className="font-mono text-ink-muted">{c.id}</span>{" "}
               <span className="text-ink">{c.title}</span>
               {broken.has(c.id) && <span className="ml-1 text-serious">break</span>}
-              {/* A task's Implements line is the edge that makes the plan
-                  traceable. Rendering only id and title made the Plan tab look
-                  like it had no traceability at all, when every task had it. */}
               {c.implements && c.implements.length > 0 && (
-                <span className="text-ink-muted"> — implements {c.implements.join(", ")}</span>
+                <span className="text-ink-muted"> — {c.implements.map((claim) => claim.startsWith("REQ-")
+                  ? requirementIds.has(claim)
+                    ? `implements ${claim}`
+                    : `claims ${claim} — no such requirement exists`
+                  : `implements ${claim}`).join(", ")}</span>
               )}
             </li>
           ))}
@@ -1162,6 +1195,27 @@ function sectionsForStage(sections: readonly Section[], stage: string): Section[
     return [{ ...section, children: section.children ? filter(section.children) : section.children }];
   });
   return filter(sections);
+}
+
+function cleanSectionBody(body: string): string {
+  return body.replace(/\bAs-built:\s*yes\b\.?\s*/gi, "").trim();
+}
+
+function summarySentence(section: Section): string {
+  const text = cleanSectionBody(section.body).replace(/\s+/g, " ").trim();
+  const sentence = text.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim();
+  return sentence || `${section.title} is described here.`;
+}
+
+function redraftSummary(mode: string, roster: readonly RosterEntry[], measured: MeasuredSpend): string {
+  const seats = stageSeats(mode, roster);
+  const architect = seats.find((s) => s.role === "architect")?.duckling ?? "one model";
+  const critics = seats.filter((s) => s.role === "critic").map((s) => s.duckling);
+  if (mode === "solo" || critics.length === 0) return `${architect} drafts a new version`;
+  const criticText = critics.length === 1 ? critics[0] : `${critics.slice(0, -1).join(", ")} and ${critics[critics.length - 1]}`;
+  const usd = seats.reduce((sum, seat) => sum + (measured[seat.duckling]?.usd ?? 0), 0);
+  const cost = Math.max(0, Math.round(usd));
+  return `${architect} drafts, ${criticText} critiques until it approves — about $${cost}`;
 }
 
 function taskIdsFromTrace(value: unknown): string[] {
