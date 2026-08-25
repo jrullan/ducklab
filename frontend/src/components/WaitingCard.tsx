@@ -3,6 +3,8 @@ import { StatusChip } from "./StatusChip";
 import { routeHref } from "../app/routes";
 import { runLabel } from "../lib/runview";
 import { waitingFor, moneyOrZero } from "../lib/format";
+import { useState } from "react";
+import { EvidenceDrawerHost } from "./EvidenceDrawer";
 
 function waitingExplanation(run: Run): string {
   if (run.pending_kind === "question") {
@@ -37,6 +39,7 @@ export function WaitingCard({
   onAbort: () => void;
   acceptError?: string;
 }) {
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
@@ -135,12 +138,14 @@ export function WaitingCard({
           </a>
         )}
         {(next.includes("accept") || next.includes("resume")) && (
-          <a
-            href={routeHref({ name: "run", id: run.id })}
+          <button
+            type="button"
+            data-testid="review-evidence"
+            onClick={() => setEvidenceOpen(true)}
             className="text-xs text-ink-muted underline"
           >
-            see the evidence
-          </a>
+            review evidence <span className="text-ink-muted">— see the evidence</span>
+          </button>
         )}
       </div>
       {acceptError && (
@@ -148,6 +153,7 @@ export function WaitingCard({
           accept failed: {acceptError}
         </p>
       )}
+      <EvidenceDrawerHost run={run} open={evidenceOpen} onClose={() => setEvidenceOpen(false)} />
     </li>
   );
 }
