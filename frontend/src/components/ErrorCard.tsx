@@ -4,7 +4,7 @@ import type { ApiError } from "../api/client";
 export function ErrorCard({ error, testId = "error-card" }: { error: unknown; testId?: string }) {
   const api = error as Partial<ApiError>;
   const raw = error instanceof Error ? error.message : String(error);
-  const sentence = (api.name === "ApiError" ? raw : "Could not complete that request. Try again.").replace(/^ApiError:\s*/, "");
+  const sentence = raw.replace(/^ApiError:\s*/, "");
   const hasDetails = api.name === "ApiError" && (api.method || api.path || api.status !== undefined);
 
   return (

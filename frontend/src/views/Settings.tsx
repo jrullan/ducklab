@@ -4,6 +4,7 @@ import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
 import { StatusChip } from "../components/StatusChip";
+import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView } from "../api/client";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
@@ -175,11 +176,7 @@ export function Settings({
             >
               Reconnect
             </button>
-            {engineError && (
-              <span className="text-xs text-critical" data-testid="settings-engine-error">
-                {engineError}
-              </span>
-            )}
+            {engineError && <ErrorCard error={engineError} testId="settings-engine-error" />}
           </div>
         )}
       </SettingsCard>
@@ -199,6 +196,7 @@ function RemoteGitSection({ client, projectId }: { client: EngineClient; project
     "shell.allow_prefixes": "", "shell.deny": "", "git.protected_paths": "", "verify.link_deps": "",
   });
   const [state, setState] = useState("");
+  const [remoteError, setRemoteError] = useState<unknown>(null);
   const [findings, setFindings] = useState<{ key: string; reason: string }[]>([]);
   const [diagnostics, setDiagnostics] = useState<ConfigDiagnostics | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -226,8 +224,9 @@ function RemoteGitSection({ client, projectId }: { client: EngineClient; project
   const update = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
   const list = (key: string, label: string) => <label className="flex flex-col gap-0.5 text-sm text-ink-secondary">{label}<span className="text-xs text-ink-muted">one item per line</span><textarea data-testid={`slice-${key}`} value={(draft[key] ?? "").replaceAll(",", "\n")} onChange={(e) => update(key, e.target.value.split("\n").filter(Boolean).join(","))} className="rounded border border-hairline bg-surface2 px-2 py-1" /></label>; 
   const save = () => {
+    setRemoteError(null);
     setState("saving…");
-    void client.projectUpdate(projectId, draft, "settings_remote_git").then(() => setState("saved")).catch((e) => setState(String(e)));
+    void client.projectUpdate(projectId, draft, "settings_remote_git").then(() => setState("saved")).catch((e) => setRemoteError(e));
   };
   const text = (key: string, label: string, hint?: string) => (
     <label className="flex flex-col gap-0.5 text-sm text-ink-secondary">
@@ -243,7 +242,8 @@ function RemoteGitSection({ client, projectId }: { client: EngineClient; project
     <SettingsCard title="lists & safety rules" desc="one item per comma; these lists constrain commands, protected files, and acceptance checkouts" testid="slice-key-editors">
       <div className="grid gap-3">{list("shell.allow_prefixes", "allowed shell prefixes")}{list("shell.deny", "denied shell commands")}{list("git.protected_paths", "protected paths")}{list("verify.link_deps", "linked verification dependencies")}{list("remote.allow_mcp_verbs", "remote MCP verbs")}</div>
       <button type="button" data-testid="save-remote-git-settings" onClick={save} className="mt-3 rounded border border-hairline px-2 py-1 text-sm">Save remote & git settings</button>
-      {state && <span className="ml-2 text-xs text-ink-muted" data-testid="remote-git-state">{state}</span>}
+      {state && !remoteError && <span className="ml-2 text-xs text-ink-muted" data-testid="remote-git-state">{state}</span>}
+      {remoteError !== null && <ErrorCard error={remoteError} testId="settings-remote-error" />}
     </SettingsCard>
     <SettingsCard title="connection diagnostics" desc="read-only checks from the engine; no setting is changed here" testid="remote-diagnostics">
       {findings.length > 0 && <p className="mb-2 text-xs text-warning" data-testid="config-findings">Configuration needs attention: {findings.map((f) => f.key).join(", ")}</p>}
@@ -312,7 +312,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [agentTurns, setAgentTurns] = useState("");
   const [buildMode, setBuildMode] = useState("");
   const [testMode, setTestMode] = useState("");
-  const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: string }>({
+  const [state, setState] = useState<{ kind: "idle" | "saving" | "saved" | "error"; message?: unknown }>({
     kind: "idle",
   });
 
@@ -385,8 +385,8 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   };
 
   const load = () => {
-    client.budgetDefaults().then(applyBudget).catch((e) => setState({ kind: "error", message: String(e) }));
-    client.modeDefaults().then(applyModes).catch((e) => setState({ kind: "error", message: String(e) }));
+    client.budgetDefaults().then(applyBudget).catch((e) => setState({ kind: "error", message: e }));
+    client.modeDefaults().then(applyModes).catch((e) => setState({ kind: "error", message: e }));
     if (typeof client.engineDefaults === "function") client.engineDefaults().then(applyEngine).catch(() => {});
   };
 
@@ -395,9 +395,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   if (!budget || !modes) {
     return (
       <section className="mt-4" data-testid="config-settings">
-        <p className="text-sm text-ink-muted">
-          {state.kind === "error" ? `could not read the settings: ${state.message}` : "reading…"}
-        </p>
+        {state.kind === "error" ? <ErrorCard error={state.message} testId="settings-load-error" /> : <p className="text-sm text-ink-muted">reading…</p>}
       </section>
     );
   }
@@ -449,7 +447,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         applyModes(savedModes);
         setState({ kind: "saved" });
       })
-      .catch((e) => setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }));
+      .catch((e) => setState({ kind: "error", message: e }));
   };
 
   const num = (
@@ -695,9 +693,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         </button>
         {state.kind === "saved" && <span className="text-sm text-good">saved</span>}
         {state.kind === "error" && (
-          <span className="text-sm text-critical" data-testid="settings-error">
-            {state.message}
-          </span>
+          <ErrorCard error={state.message} testId="settings-error" />
         )}
       </div>
     </div>

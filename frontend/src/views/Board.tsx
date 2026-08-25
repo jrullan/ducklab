@@ -12,6 +12,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useRuns } from "../store/runs";
 import type { Bug, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
+import { ErrorCard } from "../components/ErrorCard";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
@@ -135,7 +136,7 @@ export function Board({
   // the bug is filed. Visual evidence for the human — and for a triager with
   // vision, which is shown the images themselves.
   const [bugFiles, setBugFiles] = useState<File[]>([]);
-  const [bugError, setBugError] = useState<string | null>(null);
+  const [bugError, setBugError] = useState<unknown>(null);
   const [triageRun, setTriageRun] = useState<string | null>(null);
   // The banner follows the run it announced: "started — watch it" is a lie
   // once the triage is done and the verdicts are already on the board.
@@ -149,7 +150,7 @@ export function Board({
   const [gateCommand, setGateCommand] = useState("");
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const generation = useRef(0);
   // The selection belongs to the board that made it: keeping it across a
@@ -209,14 +210,14 @@ export function Board({
       })
       .catch(() => {});
     const [t, b] = await Promise.allSettled([client.tasks(projectId, summary), client.bugs(projectId, false, summary)]);
-    const problems: string[] = [];
+    const problems: unknown[] = [];
     if (requestGeneration !== generation.current) return;
     if (t.status === "fulfilled") setTasks(t.value);
-    else problems.push(`tasks: ${String(t.reason?.message ?? t.reason)}`);
+    else problems.push(t.reason);
     if (b.status === "fulfilled") setBugs(b.value);
-    else problems.push(`bugs: ${String(b.reason?.message ?? b.reason)}`);
+    else problems.push(b.reason);
 
-    setFailure(problems.length ? problems.join(" · ") : null);
+    setFailure(problems.length === 0 ? null : problems.length === 1 ? problems[0] : new Error(problems.map((problem) => problem instanceof Error ? problem.message : String(problem)).join(" · ")));
     setLoading(false);
   }, [client, projectId]);
 
@@ -334,11 +335,7 @@ export function Board({
     <div data-testid="board-view" className="flex items-start gap-4">
       <div className="min-w-0 flex-1">
         {loading && <div data-testid="board-loading" className="mb-3 text-sm text-ink-muted">Loading board…</div>}
-        {failure && (
-          <div data-testid="board-error" className="mb-3 text-sm text-critical">
-            {failure}
-          </div>
-        )}
+        {failure !== null && <ErrorCard error={failure} testId="board-error" />}
 
         {/* One line, above the columns: the answer, not a nudge. It disappears
             when there is nothing ready, which is itself the answer — everything
@@ -447,7 +444,7 @@ export function Board({
                         // this tab's stream reconnects mid-triage.
                         useRuns.getState().setRun(r);
                       })
-                      .catch((e) => setBugError(e instanceof Error ? e.message : String(e)))
+                      .catch((e) => setBugError(e))
                   }
                   className="rounded border border-ink px-3 py-1 text-sm font-medium text-ink"
                 >
@@ -572,7 +569,7 @@ export function Board({
                       setFiling(false);
                       return load();
                     })
-                    .catch((e) => setBugError(e instanceof Error ? e.message : String(e)));
+                    .catch((e) => setBugError(e));
                 }}
                 className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
               >
@@ -582,11 +579,7 @@ export function Board({
           </div>
         )}
 
-        {bugError && (
-          <p className="mb-2 text-sm text-critical" data-testid="bug-error">
-            {bugError}
-          </p>
-        )}
+        {bugError !== null && <ErrorCard error={bugError} testId="bug-error" />}
         {triageRun && (
           <p className="mb-2 text-sm" data-testid="triage-run">
             <a href={`#/runs/${triageRun}`} className="text-ink underline">
@@ -954,7 +947,7 @@ function TaskRunner({
   // the same tree at the same time, and the second one's diff contains the
   // first one's changes — which is not a result anybody can judge.
   const running = task.status === "in_progress";
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   // The run doing the work, from the store the stream feeds — so the link is
   // there whether this window started the run or an operator did, and
   // survives leaving the view and coming back. `started` only remembered a
@@ -998,7 +991,7 @@ function TaskRunner({
     ) ?? null,
   );
   const [answer, setAnswer] = useState("");
-  const [answerError, setAnswerError] = useState<string | null>(null);
+  const [answerError, setAnswerError] = useState<unknown>(null);
 
   const go = async (
     what: "run" | "test" | "tdd" | "review",
@@ -1041,7 +1034,7 @@ function TaskRunner({
       // reporting the past. onDone reloads tasks and bugs.
       onDone();
     } catch (err) {
-      setFailure(err instanceof Error ? err.message : String(err));
+      setFailure(err);
     } finally {
       setBusy(false);
     }
@@ -1164,7 +1157,7 @@ function TaskRunner({
                   setFailure(null);
                   onDone();
                 })
-                .catch((err) => setFailure(err instanceof Error ? err.message : String(err)))
+                .catch((err) => setFailure(err))
             }
             disabled={busy}
             data-testid="retire-test"
@@ -1244,7 +1237,7 @@ function TaskRunner({
         const send = (text: string) => {
           if (!text.trim()) return;
           setAnswerError(null);
-          client.answer(liveRun.id, questionId, text).then(() => { setAnswer(""); onDone(); }).catch((e) => setAnswerError(e instanceof Error ? e.message : String(e)));
+          client.answer(liveRun.id, questionId, text).then(() => { setAnswer(""); onDone(); }).catch((e) => setAnswerError(e));
         };
         return (
           <section className="rounded border border-hairline p-2 text-xs" data-testid="task-live-run" data-state={liveRun.status}>
@@ -1272,7 +1265,7 @@ function TaskRunner({
                   <input aria-label="answer" data-testid="task-answer-input" value={answer} onChange={(e) => setAnswer(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(answer); }} className="flex-1 rounded border border-hairline bg-surface2 px-2 py-1" placeholder="your answer" />
                   <button type="button" data-testid="task-answer-button" onClick={() => send(answer)} className="rounded border border-hairline px-2 py-1">Answer</button>
                 </div>
-                {answerError && <p className="mt-1 text-critical">{answerError}</p>}
+                {answerError !== null && <ErrorCard error={answerError} testId="task-answer-error" />}
               </div>
             )}
             {liveRun.status !== "paused" && (
@@ -1354,11 +1347,7 @@ function TaskRunner({
       )}
 
 
-      {failure && (
-        <p className="text-xs text-critical" data-testid="run-error">
-          {failure}
-        </p>
-      )}
+      {failure !== null && <ErrorCard error={failure} testId="run-error" />}
       {retired && (
         <p className="text-xs text-good" data-testid="retire-note">
           test retired — its commit was reverted{retired ? ` (${retired.slice(0, 8)})` : ""}
@@ -1598,7 +1587,7 @@ function BugNext({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
   const [startedRun, setStartedRun] = useState<string | null>(null);
 
   const act = (fn: () => Promise<unknown>) => {
@@ -1610,7 +1599,7 @@ function BugNext({
         if (id) setStartedRun(id);
         onDone();
       })
-      .catch((e) => setFailure(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setFailure(e))
       .finally(() => setBusy(false));
   };
 
@@ -1675,11 +1664,7 @@ function BugNext({
           </a>
         </p>
       )}
-      {failure && (
-        <p className="text-xs text-critical" data-testid="bug-next-error">
-          {failure}
-        </p>
-      )}
+      {failure !== null && <ErrorCard error={failure} testId="bug-next-error" />}
     </div>
   );
 }
@@ -1705,7 +1690,7 @@ function BugBody({
   const [title, setTitle] = useState(bug.title);
   const [body, setBody] = useState(bug.body ?? "");
   const [severity, setSeverity] = useState(bug.severity);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
 
   if (!editing) {
     return (
@@ -1773,7 +1758,7 @@ function BugBody({
                 setEditing(false);
                 onDone();
               })
-              .catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
+              .catch((e) => setFailure(e));
           }}
           className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
         >
@@ -1787,11 +1772,7 @@ function BugBody({
           cancel
         </button>
       </div>
-      {failure && (
-        <p className="text-xs text-critical" data-testid="bug-edit-error">
-          {failure}
-        </p>
-      )}
+      {failure !== null && <ErrorCard error={failure} testId="bug-edit-error" />}
     </div>
   );
 }

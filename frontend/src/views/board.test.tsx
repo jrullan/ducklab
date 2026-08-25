@@ -166,9 +166,13 @@ describe("Board", () => {
 
     await waitFor(() => expect(screen.getByTestId("board-error")).toBeTruthy());
     const err = screen.getByTestId("board-error").textContent ?? "";
-    expect(err).toContain("bugs");
     expect(err).toContain("bug table is locked");
-    expect(err).not.toContain("tasks:");
+    expect(err).not.toContain("bugs:");
+    expect(screen.queryByText("POST")).toBeNull();
+    fireEvent.click(screen.getByText("details"));
+    expect(screen.getByText(/GET \/v1\/projects\/p\/bugs/)).toBeTruthy();
+    expect(screen.getByText("500")).toBeTruthy();
+    expect(screen.queryByTestId("board-loading")).toBeNull();
     expect(screen.queryByTestId("board-cards")).toBeNull();
   });
 });

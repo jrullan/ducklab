@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CandidateCriteriaView, Duckling, EngineClient, Scorecard } from "../api/client";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { StatusChip } from "../components/StatusChip";
+import { ErrorCard } from "../components/ErrorCard";
 import { rolesForMode } from "../lib/seats";
 import type { ProviderView } from "../api/client";
 
@@ -77,20 +78,20 @@ function FilterChip({ testId, label, on, onClick }: { testId: string; label: str
 // honours and the UI hides is a rule nobody can trust (B-052).
 function CriteriaPanel({ client, onSaved }: { client: EngineClient; onSaved: () => void }) {
   const [view, setView] = useState<CandidateCriteriaView | null>(null);
-  const [error, setError] = useState("");
-  const load = () => { if (typeof client.candidateCriteria !== "function") return; client.candidateCriteria().then(setView).catch((e) => setError(e instanceof Error ? e.message : String(e))); };
+  const [error, setError] = useState<unknown>(null);
+  const load = () => { if (typeof client.candidateCriteria !== "function") return; client.candidateCriteria().then(setView).catch(setError); };
   useEffect(load, [client]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!view) return error ? <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{error}</p> : null;
+  if (!view) return error ? <ErrorCard error={error} testId="roster-criteria-error" /> : null;
   const label = (key: string) => view.catalog.find((c) => c.key === key)?.label ?? key;
   const dir = (key: string) => view.catalog.find((c) => c.key === key)?.direction === "asc" ? "↑ lowest first" : "↓ highest first";
   const roles = Object.keys(view.defaults).sort();
-  const save = (next: Record<string, string[]>) => { setError(""); client.candidateCriteriaSet(next).then((v) => { setView(v); onSaved(); }).catch((e) => setError(e instanceof Error ? e.message : String(e))); };
+  const save = (next: Record<string, string[]>) => { setError(null); client.candidateCriteriaSet(next).then((v) => { setView(v); onSaved(); }).catch(setError); };
   const configured = () => { const out: Record<string, string[]> = {}; for (const r of view.configured) out[r] = view.criteria[r] ?? []; return out; };
   const setRole = (role: string, list: string[]) => save({ ...configured(), [role]: list });
   const reset = (role: string) => { const next = configured(); delete next[role]; save(next); };
   return <div className="rounded border border-hairline bg-surface p-3 text-sm" data-testid="roster-criteria">
     <div className="mb-2 text-xs text-ink-muted">Suggestions rank the flock for a seat by these criteria, in order; a duckling with no value for a criterion sorts after those with one. Ducklings whose declared roles exclude the seat are never suggested. Local models are not compared on price.</div>
-    {error && <p role="alert" className="mb-2 text-xs" style={{ color: "var(--status-critical)" }}>{error}</p>}
+    {error !== null && <ErrorCard error={error} testId="roster-criteria-error" />}
     <div className="space-y-2">{roles.map((role) => { const list = view.criteria[role] ?? []; const isCustom = view.configured.includes(role); const available = view.catalog.filter((c) => !list.includes(c.key)); return <div key={role} className="flex flex-wrap items-center gap-1" data-testid={`roster-criteria-${role}`}>
       <span className="w-24 font-medium">{role}</span>
       {list.length === 0 && <span className="text-xs text-ink-muted">suggestions off</span>}
@@ -128,8 +129,8 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   // Errors live with the board that produced them: an error rendered at
   // the top of the view was invisible from Tournament and Common, and two
   // real bugs hid behind that. Key "" is the view itself (a failed re-read).
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const setError = (mode: string, message: string) => setErrors((cur) => {
+  const [errors, setErrors] = useState<Record<string, unknown>>({});
+  const setError = (mode: string, message: unknown) => setErrors((cur) => {
     const next = { ...cur };
     if (message) next[mode] = message; else delete next[mode];
     return next;
@@ -166,13 +167,13 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     setWarnings(Object.fromEntries(items.map(([mode, , warning]) => [mode, warning])));
   }).catch((e: unknown) => {
     // A failed re-read must not leave stale seats standing as if current.
-    setError("", `could not re-read the roster: ${e instanceof Error ? e.message : String(e)}`);
+    setError("", e);
   });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
   // Evidence failing to load is said, not swallowed: a Flock that shows "no
   // runs yet" for a duckling with 264 runs is a lie the operator will act on.
-  useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch((e) => setError("", `evidence unavailable: ${e instanceof Error ? e.message : String(e)}`)); }, [client]);
+  useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch((e) => setError("", e)); }, [client]);
   const flock = (() => {
     const all = ducks.map((d) => scorecards.find((s) => s.id === d.id) ?? ({ ...d } as Scorecard));
     const sort = SORTS.find((o) => o.key === flockSort) ?? SORTS[0]!;
@@ -197,7 +198,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       if (scope === "global") await client.GlobalRosterSet(mode, role, ids);
       else await client.RosterSetManyMode(projectId, mode, role, ids);
       await reload();
-    } catch (e) { setError(mode, e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(mode, e); }
   };
   const assign = (mode: string, role: string, id: string) => {
     const entry = (boards[mode] ?? []).find((candidate) => candidate.role === role);
@@ -282,7 +283,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       </div>; })}
     </div></aside>
     <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1" data-testid="roster-boards">
-    {errors[""] && <p role="alert" className="text-sm" style={{ color: "var(--status-critical)" }}>{errors[""]}</p>}
+    {errors[""] !== undefined && <ErrorCard error={errors[""]} testId="roster-error" />}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
     <div className="space-y-6">{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)}>
       {/* The header is a title, one line saying what the mode is for, and a
@@ -295,7 +296,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         <span className="min-w-0 truncate text-xs text-ink-muted" data-testid={`roster-blurb-${mode}`} title={MODE_BLURB[mode]}>{MODE_BLURB[mode]}</span>
         {warnings[mode] && <span className="ml-auto shrink-0 text-xs" data-testid={`roster-warning-${mode}`} style={{ color: "var(--status-warning)" }}>⚠ {warnings[mode]}</span>}
       </div>
-      {errors[mode] && <p role="alert" className="text-sm" data-testid={`roster-error-${mode}`} style={{ color: "var(--status-critical)" }}>{errors[mode]}</p>}
+      {errors[mode] !== undefined && <ErrorCard error={errors[mode]} testId={`roster-error-${mode}`} />}
       {mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p className="text-xs text-ink-muted">no pins</p>}
       <div className="mt-2 flex gap-3 overflow-x-auto">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
       const ids = names(entry); const isPinned = pinned(entry); const ghost = scope === "project" && !isPinned; const open = chosenSeat?.mode === mode && chosenSeat.role === entry.role; const top = entry.candidates?.[0]; const suggestion = top && !ids.includes(top.id) ? top : undefined;
@@ -308,7 +309,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         {editable && ids.length === 0 && !open && <button type="button" data-testid={`roster-drop-${mode}-${entry.role}`} aria-label={`assign to ${entry.role} in ${mode}`} onClick={() => setChosenSeat({ mode, role: entry.role })} className="mb-2 min-h-12 w-full rounded border border-dashed border-hairline px-2 py-2 text-xs text-ink-muted">drop here · assign</button>}
         {ids.map((id) => { const evidence = seatEvidence(id, entry.role); const isTop = top?.id === id; return <div key={id} data-testid={`roster-card-${mode}-${entry.role}-${id}`} data-ghost={ghost ? "true" : undefined} title={isPinned && (entry.global_ducklings ?? entry.default) ? `Global: ${Array.isArray(entry.global_ducklings) ? entry.global_ducklings.join(", ") : entry.default}` : undefined} className={`group rounded border p-2 mb-2 ${ghost ? "border-dashed text-ink-muted" : "border-hairline"}`}>
           <div className="flex items-center gap-2"><DuckAvatar id={id} roster={roster} /><span className="font-medium truncate">{id}</span>{(ghost || isPinned) && <small className="rounded border border-hairline px-1 text-ink-muted">{ghost ? "global" : "pinned"}</small>}{isTop && <small className="text-xs" data-testid={`roster-seat-top-${mode}-${entry.role}-${id}`} title={top?.why} style={{ color: "var(--status-good)" }}>✓ suggested</small>}
-            <span className="ml-auto flex gap-2 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(mode, ""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(mode, e instanceof Error ? e.message : String(e))); }}>unpin</button>}{editable && <button type="button" className="text-ink-muted hover:text-ink" aria-label={`remove ${id} from ${entry.role}`} title="remove" onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>×</button>}</span></div>
+            <span className="ml-auto flex gap-2 text-xs opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">{editable && scope === "project" && isPinned && <button type="button" className="text-ink-muted hover:text-ink underline" aria-label={`unpin ${id} from ${entry.role}`} onClick={() => { setError(mode, ""); void client.RosterUnpin(projectId, mode, entry.role).then(reload).catch((e) => setError(mode, e)); }}>unpin</button>}{editable && <button type="button" className="text-ink-muted hover:text-ink" aria-label={`remove ${id} from ${entry.role}`} title="remove" onClick={() => void write(mode, entry.role, ids.filter((candidate) => candidate !== id))}>×</button>}</span></div>
           {evidence.line && <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-seat-evidence-${mode}-${entry.role}-${id}`} title={evidence.full}>{evidence.line}</div>}
         </div>; })}
         {suggestion && !open && <div className="mb-2 text-[11px] text-ink-muted" data-testid={`roster-seat-suggestion-${mode}-${entry.role}`} title={suggestion.why}>suggested: <button type="button" className="underline hover:text-ink" aria-label={`assign suggested ${suggestion.id} to ${entry.role} in ${mode}`} onClick={() => assign(mode, entry.role, suggestion.id)}>{suggestion.id}</button></div>}
