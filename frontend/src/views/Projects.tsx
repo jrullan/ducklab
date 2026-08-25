@@ -46,6 +46,7 @@ export function Projects({
   // it never changes the recorded configuration.
   const [configFindings, setConfigFindings] = useState<Record<string, ConfigFinding[]>>({});
   const [consultants, setConsultants] = useState<Duckling[]>([]);
+  const [openedProject, setOpenedProject] = useState<string | null>(null);
 
   const load = useCallback(() => {
     client
@@ -81,6 +82,16 @@ export function Projects({
     if (typeof client.ducklings !== "function") return;
     void client.ducklings().then(setConsultants).catch(() => {});
   }, [client]);
+
+  // A selection is a project-open moment. Query its read-only diagnosis here,
+  // not only while the full project list happens to refresh.
+  useEffect(() => {
+    if (!selected || typeof client.configDoctor !== "function") return;
+    setOpenedProject(selected);
+    void client.configDoctor(selected)
+      .then((findings) => setConfigFindings((current) => ({ ...current, [selected]: findings })))
+      .catch(() => {});
+  }, [client, selected]);
 
   // Said before it is sent. `~` is a shell feature the engine cannot expand
   // for you, and a relative path means nothing to a daemon — one real session
@@ -308,7 +319,7 @@ export function Projects({
                 </div>
                 {(() => {
                   const finding = configFindings[p.id]?.[0];
-                  if (!finding || consultants.length === 0) return null;
+                  if (p.id !== openedProject || !finding || consultants.length === 0) return null;
                   const initialMessage = `Please prioritize this configuration finding and explain the safe amendment: ${finding.key} → ${finding.proposed}. Reason: ${finding.reason}`;
                   return <div className="mt-2 rounded border border-warning p-2 text-xs" data-testid={`project-config-offer-${p.id}`}>
                     <p><code>{finding.key}</code> needs attention: {finding.reason}</p>

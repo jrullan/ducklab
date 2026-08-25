@@ -142,6 +142,28 @@ describe("Projects", () => {
 
   // No native chooser outside the desktop, so the button must not be there
   // promising something that cannot happen.
+  it("offers a configuration consultant when opening a project with findings", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    const c = client as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    c.configDoctor = vi.fn(() => Promise.resolve([{ key: "verify.mode", proposed: "tests", reason: "no gate is configured" }]));
+    c.ducklings = vi.fn(() => Promise.resolve([{ id: "consultant", provider: "test", model: "test" }]));
+    c.chatStart = vi.fn(() => Promise.resolve({ id: "consultation-1" }));
+    render(<Projects client={client} selected="alpha" onSelect={noop} onChanged={noop} />);
+
+    const offer = await screen.findByTestId("project-config-offer-alpha");
+    expect(offer).toHaveTextContent("no gate is configured");
+    fireEvent.click(screen.getByTestId("chat-about"));
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "consultant" } });
+    fireEvent.click(screen.getByTestId("chat-start"));
+
+    await waitFor(() => expect(c.chatStart).toHaveBeenCalledWith("alpha", expect.objectContaining({
+      duckling: "consultant",
+      aboutKind: "ducklab",
+      aboutId: "configuration",
+      message: expect.stringContaining("verify.mode"),
+    })));
+  });
+
   it("hides the folder chooser when there is no native binding", async () => {
     const client = clientWith([]);
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);

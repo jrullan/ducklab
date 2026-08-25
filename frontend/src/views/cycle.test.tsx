@@ -275,6 +275,30 @@ describe("Cycle — starting a stage", () => {
     );
   });
 
+  it("offers a configuration consultant when adoption completes with a finding", async () => {
+    const c = client({
+      projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
+      ducklings: vi.fn(() => Promise.resolve([{ id: "consultant", provider: "test", model: "test" }])),
+      configDoctor: vi.fn(() => Promise.resolve([{ key: "verify.mode", proposed: "tests", reason: "no gate is configured" }])),
+      chatStart: vi.fn(() => Promise.resolve({ id: "consultation-1" })),
+    });
+    render(<Cycle client={c} projectId="p" />);
+
+    fireEvent.click(await screen.findByTestId("cycle-run"));
+    const offer = await screen.findByTestId("adopt-config-offer");
+    expect(offer).toHaveTextContent("no gate is configured");
+    fireEvent.click(screen.getByTestId("chat-about"));
+    fireEvent.change(screen.getByTestId("chat-duckling"), { target: { value: "consultant" } });
+    fireEvent.click(screen.getByTestId("chat-start"));
+
+    await waitFor(() => expect(c.chatStart).toHaveBeenCalledWith("p", expect.objectContaining({
+      duckling: "consultant",
+      aboutKind: "ducklab",
+      aboutId: "configuration",
+      message: expect.stringContaining("verify.mode"),
+    })));
+  });
+
   it("starts from the brief alone only when that path is chosen", async () => {
     const c = client({
       projects: vi.fn(() => Promise.resolve([{ id: "p", path: "/x", name: "X", has_code: true }])),
