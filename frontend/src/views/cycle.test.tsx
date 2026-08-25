@@ -73,7 +73,7 @@ describe("Cycle", () => {
     // marked everything, or nothing, would carry no information.
     expect(cards[0]!.dataset.broken).toBe("false");
     expect(cards[1]!.dataset.broken).toBe("true");
-    expect(screen.getByTestId("trace-rail").textContent).toContain("1 break");
+    expect(screen.getByTestId("cycle-health").textContent).toContain("1 break");
   });
 
   it("says the spine is clean only when it is", async () => {
@@ -83,7 +83,7 @@ describe("Cycle", () => {
       return json({}, 404);
     });
     render(<Cycle client={client} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("trace-clean")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("cycle-health")).toHaveTextContent("0 breaks in the spine"));
   });
 
   it("promotes a proposal through the artifact endpoint, not a stage run", async () => {
@@ -124,6 +124,42 @@ describe("Cycle", () => {
     render(<Cycle client={client} projectId="p" />);
     await waitFor(() => expect(screen.getByTestId("cycle-error").textContent).toContain("engine exploded"));
     expect(screen.queryByTestId("cycle-section")).toBeNull();
+  });
+
+  it("pins the frame, narrows the index, and jumps to a selected section", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(TRACE);
+      return json({}, 404);
+    });
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    render(<Cycle client={client} projectId="p" />);
+
+    expect(screen.getByTestId("cycle-frame-header").className).toContain("sticky");
+    expect(screen.getByTestId("cycle-index").className).toContain("sticky");
+    await waitFor(() => expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(2));
+    fireEvent.change(screen.getByTestId("cycle-index-filter"), { target: { value: "Invoice" } });
+    expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(1);
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("data-id", "REQ-002");
+    fireEvent.click(screen.getByTestId("cycle-index-row"));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+  });
+
+  it("jumps to a section from the command palette", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(TRACE);
+      return json({}, 404);
+    });
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    render(<Cycle client={client} projectId="p" />);
+
+    await waitFor(() => expect(screen.getAllByTestId("cycle-palette-entry")).toHaveLength(2));
+    fireEvent.click(screen.getByText("Jump to section"));
+    fireEvent.change(screen.getByTestId("cycle-palette-input"), { target: { value: "REQ-002" } });
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }));
   });
 
   it("switches stage when a tab is clicked", async () => {
@@ -555,7 +591,6 @@ describe("Cycle — what was asked for", () => {
     });
     render(<Cycle client={client} projectId="p" />);
 
-    fireEvent.click(await screen.findByTestId("asked-for-toggle"));
     expect((await screen.findByTestId("asked-for")).textContent).toContain("triangle tool");
     expect(client.runBrief).toHaveBeenCalledWith("r-42");
   });
@@ -571,16 +606,15 @@ describe("Cycle — what was asked for", () => {
       proposal: { diff: "", sections: [{ id: "REQ-001", title: "x", body: "" }], run_id: "r-new" },
     });
     render(<Cycle client={client} projectId="p" />);
-    await screen.findByTestId("asked-for-toggle");
+    await screen.findByTestId("asked-for");
     expect(client.runBrief).toHaveBeenCalledWith("r-new");
   });
 
-  // Collapsed, because it is a reference and not the subject.
-  it("starts collapsed", async () => {
+  // The person's words are the subject and stay open above machine text.
+  it("starts open", async () => {
     const client = withBrief({ kind: "requirements", markdown: "", sections: [], run_id: "r-42" });
     render(<Cycle client={client} projectId="p" />);
-    await screen.findByTestId("asked-for-toggle");
-    expect(screen.queryByTestId("asked-for")).toBeNull();
+    expect((await screen.findByTestId("asked-for")).textContent).toContain("triangle tool");
   });
 
   // Most stages are not seeded with one, and an empty panel promising a brief
@@ -855,9 +889,7 @@ describe("the trace rail's scope", () => {
       return json({}, 404);
     });
     render(<Cycle client={client} projectId="p" />);
-    await waitFor(() =>
-      expect(screen.getByTestId("trace-scope").textContent).toContain("proposed plan"),
-    );
+    await waitFor(() => expect(screen.getByTestId("cycle-health")).toHaveTextContent("0 breaks in the spine"));
   });
 
   it("stays quiet when the approved spine is what was checked", async () => {
@@ -867,7 +899,7 @@ describe("the trace rail's scope", () => {
       return json({}, 404);
     });
     render(<Cycle client={client} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("trace-clean")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("cycle-health")).toHaveTextContent("0 breaks in the spine"));
     expect(screen.queryByTestId("trace-scope")).toBeNull();
   });
 });

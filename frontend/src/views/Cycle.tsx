@@ -9,7 +9,7 @@
  * them as fact.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Artifact, ConfigFinding, Duckling, EngineClient, RosterEntry, Run, Section, Task, TraceError } from "../api/client";
 import { ChatAbout } from "../components/ChatAbout";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
@@ -42,10 +42,8 @@ export function Cycle({
   );
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [errors, setErrors] = useState<TraceError[]>([]);
-  // Which stages the check read from a pending proposal rather than the
-  // approved artifact. Without this the rail cannot say whether a break is in
-  // what you are deciding on or in what you accepted last week.
-  const [checkedProposed, setCheckedProposed] = useState<string[]>([]);
+  // Retained for compatibility with the engine's proposal scope response; the
+  // visible surface is the pinned frame health line, not a trace rail.
   const [tasks, setTasks] = useState<Task[]>([]);
   const [traceDown, setTraceDown] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
@@ -150,7 +148,10 @@ export function Cycle({
   // Named for what it is, not what it does: `brief` is already the textarea
   // someone types into, and this is the one a past run was given.
   const [askedFor, setAskedFor] = useState("");
-  const [showAsked, setShowAsked] = useState(false);
+  const [indexQuery, setIndexQuery] = useState("");
+  const [indexFilter, setIndexFilter] = useState<"all" | "breaks" | "no-task">("all");
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,7 +163,6 @@ export function Cycle({
       ]);
       setArtifact(a);
       setErrors(e.errors);
-      setCheckedProposed(e.proposed);
     } catch (err) {
       // A project with no artifact yet is not an error worth a red banner, but
       // a real failure must not be shown as "empty" — that reads as "nothing
@@ -383,10 +383,43 @@ export function Cycle({
     }
   }
 
+  useEffect(() => {
+    if (!selectedSection) return;
+    detailRef.current
+      ?.querySelector<HTMLElement>(`[id="cycle-section-${selectedSection}"]`)
+      ?.scrollIntoView({ block: "start" });
+  }, [selectedSection]);
+
+  useEffect(() => {
+    setSelectedSection(null);
+    setIndexQuery("");
+    setIndexFilter("all");
+  }, [active.stage]);
+
+  const sectionHasNoTask = (s: Section) =>
+    active.stage === "plan" && !tasks.some((t) => taskIdsFromTrace(traceDown[s.id]).includes(t.id));
+  // While a parsed proposal is open, the detail pane shows that document; keep
+  // the index pointing at the same ids rather than at the hidden accepted copy.
+  const indexedRoots = artifact?.proposal && !proposalDecided && proposalSections.length > 0
+    ? proposalSections
+    : sections;
+  // Tasks are sections in the plan's document too. Flatten only the index so
+  // nested plan work is findable without changing the document's reading shape.
+  const indexedSections = indexedRoots.flatMap((s) => [s, ...(s.children ?? [])]);
+  const visibleSections = indexedSections.filter((s) => {
+    const q = indexQuery.trim().toLowerCase();
+    const matchesText = !q || `${s.id} ${s.title}`.toLowerCase().includes(q);
+    const matchesState = indexFilter === "all"
+      || (indexFilter === "breaks" && broken.has(s.id))
+      || (indexFilter === "no-task" && sectionHasNoTask(s));
+    return matchesText && matchesState;
+  });
+
   return (
-    <div data-testid="cycle-view" className="flex gap-6">
-      <div className="flex-1 min-w-0">
-        <div role="tablist" className="flex gap-1 border-b border-hairline mb-4">
+    <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
+      <header data-testid="cycle-frame-header" className="sticky top-0 z-10 border-b border-hairline bg-surface py-2">
+        <div className="flex items-center justify-between gap-3">
+          <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="flex gap-1">
           {STAGES.map((s) => (
             <button
               key={s.kind}
@@ -401,21 +434,81 @@ export function Cycle({
                   : "border-transparent text-ink-muted hover:text-ink")
               }
             >
-              {s.label}
+              <span>{s.label}</span>
+              {s.kind === active.kind && <span data-testid="cycle-stage-caption" className="ml-2 text-xs font-normal text-ink-muted">{s.story}</span>}
             </button>
           ))}
-        </div>
-        <section data-testid="cycle-stage-narrative" className="mb-5">
-          <h1 className="text-lg font-medium text-ink">The document chain</h1>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            {STAGES.map((s) => (
-              <div key={s.kind} data-testid={`cycle-stage-${s.stage}`} className={"rounded-card border p-2 " + (s.kind === active.kind ? "border-ink" : "border-hairline")}>
-                <div className="text-sm font-medium text-ink">{s.label}</div>
-                <p className="text-xs text-ink-secondary">{s.story}</p>
+          </div>
+          <details data-testid="cycle-command-palette" className="relative">
+            <summary className="cursor-pointer text-xs text-ink-muted">Jump to section</summary>
+            <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded border border-hairline bg-surface p-2 shadow-sm">
+              <label className="sr-only" htmlFor="cycle-palette-input">Jump to section by id</label>
+              <input
+                id="cycle-palette-input"
+                data-testid="cycle-palette-input"
+                list="cycle-palette-ids"
+                placeholder="Type an id, e.g. SPEC-026"
+                className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+                onChange={(e) => {
+                  const value = e.target.value.trim().toUpperCase();
+                  const match = indexedSections.find((s) => s.id.toUpperCase() === value);
+                  if (match) setSelectedSection(match.id);
+                }}
+              />
+              <datalist id="cycle-palette-ids">
+                {indexedSections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+              </datalist>
+              <div className="mt-1 max-h-40 overflow-y-auto">
+                {indexedSections.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    data-testid="cycle-palette-entry"
+                    onClick={() => setSelectedSection(s.id)}
+                    className="block w-full px-1 py-1 text-left text-xs hover:bg-surface2"
+                  >{s.id} — {s.title}</button>
+                ))}
               </div>
+            </div>
+          </details>
+        </div>
+        <section data-testid="cycle-stage-narrative" className="sr-only"><h1>The document chain</h1><p>{STAGES.map((s) => s.story).join(" ")}</p></section>
+        <a href="#cycle-ledger" data-testid="cycle-health" className="mt-1 block text-xs text-ink-secondary underline-offset-2 hover:underline">
+          {errors.length} break{errors.length === 1 ? "" : "s"} in the spine
+        </a>
+      </header>
+      <div className="flex min-h-0 flex-1 gap-4 overflow-hidden pt-3">
+        <nav data-testid="cycle-index" aria-label={`${active.label} section index`} className="sticky top-0 h-[calc(100vh-7rem)] w-64 shrink-0 overflow-y-auto border-r border-hairline pr-3">
+          <label className="sr-only" htmlFor="cycle-index-filter">Find a section</label>
+          <input id="cycle-index-filter" data-testid="cycle-index-filter" value={indexQuery} onChange={(e) => setIndexQuery(e.target.value)} placeholder="Find a section…" className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
+          <div className="mb-2 flex gap-1" role="group" aria-label="section state filters">
+            {([["all", "All"], ["breaks", "Breaks"], ["no-task", "No task yet"]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                data-testid={`cycle-filter-${value}`}
+                aria-pressed={indexFilter === value}
+                onClick={() => setIndexFilter(value)}
+                className="rounded border border-hairline px-1.5 py-0.5 text-xs text-ink-muted aria-pressed:border-ink aria-pressed:text-ink"
+              >{label}</button>
             ))}
           </div>
-        </section>
+          <ol className="space-y-1" data-testid="cycle-index-entries">
+            {visibleSections.map((s) => {
+              const hasBreak = broken.has(s.id);
+              const noTask = sectionHasNoTask(s);
+              return <li key={s.id}>
+                <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => setSelectedSection(s.id)} className="w-full rounded px-2 py-1 text-left text-xs hover:bg-surface2">
+                  <span className="font-mono">{s.id} —</span> {s.title}
+                  {hasBreak && <span className="ml-1 text-serious" title="break">break</span>}
+                  {noTask && <span className="ml-1 text-warn" title="no task yet">no task yet</span>}
+                  {artifact?.proposal && !proposalDecided && <span className="ml-1 text-ink-muted" title="proposal pending">proposal pending</span>}
+                </button>
+              </li>;
+            })}
+          </ol>
+        </nav>
+        <div ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain pr-2">
 
         {failure && (
           <div data-testid="cycle-error" className="mb-4 text-sm text-critical">
@@ -423,35 +516,21 @@ export function Cycle({
           </div>
         )}
 
-        {/* Checking that requirements match what was asked for is the first
-            thing anyone does with them, and the brief was previously reachable
-            only by digging it out of a prompt in the run log.
-
-            Collapsed: it is a reference, not the subject. */}
+        {/* The person's words are the first thing to read, before machine text. */}
         {askedFor && (
-          <section className="mb-4 rounded-card border border-hairline" data-testid="asked-for-panel">
-            <button
-              type="button"
-              onClick={() => setShowAsked((v) => !v)}
-              aria-expanded={showAsked}
-              data-testid="asked-for-toggle"
-              className="w-full px-3 py-2 text-left text-sm text-ink-secondary"
+          <section className="order-1 mb-4 rounded-card border border-hairline" data-testid="asked-for-panel">
+            <div className="px-3 py-2 text-sm text-ink-secondary">What you asked for</div>
+            <pre
+              data-testid="asked-for"
+              className="overflow-x-auto whitespace-pre-wrap border-t border-hairline px-3 py-2 text-sm text-ink"
             >
-              {showAsked ? "▾" : "▸"} What you asked for
-            </button>
-            {showAsked && (
-              <pre
-                data-testid="asked-for"
-                className="overflow-x-auto whitespace-pre-wrap border-t border-hairline px-3 py-2 text-sm text-ink"
-              >
-                {askedFor}
-              </pre>
-            )}
+              {askedFor}
+            </pre>
           </section>
         )}
 
         {artifact?.proposal && proposalDecided && (
-          <section data-testid="cycle-rejected-draft" className="mb-6 rounded-card border border-hairline p-3">
+          <section data-testid="cycle-rejected-draft" className="order-2 mb-6 rounded-card border border-hairline p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-medium text-ink">A rejected draft is on disk</div>
@@ -498,7 +577,7 @@ export function Cycle({
         )}
 
         {artifact?.proposal && !proposalDecided && (
-          <section data-testid="cycle-proposal" className="mb-6 rounded-card border border-serious p-3">
+          <section data-testid="cycle-proposal" className="order-2 mb-6 rounded-card border border-serious p-3">
             <DecisionCard
               next={proposalNext}
               title="A run proposes changing this section — read it and decide"
@@ -551,6 +630,7 @@ export function Cycle({
                     tasks={tasks}
                     traceDown={traceDown[s.id]}
                     isPlan={active.stage === "plan"}
+                    proposalPending
                   />
                 ))}
               </ol>
@@ -568,8 +648,19 @@ export function Cycle({
 
         {loading && <div className="text-sm text-ink-muted">Loading…</div>}
 
+        {/* The document stays ahead of its redraft machinery in reading order. */}
+        {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
+          <ol className="order-3 space-y-3" data-testid="cycle-sections">
+            {sections.map((s) => (
+              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} />
+            ))}
+          </ol>
+        )}
+
         {!loading && (!artifact?.proposal || proposalDecided) && (
-          <section data-testid="cycle-start" className="mb-6 rounded-card border border-hairline p-3">
+          <details data-testid="cycle-start" className="order-4 mb-6 rounded-card border border-hairline p-3">
+            <summary className="cursor-pointer text-sm text-ink">{sections.length === 0 ? `Draft the ${active.label.toLowerCase()}` : `Redraft the ${active.label.toLowerCase()}`}</summary>
+            <div className="pt-2">
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the
                 architect the whole document with orders to keep it — and the
@@ -967,59 +1058,18 @@ export function Cycle({
             </div>
             </>
             )}
-          </section>
+            </div>
+          </details>
         )}
 
-        {/* When a proposal includes parsed sections, it is the document being
-            decided on. Do not print the approved copy underneath it as well:
-            the same stable section id would appear twice on the page. */}
-        {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
-          <ol className="space-y-3">
-            {sections.map((s) => (
-              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} />
-            ))}
-          </ol>
-        )}
+
+        </div>
       </div>
-
-      <aside data-testid="trace-rail" className="w-72 shrink-0">
-        <h2 className="text-sm font-medium text-ink mb-2">Traceability</h2>
-        {checkedProposed.length > 0 && (
-          <p data-testid="trace-scope" className="text-xs text-ink-muted mb-2">
-            Checking the proposed {checkedProposed.join(", ")} — this is what you are
-            about to accept.
-          </p>
-        )}
-        {!artifact?.proposal && (
-          <p data-testid="coverage-line" className="mb-2 text-xs text-ink-secondary">
-            {coverageLine(errors)}
-          </p>
-        )}
-        {errors.length === 0 ? (
-          <p data-testid="trace-clean" className="text-sm text-good">
-            The cycle is linked end to end.
-          </p>
-        ) : (
-          <>
-            <p className="text-sm text-serious mb-2">
-              {errors.length} break{errors.length === 1 ? "" : "s"} in the spine
-            </p>
-            <ul className="space-y-2">
-              {errors.map((e, i) => (
-                <li key={`${e.id}-${i}`} data-testid="trace-error" className="text-xs">
-                  <span className="font-mono text-ink">{e.id}</span>
-                  <span className="text-ink-muted"> — {e.detail}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </aside>
     </div>
   );
 }
 
-function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean }) {
+function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean }) {
   // The Down walk is the engine's link, not a UI guess based on where a task
   // happens to be printed. Keep only task ids found in that walk, then use the
   // task record for its live state.
@@ -1039,6 +1089,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }:
     : undefined;
   return (
     <li
+      id={`cycle-section-${section.id}`}
       data-testid="cycle-section"
       data-broken={broken.has(section.id) ? "true" : "false"}
       className={
@@ -1050,6 +1101,12 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }:
         <span className="font-mono text-xs text-ink-muted">{section.id}</span>
         <span className="text-sm font-medium text-ink">{section.title}</span>
       </div>
+      {broken.has(section.id) && (
+        <p data-testid="cycle-section-break" className="mt-1 text-xs text-serious">break in the spine</p>
+      )}
+      {proposalPending && (
+        <p data-testid="cycle-section-proposal-pending" className="mt-1 text-xs text-ink-muted">proposal pending</p>
+      )}
       {liveState && (
         <p data-testid="cycle-live-state" data-trace-loaded={traceDown ? "true" : "false"} className="mt-1 text-xs text-ink-secondary">
           {liveState}
@@ -1066,6 +1123,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }:
           {section.children.map((c) => (
             <li
               key={c.id}
+              id={`cycle-section-${c.id}`}
               data-testid="cycle-child"
               data-id={c.id}
               data-broken={broken.has(c.id) ? "true" : "false"}
@@ -1073,6 +1131,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false }:
             >
               <span className="font-mono text-ink-muted">{c.id}</span>{" "}
               <span className="text-ink">{c.title}</span>
+              {broken.has(c.id) && <span className="ml-1 text-serious">break</span>}
               {/* A task's Implements line is the edge that makes the plan
                   traceable. Rendering only id and title made the Plan tab look
                   like it had no traceability at all, when every task had it. */}
