@@ -41,6 +41,7 @@ export function Sidebar({
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
   // Configuration remains one destination until the settings consolidation
   // lands; engine-domain rooms (including Ducklings) belong behind Settings.
+  const configRooms = (subnav.Config ?? []).filter((r) => r.route.name !== "settings");
   const settingsEntry = (subnav.Config ?? []).find((r) => r.route.name === "settings");
   const activeRoom = (r: Route) =>
     r.name === route.name &&
@@ -71,7 +72,12 @@ export function Sidebar({
         })}
       </nav>
       <nav className="mt-auto flex flex-col gap-1 border-t border-hairline pt-4" aria-label="Settings">
-        {settingsEntry && <a key={settingsEntry.label} href={routeHref(settingsEntry.route)} data-testid={`nav-${settingsEntry.label.toLowerCase()}`} className={`rounded px-2 py-1.5 ${configMembers.includes(route.name) && route.name === settingsEntry.route.name ? "bg-surface2 text-ink" : "text-ink-muted"}`}>{settingsEntry.label}</a>}
+        {settingsEntry && <>
+          <a key={settingsEntry.label} href={routeHref(settingsEntry.route)} data-testid={`nav-${settingsEntry.label.toLowerCase()}`} className={`rounded px-2 py-1.5 ${configMembers.includes(route.name) && route.name === settingsEntry.route.name ? "bg-surface2 text-ink" : "text-ink-muted"}`}>{settingsEntry.label}</a>
+          <nav className="mt-1 flex flex-col gap-1 border-l border-hairline pl-3 text-sm" data-testid="subnav-settings">
+            {configRooms.map((r) => <a key={r.label} href={routeHref(r.route)} data-testid={`subnav-${r.label.toLowerCase()}`} className={activeRoom(r.route) ? "text-ink" : "text-ink-muted"}>{r.label}</a>)}
+          </nav>
+        </>}
       </nav>
       {client && projectId && <>
         <div className="mt-3"><AppControl client={client} projectId={projectId} /></div>

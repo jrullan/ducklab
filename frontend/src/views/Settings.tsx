@@ -7,6 +7,7 @@ import { moneyOrZero } from "../lib/format";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
+import { routeHref } from "../app/routes";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -59,6 +60,12 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "engine", label: "engine" },
 ];
 
+const SETTINGS_ROOMS = [
+  { name: "roster" as const, label: "Roster" },
+  { name: "skills" as const, label: "Skills" },
+  { name: "projects" as const, label: "Projects" },
+];
+
 export function Settings({
   theme, onTheme, engineVersion, connection, client, projectId, onEngine, engineBusy, engineError,
 }: {
@@ -104,13 +111,23 @@ export function Settings({
             {sec.label}
           </button>
         ))}
+        {SETTINGS_ROOMS.map((room) => (
+          <a
+            key={room.name}
+            href={routeHref({ name: room.name })}
+            data-testid={`settings-nav-${room.name}`}
+            className="block rounded px-2 py-1 text-sm text-ink-muted"
+          >
+            {room.label}
+          </a>
+        ))}
       </nav>
 
       <div className="min-w-0 max-w-3xl flex-1">
       {section === "ducklings" && client && (
         <>
           <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
-          <a href="#/roster" role="link" className="ml-4 text-sm text-ink underline">Roster board</a>
+          <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Roster board</a>
         </>
       )}
       {client && <ConfigSection client={client} section={section} projectId={projectId} />}

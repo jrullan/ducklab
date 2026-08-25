@@ -10,13 +10,14 @@ const zones = [
 ];
 const config = [
   { label: "Settings", route: { name: "settings" as const } },
+  { label: "Ducklings", route: { name: "ducklings" as const } },
   { label: "Roster", route: { name: "roster" as const } },
   { label: "Skills", route: { name: "skills" as const } },
   { label: "Projects", route: { name: "projects" as const } },
 ];
 
 describe("desktop sidebar rail", () => {
-  it("keeps primary navigation, one settings entry, and footer status reachable", () => {
+  it("keeps primary navigation, settings rooms, and footer status reachable", () => {
     render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={["settings", "roster", "skills", "projects", "ducklings"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={2} connection="open" />);
 
     expect(screen.getByTestId("sidebar")).toBeInTheDocument();
@@ -25,10 +26,10 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("nav-records")).toHaveTextContent("Records");
     expect(screen.getByTestId("nav-badge")).toHaveTextContent("2");
     expect(screen.getByTestId("nav-settings")).toHaveAttribute("href", routeHref({ name: "settings" }));
-    expect(screen.queryByTestId("nav-ducklings")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("nav-roster")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("nav-skills")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("nav-projects")).not.toBeInTheDocument();
+    expect(screen.getByTestId("subnav-ducklings")).toHaveAttribute("href", routeHref({ name: "ducklings" }));
+    expect(screen.getByTestId("subnav-roster")).toHaveAttribute("href", routeHref({ name: "roster" }));
+    expect(screen.getByTestId("subnav-skills")).toHaveAttribute("href", routeHref({ name: "skills" }));
+    expect(screen.getByTestId("subnav-projects")).toHaveAttribute("href", routeHref({ name: "projects" }));
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
   });
 
@@ -50,9 +51,18 @@ describe("desktop sidebar rail", () => {
     expect(within(work.parentElement as HTMLElement).getByTestId("subnav-documents")).toBeInTheDocument();
   });
 
-  it("does not duplicate settings as config room navigation", () => {
+  it("keeps every routed view reachable from the sidebar tree", () => {
+    const routedViews = ["now", "board", "cycle", "runs", "reports", "review", "release", "bench", "settings", "ducklings", "roster", "skills", "projects"];
+    const tree = [...zones.flatMap((zone) => [zone.home.name, ...zone.members]), "reports", "review", "release", "bench", ...config.map((item) => item.route.name)];
+    expect(routedViews.every((name) => tree.includes(name as (typeof tree)[number]))).toBe(true);
+  });
+
+  it("attaches every configured route to a sidebar door", () => {
     render(<Sidebar route={{ name: "settings" }} zones={zones} configMembers={["settings", "roster", "skills", "projects", "ducklings"]} subnav={{ Config: config }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
-    expect(screen.queryByTestId("subnav")).not.toBeInTheDocument();
-    expect(screen.getAllByTestId("nav-settings")).toHaveLength(1);
+
+    for (const item of config) {
+      const testid = item.label === "Settings" ? "nav-settings" : `subnav-${item.label.toLowerCase()}`;
+      expect(screen.getByTestId(testid)).toHaveAttribute("href", routeHref(item.route));
+    }
   });
 });
