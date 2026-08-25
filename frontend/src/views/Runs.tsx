@@ -17,8 +17,10 @@ import { money } from "../lib/format";
 import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
 
-const FILTERS = ["all", "waiting", "running", "done", "landed", "failed"] as const;
+const FILTERS = ["all", "waiting", "running", "landed", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
+
+const PAGE_SIZE = 25;
 
 /** A run's wall time, compact: the tracker's own wallclock when recorded,
  * else the started→ended span, else started→now for one still going. */
@@ -43,9 +45,14 @@ function took(r: Run): string {
 
 export function Runs({ runs }: { runs: Run[] }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [page, setPage] = useState(1);
 
   const ordered = useMemo(
-    () => [...runs].sort((a, b) => (a.started_at < b.started_at ? 1 : -1)),
+    () =>
+      [...runs].sort((a, b) => {
+        const byTime = Date.parse(b.started_at) - Date.parse(a.started_at);
+        return byTime || b.id.localeCompare(a.id);
+      }),
     [runs],
   );
 
@@ -57,8 +64,6 @@ export function Runs({ runs }: { runs: Run[] }) {
             return r.status === "paused";
           case "running":
             return r.status === "running" || r.status === "queued";
-          case "done":
-            return r.status === "done" && r.resolution !== "landed";
           case "landed":
             return r.resolution === "landed";
           case "failed":
@@ -74,6 +79,10 @@ export function Runs({ runs }: { runs: Run[] }) {
     [ordered, filter],
   );
 
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const paged = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   if (runs.length === 0) {
     return <EmptyState message="No runs yet. Pick a task on the Board and press Run." />;
   }
@@ -87,7 +96,10 @@ export function Runs({ runs }: { runs: Run[] }) {
             key={f}
             data-testid={`runs-filter-${f}`}
             aria-pressed={filter === f}
-            onClick={() => setFilter(f)}
+            onClick={() => {
+              setFilter(f);
+              setPage(1);
+            }}
             className={
               "rounded border px-2 py-1 text-sm " +
               (filter === f ? "border-ink text-ink" : "border-hairline text-ink-muted")
@@ -96,10 +108,35 @@ export function Runs({ runs }: { runs: Run[] }) {
             {f}
           </button>
         ))}
-        <span className="text-sm text-ink-muted">
-          {shown.length} of {runs.length}
+        <span className="text-sm text-ink-muted" data-testid="runs-count">
+          showing {paged.length} of {shown.length}
         </span>
       </div>
+      {pageCount > 1 && (
+        <nav className="mb-3 flex items-center gap-2" aria-label="Runs pagination">
+          <button
+            type="button"
+            data-testid="runs-previous"
+            disabled={currentPage === 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="rounded border border-hairline px-2 py-1 text-sm text-ink disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span className="text-sm text-ink-muted" data-testid="runs-page">
+            Page {currentPage} of {pageCount}
+          </span>
+          <button
+            type="button"
+            data-testid="runs-next"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+            className="rounded border border-hairline px-2 py-1 text-sm text-ink disabled:opacity-40"
+          >
+            Next
+          </button>
+        </nav>
+      )}
 
       <table className="w-full border-collapse text-sm">
         <thead>
@@ -116,7 +153,7 @@ export function Runs({ runs }: { runs: Run[] }) {
           </tr>
         </thead>
         <tbody>
-          {shown.map((r) => (
+          {paged.map((r) => (
             <tr key={r.id} data-testid="runs-row" data-run={r.id}>
               <td className="border-b border-hairline py-1 pr-3">
                 <StatusChip role={r.resolution === "landed" ? "good" : runStatusRole(r.status)} label={r.resolution === "landed" ? "landed" : r.status} />

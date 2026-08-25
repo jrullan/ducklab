@@ -435,6 +435,18 @@ func TestWailsOriginsAreAllowed(t *testing.T) {
 // was every project's runs, which a reader then took for one project's
 // history. An answer to a different question than the one asked is worse
 // than an error.
+func TestRunListPaginationParameters(t *testing.T) {
+	limit, offset, err := runListPagination(map[string][]string{"limit": {"25"}, "offset": {"50"}})
+	if err != nil || limit != 25 || offset != 50 {
+		t.Fatalf("pagination = %d, %d, %v; want 25, 50, nil", limit, offset, err)
+	}
+	for _, tc := range []struct{ key, value string }{{"limit", "-1"}, {"offset", "-1"}, {"limit", "nope"}, {"offset", "nope"}} {
+		if _, _, err := runListPagination(map[string][]string{tc.key: {tc.value}}); err == nil {
+			t.Errorf("%s=%s was accepted", tc.key, tc.value)
+		}
+	}
+}
+
 func TestRunListRefusesAMistypedFilter(t *testing.T) {
 	if got := unknownRunListParam(map[string][]string{"project_id": {"calculator"}}); got != "project_id" {
 		t.Errorf("mistyped key not named: %q", got)

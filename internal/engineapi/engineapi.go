@@ -1458,11 +1458,27 @@ func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 // by, or "".
 func unknownRunListParam(q url.Values) string {
 	for k := range q {
-		if k != "project" && k != "status" {
+		if k != "project" && k != "status" && k != "limit" && k != "offset" {
 			return k
 		}
 	}
 	return ""
+}
+
+func runListPagination(q url.Values) (limit, offset int, err error) {
+	if raw := q.Get("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 0 {
+			return 0, 0, fmt.Errorf("limit must be a non-negative integer")
+		}
+	}
+	if raw := q.Get("offset"); raw != "" {
+		offset, err = strconv.Atoi(raw)
+		if err != nil || offset < 0 {
+			return 0, 0, fmt.Errorf("offset must be a non-negative integer")
+		}
+	}
+	return limit, offset, nil
 }
 
 func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
@@ -1472,11 +1488,12 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 	// different question than the one asked is worse than an error.
 	if bad := unknownRunListParam(r.URL.Query()); bad != "" {
 		s.error(w, http.StatusBadRequest, "bad_request",
-			fmt.Sprintf("unknown query parameter %q; this endpoint filters by project= and status=", bad))
+			fmt.Sprintf("unknown query parameter %q; this endpoint accepts project=, status=, limit=, and offset=", bad))
 		return
 	}
-	projectID := r.URL.Query().Get("project")
-	status := r.URL.Query().Get("status")
+	query := r.URL.Query()
+	projectID := query.Get("project")
+	status := query.Get("status")
 	runs, err := s.svc.RunList(r.Context(), service.RunFilter{
 		ProjectID: projectID,
 		Status:    status,
@@ -1485,7 +1502,24 @@ func (s *Server) handleRunList(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	s.json(w, http.StatusOK, map[string]interface{}{"items": runs, "total": len(runs)})
+	total := len(runs)
+	// Pagination is applied after filtering so total remains honest for the
+	// question asked. Invalid values are rejected rather than silently changing
+	// the requested page.
+	limit, offset, parseErr := runListPagination(query)
+	if parseErr != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", parseErr.Error())
+		return
+	}
+	if offset > len(runs) {
+		offset = len(runs)
+	}
+	end := len(runs)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	runs = runs[offset:end]
+	s.json(w, http.StatusOK, map[string]interface{}{"items": runs, "total": total})
 }
 
 func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {

@@ -41,6 +41,41 @@ describe("Runs", () => {
     expect(rows[0]!.dataset.run).toBe("r-stage");
   });
 
+  it("paginates at 25 rows and reports the filtered count", () => {
+    const runs = Array.from({ length: 30 }, (_, i) =>
+      mk({ id: `r-${i}`, started_at: `2026-08-${String(30 - i).padStart(2, "0")}T00:00:00Z` }),
+    );
+    render(<Runs runs={runs} />);
+
+    expect(screen.getAllByTestId("runs-row")).toHaveLength(25);
+    expect(screen.getByTestId("runs-count").textContent).toBe("showing 25 of 30");
+    fireEvent.click(screen.getByTestId("runs-next"));
+    expect(screen.getAllByTestId("runs-row")).toHaveLength(5);
+    expect(screen.getByTestId("runs-count").textContent).toBe("showing 5 of 30");
+  });
+
+  it("resets the page when changing filters and preserves the filter while paging", () => {
+    const runs = Array.from({ length: 30 }, (_, i) =>
+      mk({
+        id: `r-${i}`,
+        status: i < 26 ? "failed" : "done",
+        verdict: i < 26 ? "FAILED" : "PASSED",
+        started_at: `2026-08-${String(30 - (i % 30)).padStart(2, "0")}T${String(i).padStart(2, "0")}:00:00Z`,
+      }),
+    );
+    render(<Runs runs={runs} />);
+
+    fireEvent.click(screen.getByTestId("runs-next"));
+    expect(screen.getByTestId("runs-page").textContent).toBe("Page 2 of 2");
+    fireEvent.click(screen.getByTestId("runs-filter-failed"));
+    expect(screen.getByTestId("runs-page").textContent).toBe("Page 1 of 2");
+    expect(screen.getByTestId("runs-count").textContent).toBe("showing 25 of 26");
+    fireEvent.click(screen.getByTestId("runs-next"));
+    expect(screen.getByTestId("runs-page").textContent).toBe("Page 2 of 2");
+    expect(screen.getAllByTestId("runs-row")).toHaveLength(1);
+    expect(screen.getAllByTestId("runs-row")[0]!.textContent).toContain("failed");
+  });
+
   it("says there are none rather than showing an empty table", () => {
     render(<Runs runs={[]} />);
     expect(screen.queryByTestId("runs-view")).toBeNull();

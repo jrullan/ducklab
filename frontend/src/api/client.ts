@@ -1100,9 +1100,13 @@ export class EngineClient {
   Scorecards() {
     return this.request<{ items: Scorecard[] }>("GET", "/v1/ducklings/scorecards").then((r) => r.items ?? []);
   }
-  runs(projectId?: string) {
-    const q = projectId ? `?project=${encodeURIComponent(projectId)}` : "";
-    return this.request<{ items: Run[] }>("GET", `/v1/runs${q}`).then((r) => r.items ?? []);
+  runs(projectId?: string, options?: { limit?: number; offset?: number }) {
+    const params = new URLSearchParams();
+    if (projectId) params.set("project", projectId);
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<{ items: Run[]; total?: number }>("GET", `/v1/runs${query ? `?${query}` : ""}`).then((r) => r.items ?? []);
   }
   run(id: string) {
     return this.request<{ run: Run; events: unknown[]; landing_offer?: LandingOffer }>("GET", `/v1/runs/${id}`);
