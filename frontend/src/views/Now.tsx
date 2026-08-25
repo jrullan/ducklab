@@ -10,7 +10,7 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useState } from "react";
-import type { Bug, Duckling, EngineClient, Run, Task } from "../api/client";
+import type { Bug, Duckling, EngineClient, Run, Task, RosterEntry } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
@@ -30,6 +30,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
   const [next, setNext] = useState<Task | null>(null);
   const [fleet, setFleet] = useState<Duckling[]>([]);
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [preferred, setPreferred] = useState<Record<string, string[]>>({});
   const [buildMode, setBuildMode] = useState("solo");
   const [testMode, setTestMode] = useState("solo");
@@ -51,6 +52,9 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       .then((all) => setBugs(all))
       .catch(() => setBugs([]));
     client.ducklings().then(setFleet).catch(() => setFleet([]));
+    if (typeof client.roster === "function") {
+      client.roster(projectId).then((r) => setRoster(r.entries)).catch(() => setRoster([]));
+    }
     client
       .modeDefaults()
       .then((d) => {
@@ -343,6 +347,8 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     preferred={preferred}
                     estimates={estimates}
                     label={`Run ${next.id}`}
+                    roster={roster}
+                    initiallyOpen={false}
                     onLaunch={(opts) => void launch(opts)}
                   />
                 )}

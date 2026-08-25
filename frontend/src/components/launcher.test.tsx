@@ -114,6 +114,33 @@ describe("the TDD chain build mode", () => {
   });
 });
 
+describe("the launch modal", () => {
+  it("opens from the launch trigger and preselects the requested mode", () => {
+    render(<RunLauncher ducklings={fleet} initialMode="pair" initiallyOpen={false} onLaunch={() => {}} />);
+    expect(screen.queryByTestId("launch-modal")).toBeNull();
+    fireEvent.click(screen.getByTestId("launch-modal-trigger"));
+    expect(screen.getByTestId("launch-modal")).toBeTruthy();
+    expect(screen.getByTestId("mode-card-pair")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows history estimates and an honest fallback on mode cards", () => {
+    render(<RunLauncher ducklings={fleet} estimates={{ pair: { usd: 0.87, runs: 3 } }} onLaunch={() => {}} />);
+    expect(screen.getByTestId("mode-card-pair").textContent).toContain("estimated $0.23–$0.35 per run");
+    expect(screen.getByTestId("mode-card-split").textContent).toContain("no history yet for this shape");
+  });
+
+  it("displays seats prefilled from the roster without asking for a model name", () => {
+    const roster = [
+      { role: "implementer", duckling: "pato-atom", source: "project mode seat" },
+      { role: "reviewer", duckling: "pato-sonnet", source: "global mode seat" },
+    ];
+    render(<RunLauncher ducklings={fleet} initialMode="pair" roster={roster} onLaunch={() => {}} />);
+    expect(screen.getByText("pato-atom")).toBeTruthy();
+    expect(screen.getByText("pato-sonnet")).toBeTruthy();
+    expect(screen.getByText(/never need to type a model name/)).toBeTruthy();
+  });
+});
+
 describe("the launcher's cost estimates", () => {
   it("shows each mode's measured average beside it", () => {
     render(

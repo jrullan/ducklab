@@ -12,6 +12,20 @@ export type LaunchOpts = { mode: string; ducklings: string[]; seats?: Record<str
 
 export const MODES = ["solo", "pair", "tournament", "split"] as const;
 
+const MODE_WHEN: Record<string, string> = {
+  solo: "Use one voice when the task is clear and quick.",
+  pair: "Use two voices when you want an independent review.",
+  tournament: "Use competing voices when you want several approaches.",
+  split: "Use this when the task can be worked on in parallel.",
+};
+
+function modeCost(mode: string, estimates?: ModeEstimates): string {
+  const estimate = estimates?.[mode];
+  if (!estimate || estimate.runs <= 0) return "no history yet for this shape";
+  const average = estimate.usd / estimate.runs;
+  return `estimated $${(average * 0.8).toFixed(2)}–$${(average * 1.2).toFixed(2)} per run`;
+}
+
 /** Project the canonical roster into the positional seats sent to the engine.
  * Roster responses are role-ordered, not seat-ordered. */
 function rosterSeats(mode: string, roster: readonly RosterEntry[]): string[] {
@@ -205,6 +219,7 @@ export function RunLauncher({
   onModeChange,
   measured,
   roster,
+  initiallyOpen = true,
 }: {
   ducklings: readonly Duckling[];
   initialMode?: string;
@@ -227,8 +242,10 @@ export function RunLauncher({
   onModeChange?: (mode: string) => void;
   measured?: MeasuredSpend;
   roster?: readonly RosterEntry[];
+  initiallyOpen?: boolean;
 }) {
   const resolved = roster ?? [];
+  const [open, setOpen] = useState(initiallyOpen);
   const [mode, setMode] = useState(initialMode);
   // The run-specific instruction — the consultant's "relaunch with a note"
   // had the channel (RunRequest.note) and no general doorway. Collapsed
@@ -270,9 +287,99 @@ export function RunLauncher({
     });
   };
 
+  if (!open) return (
+    <div>
+      <button
+        type="button"
+        data-testid="launch-modal-trigger"
+        onClick={() => setOpen(true)}
+        className="rounded border border-hairline px-3 py-1.5 text-sm"
+      >
+        {label}
+      </button>
+    </div>
+  );
   return (
     <div className="space-y-2" data-testid="run-launcher">
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        role="dialog"
+        aria-label="Launch work"
+        data-testid="launch-modal"
+        className="space-y-3 rounded-card border border-hairline bg-surface p-3"
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-base font-medium text-ink">Launch work</h2>
+            <p className="text-xs text-ink-muted">
+              The task is already selected. Choose a shape and start.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close launch"
+            onClick={() => setOpen(false)}
+            className="text-xs text-ink-muted"
+          >
+            close
+          </button>
+        </div>
+        <fieldset>
+          <legend className="text-xs font-medium text-ink-muted">how to work</legend>
+          <div
+            className="mt-1 grid gap-2 sm:grid-cols-2"
+            data-testid="mode-cards"
+          >
+            {MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-testid={`mode-card-${m}`}
+                aria-pressed={mode === m}
+                onClick={() => {
+                  setMode(m);
+                  onModeChange?.(m);
+                  if (resolved.length) {
+                    changed.current = false;
+                    setChosen([]);
+                    setSeatProvenance([]);
+                  } else {
+                    const saved = preferred?.[m];
+                    if (saved?.length) {
+                      setChosen([...saved]);
+                      onDucklingsChange?.([...saved]);
+                    }
+                  }
+                }}
+                className={`rounded border p-2 text-left text-xs ${
+                  mode === m ? "border-ink" : "border-hairline"
+                }`}
+              >
+                <span className="block font-medium text-ink">{m}</span>
+                <span className="mt-1 block text-ink-secondary">
+                  {MODE_WHEN[m] ?? "Use this shape when it fits the work."}
+                </span>
+                <span className="mt-1 block text-ink-muted">
+                  {modeCost(m, estimates)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
+        <p className="text-xs text-ink-muted">
+          Seats are filled from the roster. You never need to type a model name.
+        </p>
+        <button
+          type="button"
+          className="text-xs text-ink-muted underline"
+          onClick={() => {
+            changed.current = false;
+            setChosen(resolved.length ? rosterSeats(mode, resolved) : preferred?.[mode] ?? []);
+            setSeatProvenance([]);
+          }}
+        >
+          use defaults
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
         <select
           aria-label="mode"
           data-testid="run-mode"
@@ -281,7 +388,7 @@ export function RunLauncher({
             const next = e.target.value;
             setMode(next);
             onModeChange?.(next);
-            if (roster) {
+            if (resolved.length) {
               // A mode change re-resolves from the canonical roster; saved
               // Settings line-ups must not clobber the resolver.
               changed.current = false;
@@ -421,6 +528,7 @@ export function RunLauncher({
           )}
         </div>
       )}
-    </div>
+        </div>
+      </div>
   );
 }

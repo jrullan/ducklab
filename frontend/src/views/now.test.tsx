@@ -204,6 +204,7 @@ describe("Now — the inbox", () => {
     render(<Now client={client} projectId="p" />);
     const next = await screen.findByTestId("now-next");
     expect(next.textContent).toContain("T-028");
+    fireEvent.click(screen.getByTestId("launch-modal-trigger"));
     fireEvent.click(screen.getByTestId("run-start"));
     await waitFor(() =>
       expect(client.runStart).toHaveBeenCalledWith("p", "T-028", expect.anything()),
