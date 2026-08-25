@@ -18,11 +18,7 @@ import { WaitingCard } from "../components/WaitingCard";
 import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
-import { money, tokens, waitingFor } from "../lib/format";
-
-function nowMoney(usd: number): string {
-  return usd === 0 ? "$0.00" : money(usd);
-}
+import { moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
@@ -421,7 +417,7 @@ function RunningRow({ run, live }: { run: Run; live?: LiveSpend }) {
       {live && (
         <span className="text-xs tabular-nums text-ink-muted">
           {tokens(live.tokens)}
-          {live.limit?.tokens ? ` / ${tokens(live.limit.tokens)}` : ""} · {nowMoney(live.usd)}
+          {live.limit?.tokens ? ` / ${tokens(live.limit.tokens)}` : ""} · {moneyOrZero(live.usd)}
         </span>
       )}
     </li>
@@ -441,7 +437,7 @@ function NowFooter({ runs }: { runs: Run[] }) {
   const passed = runs.filter((r) => r.verdict === "PASSED").length;
   return (
     <p className="mt-4 border-t border-hairline pt-2 text-xs text-ink-muted" data-testid="now-footer">
-      today {nowMoney(spentToday)} · all time {nowMoney(spentAll)}
+      today {moneyOrZero(spentToday)} · all time {moneyOrZero(spentAll)}
       {finished > 0 && (
         <>
           {" "}

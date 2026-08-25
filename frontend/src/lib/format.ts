@@ -7,6 +7,11 @@ export function money(usd: number): string {
   return usd < 1 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+/** Money display for spend values, including an exact zero. */
+export function moneyOrZero(usd: number): string {
+  return usd === 0 ? "$0.00" : money(usd);
+}
+
 export function tokens(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "0";
   if (n < 1000) return String(Math.round(n));

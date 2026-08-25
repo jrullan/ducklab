@@ -2,11 +2,7 @@ import type { Run } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { routeHref } from "../app/routes";
 import { runLabel } from "../lib/runview";
-import { waitingFor, money } from "../lib/format";
-
-function cardMoney(usd: number): string {
-  return usd === 0 ? "$0.00" : money(usd);
-}
+import { waitingFor, moneyOrZero } from "../lib/format";
 
 function waitingExplanation(run: Run): string {
   if (run.pending_kind === "question") {
@@ -74,7 +70,7 @@ export function WaitingCard({
         </span>
         {run.budget && run.budget.usd > 0 && (
           <span className="ml-auto text-xs tabular-nums text-ink-secondary">
-            {cardMoney(run.budget.usd)}
+            {moneyOrZero(run.budget.usd)}
           </span>
         )}
       </div>
