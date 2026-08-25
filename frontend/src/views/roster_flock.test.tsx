@@ -69,6 +69,7 @@ describe("Roster flock evidence", () => {
 
     // Filters are chips: press to narrow, press again to release; the count
     // says how many survived and offers one clear.
+    expect(screen.getByTestId("roster-flock-filter-caption").textContent).toBe("filter the flock:");
     fireEvent.change(screen.getByTestId("roster-flock-filter-text"), { target: { value: "cedar-tools" } });
     await waitFor(() => expect(flockOrder()).toEqual(["cedar"]));
     expect(screen.getByTestId("roster-flock-count").textContent).toMatch(/1 of 5/);

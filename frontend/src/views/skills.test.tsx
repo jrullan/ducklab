@@ -63,6 +63,13 @@ function client(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("Skills view", () => {
+  it("uses a purpose-led header and keeps implementation details behind how it works", async () => {
+    render(<Skills client={client()} projectId="p" />);
+    expect(screen.getByText("a recipe your models can read — or run — when a task calls for it")).toBeTruthy();
+    expect(screen.getByTestId("skills-how-it-works").textContent).toContain("how it works");
+    expect(screen.getByTestId("skills-how-it-works").textContent).toContain(".ducklab/skills");
+  });
+
   it("lists skills with scope badges, greys the pending one, and shows problems", async () => {
     render(<Skills client={client()} projectId="p" />);
     const rows = await screen.findAllByTestId("skill-row");

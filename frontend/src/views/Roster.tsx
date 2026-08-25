@@ -255,6 +255,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         <button type="button" className="ml-auto text-xs text-ink-muted underline hover:text-ink" data-testid="roster-criteria-toggle" aria-expanded={criteriaOpen} title="how seats are suggested" onClick={() => setCriteriaOpen((v) => !v)}>{criteriaOpen ? "hide criteria" : "criteria"}</button></div>
       <input data-testid="roster-flock-filter-text" value={flockText} onChange={(e) => setFlockText(e.target.value)} placeholder="search id or model" aria-label="search the flock" className="mt-2 w-full rounded border border-hairline bg-surface px-2 py-1 text-sm" />
       <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label="flock filters">
+        <span className="mr-1 text-ink-muted" data-testid="roster-flock-filter-caption">filter the flock:</span>
         {flock.providers.map((p) => <FilterChip key={p} testId={`roster-flock-filter-provider-${p}`} label={p} on={flockProvider === p} onClick={() => setFlockProvider(flockProvider === p ? "" : p)} />)}
         <span aria-hidden="true" className="mx-1 h-4 w-px bg-hairline" />
         {(["local", "remote"] as const).map((l) => <FilterChip key={l} testId={`roster-flock-filter-locality-${l}`} label={l} on={flockLocality === l} onClick={() => setFlockLocality(flockLocality === l ? "" : l)} />)}

@@ -119,12 +119,17 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       <div className="mb-3 flex items-baseline justify-between">
         <div>
           <h1 className="text-lg text-ink">Skills</h1>
-          <p className="text-xs text-ink-muted">
-            Directories with a SKILL.md — project ones live in .ducklab/skills and shadow global
-            ones on a name collision. A documentation skill briefs a seat (the architect reads a
-            survey guide before an adopt); a runnable one executes its entry script. Ducklings
-            propose skills with ordinary writes; one stays pending until its run is accepted.
-          </p>
+          <p className="text-xs text-ink-muted">a recipe your models can read — or run — when a task calls for it</p>
+          <details className="mt-1 text-xs text-ink-muted" data-testid="skills-how-it-works">
+            <summary className="cursor-pointer">how it works</summary>
+            <p className="mt-1">
+              Each skill is a directory with a SKILL.md. Project ones live in .ducklab/skills and
+              shadow global ones on a name collision. A documentation skill briefs a seat (the
+              architect reads a survey guide before an adopt); a runnable one executes its entry
+              script. Ducklings propose skills with ordinary writes; one stays pending until its
+              run is accepted.
+            </p>
+          </details>
         </div>
         <button
           type="button"
