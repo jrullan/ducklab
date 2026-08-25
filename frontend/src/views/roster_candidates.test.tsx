@@ -29,6 +29,7 @@ const seats: Record<string, { role: string; ducklings: string[]; source: string;
   ],
   solo: [{ role: "implementer", ducklings: ["pass-third"], source: "global mode seat" }, { role: "advisor", ducklings: ["pass-slow"], source: "global mode seat" }],
   common: [{ role: "triager", ducklings: ["local-cheap"], source: "global role fallback" }, { role: "scribe", ducklings: ["no-runs"], source: "global role fallback" }],
+  tournament: [{ role: "judge", ducklings: [], source: "global mode seat", candidates: cand("pass-cheap", "bench-best") }],
 };
 
 async function renderRoster() {
@@ -50,6 +51,22 @@ const flockOrder = () => Array.from(screen.getByTestId("roster-flock").querySele
 const suggested = () => flockOrder().filter((id) => screen.queryByTestId(`roster-suggested-${id}`));
 
 describe("Roster seat-aware candidates", () => {
+  it("renders an evidence portrait from the measured record, including early numbers", async () => {
+    await renderRoster();
+    expect(screen.getByTestId("roster-flock-portrait-pass-cheap").textContent).toMatch(/Early numbers: 92% accepted; \$0\.22 per accept\./);
+  });
+
+  it("explains empty seats and shows suggestion arithmetic in the seat and picker", async () => {
+    const client = await renderRoster();
+    expect(screen.getByTestId("roster-seat-empty-tournament-judge").textContent).toMatch(/suggestions are waiting for a choice/i);
+    expect(screen.getByTestId("roster-seat-suggestion-arithmetic-tournament-judge").textContent).toContain("pass-cheap: lowest cost per accepted run ($0.22 vs $0.34)");
+
+    fireEvent.click(screen.getByTestId("roster-drop-tournament-judge"));
+    expect(screen.getByTestId("roster-pick-suggested-pass-cheap")).toBeTruthy();
+    expect(screen.getByTestId("roster-pick-suggested-arithmetic-pass-cheap").textContent).toContain("lowest cost per accepted run ($0.22 vs $0.34)");
+    expect(client.GlobalRosterSet).not.toHaveBeenCalled();
+  });
+
   it("prioritizes evidence on seat selection, labels three candidates, restores the prior sort, and never assigns", async () => {
     const client = await renderRoster();
     const initial = flockOrder();
