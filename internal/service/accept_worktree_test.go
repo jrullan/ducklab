@@ -500,6 +500,43 @@ func TestAcceptWorktreeAdvancesCleanDefaultCheckout(t *testing.T) {
 	}
 }
 
+func TestAcceptWorktreeRacedCheckoutAdvancesWithWarning(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-raced-checkout")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "raced.txt"), []byte("accepted work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A concurrent pull holds this lock while it mutates the checkout. Creating
+	// it directly makes the race deterministic while leaving read-only checks
+	// available to acceptance.
+	lockPath := filepath.Join(dir, ".git", "index.lock")
+	if err := os.WriteFile(lockPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(lockPath) })
+
+	result, err := s.RunAccept(context.Background(), run.ID, "")
+	if err != nil {
+		t.Fatalf("accept raced checkout: %v", err)
+	}
+	if result.Warning == "" || !strings.Contains(result.Warning, "raced the landing") || !strings.Contains(result.Warning, "run git status") {
+		t.Fatalf("accept warning = %q, want raced-landing guidance", result.Warning)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != "done" {
+		t.Fatalf("run status = %q, want done", detail.Run.Status)
+	}
+	if detail.Run.Warning != result.Warning {
+		t.Fatalf("run warning = %q, result warning = %q", detail.Run.Warning, result.Warning)
+	}
+}
+
 func TestAcceptWorktreeLeavesDirtyTouchedCheckoutBehindWithWarning(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

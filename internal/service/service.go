@@ -2810,7 +2810,11 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 			rs.run.Warning = fmt.Sprintf("main advanced to %s; your checkout is behind and was left untouched", rebasedSHA)
 			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
 		} else if err := defaultGit.SyncPathsToRevision(rebasedSHA, touched); err != nil {
-			return fmt.Errorf("advance registered checkout to %s: %w", short(rebasedSHA), err)
+			// The landing is already durable. A person (or another git
+			// operation) may have changed this checkout between the clean
+			// check and checkout, so never turn this into a failed accept.
+			rs.run.Warning = fmt.Sprintf("main advanced to %s; your checkout raced the landing and could not be advanced; run git status", rebasedSHA)
+			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
 		}
 	}
 	defer s.continueChain(ctx, rs)
