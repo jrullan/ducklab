@@ -591,7 +591,7 @@ export interface ClientOptions {
   /** Called when a response reveals a stale connection — the signal the
    * banner listens for, with which remedy applies. The error still throws;
    * this is how the shell learns without every call site reporting upward. */
-  onStale?: (kind: StaleKind) => void;
+  onStale?: (kind: StaleKind, detail?: { method?: string; path?: string }) => void;
   reconnect?: () => Promise<{ baseUrl: string; token: string }>;
   /** Called after a previously stale binding has been repaired. */
   onRecovered?: () => void;
@@ -627,7 +627,7 @@ export class EngineClient {
     } catch (firstError) {
       if (!this.opts.reconnect) {
         this.stale = "restarted";
-        this.opts.onStale?.("restarted");
+        this.opts.onStale?.("restarted", { method, path });
         throw firstError;
       }
       try {
@@ -639,7 +639,7 @@ export class EngineClient {
         headers.Authorization = `Bearer ${fresh.token}`;
       } catch (reconnectError) {
         this.stale = "restarted";
-        this.opts.onStale?.("restarted");
+        this.opts.onStale?.("restarted", { method, path });
         throw reconnectError;
       }
       try {
@@ -650,7 +650,7 @@ export class EngineClient {
         });
       } catch (retryError) {
         this.stale = "restarted";
-        this.opts.onStale?.("restarted");
+        this.opts.onStale?.("restarted", { method, path });
         throw retryError;
       }
     }
@@ -681,7 +681,7 @@ export class EngineClient {
         (res.status === 404 && text === "404 page not found");
       if (unknownRoute) {
         this.stale = "older";
-        this.opts.onStale?.("older");
+        this.opts.onStale?.("older", { method, path });
         throw new ApiError(
           "it is older than this app. Restart the engine.",
           res.status,
@@ -711,12 +711,12 @@ export class EngineClient {
             return this.request<T>(method, path, body, true);
           } catch (reconnectError) {
             this.stale = "restarted";
-            this.opts.onStale?.("restarted");
+            this.opts.onStale?.("restarted", { method, path });
             throw reconnectError;
           }
         }
         this.stale = "restarted";
-        this.opts.onStale?.("restarted");
+        this.opts.onStale?.("restarted", { method, path });
         throw new ApiError(
           "the engine no longer recognizes this window's session — it was restarted outside the app. Reconnect.",
           res.status,

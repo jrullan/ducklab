@@ -147,14 +147,24 @@ export function App() {
   );
   // A response revealed the engine predates this app. The one action that
   // fixes it gets a button, not a sentence telling someone to open a terminal.
+  const initialMissingKeys = window.ducklab?.engineMissingKeys ?? [];
   const [stale, setStale] = useState<false | "older" | "restarted" | "env">(
     // The shell computed this at bind time: the adopted engine lacks a
     // provider key this app has, so every run on that provider will 401
     // while the UI otherwise looks healthy. Same door as a stale binary.
-    (window.ducklab?.engineMissingKeys?.length ?? 0) > 0 ? "env" : false,
+    initialMissingKeys.length > 0 ? "env" : false,
   );
+  const [staleDetail, setStaleDetail] = useState<{ method?: string; path?: string } | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
+  // The only setter for the main disabled surface. Every dim must carry an
+  // actionable explanation and is logged with its originating detail.
+  const [mainDisabledReason, setMainDisabledReason] = useState<string | null>(null);
+  const disableMain = (reason: string) => {
+    if (!reason.trim()) throw new Error("main disabled surface requires a reason");
+    console.error("Ducklab main surface disabled:", reason);
+    setMainDisabledReason(reason);
+  };
 
   // The stream and its handlers outlive any one project, so they read the
   // choice through a ref rather than capturing whichever was current when the
@@ -205,8 +215,11 @@ export function App() {
       baseUrl: cfg.baseUrl,
       token: cfg.token,
       version: VERSION,
-      onStale: (kind) => setStale((cur) => cur || kind),
-      onRecovered: () => setStale(false),
+      onStale: (kind, detail) => {
+        setStale((cur) => cur || kind);
+        setStaleDetail(detail ?? null);
+      },
+      onRecovered: () => { setStale(false); setStaleDetail(null); },
       reconnect: async () => {
         const fqn = window.ducklab?.reconnectEngine;
         const call = window.wails?.Call?.ByName;
@@ -350,6 +363,24 @@ export function App() {
 
   // A dropped connection dims the last known state; it never blanks it (AC-30).
   const degraded = connection === "reconnecting" || connection === "closed";
+  useEffect(() => {
+    if (stale) {
+      const suffix = staleDetail?.method && staleDetail.path
+        ? `: ${staleDetail.method} ${staleDetail.path}`
+        : "";
+      disableMain(stale === "older"
+        ? `The engine reported an unknown route${suffix} — this app may be newer than the engine; restart the engine.`
+        : stale === "env"
+          ? `The engine is missing provider configuration (${initialMissingKeys.join(", ")}) — restart the engine so it receives the app's configuration.`
+          : `The engine was restarted outside the app${suffix} — reconnect to restore this window's session.`);
+    } else if (degraded) {
+      disableMain(connection === "closed"
+        ? "The event stream was shut down while the client is rebuilt — it will reopen automatically; keep this window open."
+        : "The event stream is reconnecting — the last known state is shown; wait for the connection to recover.");
+    } else {
+      setMainDisabledReason(null);
+    }
+  }, [connection, degraded, stale, staleDetail, initialMissingKeys.join(",")]);
   const waitingCount = pendingForHuman(runs).length;
 
   // The attention surface. The store sees every state change; this is the one
@@ -460,13 +491,18 @@ export function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
+        {mainDisabledReason && (
+          <div className="absolute left-1/2 top-4 z-50 max-w-2xl -translate-x-1/2 rounded border-2 border-serious bg-surface px-4 py-3 text-sm shadow-lg" role="alert" data-testid="main-disabled-banner">
+            {mainDisabledReason}
+          </div>
+        )}
         <main
-          aria-readonly={stale ? "true" : undefined}
+          aria-readonly={mainDisabledReason ? "true" : undefined}
           data-testid={stale ? "stale-read-only" : undefined}
           className={
             "min-h-0 flex-1 overflow-y-auto" +
-            (degraded ? " opacity-60 transition-opacity" : "") +
-            (stale ? " pointer-events-none opacity-60" : "")
+            (stale ? " pointer-events-none" : "") +
+            (degraded || stale ? " opacity-60 transition-opacity" : "")
           }
           data-degraded={String(degraded)}
         >
