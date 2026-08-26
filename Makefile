@@ -8,13 +8,22 @@
 GO      ?= go
 TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 
+# The -dirty marker considers COMPILED sources only: .ducklab is harness state
+# the engine rewrites on every Settings change, and a stamp that cries dirty
+# over a roster pin dies of alarm fatigue. Why the marker exists at all: a
+# binary built over a stale checkout wore HEAD's clean sha and served pre-fix
+# code — an evening went to chasing that phantom regression.
+SRCDIRTY = $$(git diff-index --quiet HEAD -- . ':(exclude).ducklab' 2>/dev/null || echo -dirty)
+STAMPVER = $$(git describe --tags --always 2>/dev/null || echo unknown)$(SRCDIRTY)
+STAMPSHA = $$(git rev-parse HEAD 2>/dev/null || echo unknown)$(SRCDIRTY)
+
 .PHONY: all build test test-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
 
 all: vet test frontend
 
 build:
-	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)$$(git diff-index --quiet HEAD -- 2>/dev/null || echo -dirty)" -o bin/ducklab ./cmd/ducklab
-	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)$$(git diff-index --quiet HEAD -- 2>/dev/null || echo -dirty)" -o bin/ducklab-engine ./cmd/ducklab-engine
+	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$(STAMPVER) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$(STAMPSHA)" -o bin/ducklab ./cmd/ducklab
+	CGO_ENABLED=0 $(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$(STAMPVER) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$(STAMPSHA)" -o bin/ducklab-engine ./cmd/ducklab-engine
 
 vet:
 	$(GO) vet ./...
@@ -83,7 +92,7 @@ desktop:
 	cd frontend && npm run build
 	rm -rf cmd/ducklab-desktop/frontend/dist
 	cp -r frontend/dist cmd/ducklab-desktop/frontend/dist
-	$(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$$(git rev-parse HEAD 2>/dev/null || echo unknown)$$(git diff-index --quiet HEAD -- 2>/dev/null || echo -dirty)" -o bin/ducklab-desktop ./cmd/ducklab-desktop
+	$(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$(STAMPVER) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$(STAMPSHA)" -o bin/ducklab-desktop ./cmd/ducklab-desktop
 
 cross:
 	@for t in $(TARGETS); do \
