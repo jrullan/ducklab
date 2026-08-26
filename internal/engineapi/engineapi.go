@@ -1012,6 +1012,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok":         true,
 		"version":    s.version,
 		"provenance": s.provenance,
+		// Explicit, not parsed out of the strings above: a -dirty binary is
+		// serving code that may not match its own sha, and every consumer of
+		// this endpoint (footer, doctor, a person with curl) deserves the
+		// fact without knowing the stamp convention.
+		"dirty": strings.HasSuffix(s.version, "-dirty") || strings.HasSuffix(s.provenance, "-dirty"),
 		// The queue's live counters. The one time they were needed — a run
 		// stuck in "queued" with nothing visibly running — they were
 		// invisible, and the diagnosis ran through disk archaeology.

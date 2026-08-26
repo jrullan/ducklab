@@ -140,6 +140,10 @@ func main() {
 	}()
 
 	fmt.Printf("ducklab-engine %s listening on 127.0.0.1:%d\n", build.Version, port)
+	if build.Dirty() {
+		fmt.Println("WARNING: built from a working tree that differed from HEAD (-dirty) — " +
+			"what this engine serves may not match any commit; rebuild from a clean checkout before trusting run results")
+	}
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "error: serve: %v\n", err)
 		os.Exit(1)

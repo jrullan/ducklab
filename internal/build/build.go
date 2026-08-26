@@ -27,3 +27,17 @@ var Commit = "unknown"
 
 // Provenance is the source branch and commit used to build this binary.
 func Provenance() string { return Branch + "@" + Commit }
+
+// Dirty reports whether this binary was built from a working tree that
+// differed from the commit it is stamped with.
+//
+// The stamp used to be a lie by construction: ldflags read `git rev-parse
+// HEAD` while the compiler read the working tree, so a binary built over a
+// stale checkout wore a clean sha. Measured cost of that lie: an engine
+// stamped with a fix's commit served the pre-fix code, "reproduced" the very
+// bug the commit fixed, and an evening went to chasing a phantom regression.
+// The Makefile now stamps -dirty into Version and Commit whenever the tree
+// differs from HEAD; this is the one place that reads the marker.
+func Dirty() bool {
+	return strings.HasSuffix(Version, "-dirty") || strings.HasSuffix(Commit, "-dirty")
+}
