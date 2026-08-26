@@ -374,6 +374,121 @@ func startedAfter(r *runlog.Run, since time.Time) bool {
 	return !t.Before(since)
 }
 
+// ProjectStats is the engine-owned, compact answer to project analytics.
+type ProjectStats struct {
+	Runs             int            `json:"runs"`
+	Passed           int            `json:"passed"`
+	PassRate         float64        `json:"pass_rate"`
+	Accepted         int            `json:"accepted"`
+	AcceptanceRate   float64        `json:"acceptance_rate"`
+	CostUSD          float64        `json:"cost_usd"`
+	FirstRunCount    int            `json:"first_run_count"`
+	FirstRunPassed   int            `json:"first_run_passed"`
+	FirstRunPassRate float64        `json:"first_run_pass_rate"`
+	ByMode           map[string]Row `json:"by_mode"`
+	ByDuckling       map[string]Row `json:"by_duckling"`
+}
+
+// BuildProjectStats computes project-wide analytics without involving a model.
+func BuildProjectStats(runs []*runlog.Run) ProjectStats {
+	var out ProjectStats
+	first := map[string]*runlog.Run{}
+	passDenominator := 0
+	for _, r := range runs {
+		if r == nil || r.Verdict == "" {
+			continue
+		}
+		out.Runs++
+		if eligible, passed := statsPass(r); eligible {
+			passDenominator++
+			if passed {
+				out.Passed++
+			}
+		}
+		if r.Accepted {
+			out.Accepted++
+		}
+		out.CostUSD += r.Budget.USD
+		key := r.TaskID
+		if key == "" {
+			key = r.ID
+		}
+		if old := first[key]; old == nil || r.StartedAt < old.StartedAt {
+			first[key] = r
+		}
+	}
+	if passDenominator > 0 {
+		out.PassRate = float64(out.Passed) / float64(passDenominator) * 100
+	}
+	if out.Runs > 0 {
+		out.AcceptanceRate = float64(out.Accepted) / float64(out.Runs) * 100
+	}
+	firstDenominator := 0
+	for _, r := range first {
+		if eligible, passed := statsPass(r); eligible {
+			firstDenominator++
+			if passed {
+				out.FirstRunPassed++
+			}
+		}
+	}
+	out.FirstRunCount = firstDenominator
+	if firstDenominator > 0 {
+		out.FirstRunPassRate = float64(out.FirstRunPassed) / float64(firstDenominator) * 100
+	}
+	out.ByMode, out.ByDuckling = map[string]Row{}, map[string]Row{}
+	for _, r := range Build(runs, Options{By: "mode"}).Rows {
+		out.ByMode[r.Key] = r
+	}
+	for _, r := range Build(runs, Options{By: "duckling"}).Rows {
+		out.ByDuckling[r.Key] = r
+	}
+	return out
+}
+
+// statsPass mirrors Row.PassRate's definition for project-wide rates.
+func statsPass(r *runlog.Run) (eligible, passed bool) {
+	if r == nil || r.Verdict == "" {
+		return false, false
+	}
+	if isDocumentStage(r.Stage) && r.Resolution == "superseded" {
+		return false, false
+	}
+	if r.NoChanges {
+		return false, false
+	}
+	if isDocumentStage(r.Stage) {
+		return true, r.Accepted
+	}
+	return true, r.Verdict == "PASSED" || r.Resolution == "landed"
+}
+
+// RenderProjectStats gives consultants a small, honest, deterministic result.
+func RenderProjectStats(s ProjectStats) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "runs: %d · passed: %d (%.1f%%) · accepted: %d (%.1f%%) · cost: $%.6f\n", s.Runs, s.Passed, s.PassRate, s.Accepted, s.AcceptanceRate, s.CostUSD)
+	fmt.Fprintf(&b, "first-run pass rate: %d/%d (%.1f%%)\n", s.FirstRunPassed, s.FirstRunCount, s.FirstRunPassRate)
+	b.WriteString("by mode:\n")
+	for _, k := range sortedRows(s.ByMode) {
+		r := s.ByMode[k]
+		fmt.Fprintf(&b, "  %s: %d runs, %.1f%% passed, $%.6f\n", k, r.Runs, r.PassRate(), r.CostUSD)
+	}
+	b.WriteString("by duckling:\n")
+	for _, k := range sortedRows(s.ByDuckling) {
+		r := s.ByDuckling[k]
+		fmt.Fprintf(&b, "  %s: %d runs, %.1f%% passed, $%.6f\n", k, r.Runs, r.PassRate(), r.CostUSD)
+	}
+	return b.String()
+}
+func sortedRows(m map[string]Row) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Render formats the report as the table of 03-CLI.md §3.10.
 func Render(rep *Report) string {
 	var b strings.Builder

@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/jrullan/ducklab/internal/report"
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 // Run history for the consultant.
@@ -33,19 +36,27 @@ func (t *RunListTool) Description() string {
 func (t *RunListTool) Schema() interface{} {
 	return NewSchema().
 		AddString("task", "Only runs for this task id (optional)", false).
-		AddInt("limit", "Max runs to return (default 20)", false)
+		AddInt("limit", "Max runs to return (default 20, maximum 100)", false).
+		AddInt("offset", "Number of matching runs to skip (for pagination)", false)
 }
 
 func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
 	var a struct {
-		Task  string `json:"task"`
-		Limit int    `json:"limit"`
+		Task   string `json:"task"`
+		Limit  int    `json:"limit"`
+		Offset int    `json:"offset"`
 	}
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	if a.Limit <= 0 || a.Limit > 100 {
+	if a.Limit <= 0 {
 		a.Limit = 20
+	}
+	if a.Limit > 100 {
+		a.Limit = 100
+	}
+	if a.Offset < 0 {
+		a.Offset = 0
 	}
 	dir := filepath.Join(ectx.ProjectRoot, ".ducklab", "runs")
 	entries, err := os.ReadDir(dir)
@@ -81,11 +92,16 @@ func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 		rows = append(rows, row{s.ID, s.Stage, s.TaskID, s.Status, s.Verdict, s.Started})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].started > rows[j].started })
+	total := len(rows)
+	if a.Offset >= total {
+		return SuccessResult("showing 0 of %d; no more runs", total), nil
+	}
+	rows = rows[a.Offset:]
 	if len(rows) > a.Limit {
 		rows = rows[:a.Limit]
 	}
 	if len(rows) == 0 {
-		return SuccessResult("no matching runs"), nil
+		return SuccessResult("showing 0 of %d; no more runs", total), nil
 	}
 	var b strings.Builder
 	for _, r := range rows {
@@ -99,7 +115,47 @@ func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 		}
 		fmt.Fprintf(&b, "%s  %s  %s  %s  %s  %s\n", r.id, r.stage, task, r.status, verdict, r.started)
 	}
-	return SuccessResult("id  stage  task  status  verdict  started\n%s", b.String()), nil
+	line := fmt.Sprintf("showing %d of %d", len(rows), total)
+	if a.Offset+len(rows) < total {
+		line += fmt.Sprintf("; use offset %d to continue", a.Offset+len(rows))
+	}
+	return SuccessResult("%s\nid  stage  task  status  verdict  started\n%s", line, b.String()), nil
+}
+
+// ProjectStatsTool returns compact, engine-computed project aggregates.
+type ProjectStatsTool struct{}
+
+func (t *ProjectStatsTool) Name() string   { return "project_stats" }
+func (t *ProjectStatsTool) Mutating() bool { return false }
+func (t *ProjectStatsTool) Description() string {
+	return "Read engine-computed project statistics including first-run pass rate, acceptance rate, cost totals, and totals by mode and duckling."
+}
+func (t *ProjectStatsTool) Schema() interface{} { return NewSchema() }
+func (t *ProjectStatsTool) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	runs, err := readRuns(ectx.ProjectRoot)
+	if err != nil {
+		return SuccessResult("no runs recorded yet"), nil
+	}
+	return SuccessResult("%s", report.RenderProjectStats(report.BuildProjectStats(runs))), nil
+}
+func readRuns(root string) ([]*runlog.Run, error) {
+	entries, err := os.ReadDir(filepath.Join(root, ".ducklab", "runs"))
+	if err != nil {
+		return nil, err
+	}
+	var runs []*runlog.Run
+	for _, e := range entries {
+		if e.IsDir() {
+			data, err := os.ReadFile(filepath.Join(root, ".ducklab", "runs", e.Name(), "state.json"))
+			if err == nil {
+				var r runlog.Run
+				if json.Unmarshal(data, &r) == nil {
+					runs = append(runs, &r)
+				}
+			}
+		}
+	}
+	return runs, nil
 }
 
 // RunReadTool summarizes one run's record: turns, verdicts, gates, failure.

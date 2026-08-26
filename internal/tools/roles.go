@@ -51,7 +51,7 @@ var roleToolbelts = map[config.Role][]string{
 		"fs_read", "artifact_read",
 	},
 	config.RoleConsultant: {
-		"fs_read", "fs_search", "artifact_read", "roster_read",
+		"fs_read", "fs_search", "artifact_read", "roster_read", "run_list", "project_stats",
 	},
 	// The human turn is not an agent loop; it has no tools.
 	config.RoleHuman: {},
