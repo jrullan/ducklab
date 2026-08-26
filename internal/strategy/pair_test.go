@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -571,6 +572,61 @@ func TestRoundsStopWhenNothingCanChange(t *testing.T) {
 
 // The cut must not fire while work is still landing: a reviewer asking for
 // changes on a real diff is the loop doing its job.
+func TestResumeRepeatsInterruptedRoleWithPartialNotes(t *testing.T) {
+	var events []map[string]interface{}
+	var firstRoles []config.Role
+	calls := 0
+	first := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			firstRoles = append(firstRoles, turn.Role)
+			calls++
+			if calls == 2 {
+				return &agent.Outcome{Text: "partial review notes"}, agent.ErrBudgetExceeded
+			}
+			return &agent.Outcome{Text: "implemented"}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "reviewer"},
+		Diff:   func() (string, error) { return "diff", nil },
+		OnEvent: func(kind string, data map[string]interface{}) {
+			if kind == "turn_interrupted" {
+				events = append(events, data)
+			}
+		},
+	}
+	if _, err := ExecuteScript(context.Background(), PairScript(), first); !errors.Is(err, agent.ErrBudgetExceeded) {
+		t.Fatalf("first execution error = %v", err)
+	}
+	if len(events) != 1 || events[0]["role"] != string(config.RoleReviewer) {
+		t.Fatalf("checkpoint = %+v, want reviewer interruption", events)
+	}
+
+	var prompt string
+	var resumedRoles []config.Role
+	second := &ExecuteParams{
+		ResumeFrom: &ResumeTurn{Round: 1, Index: 1, Role: config.RoleReviewer, Notes: "partial review notes"},
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, p string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			resumedRoles = append(resumedRoles, turn.Role)
+			prompt = p
+			return verdictOutcome("approve"), nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "reviewer"},
+		Diff:   func() (string, error) { return "diff", nil },
+		Gate:   func(context.Context) (string, string, error) { return "green", "", nil },
+	}
+	if _, err := ExecuteScript(context.Background(), PairScript(), second); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstRoles) != 2 || firstRoles[0] != config.RoleImplementer || firstRoles[1] != config.RoleReviewer {
+		t.Fatalf("first roles = %v", firstRoles)
+	}
+	if len(resumedRoles) != 1 || resumedRoles[0] != config.RoleReviewer {
+		t.Fatalf("resumed roles = %v, want reviewer only", resumedRoles)
+	}
+	if !strings.Contains(prompt, "Resumed with partial notes") || !strings.Contains(prompt, "partial review notes") {
+		t.Fatalf("resume prompt lost partial notes: %q", prompt)
+	}
+}
+
 func TestRoundsContinueWhileTheTreeIsMoving(t *testing.T) {
 	rec := &recorder{}
 	params := &ExecuteParams{

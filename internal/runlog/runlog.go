@@ -161,6 +161,16 @@ type Run struct {
 	// StageRequest is the persisted artifact-stage launch request, exposed on
 	// reads so an operator can replay an amendment without losing its shape.
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`
+	// InterruptedTurn is the last turn stopped by a pausing interruption.
+	InterruptedTurn *InterruptedTurn `json:"interrupted_turn,omitempty"`
+}
+
+// InterruptedTurn is a durable checkpoint for resuming the same role.
+type InterruptedTurn struct {
+	Round int    `json:"round"`
+	Index int    `json:"index"`
+	Role  string `json:"role"`
+	Notes string `json:"notes,omitempty"`
 }
 
 // GateReproduction is the result of proving the accepted commit in a clean checkout.

@@ -531,6 +531,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			res, rerr := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
+				ResumeFrom:     resumeTurn(rs.run),
 				// Decisions the person already made ride the prompt, like on
 				// build and test runs: a resumed stage replays from scratch,
 				// and a model that cannot see the answers re-asks them.
@@ -556,6 +557,13 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				},
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
+					if kind == "turn_interrupted" {
+						rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"])}
+						rs.writer.WriteState()
+					} else if kind == "turn_end" && data["incomplete"] != true {
+						rs.run.InterruptedTurn = nil
+						rs.writer.WriteState()
+					}
 				},
 			})
 			if res != nil {

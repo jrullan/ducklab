@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -87,6 +88,16 @@ type ExecuteParams struct {
 	EscalationCandidates []EscalationCandidate
 	CurrentLowerBound    float64
 	ModeMedian           float64
+	// ResumeFrom checkpoints an interrupted turn.
+	ResumeFrom *ResumeTurn
+}
+
+// ResumeTurn is the durable checkpoint for an interrupted turn.
+type ResumeTurn struct {
+	Round int
+	Index int
+	Role  config.Role
+	Notes string
 }
 
 // RoundRecord is what happened in one round.
@@ -276,6 +287,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
 
+			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {
+				continue
+			}
+
 			if turn.Role == config.RoleHuman {
 				// A human turn is scheduled by the stage runner, not here.
 				continue
@@ -294,6 +309,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview)
+			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
+				prompt += "\n\n## Resumed with partial notes\n\nThe " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from these notes:\n\n" + params.ResumeFrom.Notes
+			}
 			if err != nil {
 				result.Error = err
 				return result, err
@@ -315,7 +333,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			if err != nil {
-				// What it managed to say and do before it died, recorded on the
+				notes := partialTurnNotes(outcome)
+				emit(params, "turn_interrupted", map[string]interface{}{"round": round, "turn": i, "role": string(turn.Role), "notes": notes})
+				// What it managed
 				// way out. This used to return first, so a turn that failed took
 				// its whole record with it: a run that patched a file seventeen
 				// times left a transcript of four events, and the only way to
@@ -782,6 +802,71 @@ func EmitTurnRecord(emitFn func(kind string, data map[string]interface{}), round
 		}
 		emit(params, "tool_call", data)
 	}
+}
+
+// partialTurnNotes preserves the useful, bounded checkpoint of a turn that
+// stopped before producing a final answer. Tool calls are included because the
+// worktree may contain their effects while the model's draft and reasoning are
+// the only explanation of what remains to do.
+func partialTurnNotes(outcome *agent.Outcome) string {
+	if outcome == nil {
+		return ""
+	}
+	type partialCall struct {
+		Name   string `json:"name"`
+		Args   string `json:"args,omitempty"`
+		Result string `json:"result,omitempty"`
+		Digest string `json:"digest,omitempty"`
+	}
+	checkpoint := struct {
+		Draft     string        `json:"draft,omitempty"`
+		Reasoning string        `json:"reasoning,omitempty"`
+		ToolCalls []partialCall `json:"tool_calls,omitempty"`
+	}{
+		Draft: strings.TrimSpace(outcome.Text), Reasoning: strings.TrimSpace(outcome.Reasoning),
+	}
+	for _, call := range outcome.ToolCalls {
+		pc := partialCall{Name: call.Name, Digest: call.Digest}
+		if len(call.Args) > 2048 {
+			pc.Args = string(call.Args[:2048]) + "…"
+		} else {
+			pc.Args = string(call.Args)
+		}
+		if call.Result != nil {
+			pc.Result = SummariseToolResult(call.Result.Content)
+		}
+		checkpoint.ToolCalls = append(checkpoint.ToolCalls, pc)
+	}
+	const maxCheckpointBytes = 16384
+	marshal := func() []byte {
+		data, _ := json.Marshal(checkpoint)
+		return data
+	}
+	data := marshal()
+	// Keep the checkpoint valid JSON even when a model produced unusually large
+	// drafts. Drop the oldest tool details first; the bounded summary still
+	// retains the role's draft/reasoning and the most recent activity.
+	for len(data) > maxCheckpointBytes && len(checkpoint.ToolCalls) > 1 {
+		checkpoint.ToolCalls = checkpoint.ToolCalls[1:]
+		data = marshal()
+	}
+	if len(data) > maxCheckpointBytes {
+		checkpoint.Draft = truncateCheckpointText(checkpoint.Draft, 4096)
+		checkpoint.Reasoning = truncateCheckpointText(checkpoint.Reasoning, 4096)
+		for i := range checkpoint.ToolCalls {
+			checkpoint.ToolCalls[i].Args = truncateCheckpointText(checkpoint.ToolCalls[i].Args, 512)
+			checkpoint.ToolCalls[i].Result = truncateCheckpointText(checkpoint.ToolCalls[i].Result, 512)
+		}
+		data = marshal()
+	}
+	return string(data)
+}
+
+func truncateCheckpointText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // maxToolResultBytes bounds what a tool result contributes to the log (I3).

@@ -461,6 +461,32 @@ func (s *Service) modeTurnMedian(mode, exclude string) float64 {
 	return (turns[middle-1] + turns[middle]) / 2
 }
 
+func resumeTurn(run *runlog.Run) *strategy.ResumeTurn {
+	if run == nil || run.InterruptedTurn == nil {
+		return nil
+	}
+	t := run.InterruptedTurn
+	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes}
+}
+
+func stringValueAny(v interface{}) string {
+	s, _ := v.(string)
+	return s
+}
+
+func intValue(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	}
+	return 0
+}
+
 func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	cards, _ := s.Scorecards(ctx)
 	currentSeat := string(mc.roster[config.RoleImplementer])
@@ -470,6 +496,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		EscalationCandidates: escalationCandidates,
 		CurrentLowerBound:    currentFloor,
 		ModeMedian:           s.modeTurnMedian(mc.rs.run.Mode, mc.rs.run.ID),
+		ResumeFrom:           resumeTurn(mc.rs.run),
 		ProjectRoot:          runRoot(mc.rs.run, mc.entry.Path),
 		TaskID:               mc.req.TaskID,
 		// Answers the person already gave ride ON the prompt: a resumed run
@@ -502,6 +529,13 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
+			if kind == "turn_interrupted" {
+				mc.rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"])}
+				mc.rs.writer.WriteState()
+			} else if kind == "turn_end" && data["incomplete"] != true {
+				mc.rs.run.InterruptedTurn = nil
+				mc.rs.writer.WriteState()
+			}
 		},
 	}
 

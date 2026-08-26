@@ -76,6 +76,86 @@ func TestABudgetDeathPausesWithTheWorkInPlace(t *testing.T) {
 	}
 }
 
+// A persisted reviewer checkpoint must replay the reviewer without disturbing
+// the completed implementer record or the files already in the run checkout.
+func TestResumePreservesCompletedTurnAndReplaysInterruptedReviewer(t *testing.T) {
+	s := serviceWithDucklings(t, "impl", "reviewer")
+	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if err := vcs.New(dir).Init(); err != nil {
+		t.Fatal(err)
+	}
+	completed := filepath.Join(dir, "completed.go")
+	if err := os.WriteFile(completed, []byte("package completed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := &runlog.Run{
+		ID: "r-review-resume", ProjectID: projectID, TaskID: "T-001", Stage: "build", Mode: "pair",
+		Status: "paused", PendingKind: "budget", StartedAt: time.Now().UTC().Format(time.RFC3339),
+		Roster:          map[string]string{"implementer": "impl", "reviewer": "reviewer"},
+		InterruptedTurn: &runlog.InterruptedTurn{Round: 1, Index: 1, Role: "reviewer", Notes: "partial review notes"},
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendEvent("message", map[string]interface{}{"round": 1, "turn": 0, "role": "implementer", "text": "completed implementation"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendEvent("turn_end", map[string]interface{}{"round": 1, "turn": 0, "role": "implementer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteState(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	if err := s.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunResume(context.Background(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	select {
+	case <-rs.done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("resumed run never stopped")
+	}
+
+	if _, err := os.Stat(completed); err != nil {
+		t.Fatalf("completed work disappeared across resume: %v", err)
+	}
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resumedReviewer bool
+	var completedMessage bool
+	for _, event := range events {
+		if event.Type == "message" && event.Data["role"] == "implementer" && event.Data["text"] == "completed implementation" {
+			completedMessage = true
+		}
+		if event.Type == "turn_start" && event.Data["round"] == float64(1) && event.Data["turn"] == float64(1) && event.Data["role"] == "reviewer" {
+			resumedReviewer = true
+		}
+	}
+	if !completedMessage {
+		t.Error("completed implementer output was lost from the run log")
+	}
+	if !resumedReviewer {
+		t.Errorf("resume did not replay the interrupted reviewer turn; status=%s failure=%q events=%+v", rs.run.Status, rs.run.Failure, events)
+	}
+	state, err := runlog.ReadState(rs.runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.InterruptedTurn == nil {
+		t.Error("resume lost the durable interrupted-turn checkpoint")
+	}
+}
+
 // Lifting one cap frees exactly that cap, is recorded on the run, and is
 // refused once the run has ended — a finished run spends nothing.
 func TestLiftingACapIsRecordedAndGuarded(t *testing.T) {

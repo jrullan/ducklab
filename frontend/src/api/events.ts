@@ -247,6 +247,7 @@ export const KNOWN_EVENT_TYPES = [
   "round_start",
   "turn_start",
   "turn_end",
+  "turn_interrupted",
   "llm_call",
   "tool_call",
   "tool_call_started",
