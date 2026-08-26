@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { Run } from "../api/client";
+import type { Artifact, Run } from "../api/client";
 import { EvidenceDrawer } from "./EvidenceDrawer";
 
 const run: Run = {
@@ -35,6 +35,16 @@ describe("EvidenceDrawer", () => {
     expect(screen.getByTestId("render-captures").querySelectorAll("img")).toHaveLength(2);
     await vi.waitFor(() => expect(screen.getByAltText("now.png")).toHaveAttribute("src", "blob:now.png"));
     expect(captureClient.runCaptureUrl).toHaveBeenCalledWith("r-1", "now.png");
+  });
+
+  it("explains that plan approval creates tasks, not code", () => {
+    const plan: NonNullable<Artifact["proposal"]> = {
+      diff: "", sections: [{ id: "T-201", title: "task", body: "" }],
+    };
+    render(<EvidenceDrawer plan={plan} onClose={() => {}} />);
+    expect(screen.getByTestId("plan-drawer-meaning").textContent).toBe(
+      "you approve these tasks being born and their lanes — you are not approving code yet",
+    );
   });
 
   it("closes from its close button", () => {

@@ -227,6 +227,42 @@ describe("Now — the inbox", () => {
     expect(screen.getAllByTestId("now-next-steps")).toHaveLength(1);
   });
 
+  it("shows pending plan evidence through the view join and explains approval", async () => {
+    const artifact = {
+      kind: "plan", version: 1, approved: false, markdown: "",
+      sections: [],
+      proposal: { diff: "", sections: [
+        { id: "T-201", title: "first", body: "", fields: { lane: "build", owner: "alice", files: "src/shared.ts" } },
+        { id: "T-202", title: "second", body: "", fields: { lane: "test", owner: "bob", files: "src/shared.ts" } },
+      ] },
+    };
+    const client = clientWith({
+      artifact: vi.fn(() => Promise.resolve(artifact)),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [{ kind: "missing", id: "T-202", detail: "missing criterion" }], proposed: ["plan"] })),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-plan-card");
+    expect(card.textContent).toContain("criteria covered: 1");
+    expect(card.textContent).toContain("tasks proposed: 2");
+    expect(card.textContent).toContain("can run in parallel: 2");
+    expect(card.textContent).toContain("files with two owners: 1");
+    fireEvent.click(screen.getByTestId("plan-examine"));
+    expect(screen.getByTestId("plan-drawer-meaning").textContent).toBe(
+      "you approve these tasks being born and their lanes — you are not approving code yet",
+    );
+  });
+
+  it("does not show a plan decision when no proposal is waiting", async () => {
+    const client = clientWith({
+      artifact: vi.fn(() => Promise.resolve({ kind: "plan", version: 1, approved: true, markdown: "", sections: [] })),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    await screen.findByTestId("now-view");
+    await waitFor(() => expect(client.artifact).toHaveBeenCalledWith("p", "plan"));
+    expect(screen.queryByTestId("now-plan-card")).toBeNull();
+  });
+
   it("says when nothing is ready either, which is itself the answer", async () => {
     seed([{ ...base, id: "r-d", status: "done", accepted: true, pending_kind: undefined }]);
     render(<Now client={clientWith()} projectId="p" />);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { runCaptureUrl, type Run } from "../api/client";
+import { runCaptureUrl, type Run, type Artifact } from "../api/client";
 import { money, moneyOrZero } from "../lib/format";
 
 type Evidence = Record<string, unknown>;
@@ -36,7 +36,10 @@ function netLines(data: Evidence): string {
   return "not recorded";
 }
 
-export function EvidenceDrawer({ run, onClose, captureClient }: { run: Run; onClose: () => void; captureClient?: { runCaptureUrl: (runId: string, name: string) => Promise<string> } }) {
+export function EvidenceDrawer({ run, plan, open = true, onClose, captureClient }: { run?: Run; plan?: NonNullable<Artifact["proposal"]>; open?: boolean; onClose: () => void; captureClient?: { runCaptureUrl: (runId: string, name: string) => Promise<string> } }) {
+  if (!open) return null;
+  if (plan) return <PlanEvidenceDrawer plan={plan} onClose={onClose} />;
+  if (!run) return null;
   const [captureURLs, setCaptureURLs] = useState<Record<string, string>>({});
   useEffect(() => {
     let alive = true;
@@ -87,6 +90,17 @@ export function EvidenceDrawer({ run, onClose, captureClient }: { run: Run; onCl
       </aside>
     </div>
   );
+}
+
+function PlanEvidenceDrawer({ plan, onClose }: { plan: NonNullable<Artifact["proposal"]>; onClose: () => void }) {
+  const sections = plan.sections ?? [];
+  return <div className="fixed inset-0 z-40" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <aside className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-hairline bg-page p-5 shadow-lg" role="dialog" aria-modal="true" aria-label="Plan evidence">
+      <div className="flex items-start justify-between gap-3"><div><p className="text-xs text-ink-muted">Evidence for</p><h2 className="text-lg font-medium text-ink">Plan</h2></div><button type="button" aria-label="Close evidence" onClick={onClose} className="rounded border border-hairline px-2 py-1 text-sm">Close</button></div>
+      <p className="mt-4 text-sm text-ink" data-testid="plan-drawer-meaning">you approve these tasks being born and their lanes — you are not approving code yet</p>
+      <p className="mt-4 text-sm text-ink-secondary">{sections.length} proposed plan sections. Review the scope and ownership before approving.</p>
+    </aside>
+  </div>;
 }
 
 export function EvidenceDrawerHost({ run, open, onClose, captureClient }: { run: Run; open: boolean; onClose: () => void; captureClient?: { runCaptureUrl: (runId: string, name: string) => Promise<string> } }) {

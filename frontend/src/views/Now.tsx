@@ -10,11 +10,12 @@
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
 import { useEffect, useState } from "react";
-import type { Bug, Duckling, EngineClient, NextStep, Run, Task, RosterEntry } from "../api/client";
+import type { Bug, Duckling, EngineClient, NextStep, Run, Task, RosterEntry, TraceError } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
+import { PlanCard } from "../components/PlanCard";
 import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
@@ -53,10 +54,17 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   // queue of questions.
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
+  const [plan, setPlan] = useState<import("../api/client").Artifact | null>(null);
+  const [planTrace, setPlanTrace] = useState<TraceError[]>([]);
 
   useEffect(() => {
     if (!projectId) return;
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
+    if (typeof client.artifact === "function" && typeof client.traceCheck === "function") {
+      Promise.all([client.artifact(projectId, "plan"), client.traceCheck(projectId)])
+        .then(([artifact, trace]) => { setPlan(artifact.proposal ? artifact : null); setPlanTrace(trace.errors ?? []); })
+        .catch(() => { setPlan(null); setPlanTrace([]); });
+    }
     client.projectNext(projectId).then(setNextSteps).catch(() => setNextSteps([]));
     client
       .bugs(projectId)
@@ -185,6 +193,15 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
             ))}
           </ol>
         </section>
+      )}
+
+      {plan?.proposal && (
+        <PlanCard
+          artifact={plan}
+          traceErrors={planTrace}
+          onApprove={() => void client.promote(projectId, "plan").then(() => setPlan(null)).catch(() => {})}
+          onChanges={() => void client.artifactDiscard(projectId, "plan").then(() => setPlan(null)).catch(() => {})}
+        />
       )}
 
       {active.length > 0 && (
