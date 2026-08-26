@@ -394,15 +394,6 @@ export function Cycle({
   // artifact's own prefix. The plan's prefix is M, but its breaks land on
   // tasks (T-), so a prefix test meant a task implementing nothing was never
   // marked on the one tab that could show it.
-  const broken = new Set<string>();
-  const addBreaks = (items: readonly Section[]) => items.forEach((s) => {
-    if (errors.some((e) => e.id === s.id)) broken.add(s.id);
-    if ((s.implements ?? []).some((claim) => claim.startsWith("REQ-") && !requirementIds.has(claim))) broken.add(s.id);
-    addBreaks(s.children ?? []);
-  });
-  addBreaks(sections);
-  addBreaks(proposalSections);
-
   useEffect(() => {
     if (!selectedSection) return;
     detailRef.current
@@ -416,8 +407,19 @@ export function Cycle({
     setIndexFilter("all");
   }, [active.stage]);
 
-  const sectionHasNoTask = (s: Section) =>
-    active.stage === "plan" && !tasks.some((t) => taskIdsFromTrace(traceDown[s.id]).includes(t.id));
+  // The pinned index is the one finder. Keep it reachable without making a
+  // second, overlapping palette compete for the same sections.
+  useEffect(() => {
+    const focusIndex = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        document.getElementById("cycle-index-filter")?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusIndex);
+    return () => window.removeEventListener("keydown", focusIndex);
+  }, []);
+
   // While a parsed proposal is open, the detail pane shows that document; keep
   // the index pointing at the same ids rather than at the hidden accepted copy.
   const indexedRoots = artifact?.proposal && !proposalDecided && proposalSections.length > 0
@@ -426,6 +428,11 @@ export function Cycle({
   // Tasks are sections in the plan's document too. Flatten only the index so
   // nested plan work is findable without changing the document's reading shape.
   const indexedSections = indexedRoots.flatMap((s) => [s, ...(s.children ?? [])]);
+  // Counts and markers are intentionally computed by the same trace/task join.
+  // This prevents a chip from claiming a different truth than the health line.
+  const markers = traceMarkers(indexedSections, errors, tasks, traceDown, active.stage, requirementIds);
+  const broken = new Set(markers.filter((m) => m.break).map((m) => m.id));
+  const sectionHasNoTask = (s: Section) => markers.find((m) => m.id === s.id)?.noTask ?? false;
   const visibleSections = indexedSections.filter((s) => {
     const q = indexQuery.trim().toLowerCase();
     const matchesText = !q || `${s.id} ${s.title}`.toLowerCase().includes(q);
@@ -437,7 +444,7 @@ export function Cycle({
 
   return (
     <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
-      <header data-testid="cycle-frame-header" className="sticky top-0 z-10 border-b border-hairline bg-surface py-2">
+      <header data-testid="cycle-frame-header" id="cycle-ledger" className="sticky top-0 z-10 border-b border-hairline bg-surface py-2">
         <div className="flex items-center justify-between gap-3">
           <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="flex gap-1">
           {STAGES.map((s) => (
@@ -459,43 +466,12 @@ export function Cycle({
             </button>
           ))}
           </div>
-          <details data-testid="cycle-command-palette" className="relative">
-            <summary className="cursor-pointer text-xs text-ink-muted">Jump to section</summary>
-            <div className="absolute right-0 top-full z-20 mt-1 w-64 rounded border border-hairline bg-surface p-2 shadow-sm">
-              <label className="sr-only" htmlFor="cycle-palette-input">Jump to section by id</label>
-              <input
-                id="cycle-palette-input"
-                data-testid="cycle-palette-input"
-                list="cycle-palette-ids"
-                placeholder="Type an id, e.g. SPEC-026"
-                className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
-                onChange={(e) => {
-                  const value = e.target.value.trim().toUpperCase();
-                  const match = indexedSections.find((s) => s.id.toUpperCase() === value);
-                  if (match) setSelectedSection(match.id);
-                }}
-              />
-              <datalist id="cycle-palette-ids">
-                {indexedSections.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-              </datalist>
-              <div className="mt-1 max-h-40 overflow-y-auto">
-                {indexedSections.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    data-testid="cycle-palette-entry"
-                    onClick={() => setSelectedSection(s.id)}
-                    className="block w-full px-1 py-1 text-left text-xs hover:bg-surface2"
-                  >{s.id} — {s.title}</button>
-                ))}
-              </div>
-            </div>
-          </details>
         </div>
         <section data-testid="cycle-stage-narrative" className="sr-only"><h1>The document chain</h1><p>{STAGES.map((s) => s.story).join(" ")}</p></section>
-        <a href="#cycle-ledger" data-testid="cycle-health" className="mt-1 block text-xs text-ink-secondary underline-offset-2 hover:underline">
-          {errors.length} break{errors.length === 1 ? "" : "s"} in the spine
-        </a>
+        <div data-testid="cycle-health" className="mt-1 block text-xs text-ink-secondary">
+          <a href="#/cycle/ledger" className="underline-offset-2 hover:underline"><span>{broken.size === 0 ? "0 breaks in the spine — the spine is intact" : <>{broken.size} break{broken.size === 1 ? "" : "s"} in the spine</>}</span></a>
+          <a href="#/cycle/ledger" className="ml-2 underline">Open ledger</a>
+        </div>
       </header>
       <div className="flex min-h-0 flex-1 gap-4 overflow-hidden pt-3">
         <nav data-testid="cycle-index" aria-label={`${active.label} section index`} className="sticky top-0 h-[calc(100vh-7rem)] w-64 shrink-0 overflow-y-auto border-r border-hairline pr-3">
@@ -1233,6 +1209,17 @@ function taskIdsFromTrace(value: unknown): string[] {
   }
   walk(value);
   return ids;
+}
+
+type TraceMarker = { id: string; break: boolean; noTask: boolean };
+
+export function traceMarkers(sections: readonly Section[], errors: readonly TraceError[], tasks: readonly Task[], traceDown: Record<string, unknown>, stage: string, requirementIds: Set<string>): TraceMarker[] {
+  return sections.map((section) => {
+    const linked = taskIdsFromTrace(traceDown[section.id]);
+    const hasTask = linked.some((id) => tasks.some((task) => task.id === id));
+    const invalidRequirement = (section.implements ?? []).some((claim) => claim.startsWith("REQ-") && !requirementIds.has(claim));
+    return { id: section.id, break: errors.some((error) => error.id === section.id) || invalidRequirement, noTask: stage === "plan" && !hasTask };
+  });
 }
 
 function coverageLine(errors: TraceError[]): string {

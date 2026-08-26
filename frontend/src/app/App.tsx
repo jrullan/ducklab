@@ -12,6 +12,7 @@ import { Runs } from "../views/Runs";
 import { RunView } from "../views/RunView";
 import { Board } from "../views/Board";
 import { Cycle } from "../views/Cycle";
+import { Ledger } from "../views/Ledger";
 import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
 import { Review } from "../views/Review";
@@ -480,6 +481,7 @@ export function App() {
           </div>
         )}
         {route.name === "run" && client && <RunView runId={route.id} client={client} />}
+        {route.name === "ledger" && client && projectId && <Ledger client={client} projectId={projectId} />}
         {route.name === "cycle" &&
           (client && projectId ? (
             <div className="p-4">

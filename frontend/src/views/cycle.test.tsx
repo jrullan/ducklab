@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { act } from "@testing-library/react";
 import { saveChipFacts } from "../lib/chipfacts";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { Cycle } from "./Cycle";
+import { Cycle, traceMarkers } from "./Cycle";
+import { Ledger } from "./Ledger";
 import { EngineClient } from "../api/client";
 
 /** Shapes copied from a live engine response, not invented: sections is null
@@ -146,20 +147,25 @@ describe("Cycle", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
   });
 
-  it("jumps to a section from the command palette", async () => {
-    const client = clientWith((p) => {
+  it("uses the joined trace markers for health and chip filters", async () => {
+    const c = clientWith((p) => {
+      if (p.includes("/artifacts/plan")) return json(PLAN);
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
-      if (p.includes("/trace/check")) return json(TRACE);
+      if (p.includes("/trace/check")) return json({ errors: [{ kind: "unjustified_task", id: "T-002", detail: "task implements no spec section" }] });
+      if (p.includes("/trace/M-001")) return json({ down: ["T-001"] });
+      if (p.includes("/tasks")) return json({ items: [{ id: "T-001", title: "Authentication", milestone: "M-001", status: "done" }] });
       return json({}, 404);
     });
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
-    render(<Cycle client={client} projectId="p" />);
-
-    await waitFor(() => expect(screen.getAllByTestId("cycle-palette-entry")).toHaveLength(2));
-    fireEvent.click(screen.getByText("Jump to section"));
-    fireEvent.change(screen.getByTestId("cycle-palette-input"), { target: { value: "REQ-002" } });
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }));
+    render(<Cycle client={c} projectId="p" stage="plan" />);
+    const joined = traceMarkers(PLAN.sections.flatMap((section) => [section, ...(section.children ?? [])]), [{ kind: "unjustified_task", id: "T-002", detail: "task implements no spec section" }], [{ id: "T-001", title: "Authentication", milestone: "M-001", status: "done" }], { "M-001": { down: ["T-001"] }, "T-002": { down: [] } }, "plan", new Set(["REQ-001"]));
+    expect(joined.find((marker) => marker.id === "T-002")).toMatchObject({ break: true, noTask: true });
+    await waitFor(() => expect(screen.getByTestId("cycle-health")).toHaveTextContent("1 break in the spine"));
+    fireEvent.click(screen.getByTestId("cycle-filter-breaks"));
+    expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(1);
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("data-id", "T-002");
+    fireEvent.click(screen.getByTestId("cycle-filter-no-task"));
+    expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(2);
+    expect(screen.getAllByTestId("cycle-index-row").map((row) => row.getAttribute("data-id"))).toEqual(["T-001", "T-002"]);
   });
 
   it("switches stage when a tab is clicked", async () => {
@@ -212,6 +218,34 @@ describe("Cycle", () => {
     fireEvent.click(screen.getByTestId("cycle-tab-spec"));
     await waitFor(() => expect(screen.getAllByText("SPEC-008", { exact: true })).toHaveLength(1));
     expect(screen.queryByText("REQ-001", { exact: true })).toBeNull();
+  });
+});
+
+describe("Ledger", () => {
+  it("lists breaks with both settlement paths and meaningful timing", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(TRACE);
+      if (p.includes("/tasks")) return json({ items: [] });
+      return json({}, 404);
+    });
+    render(<Ledger client={client} projectId="p" />);
+    expect(await screen.findByTestId("cycle-ledger-table")).toBeTruthy();
+    expect(screen.getByTestId("cycle-ledger-row")).toHaveTextContent("Invoice export");
+    expect(screen.getByTestId("cycle-ledger-row")).toHaveTextContent("orphan requirement");
+    expect(screen.getByTestId("cycle-ledger-row")).toHaveTextContent("Create missing piece");
+    expect(screen.getByTestId("cycle-ledger-row")).toHaveTextContent("Mark non-normative or amend");
+  });
+
+  it("states when the spine has no breaks", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: null });
+      if (p.includes("/tasks")) return json({ items: [] });
+      return json({}, 404);
+    });
+    render(<Ledger client={client} projectId="p" />);
+    expect(await screen.findByTestId("cycle-ledger-empty")).toHaveTextContent("No breaks");
   });
 });
 
