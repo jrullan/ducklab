@@ -104,6 +104,28 @@ describe("ConversationTurn", () => {
     expect(screen.getAllByTestId("tool-call")).toHaveLength(1);
   });
 
+  it("renders persisted interruption notes as resumed context for the interrupted turn", () => {
+    const checkpointNotes = "Partial draft: add the reducer case before rendering the status.";
+    const blocks = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("turn_interrupted", 2, { round: 1, turn: 0, role: "implementer", notes: checkpointNotes }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer", incomplete: true }),
+      // Restarting the same coordinates is the persisted checkpoint being resumed,
+      // not an unrelated second implementer turn.
+      ev("turn_start", 4, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("message", 5, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno", content: "Finished after resume." }),
+      ev("turn_end", 6, { round: 1, turn: 0, role: "implementer" }),
+    ]);
+    const interrupted = blocks.find((block) => block.incomplete);
+    expect(interrupted).toBeTruthy();
+
+    render(<ConversationTurn block={interrupted!} roster={roster} />);
+    expect(screen.getByText(checkpointNotes)).toBeTruthy();
+    expect(screen.getByText(/resumed with partial notes/i)).toBeTruthy();
+    // The checkpoint replaces the otherwise context-free incomplete warning.
+    expect(screen.queryByText("turn did not finish")).toBeNull();
+  });
+
   it("says nothing about finishing when the turn finished", () => {
     const [block] = buildTurns([
       ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
