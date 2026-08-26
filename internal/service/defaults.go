@@ -57,10 +57,11 @@ func (s *Service) EngineDefaultsSet(v EngineDefaultsView) error {
 
 // BudgetView is the default budget a run starts with.
 type BudgetView struct {
-	MaxUSD        float64 `json:"max_usd"`
-	MaxTokens     int64   `json:"max_tokens"`
-	MaxTurns      int     `json:"max_turns"`
-	MaxWallclockS int     `json:"max_wallclock_s"`
+	MaxUSD                        float64 `json:"max_usd"`
+	MaxTokens                     int64   `json:"max_tokens"`
+	MaxTurns                      int     `json:"max_turns"`
+	MaxWallclockS                 int     `json:"max_wallclock_s"`
+	WallclockEscalationMultiplier float64 `json:"wallclock_escalation_multiplier"`
 }
 
 // BudgetDefaults returns the budget every run starts with.
@@ -71,6 +72,7 @@ func (s *Service) BudgetDefaults() BudgetView {
 	return BudgetView{
 		MaxUSD: b.MaxUSD, MaxTokens: b.MaxTokens,
 		MaxTurns: b.MaxTurns, MaxWallclockS: b.MaxWallclockS,
+		WallclockEscalationMultiplier: b.WallclockEscalationMultiplier,
 	}
 }
 
@@ -92,6 +94,7 @@ func (s *Service) BudgetDefaultsSet(v BudgetView) error {
 		{"max_tokens", float64(v.MaxTokens)},
 		{"max_turns", float64(v.MaxTurns)},
 		{"max_wallclock_s", float64(v.MaxWallclockS)},
+		{"wallclock_escalation_multiplier", v.WallclockEscalationMultiplier},
 	} {
 		if f.val <= 0 {
 			return fmt.Errorf("budget %s must be greater than zero; got %v", f.name, f.val)
@@ -104,6 +107,7 @@ func (s *Service) BudgetDefaultsSet(v BudgetView) error {
 	s.cfg.Defaults.Budget = config.Budget{
 		MaxUSD: v.MaxUSD, MaxTokens: v.MaxTokens,
 		MaxTurns: v.MaxTurns, MaxWallclockS: v.MaxWallclockS,
+		WallclockEscalationMultiplier: v.WallclockEscalationMultiplier,
 	}
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Budget = previous

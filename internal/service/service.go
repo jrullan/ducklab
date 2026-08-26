@@ -118,6 +118,10 @@ type runState struct {
 	// another goroutine while a reply is in flight. The durable half lives on
 	// the record (run.AgentTurns = -1) for resume.
 	capLifted atomic.Bool
+	// historyEscalated is set once when a live run crosses its historical
+	// duration threshold; it prevents repeated suggestions while cancellation
+	// unwinds the strategy.
+	historyEscalated atomic.Bool
 	// refMu guards the run's reference bookkeeping: ref_read executes on
 	// agent turns while critics may run concurrently.
 	refMu sync.Mutex
@@ -1819,6 +1823,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
+	// Sample independently of model-call accounting: a provider call may
+	// remain in flight for minutes without producing a spend callback.
+	go s.monitorWallclockEscalation(ctx, rs)
 
 	dispatchErr := s.dispatchMode(ctx, &modeContext{
 		entry: entry, projCfg: projCfg, rs: rs, ectx: ectx,
@@ -2366,8 +2373,8 @@ func (s *Service) failRun(rs *runState, err error) {
 	// A cancellation during shutdown or an attributed restart is a pause, not
 	// a failure. RequestRestart writes its checkpoint before cancelling the
 	// goroutine, so preserve that durable restart reason.
-	if errors.Is(err, context.Canceled) && (s.shuttingDown.Load() || rs.run.PendingKind == "engine_restart") {
-		if rs.run.PendingKind != "engine_restart" {
+	if errors.Is(err, context.Canceled) && (s.shuttingDown.Load() || rs.run.PendingKind == "engine_restart" || rs.run.PendingKind == "history_duration") {
+		if rs.run.PendingKind != "engine_restart" && rs.run.PendingKind != "history_duration" {
 			rs.run.Status = "paused"
 			rs.run.PendingKind = "engine_shutdown"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -4206,10 +4213,84 @@ func restoreAfterUnaccepted(rs *runState) error {
 // an adapter is built — the same one-of-six disease as the streaming callbacks
 // and the budget ceilings before it — so a council's intake showed a meter at
 // zero for the whole run, and a triage's calls were attributed to nobody.
+func (s *Service) monitorWallclockEscalation(ctx context.Context, rs *runState) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkWallclockEscalation(rs)
+		}
+	}
+}
+
+// checkWallclockEscalation emits the existing escalation card once a live run
+// exceeds the configured multiple of its mode/project history. Five completed
+// runs are required so a single outlier never becomes misleading advice.
+func (s *Service) checkWallclockEscalation(rs *runState) {
+	if rs == nil || rs.run == nil || rs.writer == nil || rs.run.Status != "running" || rs.historyEscalated.Load() {
+		return
+	}
+	s.cfgMu.RLock()
+	multiplier := s.cfg.Defaults.Budget.WallclockEscalationMultiplier
+	s.cfgMu.RUnlock()
+	if multiplier <= 0 {
+		multiplier = 2
+	}
+	var total float64
+	var count int
+	s.runsMu.RLock()
+	for id, prior := range s.runs {
+		if id == rs.run.ID || prior == nil || prior.run == nil {
+			continue
+		}
+		r := prior.run
+		if r.ProjectID == rs.run.ProjectID && r.Mode == rs.run.Mode && r.WallclockMs > 0 && r.EndedAt != "" {
+			total += float64(r.WallclockMs) / 1000
+			count++
+		}
+	}
+	s.runsMu.RUnlock()
+	if count < 5 || total/float64(count) <= 0 {
+		return
+	}
+	average := total / float64(count)
+	started, err := time.Parse(time.RFC3339, rs.run.StartedAt)
+	if err != nil {
+		return
+	}
+	elapsed := time.Since(started).Seconds()
+	if elapsed < multiplier*average || !rs.historyEscalated.CompareAndSwap(false, true) {
+		return
+	}
+	data := map[string]interface{}{
+		"point": "wallclock_history", "thresholds_fired": []string{"wallclock_over_history"},
+		"wallclock_s": elapsed, "history_average_s": average, "history_runs": count,
+		"detail":    fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60),
+		"diagnoses": map[string]interface{}{"seat_at_capacity": "the current seat may be saturated", "task_brief_quality": "the brief may be too wide"},
+		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
+	}
+	rs.writer.AppendEvent("escalation_suggestion", data)
+	rs.run.Status = "paused"
+	rs.run.PendingKind = "history_duration"
+	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
+	rs.run.PendingData = data
+	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "history_duration", "detail": fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60)})
+	rs.writer.WriteState()
+	if rs.cancel != nil {
+		rs.cancel()
+	}
+}
+
 func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapter {
 	return &runLogAdapter{
 		w: rs.writer, run: rs.run, mu: &rs.wmu,
-		onSpend: func() { s.publishSpend(rs, tracker) },
+		onSpend: func() {
+			s.publishSpend(rs, tracker)
+			s.checkWallclockEscalation(rs)
+		},
 	}
 }
 

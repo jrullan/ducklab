@@ -107,6 +107,9 @@ type Budget struct {
 	MaxTokens     int64   `toml:"max_tokens" json:"max_tokens"`
 	MaxWallclockS int     `toml:"max_wallclock_s" json:"max_wallclock_s"`
 	MaxTurns      int     `toml:"max_turns" json:"max_turns"`
+	// WallclockEscalationMultiplier pauses a live run when it exceeds this
+	// multiple of the historical average for its mode and project.
+	WallclockEscalationMultiplier float64 `toml:"wallclock_escalation_multiplier" json:"wallclock_escalation_multiplier"`
 }
 
 // Defaults holds global defaults.
@@ -644,10 +647,11 @@ func DefaultGlobal() *Global {
 			HTTPTimeoutS:       300,
 			TransientRetries:   3,
 			Budget: Budget{
-				MaxUSD:        2.00,
-				MaxTokens:     400000,
-				MaxWallclockS: 1800,
-				MaxTurns:      24,
+				MaxUSD:                        2.00,
+				MaxTokens:                     400000,
+				MaxWallclockS:                 1800,
+				MaxTurns:                      24,
+				WallclockEscalationMultiplier: 2,
 			},
 		},
 		Engine: Engine{
