@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -129,7 +130,9 @@ func (t *FSRead) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSRead) Description() string {
-	return "Read a file with optional line range."
+	return "Read a file with optional line range. Each output line is prefixed with its " +
+		"line number and a tab; the numbers are NOT part of the file — never copy them " +
+		"into fs_patch searches or file content."
 }
 
 // Schema returns the argument schema.
@@ -228,14 +231,15 @@ func (t *FSSearch) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSSearch) Description() string {
-	return "Search file contents with a regex pattern."
+	return "Search file contents line by line with a regex pattern. Results are path:line: text " +
+		"— the path:line prefix is not file content."
 }
 
 // Schema returns the argument schema.
 func (t *FSSearch) Schema() interface{} {
 	return NewSchema().
-		AddString("pattern", "Regex pattern to search for", true).
-		AddString("glob", "File glob to limit search (e.g. '*.go')", false).
+		AddString("pattern", "Regular expression (not literal text: escape ( ) [ ] . * + ? with a backslash)", true).
+		AddString("glob", "Glob to limit the search, matched against the file name or the project-relative path (e.g. '*.go' or 'internal/*.go')", false).
 		AddInt("max", "Maximum results (default: 100)", false)
 }
 
@@ -254,6 +258,15 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if a.Max <= 0 {
 		a.Max = 100
 	}
+	// Validated once, before the walk. This used to be compiled per file inside
+	// SearchInContent, whose "invalid regex" report came back as a RESULT line —
+	// one per file, as a success. A model that sent `count(` read a hundred
+	// lines of "path:invalid regex" and had no way to see its pattern was the
+	// problem, let alone which character.
+	if _, err := regexp.Compile(a.Pattern); err != nil {
+		return ErrorResult("invalid regex %q: %v — the pattern is a regular expression, not "+
+			"literal text; escape metacharacters like ( ) [ ] . * + ? with a backslash", a.Pattern, err), nil
+	}
 	var results []string
 	err := filepath.Walk(ectx.ProjectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -266,7 +279,10 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 		if underDir(rel, ".git") {
 			return nil
 		}
-		if a.Glob != "" && !GlobMatch(a.Glob, filepath.Base(path)) {
+		// Name or relative path, whichever the model meant: a glob like
+		// 'internal/*.go' matched nothing when tested against base names only,
+		// and the resulting "no matches" read as "that code does not exist".
+		if a.Glob != "" && !GlobMatch(a.Glob, filepath.Base(path)) && !GlobMatch(a.Glob, filepath.ToSlash(rel)) {
 			return nil
 		}
 		data, err := os.ReadFile(path)
@@ -303,7 +319,8 @@ func (t *FSWrite) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSWrite) Description() string {
-	return "Write a file. Creates parent directories."
+	return "Write a file in full — the content REPLACES everything the file held. " +
+		"Creates parent directories. For a partial change prefer fs_write_lines or fs_patch."
 }
 
 // Schema returns the argument schema.
@@ -410,7 +427,19 @@ func (t *FSWriteLines) Execute(ctx context.Context, ectx *ExecContext, args json
 		return ErrorResult("the file has %d lines; you asked to replace through line %d — re-read it, the numbers may have shifted", len(lines), a.End), nil
 	}
 	if lines[a.Start-1] != a.FirstLine {
-		// The mismatch TEACHES: the actual line is the whole repair.
+		// The mismatch TEACHES: the actual line is the whole repair — and when
+		// the given text is findable elsewhere, WHERE it went is the repair.
+		// A model whose numbers shifted (its own earlier edit, usually) was
+		// told only "your numbers are off" and had to re-read and re-count;
+		// naming the new line number closes the loop in one call.
+		if hits := linesEqualTo(lines, a.FirstLine); len(hits) == 1 {
+			delta := hits[0] - a.Start
+			return ErrorResult("line %d is %q, not %q — your text is now at line %d (shifted %+d, likely by an earlier edit). Retry with start=%d, end=%d",
+				a.Start, lines[a.Start-1], a.FirstLine, hits[0], delta, hits[0], a.End+delta), nil
+		} else if len(hits) > 1 {
+			return ErrorResult("line %d is %q, not %q — that text appears at lines %s; re-read to pick the right one and retry",
+				a.Start, lines[a.Start-1], a.FirstLine, joinInts(hits, 5)), nil
+		}
 		return ErrorResult("line %d is %q, not %q — your numbers are off or the file changed; re-read around line %d and retry", a.Start, lines[a.Start-1], a.FirstLine, a.Start), nil
 	}
 	var replacement []string
@@ -505,7 +534,11 @@ func (t *FSPatch) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *FSPatch) Description() string {
-	return "Apply search/replace edits to a file. Each search must match exactly once. " +
+	return "Apply search/replace edits to a file. Each search must match the file BYTE-FOR-BYTE " +
+		"(same indentation, tabs vs spaces, trailing whitespace) exactly once; never include " +
+		"fs_read's line-number prefixes. Keep each search as short as uniqueness allows. Edits " +
+		"apply in order, all-or-nothing: if any search misses, NOTHING is written — and each " +
+		"edit must match the file as changed by the edits before it. " +
 		"Shape: " + fsPatchShapeHint
 }
 
@@ -623,8 +656,17 @@ func (t *FSPatch) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 			return ErrorResult("edit %d has no text to find. Send %s", i, fsPatchShapeHint), nil
 		}
 		count := strings.Count(content, search)
-		if count != 1 {
-			return ErrorResult("edit %d: search string matches %d times (must be exactly 1)", i, count), nil
+		if count == 0 {
+			return ErrorResult("edit %d: search matched 0 times — %s. No edits from this call were applied (fs_patch is all-or-nothing)",
+				i, patchMissDiagnosis(content, search)), nil
+		}
+		if count > 1 {
+			return ErrorResult("edit %d: search matches %d times (lines %s) — ambiguous. Extend it with surrounding lines until it matches exactly once, or replace an exact range with fs_write_lines. No edits from this call were applied (fs_patch is all-or-nothing)",
+				i, count, joinInts(matchLines(content, search), 5)), nil
+		}
+		if edit.to() == search {
+			return ErrorResult("edit %d: search and replace are identical — applying it would change nothing. Put the NEW text in replace. No edits from this call were applied",
+				i), nil
 		}
 		content = strings.Replace(content, search, edit.to(), 1)
 	}
@@ -705,4 +747,174 @@ func (t *FSDelete) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 // begins with ".git" and lives in no directory of that name.
 func underDir(rel, dir string) bool {
 	return rel == dir || strings.HasPrefix(rel, dir+string(filepath.Separator))
+}
+
+// patchMissDiagnosis explains WHY a search matched nothing, in terms the model
+// can act on. "matches 0 times" was measured producing a fail→read→fail loop —
+// six failed patches on one file in one run — because the error carried no
+// information about HOW the search differed from the file, so the model's only
+// legal move was to re-read and guess again. Each branch below turns one
+// observed failure mode into the fact that repairs it. Deliberately
+// language-agnostic: number prefixes, indentation style and line endings are
+// properties of any codebase, not of one language.
+func patchMissDiagnosis(content, search string) string {
+	// Copied tool output: fs_read prefixes every line "  12\t", fs_search "12: ".
+	if stripped := stripLineNumberPrefixes(search); stripped != search && strings.Contains(content, stripped) {
+		return "the search contains line-number prefixes from fs_read/fs_search output; those numbers are not part of the file — resend it without them"
+	}
+	// Line endings: the file says \r\n and the search says \n, or the reverse.
+	if strings.Contains(content, "\r\n") != strings.Contains(search, "\r\n") &&
+		strings.Contains(dropCR(content), dropCR(search)) {
+		return `the file and the search disagree on line endings (\r\n vs \n) — match the file's endings exactly`
+	}
+	// Whitespace drift: the same text is there, indented differently.
+	if line, span := fuzzyLocate(content, search); line > 0 {
+		return fmt.Sprintf("the same text IS at line %d but with different whitespace (%s) — searches must match byte-for-byte; re-read lines %d-%d with fs_read and copy exactly, or replace that range with fs_write_lines",
+			line, indentStyle(content), line, line+span-1)
+	}
+	// The opening line exists exactly once; what follows it has drifted.
+	if first := strings.TrimSpace(firstNonBlankLine(search)); first != "" {
+		if hits := linesTrimEqualTo(content, first); len(hits) == 1 {
+			return fmt.Sprintf("its first line matches line %d but the following lines differ from the file — earlier edits in this same call change what later searches must match; re-read around line %d and copy the current text",
+				hits[0], hits[0])
+		}
+	}
+	return "that text is not in the file — it may have changed since you read it (earlier edits in this same call also change it); re-read with fs_read, or replace an exact line range with fs_write_lines"
+}
+
+// lineNumberPrefix is the shape fs_read ("  12\t") and fs_search ("12: ")
+// prepend to file lines in their output.
+var lineNumberPrefix = regexp.MustCompile(`^[ \t]*\d+(\t|: )`)
+
+// stripLineNumberPrefixes removes a leading line-number prefix from every line
+// — but only when EVERY non-blank line carries one, so code that legitimately
+// begins with a number is never mangled.
+func stripLineNumberPrefixes(s string) string {
+	lines := strings.Split(s, "\n")
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" && !lineNumberPrefix.MatchString(l) {
+			return s
+		}
+	}
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = lineNumberPrefix.ReplaceAllString(l, "")
+	}
+	return strings.Join(out, "\n")
+}
+
+func dropCR(s string) string { return strings.ReplaceAll(s, "\r", "") }
+
+// fuzzyLocate finds the search inside the content comparing whole lines with
+// their surrounding whitespace ignored. Returns the 1-based content line where
+// the match starts and how many lines it spans; 0 when not found. A hit here,
+// after the exact match already failed, means whitespace is the difference.
+func fuzzyLocate(content, search string) (line, span int) {
+	cl := trimmedLines(content)
+	sl := trimmedLines(search)
+	for len(sl) > 0 && sl[0] == "" {
+		sl = sl[1:]
+	}
+	for len(sl) > 0 && sl[len(sl)-1] == "" {
+		sl = sl[:len(sl)-1]
+	}
+	if len(sl) == 0 {
+		return 0, 0
+	}
+	for i := 0; i+len(sl) <= len(cl); i++ {
+		ok := true
+		for j := range sl {
+			if cl[i+j] != sl[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return i + 1, len(sl)
+		}
+	}
+	return 0, 0
+}
+
+func trimmedLines(s string) []string {
+	lines := strings.Split(dropCR(s), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(l)
+	}
+	return lines
+}
+
+// indentStyle names how a file indents, so a whitespace mismatch message can
+// say which convention the re-typed search must follow.
+func indentStyle(content string) string {
+	switch {
+	case strings.Contains("\n"+content, "\n\t"):
+		return "this file indents with tabs"
+	case strings.Contains("\n"+content, "\n "):
+		return "this file indents with spaces"
+	default:
+		return "check leading and trailing whitespace"
+	}
+}
+
+func firstNonBlankLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			return l
+		}
+	}
+	return ""
+}
+
+// linesTrimEqualTo returns the 1-based numbers of content lines equal to
+// trimmed once their own surrounding whitespace is ignored.
+func linesTrimEqualTo(content, trimmed string) []int {
+	var hits []int
+	for i, l := range strings.Split(dropCR(content), "\n") {
+		if strings.TrimSpace(l) == trimmed {
+			hits = append(hits, i+1)
+		}
+	}
+	return hits
+}
+
+// matchLines returns the 1-based line numbers where search occurs
+// (non-overlapping, like the strings.Count that found them).
+func matchLines(content, search string) []int {
+	var out []int
+	for start := 0; ; {
+		i := strings.Index(content[start:], search)
+		if i < 0 {
+			return out
+		}
+		abs := start + i
+		out = append(out, 1+strings.Count(content[:abs], "\n"))
+		start = abs + len(search)
+	}
+}
+
+// linesEqualTo returns the 1-based numbers of lines exactly equal to want.
+func linesEqualTo(lines []string, want string) []int {
+	var hits []int
+	for i, l := range lines {
+		if l == want {
+			hits = append(hits, i+1)
+		}
+	}
+	return hits
+}
+
+// joinInts renders at most max line numbers, naming how many were left out —
+// a model told "lines 12, 84, 133" can disambiguate; a model told nothing
+// cannot, and a model told two hundred numbers reads none of them.
+func joinInts(ns []int, max int) string {
+	var parts []string
+	for i, n := range ns {
+		if i == max {
+			parts = append(parts, fmt.Sprintf("… %d more", len(ns)-max))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d", n))
+	}
+	return strings.Join(parts, ", ")
 }

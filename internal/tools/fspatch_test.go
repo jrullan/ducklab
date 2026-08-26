@@ -127,6 +127,97 @@ func TestAnAmbiguousSearchIsStillRefused(t *testing.T) {
 	}
 }
 
+// A miss must TEACH. "matches 0 times" was measured producing a fail→read→fail
+// loop — six failed patches on one file in one run — because the error said
+// nothing about HOW the search differed from the file. These tests pin each
+// diagnosis branch to the failure mode it repairs.
+
+// The commonest self-inflicted miss: the model copied its own fs_read output,
+// line-number prefixes included.
+func TestAMissWithLineNumberPrefixesIsDiagnosed(t *testing.T) {
+	res, after := patchIn(t, "func a() {\n\treturn\n}\n",
+		`{"path":"index.html","old_str":"   1\tfunc a() {\n   2\t\treturn","new_str":"x"}`)
+	if !res.IsError {
+		t.Fatalf("a prefixed search was applied: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "line-number prefixes") {
+		t.Errorf("the miss was not diagnosed as copied prefixes: %q", res.Content)
+	}
+	if after != "func a() {\n\treturn\n}\n" {
+		t.Errorf("the file was touched: %q", after)
+	}
+}
+
+// The second commonest: the text is right, the whitespace is not — a model
+// re-typing a tab-indented file with spaces. The repair is the line number.
+func TestAMissByWhitespaceNamesTheLine(t *testing.T) {
+	res, _ := patchIn(t, "func main() {\n\tdoThing()\n}\n",
+		`{"path":"index.html","old_str":"func main() {\n    doThing()\n}","new_str":"x"}`)
+	if !res.IsError {
+		t.Fatalf("a whitespace-drifted search was applied: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "line 1") || !strings.Contains(res.Content, "whitespace") {
+		t.Errorf("the miss was not located: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "tabs") {
+		t.Errorf("the file's indent style was not named: %q", res.Content)
+	}
+}
+
+// fs_patch is all-or-nothing, and the error must SAY so: a model told only
+// "edit 1 missed" concludes edit 0 landed and composes its next call against
+// a file state that does not exist.
+func TestAMissStatesThatNothingWasApplied(t *testing.T) {
+	res, after := patchIn(t, "one\ntwo\nthree\n",
+		`{"path":"index.html","edits":[{"search":"one","replace":"uno"},{"search":"missing","replace":"x"}]}`)
+	if !res.IsError {
+		t.Fatalf("a partial patch was applied: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "No edits from this call were applied") {
+		t.Errorf("the all-or-nothing contract is not stated: %q", res.Content)
+	}
+	if after != "one\ntwo\nthree\n" {
+		t.Errorf("edits landed despite the error: %q", after)
+	}
+}
+
+// An ambiguous search names WHERE it matched, so the model can extend it
+// instead of guessing.
+func TestAnAmbiguousSearchNamesItsLines(t *testing.T) {
+	res, _ := patchIn(t, "x\ny\nx\n", `{"path":"index.html","old_str":"x","new_str":"z"}`)
+	if !res.IsError {
+		t.Fatalf("an ambiguous search was applied: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "lines 1, 3") {
+		t.Errorf("the match locations are not named: %q", res.Content)
+	}
+}
+
+// search == replace is a no-op the model mistook for an edit; reporting it as
+// "patched (1 edits)" tells it the work is done when nothing changed.
+func TestIdenticalSearchAndReplaceIsRefused(t *testing.T) {
+	res, after := patchIn(t, "hello\n", `{"path":"index.html","old_str":"hello","new_str":"hello"}`)
+	if !res.IsError {
+		t.Fatalf("an identical search/replace was reported as an edit: %q", res.Content)
+	}
+	if after != "hello\n" {
+		t.Errorf("the file changed: %q", after)
+	}
+}
+
+// When only the tail of a search has drifted, its first line anchors the
+// diagnosis: re-read THERE, not the whole file.
+func TestADriftedTailIsAnchoredToItsFirstLine(t *testing.T) {
+	res, _ := patchIn(t, "alpha unique\nbeta\ngamma\n",
+		`{"path":"index.html","old_str":"alpha unique\nCHANGED","new_str":"x"}`)
+	if !res.IsError {
+		t.Fatalf("a drifted search was applied: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "first line matches line 1") {
+		t.Errorf("the drift was not anchored: %q", res.Content)
+	}
+}
+
 func TestFSPatchRefusalsEndTheTurnOnTheFifthRefusalPerFile(t *testing.T) {
 	const maxRefusalsBeforeTurnEnd = 5
 

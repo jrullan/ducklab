@@ -22,7 +22,8 @@ func (t *Shell) Mutating() bool { return true }
 
 // Description returns the tool description.
 func (t *Shell) Description() string {
-	return "Run a shell command in the project root. Subject to policy."
+	return "Run a shell command in the project root. Each call is a FRESH shell: cd, variables " +
+		"and state do not carry over to the next call. Subject to policy."
 }
 
 // Schema returns the argument schema.

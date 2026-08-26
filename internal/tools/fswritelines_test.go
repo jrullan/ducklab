@@ -69,6 +69,25 @@ func TestWriteLinesMismatchTeachesTheActualLine(t *testing.T) {
 	}
 }
 
+// When the given first_line exists elsewhere in the file, WHERE it went is the
+// repair: the numbers shifted (usually by the model's own earlier edit), and
+// naming the corrected start/end closes the loop in one call instead of a
+// re-read-and-recount round trip.
+func TestWriteLinesShiftedRangeNamesTheNewNumbers(t *testing.T) {
+	ectx, root := writeLinesFixture(t)
+	res := execWriteLines(t, ectx, `{"path":"f.txt","start":2,"end":3,"first_line":"four","content":"X"}`)
+	if !res.IsError {
+		t.Fatal("expected refusal on first_line mismatch")
+	}
+	if !strings.Contains(res.Content, "start=4") || !strings.Contains(res.Content, "end=5") {
+		t.Errorf("error does not name the shifted range: %s", res.Content)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "f.txt"))
+	if string(got) != "one\ntwo\nthree\nfour\nfive\n" {
+		t.Errorf("file was modified despite refusal: %q", got)
+	}
+}
+
 func TestWriteLinesEmptyContentDeletes(t *testing.T) {
 	ectx, root := writeLinesFixture(t)
 	res := execWriteLines(t, ectx, `{"path":"f.txt","start":2,"end":4,"first_line":"two","content":""}`)
