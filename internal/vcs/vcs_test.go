@@ -588,6 +588,66 @@ func TestDiffExcludesTheHarnessDirectory(t *testing.T) {
 	}
 }
 
+func TestRenderCapturesStayOutOfDiffAndStaging(t *testing.T) {
+	g, dir := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab-render-captures"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab-render-captures", "scene.png"), []byte("binary evidence"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "candidate.go"), []byte("package candidate\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := g.Diff()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "candidate.go") || strings.Contains(diff, "scene.png") {
+		t.Fatalf("diff included the wrong paths: %q", diff)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := g.run("diff", "--cached", "--name-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(staged, "candidate.go") || strings.Contains(staged, "scene.png") {
+		t.Fatalf("staged paths included render evidence: %q", staged)
+	}
+}
+
+func TestAddAllExcludingDeduplicatesIgnoredSymlinkPaths(t *testing.T) {
+	g, dir := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n.venv/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "frontend", "node_modules")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, ".venv")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "change.go"), []byte("package change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAllExcluding("node_modules", "frontend/node_modules", ".venv", ".venv"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := g.run("diff", "--cached", "--name-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "change.go") || strings.Contains(out, "node_modules") || strings.Contains(out, ".venv") {
+		t.Fatalf("staged paths = %q", out)
+	}
+}
+
 // Linked dependency directories are runtime inputs for an isolated run. Their
 // symlink target may expose an operator path, so candidate diffs must omit them
 // while retaining the task's real files.

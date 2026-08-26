@@ -220,27 +220,39 @@ func (g *Git) AddAll() error {
 
 // AddAllExcluding stages all changes except runtime-only paths. Callers use it
 // for linked dependency trees that are available in an isolated checkout but
-// must never become repository content. Excluded paths are explicitly removed
-// from the index after add: pathspec exclusion alone can leave a newly linked
-// path staged, which makes a later rebase refuse the dirty index.
+// must never become repository content.
+//
+// Do not put exclusions in the add pathspec. A linked dependency may be an
+// ignored symlink, and git then errors before the exclusion can take effect.
+// Stage the tree without pathspecs (ignored files are still ignored by git),
+// then explicitly remove the runtime paths from the index.
 func (g *Git) AddAllExcluding(excluded ...string) error {
-	args := []string{"add", "-A", "--", "."}
-	var paths []string
-	for _, path := range excluded {
-		if path != "" {
-			path = filepath.ToSlash(path)
-			args = append(args, ":^"+path)
-			paths = append(paths, path)
-		}
-	}
-	if _, err := g.run(args...); err != nil {
+	if _, err := g.run("add", "-A"); err != nil {
 		return err
 	}
+	// Render output is evidence, never candidate work, even when a caller did
+	// not provide the run's dependency exclusions.
+	paths := uniquePaths(append(excluded, ".ducklab-render-captures"))
 	if len(paths) == 0 {
 		return nil
 	}
 	_, err := g.run(append([]string{"rm", "-r", "--cached", "--ignore-unmatch", "--"}, paths...)...)
 	return err
+}
+
+func uniquePaths(paths []string) []string {
+	seen := make(map[string]bool, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		path = strings.TrimSuffix(path, "/")
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
 }
 
 // Clean discards tracked and untracked working-tree changes.
@@ -340,11 +352,9 @@ func (g *Git) DiffExcluding(excluded ...string) (string, error) {
 	// it — T-097's reviewer then flagged, CRITICAL, that the diff "loosens
 	// harness safety constraints without task justification". It was right
 	// about everything except whose change it was.
-	paths := []string{".", ":^.ducklab"}
-	for _, path := range excluded {
-		if path != "" {
-			paths = append(paths, ":^"+filepath.ToSlash(path))
-		}
+	paths := []string{".", ":^.ducklab", ":^.ducklab-render-captures"}
+	for _, path := range uniquePaths(excluded) {
+		paths = append(paths, ":^"+path)
 	}
 	return g.run(append([]string{"diff", "HEAD", "--"}, paths...)...)
 }
