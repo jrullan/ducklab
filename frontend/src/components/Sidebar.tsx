@@ -1,8 +1,10 @@
-import type { EngineClient, Project } from "../api/client";
+import { useEffect, useState } from "react";
+import type { Duckling, EngineClient, Project } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { AppControl } from "./AppControl";
 import { routeHref, type Route } from "../app/routes";
 import { AutopilotControl } from "./GuidePanel";
+import { ChatAbout } from "./ChatAbout";
 
 export type SidebarZone = {
   label: string;
@@ -39,6 +41,11 @@ export function Sidebar({
   connection: "open" | "connecting" | "reconnecting" | "closed";
 }) {
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
+  const [ducklings, setDucklings] = useState<Duckling[]>([]);
+  useEffect(() => {
+    if (!client || !projectId) return;
+    client.ducklings().then(setDucklings).catch(() => setDucklings([]));
+  }, [client, projectId]);
   // Settings is one door; its rooms are deliberately owned by the category
   // menu inside the Settings view, not by a sidebar subnav.
   const hasSettings = configMembers.includes("settings");
@@ -80,6 +87,16 @@ export function Sidebar({
         <div className="mt-3"><AutopilotControl client={client} projectId={projectId} /></div>
       </>}
       <footer className="mt-4 flex flex-col gap-1 border-t border-hairline pt-3 text-sm" data-testid="sidebar-footer">
+        {client && projectId && ducklings.length > 0 && (
+          <ChatAbout
+            client={client}
+            projectId={projectId}
+            aboutKind="ducklab"
+            aboutId={projectId}
+            ducklings={ducklings}
+            label="Ask how & why — chat about the project"
+          />
+        )}
         <StatusChip role={connection === "open" ? "good" : connection === "closed" ? "critical" : "warning"} label={connection === "open" ? "engine" : `engine · stream ${connection}`} />
         {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}
       </footer>

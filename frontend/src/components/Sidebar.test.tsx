@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { EngineClient } from "../api/client";
+import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
 import { routeHref } from "../app/routes";
 
@@ -34,6 +35,21 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
     expect(screen.queryByTestId("utility-drawer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("utilities-drawer")).not.toBeInTheDocument();
+  });
+
+  it("renders the project chat door and opens the chat", async () => {
+    const client = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async () => new Response('[{"id":"luna","provider":"test","model":"test"}]', { status: 200, headers: { "Content-Type": "application/json" } })) as never,
+    });
+    vi.spyOn(client, "roster").mockResolvedValue({ entries: [] });
+    vi.spyOn(client, "ducklings").mockResolvedValue([{ id: "luna", provider: "test", model: "test" }]);
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[{ id: "p", name: "project", path: "." }]} projectId="p" onProject={() => {}} client={client} waitingCount={0} connection="open" />);
+
+    await waitFor(() => expect(within(screen.getByTestId("sidebar-footer")).getByTestId("chat-about")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("chat-about"));
+    expect(screen.getByTestId("chat-about-form")).toBeInTheDocument();
   });
 
   it("removes app identity and keeps project selection as the only project control", () => {

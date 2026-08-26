@@ -100,6 +100,18 @@ describe("chat transcript author avatars", () => {
   });
 });
 
+describe("ChatAbout roster seating", () => {
+  it("pre-seats the resolved consultant when the chat opens", async () => {
+    const roster = vi.fn().mockResolvedValue({ entries: [{ role: "consultant", duckling: "luna", source: "project" }] });
+    const rosterClient = { roster } as unknown as EngineClient;
+    const ducklings = [{ id: "luna", provider: "test", model: "test" }];
+    render(<ChatAbout client={rosterClient} projectId="p" aboutKind="task" aboutId="T-1" ducklings={ducklings} />);
+    fireEvent.click(screen.getByTestId("chat-about"));
+    await waitFor(() => expect(screen.getByTestId("chat-duckling")).toHaveValue("luna"));
+    expect(roster).toHaveBeenCalledWith("p");
+  });
+});
+
 describe("ChatAbout image attachments", () => {
   const ducklings = [
     { id: "text-only", provider: "test", model: "text", caps: { native_tools: true, context_tokens: 1, vision: false } },
@@ -110,7 +122,8 @@ describe("ChatAbout image attachments", () => {
     return new EngineClient({
       baseUrl: "http://engine",
       token: "t",
-      fetchFn: (async (_url: string, init?: RequestInit) => {
+      fetchFn: (async (url: string, init?: RequestInit) => {
+        if (url.includes("/roster")) return new Response('{"entries":[]}', { status: 200, headers: { "Content-Type": "application/json" } });
         requests.push({ body: init?.body ? JSON.parse(String(init.body)) : undefined });
         return new Response('{"id":"new-chat"}', { status: 200, headers: { "Content-Type": "application/json" } });
       }) as never,

@@ -35,6 +35,22 @@ export function ChatAbout({
 }) {
   const [open, setOpen] = useState(startOpen);
   const [duckling, setDuckling] = useState(preselectedDuckling);
+  const pickerTouched = useRef(false);
+  // The consultant is a roster decision, not a second question at the chat door.
+  // Resolve it here so project, task, and bug chats all share the same seat.
+  useEffect(() => {
+    if (!open || preselectedDuckling || typeof client.roster !== "function") return;
+    // Give a person who is about to pick a seat precedence over the async
+    // roster lookup, while filling an untouched picker from the resolved seat.
+    if (pickerTouched.current) return;
+    let cancelled = false;
+    void client.roster(projectId).then(({ entries }) => {
+      if (cancelled || pickerTouched.current) return;
+      const consultant = entries.find((entry) => entry.role === "consultant")?.duckling;
+      if (consultant) setDuckling((current) => current || consultant);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [client, projectId, preselectedDuckling, open]);
   const [message, setMessage] = useState(initialMessage);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +96,7 @@ export function ChatAbout({
     <div className="space-y-1 rounded border border-hairline p-2" data-testid="chat-about-form">
       <select
         value={duckling}
-        onChange={(e) => setDuckling(e.target.value)}
+        onChange={(e) => { pickerTouched.current = true; setDuckling(e.target.value); }}
         data-testid="chat-duckling"
         className="w-full rounded border border-hairline bg-surface2 px-1 py-0.5 text-xs"
       >
