@@ -606,7 +606,14 @@ func TestAcceptWorktreeRacedCheckoutAdvancesWithWarning(t *testing.T) {
 	}
 }
 
-func TestAcceptWorktreeLeavesDirtyDucklabCheckoutBehindWithWarning(t *testing.T) {
+// The engine dirties its own registered checkout continuously — audit.jsonl
+// on every bug move, project.toml on every Settings edit — so a cleanliness
+// rule that counts .ducklab churn makes the fast-forward dead code: the
+// first clean-tree accept of the feature's life still warned "left
+// untouched" because the engine had filed bugs that evening. The sync is
+// path-scoped; only local changes on the paths it would touch can be lost.
+// Unrelated .ducklab state must survive the sync AND not block it.
+func TestAcceptWorktreeSyncsDespiteDucklabChurnAndPreservesIt(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
 	gitProject(t, dir)
@@ -614,9 +621,7 @@ func TestAcceptWorktreeLeavesDirtyDucklabCheckoutBehindWithWarning(t *testing.T)
 	if err := os.WriteFile(ducklabPath, []byte("committed state\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// This remains an untracked, user-visible path in the registered checkout.
-	// It must block synchronization just like tracked changes do.
-	run, _ := pausedWorktreeRun(t, s, id, dir, "r-leave-dirty-ducklab-checkout")
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-sync-despite-ducklab-churn")
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "accepted.txt"), []byte("accepted work\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -628,35 +633,24 @@ func TestAcceptWorktreeLeavesDirtyDucklabCheckoutBehindWithWarning(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWarning := "main advanced to " + result.CommitSHA + "; your checkout is behind and was left untouched; a commit from this tree would revert landed work, and builds read stale sources"
-	if got := acceptResultWarning(t, result); got != wantWarning {
-		t.Fatalf("accept warning = %q, want %q", got, wantWarning)
+	if got := acceptResultWarning(t, result); got != "" {
+		t.Fatalf("accept warned %q; unrelated .ducklab churn must not block the sync", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "accepted.txt")); !os.IsNotExist(err) {
-		t.Fatalf("dirty checkout received accepted file: %v", err)
+	// The landed work reached the person's checkout...
+	accepted, err := os.ReadFile(filepath.Join(dir, "accepted.txt"))
+	if err != nil {
+		t.Fatalf("clean touched paths were not synced: %v", err)
 	}
+	if string(accepted) != "accepted work\n" {
+		t.Fatalf("synced file holds %q", accepted)
+	}
+	// ...and their local harness state was not touched by it.
 	got, err := os.ReadFile(ducklabPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "person's local state\n" {
 		t.Fatalf("local .ducklab state was changed to %q", got)
-	}
-	detail, err := s.RunGet(context.Background(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Run.Warning != wantWarning {
-		t.Fatalf("run warning = %q, want %q", detail.Run.Warning, wantWarning)
-	}
-	found := false
-	for _, event := range detail.Events {
-		if event.Type == "warning" && event.Data["detail"] == wantWarning {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("warning event %q was not recorded", wantWarning)
 	}
 }
 

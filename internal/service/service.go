@@ -2854,10 +2854,20 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if err != nil {
 			return fmt.Errorf("list accepted paths: %w", err)
 		}
-		// Any local change makes the registered checkout unsafe to advance:
-		// unrelated staged, unstaged, and untracked files are just as much at
-		// risk as paths touched by the candidate.
-		clean, err = defaultGit.PathsAreCleanForSync()
+		// Cleanliness is judged on the paths the sync will TOUCH, because the
+		// sync is path-scoped: SyncPathsToRevision checks out only `touched`,
+		// so those are the only files a local change can lose.
+		//
+		// The whole-checkout rule this replaces (B-267's first landing) was
+		// safe-sounding and fatal in practice: .ducklab/bugs/audit.jsonl and
+		// project.toml change on every bug move and Settings edit — the
+		// engine dirties its own registered checkout continuously — so the
+		// whole-tree check made the fast-forward DEAD CODE. Measured: the
+		// first clean-tree accept of the feature's life (T-222) still warned
+		// "left untouched" because the engine had filed bugs that evening,
+		// and the person's checkout silently kept the INVERSE of the landed
+		// work — the stale-tree class the sync exists to kill.
+		clean, err = defaultGit.PathsAreClean(touched)
 		if err != nil {
 			return fmt.Errorf("check registered checkout paths: %w", err)
 		}
