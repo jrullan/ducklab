@@ -241,7 +241,19 @@ export function ConversationTurn({
           complete one is worse than none. */}
       {!collapsed && block.incomplete && (
         <div className="mt-1" data-testid="turn-incomplete">
-          <StatusChip role="warning" label="turn did not finish" />
+          {block.checkpointNotes ? (
+            <>
+              <StatusChip
+                role="warning"
+                label={block.resumed ? "resumed with partial notes" : "turn interrupted with partial notes"}
+              />
+              <div className="mt-1 whitespace-pre-wrap text-sm text-ink-secondary" data-testid="checkpoint-notes">
+                {block.checkpointNotes}
+              </div>
+            </>
+          ) : (
+            <StatusChip role="warning" label="turn did not finish" />
+          )}
         </div>
       )}
 

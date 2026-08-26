@@ -79,6 +79,10 @@ export interface TurnBlock {
    * What it said and did is real but partial, and a reader must not take it for
    * a complete record. */
   incomplete?: boolean;
+  /** Durable notes captured when this turn was interrupted and later resumed. */
+  checkpointNotes?: string;
+  /** A later turn_start resumed this turn's checkpoint. */
+  resumed?: boolean;
   /** What this turn was working on: a split's subtask, a tournament's
    * contestant slot. Two lanes with the same role and the same duckling are
    * otherwise indistinguishable, which is exactly what a split produces. */
@@ -339,6 +343,11 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           });
         }
         const key = keyFor(round, turn);
+        const previous = byKey.get(key);
+        // A resumed turn reuses its coordinates. Keep the interrupted block in
+        // the transcript, and mark it so its durable checkpoint is readable as
+        // context rather than as an unexplained incomplete answer.
+        if (previous?.checkpointNotes) previous.resumed = true;
         const block: TurnBlock = {
           key,
           round,
@@ -359,6 +368,15 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           for (const o of open) o.concurrent = true;
         }
         open.add(block);
+        break;
+      }
+      case "turn_interrupted": {
+        const b = blockFor(d);
+        const notes = typeof d.notes === "string" ? d.notes : "";
+        if (b) {
+          b.incomplete = true;
+          if (notes) b.checkpointNotes = notes;
+        }
         break;
       }
       case "turn_end": {

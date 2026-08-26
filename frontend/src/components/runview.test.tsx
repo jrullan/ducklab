@@ -118,12 +118,29 @@ describe("ConversationTurn", () => {
     ]);
     const interrupted = blocks.find((block) => block.incomplete);
     expect(interrupted).toBeTruthy();
+    expect(interrupted!.checkpointNotes).toBe(checkpointNotes);
+    expect(interrupted!.resumed).toBe(true);
 
     render(<ConversationTurn block={interrupted!} roster={roster} />);
     expect(screen.getByText(checkpointNotes)).toBeTruthy();
     expect(screen.getByText(/resumed with partial notes/i)).toBeTruthy();
     // The checkpoint replaces the otherwise context-free incomplete warning.
     expect(screen.queryByText("turn did not finish")).toBeNull();
+  });
+
+  it("keeps an interrupted turn incomplete without claiming it resumed", () => {
+    const [block] = buildTurns([
+      ev("turn_start", 1, { round: 1, turn: 0, role: "implementer", duckling: "pato-uno" }),
+      ev("turn_interrupted", 2, { round: 1, turn: 0, role: "implementer" }),
+      ev("turn_end", 3, { round: 1, turn: 0, role: "implementer" }),
+    ]);
+    expect(block!.incomplete).toBe(true);
+    expect(block!.checkpointNotes).toBeUndefined();
+    expect(block!.resumed).toBeUndefined();
+
+    render(<ConversationTurn block={block!} roster={roster} />);
+    expect(screen.getByText("turn did not finish")).toBeTruthy();
+    expect(screen.queryByText(/resumed with partial notes/i)).toBeNull();
   });
 
   it("says nothing about finishing when the turn finished", () => {
