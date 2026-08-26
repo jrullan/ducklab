@@ -549,6 +549,17 @@ func (s *Server) handleRunBrief(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"brief": brief})
 }
 
+func (s *Server) handleRunCapture(w http.ResponseWriter, r *http.Request) {
+	data, err := s.svc.RunCapture(r.Context(), r.PathValue("id"), r.PathValue("name"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 func (s *Server) handleRunDiff(w http.ResponseWriter, r *http.Request) {
 	diff, err := s.svc.RunDiff(r.Context(), r.PathValue("id"))
 	if err != nil {

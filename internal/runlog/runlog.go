@@ -79,6 +79,7 @@ type Run struct {
 	PendingSince string                 `json:"pending_since,omitempty"`
 	PendingKind  string                 `json:"pending_kind,omitempty"` // gate|question
 	PendingData  map[string]interface{} `json:"pending_data,omitempty"`
+	Captures     []string               `json:"captures,omitempty"`
 	UnsafeWrites bool                   `json:"unsafe_writes"`
 	Stream       bool                   `json:"stream"`
 	DryRun       bool                   `json:"dry_run"`
@@ -451,6 +452,18 @@ func (w *Writer) WriteVerify(output string) error {
 func (w *Writer) WriteDiff(diff string) error {
 	path := filepath.Join(w.runDir, "diff.patch")
 	return os.WriteFile(path, []byte(diff), 0o644)
+}
+
+// WriteCapture stores a PNG (or other render artifact) under the run evidence.
+func (w *Writer) WriteCapture(name string, data []byte) error {
+	if name == "" || filepath.Base(name) != name || name == "." || name == ".." {
+		return fmt.Errorf("invalid capture name")
+	}
+	dir := filepath.Join(w.runDir, "captures")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, filepath.Base(name)), data, 0o644)
 }
 
 // WriteBrief writes what a person asked for, verbatim.

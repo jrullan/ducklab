@@ -1,4 +1,4 @@
-import type { Run } from "../api/client";
+import { EngineClient, type Run } from "../api/client";
 import { StatusChip } from "./StatusChip";
 import { routeHref } from "../app/routes";
 import { runLabel } from "../lib/runview";
@@ -31,7 +31,9 @@ export function WaitingCard({
   onReject,
   onAbort,
   acceptError,
+  client,
 }: {
+  client?: EngineClient;
   run: Run;
   accepting: boolean;
   onAccept: () => void;
@@ -153,7 +155,7 @@ export function WaitingCard({
           accept failed: {acceptError}
         </p>
       )}
-      <EvidenceDrawerHost run={run} open={evidenceOpen} onClose={() => setEvidenceOpen(false)} />
+      <EvidenceDrawerHost run={run} captureClient={client} open={evidenceOpen} onClose={() => setEvidenceOpen(false)} />
     </li>
   );
 }

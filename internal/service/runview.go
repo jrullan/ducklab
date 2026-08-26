@@ -29,6 +29,18 @@ func (s *Service) RunDiff(ctx context.Context, id string) (string, error) {
 	return s.readRunFile(id, "diff.patch")
 }
 
+// RunCapture returns one attached render artifact.
+func (s *Service) RunCapture(ctx context.Context, id, name string) ([]byte, error) {
+	if filepath.Base(name) != name || name == "." || name == ".." || filepath.Ext(name) == "" {
+		return nil, fmt.Errorf("invalid capture name")
+	}
+	dir := s.RunDir(id)
+	if dir == "" {
+		return nil, fmt.Errorf("run %q not found", id)
+	}
+	return os.ReadFile(filepath.Join(dir, "captures", name))
+}
+
 // RunTestHunks returns the test-file part of the diff for a flagged run.
 //
 // Empty for every run that did not touch tests, which is most of them.

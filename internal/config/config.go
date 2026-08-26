@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -403,6 +404,21 @@ type Project struct {
 	GitHub    GitHub                         `toml:"github" json:"github"`
 	Shell     ShellPolicy                    `toml:"shell" json:"shell"`
 	Run       RunApp                         `toml:"run" json:"run"`
+	Render    RenderContract                 `toml:"render,omitempty" json:"render,omitempty"`
+	// RenderConfigured distinguishes an absent optional [render] section from a
+	// declared section whose command intentionally reuses [run].
+	RenderConfigured bool `toml:"-" json:"-"`
+}
+
+// RenderContract describes optional visual evidence captured at the run gate.
+type RenderContract struct {
+	Command   string   `toml:"command" json:"command"`
+	URL       string   `toml:"url" json:"url"`
+	Ready     string   `toml:"ready" json:"ready"`
+	Scenes    []string `toml:"scenes" json:"scenes"`
+	Viewport  string   `toml:"viewport" json:"viewport"`
+	TimeoutS  int      `toml:"timeout_s" json:"timeout_s"`
+	Artifacts string   `toml:"artifacts" json:"artifacts"`
 }
 
 // RunApp is how the built application actually starts — the stage the gate
@@ -655,8 +671,15 @@ func LoadProject(path string) (*Project, error) {
 		return nil, &Error{File: path, Msg: err.Error()}
 	}
 	p := DefaultProject("", "")
-	if _, err := toml.Decode(string(data), p); err != nil {
+	md, err := toml.Decode(string(data), p)
+	if err != nil {
 		return nil, &Error{File: path, Msg: err.Error()}
+	}
+	for _, key := range md.Keys() {
+		if key.String() == "render" || strings.HasPrefix(key.String(), "render.") {
+			p.RenderConfigured = true
+			break
+		}
 	}
 	// Tolerant at READ, strict at WRITE. An unknown key here used to refuse
 	// the whole project — which turned every schema-extending task into a
@@ -710,6 +733,20 @@ func (p *Project) Validate(path string) error {
 		p.Verify.Mode != "build" && p.Verify.Mode != "lint" && p.Verify.Mode != "none" &&
 		p.Verify.Mode != "custom" {
 		return &Error{File: path, Key: "verify.mode", Msg: fmt.Sprintf("invalid mode %q", p.Verify.Mode)}
+	}
+	if p.Render.TimeoutS < 0 {
+		return &Error{File: path, Key: "render.timeout_s", Msg: "must be zero (default) or positive"}
+	}
+	if p.Render.Viewport != "" {
+		parts := strings.Split(p.Render.Viewport, "x")
+		if len(parts) != 2 {
+			return &Error{File: path, Key: "render.viewport", Msg: "must be WIDTHxHEIGHT"}
+		}
+		for _, part := range parts {
+			if n, err := strconv.Atoi(part); err != nil || n <= 0 {
+				return &Error{File: path, Key: "render.viewport", Msg: "must be WIDTHxHEIGHT"}
+			}
+		}
 	}
 	if p.References.PerFileChars < 0 || p.References.TotalChars < 0 || p.References.MaxFiles < 0 {
 		return &Error{File: path, Key: "references", Msg: "caps must be zero (default) or positive"}

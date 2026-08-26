@@ -1192,6 +1192,7 @@ function TaskRunner({
       {pausedRun && (
         <ul className="list-none">
           <WaitingCard
+            client={client}
             run={pausedRun}
             accepting={acceptSt?.kind === "pending"}
             onAccept={() => {

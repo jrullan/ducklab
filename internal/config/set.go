@@ -79,7 +79,13 @@ func SetKey(cfg *Project, key, value string) error {
 				key, strings.Join(Keys(), ", "))
 		}
 		if i == len(parts)-1 {
-			return assign(field, key, value)
+			if err := assign(field, key, value); err != nil {
+				return err
+			}
+			if strings.HasPrefix(key, "render.") {
+				cfg.RenderConfigured = true
+			}
+			return nil
 		}
 		if field.Kind() == reflect.Map {
 			return assignMapPath(field, parts[i+1:], key, value)

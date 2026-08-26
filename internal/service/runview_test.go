@@ -122,6 +122,30 @@ func TestRunArtefactsUnknownRunIsAnError(t *testing.T) {
 	}
 }
 
+func TestRunCaptureRejectsTraversalAndReadsAttachedFile(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "proj")
+	entry, _ := s.registry.Get(projectID)
+	writeRun(t, entry.Path, projectID, "r-capture", "done")
+	s.RecoverRuns(context.Background())
+	captureDir := filepath.Join(s.RunDir("r-capture"), "captures")
+	if err := os.MkdirAll(captureDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(captureDir, "scene.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.RunCapture(context.Background(), "r-capture", "scene.png")
+	if err != nil || string(got) != "png" {
+		t.Fatalf("capture = %q, err=%v", got, err)
+	}
+	for _, name := range []string{"../state.json", ".", ".."} {
+		if _, err := s.RunCapture(context.Background(), "r-capture", name); err == nil {
+			t.Errorf("accepted invalid capture name %q", name)
+		}
+	}
+}
+
 func TestRunVerifyTailsOutput(t *testing.T) {
 	s := newTestService(t)
 	projectID := newTestProject(t, s, "proj")

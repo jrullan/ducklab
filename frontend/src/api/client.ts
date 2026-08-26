@@ -76,6 +76,15 @@ export interface AppStatus {
 
 export interface LandingOffer { commit_sha: string; evidence: string }
 
+// Desktop capability: "GET", `/v1/runs/${runId}/captures/${name}` (implemented as a blob URL).
+export async function runCaptureUrl(baseUrl: string, runId: string, name: string, token = ""): Promise<string> {
+  const response = await fetch(`${baseUrl}/v1/runs/${encodeURIComponent(runId)}/captures/${encodeURIComponent(name)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!response.ok) throw new Error(`capture request failed: ${response.status}`);
+  return URL.createObjectURL(await response.blob());
+}
+
 export interface Run {
   id: string;
   project_id: string;
@@ -114,6 +123,7 @@ export interface Run {
   pending_kind?: string;
   pending_since?: string;
   pending_data?: Record<string, unknown>;
+  captures?: string[];
   resolution?: string;
   warning?: string;
   /** Why the run failed, in the engine's words. Some of these are written to be
@@ -1296,6 +1306,18 @@ export class EngineClient {
   }
   /** Fetch one attachment as a blob URL — <img src> cannot carry the auth
    * header, so the bytes come through the client and the URL is local. */
+  async runCaptureUrl(runId: string, name: string): Promise<string> {
+    const f = this.opts.fetchFn ?? fetch;
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.opts.token}` };
+    if (this.opts.version) headers["X-Ducklab-Client"] = this.opts.version;
+    const resp = await f(
+      `${this.opts.baseUrl}/v1/runs/${encodeURIComponent(runId)}/captures/${encodeURIComponent(name)}`,
+      { headers },
+    );
+    if (!resp.ok) throw new Error(`capture ${name}: ${resp.status}`);
+    return URL.createObjectURL(await resp.blob());
+  }
+
   async bugAttachmentUrl(projectId: string, bugId: string, name: string): Promise<string> {
     const f = this.opts.fetchFn ?? fetch;
     const headers: Record<string, string> = { Authorization: `Bearer ${this.opts.token}` };

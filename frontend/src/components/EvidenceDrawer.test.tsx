@@ -28,6 +28,15 @@ describe("EvidenceDrawer", () => {
     expect(screen.getByText("Raw logs").closest("details")).not.toHaveAttribute("open");
   });
 
+  it("shows attached captures in the how it looks strip", async () => {
+    const captureClient = { runCaptureUrl: vi.fn(async (_id: string, name: string) => `blob:${name}`) };
+    render(<EvidenceDrawer run={{ ...run, captures: ["now.png", "runs.png"] }} captureClient={captureClient} onClose={() => {}} />);
+    expect(screen.getByRole("region", { name: "How it looks" })).toBeInTheDocument();
+    expect(screen.getByTestId("render-captures").querySelectorAll("img")).toHaveLength(2);
+    await vi.waitFor(() => expect(screen.getByAltText("now.png")).toHaveAttribute("src", "blob:now.png"));
+    expect(captureClient.runCaptureUrl).toHaveBeenCalledWith("r-1", "now.png");
+  });
+
   it("closes from its close button", () => {
     const onClose = vi.fn();
     render(<EvidenceDrawer run={run} onClose={onClose} />);

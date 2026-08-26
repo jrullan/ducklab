@@ -1873,6 +1873,28 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		return
 	}
 	rs.writer.WriteVerify(gateResult.Output)
+	// Rendering is optional evidence and a failure is only a caveat.
+	render := projCfg.Render
+	if projCfg.RenderConfigured {
+		if render.Command == "" {
+			render.Command = projCfg.Run.Command
+		}
+		if render.Ready == "" {
+			render.Ready = projCfg.Run.Health
+		}
+	}
+	if projCfg.RenderConfigured && render.Command != "" {
+		captures, renderErr := captureRender(ctx, runRoot(rs.run, entry.Path), render, rs.writer, rs.run.ID, rs.run.ProjectID)
+		if renderErr != nil {
+			rs.run.Warning = "render failed: " + renderErr.Error()
+			rs.writer.AppendEvent("render", map[string]interface{}{"ok": false, "reason": renderErr.Error()})
+		} else if len(captures) > 0 {
+			rs.run.Captures = captures
+			rs.writer.AppendEvent("render", map[string]interface{}{"ok": true, "captures": captures})
+		}
+	}
+	// Persist render attachments and caveats before the gate state is exposed.
+	rs.writer.WriteState()
 	// The output rides the event, bounded: a FAILED run whose gate event
 	// said only exit:1 sent the person re-running the whole suite by hand
 	// to learn which test broke (B-122).
@@ -1891,7 +1913,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// Said here, once, with the fix — rather than leaving someone to wonder on
 	// the third run why nothing ever passes.
 	if advice := gateAdvice(entry.Path, projCfg.Verify); advice != "" {
-		rs.run.Warning = advice
+		if rs.run.Warning != "" {
+			rs.run.Warning += "; " + advice
+		} else {
+			rs.run.Warning = advice
+		}
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": advice})
 	}
 

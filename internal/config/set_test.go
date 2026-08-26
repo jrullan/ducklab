@@ -17,6 +17,12 @@ func TestSetKeyWritesNestedValues(t *testing.T) {
 		{"describe", "a harness", func() bool { return cfg.Describe == "a harness" }},
 		{"autonomy", "auto", func() bool { return string(cfg.Autonomy) == "auto" }},
 		{"verify.timeout_s", "42", func() bool { return cfg.Verify.TimeoutS == 42 }},
+		{"render.command", "node capture.mjs", func() bool { return cfg.Render.Command == "node capture.mjs" }},
+		{"render.url", "http://example/{engine}/{token}", func() bool { return cfg.Render.URL == "http://example/{engine}/{token}" }},
+		{"render.scenes", "/,/runs", func() bool { return slices.Equal(cfg.Render.Scenes, []string{"/", "/runs"}) }},
+		{"render.viewport", "800x600", func() bool { return cfg.Render.Viewport == "800x600" }},
+		{"render.timeout_s", "9", func() bool { return cfg.Render.TimeoutS == 9 }},
+		{"render.artifacts", "captures/*.png", func() bool { return cfg.Render.Artifacts == "captures/*.png" }},
 	} {
 		if err := SetKey(cfg, tc.key, tc.val); err != nil {
 			t.Fatalf("SetKey(%q): %v", tc.key, err)

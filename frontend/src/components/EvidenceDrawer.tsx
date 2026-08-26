@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import type { Run } from "../api/client";
+import { useEffect, useState } from "react";
+import { runCaptureUrl, type Run } from "../api/client";
 import { money, moneyOrZero } from "../lib/format";
 
 type Evidence = Record<string, unknown>;
@@ -36,7 +36,23 @@ function netLines(data: Evidence): string {
   return "not recorded";
 }
 
-export function EvidenceDrawer({ run, onClose }: { run: Run; onClose: () => void }) {
+export function EvidenceDrawer({ run, onClose, captureClient }: { run: Run; onClose: () => void; captureClient?: { runCaptureUrl: (runId: string, name: string) => Promise<string> } }) {
+  const [captureURLs, setCaptureURLs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    const urls: string[] = [];
+    for (const name of run.captures ?? []) {
+      const promise = captureClient
+        ? captureClient.runCaptureUrl(run.id, name)
+        : runCaptureUrl(window.ducklab?.baseUrl ?? "", run.id, name, window.ducklab?.token ?? "");
+      void promise.then((url) => {
+        if (!alive) { URL.revokeObjectURL?.(url); return; }
+        urls.push(url);
+        setCaptureURLs((old) => ({ ...old, [name]: url }));
+      });
+    }
+    return () => { alive = false; for (const url of urls) URL.revokeObjectURL?.(url); };
+  }, [run.id, run.captures, captureClient]);
   const data = (run.pending_data ?? {}) as Evidence;
   const testStatus = text(value(data, "tests", "test_summary", "test_status"), run.verdict === "UNVERIFIED" ? "unverified" : run.verdict.toLowerCase());
   const testNote = text(value(data, "test_note", "tests_note", "test_message"), run.warning ?? "No further test note recorded.");
@@ -48,6 +64,7 @@ export function EvidenceDrawer({ run, onClose }: { run: Run; onClose: () => void
     ? (freshness ? "Tests ran on the final revision." : "Tests did not run on the final revision.")
     : typeof freshness === "string" ? freshness : "Evidence freshness was not recorded.";
   const files = filesFrom(data);
+  const captures = run.captures ?? [];
 
   return (
     <div className="fixed inset-0 z-40" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -57,6 +74,7 @@ export function EvidenceDrawer({ run, onClose }: { run: Run; onClose: () => void
           <button type="button" aria-label="Close evidence" onClick={onClose} className="rounded border border-hairline px-2 py-1 text-sm">Close</button>
         </div>
         <p className="mt-4 text-sm text-ink-secondary">{text(run.subject, "This run is waiting for your decision.")}</p>
+        {captures.length > 0 && <section className="mt-5" aria-label="How it looks"><h3 className="text-sm font-medium text-ink">How it looks</h3><div className="mt-2 flex gap-3 overflow-x-auto" data-testid="render-captures">{captures.map((capture) => <img key={capture} src={captureURLs[capture]} alt={capture} className="h-32 w-auto rounded border border-hairline object-cover" />)}</div></section>}
         <div className="mt-4 grid gap-2 sm:grid-cols-3" data-testid="evidence-tiles">
           <div className="rounded border border-hairline p-3"><p className="text-xs text-ink-muted">Tests</p><p className="mt-1 font-medium text-ink">{testStatus}</p><p className="mt-1 text-xs text-ink-secondary">{testNote}</p></div>
           <div className="rounded border border-hairline p-3"><p className="text-xs text-ink-muted">Reviewer verdict</p><p className="mt-1 text-sm text-ink">“{verdict.replace(/^“|”$/g, "") }”</p></div>
@@ -71,7 +89,7 @@ export function EvidenceDrawer({ run, onClose }: { run: Run; onClose: () => void
   );
 }
 
-export function EvidenceDrawerHost({ run, open, onClose }: { run: Run; open: boolean; onClose: () => void }) {
+export function EvidenceDrawerHost({ run, open, onClose, captureClient }: { run: Run; open: boolean; onClose: () => void; captureClient?: { runCaptureUrl: (runId: string, name: string) => Promise<string> } }) {
   useEffect(() => { if (!open) return; const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [open, onClose]);
-  return open ? <EvidenceDrawer run={run} onClose={onClose} /> : null;
+  return open ? <EvidenceDrawer run={run} captureClient={captureClient} onClose={onClose} /> : null;
 }

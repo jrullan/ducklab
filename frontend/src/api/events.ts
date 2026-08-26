@@ -262,6 +262,7 @@ export const KNOWN_EVENT_TYPES = [
   "seat_failover",
   "gate_resolved",
   "gate_reproduced",
+  "render",
   // An accept whose commit did not reproduce from a clean checkout takes
   // the commit back; the diff stays in the tree, uncommitted (B-069).
   "commit_withdrawn",
