@@ -2801,7 +2801,10 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if err != nil {
 			return fmt.Errorf("list accepted paths: %w", err)
 		}
-		clean, err = defaultGit.PathsAreClean(touched)
+		// Any local change makes the registered checkout unsafe to advance:
+		// unrelated staged, unstaged, and untracked files are just as much at
+		// risk as paths touched by the candidate.
+		clean, err = defaultGit.PathsAreClean([]string{".", ":^.ducklab/**"})
 		if err != nil {
 			return fmt.Errorf("check registered checkout paths: %w", err)
 		}
@@ -2814,7 +2817,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	// local changes that the fast-forward could overwrite.
 	if onDefault {
 		if !clean {
-			rs.run.Warning = fmt.Sprintf("main advanced to %s; your checkout is behind and was left untouched", rebasedSHA)
+			rs.run.Warning = fmt.Sprintf("main advanced to %s; your checkout is behind and was left untouched; a commit from this tree would revert landed work, and builds read stale sources", rebasedSHA)
 			rs.writer.AppendEvent("warning", map[string]interface{}{"detail": rs.run.Warning})
 		} else if err := defaultGit.SyncPathsToRevision(rebasedSHA, touched); err != nil {
 			// The landing is already durable. A person (or another git

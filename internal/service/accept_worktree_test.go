@@ -554,7 +554,7 @@ func TestAcceptWorktreeLeavesDirtyTouchedCheckoutBehindWithWarning(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantWarning := "main advanced to " + result.CommitSHA + "; your checkout is behind and was left untouched"
+	wantWarning := "main advanced to " + result.CommitSHA + "; your checkout is behind and was left untouched; a commit from this tree would revert landed work, and builds read stale sources"
 	gotWarning := acceptResultWarning(t, result)
 	if !strings.Contains(gotWarning, wantWarning) {
 		t.Fatalf("accept warning = %q, want checkout state %q", gotWarning, wantWarning)
