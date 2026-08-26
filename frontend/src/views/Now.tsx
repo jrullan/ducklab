@@ -97,11 +97,15 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   }, [client, projectId, runs]);
 
   const list = Object.values(runs);
-  const waiting = pendingForHuman(runs).sort((a, b) =>
+  // Conversations are records, not inbox work, once they have ended for any
+  // reason. Keep terminal chats out of the source list so no classification
+  // (including a future one) can accidentally put a dead conversation in Now.
+  const nowList = list.filter((r) => !isTerminalChat(r));
+  const waiting = pendingForHuman(Object.fromEntries(nowList.map((r) => [r.id, r]))).sort((a, b) =>
     (a.pending_since ?? "").localeCompare(b.pending_since ?? ""),
   );
-  const active = list.filter((r) => r.status === "running" || r.status === "queued");
-  const failures = actionableFailures(list);
+  const active = nowList.filter((r) => r.status === "running" || r.status === "queued");
+  const failures = actionableFailures(nowList);
 
   const toVerify = bugs.filter((b) => b.status === "fixed");
   // A report sent back after its fix landed, with nothing running for it. The
@@ -110,7 +114,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   // and nobody was working on it. The reopened state is a queue item — the
   // next act is a new run — or it is a silence shaped like progress.
   const inFlight = new Set(
-    list
+    nowList
       .filter((r) => r.status === "running" || r.status === "queued" || r.status === "paused")
       .map((r) => r.task_id),
   );
@@ -118,7 +122,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
     (b) => b.status === "in_progress" && !!b.task_id && !inFlight.has(b.task_id),
   );
   const lastModeFor = (taskID: string) =>
-    list
+    nowList
       .filter((r) => r.task_id === taskID)
       .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]?.mode ?? "solo";
 
@@ -352,7 +356,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
           phase 3): cost as ambient information rather than a report consulted
           after the money is gone. Spend used to be a prop there, and the one
           caller passed zero. */}
-      <NowFooter runs={list} />
+      <NowFooter runs={nowList} />
 
 
 
@@ -414,7 +418,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
               )}
             </div>
           ) : (
-            list.length > 0 && (
+            nowList.length > 0 && (
               <p className="mt-1 text-xs text-ink-muted" data-testid="now-all-done">
                 Nothing is ready to start either: everything is done, running, or waiting
                 on something.
@@ -425,6 +429,12 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       )}
     </div>
   );
+}
+
+/** A completed conversation is history regardless of how it terminated. */
+function isTerminalChat(run: Run): boolean {
+  if (run.stage !== "chat") return false;
+  return new Set(["done", "failed", "aborted", "canceled", "cancelled", "ended"]).has(String(run.status).toLowerCase());
 }
 
 /** Failures worth acting on: the LATEST run of its task or stage, still failed,

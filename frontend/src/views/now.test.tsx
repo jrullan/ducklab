@@ -118,6 +118,31 @@ describe("Now — the inbox", () => {
     expect(screen.queryByTestId("now-failures")).toBeNull();
   });
 
+  it("keeps every terminal chat out of every Now bucket", async () => {
+    seed([
+      { ...base, id: "chat-done", stage: "chat", status: "done", verdict: "PASSED", pending_kind: "chat", next: [] },
+      { ...base, id: "chat-failed", stage: "chat", status: "failed", verdict: "FAILED", pending_kind: undefined, next: [], failure: "stream read: context canceled" },
+      { ...base, id: "chat-aborted", stage: "chat", status: "failed", verdict: "ABORTED", pending_kind: undefined, next: [] },
+    ]);
+    render(<Now client={clientWith()} projectId="p" />);
+    await screen.findByTestId("now-quiet");
+    expect(screen.queryByTestId("now-running")).toBeNull();
+    expect(screen.queryByTestId("now-waiting")).toBeNull();
+    expect(screen.queryByTestId("now-failures")).toBeNull();
+    expect(screen.queryByTestId("now-reopened")).toBeNull();
+    expect(screen.queryByTestId("now-footer")).toBeNull();
+    expect(screen.queryByText(/chat-(done|failed|aborted)/)).toBeNull();
+  });
+
+  it("does not let a terminal chat suppress a reopened report", async () => {
+    seed([{ ...base, id: "chat-dead", stage: "chat", task_id: "T-026", status: "failed", verdict: "FAILED", next: [] }]);
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([
+      { id: "B-reopened", title: "Still broken", severity: "high", status: "in_progress", task_id: "T-026", source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z", next: ["fixed"] },
+    ])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    expect(await screen.findByTestId("now-reopened-card")).toBeTruthy();
+  });
+
   // Only the LATEST run of a task, still failed, for work never subsequently
   // accepted. An old failure whose task a later run completed is history, and
   // offering it here would offer redoing finished work.
