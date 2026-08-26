@@ -73,6 +73,108 @@ func TestAPromotedTaskCarriesWhatTheTriageFound(t *testing.T) {
 
 // A bug promoted without being triaged keeps working: the report is all there
 // is, and it is enough to start from.
+// A stored split is a recommendation, not an automatic task creation. Once a
+// person promotes it, however, every portion becomes independently schedulable
+// work with its own lane. The bug cannot claim fixed when only one portion has
+// landed.
+func TestPromotingAStoredSplitCreatesLanesAndWaitsForEveryPortion(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{
+		Title: "saving a profile loses its avatar and leaves the cache stale",
+		Body:  "Both persistence and the cache update fail on save.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	proposal := []interface{}{
+		map[string]interface{}{
+			"title":      "Persist the avatar on profile save",
+			"acceptance": []interface{}{"a saved avatar is present after reload"},
+			"owns":       []interface{}{"internal/profile/persist.go"},
+		},
+		map[string]interface{}{
+			"title":      "Refresh the avatar cache after profile save",
+			"acceptance": []interface{}{"the cache serves the newly saved avatar"},
+			"owns":       []interface{}{"internal/profile/cache.go"},
+		},
+	}
+	if _, err := s.ApplyTriage(context.Background(), id, []map[string]interface{}{{
+		"bug": "B-001", "severity": "high", "reason": "the report spans persistence and caching",
+		"proposal": proposal,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 2 {
+		t.Fatalf("triage auto-applied its proposal: got %d tasks, want 2", len(before))
+	}
+
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 4 {
+		t.Fatalf("promotion created %d tasks, want one for each of 2 portions", len(tasks)-len(before))
+	}
+
+	plan, err := artifact.Load(dir, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		owns       string
+		acceptance string
+	}{
+		"Persist the avatar on profile save": {
+			owns: "internal/profile/persist.go", acceptance: "a saved avatar is present after reload",
+		},
+		"Refresh the avatar cache after profile save": {
+			owns: "internal/profile/cache.go", acceptance: "the cache serves the newly saved avatar",
+		},
+	}
+	var portionIDs []string
+	for _, task := range tasks {
+		portion, ok := want[task.Title]
+		if !ok {
+			continue
+		}
+		portionIDs = append(portionIDs, task.ID)
+		section := plan.Section(task.ID)
+		if section == nil || len(section.Owns) != 1 || section.Owns[0] != portion.owns {
+			t.Errorf("%q owns %v, want its disjoint lane %q", task.Title, section, portion.owns)
+		}
+		if !strings.Contains(task.Body, portion.acceptance) {
+			t.Errorf("%q lost its acceptance criterion:\n%s", task.Title, task.Body)
+		}
+	}
+	if len(portionIDs) != len(want) {
+		t.Fatalf("promoted portions = %v, want both %v", portionIDs, want)
+	}
+
+	if fixed, err := s.BugFixedByTask(context.Background(), id, portionIDs[0]); err != nil || fixed != "" {
+		t.Fatalf("first accepted portion fixed %q, %v; the other portion is still open", fixed, err)
+	}
+	bugs, err := s.BugList(context.Background(), id, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bugs[0].Status != "in_progress" {
+		t.Fatalf("status after one accepted portion = %q, want in_progress", bugs[0].Status)
+	}
+	if fixed, err := s.BugFixedByTask(context.Background(), id, portionIDs[1]); err != nil || fixed != "B-001" {
+		t.Fatalf("all accepted portions fixed %q, %v; want B-001", fixed, err)
+	}
+}
+
+// A bug promoted without being triaged keeps working: the report is all there
+// is, and it is enough to start from.
 func TestAnUntriagedBugStillPromotes(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
