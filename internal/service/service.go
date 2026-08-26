@@ -2804,7 +2804,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		// Any local change makes the registered checkout unsafe to advance:
 		// unrelated staged, unstaged, and untracked files are just as much at
 		// risk as paths touched by the candidate.
-		clean, err = defaultGit.PathsAreClean([]string{".", ":^.ducklab/**"})
+		clean, err = defaultGit.PathsAreCleanForSync()
 		if err != nil {
 			return fmt.Errorf("check registered checkout paths: %w", err)
 		}

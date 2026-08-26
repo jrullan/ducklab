@@ -255,6 +255,23 @@ func uniquePaths(paths []string) []string {
 	return out
 }
 
+// PathsAreCleanForSync reports whether a checkout has any local changes.
+// The entire checkout is considered: even untracked files under .ducklab can
+// be user-visible and must block synchronization.
+func (g *Git) PathsAreCleanForSync() (bool, error) {
+	out, err := g.run("status", "--porcelain", "--untracked-files=all", "--", ".")
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
 // Clean discards tracked and untracked working-tree changes.
 func (g *Git) Clean() error {
 	if _, err := g.run("reset", "--hard", "HEAD"); err != nil {

@@ -540,21 +540,13 @@ func TestAcceptWorktreeRacedCheckoutAdvancesWithWarning(t *testing.T) {
 func TestAcceptWorktreeLeavesDirtyDucklabCheckoutBehindWithWarning(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
-	git := gitProject(t, dir)
+	gitProject(t, dir)
 	ducklabPath := filepath.Join(dir, ".ducklab", "local-state.txt")
 	if err := os.WriteFile(ducklabPath, []byte("committed state\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// .ducklab is normally ignored, but registered checkouts can contain tracked
-	// user-visible files there. Force-add one to exercise its local modification.
-	cmd := exec.Command("git", "add", "-f", ".ducklab/local-state.txt")
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("track .ducklab state: %v: %s", err, out)
-	}
-	if _, err := git.Commit("track local ducklab state"); err != nil {
-		t.Fatal(err)
-	}
+	// This remains an untracked, user-visible path in the registered checkout.
+	// It must block synchronization just like tracked changes do.
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-leave-dirty-ducklab-checkout")
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "accepted.txt"), []byte("accepted work\n"), 0o644); err != nil {
 		t.Fatal(err)

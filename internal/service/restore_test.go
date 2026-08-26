@@ -26,6 +26,9 @@ func gitProject(t *testing.T, dir string) *vcs.Git {
 		}
 	}
 	g := vcs.New(dir)
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".ducklab/runs/\n.ducklab/ducklab.db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("original\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
