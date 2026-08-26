@@ -358,6 +358,12 @@ func parseDecomposition(text string) (*Decomposition, error) {
 }
 
 // Triage is the triager's contract: one bug, classified (04 §6.6).
+type SplitProposal struct {
+	Title      string   `json:"title"`
+	Acceptance []string `json:"acceptance"`
+	Owns       []string `json:"owns"`
+}
+
 type Triage struct {
 	Severity string `json:"severity"`
 	// DuplicateOf is a bug id or empty. A pointer so "absent" and "not a
@@ -383,6 +389,9 @@ type Triage struct {
 	// the build loop that carried none, so its implementer ran without a
 	// checklist and reported "1/1" on the task as a whole.
 	Deliverables []string `json:"deliverables"`
+	// Proposal portions a multi-concern bug into independently owned tasks.
+	// It remains advice until a person promotes the bug.
+	Proposal []SplitProposal `json:"proposal"`
 	// TestReason is one line: why that strategy — and for test-first, a
 	// sketch of the reproduction the test-writer can start from.
 	TestReason string `json:"test_reason"`
@@ -404,6 +413,11 @@ func parseTriage(text string) (*Triage, error) {
 	t.Severity = strings.ToLower(strings.TrimSpace(t.Severity))
 	if !validTriageSeverities[t.Severity] {
 		return nil, fmt.Errorf("triage contract: severity %q, want critical, high, normal or low", t.Severity)
+	}
+	for _, portion := range t.Proposal {
+		if strings.TrimSpace(portion.Title) == "" || len(portion.Acceptance) > 2 || len(portion.Acceptance) == 0 || len(portion.Owns) == 0 {
+			return nil, fmt.Errorf("triage contract: proposal portions need title, 1-2 acceptance criteria, and owns")
+		}
 	}
 	if strings.TrimSpace(t.Reason) == "" {
 		// A classification with no reason cannot be argued with, and this one

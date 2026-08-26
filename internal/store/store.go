@@ -56,6 +56,7 @@ func (d *DB) Migrate() error {
 		{Version: 2, Name: "002_triage_findings", SQL: migration002},
 		{Version: 3, Name: "003_test_strategy", SQL: migration003},
 		{Version: 4, Name: "004_triage_deliverables", SQL: migration004},
+		{Version: 5, Name: "005_triage_proposal", SQL: migration005},
 	}
 
 	for _, m := range migrations {
@@ -282,6 +283,12 @@ func (d *DB) CreateTask(t *Task) error {
 	return err
 }
 
+// SetTaskStatus records task completion needed by bug promotion's all-portions gate.
+func (d *DB) SetTaskStatus(id, status string) error {
+	_, err := d.db.Exec(`UPDATE task SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}
+
 // GetTask returns a task by ID.
 func (d *DB) GetTask(id string) (*Task, error) {
 	var t Task
@@ -404,6 +411,8 @@ type Bug struct {
 	// task, newline-separated; promotedTaskBody renders it as the
 	// **Deliverables:** checklist the implementer reports against.
 	Deliverables string
+	// Proposal is the triager's JSON split recommendation, applied only by promote.
+	Proposal string
 }
 
 // CreateBug inserts a bug.
@@ -436,10 +445,10 @@ func nullable(s string) interface{} {
 func (d *DB) GetBug(id string) (*Bug, error) {
 	var b Bug
 	var dup, task sql.NullString
-	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason, deliverables
+	err := d.db.QueryRow(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason, deliverables, proposal
 		FROM bug WHERE id = ?`, id).Scan(
 		&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status, &dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
-		&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason, &b.Deliverables)
+		&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason, &b.Deliverables, &b.Proposal)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +459,7 @@ func (d *DB) GetBug(id string) (*Bug, error) {
 // ListBugs returns every bug, oldest first. Ordering for a person is the
 // caller's job: urgency is a product decision, not a storage one.
 func (d *DB) ListBugs() ([]*Bug, error) {
-	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason, deliverables
+	rows, err := d.db.Query(`SELECT id, title, body, severity, status, duplicate_of, task_id, source, reporter, created_at, updated_at, component, suspected_files, task_title, triage_reason, test_strategy, test_reason, deliverables, proposal
 		FROM bug ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -462,7 +471,7 @@ func (d *DB) ListBugs() ([]*Bug, error) {
 		var dup, task sql.NullString
 		if err := rows.Scan(&b.ID, &b.Title, &b.Body, &b.Severity, &b.Status,
 			&dup, &task, &b.Source, &b.Reporter, &b.CreatedAt, &b.UpdatedAt,
-			&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason, &b.Deliverables); err != nil {
+			&b.Component, &b.SuspectedFiles, &b.TaskTitle, &b.TriageReason, &b.TestStrategy, &b.TestReason, &b.Deliverables, &b.Proposal); err != nil {
 			return nil, err
 		}
 		b.DuplicateOf, b.TaskID = dup.String, task.String
@@ -476,11 +485,11 @@ func (d *DB) UpdateBug(b *Bug) error {
 	b.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_, err := d.db.Exec(`UPDATE bug SET title = ?, body = ?, severity = ?, status = ?,
 		duplicate_of = ?, task_id = ?, updated_at = ?,
-		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?, test_strategy = ?, test_reason = ?, deliverables = ?
+		component = ?, suspected_files = ?, task_title = ?, triage_reason = ?, test_strategy = ?, test_reason = ?, deliverables = ?, proposal = ?
 		WHERE id = ?`,
 		b.Title, b.Body, b.Severity, b.Status,
 		nullable(b.DuplicateOf), nullable(b.TaskID), b.UpdatedAt,
-		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.TestStrategy, b.TestReason, b.Deliverables, b.ID)
+		b.Component, b.SuspectedFiles, b.TaskTitle, b.TriageReason, b.TestStrategy, b.TestReason, b.Deliverables, b.Proposal, b.ID)
 	return err
 }
 
@@ -541,6 +550,10 @@ ALTER TABLE bug ADD COLUMN test_reason TEXT NOT NULL DEFAULT '';
 // checklist — their implementers reported "1/1" on the task as a whole.
 const migration004 = `
 ALTER TABLE bug ADD COLUMN deliverables TEXT NOT NULL DEFAULT '';
+`
+
+const migration005 = `
+ALTER TABLE bug ADD COLUMN proposal TEXT NOT NULL DEFAULT '';
 `
 
 // DeleteTask removes a task and the traceability edges that name it.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -127,6 +128,15 @@ func (s *Service) BugMove(ctx context.Context, projectID, id, to, actor string) 
 	next, err := bug.Move(bug.Status(rec.Status), bug.Status(to))
 	if err != nil {
 		return nil, err
+	}
+	if next == bug.Fixed && rec.Proposal != "" {
+		all, err := bugProposalTasksAccepted(db, rec.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !all {
+			return nil, fmt.Errorf("bug %s cannot become fixed until every proposed task is accepted", rec.ID)
+		}
 	}
 	from := rec.Status
 	rec.Status = string(next)
@@ -339,6 +349,9 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			"suspected_files": t.SuspectedFiles,
 			"test_strategy":   t.TestStrategy, "test_reason": t.TestReason,
 		}
+		if len(t.Proposal) > 0 {
+			p["proposal"] = t.Proposal
+		}
 		if len(t.Deliverables) > 0 {
 			p["deliverables"] = t.Deliverables
 		}
@@ -491,29 +504,31 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 	if err != nil {
 		return nil, err
 	}
-	taskID, err := appendPlanTask(entry.Path, rec)
+	var portions []agent.SplitProposal
+	if rec.Proposal != "" {
+		if err := json.Unmarshal([]byte(rec.Proposal), &portions); err != nil {
+			return nil, fmt.Errorf("read stored split proposal: %w", err)
+		}
+	}
+	taskIDs, err := appendPlanTasks(entry.Path, rec, portions)
 	if err != nil {
 		return nil, err
 	}
-	// Recorded in the database too, so a bug's task can be found without
-	// parsing a document, but the document is what allocated the id.
-	if err := db.CreateTask(&store.Task{
-		ID:     taskID,
-		Title:  promotedTaskTitle(rec),
-		Body:   promotedTaskBody(rec),
-		Status: "todo",
-	}); err != nil {
-		return nil, err
-	}
-	// The edge is what makes the bug part of the same graph as everything
-	// else: it answers "why does this task exist" with the report that caused
-	// it, the way a task answers it with the spec section it implements.
-	if err := db.AddTrace("bug", bugID, "task", taskID); err != nil {
-		return nil, err
+	for i, taskID := range taskIDs {
+		title, body := promotedTaskTitle(rec), promotedTaskBody(rec)
+		if len(portions) > 0 {
+			title, body = portions[i].Title, promotedPortionBody(rec, portions[i])
+		}
+		if err := db.CreateTask(&store.Task{ID: taskID, Title: title, Body: body, Status: "todo"}); err != nil {
+			return nil, err
+		}
+		if err := db.AddTrace("bug", bugID, "task", taskID); err != nil {
+			return nil, err
+		}
 	}
 
 	from := rec.Status
-	rec.TaskID = taskID
+	rec.TaskID = taskIDs[0]
 	rec.Status = string(next)
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
@@ -522,14 +537,18 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 		actor = "human"
 	}
 	appendBugAudit(entry.Path, bug.AuditEntry{
-		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "promote", Note: taskID,
+		Bug: rec.ID, From: from, To: rec.Status, Actor: actor, Via: "promote", Note: taskIDs[0],
 	})
 	// A promote changes what the guide says without any run settling — the
 	// exact blind spot of the settle hooks. Poke the loop so an autopilot
 	// idling at "promote it" picks the new task up instead of waiting for an
 	// accept that will never come.
 	go s.autopilotAdvance(projectID)
-	return map[string]interface{}{"bug": bugID, "task": taskID, "status": rec.Status}, nil
+	out := map[string]interface{}{"bug": bugID, "task": taskIDs[0], "status": rec.Status}
+	if len(taskIDs) > 1 {
+		out["tasks"] = taskIDs
+	}
+	return out, nil
 }
 
 // promotedTaskBody is what an implementer is given when a report becomes work.
@@ -538,6 +557,20 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 // alone: the component, the suspected files and the reasoning were computed,
 // shown once at a gate, and then discarded — so the model that had to fix the
 // bug went looking for a location somebody had already found.
+func promotedPortionBody(b *store.Bug, portion agent.SplitProposal) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Fixes %s.\n\n**Acceptance:**\n", b.ID)
+	for _, criterion := range portion.Acceptance {
+		fmt.Fprintf(&sb, "- %s\n", criterion)
+	}
+	if len(portion.Owns) > 0 {
+		fmt.Fprintf(&sb, "\n**Owns:** %s\n", strings.Join(portion.Owns, ", "))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(promotedTaskBody(b))
+	return sb.String()
+}
+
 func promotedTaskBody(b *store.Bug) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Fixes %s.\n\n", b.ID)
@@ -598,59 +631,65 @@ func promotedTaskBody(b *store.Bug) string {
 // contained was read as a child of whatever milestone came before it.
 const bugsMilestoneTitle = "Reported bugs"
 
-// appendPlanTask adds a task to the plan document and returns its id.
-func appendPlanTask(projectRoot string, rec *store.Bug) (string, error) {
+// appendPlanTasks adds one task per proposal portion, each with its own lane.
+// With no portions it preserves the legacy single-task promotion exactly.
+func appendPlanTasks(projectRoot string, rec *store.Bug, portions []agent.SplitProposal) ([]string, error) {
 	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if plan == nil {
 		plan = &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}}
 	}
-
 	var existing []artifact.Section
 	for _, m := range plan.Sections {
 		existing = append(existing, m.Children...)
 	}
-	taskID := fmt.Sprintf("T-%03d", stage.NextFree(existing, "T"))
-
-	// The title the triager proposed, when it gave one: it names the change to
-	// make, where the report names the symptom. "when dragging a vertex one edge
-	// value does not change" is what a person saw; "recompute the edge label for
-	// the dragged vertex" is what somebody has to do.
-	task := artifact.Section{
-		ID:    taskID,
-		Title: promotedTaskTitle(rec),
-		Body:  promotedTaskBody(rec),
+	hasProposal := len(portions) > 0
+	if !hasProposal {
+		portions = []agent.SplitProposal{{Title: promotedTaskTitle(rec)}}
 	}
-
-	placed := false
-	for i := range plan.Sections {
-		if plan.Sections[i].Title == bugsMilestoneTitle {
-			plan.Sections[i].Children = append(plan.Sections[i].Children, task)
-			placed = true
-			break
+	ids := make([]string, 0, len(portions))
+	separateMilestones := len(portions) > 1
+	for _, portion := range portions {
+		id := fmt.Sprintf("T-%03d", stage.NextFree(existing, "T"))
+		existing = append(existing, artifact.Section{ID: id})
+		task := artifact.Section{ID: id, Title: portion.Title, Body: promotedTaskBody(rec)}
+		if hasProposal {
+			task.Body = promotedPortionBody(rec, portion)
+			task.Owns = portion.Owns
 		}
-	}
-	if !placed {
-		plan.Sections = append(plan.Sections, artifact.Section{
-			ID:       fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")),
-			Title:    bugsMilestoneTitle,
-			Children: []artifact.Section{task},
-		})
+		if separateMilestones {
+			plan.Sections = append(plan.Sections, artifact.Section{
+				ID: fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")), Title: bugsMilestoneTitle,
+				Owns: portion.Owns, Children: []artifact.Section{task},
+			})
+		} else {
+			placed := false
+			for i := range plan.Sections {
+				if plan.Sections[i].Title == bugsMilestoneTitle {
+					plan.Sections[i].Children = append(plan.Sections[i].Children, task)
+					placed = true
+					break
+				}
+			}
+			if !placed {
+				plan.Sections = append(plan.Sections, artifact.Section{
+					ID: fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")), Title: bugsMilestoneTitle,
+					Children: []artifact.Section{task},
+				})
+			}
+		}
+		ids = append(ids, id)
 	}
 	plan.Front.Kind = artifact.KindPlan
-	// A project may legitimately have bugs and no plan: the spec allows a
-	// build on a hand-written task with no requirements at all (05 §1).
-	// Promoting into one creates the plan rather than refusing.
 	if err := os.MkdirAll(artifact.DocsDir(projectRoot), 0o755); err != nil {
-		return "", err
+		return nil, err
 	}
-	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan),
-		[]byte(artifact.Render(plan)), 0o644); err != nil {
-		return "", err
+	if err := os.WriteFile(artifact.Path(projectRoot, artifact.KindPlan), []byte(artifact.Render(plan)), 0o644); err != nil {
+		return nil, err
 	}
-	return taskID, nil
+	return ids, nil
 }
 
 // ApplyTriage writes an accepted triage onto the bugs it classified.
@@ -749,6 +788,13 @@ func (s *Service) ApplyTriage(ctx context.Context, projectID string, raw interfa
 		if items, ok := p["deliverables"].([]string); ok {
 			rec.Deliverables = strings.Join(items, "\n")
 		}
+		if proposal, ok := p["proposal"]; ok {
+			data, err := json.Marshal(proposal)
+			if err != nil {
+				return applied, fmt.Errorf("store split proposal: %w", err)
+			}
+			rec.Proposal = string(data)
+		}
 		// A classification must never undo a promotion. Move(InProgress,
 		// Triaged) is a LEGAL transition — it exists so a person can send
 		// half-started work back — so relying on Move to refuse was wrong:
@@ -806,8 +852,20 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		return "", err
 	}
 	for _, rec := range recs {
-		if rec.TaskID != taskID {
+		if rec.TaskID != taskID && !bugProposalContainsTask(db, rec.ID, taskID) {
 			continue
+		}
+		if rec.Proposal != "" {
+			if err := db.SetTaskStatus(taskID, "accepted"); err != nil {
+				return "", err
+			}
+			all, err := bugProposalTasksAccepted(db, rec.ID)
+			if err != nil {
+				return "", err
+			}
+			if !all {
+				return "", nil
+			}
 		}
 		// Walk the legal chain to fixed from wherever the report stands. It
 		// used to demand in_progress exactly and skip in silence — so a bug a
@@ -841,6 +899,42 @@ func (s *Service) BugFixedByTask(ctx context.Context, projectID, taskID string) 
 		return rec.ID, nil
 	}
 	return "", nil
+}
+
+func bugProposalContainsTask(db *store.DB, bugID, taskID string) bool {
+	traces, err := db.TracesFrom("bug", bugID)
+	if err != nil {
+		return false
+	}
+	for _, trace := range traces {
+		if trace == "task:"+taskID {
+			return true
+		}
+	}
+	return false
+}
+
+func bugProposalTasksAccepted(db *store.DB, bugID string) (bool, error) {
+	traces, err := db.TracesFrom("bug", bugID)
+	if err != nil {
+		return false, err
+	}
+	tasks := 0
+	for _, trace := range traces {
+		id, ok := strings.CutPrefix(trace, "task:")
+		if !ok {
+			continue
+		}
+		task, err := db.GetTask(id)
+		if err != nil {
+			return false, err
+		}
+		tasks++
+		if task.Status != "accepted" {
+			return false, nil
+		}
+	}
+	return tasks > 0, nil
 }
 
 // promotedTaskTitle prefers what the triager proposed.

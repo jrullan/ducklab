@@ -1424,6 +1424,7 @@ Reply with one JSON object:
  "test_strategy": "test-first" | "build-only",
  "test_reason": "one line",
  "deliverables": ["2-5 concrete, verifiable outcomes for the fix task", …],
+ "proposal": [{"title":"imperative portion", "acceptance":["1-2 verifiable criteria"], "owns":["disjoint/path"]}],
  "reason": "one sentence"}
 
 Base "duplicate_of" only on the open bugs you were given. If you are unsure,
@@ -1441,7 +1442,11 @@ You recommend; a person decides.
 "deliverables" become the fix task's numbered work contract: each one a
 concrete outcome a reviewer can check against the diff ("the brake resets
 after a successful fs_read of the braked path", "a test asserts the reset"),
-not steps and not vague goals. 2-5 of them; empty only if not actionable.`
+not steps and not vague goals. 2-5 of them; empty only if not actionable.
+
+When the bug spans multiple concerns, you may add "proposal": portions with a
+short title, no more than two acceptance criteria, and an Owns lane per portion.
+The proposal is advice only; it never creates tasks until a person promotes it.`
 
 // usageMap is what goes to llm.jsonl for one call.
 //
