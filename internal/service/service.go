@@ -1885,12 +1885,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 	if projCfg.RenderConfigured && render.Command != "" {
 		captures, renderErr := captureRender(ctx, runRoot(rs.run, entry.Path), render, rs.writer, rs.run.ID, rs.run.ProjectID)
-		if renderErr != nil {
+		if len(captures) > 0 {
+			rs.run.Captures = captures
+			event := map[string]interface{}{"ok": true, "captures": captures}
+			if renderErr != nil {
+				event["note"] = "captures attached despite dirty render exit: " + renderErr.Error()
+			}
+			rs.writer.AppendEvent("render", event)
+		} else if renderErr != nil {
 			rs.run.Warning = "render failed: " + renderErr.Error()
 			rs.writer.AppendEvent("render", map[string]interface{}{"ok": false, "reason": renderErr.Error()})
-		} else if len(captures) > 0 {
-			rs.run.Captures = captures
-			rs.writer.AppendEvent("render", map[string]interface{}{"ok": true, "captures": captures})
 		}
 	}
 	// Persist render attachments and caveats before the gate state is exposed.

@@ -65,11 +65,11 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		"DUCKLAB_RENDER_SCENES="+strings.Join(contract.Scenes, "\n"), "DUCKLAB_RENDER_VIEWPORT="+viewport,
 		"DUCKLAB_RENDER_OUTPUT="+filepath.Join(root, ".ducklab-render-captures"),
 		"DUCKLAB_RENDER_TIMEOUT_S="+fmt.Sprintf("%d", timeout))
-	out, err := xplat.ShellContext(ctx, root, env, contract.Command).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), err)
-	}
+	out, commandErr := xplat.ShellContext(ctx, root, env, contract.Command).CombinedOutput()
 	if strings.TrimSpace(contract.Artifacts) == "" {
+		if commandErr != nil {
+			return nil, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+		}
 		return nil, nil
 	}
 	matches, err := filepath.Glob(filepath.Join(root, contract.Artifacts))
@@ -77,6 +77,9 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 		return nil, fmt.Errorf("render artifacts glob: %w", err)
 	}
 	if len(matches) == 0 {
+		if commandErr != nil {
+			return nil, fmt.Errorf("render command: %s: %w", strings.TrimSpace(string(out)), commandErr)
+		}
 		return nil, fmt.Errorf("render artifacts matched no files: %s", contract.Artifacts)
 	}
 	var captures []string
@@ -103,6 +106,11 @@ func captureRender(ctx context.Context, root string, contract config.RenderContr
 			return nil, err
 		}
 		captures = append(captures, name)
+	}
+	if commandErr != nil {
+		// A dirty renderer is still successful when it produced usable evidence.
+		// Preserve the captures and let the caller record the exit as a caveat.
+		return captures, fmt.Errorf("render command exited unsuccessfully: %s: %w", strings.TrimSpace(string(out)), commandErr)
 	}
 	return captures, nil
 }

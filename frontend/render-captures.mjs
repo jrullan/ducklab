@@ -29,7 +29,16 @@ await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 let server;
 if (process.env.DUCKLAB_RENDER_START !== "false") {
-  server = spawn("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--cors"], { cwd: "frontend", stdio: "inherit" });
+  // Keep the server and all of its descendants in a separate process group.
+  // Piping (and draining) their output prevents inherited descriptors from
+  // keeping the render command's CombinedOutput pipes open after this exits.
+  server = spawn("npm", ["run", "dev", "--", "--host", "0.0.0.0", "--cors"], {
+    cwd: "frontend",
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  server.stdout?.resume();
+  server.stderr?.resume();
 }
 try {
   const browser = await chromium.launch({ headless: true });
@@ -77,5 +86,13 @@ try {
     await browser.close();
   }
 } finally {
-  server?.kill();
+  if (server?.pid) {
+    // kill() only reaches npm; the negative pid kills the entire detached
+    // process group, including the Vite descendants holding our pipes.
+    try {
+      process.kill(-server.pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  }
 }
