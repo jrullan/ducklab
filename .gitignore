@@ -2,6 +2,8 @@
 /ducklab-engine
 /ducklab-desktop
 node_modules/
+frontend/node_modules/
+
 *.exe
 *.test
 *.out

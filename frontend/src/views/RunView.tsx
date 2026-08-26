@@ -8,7 +8,7 @@ import { VirtualList } from "../components/VirtualList";
 import { ToolTimeline } from "../components/ToolTimeline";
 import { GateCard } from "../components/GateCard";
 import { EscalationSuggestionCard } from "../components/EscalationSuggestionCard";
-import { ConfigAmendmentCard } from "../components/ConfigAmendmentCard";
+import { ConfigAmendmentCard, shouldShowConfigAmendment } from "../components/ConfigAmendmentCard";
 import { ConfigFailureCard } from "../components/ConfigFailureCard";
 import { CandidateCard } from "../components/CandidateCard";
 import { DiffView } from "../components/DiffView";
@@ -242,6 +242,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [chatBusy, setChatBusy] = useState(false);
   const [chatImages, setChatImages] = useState<{ name: string; data: string }[]>([]);
   const [chatImageError, setChatImageError] = useState<string | null>(null);
+  // Standing doctor findings stay quiet unless this conversation is about configuration.
+  const [dismissedConfigProposals, setDismissedConfigProposals] = useState<Set<string>>(() => new Set());
   const chatImageInput = useRef<HTMLInputElement>(null);
   // Follow the chain: accepting a watched test starts its build, and the
   // person watching should keep watching. Auto-navigate ONLY when the run
@@ -614,7 +616,23 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // A terminal configuration failure leads with understanding. Do not also
   // offer the mutation card for the same finding; amendments from chat or the
   // consultant remain actionable on non-failure runs.
-  const actionableConfigProposals = configFailure ? [] : configProposals;
+  const chatTouchesConfiguration = run.stage === "chat" && turns.some((turn) =>
+    /configur|setting|github|git hub|verify|dependenc|integration|node_modules|remote/i.test(turn.text),
+  );
+  const visibleChatConfigProposals = configProposals.filter((event) => {
+    const id = String(event.seq ?? "");
+    const data = event.data ?? {};
+    return shouldShowConfigAmendment({
+      touchesConfiguration: chatTouchesConfiguration,
+      isNew: data.new_since_last_shown === true || data.is_new === true || data.old === "missing",
+      dismissed: dismissedConfigProposals.has(id),
+    });
+  });
+  // A terminal config failure is explained by its failure card. Otherwise a
+  // standing finding belongs in the chat only when the conversation is about
+  // configuration (or it is genuinely new); unrelated chats must not be
+  // interrupted by the doctor's home-screen finding.
+  const actionableConfigProposals = configFailure ? [] : run.stage === "chat" ? visibleChatConfigProposals : configProposals;
   // The live figures while the run is GOING, the recorded ones once it is
   // not — by status, not by which happens to exist. The last streamed budget
   // event can predate the final turn's accounting by a moment, and a paused
@@ -1040,7 +1058,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
         const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
         if (!key) return null;
-        return <ConfigAmendmentCard key={event.seq ?? index} client={client} projectId={run.project_id} finding={{ key, proposed, reason }} old={typeof data.old === "string" ? data.old : ""} why={reason} />;
+        return <ConfigAmendmentCard
+          key={event.seq ?? index}
+          client={client}
+          projectId={run.project_id}
+          finding={{ key, proposed, reason }}
+          old={typeof data.old === "string" ? data.old : ""}
+          why={reason}
+          onDismiss={run.stage === "chat" ? () => setDismissedConfigProposals((current) => {
+            const next = new Set(current);
+            next.add(String(event.seq ?? index));
+            return next;
+          }) : undefined}
+        />;
       })}
 
       {(canRelaunch || escalationCandidate !== null) && (
@@ -1725,18 +1755,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               after the transcript, so a doctor finding cannot cover the
               consultant's reply or make an unanswered question look answered
               by a card. */}
-          {run.stage === "chat" && configProposals.length > 0 && (
+          {run.stage === "chat" && visibleChatConfigProposals.length > 0 && (
             <section className="m-2 rounded-card border border-warning p-3" data-testid="chat-config-amendments">
               <p className="text-sm text-ink-secondary">
-                the doctor also found {configProposals.length} configuration finding{configProposals.length === 1 ? "" : "s"} — review {configProposals.length === 1 ? "it" : "them"} below
+                the doctor also found {visibleChatConfigProposals.length} configuration finding{visibleChatConfigProposals.length === 1 ? "" : "s"} — review {visibleChatConfigProposals.length === 1 ? "it" : "them"} below
               </p>
-              {configProposals.map((event, index) => {
+              {visibleChatConfigProposals.map((event, index) => {
                 const data = event.data ?? {};
                 const key = typeof data.key === "string" ? data.key : "";
                 const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
                 const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
                 if (!key) return null;
-                return <ConfigAmendmentCard key={event.seq ?? index} client={client} projectId={run.project_id} finding={{ key, proposed, reason }} old={typeof data.old === "string" ? data.old : ""} why={reason} />;
+                return <ConfigAmendmentCard key={event.seq ?? index} client={client} projectId={run.project_id} finding={{ key, proposed, reason }} old={typeof data.old === "string" ? data.old : ""} why={reason} onDismiss={() => setDismissedConfigProposals((current) => new Set(current).add(String(event.seq ?? index)))} />;
               })}
             </section>
           )}
