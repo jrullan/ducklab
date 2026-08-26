@@ -36,6 +36,7 @@ autonomy = "guarded"
     advisor = ["terra"]
   [mode_seats.pair]
     advisor = ["k3"]
+    implementer = ["luna"]
 
 [modes]
 
@@ -50,10 +51,19 @@ autonomy = "guarded"
   base_branch = "main"
   commit_trailer = true
 
+[remote]
+  name = "origin"
+  fetch_on_open = false
+  allow_mcp_verbs = []
+
 [github]
   enabled = false
   repo = ""
   mirror_bugs = false
+  pr_base = ""
+  pr_draft = false
+  pr_tool = "gh"
+  pr_body_by_scribe = false
 
 [shell]
   mode = "guarded"
@@ -68,3 +78,12 @@ autonomy = "guarded"
   health = ""
   preflight = ""
   requires = ""
+
+[render]
+  command = "node frontend/render-captures.mjs"
+  url = "http://127.0.0.1:5173/?engine={engine}&token={token}"
+  ready = "http://127.0.0.1:5173/"
+  scenes = ["#/now", "#/cycle", "#/board", "#/runs", "#/settings", "#/roster"]
+  viewport = "1440x900"
+  timeout_s = 180
+  artifacts = ".ducklab-render-captures/*.png"

@@ -3271,3 +3271,648 @@ The consultant reads `config_doctor` findings and the config and becomes the con
 
 **Assumption:** across the milestone — `[remote]` holds a single named remote (multi-remote `[[remote]]` tables are not required), and the doctor's closed rule list is the seven findings enumerated in the amendment.
 
+### T-143 — Staging exclusion leaves excluded paths STAGED: a dirty index blocks the accept's rebase, so every non-fast-path accept fails
+
+Fixes B-154.
+
+## Reported
+
+First non-fast-path accept in production (r-20260825-114809-dsgi, T-139): T-125's staging exclusion kept frontend/node_modules out of the commit but left it ADDED in the index; git rebase refuses with a dirty index, so the accept failed with 'cannot rebase: You have unstaged changes'. Fast-path accepts never hit it (no rebase), which is why T-138 landed clean. Fix: the exclusion must UNSTAGE (rm --cached) excluded paths after AddAll, leaving them untracked; test: accept a worktree run with a linked dep against a MOVED default branch — the rebase must proceed. Operator unblocked dsgi via restore --staged.
+
+### T-144 — acceptWorktreeRun retry is not idempotent: after a failed rebase, the retry re-runs the commit step and dies on 'nothing to commit'
+
+Fixes B-155.
+
+## Reported
+
+Same incident, second wall: after the rebase failure, retrying the accept re-ran AddAll+commit; the run commit already existed (442f25e), git commit exited 1, accept aborted before reaching the rebase. Fix: the commit step detects an existing run commit (HEAD authored by this run / clean tree) and skips forward; test: accept, fail it mid-rebase (simulated), retry succeeds end to end. Operator unblocked via soft reset to base and a fresh retry, which then landed 4e1f240 through the full rebase→re-gate→ff path.
+
+### T-145 — ConfigFailureCard can never render: config_amendment events are not emitted on the run-failure path it listens for
+
+Fixes B-160.
+
+## Reported
+
+T-142 reviewer finding (major, glm52), filed per the ratchet doctrine at accept 4bb86f9. The config-shaped run failure card exists in RunView but its trigger event never fires on actual run failures — the surface is unreachable. Wire the failure path to emit the event (the failure card offering 'ask the consultant' with the doctor finding pre-seeded, per T-142's contract) and add the vitest that exercises the card from a simulated config-shaped failure. This is also the remnant of T-142 deliverable 2.
+
+### T-146 — config_amendment emission is untested: no Go test verifies ChatStart emits amendment events when the doctor has findings
+
+Fixes B-161.
+
+## Reported
+
+T-142 reviewer finding (major, glm52), filed at accept 4bb86f9. Add Go tests pinning: ChatStart with doctor findings emits config_amendment; without findings emits none; the event payload carries key/old/new/why. Small, test-only task.
+
+### T-147 — Adopt-end and project-open consultant offers are unwired or untested (adopt-config-offer, project-config-offer)
+
+Fixes B-162.
+
+## Reported
+
+T-142 reviewer finding (major, glm52), filed at accept 4bb86f9. The two proactive consultant offers exist as components/test-ids but their triggers from adopt-end and project-open-with-findings are not verified end to end. Wire and pin each with a vitest per affordance. This is the remnant of T-142 deliverable 6.
+
+### T-148 — ValueKey misses 3-level nested map keys (mode_seats.pair.implementer): doctor finding keys cannot round-trip through the config API
+
+Fixes B-163.
+
+## Reported
+
+T-142 reviewer finding (minor, glm52), filed at accept 4bb86f9. The map-handling branch of ValueKey handles two levels; doctor findings can name three-level keys. Extend the walk one level with the same strict-typo behavior, plus round-trip test.
+
+### T-149 — config doctor emits duplicate findings when both root and frontend package.json exist
+
+Fixes B-156.
+
+## Reported
+
+T-139 reviewer residual (approved with finding on record): detectedTools appends 'npm ' twice when root and frontend package.json both exist, producing duplicate shell.allow_prefixes findings. Dedupe the tools slice. One-line fix + a test case with both manifests.
+
+### T-150 — The spent card omits wall clock: the run's most expensive dimension — the human's waiting time — is the one not shown
+
+Fixes B-157.
+
+## Reported
+
+The run view's spent card shows '$3.58 · 9.6M tokens · 9 turns' plus per-duckling token/cost rows, but not elapsed time. The run record already carries wallclock_ms and the budget tracks wallclock_s against its cap, so this is purely a rendering gap.
+
+Rationale (Jose, 2026-08-25): wall clock is the operator's own cost — attention held while waiting to test and decide. A card that prices the model's work but not the human's wait misprices the run. Fix: the spent header gains the elapsed time ('$3.58 · 9.6M tokens · 9 turns · 47m'), live-ticking while the run is in flight, final on done; consider a per-round or per-stage breakdown later, not in this pass. A vitest pins the header rendering with a wallclock value.
+
+Context link: the gate ratchet doctrine — accept-with-findings vs relaunch — is argued in wall-clock terms; the card should show the number the doctrine optimizes.
+
+### T-151 — Mark Landed asks the user for forensics the system can do itself, and its always-visible fields invite record falsification
+
+Fixes B-158.
+
+## Reported
+
+The run header for a not-accepted run permanently shows two free-text fields (landing commit SHA, landing note) and a Mark Landed button. Jose's questions expose the defects: where would a user get that sha? (git archaeology); do they know what to type? (no placeholder guidance beyond field names); do they know WHEN this applies? (only the rare work-reached-main-outside-the-engine case); and should it always be visible? (no — an ever-present 'make this failure count as a pass' control is a records-integrity hazard, since landed counts as success in scorecards).
+
+Root cause: the feature was born from the night operator's manual-landing workflow (B-140), where the operator authored the landing commit and knew its sha. It shipped operator-shaped.
+
+Inversion: ducklab can usually do the forensics itself — landing commits carry the 'Ducklab-Run: <id>' trailer by convention, so the engine can search the default branch for a commit whose trailer names this run and OFFER: 'this run's work appears on main as <sha> — mark landed?' with the sha pre-filled and the evidence shown. Design:
+1. DEFAULT: no fields visible. When the trailer scan finds a match for a not-accepted run, a card offers the pre-filled one-click confirm.
+2. DISCLOSED EXPERT PATH: behind a 'more actions' door, the manual fields remain for landings without a trailer — with placeholder text saying what belongs there and when this is legitimate.
+3. GUARDS: the sha must exist and be reachable from the default branch (warn otherwise); the action stays recorded and attributed; a landed resolution always names its evidence (trailer match or manual attestation).
+Tests: trailer scan surfaces the offer with the right sha; manual path rejects an unreachable sha with the reason; no fields render when there is no match and the door is closed.
+
+### T-152 — Concurrency knobs have no desktop surface: max_concurrent_runs and per-provider max_concurrent live only in the engine TOML and need a restart
+
+Fixes B-164.
+
+## Reported
+
+With parallel runs now the operating norm (wave scheduling, worktree isolation, merge-proof accepts), the two knobs that govern parallelism are invisible and inert in the desktop: defaults.max_concurrent_runs (engine config.toml, default 2) and each provider's max_concurrent. Settings edits autonomy/autopilot but not these; changing them means hand-editing ~/.config/ducklab/config.toml and restarting the engine.
+
+Fix direction: (1) expose both in Settings (engine section for the global cap with the engine's CPU-derived ceiling shown as context; provider cards for per-provider caps), writable through the existing settings-save path; (2) make the queue read the value live (it consults s.cfg on canStart — a settings write should take effect without a restart, or the card must say 'applies on restart' in plain words per the usability doctrine); (3) the queued_reason already names the cap ('engine at max_concurrent_runs') — link that reason text to the setting so the operator can act where they learn.
+
+Tests: settings write round-trips; a queued run starts when the cap is raised live (or the restart-required label renders); provider cap edit honored by the next admission.
+
+### T-154 — The failure-path config_amendment event renders two competing cards: Apply-amendment and ask-the-consultant for the same finding
+
+Fixes B-165.
+
+## Reported
+
+T-145 reviewer residual (minor, glm52), filed at accept per the ratchet doctrine. ConfigAmendmentCard and ConfigFailureCard both key on config_amendment; on the failure path the user sees a direct Apply button AND the consultant door for the same finding — two affordances, unclear precedence, and per the usability doctrine the failure moment should lead with understanding (consultant) before mutation (apply). Fix per the reviewer: filter the configProposals map so failure-path events render only the ConfigFailureCard; the amendment card remains for chat/doctor-originated proposals. One vitest pins the exclusivity.
+
+### T-155 — Timing-sensitive tests flake under parallel gate load: TestShellContextKillsTheWholeGroupAtTimeout failed a gate for an unrelated one-line diff
+
+Fixes B-166.
+
+## Reported
+
+First cost of 4-concurrent runs in production (2026-08-25): T-149's gate (a one-line doctor dedup) went red on TestShellContextKillsTheWholeGroupAtTimeout (internal/xplat) — a process-group-kill timing assertion. The test passes 3/3 immediately afterward on the same machine: CPU contention from four simultaneous full gates pushed the timing past its tolerance. A flaky test under load undermines every parallel verdict — false reds burn redo wall-clock and erode trust in the gate.
+
+Fix directions, pick deliberately: (a) make the assertion load-tolerant (poll-until with a generous deadline instead of a fixed window); (b) mark genuinely timing-bound tests to run serially (Go's t.Parallel discipline inverted — a build tag or -short exclusion the gate honors); (c) as policy, gates could retry a red ONCE when the only failures are in a known timing-sensitive list — least preferred, masks real regressions. (a) is the honest default.
+
+Evidence: run r-20260825-171613-qbne failure log; go test -count=3 green solo minutes later.
+
+### T-156 — ProviderSet cap-raise poke path is untested: no test verifies a queued run is admitted when a provider max_concurrent rises
+
+Fixes B-167.
+
+## Reported
+
+T-152 reviewer residual (minor, glm52), filed at accept per the ratchet. The engine-level cap raise has its live-admission test; the PROVIDER cap raise via ProviderSet pokes the queue but nothing pins it. Add the Go test: queue a run against a provider cap of 1, raise to 2 via ProviderSet, assert admission without restart.
+
+### T-157 — Fake engine drifted behind the app: six newer endpoints unknown, breaking the documented frontend dev flow
+
+Fixes B-169.
+
+## Reported
+
+From the visual audit (docs/ux-audit-visual-2026-08.md, I-2). tasks?summary=true, bugs?summary=true, /v1/providers, /v1/defaults/budget, roster?mode=, /skills are unknown to cmd/fake-engine, so Tasks, Bugs, Settings panels, Roster council and Skills all error in the README's dev flow. Fix: bring fake-engine up to the routes it fakes AND pin parity — a test that walks routes_table entries the frontend consumes and asserts the fake engine answers each (the desktop_coverage_test pattern extended to the fake).
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is Go only: cmd/fake-engine/** plus one parity test (it may live beside the routes table consumer). Do NOT touch frontend/**.
+
+### T-158 — The Now card speaks four unexplained terms to the novice, and the amber warning beside 'passed' says nothing
+
+Fixes B-171.
+
+## Reported
+
+Audit III-1 (docs/ux-audit-visual-2026-08.md). 'build · T-001 pair ⚠ passed waiting 0s' is the first thing a new user must decide on. Add one plain sentence per pending card ('This task finished and passed its tests — it is waiting for your decision', variants for question/dissent/unverified), keep chips as detail, and give the ⚠ its word or tooltip (it appears to mark passed-with-caveat/unverified — say which). Also III-2: $0.0000 renders as a glitch; use $0.00 or 'nothing spent yet'. Vitest per card variant.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is the Now view only (frontend/src — the files rendering the Now screen and its pending cards) plus their tests. Do NOT touch cmd/**, the Roster or Skills views, or shared error components.
+
+### T-159 — Roster filter chips are unlabeled and the Skills header is an implementation dump
+
+Fixes B-172.
+
+## Reported
+
+Audit V-1/V-2 (docs/ux-audit-visual-2026-08.md). (a) The flock filter chip row gets a caption ('filter the flock:'); (b) Skills' header paragraph becomes a purpose sentence ('a recipe your models can read — or run — when a task calls for it') with the internals (paths, shadowing) behind a 'how it works' disclosure. The roster mode subtitles are the register to imitate.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is the Roster and Skills view copy only (chip-row caption, Skills header + disclosure) plus their tests. Do NOT touch cmd/**, the Now view, or shared error components.
+
+### T-160 — User-facing errors leak developer debris: raw GET /v1/ paths and an ApiError: prefix around otherwise-perfect plain sentences
+
+Fixes B-170.
+
+## Reported
+
+Audit II-1 (docs/ux-audit-visual-2026-08.md). The good half already exists ('it is older than this app. Restart the engine.'); wrap it in one error-card component: plain sentence first, method/path/status behind a details disclosure, no ApiError: prefix. Also II-2: an errored fetch must terminate its Loading state (Skills shows both at once). Vitest pins the card and the exclusivity.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is the frontend error-presentation surface: the shared error card/component, api/client.ts error text, and the views' error+loading exclusivity, plus tests. Do NOT touch cmd/**, internal/**, lib/format money helpers, or WaitingCard.
+
+### T-161 — Browser dev against a REAL engine fails silently: no CORS, misleading 'session died' banner
+
+Fixes B-173.
+
+## Reported
+
+Audit I-1 (docs/ux-audit-visual-2026-08.md). ?engine=&token= against a real engine yields cross-origin failures the app reports as a dead session. Either document the flow as fake-engine-only, or add opt-in loopback CORS (--allow-origin, like the fake engine has) so real-data frontend dev and visual audits are possible.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is the engine HTTP layer (opt-in loopback CORS flag, off by default, mirroring cmd/fake-engine's --allow-origin) and the frontend dev docs that describe the browser dev flow, plus tests. Do NOT touch frontend/src/** or internal/service.
+
+### T-162 — TestProjectRecoveryDoors/cherry-pick-chain flakes under concurrent gate load
+
+Fixes B-174.
+
+## Reported
+
+Failed T-157's gate (run r-20260825-180750-mbpu) with 'cherry-pick landed <sha>, want original <sha>' while three gates ran concurrently; 3/3 green in isolation on the same tree. Same class as B-166 (contention flake), different test. Make it tolerant of load the way T-155 treated the shell-timeout test — the sha expectation likely races on timestamps or shared tmp state.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is internal/service remote_test.go (make TestProjectRecoveryDoors load-tolerant) only. Do NOT touch cmd/**, frontend/**, or other packages.
+
+### T-163 — Roll the ErrorCard out to the remaining views — only Skills adopted it
+
+Fixes B-177.
+
+## Reported
+
+Residue from T-160 (accepted under the gate ratchet): the ErrorCard (plain sentence first, method/path/status behind a closed details disclosure, no ApiError: prefix) exists and Skills uses it, but Settings, Roster, Tasks, Bugs and any other view rendering fetch errors still print raw error strings. Adopt the card everywhere an ApiError is shown, and give each adoption the error-terminates-loading exclusivity check Skills got.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is ErrorCard adoption in Settings, Roster, Tasks and Bugs views (plus their tests) ONLY. Do NOT touch Now.tsx, WaitingCard.tsx, lib/format, cmd/**, or internal/** — the Now surface belongs to a concurrent run; if it needs the card too, note it in your summary instead of editing it.
+
+### T-164 — WaitingCard/Now duplicate a zero-dollar money helper and declare a function between imports
+
+Fixes B-175.
+
+## Reported
+
+Residue from T-158 (accepted under the gate ratchet): cardMoney in components/WaitingCard.tsx and nowMoney in views/Now.tsx are the same three-line helper, and nowMoney is declared mid-import-block in Now.tsx. Fold the zero case into lib/format money() (or a moneyOrZero there), delete both locals, restore the import block.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is lib/format (fold the zero-dollar case into money() or add moneyOrZero), WaitingCard.tsx, Now.tsx and their tests ONLY. Do NOT touch other views, ErrorCard, cmd/**, or internal/**.
+
+### T-165 — killrepro test marker is shared across concurrent gates: parallel runs could pgrep each other's sleeper and falsely fail
+
+Fixes B-168.
+
+## Reported
+
+T-155 reviewer residual (minor, glm52), filed at accept per the ratchet. The xplat_killrepro_sleeper marker is identical in every worktree, so two gates running the test simultaneously can see each other's orphan in pgrep; the new 10s tolerance widens the exposure window. Fix: suffix the marker with the run/test PID (os.Getpid()) so each gate matches only its own processes; test stays load-tolerant.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane is the killrepro test marker in internal/xplat (make the marker unique per gate, e.g. PID suffix) plus its tests ONLY. Do NOT touch frontend/** or other packages.
+
+### T-166 — Pin committer/author dates in cherry-pick recovery so the orphan SHA is preserved
+
+Fixes B-176.
+
+## Reported
+
+Residue from T-162 (accepted under the gate ratchet): TestProjectRecoveryDoors no longer asserts the cherry-picked recovery keeps the original SHA, because equality was a same-second timestamp coincidence, not a contract (B-174). If identity preservation IS wanted for the recovery door, the fix is in internal/vcs — pin GIT_COMMITTER_DATE/author date from the orphan when cherry-picking — and then the assertion comes back as a real contract. If not wanted, close this.
+
+**Deliverables:**
+- Git.CherryPick in internal/vcs/vcs.go reads the orphan's author date (and name/email if needed) and exports GIT_AUTHOR_DATE and GIT_COMMITTER_DATE from it for the cherry-pick invocation, so the recovered commit reproduces the original SHA
+- TestProjectRecoveryDoors cherry-pick-chain in internal/service/remote_test.go asserts landed == sha again as a stable contract
+- The SHA assertion holds even when the test forces a delay (e.g. sleeps or fakes the clock) between the orphan commit and the recovery
+- RestoreAsFreshCommit behaviour is unchanged: it still records a new commit with a different SHA
+
+## Triage
+
+**Component:** vcs
+**Suspected files:** internal/vcs/vcs.go, internal/service/remote_test.go
+
+The cherry-pick recovery door works and content is verified; only SHA identity is unpinned because git cherry-pick uses wall-clock committer date, so the fix is to pin dates in internal/vcs and restore the dropped assertion as a real contract.
+
+**Verification (triage recommends):** test-first — TestProjectRecoveryDoors cherry-pick-chain subtest re-asserts landed == sha, which fails today whenever the cherry-pick crosses a second boundary
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-167 — Now decides through an evidence drawer: conclusion and verdict up front, technical detail behind it, decision buttons never lost
+
+Fixes B-179.
+
+## Reported
+
+Adoption from the UI benchmark (design refs: ~/wiki/Desarrollo/ducklab/benchmark-p3-editor-en-jefe.md item 3, benchmark-p4-galley.md). A waiting card's 'review' affordance opens a side DRAWER (not a page navigation): top strip of three tiles — tests (passed/failed/skipped with a plain note), reviewer verdict (one quoted sentence), cost so far vs ceiling; then a summarized diff (files + plain one-line summary each + net lines); then collapsed-by-default sections for cost breakdown per seat and raw logs. The Accept/Reject/etc buttons stay visible while the drawer is open — the decision never loses its context. Include a line stating evidence freshness (whether tests ran on the final revision) when the data allows. Vitest pins: drawer opens from the card, tiles present, technical sections closed by default, decision buttons still rendered.
+
+IDENTITY RULE: keep ducklab's vocabulary exactly as it is (ducklings, flock, Now, seats, runs, landed). Adopt the PATTERN described, never the source prototype's naming. House voice: plain sentence first, technical detail behind disclosure.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: frontend/src/components/WaitingCard.tsx, a NEW EvidenceDrawer component (+ its test), and WaitingCard's test. Do NOT touch Now.tsx, RunLauncher.tsx, Roster.tsx, Settings.tsx, or internal/** — render the drawer from within WaitingCard so no view wiring is needed.
+
+### T-168 — Launching work becomes a modal that pre-answers everything: mode cards with when-to-use and cost estimated from this project's history, seats prefilled from the roster
+
+Fixes B-180.
+
+## Reported
+
+Adoption from the UI benchmark (design ref: ~/wiki/Desarrollo/ducklab/benchmark-p4-galley.md item 10 — Grok's launch modal). The launch flow presents as a modal: (1) what to work on — existing task preselected, quick brief, or a bug from the board; (2) mode choices as cards, each with ONE plain line of when to use it AND an estimated cost range computed from this project's past runs of that mode (fall back honestly to 'no history yet for this shape' when there is none); (3) seats already filled from roster resolution, shown not asked — include the microcopy principle: the user is never asked to type a model name. Launch button + defaults link. Vitest pins: preselection, estimate-or-honest-fallback, seats displayed prefilled.
+
+IDENTITY RULE: keep ducklab's vocabulary exactly as it is (ducklings, flock, Now, seats, runs, landed). Adopt the PATTERN described, never the source prototype's naming. House voice: plain sentence first, technical detail behind disclosure.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: frontend/src/components/RunLauncher.tsx (and TddLaunch if needed), Now.tsx wiring for the modal trigger, plus their tests. Do NOT touch WaitingCard.tsx, EvidenceDrawer, Roster.tsx, Settings.tsx, or internal/**.
+
+### T-169 — Roster suggestions show their arithmetic, ducklings get evidence portraits, and an empty seat explains itself
+
+Fixes B-181.
+
+## Reported
+
+Refinement (NOT a rebuild — Jose rates ducklab's roster above every benchmark entrant; keep its structure and the mode subtitles untouched). Design refs: ~/wiki/Desarrollo/ducklab/benchmark-p4-galley.md items 2-3. Three additions: (1) each seat suggestion states its arithmetic in one sentence — not the criterion but the numbers ('luna: lowest cost per accepted run ($0.02 vs terra $0.11); glm52 produced findings in 81% of reviews'), computed from the same evidence the suggestion already uses; (2) each duckling card gains a one-line evidence portrait derived from its measured record (accept rate, send-back rate, cost per accept — rendered as prose, honest about small samples: under ~15 runs say 'early numbers'); (3) when a mode seats no one for a role, the empty seat says why in a sentence instead of rendering blank. Vitest pins each.
+
+IDENTITY RULE: keep ducklab's vocabulary exactly as it is (ducklings, flock, Now, seats, runs, landed). Adopt the PATTERN described, never the source prototype's naming. House voice: plain sentence first, technical detail behind disclosure.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: frontend/src/views/Roster.tsx and its tests only. Do NOT touch WaitingCard, RunLauncher, Now.tsx, Settings.tsx, or internal/**.
+
+### T-170 — Budget ceilings show what actually happened against them: hits last month, a suggested adjustment, and where the money went
+
+Fixes B-182.
+
+## Reported
+
+Adoption from the UI benchmark (design ref: ~/wiki/Desarrollo/ducklab/benchmark-foreman-opus48.md — Foreman screen 9). The budgets & limits section stops showing bare numbers: (1) next to each ceiling, what happened against it recently — 'N runs hit this ceiling in the last 30 days' with a one-line suggested adjustment when the data warrants it; (2) a 'where the money went' summary: accepted work / rejected work / failed runs with amounts, honestly computed from the run log; (3) keep the edit affordances as they are. If the engine lacks an aggregate endpoint, add a small read-only one (GET budget stats) following the routes_table pattern — or compute client-side from the existing runs list if that is simpler and correct. Tests on whichever layer computes.
+
+IDENTITY RULE: keep ducklab's vocabulary exactly as it is (ducklings, flock, Now, seats, runs, landed). Adopt the PATTERN described, never the source prototype's naming. House voice: plain sentence first, technical detail behind disclosure.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: frontend/src/views/Settings.tsx (budgets section) + its tests, and IF needed one new read-only endpoint (routes_table + engineapi + service + a Go test). Do NOT touch WaitingCard, RunLauncher, Now.tsx, Roster.tsx, or any other view.
+
+### T-171 — The desktop nav moves to a left sidebar rail — a stable spine for a four-lane app
+
+Fixes B-184.
+
+## Reported
+
+Adoption from the UI benchmark, Jose's explicit direction (design refs: ~/wiki/Desarrollo/ducklab/benchmark-*.md — Grok's letter rail, GPT-Sol's sidebar with project card, Foreman v2's 'a desktop app with a stable spine beats tabs when four runs are live').
+
+Migrate the desktop's top navigation to a LEFT SIDEBAR rail. Scope is the shell ONLY — view contents do not change.
+
+The sidebar carries, top to bottom: (1) the ducklab identity block; (2) the active project (name + branch, switcher preserved); (3) the primary nav — Now (with its waiting-count badge), Work, Records — each with its existing sub-navigation behavior preserved; (4) the settings area (Settings, Roster, Skills, Projects) where the gear used to lead; (5) a footer with what the current footer says (engine status, waiting summary). Keyboard: keep every existing shortcut working; adding single-key nav jumps is welcome but optional. The main content area must keep its current width behavior (no view should reflow beyond gaining the rail).
+
+IDENTITY RULE: ducklab vocabulary and voice exactly as they are. This is a re-housing, not a redesign: nav labels, badges and status copy move house unchanged.
+
+Tests: vitest pinning the rail renders all primary items with the Now badge, the settings area is reachable, and the footer status is present; the existing view tests and desktop coverage tests must stay green — that is the proof the views were not touched.
+
+SCOPE NOTICE: this run has the repo to itself, but stay in lane anyway: frontend/src/app/App.tsx, nav/shell components (new Sidebar component welcome), styles, and their tests. Do NOT modify the individual views' internals (Now.tsx content, Roster.tsx, Settings.tsx sections, etc.) beyond what their mounting requires.
+
+### T-172 — Budget history polish: hide zero-hit ceiling rows, gate the suggested adjustment, use the shared money formatter
+
+Fixes B-183.
+
+## Reported
+
+Residue from T-170 (accepted under the gate ratchet). Three touches in Settings' budgets section: (1) ceiling rows with 0 hits in the last 30 days should not render — a list of '0 runs hit this ceiling' four times is noise; (2) 'Suggested adjustment' should appear only when the data warrants it (e.g. >=2 hits in the window), not on a single hit; (3) 'where the money went' formats with toFixed(2) — use the shared moneyOrZero/money from lib/format. Adjust the existing vitest accordingly.
+
+### T-173 — The documents surface narrates the chain: three stages that say who writes and what you approve, sections with their live state, proposals presented as decisions
+
+Fixes B-186.
+
+## Reported
+
+Documents phase 1 — 'the chain visible' (design doc: ~/wiki/Desarrollo/ducklab/propuesta-documents-ui.md, sections 1-2; comparative refs in benchmark-documents-sintesis.md). FRONTEND ONLY: the engine already provides everything — client.traceShow (walk Up/Down from any id), client.traceCheck (deterministic coverage with non-normative awareness), and the artifact get/promote/proposal methods. Do NOT add engine endpoints. Do NOT edit client.ts unless a method you need is genuinely missing, and then add only that method.
+
+IDENTITY RULE: ducklab vocabulary and house voice — plain sentence first, technical detail behind disclosure, jargon explained at point of use.
+
+Rework the documents surface (the Work-side lifecycle view — Cycle.tsx renders it today) from file-list to narrated thread: (1) stage headers teach in one line each — reqs: 'you write this; nobody codes from it' / spec: 'ducklings draft; you agree behavior' / plan: 'cut into tasks; you birth them' (phrase in house voice, these are direction not literal strings); (2) each plan section shows its live state derived from traceShow Down + task status ('T-042 landed' / 'waiting at its gate' / 'no task born yet'); (3) a pending proposal renders as a decision — 'a run proposes changing this section — read it and decide' with the existing promote/discard actions; (4) coverage from traceCheck surfaces as a plain line ('every normative section has work behind it' or 'N sections have no task yet'), never as raw JSON. Vitest pins headers, live states, proposal decision, coverage line.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Cycle.tsx (and its test file), plus a new documents-local component if you need one UNDER views/. Do NOT touch RunView.tsx, Runs.tsx, Now.tsx, components/ shared files, or client.ts.
+
+### T-174 — Every run answers 'why does this run exist': the requirement sentence quoted, the chain as breadcrumb, and no-spine stated honestly
+
+Fixes B-187.
+
+## Reported
+
+Documents phase 1 — 'the chain visible' (design doc: ~/wiki/Desarrollo/ducklab/propuesta-documents-ui.md, sections 1-2; comparative refs in benchmark-documents-sintesis.md). FRONTEND ONLY: the engine already provides everything — client.traceShow (walk Up/Down from any id), client.traceCheck (deterministic coverage with non-normative awareness), and the artifact get/promote/proposal methods. Do NOT add engine endpoints. Do NOT edit client.ts unless a method you need is genuinely missing, and then add only that method.
+
+IDENTITY RULE: ducklab vocabulary and house voice — plain sentence first, technical detail behind disclosure, jargon explained at point of use.
+
+RunView gains a compact origin panel: (1) the requirement sentence this run ultimately serves, QUOTED in italics (walk traceShow Up from the run's task to the requirements section; quote its text or title); (2) a breadcrumb of the chain (plan section ← spec section ← requirement) where each crumb navigates; (3) when the walk finds no spine, say so plainly — 'this run has no document behind it — worth knowing' — never render an empty panel; (4) place it in the right rail near the existing budget/team panels, details behind disclosure if long. Vitest pins quoted sentence, breadcrumb, and the no-spine sentence.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/RunView.tsx (and its tests). Do NOT touch Cycle.tsx, Runs.tsx, Now.tsx, shared components/, or client.ts.
+
+### T-175 — Task cards carry their origin line: the plan-section sentence that bore them, clickable — and orphans say so
+
+Fixes B-188.
+
+## Reported
+
+Documents phase 1 — 'the chain visible' (design doc: ~/wiki/Desarrollo/ducklab/propuesta-documents-ui.md, sections 1-2; comparative refs in benchmark-documents-sintesis.md). FRONTEND ONLY: the engine already provides everything — client.traceShow (walk Up/Down from any id), client.traceCheck (deterministic coverage with non-normative awareness), and the artifact get/promote/proposal methods. Do NOT add engine endpoints. Do NOT edit client.ts unless a method you need is genuinely missing, and then add only that method.
+
+IDENTITY RULE: ducklab vocabulary and house voice — plain sentence first, technical detail behind disclosure, jargon explained at point of use.
+
+Wherever task cards/rows render in the Work tasks surface: (1) each task shows one muted origin line — the title/sentence of the plan section it was born from (traceShow Up), clickable to the documents surface; (2) a task with no spine shows 'no document behind this task' instead of nothing; (3) a task promoted from a bug shows both parents ('from bug B-xxx · plan §y') when both exist — the promote linkage already exists in the data. Build the line as a small component components/OriginLine.tsx so later surfaces can reuse it. Vitest pins origin render, orphan sentence, dual parents.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: the tasks list surface (locate where task cards render — likely within the Work views), components/OriginLine.tsx (new) and tests. Do NOT touch Cycle.tsx, RunView.tsx, Now.tsx, or client.ts.
+
+### T-176 — The Requirements tab renders spec sections, and SPEC-008 renders twice on one page
+
+Fixes B-190.
+
+## Reported
+
+Production finding (Jose's screenshot, documents surface, 2026-08-25). The Requirements tab — whose own header says 'you write this; nobody codes from it' — displays SPEC-008 and SPEC-026 cards full of code identifiers. Either the stage filter is broken or section-to-stage attribution is. Separately, SPEC-008 appears twice in the same scroll (once with 'no task born yet', once without). Fix the filter/attribution, dedupe the render, and pin both with vitest against a fixture that mixes stages.
+
+LANE NOTICE: this run shares the repo with one concurrent run. Your lane: frontend/src/views/Cycle.tsx and its tests only. Do NOT touch App.tsx, Sidebar, Now.tsx, Records views, or client.ts.
+
+### T-177 — The pre-sidebar utility panel (autopilot, next steps, recent runs) is homeless in the new layout
+
+Fixes B-196.
+
+## Reported
+
+Flagged by Jose on the first production render after T-171. The middle column — autopilot start, next steps ('Cut a release', 'Triage the open bugs', 'Promote B-178...'), 'ask how & why', Recent runs — was designed to BE the left rail of the old top-nav layout. With the real sidebar in place it floats as a second rail between nav and content: unanchored, with its own 'hide' link, and duplicating jobs other surfaces own. Recommended dissolution (doctrine: each job lives where its surface is): next steps are DECISIONS -> they belong on Now (they are the 'what needs me' list by definition); Recent runs belongs to Records (and the sidebar's Now badge already signals activity); autopilot start/stop is an operating control -> sidebar, near the engine status; 'ask how & why' -> sidebar footer or command palette. Alternative if dissolution is too large for one pass: collapse the panel into a toggleable utility drawer anchored to the sidebar. Either way the middle column disappears as a permanent layout zone. State the choice taken in the run summary.
+
+LANE NOTICE: this run shares the repo with one concurrent run. Your lane: frontend/src/app/App.tsx, components/Sidebar.tsx, and the views that RECEIVE relocated jobs (Now.tsx for next steps, Runs/Records surface for recent runs), plus tests. Do NOT touch Cycle.tsx or client.ts. Note: B-194 (subnav grouping under the wrong parent) lives in your territory — fix it as part of the layout work and say so in your summary.
+
+### T-178 — The documents surface has no working frame: the header scrolls away, and finding one section means reading them all
+
+Fixes B-197.
+
+## Reported
+
+Flagged by Jose on production render. Two faces of one failure — the frame does not hold the reader: (1) the stage tabs, page header and actions scroll off with the content; they must stay pinned while sections scroll beneath. (2) There is no way to FIND a section: no filter, no index, no jump-by-id. Nobody reads all requirements linearly; the design question is minimum interaction and minimum time to land on one known section (requirement, spec, or plan task alike). Direction: a pinned compact index (ids + titles, type-ahead filter that narrows as you type, showing breaks/no-task markers inline) with the content pane scrolling to the selected section; wire section ids into the existing command palette so typing SPEC-026 anywhere jumps there. Filters for the working states (breaks only / no task yet) belong on the index, not as more prose. Vitest pins: sticky frame, type-ahead narrowing, jump-to-section, palette entries.
+
+=== TASK FRAMING (D1 — Documents skeleton) ===
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md, sections 2 and 3 — read it FIRST; where this brief and that file disagree, the file wins.
+
+This task implements the Documents page skeleton as one coherent change, NOT as isolated patches. Acceptance criteria — ALL of these, which correspond to filed bugs landing together here:
+1. (this bug, B-197) Pinned frame: stage control + index pane fixed while detail scrolls; index rows are `id — title` with type-ahead narrowing and inline state markers (break / no task yet / proposal pending); selecting a row brings its section into the detail pane.
+2. (B-189, rail part) The right-hand traceability rail is REMOVED as a zone. The only ambient remnant is one health line ('N breaks in the spine') placed in the frame; it will link to a ledger view built in a later task — for now it may link to nothing but must exist. Inline markers on index rows and section cards carry the in-place information.
+3. (B-195) One control owns stage switching; the teaching lines become captions ON it; the three inert stage cards disappear. Nothing inert may look pressable.
+4. (B-192, order part) Reading order: 'what you asked for' — the person's words — renders FIRST and open in the detail pane; the redraft form moves BELOW the document behind a plain affordance (its internal redesign is a later task — just relocate it).
+Vitest pins every criterion. Keep every existing passing behavior (dedupe, stage filtering from T-176) intact.
+
+LANE NOTICE: this run shares the repo with one concurrent run (T-177, which owns App.tsx/Sidebar/Now/Records). Your lane: frontend/src/views/Cycle.tsx, new components UNDER views/ if needed, and tests. Do NOT touch App.tsx, Sidebar, Now.tsx, Records views, or client.ts.
+
+### T-179 — Sidebar top stacks three redundancies: app name the window bar already shows, a project card the selector already covers, and a bare branch label that reads as jargon
+
+Fixes B-198.
+
+## Reported
+
+Flagged by Jose. (1) The app name repeats the window title bar; the identity block shrinks to the glyph or disappears. (2) The informational 'project ducklab' block does nothing the project selector below it does not — one control owns showing AND switching the project. (3) 'main' renders bare under the project — to a user, meaningless; it is the git branch (added by T-171 following the benchmark prototype uncritically). Correct rule: branch is EXCEPTION-state information — hidden when the project sits on its base branch, shown with words when it deviates ('on branch chore/release-0.3.48 — not the base') because that is when it changes decisions. Vitest pins: no app-name text node, single project control, branch hidden on base / worded when deviating.
+
+=== TASK FRAMING (S1 — sidebar structure) ===
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1 — read it FIRST; it wins over this brief on conflict.
+
+Acceptance criteria, landing together here:
+1. (this bug, B-198) No app-name text node; one project control (selector shows AND switches — the informational card goes); branch as exception-state only (hidden on base branch, worded when deviating: 'on branch X — not the base').
+2. (B-194) Subnav renders visually attached to its own parent (Work's children under Work), never adjacent to a sibling heading — pin DOM order with vitest.
+Note: T-177 just landed AutopilotControl into the sidebar — preserve it and its tests.
+
+LANE NOTICE: this run shares the repo with one concurrent run (T-178, which owns Cycle.tsx). Your lane: components/Sidebar.tsx, App.tsx if mounting requires, and tests. Do NOT touch Cycle.tsx, views/, or client.ts.
+
+### T-180 — Restore the cherry-pick SHA assertion: T-166 pinned commit identity but nothing proves it
+
+Fixes B-203.
+
+## Reported
+
+Follow-through on B-176/T-166 (commit 8bfec63 pins author+committer identity and dates from the orphan so recovery recreates the original object id). The assertion T-162 removed from TestProjectRecoveryDoors/cherry-pick-chain must come back as a real contract now that the implementation honors it, replacing T-162's explanatory comment. Also verify it holds under parallel load (the original flake scenario, B-174) — run the package with -count and parallel gates locally before trusting it. Until this lands, B-176's 'fixed' cannot honestly be verified.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: internal/service/remote_test.go (and internal/vcs tests if you add one) ONLY. Do NOT touch frontend/** or other packages.
+
+### T-181 — T-177 left the dissolution half-done: a floating utilities drawer overlaps content and the whole GuideRail is embedded in Now, duplicating its running list
+
+Fixes B-200.
+
+## Reported
+
+Real-render finding (Jose's screenshot post-T-176/177) against docs/desktop-blueprint.md section 1, which this bug finishes. Three defects, one landing: (1) the 'Utilities' drawer — whose content is links saying where things moved — floats OVER the Now content and must be REMOVED entirely, along with the sidebar's 'hide utility drawer' control; a signpost is not a dissolution. (2) Now embeds the full GuideRail as a card (own hide, own running list, next steps) ABOVE Now's native running section — the same runs render twice on one screen. Now's native sections absorb the jobs (next steps as a proper Now section; nothing embedded wholesale). (3) Recent runs live in Records natively, not via an embedded panel. Vitest pins: no utilities drawer, exactly one running list on Now, next steps as a native Now section.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: components/GuidePanel.tsx (remove/reduce), views/Now.tsx, views/Runs.tsx, app/App.tsx, and their tests. Do NOT touch components/Sidebar.tsx, views/Cycle.tsx, internal/**, or client.ts.
+
+### T-182 — The sidebar's config block grew to five entries (Ducklings appeared) — the target is one
+
+Fixes B-201.
+
+## Reported
+
+Real-render finding. Post-T-177 the bottom block shows Settings, Ducklings, Roster, Skills, Projects — one MORE engine-domain entry than before, while the blueprint (section 1) and the pending Configuracion proposal target ONE Settings entry. Until the consolidation arc gets its go, the rule is: no new config entries; fold Ducklings back under wherever it lived (Settings section or Roster). Vitest pins the bottom block's entry list.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: components/Sidebar.tsx and its tests ONLY (T-179 just landed there — rebase onto its state and preserve its tests). Do NOT touch App.tsx, GuidePanel, views/, or client.ts.
+
+### T-183 — T-182 hid Roster, Skills and Projects without giving them a door — the rooms are unreachable
+
+Fixes B-204.
+
+## Reported
+
+Critical regression found by Jose on production render. T-182 collapsed the sidebar's config block to one Settings entry and the code comment says the engine-domain rooms 'belong behind Settings' — but Settings' subnav (my ducklings, providers, budgets & limits, autopilot & autonomy, remote & git, appearance & alerts, engine) gained NO entries for Roster, Skills or Projects. The Roster board — seats, modes, flock evidence, the surface the operator rates above every benchmark prototype — has no path from the UI at all. FIX (interim until the Configuracion arc): Settings' subnav gains Roster, Skills and Projects entries so every room keeps a door; the existing routes/views are untouched — this is linking, not moving. NEW BLUEPRINT-CLASS RULE, pin it with a vitest reachability test: every routed view must be reachable from the sidebar tree — a room without a door is a failing test, not a code review question.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: components/Sidebar.tsx, views/Settings.tsx (subnav wiring only), and tests. Do NOT touch App.tsx, GuidePanel, Now.tsx, Runs.tsx, Cycle.tsx, or client.ts.
+
+### T-184 — The settings space reorganizes around the user's three questions — mechanical re-housing, Roster intact
+
+Fixes B-208.
+
+## Reported
+
+C1 — the Settings consolidation (Jose's go, 2026-08-25). BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1 (one Settings entry) — this task builds what lives BEHIND that entry.
+
+Reorganize the settings space around the user's three questions, as a MECHANICAL RE-HOUSING (no internal redesign of any section — that is a later arc):
+1. 'Who works for you — and how far they may go': the Roster board moves here INTACT as the area's heart (it is the operator's favorite surface; move, do not redesign), with providers ('add a provider first...' teaching preserved), ducklings config, skills, budgets & limits (with its history features), autopilot & autonomy.
+2. 'Your projects': project management + per-project repo/remote & git config.
+3. 'Your preferences': appearance & alerts, engine section.
+Rules: section names speak user, not engine domain; every existing deep link redirects to the new home; the reachability test (T-183) keeps passing and is EXTENDED to the new tree; every moved section keeps its existing tests green — that is the proof nothing was internally touched.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: views/Settings.tsx, views/Roster.tsx ONLY if mounting requires (no internal changes), components/Sidebar.tsx subnav wiring, App routes if needed, and tests. Do NOT touch views/Now.tsx, views/Cycle.tsx, components/EvidenceDrawer.tsx, GuidePanel, internal/**, or client.ts.
+
+## Amended after the first attempt (2 red rounds, empty diff — read this FIRST)
+
+The first attempt failed on legacy route compatibility. The binding ROUTES CONTRACT, learned from that failure:
+- Every existing route name stays VALID and renders its view: now, board, cycle, runs, reports, review, release, bench, settings, ducklings, roster, skills, projects. You re-house NAVIGATION, not routes. A user's bookmark to any of them still works.
+- The pre-existing route/view tests are the contract: make them pass by KEEPING routes and views alive, never by rewriting or deleting the tests. Red 'legacy route compatibility' tests mean YOUR change is wrong, not the tests (the advisor already told you this).
+- Implementation shape that fits the contract: the Settings view gains a grouped category menu (three user-question groups containing the existing sections/rooms as entries); ducklings/roster/skills/projects remain their own views reachable through that menu (and their routes). This is wiring and grouping — the smallest change that satisfies. Do NOT move component files, do NOT rewrite App routing wholesale, do NOT fold views into Settings.tsx bodily.
+- Work in THIN slices: land the grouped menu first, run the tests, then adjust labels. If a step reds the suite, revert that step rather than accumulating.
+
+### T-185 — The render contract: [render] in project.toml, captures attached to runs at the gate, shown in the EvidenceDrawer
+
+Fixes B-209.
+
+## Reported
+
+R1 — the render contract (Jose's decision: render is a PROJECT CONFIG PARAMETER, sibling of [run] and [verify]).
+
+Engine: project.toml gains an optional [render] section — command (how to start the renderable thing; empty = reuse [run]), url, ready (health check; empty = reuse [run].health), scenes (list of routes/states to capture), viewport (default 1440x900), timeout_s (default 120), artifacts (glob of images the command itself produced, for non-web apps — the contract is 'give me PNGs', the engine is never a browser). {engine}/{token} interpolate in url for the dev-CORS flow (T-161). When a run reaches its gate and the project declares [render], the engine executes the contract in the RUN'S WORKTREE and attaches the captured images to the run. A render failure is a gate CAVEAT with its reason, never a red gate. Frontend: the EvidenceDrawer shows attached captures under a 'how it looks' strip. Dogfood: ducklab's own project.toml declares [render] with scenes for Now, Work/Documents, and Records/Runs using the vite+--allow-origin flow (playwright is vendored in frontend/node_modules — the render command drives it via a small script; the engine only runs the command and collects files). Go tests for contract parsing/execution/attachment; vitest for the drawer strip.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: internal/** (config, service gate hook, run attachments), cmd if needed, .ducklab/project.toml, a capture script under scripts/ or frontend/, components/EvidenceDrawer.tsx + its test. Do NOT touch views/Settings.tsx, views/Now.tsx, views/Cycle.tsx, Sidebar, or GuidePanel.
+
+### T-186 — The task lists Vitest pins (no utilities drawer, exactly one running list on Now, next steps as a…
+
+Fixes B-205.
+
+## Reported
+
+The task lists Vitest pins (no utilities drawer, exactly one running list on Now, next steps as a native Now section) but no new assertions were added to pin these behaviors; only the old guidepanel tests were deleted.
+
+Where: frontend/src/views/now.test.tsx:1
+
+Suggested fix: Add explicit assertions: query that no utility-drawer testid exists, that exactly one running list renders on Now, and that now-next-steps is a native section.
+
+Found by glm52 reviewing T-181 in run r-20260825-223247-zm5p (verdict: approve).
+
+
+(reviewer finding from T-181) Add the missing vitest pins for the dissolution acceptance criteria: no utilities drawer anywhere, exactly ONE running list on Now, next steps as a native Now section, recent runs native in Records. Tests only.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: test files ONLY (views/now.test.tsx, components/Sidebar.test.tsx additions, views/runs tests). Do NOT touch any non-test source file.
+
+### T-187 — Documents detail pane: verified claims, summary-first cards, redraft machinery behind one plain line
+
+Fixes B-211.
+
+## Reported
+
+D2 — Documents cards & claims layer. BINDING DESIGN REFERENCE: docs/desktop-blueprint.md sections 2-3. Builds ON the D1 skeleton (T-178, just landed): do not restructure the frame — this task is the DETAIL PANE's content quality.
+
+Acceptance criteria, landing together:
+1. (B-191) A section claiming 'implements REQ-xxx' renders the claim only if the target exists; otherwise 'claims REQ-008 — no such requirement exists', styled as a break. Card and trace check can never disagree on screen.
+2. (B-192, disclosure part) Section cards are summary-first: one plain sentence visible, body behind a disclosure; unexplained markers ('As-built: yes') get a point-of-use explanation or are dropped.
+3. (B-193) The redraft machinery's default face is ONE plain line ('k3 drafts, glm52 critiques until it approves — about $1' — computed from the actual seats, not hardcoded); seats/rounds/caps appear only on disclosure; helper copy speaks human (no ids/diff/gate jargon).
+Vitest pins each criterion.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Cycle.tsx (+ its test, + local components under views/). Do NOT touch Settings.tsx, Sidebar, Now.tsx, Runs.tsx, EvidenceDrawer, internal/**, or client.ts.
+
+### T-188 — The runs list deserves pagination — honest counts, filters preserved, newest first
+
+Fixes B-210.
+
+## Reported
+
+Flagged by Jose (2026-08-25). With 120+ runs the Records list renders everything in one scroll. Add pagination: a sensible page size (~25), an honest count line ('showing 25 of 122'), state filters (all/running/waiting/landed/failed) preserved across pages, newest first. If the runs list endpoint lacks limit/offset (or cursor) support, add it engine-side following the routes_table pattern. Vitest pins page size, count line, and filter+page interaction; Go test for the endpoint parameters if added.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Runs.tsx (+ runs tests), and the runs list endpoint in internal/engineapi ONLY if limit/offset support is missing — do NOT touch internal/service beyond that endpoint, and do NOT touch Cycle.tsx, Settings.tsx, EvidenceDrawer, or config internals (a concurrent run owns internal/** broadly — if your endpoint change would exceed one handler, note it and do the frontend against the existing API instead).
+
+### T-189 — Documents closes: a real ledger behind the health line, one finder, and filters wired to truth
+
+Fixes B-219.
+
+## Reported
+
+D3 — Documents closing landing. BINDING DESIGN REFERENCE: docs/desktop-blueprint.md sections 2-3. Builds on D1+D2 (landed). Acceptance criteria — ALL, landing together:
+1. (B-189, remainder) The LEDGER view exists: every spine break listed with the two ways out (create the missing piece -> births a task; mark non-normative or amend -> opens the document flow). Table shape: what the document says / what exists / since when / settle it. The health line ('N breaks in the spine') LINKS to it — no more dead link. With zero breaks the health line stays quiet or says so plainly.
+2. (B-214) The 'Jump to section' palette is REMOVED — the pinned index filter owns finding (give it a keyboard focus shortcut). This also removes the broken overlapping dropdown.
+3. (B-215) The index chips (Breaks / No task yet) filter over markers derived from THE SAME data the counts come from (trace/check + traceShow join) — one source of truth. Pin with a test that flows through the same join code the view uses, not a parallel fixture map.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Cycle.tsx, a new ledger view/component under views/, App route for it if needed, and tests. Do NOT touch Settings.tsx, Sidebar, Now.tsx, EvidenceDrawer, internal/**, or client.ts.
+
+### T-190 — The legacy seat-dropdown roster embedded in the Ducklings room duplicates the Roster board — two control surfaces over the same state
+
+Fixes B-212.
+
+## Reported
+
+Jose's direction (2026-08-25, screenshots): the Ducklings settings room still renders 'Roster for this project' — advisor/architect/consultant/implementer/judge/reviewer/scribe dropdowns with 'chosen by the engine' — a pre-Roster-board relic he thought was eliminated. The Roster board (which still exists and stays) is THE roster UI. Two parallel write paths to seat state invite contradictory edits. Remove the embedded block from the Ducklings room; keep its useful teaching lines only if the Roster board lacks them. Blueprint section 1 (amended) is binding: one control surface per piece of state. Vitest pins the Ducklings room renders no seat controls.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1 (one control surface per piece of state).
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: the Ducklings settings room (views/Ducklings.tsx or wherever the embedded 'Roster for this project' block renders) and its tests ONLY. Do NOT touch views/Roster.tsx (the Roster board stays as-is), Settings.tsx, Sidebar, Cycle.tsx, EvidenceDrawer, or internal/**.
+
+### T-191 — Settings expands no sidebar subnav: one door outside, all corridors inside via the category menu
+
+Fixes B-213.
+
+## Reported
+
+Jose's direction (2026-08-25): having Ducklings/Roster/Skills/Projects both as sidebar sub-menu AND inside Settings is redundant. Target (blueprint section 1, amended): the sidebar shows the single 'Settings' entry with NO expanded sub-items; every room — my ducklings, providers, budgets & limits, autopilot & autonomy, remote & git, appearance & alerts, engine, roster, skills, projects — navigates exclusively through the category side-menu inside the Settings view. This supersedes T-183's interim sidebar doors (which were correct as an emergency door, not as the destination). The rule-6 reachability test is UPDATED to walk settings rooms through the internal menu instead of expecting sidebar entries. Vitest pins: sidebar renders no settings sub-items; every room reachable via the internal menu.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1 (Settings expands NO sidebar subnav). Note: T-184 just landed the grouped three-question category menu inside Settings — preserve it; your job is only the sidebar side and the reachability-test update.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: components/Sidebar.tsx + its tests, and the reachability test. Do NOT touch views/Settings.tsx beyond what removing sidebar entries requires, and do NOT touch Ducklings.tsx, Cycle.tsx, EvidenceDrawer, or internal/**.
+
+### T-192 — The Settings frame must hold its rooms: category menu persists, rooms render inside — and the menu gets real visual hierarchy
+
+Fixes B-220.
+
+## Reported
+
+Jose's render findings on T-184's landing (2026-08-25 screenshots). Two defects, one landing — the Settings FRAME:
+1. STRUCTURAL: the re-housed rooms (Roster board, Skills, Project management) open as full-page teleports — clicking them LEAVES Settings entirely: the category menu vanishes and all context is lost. The Settings frame must persist: the category menu stays as a fixed column and the selected room renders INSIDE the remaining content area (mount the existing room views within the Settings layout; do not modify their internals). Routes stay valid — a direct route to roster renders the same framed presentation.
+2. VISUAL: the category menu is unstyled stacked text — no hierarchy. Give it the house treatment: group labels as small muted uppercase captions (they are labels, not links), entries with consistent casing and naming in house voice, spacing between groups, no awkward two-line wraps (shorten the first group label if needed: the full question can live as a tooltip/caption).
+Vitest pins: menu persists while a room is open; room renders within the frame; group labels are not links; reachability test stays green.
+
+BINDING DESIGN REFERENCE: docs/desktop-blueprint.md section 1.
+
+LANE NOTICE: this run shares the repo with three concurrent runs. Your lane: views/Settings.tsx, app/App.tsx if mounting requires, and tests. Do NOT touch views/Ducklings.tsx (a concurrent run owns it), views/Roster.tsx internals, views/Cycle.tsx, components/Sidebar.tsx, EvidenceDrawer, or internal/**.
+
+### T-193 — The documents health line reports a false all-clear: '0 breaks — the spine is intact' while trace/check reports 16
+
+Fixes B-222.
+
+## Reported
+
+Render-pass finding (R1's own captures, 2026-08-25). The page says '0 breaks in the spine — the spine is intact' and offers the ledger, while GET /v1/projects/ducklab/trace/check returns 16 errors (SPEC-008, 061-063, 068-076 unimplemented_spec + T-139..142). The D3 rewiring reads the wrong field/shape of the trace/check response (the API returns {errors:[...]}). Also the coverage line ('N sections have no task yet') vanished entirely. A false all-clear is worse than the original wall. Fix the join against the REAL response shape; pin with a test that feeds the actual API payload shape (errors array), not a hand-built fixture; restore the coverage line. Also render raw markdown in section summaries while in Cycle: cards show '**Priority:** must' unparsed and concatenated — render the emphasis or strip the markers, and separate the Priority line from the body (second criterion, same landing).
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Cycle.tsx, views/Ledger.tsx if the same join feeds it, and tests. Do NOT touch Settings.tsx, client.ts events, internal/**.
+
+### T-194 — The SSE stream never connects in the browser dev flow: EventSource cannot send the bearer header
+
+Fixes B-223.
+
+## Reported
+
+Render-pass finding: all six captures show '⚠ engine · stream connecting' and the Tasks board sits at 'Loading board… · all 0'. In the --allow-origin dev flow the app authenticates REST via the Authorization header, but EventSource cannot set headers — the stream request arrives tokenless, 401s, and retries forever; board data that rides the stream never arrives. Fix: the stream endpoint accepts the token as a query parameter (scoped to the SSE route; constant-time compare), and the client uses it when it builds EventSource URLs. Wails flow unchanged. Go test for query-token auth on the stream route; vitest for the EventSource URL construction.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: internal/engineapi (stream route auth), frontend/src/api/client.ts + events.ts (EventSource URL), and tests. Do NOT touch views/**, Sidebar, or EvidenceDrawer.
+
+### T-195 — The framed Roster board is strangled: mode sections truncate and seats disappear inside the Settings frame
+
+Fixes B-224.
+
+## Reported
+
+Render-pass finding: inside the Settings frame, the Roster board's mode sections (Common/Council/Solo/Pair/Split/Tournament) render as clipped one-liners ending in '…' with NO seat cards visible — the category menu column plus the flock column leave the modes no width. Fix within the frame contract: the room area must give the board its full layout (let the mode sections wrap/stack vertically when narrow, or allow the category menu to collapse to icons while inside a wide room) — choose the smallest change that shows every seat, and state it in the summary. Vitest pins: seat cards visible in the framed presentation at 1440x900.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: views/Settings.tsx (frame layout), views/Roster.tsx layout classes ONLY if wrapping requires (no logic changes), and tests. Do NOT touch Cycle.tsx, client.ts, events.ts, or internal/**.
+
+### T-196 — The render capture script gives the app server no time to boot: one goto, then it dies
+
+Fixes B-225.
+
+## Reported
+
+Dogfood finding from the first two real gate renders (T-194, T-193 accept warnings). The render capture script spawns Vite and then issues a SINGLE page.goto against the ready URL — a booting server yields net::ERR_CONNECTION_REFUSED and the whole capture aborts (surfaced correctly as a gate warning, but no photos). Fix in frontend/render-captures.mjs: poll the ready URL (retry loop with short sleeps) until it answers or the contract timeout expires, THEN navigate scenes; treat per-scene goto failures as per-scene failures (skip and note) rather than aborting the batch. Also kill the spawned server on every exit path. Node-level test or a dry-run mode if practical; otherwise the next gate's warning-free capture is the proof.
+
+LANE NOTICE: this run shares the repo with one concurrent run. Your lane: frontend/render-captures.mjs only. Do NOT touch internal/**, views/**, or client.ts.
+
+### T-197 — Render captures die twice: the dev server's descendants hold the pipes, and the engine discards PNGs on any dirty exit
+
+Fixes B-226.
+
+## Reported
+
+Follow-through on the render contract dogfood (third gate iteration). Current failure: 'exec: WaitDelay expired before I/O complete' — the capture script's spawned Vite child keeps stdout/stderr pipes open after the script exits (kill() reaches the child but not its descendants / the inherited pipes), Go's exec surfaces the WaitDelay error, and the engine treats ANY command error as render-failed — discarding PNGs that may exist. Two-sided fix, one landing:
+(a) frontend/render-captures.mjs: spawn the dev server DETACHED in its own process group with piped (not inherited) stdio, and on every exit path kill the negative pgid so no descendant holds a pipe.
+(b) internal/service/render.go: the contract is 'give me PNGs' — after the command ends (cleanly or not), if the artifacts glob matches files, ATTACH them and report success with a note about the dirty exit; only report render-failed when there are no artifacts. Go test: command writes a PNG then exits nonzero -> captures attached with note.
+
+LANE NOTICE: this run shares the repo with one concurrent run. Your lane: frontend/render-captures.mjs, internal/service/render.go + render_test.go. Do NOT touch views/**, client.ts, Settings, or Sidebar.
+
+
