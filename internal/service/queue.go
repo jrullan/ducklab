@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -24,10 +22,11 @@ type runQueue struct {
 	waiting     []*queued
 	perProj     map[string]int
 	perProvider map[string]int
-	holders     map[string][]string
+	service     *Service
 	providerCap func(string) (int, bool)
 	// limitFn keeps the engine cap live after a settings write.
 	limitFn func() int
+	wake    chan struct{}
 	// held answers "may a run for this task start in this project?" with a
 	// reason when it may not — a run paused at its gate has released its
 	// slot but its uncommitted diff still sits in the tree (and accept
@@ -59,7 +58,27 @@ func newRunQueue(limit int) *runQueue {
 	if limit <= 0 {
 		limit = 2
 	}
-	return &runQueue{limit: limit, perProj: map[string]int{}, perProvider: map[string]int{}, holders: map[string][]string{}}
+	q := &runQueue{limit: limit, perProj: map[string]int{}, perProvider: map[string]int{}, wake: make(chan struct{})}
+	q.providerCap = func(id string) (int, bool) {
+		s := q.service
+		if s == nil || s.cfg == nil {
+			return 0, false
+		}
+		s.cfgMu.RLock()
+		p, ok := s.cfg.Providers[config.ProviderID(id)]
+		s.cfgMu.RUnlock()
+		if !ok {
+			return 0, false
+		}
+		if p.MaxConcurrent > 0 {
+			return p.MaxConcurrent, true
+		}
+		if IsLocalHost(p.BaseURL) {
+			return 1, true
+		}
+		return 8, true
+	}
+	return q
 }
 
 // submit either starts a run immediately or queues it.
@@ -67,39 +86,11 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	// Keep the lookup live: changing a provider's URL or explicit cap must
 	// affect the next queue decision without restarting or migrating state.
 	q.mu.Lock()
-	if q.providerCap == nil {
-		q.providerCap = func(id string) (int, bool) {
-			if s == nil || s.cfg == nil {
-				return 0, false
-			}
-			s.cfgMu.RLock()
-			p, ok := s.cfg.Providers[config.ProviderID(id)]
-			s.cfgMu.RUnlock()
-			if !ok {
-				return 0, false
-			}
-			if p.MaxConcurrent > 0 {
-				return p.MaxConcurrent, true
-			}
-			if IsLocalHost(p.BaseURL) {
-				return 1, true
-			}
-			return 8, true
-		}
-	}
+	q.service = s
 	q.mu.Unlock()
+	// A roster is metadata, not a reservation. Provider capacity is acquired
+	// around the individual role turn by runnerFor.
 	item.providers = item.providers[:0]
-	seen := map[string]bool{}
-	if s != nil && s.cfg != nil {
-		s.cfgMu.RLock()
-		for _, id := range item.rs.run.Roster {
-			if d, ok := s.cfg.Ducklings[config.DucklingID(id)]; ok && !seen[string(d.Provider)] {
-				item.providers = append(item.providers, string(d.Provider))
-				seen[string(d.Provider)] = true
-			}
-		}
-		s.cfgMu.RUnlock()
-	}
 	q.mu.Lock()
 	if q.canStart(item) {
 		q.reserve(item)
@@ -122,9 +113,6 @@ func (q *runQueue) submit(s *Service, item *queued) {
 			}
 		}
 	}
-	if p := q.providerHold(item); p != "" {
-		reason = fmt.Sprintf("waiting for a slot on provider %s (held by %s)", p, strings.Join(q.holders[p], ", "))
-	}
 	if item.chained {
 		q.waiting = append([]*queued{item}, q.waiting...)
 	} else {
@@ -140,19 +128,38 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	item.rs.writer.WriteState()
 }
 
-func (q *runQueue) providerHold(item *queued) string {
-	for _, p := range item.providers {
+// acquireProvider reserves one provider slot for one role turn.
+func (q *runQueue) acquireProvider(ctx context.Context, s *Service, provider, runID string) error {
+	for {
+		q.mu.Lock()
+		q.service = s
 		cap := 8
-		if q.providerCap != nil {
-			if n, ok := q.providerCap(p); ok && n > 0 {
-				cap = n
-			}
+		if n, ok := q.providerCap(provider); ok && n > 0 {
+			cap = n
 		}
-		if q.perProvider[p] >= cap {
-			return p
+		if q.perProvider[provider] < cap {
+			q.perProvider[provider]++
+			q.mu.Unlock()
+			return nil
+		}
+		wake := q.wake
+		q.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wake:
 		}
 	}
-	return ""
+}
+
+func (q *runQueue) releaseProvider(provider, runID string) {
+	q.mu.Lock()
+	if n := q.perProvider[provider]; n > 0 {
+		q.perProvider[provider] = n - 1
+	}
+	close(q.wake)
+	q.wake = make(chan struct{})
+	q.mu.Unlock()
 }
 
 func (q *runQueue) canStart(item *queued) bool {
@@ -164,17 +171,6 @@ func (q *runQueue) canStart(item *queued) bool {
 	}
 	if q.running >= limit {
 		return false
-	}
-	for _, p := range item.providers {
-		cap := 8
-		if q.providerCap != nil {
-			if n, ok := q.providerCap(p); ok && n > 0 {
-				cap = n
-			}
-		}
-		if q.perProvider[p] >= cap {
-			return false
-		}
 	}
 	// Only runs that share the person's checkout need the project tree hold.
 	// Build and test-first runs have private worktrees; global and provider
@@ -202,10 +198,6 @@ func worktreeCapable(item *queued) bool {
 func (q *runQueue) reserve(item *queued) {
 	q.running++
 	q.perProj[item.rs.run.ProjectID]++
-	for _, p := range item.providers {
-		q.perProvider[p]++
-		q.holders[p] = append(q.holders[p], item.rs.run.ID)
-	}
 }
 
 func (q *runQueue) start(s *Service, item *queued) {
@@ -237,17 +229,6 @@ func (q *runQueue) start(s *Service, item *queued) {
 func (q *runQueue) done(s *Service, item *queued) {
 	q.mu.Lock()
 	q.running--
-	for _, p := range item.providers {
-		if n := q.perProvider[p]; n > 0 {
-			q.perProvider[p] = n - 1
-		}
-		for i, id := range q.holders[p] {
-			if id == item.rs.run.ID {
-				q.holders[p] = append(q.holders[p][:i], q.holders[p][i+1:]...)
-				break
-			}
-		}
-	}
 	if n := q.perProj[item.rs.run.ProjectID]; n > 0 {
 		q.perProj[item.rs.run.ProjectID] = n - 1
 	}
@@ -267,6 +248,9 @@ func (q *runQueue) done(s *Service, item *queued) {
 func (q *runQueue) poke(s *Service) {
 	for {
 		q.mu.Lock()
+		// Provider turn waiters sleep on wake too; live cap changes must wake them.
+		close(q.wake)
+		q.wake = make(chan struct{})
 		next := q.promoteLocked()
 		q.mu.Unlock()
 		if next == nil {

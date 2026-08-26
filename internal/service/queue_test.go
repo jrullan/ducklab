@@ -333,10 +333,9 @@ func TestAChainedBuildJumpsTheWaitingLine(t *testing.T) {
 	}
 }
 
-// Provider capacity belongs at the run queue, rather than in a provider client:
-// a local endpoint must be visible as queued before it is asked to serialize
-// calls internally. The resolved roster identifies the provider the run seats.
-func TestQueueQueuesLocalProviderAndRecordsWhy(t *testing.T) {
+// Provider capacity applies to role turns, not whole runs: local runs remain
+// visible as running until a role actually asks the provider to execute.
+func TestQueueAllowsLocalProviderRunsUntilTheirTurns(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	p := s.cfg.Providers["fake"]
 	p.BaseURL = "http://localhost:8081/v1"
@@ -363,17 +362,16 @@ func TestQueueQueuesLocalProviderAndRecordsWhy(t *testing.T) {
 	second.parallel = true
 	second.rs.run.Roster = map[string]string{"reviewer": "pato-uno"}
 	s.queue.submit(s, second)
-	if second.rs.run.Status != "queued" {
-		t.Fatalf("second local-provider run = %q, want queued", second.rs.run.Status)
+	if second.rs.run.Status != "running" {
+		t.Fatalf("second local-provider run = %q, want running", second.rs.run.Status)
 	}
 
 	// QueuedReason is deliberately read by name here until the production field
 	// lands with this test. It must be durable state, not an event clients have
 	// to replay, and it must identify both the constrained provider and holder.
 	reason := queuedReason(t, second.rs.run)
-	want := "waiting for a slot on provider fake (held by r-first)"
-	if reason != want {
-		t.Errorf("queued reason = %q, want %q", reason, want)
+	if reason != "" {
+		t.Errorf("running run retained queued reason %q", reason)
 	}
 
 	close(release)
@@ -421,8 +419,8 @@ func TestQueueHonorsExplicitProviderCap(t *testing.T) {
 	second.parallel = true
 	second.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
 	s.queue.submit(s, second)
-	if second.rs.run.Status != "queued" {
-		t.Errorf("explicit cap did not queue second hosted run; status = %q", second.rs.run.Status)
+	if second.rs.run.Status != "running" {
+		t.Errorf("explicit cap prevented second hosted run from starting; status = %q", second.rs.run.Status)
 	}
 	close(release)
 }
@@ -437,19 +435,24 @@ func TestProviderSetAdmitsWaitingRunAfterLiveProviderCapRaise(t *testing.T) {
 	}
 	s.queue = newRunQueue(16)
 
-	release := make(chan struct{})
-	first := queuedRun(t, "r-provider-cap-holder", "one", func() { <-release })
-	first.parallel = true
-	first.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
-	s.queue.submit(s, first)
+	if err := s.queue.acquireProvider(context.Background(), s, "fake", "r-provider-cap-holder"); err != nil {
+		t.Fatal(err)
+	}
 
 	secondStarted := make(chan struct{})
-	second := queuedRun(t, "r-provider-cap-waiter", "two", func() { close(secondStarted) })
+	second := queuedRun(t, "r-provider-cap-waiter", "two", func() {
+		if err := s.queue.acquireProvider(context.Background(), s, "fake", "r-provider-cap-waiter"); err != nil {
+			t.Error(err)
+			return
+		}
+		close(secondStarted)
+		s.queue.releaseProvider("fake", "r-provider-cap-waiter")
+	})
 	second.parallel = true
 	second.rs.run.Roster = map[string]string{"implementer": "pato-uno"}
 	s.queue.submit(s, second)
-	if second.rs.run.Status != "queued" {
-		t.Fatalf("status = %q, want queued at provider cap 1", second.rs.run.Status)
+	if second.rs.run.Status != "running" {
+		t.Fatalf("status = %q, want running at admission; role turns enforce provider cap", second.rs.run.Status)
 	}
 
 	if err := s.ProviderSet("fake", ProviderView{
@@ -460,9 +463,9 @@ func TestProviderSetAdmitsWaitingRunAfterLiveProviderCapRaise(t *testing.T) {
 	select {
 	case <-secondStarted:
 	case <-time.After(2 * time.Second):
-		t.Fatal("queued run was not admitted after ProviderSet raised the provider cap")
+		t.Fatal("role turn was not admitted after ProviderSet raised the provider cap")
 	}
-	close(release)
+	s.queue.releaseProvider("fake", "r-provider-cap-holder")
 }
 
 func setProviderMaxConcurrent(t *testing.T, p *config.Provider, cap int) {
@@ -497,8 +500,8 @@ func TestQueueHostedProviderDefaultAllowsEightRuns(t *testing.T) {
 		if i <= 8 && item.rs.run.Status != "running" {
 			t.Errorf("hosted run %d status = %q, want running", i, item.rs.run.Status)
 		}
-		if i == 9 && item.rs.run.Status != "queued" {
-			t.Errorf("ninth hosted run status = %q, want queued", item.rs.run.Status)
+		if i == 9 && item.rs.run.Status != "running" {
+			t.Errorf("ninth hosted run status = %q, want running", item.rs.run.Status)
 		}
 	}
 	for i := 0; i < 8; i++ {
@@ -535,13 +538,109 @@ func TestQueueBlocksRosterWhenAnyProviderIsAtCap(t *testing.T) {
 		"implementer": "local-duck", "reviewer": "hosted-duck",
 	}
 	s.queue.submit(s, spanning)
-	if spanning.rs.run.Status != "queued" {
-		t.Errorf("roster spanning a full local provider started: %q", spanning.rs.run.Status)
+	if spanning.rs.run.Status != "running" {
+		t.Errorf("roster was not admitted without a role turn: %q", spanning.rs.run.Status)
 	}
-	if got := queuedReason(t, spanning.rs.run); got != "waiting for a slot on provider local (held by r-local-holder)" {
-		t.Errorf("spanning roster reason = %q", got)
+	if got := queuedReason(t, spanning.rs.run); got != "" {
+		t.Errorf("admitted run retained queued reason %q", got)
 	}
 	close(release)
+}
+
+// Provider capacity is not a run admission reservation: a shared tail-role
+// provider must be available to both runs until their scribe turns execute.
+func TestQueueAllowsConcurrentRunsWithSharedTailRoleProvider(t *testing.T) {
+	s := serviceWithDucklings(t, "implementer-one", "reviewer-one", "implementer-two", "reviewer-two", "scribe")
+	s.cfg.Providers = map[config.ProviderID]config.Provider{
+		"local":  {Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
+		"hosted": {Kind: config.ProviderKindOpenAI, BaseURL: "https://api.example.test/v1"},
+	}
+	for _, id := range []string{"implementer-one", "reviewer-one", "implementer-two", "reviewer-two"} {
+		s.cfg.Ducklings[config.DucklingID(id)] = config.Duckling{Provider: "hosted", Model: id}
+	}
+	s.cfg.Ducklings["scribe"] = config.Duckling{Provider: "local", Model: "scribe"}
+	s.queue = newRunQueue(2)
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	for _, id := range []string{"run-one", "run-two"} {
+		item := queuedRun(t, id, id, func() {
+			started <- id
+			<-release
+		})
+		item.parallel = true
+		item.rs.run.Stage = "build"
+		if id == "run-one" {
+			item.rs.run.Roster = map[string]string{
+				"implementer": "implementer-one", "reviewer": "reviewer-one", "scribe": "scribe",
+			}
+		} else {
+			item.rs.run.Roster = map[string]string{
+				"implementer": "implementer-two", "reviewer": "reviewer-two", "scribe": "scribe",
+			}
+		}
+		s.queue.submit(s, item)
+		if item.rs.run.Status != "running" {
+			t.Fatalf("%s status = %q, want running", id, item.rs.run.Status)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("both runs did not reach their build/review phase")
+		}
+	}
+	close(release)
+}
+
+// The cap applies to role turns, not rosters: the second scribe waits until
+// the first scribe releases its provider slot.
+func TestQueueSerializesScribeTurnsAtProviderCap(t *testing.T) {
+	s := serviceWithDucklings(t, "scribe")
+	s.cfg.Providers = map[config.ProviderID]config.Provider{
+		"local": {Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
+	}
+	s.cfg.Ducklings["scribe"] = config.Duckling{Provider: "local", Model: "scribe"}
+	q := newRunQueue(2)
+	firstAcquired := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		err := q.acquireProvider(context.Background(), s, "local", "run-one")
+		if err == nil {
+			close(firstAcquired)
+			<-release
+			q.releaseProvider("local", "run-one")
+		}
+		firstDone <- err
+	}()
+	select {
+	case <-firstAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("first scribe did not acquire provider")
+	}
+	secondAcquired := make(chan struct{})
+	go func() {
+		if err := q.acquireProvider(context.Background(), s, "local", "run-two"); err != nil {
+			return
+		}
+		close(secondAcquired)
+		q.releaseProvider("local", "run-two")
+	}()
+	select {
+	case <-secondAcquired:
+		t.Fatal("second scribe acquired a cap-one provider concurrently")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-secondAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("second scribe did not acquire after first released")
+	}
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestQueueStats(t *testing.T) {

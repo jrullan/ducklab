@@ -353,6 +353,13 @@ func bothSidesWarning(out map[config.Role]config.DucklingID) string {
 }
 
 // runnerFor returns a TurnRunner that picks the loop matching each turn's role.
+func cacheRunID(ectx *tools.ExecContext) string {
+	if ectx == nil {
+		return ""
+	}
+	return ectx.RunID
+}
+
 func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.DucklingID, ectx *tools.ExecContext) strategy.TurnRunner {
 	return func(ctx context.Context, t *strategy.Turn, d config.DucklingID, prompt string, belt []string, tc strategy.TurnContext) (*agent.Outcome, error) {
 		if d == "" {
@@ -373,6 +380,11 @@ func (s *Service) runnerFor(cache *loopCache, roster map[config.Role]config.Duck
 		if tc.Root != "" {
 			turnCtx.ProjectRoot = tc.Root
 		}
+		provider := string(loop.Duckling.Provider)
+		if err := s.queue.acquireProvider(ctx, s, provider, cacheRunID(ectx)); err != nil {
+			return nil, err
+		}
+		defer s.queue.releaseProvider(provider, cacheRunID(ectx))
 		return agent.RunTurn(ctx, loop, &agent.Turn{
 			Role: t.Role, Duckling: d, Prompt: prompt, Toolbelt: belt,
 			Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
