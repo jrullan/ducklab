@@ -555,8 +555,14 @@ func TestAcceptWorktreeLeavesDirtyTouchedCheckoutBehindWithWarning(t *testing.T)
 		t.Fatal(err)
 	}
 	wantWarning := "main advanced to " + result.CommitSHA + "; your checkout is behind and was left untouched"
-	if got := acceptResultWarning(t, result); got != wantWarning {
-		t.Fatalf("accept warning = %q, want %q", got, wantWarning)
+	gotWarning := acceptResultWarning(t, result)
+	if !strings.Contains(gotWarning, wantWarning) {
+		t.Fatalf("accept warning = %q, want checkout state %q", gotWarning, wantWarning)
+	}
+	for _, risk := range []string{"commit from this tree", "revert landed work", "builds", "stale sources"} {
+		if !strings.Contains(strings.ToLower(gotWarning), risk) {
+			t.Errorf("accept warning = %q, want risk %q", gotWarning, risk)
+		}
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "shared.txt"))
 	if err != nil {
