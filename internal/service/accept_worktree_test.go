@@ -24,6 +24,7 @@ func pausedWorktreeRun(t *testing.T, s *Service, id, dir, runID string) (*runlog
 	if err := s.createRunWorktree(run, dir); err != nil {
 		t.Fatal(err)
 	}
+	run.ExecutionRoot, run.GateRoot = run.WorktreePath, run.WorktreePath
 	w, err := runlog.NewWriter(dir, run)
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +311,7 @@ func TestAcceptPausedTestFirstRetainsWorktreeAndLandsRedTest(t *testing.T) {
 	if err := s.createRunWorktree(run, dir); err != nil {
 		t.Fatal(err)
 	}
+	run.ExecutionRoot, run.GateRoot = run.WorktreePath, run.WorktreePath
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "red_test.txt"), []byte("red test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -358,6 +360,7 @@ tests = "false"`)
 	if err := s.createRunWorktree(run, dir); err != nil {
 		t.Fatal(err)
 	}
+	run.ExecutionRoot, run.GateRoot = run.WorktreePath, run.WorktreePath
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "red_test.txt"), []byte("red test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

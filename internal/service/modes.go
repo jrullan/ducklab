@@ -503,13 +503,14 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	cards, _ := s.Scorecards(ctx)
 	currentSeat := string(mc.roster[config.RoleImplementer])
 	escalationCandidates, currentFloor := escalationCandidatesFor(string(config.RoleImplementer), currentSeat, cards)
+	root := mc.ectx.ProjectRoot
 	base := strategy.ExecuteParams{
 		LiveToolEvents:       true,
 		EscalationCandidates: escalationCandidates,
 		CurrentLowerBound:    currentFloor,
 		ModeMedian:           s.modeTurnMedian(mc.rs.run.Mode, mc.rs.run.ID),
 		ResumeFrom:           resumeTurn(mc.rs.run),
-		ProjectRoot:          runRoot(mc.rs.run, mc.entry.Path),
+		ProjectRoot:          root,
 		TaskID:               mc.req.TaskID,
 		// Answers the person already gave ride ON the prompt: a resumed run
 		// replays from scratch, and a model that cannot see the decisions
@@ -530,14 +531,17 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		// per-role caps as every other mode.
 		TurnCaps: s.roleTurnCapsFor(mc.req.AgentTurns),
 		Gate: func(ctx context.Context) (string, string, error) {
-			res, err := verify.Run(ctx, runRoot(mc.rs.run, mc.entry.Path), mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
+			mc.rs.gateRoot = root
+			mc.rs.run.GateRoot = root
+			mc.rs.writer.WriteState()
+			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
 			}
 			return gateWord(res), res.Output, nil
 		},
 		Diff: func() (string, error) {
-			return vcs.New(runRoot(mc.rs.run, mc.entry.Path)).DiffExcluding(mc.rs.run.LinkedDeps...)
+			return vcs.New(root).DiffExcluding(mc.rs.run.LinkedDeps...)
 		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)

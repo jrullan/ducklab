@@ -93,6 +93,8 @@ type runState struct {
 	// the run's SHAPE — a person deciding whether to lift a cap deserves to
 	// know the gate has failed thirty times in a row before they feed it.
 	execCtx *tools.ExecContext
+	// gateRoot records the checkout used by the run's final gate.
+	gateRoot string
 	// projectPath is kept so a rehydrated run can open its writer without
 	// a registry lookup that may have changed since the run started.
 	projectPath string
@@ -1523,8 +1525,9 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 	}
 
 	// Build exec context
+	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
-		ProjectRoot:  runRoot(rs.run, entry.Path),
+		ProjectRoot:  root,
 		RunID:        rs.run.ID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
@@ -1738,8 +1741,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.setTracker(tracker)
 	recordLimits(rs, &b)
 
+	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
-		ProjectRoot:  runRoot(rs.run, entry.Path),
+		ProjectRoot:  root,
 		RunID:        rs.run.ID,
 		ProjectID:    rs.run.ProjectID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
@@ -1750,6 +1754,9 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	rs.execCtx = ectx
+	rs.run.ExecutionRoot = root
+	rs.writer.WriteState()
 
 	// Tool-level brakes notify the operator. Governance refusals are also kept
 	// on the run: a rejected project-settings edit is itself gate-relevant.
@@ -1874,7 +1881,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		"phase":  "final",
 		"detail": "running the full gate — the verdict is its exit code",
 	})
-	gateResult, err := verify.Run(ctx, runRoot(rs.run, entry.Path), projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	gateRoot := ectx.ProjectRoot
+	rs.gateRoot = gateRoot
+	rs.run.GateRoot = gateRoot
+	rs.writer.WriteState()
+	gateResult, err := verify.Run(ctx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
@@ -1891,7 +1902,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		}
 	}
 	if projCfg.RenderConfigured && render.Command != "" {
-		captures, renderErr := captureRender(ctx, runRoot(rs.run, entry.Path), render, rs.writer, rs.run.ID, rs.run.ProjectID)
+		captures, renderErr := captureRender(ctx, ectx.ProjectRoot, render, rs.writer, rs.run.ID, rs.run.ProjectID)
 		if len(captures) > 0 {
 			rs.run.Captures = captures
 			event := map[string]interface{}{"ok": true, "captures": captures}
@@ -1938,7 +1949,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
 
 	// Get diff
-	git := vcs.New(runRoot(rs.run, entry.Path))
+	git := vcs.New(ectx.ProjectRoot)
 	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
 	rs.writer.WriteDiff(diff)
 	if s.afterRunDiff != nil {
@@ -2457,6 +2468,39 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 			actor = "human"
 		}
 	}
+	// A recorded worktree is a custody boundary. Check every known execution
+	// root before promotion or staging can mutate a different checkout.
+	if rs.run.WorktreePath != "" {
+		expected, _ := filepath.Abs(rs.run.WorktreePath)
+		checkRoot := func(label, actual string) error {
+			if actual == "" {
+				return nil
+			}
+			normalized, _ := filepath.Abs(actual)
+			if filepath.Clean(expected) != filepath.Clean(normalized) {
+				return fmt.Errorf("accept root mismatch: run worktree %s, %s tree %s", rs.run.WorktreePath, label, actual)
+			}
+			return nil
+		}
+		if rs.execCtx != nil {
+			if err := checkRoot("turn execution", rs.execCtx.ProjectRoot); err != nil {
+				return err
+			}
+		}
+		if rs.run.ExecutionRoot == "" {
+			return fmt.Errorf("accept root mismatch: run worktree %s, turn execution root was not recorded", rs.run.WorktreePath)
+		}
+		if rs.run.GateRoot == "" {
+			return fmt.Errorf("accept root mismatch: run worktree %s, gate root was not recorded", rs.run.WorktreePath)
+		}
+		if err := checkRoot("turn execution record", rs.run.ExecutionRoot); err != nil {
+			return err
+		}
+		if err := checkRoot("gate", rs.run.GateRoot); err != nil {
+			return err
+		}
+	}
+
 	// A stage run's human gate is the decision to promote its document. There
 	// is one decision, so there is one action: accepting the run accepts the
 	// artifact.
@@ -2583,7 +2627,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 			"phase":  "accept",
 			"detail": "reproducing the gate from a clean checkout of the accepted commit — nothing lands that did not reproduce",
 		})
-		reproduction, err := verifyAcceptedCommit(ctx, git, entry.Path, head, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		reproduction, err := verifyAcceptedCommitWithBase(ctx, git, entry.Path, head, rs.run.Stage, "", verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 		if err != nil {
 			return err
 		}
@@ -2714,15 +2758,24 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		// Its clean, tagged HEAD is already the candidate; do not commit it again.
 	}
 
+	// Capture this run's diff before rebasing can introduce unrelated upstream
+	// commits into acceptance diagnostics.
+	candidateSHA, err := workGit.HeadSHA()
+	if err != nil {
+		return fmt.Errorf("read candidate worktree HEAD: %w", err)
+	}
+	candidateDiffBytes, err := workGit.DiffBetween(rs.run.BaseSHA, candidateSHA)
+	if err != nil {
+		return fmt.Errorf("read candidate worktree diff: %w", err)
+	}
+	candidateDiff := string(candidateDiffBytes)
+
 	// The chained red test remains solely on its run branch. Its build may
 	// later land the combined history through the normal acceptance path.
 	if rs.run.Stage == "test" && rs.run.ChainBuild != nil {
-		sha, err := workGit.HeadSHA()
-		if err != nil {
-			return fmt.Errorf("read chained test worktree HEAD: %w", err)
-		}
+		sha := candidateSHA
 		rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing chained red test " + short(sha) + " from a clean checkout"})
-		reproduction, err := verifyAcceptedCommit(ctx, defaultGit, entry.Path, sha, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+		reproduction, err := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, sha, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 		if reproduction != nil {
 			rs.run.GateReproduced = reproduction
 			rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
@@ -2770,7 +2823,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return fmt.Errorf("read rebased worktree HEAD: %w", err)
 	}
 	rs.writer.AppendEvent("gate_started", map[string]interface{}{"phase": "accept", "detail": "reproducing rebased " + short(rebasedSHA) + " from a clean checkout before fast-forward merge"})
-	reproduction, verifyErr := verifyAcceptedCommit(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	reproduction, verifyErr := verifyAcceptedCommitWithTestDiff(ctx, defaultGit, entry.Path, rebasedSHA, rs.run.Stage, candidateDiff, true, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if reproduction != nil {
 		rs.run.GateReproduced = reproduction
 		rs.writer.AppendEvent("gate_reproduced", map[string]interface{}{"gate": reproduction.Gate, "command": reproduction.Command, "exit_code": reproduction.ExitCode, "green": reproduction.Green, "output": reproduction.Output, "duration_s": reproduction.Duration, "acceptance_gate": reproduction})
@@ -2851,6 +2904,14 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 // sha. The working tree may contain ignored files that git add deliberately
 // omitted; only this checkout can prove the recorded commit is reproducible.
 func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage string, identities ...verify.Identity) (*runlog.GateReproduction, error) {
+	return verifyAcceptedCommitWithBase(ctx, git, root, sha, stage, "", identities...)
+}
+
+func verifyAcceptedCommitWithBase(ctx context.Context, git *vcs.Git, root, sha, stage, base string, identities ...verify.Identity) (*runlog.GateReproduction, error) {
+	return verifyAcceptedCommitWithTestDiff(ctx, git, root, sha, stage, "", false, identities...)
+}
+
+func verifyAcceptedCommitWithTestDiff(ctx context.Context, git *vcs.Git, root, sha, stage, testDiff string, testDiffProvided bool, identities ...verify.Identity) (*runlog.GateReproduction, error) {
 	identity := verify.Identity{}
 	if len(identities) > 0 {
 		identity = identities[0]
@@ -2904,6 +2965,14 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 	// by a compile error. Green from the checkout is the test-stage failure.
 	if stage == "test" {
 		if verify.IsGreen(result) {
+			diff := testDiff
+			var diffErr error
+			if !testDiffProvided {
+				diff, diffErr = git.ShowCommit(sha)
+			}
+			if diffErr == nil && !containsTestChange(diff) {
+				return reproduction, fmt.Errorf("the commit contains no test changes at all; the turn's test work did not enter the accepted commit")
+			}
 			return reproduction, fmt.Errorf("the committed test passes from a clean checkout — it asserts nothing that is not already true")
 		}
 		if compileFailure(result.Output) {
@@ -2918,6 +2987,17 @@ func verifyAcceptedCommit(ctx context.Context, git *vcs.Git, root, sha, stage st
 		return reproduction, fmt.Errorf("accepted commit %s failed its gate from a clean checkout:\n%s", short(sha), result.Output)
 	}
 	return reproduction, nil
+}
+
+func containsTestChange(diff string) bool {
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "+++ b/") || strings.HasPrefix(line, "diff --git ") {
+			if strings.Contains(line, "_test.") || strings.HasSuffix(line, "_test.go") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // linkedDependencyPaths reports every dependency path that can be linked into
@@ -3135,7 +3215,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		w.WriteState()
 		s.queue.submit(s, &queued{
 			rs: rs, ctx: runCtx, chained: true,
-			exec: func(c context.Context) { s.executeTestFirst(c, rs, entry.Path, projCfg, treq) },
+			exec: func(c context.Context) { s.executeTestFirst(c, rs, runRoot(rs.run, entry.Path), projCfg, treq) },
 		})
 		return rs.run, nil
 	}

@@ -363,6 +363,10 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 
 func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project, req TestFirstRequest) {
 	defer rs.writer.Close()
+	// Record the custody root before the first (baseline) gate, so even a
+	// failure before the model turn has durable evidence of which checkout ran.
+	rs.run.ExecutionRoot = projectRoot
+	rs.writer.WriteState()
 	// A worktree remains available at a human gate: acceptance must commit and
 	// prove its isolated red test. Accept and reject remove it after deciding.
 	defer close(rs.done)
@@ -400,6 +404,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase":  "before",
 		"detail": "running the suite before any test is written — a red test only means something against a green baseline",
 	})
+	rs.gateRoot = projectRoot
+	rs.run.GateRoot = projectRoot
+	rs.writer.WriteState()
 	before, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate before: %w", err))
@@ -468,6 +475,8 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Answers: rs.answers(),
 	}
 	rs.execCtx = ectx
+	rs.run.ExecutionRoot = projectRoot
+	rs.writer.WriteState()
 	cache := &loopCache{
 		svc: s, tracker: tracker,
 		writer:  s.llmWriter(rs, tracker),
@@ -502,6 +511,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 	// later — so solo runs no round gate at all.
 	if testMode(req.Mode) == "pair" {
 		params.Gate = func(ctx context.Context) (string, string, error) {
+			rs.gateRoot = projectRoot
+			rs.run.GateRoot = projectRoot
+			rs.writer.WriteState()
 			res, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 			if err != nil {
 				return "none", "", err
@@ -531,6 +543,9 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"phase":  "after",
 		"detail": "running the suite over the new test — an honest red is the deliverable",
 	})
+	rs.gateRoot = projectRoot
+	rs.run.GateRoot = projectRoot
+	rs.writer.WriteState()
 	after, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate after: %w", err))

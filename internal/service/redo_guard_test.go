@@ -71,7 +71,10 @@ func TestAFinishedTaskRefusesALaunchWithoutRedo(t *testing.T) {
 	s.waitForRun(context.Background(), r.ID)
 
 	// A task that was never accepted is untouched by the guard.
-	if _, err := s.RunStart(context.Background(), id, RunRequest{TaskID: "T-002", Mode: "solo"}); err != nil {
+	if r, err := s.RunStart(context.Background(), id, RunRequest{TaskID: "T-002", Mode: "solo"}); err != nil {
 		t.Errorf("an unfinished task was refused: %v", err)
+	} else {
+		s.RunAbort(context.Background(), r.ID)
+		s.waitForRun(context.Background(), r.ID)
 	}
 }

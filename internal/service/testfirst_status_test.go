@@ -263,6 +263,19 @@ func TestTheTddChainCommitsTheTestAndStartsTheBuild(t *testing.T) {
 	if !foundBuild {
 		t.Error("no build run was started after the commit")
 	}
+	s.runsMu.RLock()
+	pending := make([]*runState, 0, len(s.runs))
+	for _, rs := range s.runs {
+		pending = append(pending, rs)
+	}
+	s.runsMu.RUnlock()
+	for _, rs := range pending {
+		select {
+		case <-rs.done:
+		case <-time.After(15 * time.Second):
+			t.Fatal("chained run did not finish")
+		}
+	}
 }
 
 // A chain's build mode has the same provenance contract as an ordinary
@@ -341,6 +354,19 @@ func TestChainedBuildModeRecordsResolutionOrExplicitRequest(t *testing.T) {
 			if got, _ := disk["mode_source"].(string); got != tc.wantSource {
 				t.Errorf("state.json mode_source = %q, want %q", got, tc.wantSource)
 			}
+			s.runsMu.RLock()
+			pending := make([]*runState, 0, len(s.runs))
+			for _, rs := range s.runs {
+				pending = append(pending, rs)
+			}
+			s.runsMu.RUnlock()
+			for _, rs := range pending {
+				select {
+				case <-rs.done:
+				case <-time.After(15 * time.Second):
+					t.Fatal("chained run did not finish")
+				}
+			}
 		})
 	}
 }
@@ -395,6 +421,19 @@ func TestAManualAcceptContinuesThePausedChain(t *testing.T) {
 	got, _ := s.RunGet(context.Background(), "r-unv")
 	if got.Run.ChainBuild != nil {
 		t.Error("the chain was not consumed — a second accept would double-build")
+	}
+	s.runsMu.RLock()
+	pending := make([]*runState, 0, len(s.runs))
+	for _, rs := range s.runs {
+		pending = append(pending, rs)
+	}
+	s.runsMu.RUnlock()
+	for _, rs := range pending {
+		select {
+		case <-rs.done:
+		case <-time.After(15 * time.Second):
+			t.Fatal("chained run did not finish")
+		}
 	}
 }
 
