@@ -381,6 +381,16 @@ func TestSSEAcceptsTokenAsQueryParameter(t *testing.T) {
 	if !ok || got != "abc" {
 		t.Errorf("query token = %q, ok=%v; want abc, true", got, ok)
 	}
+
+	// Exercise the actual stream-route auth middleware, not just token parsing.
+	s := &Server{token: "abc"}
+	called := false
+	h := s.auth(func(http.ResponseWriter, *http.Request) { called = true })
+	w := httptest.NewRecorder()
+	h(w, r)
+	if !called || w.Code != http.StatusOK {
+		t.Fatalf("query-token stream auth: called=%v status=%d; want called=true status=200", called, w.Code)
+	}
 }
 
 // The exception is narrow: a token in a query string is more likely to be

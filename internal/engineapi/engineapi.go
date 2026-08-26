@@ -4,6 +4,8 @@ package engineapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -954,7 +956,11 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "missing or malformed credentials")
 			return
 		}
-		if token != s.token {
+		// Compare fixed-size digests so token validation is constant-time even
+		// when the supplied token has a different length.
+		gotHash := sha256.Sum256([]byte(token))
+		wantHash := sha256.Sum256([]byte(s.token))
+		if subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) != 1 {
 			s.error(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
