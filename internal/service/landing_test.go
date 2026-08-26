@@ -48,6 +48,55 @@ func TestRunGetOffersTrailerLanding(t *testing.T) {
 	}
 }
 
+func TestRunLandAdvancesBlockedTaskToAccepted(t *testing.T) {
+	s := newTestService(t)
+	projectID := newTestProject(t, s, "landing-task-state")
+	entry, _ := s.registry.Get(projectID)
+	if err := os.MkdirAll(filepath.Join(entry.Path, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-001 — Work\n\n### T-001 — Landed task\n\nComplete it.\n"
+	if err := os.WriteFile(filepath.Join(entry.Path, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	landingGit(t, entry.Path, "init")
+	landingGit(t, entry.Path, "config", "user.name", "test")
+	landingGit(t, entry.Path, "config", "user.email", "test@test")
+	landingGit(t, entry.Path, "add", ".ducklab/docs/plan.md")
+	landingGit(t, entry.Path, "commit", "-m", "initial")
+	writeRun(t, entry.Path, projectID, "r-blocked", "failed")
+	writeRun(t, entry.Path, projectID, "r-land", "done")
+	s.RecoverRuns(context.Background())
+
+	tasks, err := s.TaskList(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != "blocked" {
+		t.Fatalf("before landing tasks = %+v, want one blocked task", tasks)
+	}
+	if tasks[0].Blocked == "" {
+		t.Fatal("blocked task has no reason")
+	}
+	sha := landingGit(t, entry.Path, "rev-parse", "HEAD")
+	if err := s.RunLand(context.Background(), "r-land", sha, "tester", "manual"); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err = s.TaskList(context.Background(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("after landing tasks = %+v, want one task", tasks)
+	}
+	if tasks[0].Status != "accepted" {
+		t.Errorf("after manual landing status = %q, want accepted", tasks[0].Status)
+	}
+	if tasks[0].Blocked != "" {
+		t.Errorf("after manual landing blocked = %q, want empty", tasks[0].Blocked)
+	}
+}
+
 func TestRunLandRejectsInvalidAndUnreachableSHA(t *testing.T) {
 	s := newTestService(t)
 	projectID := newTestProject(t, s, "landing-guard")

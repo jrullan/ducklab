@@ -277,13 +277,13 @@ func (s *Service) autopilotAdvance(projectID string) {
 	switch first.ID {
 	case "build":
 		_, err := s.RunStart(ctx, projectID, RunRequest{
-			TaskID: first.Ref, Autonomy: "yolo", Origin: "autopilot", Note: note,
+			TaskID: first.Ref, Autonomy: "guarded", Origin: "autopilot", Note: note,
 		})
 		s.autopilotResult(projectID, "build "+first.Ref, err, human)
 	case "test-first":
 		_, err := s.TestStart(ctx, projectID, TestFirstRequest{
 			TaskID: first.Ref, ThenBuild: true, Origin: "autopilot", Note: note,
-			Build: RunRequest{Autonomy: "yolo", Origin: "autopilot"},
+			Build: RunRequest{Autonomy: "guarded", Origin: "autopilot"},
 		})
 		s.autopilotResult(projectID, "test-first "+first.Ref, err, human)
 	case "triage":

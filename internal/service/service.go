@@ -3683,6 +3683,7 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	if err != nil {
 		return err
 	}
+	rs.run.Accepted = true
 	rs.run.Resolution = "landed"
 	rs.run.Verdict = "PASSED"
 	rs.run.CommitSHA = sha
@@ -3701,12 +3702,22 @@ func (s *Service) RunLand(ctx context.Context, id, sha, actor, note string) erro
 	}
 	w.AppendEvent("human", map[string]interface{}{"action": "landed", "actor": actor, "reason": evidence, "commit_sha": sha, "evidence": evidence})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "PASSED", "resolution": "landed", "evidence": evidence})
+	if rs.run.Stage == "build" {
+		if bugID, bugErr := s.BugFixedByTask(ctx, rs.run.ProjectID, rs.run.TaskID); bugErr == nil && bugID != "" {
+			w.AppendEvent("bug_fixed", map[string]interface{}{"bug": bugID, "task": rs.run.TaskID})
+		}
+	}
 	err = w.WriteState()
 	if rs.run.WorktreePath != "" {
 		s.cleanupRunWorktree(rs, rs.projectPath)
 	}
 	// Landing resolves a gate just like acceptance or rejection, so queued work
-	// held behind it must be reconsidered.
+	// held behind it must be reconsidered. It is also an acceptance decision:
+	// guarded autopilot may continue with the next lawful task after the human
+	// lands this one, just as it does after RunAccept.
+	if err == nil {
+		s.autopilotOnAccept(rs.run)
+	}
 	s.queue.poke(s)
 	return err
 }
