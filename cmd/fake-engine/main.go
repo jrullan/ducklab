@@ -129,9 +129,16 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects", f.auth(f.projects))
 	f.mux.HandleFunc("GET /v1/projects/{id}", f.auth(f.project))
 	f.mux.HandleFunc("GET /v1/projects/{id}/status", f.auth(f.projectStatus))
+	f.mux.HandleFunc("GET /v1/projects/{id}/app", f.auth(f.projectApp))
+	f.mux.HandleFunc("GET /v1/projects/{id}/autopilot", f.auth(f.projectAutopilot))
+	f.mux.HandleFunc("GET /v1/projects/{id}/gate", f.auth(f.projectGate))
+	f.mux.HandleFunc("GET /v1/projects/{id}/autonomy", f.auth(f.projectAutonomy))
 	f.mux.HandleFunc("GET /v1/ducklings", f.auth(f.ducklings))
 	f.mux.HandleFunc("GET /v1/providers", f.auth(f.providers))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
+	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
+	f.mux.HandleFunc("GET /v1/defaults/autopilot", f.auth(f.autopilotDefaults))
+	f.mux.HandleFunc("GET /v1/defaults/modes", f.auth(f.modeDefaults))
 	f.mux.HandleFunc("GET /v1/projects/{id}/roster", f.auth(f.roster))
 	f.mux.HandleFunc("GET /v1/projects/{id}/skills", f.auth(f.skills))
 	f.mux.HandleFunc("GET /v1/projects/{id}/tasks", f.auth(f.tasks))
@@ -381,6 +388,42 @@ func (f *fakeEngine) providers(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeEngine) budgetDefaults(w http.ResponseWriter, r *http.Request) {
 	f.write(w, http.StatusOK, map[string]interface{}{"max_usd": 10.0, "max_tokens": 400000, "max_turns": 20, "max_wallclock_s": 1800})
+}
+
+func (f *fakeEngine) engineDefaults(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"max_concurrent_runs": 1, "cpu_ceiling": 100})
+}
+
+func (f *fakeEngine) autopilotDefaults(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"max_tasks": 10, "max_fails": 3, "autonomy": "guarded"})
+}
+
+func (f *fakeEngine) modeDefaults(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{
+		"rounds":            map[string]int{"solo": 3, "pair": 3, "tournament": 1, "council": 2, "split": 1},
+		"agent_max_turns":   24,
+		"script_rounds":     map[string]int{"solo": 3, "pair": 3, "tournament": 1, "council": 2, "split": 1},
+		"ducklings":         map[string][]string{"solo": {"pato-uno"}, "pair": {"pato-uno", "pato-dos"}},
+		"role_turns":        map[string]int{},
+		"script_role_turns": map[string]int{"implementer": 24, "reviewer": 8, "architect": 12, "judge": 1, "triager": 6, "advisor": 6, "scribe": 12},
+		"seats":             map[string]int{"solo": 1, "pair": 2, "tournament": 0, "council": 0, "split": 0},
+	})
+}
+
+func (f *fakeEngine) projectApp(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"configured": false, "running": false, "url": ""})
+}
+
+func (f *fakeEngine) projectAutopilot(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"on": false, "max_tasks": 10, "started": 0, "consecutive_fails": 0})
+}
+
+func (f *fakeEngine) projectGate(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"mode": "none", "command": "", "detected": "none", "adoptable": false, "best_verdict": "UNVERIFIED"})
+}
+
+func (f *fakeEngine) projectAutonomy(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"autonomy": "guarded"})
 }
 
 func (f *fakeEngine) roster(w http.ResponseWriter, r *http.Request) {
