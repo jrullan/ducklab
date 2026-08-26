@@ -153,7 +153,6 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
         testSeats: roleSeats(test.mode, test.ducklings),
         mode: build.mode,
         ducklings: build.ducklings,
-        seats: roleSeats(build.mode, build.ducklings),
         maxTokens: build.maxTokens,
         agentTurns: build.agentTurns,
       });
@@ -384,7 +383,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
                     onTdd={(t, b) => void launchTdd(t, b)}
                     onTestOnly={(t) => void launchTestOnly(t)}
                     onBuildOnly={(b) =>
-                      void launch({ mode: b.mode, ducklings: b.ducklings, seats: roleSeats(b.mode, b.ducklings), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                      void launch({ mode: b.mode, ducklings: b.ducklings, maxTokens: b.maxTokens, agentTurns: b.agentTurns })
                     }
                   />
                 ) : (

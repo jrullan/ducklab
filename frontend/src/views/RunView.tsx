@@ -759,7 +759,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               thenBuild: !!chain,
               testMode: opts.mode,
               testDucklings: opts.ducklings,
-              testSeats: opts.seats,
               note: opts.note,
               mode: chain?.mode || "solo",
               ducklings: chain?.ducklings ?? [],
@@ -1560,7 +1559,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             }}
             revisionRun={revisionRun}
             redoNote={run.redo_note}
-            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, seats: roleSeats(run.mode, relaunchDucklings), note })}
+            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
             documentGate={!!(stageToRevise || run.stage === "release")}
           />
           <SurveyCoverageLine run={run} testId="proposal-unaccounted" />

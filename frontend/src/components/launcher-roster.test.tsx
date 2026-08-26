@@ -77,7 +77,7 @@ describe("the run launcher seating from the canonical roster", () => {
     // Seat 0 is the implementer, seat 1 the reviewer. Positional seeding
     // would send the advisor and the architect — entries[0] and entries[1].
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["terra", "qwen38-max", "glm52"], seats: { implementer: "terra", advisor: "qwen38-max", reviewer: "glm52" } }),
+      expect.objectContaining({ mode: "pair", ducklings: [] }),
     );
   });
 
@@ -94,7 +94,7 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "solo", ducklings: ["terra", "qwen38-max"], seats: { implementer: "terra", advisor: "qwen38-max" } }),
+      expect.objectContaining({ mode: "solo", ducklings: [] }),
     );
   });
 
@@ -112,7 +112,7 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["terra", "qwen38-max", "glm52"], seats: { implementer: "terra", advisor: "qwen38-max", reviewer: "glm52" } }),
+      expect.objectContaining({ mode: "pair", ducklings: [] }),
     );
   });
 
@@ -137,7 +137,7 @@ describe("the run launcher seating from the canonical roster", () => {
     fireEvent.click(screen.getByTestId("run-start"));
 
     expect(launchCall(onLaunch)).toEqual(
-      expect.objectContaining({ mode: "pair", ducklings: ["", "qwen38-max", "luna"], seats: { implementer: "", advisor: "qwen38-max", reviewer: "luna" } }),
+      expect.objectContaining({ mode: "pair", ducklings: ["", "qwen38-max", "luna"] }),
     );
   });
 
@@ -156,8 +156,7 @@ describe("the run launcher seating from the canonical roster", () => {
     // Nothing picked: the whole line-up defers to the engine's roster.
     // The advisor is now a real pair seat and is represented as default too.
     const launch = launchCall(onLaunch);
-    expect(launch.ducklings).toEqual(["", "qwen38-max", ""]);
-    expect(launch.seats).toEqual({ implementer: "", advisor: "qwen38-max", reviewer: "" });
+    expect(launch.ducklings).toEqual([]);
   });
 });
 

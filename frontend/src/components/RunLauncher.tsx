@@ -488,7 +488,17 @@ export function RunLauncher({
         <button
           type="button"
           onClick={() =>
-            onLaunch({ mode, ducklings: chosen, seats: roleSeats(mode, chosen), maxTokens: Number(maxTokens) || undefined, note: note.trim() || undefined, agentTurns: turnsNoCap ? -1 : Number(agentTurns) || undefined, yes: yolo || undefined })
+            onLaunch({
+              mode,
+              // The roster is the source of truth for untouched defaults. Keep
+              // the visible pins in the launcher, but leave them out of the
+              // request so the engine can resolve the canonical roster.
+              ducklings: resolved.length && !changed.current ? [] : chosen,
+              ...(Number(maxTokens) ? { maxTokens: Number(maxTokens) } : {}),
+              ...(note.trim() ? { note: note.trim() } : {}),
+              ...(turnsNoCap || Number(agentTurns) ? { agentTurns: turnsNoCap ? -1 : Number(agentTurns) } : {}),
+              ...(yolo ? { yes: true } : {}),
+            })
           }
           disabled={busy}
           data-testid="run-start"

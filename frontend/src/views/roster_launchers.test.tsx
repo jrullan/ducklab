@@ -76,7 +76,7 @@ describe("Roster launchers", () => {
     expect(screen.getAllByTestId("seat-chip")[0]!.textContent).toMatch(/picked now/i);
     fireEvent.click(screen.getByTestId("run-start"));
 
-    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-065", expect.objectContaining({ ducklings: ["nova", "", "glm52"], seats: { implementer: "nova", advisor: "", reviewer: "glm52" } })));
+    await waitFor(() => expect(client.runStart).toHaveBeenCalledWith("p", "T-065", expect.objectContaining({ ducklings: ["nova", "", "glm52"] })));
     expect(client.RosterSetManyMode).not.toHaveBeenCalled();
     expect(client.GlobalRosterSet).not.toHaveBeenCalled();
   });

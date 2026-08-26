@@ -1014,7 +1014,6 @@ function TaskRunner({
                 testSeats: roleSeats(tdd!.test.mode, tdd!.test.ducklings),
                 mode: tdd!.build.mode,
                 ducklings: tdd!.build.ducklings,
-                seats: roleSeats(tdd!.build.mode, tdd!.build.ducklings),
                 maxTokens: tdd!.build.maxTokens,
                 agentTurns: tdd!.build.agentTurns,
               })
@@ -1026,7 +1025,7 @@ function TaskRunner({
                       thenBuild: false,
                       testMode: tdd.test.mode,
                       testDucklings: tdd.test.ducklings,
-                      testSeats: roleSeats(tdd.test.mode, tdd.test.ducklings),
+
                     })
                   : client.testStart(projectId, task.id, chosen[0] ?? ""))
               : await client.reviewStart(projectId, task.id);
@@ -1125,7 +1124,7 @@ function TaskRunner({
               onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
               onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
               onBuildOnly={(b) =>
-                void go("run", { mode: b.mode, ducklings: b.ducklings, seats: roleSeats(b.mode, b.ducklings), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                void go("run", { mode: b.mode, ducklings: b.ducklings, maxTokens: b.maxTokens, agentTurns: b.agentTurns })
               }
             />
           );
