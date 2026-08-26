@@ -208,6 +208,21 @@ func hasError(errs []TraceError, kind TraceErrorKind, id string) bool {
 	return false
 }
 
+func TestLaneCollisionAcrossMilestones(t *testing.T) {
+	spine := planWith("**Owns:** internal/service/**\n\n### T-001 — First\n\n**Implements:** SPEC-001\n")
+	spine.Plan.Sections = append(spine.Plan.Sections, Section{ID: "M-02", Owns: []string{"internal/service"}, Children: []Section{{ID: "T-002"}}})
+	if !hasError(spine.Check(), LaneCollision, "T-001") {
+		t.Fatal("overlapping lanes were not reported")
+	}
+}
+
+func TestInheritedLaneIsNotSelfCollision(t *testing.T) {
+	spine := planWith("**Owns:** internal/service\n\n### T-001 — First\n\n**Implements:** SPEC-001\n")
+	if hasError(spine.Check(), LaneCollision, "M-01") {
+		t.Fatal("milestone lane collided with its inherited child")
+	}
+}
+
 var _ = filepath.Join
 
 // A spec section that records what will NOT be built has nothing for a task to

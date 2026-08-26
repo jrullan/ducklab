@@ -529,6 +529,7 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 // edge of the plan was unreachable because nobody asked for it.
 const planInstruction = "## Your task\n\nBreak this specification into milestones and tasks. " +
 	"Milestones are H2 (`## M-01 — Title`), tasks are H3 under them (`### T-001 — Title`). " +
+	"A milestone may declare its implementation lane with an **Owns:** line listing comma-separated repository paths or directory globs (for example, **Owns:** `internal/service`, `internal/artifact/**`). The lane is inherited by every task under that milestone; do not claim the same path in two live milestones.\n\n" +
 	"Every task must carry an **Implements:** line naming the spec section it delivers.\n\n" +
 	"When a task cannot be started until another task is finished — it needs code " +
 	"that task writes, not merely code in the same area — add a **Depends on:** line " +

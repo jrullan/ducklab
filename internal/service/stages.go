@@ -1172,6 +1172,9 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 	b.WriteString("## Your task\n\n")
 	if task := s.findTask(ctx, projectID, taskID); task != nil {
 		fmt.Fprintf(&b, "%s — %s\n", task.ID, task.Title)
+		if lane := s.taskLane(projectRoot, taskID); len(lane) > 0 {
+			b.WriteString("\n## Lane notice\n\nThis task owns: " + strings.Join(lane, ", ") + ". Concurrent runs own other lanes; do not modify paths outside this lane unless strictly required.\n")
+		}
 		if strings.TrimSpace(task.Body) != "" {
 			b.WriteString("\n" + strings.TrimSpace(task.Body) + "\n")
 		}
@@ -1286,6 +1289,24 @@ func (s *Service) findTask(ctx context.Context, projectID, taskID string) *TaskV
 			// dependency edges to wait on.
 			return &TaskView{ID: rec.ID, Title: rec.Title, Body: rec.Body,
 				Status: rec.Status, Next: []string{"run"}}
+		}
+	}
+	return nil
+}
+
+func (s *Service) taskLane(projectRoot, taskID string) []string {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return nil
+	}
+	for _, m := range plan.Sections {
+		for _, task := range m.Children {
+			if strings.EqualFold(task.ID, taskID) {
+				if len(task.Owns) > 0 {
+					return append([]string(nil), task.Owns...)
+				}
+				return append([]string(nil), m.Owns...)
+			}
 		}
 	}
 	return nil

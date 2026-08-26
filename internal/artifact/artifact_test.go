@@ -240,3 +240,13 @@ func TestSectionLookupMissingReturnsNil(t *testing.T) {
 		t.Error("found a section that does not exist")
 	}
 }
+
+func TestParsePlanOwnsLane(t *testing.T) {
+	doc, err := Parse("## M-01 — Auth\n\n**Owns:** `internal/service`, internal/artifact/**\n\n### T-001 — Tokens\n", KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Sections[0].Owns; len(got) != 2 || got[0] != "internal/service" || got[1] != "internal/artifact/**" {
+		t.Errorf("owns = %v", got)
+	}
+}

@@ -30,6 +30,7 @@ const (
 	// own graph: runnable, but not in the order it is written.
 	DependencyCycle   TraceErrorKind = "dependency_cycle"
 	ForwardDependency TraceErrorKind = "forward_dependency"
+	LaneCollision     TraceErrorKind = "lane_collision"
 )
 
 // TraceError is one break, with enough detail to act on.
@@ -229,6 +230,7 @@ func (s *Spine) Check() []TraceError {
 	}
 
 	errs = append(errs, checkDependencies(s.Plan)...)
+	errs = append(errs, checkLaneCollisions(s.Plan)...)
 
 	sort.Slice(errs, func(i, j int) bool {
 		if errs[i].Kind != errs[j].Kind {
@@ -237,6 +239,60 @@ func (s *Spine) Check() []TraceError {
 		return errs[i].ID < errs[j].ID
 	})
 	return errs
+}
+
+// checkLaneCollisions validates plan section lanes. A path and any of its
+// descendants are overlapping claims; this deliberately handles both files and
+// directory globs without consulting the filesystem.
+func checkLaneCollisions(plan *Document) []TraceError {
+	// A milestone's lane is inherited by its tasks. Keep the milestone index so
+	// that this inheritance is not mistaken for two independent claims.
+	type claim struct {
+		section   Section
+		milestone int
+	}
+	var claims []claim
+	for mi, m := range plan.Sections {
+		claims = append(claims, claim{section: m, milestone: mi})
+		for i := range m.Children {
+			child := m.Children[i]
+			if len(child.Owns) == 0 {
+				child.Owns = append([]string(nil), m.Owns...)
+			}
+			claims = append(claims, claim{section: child, milestone: mi})
+		}
+	}
+	var errs []TraceError
+	for i := 0; i < len(claims); i++ {
+		for j := i + 1; j < len(claims); j++ {
+			if claims[i].milestone == claims[j].milestone {
+				continue
+			}
+			for _, a := range claims[i].section.Owns {
+				for _, b := range claims[j].section.Owns {
+					if laneOverlap(a, b) {
+						errs = append(errs, TraceError{Kind: LaneCollision, ID: claims[i].section.ID,
+							Detail: fmt.Sprintf("lane %q overlaps %q claimed by %s", a, b, claims[j].section.ID)})
+					}
+				}
+			}
+		}
+	}
+	return errs
+}
+
+func laneOverlap(a, b string) bool {
+	normalize := func(path string) string {
+		path = strings.TrimSpace(path)
+		path = strings.TrimSuffix(path, "**")
+		path = strings.TrimSuffix(path, "*")
+		return strings.TrimRight(path, "/")
+	}
+	a, b = normalize(a), normalize(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 // checkDependencies walks the horizontal edge: task → task.

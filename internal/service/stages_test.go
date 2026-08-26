@@ -251,6 +251,28 @@ func TestBuildPromptCarriesTheSpecItDelivers(t *testing.T) {
 	}
 }
 
+func TestBuildPromptCarriesLaneNotice(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Auth\n\n**Owns:** internal/service\n\n### T-001 — Issue tokens\n",
+	})
+	prompt := s.buildTaskPrompt(context.Background(), id, dir, "T-001")
+	if !strings.Contains(prompt, "internal/service") || !strings.Contains(prompt, "Concurrent runs own other lanes") {
+		t.Errorf("prompt missing lane notice:\n%s", prompt)
+	}
+}
+
+func TestTaskLanePrefersExplicitTaskLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Auth\n\n**Owns:** internal/service\n\n### T-001 — Issue tokens\n\n**Owns:** internal/artifact\n",
+	})
+	got := s.taskLane(dir, "T-001")
+	if len(got) != 1 || got[0] != "internal/artifact" {
+		t.Errorf("task lane = %v", got)
+	}
+}
+
 func TestBuildPromptCarriesProjectMemory(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})

@@ -84,6 +84,10 @@ type Section struct {
 	Implements []string
 	// Fields holds the `**Key:** value` lines, keyed lowercase.
 	Fields map[string]string
+	// Owns is the plan section's lane, declared as `**Owns:** path/, other/**`.
+	// For plan documents this field is normally declared on the milestone and
+	// inherited by its child tasks.
+	Owns []string
 	// Children are nested sections (tasks under a milestone in plan.md).
 	Children []Section
 }
@@ -292,6 +296,14 @@ func parseSectionFields(s *Section, body string) {
 			continue
 		}
 		s.Fields[key] = value
+		if key == "owns" {
+			for _, path := range strings.Split(value, ",") {
+				path = strings.TrimSpace(strings.Trim(path, "`"))
+				if path != "" {
+					s.Owns = append(s.Owns, path)
+				}
+			}
+		}
 		if key == "implements" || key == "depends on" {
 			ids := splitIDs(value)
 			if key == "implements" {
@@ -332,7 +344,7 @@ func parseFieldLine(line string) (key, value string, ok bool) {
 
 func knownField(k string) bool {
 	switch k {
-	case "implements", "priority", "status", "complexity", "depends on", "role hint", "acceptance":
+	case "implements", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns":
 		return true
 	}
 	return false
