@@ -120,6 +120,13 @@ func (s *Server) routes() {
 		}
 		s.mux.HandleFunc(r.Method+" "+r.Path, h)
 	}
+	// Keep unknown-route 404s distinguishable from resource/data 404s. The
+	// desktop uses this explicit signal for version-skew recovery; it must not
+	// infer staleness from arbitrary application-level not-found responses.
+	s.mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Ducklab-Unknown-Route", "true")
+		http.NotFound(w, r)
+	})
 	s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
 	// pprof, token-guarded, outside the route table (debug surface, not API).
 	// The one time a goroutine dump was needed — an exec that survived its
@@ -176,6 +183,7 @@ func (s *Server) setCORS(w http.ResponseWriter, r *http.Request) {
 		// preflight against the engine's own contract.
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID, X-Ducklab-Client")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Ducklab-Unknown-Route")
 	}
 }
 

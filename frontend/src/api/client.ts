@@ -668,12 +668,18 @@ export class EngineClient {
 
     if (!res.ok) {
       const err = (parsed as { error?: { code?: string; message?: string } })?.error;
-      // The engine answers unknown routes with the mux's plain-text 404, not
-      // its JSON error shape — which is exactly what an engine OLDER THAN THIS
-      // APP does for a route added since it started. The generic fallback
-      // ("POST /v1/bench/start failed") reported that state without naming it,
-      // and the one action that fixes it — restart the engine — went unsaid.
-      if (err?.message === undefined && (res.status === 404 || res.status === 405)) {
+      // Only the mux may declare that a route is unknown. Resource/data 404s
+      // are ordinary application errors and must never brick the desktop. The
+      // marker is deliberately an explicit engine signal rather than an
+      // inference from status (or from a plain-text response).
+      const unknownRoute =
+        res.headers.get("X-Ducklab-Unknown-Route") === "true" ||
+        (parsed as { error?: { unknown_route?: boolean } })?.error?.unknown_route === true ||
+        // Compatibility with older muxes: Go's default unmatched-route body is
+        // a precise, unmistakable marker. Do not broaden this to arbitrary
+        // text/plain 404s, which may be data/resource failures.
+        (res.status === 404 && text === "404 page not found");
+      if (unknownRoute) {
         this.stale = "older";
         this.opts.onStale?.("older");
         throw new ApiError(

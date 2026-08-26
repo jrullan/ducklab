@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { EngineClient, ApiError } from "./client";
 
-const clientAnswering = (status: number, body: string, type = "text/plain") =>
+const clientAnswering = (status: number, body: string, type = "text/plain", headers: Record<string, string> = {}) =>
   new EngineClient({
     baseUrl: "http://engine",
     token: "t",
     fetchFn: (async () =>
-      new Response(body, { status, headers: { "Content-Type": type } })) as unknown as typeof fetch,
+      new Response(body, { status, headers: { "Content-Type": type, ...headers } })) as unknown as typeof fetch,
   });
 
 // A bench launch against an engine started before the route existed failed
@@ -62,11 +62,27 @@ describe("summary board requests", () => {
 
 describe("what an error names", () => {
   it("names the stale engine when a route is unknown, and the fix", async () => {
-    const c = clientAnswering(404, "404 page not found");
+    const c = clientAnswering(404, "404 page not found", "text/plain", { "X-Ducklab-Unknown-Route": "true" });
     const err = await c.benchStart({ ducklings: ["luna"], modes: ["solo"] }).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.message).toContain("older than this app");
     expect(err.message).toContain("Restart the engine");
+  });
+
+  it("does not infer staleness from a data 404", async () => {
+    let stale = false;
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      onStale: () => { stale = true; },
+      fetchFn: (async () => new Response(JSON.stringify({ error: { code: "not_found", message: "project missing" } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch,
+    });
+    const err = await c.projects().catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(stale).toBe(false);
   });
 
   it("passes the engine's own words through untouched", async () => {
