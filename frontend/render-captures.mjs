@@ -24,6 +24,7 @@ const scenes = (process.env.DUCKLAB_RENDER_SCENES || "/").split("\n").filter(Boo
 const output = process.env.DUCKLAB_RENDER_OUTPUT || ".ducklab-render-captures";
 const viewport = (process.env.DUCKLAB_RENDER_VIEWPORT || "1440x900").split("x").map(Number);
 const timeout = Number(process.env.DUCKLAB_RENDER_TIMEOUT_S || 120) * 1000;
+const readyRetryDelay = 250;
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 let server;
@@ -32,24 +33,49 @@ if (process.env.DUCKLAB_RENDER_START !== "false") {
 }
 try {
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: viewport[0], height: viewport[1] } });
-  if (ready) await page.goto(ready, { waitUntil: "networkidle", timeout });
-  for (const [index, scene] of scenes.entries()) {
-    // Scenes are hash routes in the SPA. Resolve them against the contract URL
-    // without discarding its interpolated engine/token query parameters.
-    const targetURL = new URL(url);
-    if (scene.startsWith("#")) targetURL.hash = scene;
-    else targetURL.pathname = scene;
-    if (token && !targetURL.searchParams.has("token")) {
-      const engine = targetURL.searchParams.get("engine");
-      if (engine) targetURL.searchParams.set("engine", engine);
-      targetURL.searchParams.set("token", token);
+  try {
+    const page = await browser.newPage({ viewport: { width: viewport[0], height: viewport[1] } });
+    if (ready) {
+      const deadline = Date.now() + timeout;
+      let lastError;
+      while (Date.now() < deadline) {
+        const remaining = deadline - Date.now();
+        try {
+          await page.goto(ready, { waitUntil: "domcontentloaded", timeout: Math.min(2000, remaining) });
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, Math.min(readyRetryDelay, Math.max(0, deadline - Date.now()))));
+        }
+      }
+      if (lastError) {
+        throw new Error(`render server did not become ready at ${ready} within ${timeout / 1000}s`, { cause: lastError });
+      }
     }
-    const target = targetURL.toString();
-    await page.goto(target, { waitUntil: "networkidle", timeout });
-    await page.screenshot({ path: `${output}/scene-${String(index + 1).padStart(2, "0")}.png`, fullPage: true });
+    for (const [index, scene] of scenes.entries()) {
+      // Scenes are hash routes in the SPA. Resolve them against the contract URL
+      // without discarding its interpolated engine/token query parameters.
+      const targetURL = new URL(url);
+      if (scene.startsWith("#")) targetURL.hash = scene;
+      else targetURL.pathname = scene;
+      if (token && !targetURL.searchParams.has("token")) {
+        const engine = targetURL.searchParams.get("engine");
+        if (engine) targetURL.searchParams.set("engine", engine);
+        targetURL.searchParams.set("token", token);
+      }
+      const target = targetURL.toString();
+      try {
+        await page.goto(target, { waitUntil: "networkidle", timeout });
+      } catch (error) {
+        console.warn(`Skipping scene ${scene}: ${error.message}`);
+        continue;
+      }
+      await page.screenshot({ path: `${output}/scene-${String(index + 1).padStart(2, "0")}.png`, fullPage: true });
+    }
+  } finally {
+    await browser.close();
   }
-  await browser.close();
 } finally {
   server?.kill();
 }
