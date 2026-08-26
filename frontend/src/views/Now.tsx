@@ -447,7 +447,7 @@ function actionableFailures(list: Run[]): Run[] {
     }
   }
   return [...latest.values()]
-    .filter((r) => r.status === "failed" && !settled.has(r.task_id || r.stage || r.id))
+    .filter((r) => r.status === "failed" && r.stage !== "chat" && !settled.has(r.task_id || r.stage || r.id))
     .sort((a, b) => (b.ended_at ?? "").localeCompare(a.ended_at ?? ""));
 }
 

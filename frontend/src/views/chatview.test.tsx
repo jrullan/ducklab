@@ -197,6 +197,25 @@ describe("ChatAbout image attachments", () => {
   });
 });
 
+describe("chat terminal state", () => {
+  it("speaks in conversation terms without an acceptance frame", async () => {
+    const ended = { ...chatRun, status: "done", pending_kind: undefined, verdict: "ABORTED", budget: { usd: 0.12, tokens: 10, turns: 1, wallclock_s: 1 } } as unknown as Run;
+    useRuns.setState({
+      runs: { "r-c": ended },
+      events: { "r-c": [
+        ev("turn_start", 1, { round: 1, turn: 0, role: "consultant", duckling: "k3" }),
+        ev("tool_call", 2, { round: 1, turn: 0, tool: "fs_read", ok: true }),
+        ev("turn_end", 3, { round: 1, turn: 0, role: "consultant" }),
+      ] },
+      spend: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-c" client={client} />);
+    const outcome = await screen.findByTestId("run-outcome");
+    expect(outcome).toHaveTextContent("conversation ended · 1 tool call · $0.1200");
+    expect(outcome).not.toHaveTextContent(/accept/i);
+  });
+});
+
 describe("the chat composer", () => {
   it("waits at the bottom section, not in the pending card", async () => {
     useRuns.setState({

@@ -107,6 +107,17 @@ describe("Now — the inbox", () => {
     expect(card.textContent).toContain("answer it");
   });
 
+  it("keeps ended and aborted chats out of the decision inbox", async () => {
+    seed([
+      { ...base, id: "chat-ended", stage: "chat", status: "done", verdict: "ABORTED", pending_kind: "chat", next: [] },
+      { ...base, id: "chat-aborted", stage: "chat", status: "failed", verdict: "ABORTED", pending_kind: undefined, next: [] },
+    ]);
+    render(<Now client={clientWith()} projectId="p" />);
+    await screen.findByTestId("now-view");
+    expect(screen.queryByTestId("now-waiting")).toBeNull();
+    expect(screen.queryByTestId("now-failures")).toBeNull();
+  });
+
   // Only the LATEST run of a task, still failed, for work never subsequently
   // accepted. An old failure whose task a later run completed is history, and
   // offering it here would offer redoing finished work.

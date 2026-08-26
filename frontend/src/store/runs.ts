@@ -327,7 +327,9 @@ export const useRuns = create<RunsState>((set) => ({
 /** Runs waiting on a person, newest wait first — the human-gate inbox. */
 export function pendingForHuman(runs: Record<string, Run>): Run[] {
   return Object.values(runs)
-    .filter((r) => r.status === "paused" && !!r.pending_kind)
+    // Chat is a conversation, not a human-gated run. In particular, an ended
+    // or aborted chat must never be routed through the accept/reject inbox.
+    .filter((r) => r.status === "paused" && !!r.pending_kind && r.stage !== "chat")
     .sort((a, b) => (a.pending_since ?? "").localeCompare(b.pending_since ?? ""));
 }
 

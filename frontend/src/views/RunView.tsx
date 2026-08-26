@@ -21,7 +21,7 @@ import { DecisionCard } from "../components/DecisionCard";
 import { SurveyCoverageLine, SurveyInventory, type SurveyInventoryItem } from "../components/SurveyInventory";
 import { RunLauncher, type LaunchOpts, type ModeEstimates } from "../components/RunLauncher";
 import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
-import { money, tokens, duration } from "../lib/format";
+import { money, moneyOrZero, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
 import { seatsFromRoster, rolesForMode } from "../lib/seats";
 import { roleSeats } from "../components/RunLauncher";
@@ -677,8 +677,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           : events.some((e) => e.type === "commit_withdrawn")
             ? "The last accept committed the diff, but it did not reproduce from a clean checkout, so the commit was taken back — the diff is still in the tree, uncommitted. Fix the tree and accept again (a new commit, verified again), or reject to restore the tree."
             : "commits the diff to the project";
+  const chatToolCalls = run.stage === "chat"
+    ? turns.reduce((count, turn) => count + turn.toolCalls.length, 0)
+    : 0;
   const outcome = (() => {
     if (isWorking) return "";
+    if (run.stage === "chat") {
+      return `conversation ended · ${chatToolCalls} tool call${chatToolCalls === 1 ? "" : "s"} · ${moneyOrZero(run.budget?.usd ?? 0)}`;
+    }
     if (run.resolution === "landed") {
       return run.commit_sha ? `landed · ${run.commit_sha.slice(0, 7)}` : "landed";
     }
