@@ -77,6 +77,24 @@ describe("Cycle", () => {
     expect(screen.getByTestId("cycle-health").textContent).toContain("1 break");
   });
 
+  it("counts the API trace errors array, not only errors joined to visible sections", async () => {
+    const apiPayload = {
+      errors: Array.from({ length: 16 }, (_, i) => ({
+        kind: "unimplemented_spec",
+        id: `SPEC-${String(i + 61).padStart(3, "0")}`,
+        detail: "no task implements this spec section",
+      })),
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(apiPayload);
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+    await waitFor(() => expect(screen.getByTestId("cycle-health")).toHaveTextContent("16 breaks in the spine"));
+    expect(screen.getByTestId("cycle-coverage-line")).toHaveTextContent("16 sections have no task yet");
+  });
+
   it("says the spine is clean only when it is", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/")) return json(REQUIREMENTS);

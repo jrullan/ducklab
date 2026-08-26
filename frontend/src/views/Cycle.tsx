@@ -469,8 +469,9 @@ export function Cycle({
         </div>
         <section data-testid="cycle-stage-narrative" className="sr-only"><h1>The document chain</h1><p>{STAGES.map((s) => s.story).join(" ")}</p></section>
         <div data-testid="cycle-health" className="mt-1 block text-xs text-ink-secondary">
-          <a href="#/cycle/ledger" className="underline-offset-2 hover:underline"><span>{broken.size === 0 ? "0 breaks in the spine — the spine is intact" : <>{broken.size} break{broken.size === 1 ? "" : "s"} in the spine</>}</span></a>
+          <a href="#/cycle/ledger" className="underline-offset-2 hover:underline"><span>{errors.length === 0 ? "0 breaks in the spine — the spine is intact" : <>{errors.length} break{errors.length === 1 ? "" : "s"} in the spine</>}</span></a>
           <a href="#/cycle/ledger" className="ml-2 underline">Open ledger</a>
+          <p data-testid="cycle-coverage-line" className="mt-1">{coverageLine(errors)}</p>
         </div>
       </header>
       <div className="flex min-h-0 flex-1 gap-4 overflow-hidden pt-3">
@@ -1108,9 +1109,9 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
           {liveState}
         </p>
       )}
-      <p data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
-        {summarySentence(section)}
-      </p>
+      <div data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
+        <SectionSummary section={section} />
+      </div>
       <details className="mt-2" data-testid="cycle-section-details">
         <summary className="cursor-pointer text-xs text-ink-muted">More detail</summary>
         <div className="pt-1">
@@ -1178,9 +1179,30 @@ function cleanSectionBody(body: string): string {
 }
 
 function summarySentence(section: Section): string {
-  const text = cleanSectionBody(section.body).replace(/\s+/g, " ").trim();
+  const text = summaryBody(section).replace(/\s+/g, " ").trim();
   const sentence = text.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim();
   return sentence || `${section.title} is described here.`;
+}
+
+/** Keep labelled metadata readable and distinct from the prose it describes. */
+function summaryBody(section: Section): string {
+  return cleanSectionBody(section.body).replace(/^\s*\*\*Priority:\*\*[^\n]*(?:\n|$)/im, "").trim();
+}
+
+function priorityLine(section: Section): string | null {
+  const match = cleanSectionBody(section.body).match(/^\s*(\*\*Priority:\*\*[^\n]*)/im);
+  return match?.[1]?.trim() ?? null;
+}
+
+function SectionSummary({ section }: { section: Section }) {
+  const priority = priorityLine(section);
+  const sentence = summarySentence(section);
+  return (
+    <>
+      {priority && <Prose body={priority} className="text-sm text-ink" />}
+      <Prose body={sentence} className="mt-1 text-sm text-ink" />
+    </>
+  );
 }
 
 function redraftSummary(mode: string, roster: readonly RosterEntry[], measured: MeasuredSpend): string {
