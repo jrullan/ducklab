@@ -511,6 +511,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// passed; with streaming it made two, never patched, and the reviewer
 		// was handed nothing to review.
 		if useNative && (provider.IsToolCalls(finishReason) || len(choice.Message.ToolCalls) > 0) {
+			// Preserve narration accompanying tool calls as the partial draft so
+			// a budget interruption can checkpoint what the model had concluded.
+			if strings.TrimSpace(choice.Message.Content) != "" {
+				outcome.Text = choice.Message.Content
+			}
 			toolCalls := choice.Message.ToolCalls
 			conversation = append(conversation, choice.Message)
 			for _, tc := range toolCalls {

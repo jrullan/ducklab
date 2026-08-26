@@ -137,12 +137,15 @@ func TestResumeReplaysBudgetInterruptedReviewerWithItsPartialWork(t *testing.T) 
 	if rs.run.Status != "paused" || rs.run.PendingKind != "budget" {
 		t.Fatalf("status/pending = %s/%s, want paused/budget", rs.run.Status, rs.run.PendingKind)
 	}
+	if reviewerCalls != 1 {
+		t.Fatalf("reviewer provider calls before pause = %d, want 1 partial response before budget interruption", reviewerCalls)
+	}
 	state, err := runlog.ReadState(rs.runDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.InterruptedTurn == nil || state.InterruptedTurn.Role != "reviewer" || !strings.Contains(state.InterruptedTurn.Notes, `"tool_calls"`) || !strings.Contains(state.InterruptedTurn.Notes, "fs_list") {
-		t.Fatalf("interrupted reviewer checkpoint = %#v, want its partial draft and tool progress", state.InterruptedTurn)
+	if state.InterruptedTurn == nil || state.InterruptedTurn.Role != "reviewer" || !strings.Contains(state.InterruptedTurn.Notes, `"tool_calls"`) || !strings.Contains(state.InterruptedTurn.Notes, "fs_list") || !strings.Contains(state.InterruptedTurn.Notes, "Partial reviewer draft") {
+		t.Fatalf("interrupted reviewer checkpoint = %#v, want its partial structured notes and tool progress", state.InterruptedTurn)
 	}
 	worktreeFile := filepath.Join(rs.run.WorktreePath, "add.go")
 	changed, err := os.ReadFile(worktreeFile)
