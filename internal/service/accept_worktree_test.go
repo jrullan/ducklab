@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
 )
 
@@ -32,6 +33,71 @@ func pausedWorktreeRun(t *testing.T, s *Service, id, dir, runID string) (*runlog
 		t.Fatal(err)
 	}
 	return run, git
+}
+
+// A recorded isolated checkout is a custody boundary: acceptance must refuse
+// rather than stage it when the turn or its gate was run from another tree.
+// In particular, that refusal must leave the candidate in the worktree and
+// must not manufacture the same change in the registered human checkout.
+func TestAcceptWorktreeRefusesTurnRootMismatchWithoutStrandingCandidate(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-worktree-root-mismatch")
+	candidate := "new_behavior_test.go"
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, candidate), []byte("package proj\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	if rs == nil {
+		t.Fatal("recovered run is absent")
+	}
+	// This models the reported split: tools used the registered checkout even
+	// though the run record already named an isolated worktree.
+	rs.execCtx = &tools.ExecContext{ProjectRoot: dir}
+
+	_, err := s.RunAccept(context.Background(), run.ID, "")
+	if err == nil || !strings.Contains(err.Error(), "root mismatch") {
+		t.Fatalf("accept error = %v, want an explicit worktree root mismatch refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(run.WorktreePath, candidate)); err != nil {
+		t.Fatalf("candidate was removed from its run worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, candidate)); !os.IsNotExist(err) {
+		t.Fatalf("candidate was stranded in the registered checkout: %v", err)
+	}
+}
+
+// A green clean checkout has two materially different causes for a test-first
+// run: its committed test may be vacuous, or this run may have committed no
+// test change whatsoever. The latter must say so; blaming a test that never
+// entered the commit risks a person discarding valid work from another tree.
+func TestAcceptWorktreeNamesMissingTestDiffBeforeCallingItVacuous(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	if _, err := s.ProjectUpdate(context.Background(), id, map[string]string{
+		"verify.mode": "tests", "verify.tests": "true",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-empty-test-diff")
+	run.Stage = "test"
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	rs.run.Stage = "test"
+
+	_, err := s.RunAccept(context.Background(), run.ID, "")
+	if err == nil || !strings.Contains(err.Error(), "commit contains no test changes") {
+		t.Fatalf("accept error = %v, want a missing-test-diff diagnostic", err)
+	}
+	if strings.Contains(err.Error(), "asserts nothing") {
+		t.Fatalf("empty test diff was mislabeled as a vacuous committed test: %v", err)
+	}
 }
 
 func TestAcceptWorktreeReceiptNamesRebasedSHA(t *testing.T) {
