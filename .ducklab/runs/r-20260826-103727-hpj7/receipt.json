@@ -1,0 +1,11 @@
+{
+  "base_sha": "479deb655f922a6f6b33a37bf1e44ade50cee856",
+  "head_sha": "4f56136391ae8ed2945248b531f12d21d80e1209",
+  "diff_sha256": "31511c19e8d133926e69707eff5e36606fcdd4fbced3a402de9a36af8f384421",
+  "gate_command": "test -z \"$(gofmt -l $(find . -type f -name '*.go'))\" \u0026\u0026 go test ./... \u0026\u0026 cd frontend \u0026\u0026 npx tsc --noEmit \u0026\u0026 npx vitest run",
+  "exit_code": 0,
+  "duration_s": 0,
+  "reproduction_verdict": "green",
+  "accepted_by": "claude",
+  "accepted_at": "2026-08-26T10:52:57Z"
+}

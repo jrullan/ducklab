@@ -3915,4 +3915,424 @@ Follow-through on the render contract dogfood (third gate iteration). Current fa
 
 LANE NOTICE: this run shares the repo with one concurrent run. Your lane: frontend/render-captures.mjs, internal/service/render.go + render_test.go. Do NOT touch views/**, client.ts, Settings, or Sidebar.
 
+### T-198 — One stray 404 bricks the whole desktop: staleness inference dims every surface with pointer-events-none and never says why
+
+Fixes B-228.
+
+## Reported
+
+Root cause of Jose's field report ('after the sixth or seventh settings tab, clicks do nothing'): client.ts treats ANY 404 as 'the engine does not know this route — it is older than this app', flips the global stale state, and App.tsx responds by dimming MAIN with pointer-events-none opacity-60 — silently disabling every click in the app. Clicking through settings rooms until one room's fetch 404s (for any reason, including a missing RESOURCE rather than a missing ROUTE) bricks the session. Reproduced with Playwright: main carries 'pointer-events-none opacity-60', every nav entry inherits pe:none. Fix, two halves: (1) staleness must not be inferred from arbitrary 404s — only a genuine version signal may flip it (compare the engine's advertised version/routes — /v1/health already carries version — or restrict the older-inference to a explicit marker the engine sends on unknown-route 404s, distinguishable from data 404s); (2) when the app DOES disable the surface, the state must be unmissable and worded (banner with the reason and the recovery action) — a silent full-app pointer-events-none is a trap that violates house rules 1 and 3. Vitest: data-404 does not flip stale; unknown-route marker does; the dimmed state renders its banner.
+
+LANE NOTICE: your lane: frontend/src/api/client.ts (stale inference), app/App.tsx (dim state + banner), engineapi if the unknown-route marker needs adding (one small header/body marker on the mux's 404), and tests. Do NOT touch views/** or Sidebar.
+
+### T-199 — Fake engine drifted again: seven endpoints unknown — the parity test does not walk the real routes
+
+Fixes B-229.
+
+## Reported
+
+Repro against the fake engine 404s: /v1/defaults/modes, /v1/defaults/engine, /v1/defaults/autopilot, /v1/projects/{id}/app, /v1/projects/{id}/autopilot, /v1/projects/{id}/gate, /v1/projects/{id}/autonomy. B-169/T-157 was supposed to pin parity, but the drift returned within a day — the parity test clearly enumerates a hand-kept list instead of walking the REAL routes table. Fix: the parity test iterates internal/engineapi's routes_table (the single source) filtered to GET routes the frontend consumes, and asserts the fake engine answers each with 2xx and plausible shape; add the seven missing handlers now.
+
+LANE NOTICE: your lane: cmd/fake-engine/** and its test. Do NOT touch internal/engineapi (read-only import of the table is fine), frontend/**.
+
+### T-200 — F2a — plan sections declare their lanes: owned files become a validated contract that briefs inherit
+
+Fixes B-231.
+
+## Reported
+
+Documents phase 2, engine half (Jose's standing go; design: docs/desktop-blueprint.md + the phase-2 section of the Documents proposal; benchmark convergence 3/3 — every strong prototype surfaced plan sections owning files). Three pieces, one landing: (1) PARSING — a plan section may declare the files/directories it owns (an 'Owns:' line or frontmatter key in the section, following the existing artifact section conventions; document the chosen syntax in the section template); (2) VALIDATION — trace/check (or a sibling deterministic check) reports when two sections with live/pending tasks claim overlapping paths, as a break kind ('lane collision'); (3) INHERITANCE — when a run starts for a task born from a section with a lane, the engine appends the lane to the run's brief automatically (the LANE NOTICE the operator writes by hand today, generated: which paths this task owns, and that concurrent runs own others). Go tests for all three: parse, collide, inherit.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: internal/artifact/**, internal/service (brief building + check), and their tests. Do NOT touch frontend/**, cmd/fake-engine (a concurrent run owns it), or engineapi routes beyond exposing the check result if trivial.
+
+### T-201 — F2b — approving a plan is a Now decision: a card with coverage evidence, and a drawer that says what approving means
+
+Fixes B-232.
+
+## Reported
+
+Documents phase 2, surface half (Jose's go; design refs: docs/desktop-blueprint.md section 3 'at decision time' + the GPT-Sol pattern from the benchmark synthesis). When the project's PLAN artifact has a pending proposal awaiting agreement, Now shows a decision card alongside the run cards: (1) headline in house voice ('The team turned the agreed spec into N tasks — it is waiting for you to approve the scope before any duckling touches code'); (2) evidence line computed from real sources — criteria covered (traceCheck), tasks proposed and how many can run in parallel (plan sections), lane collisions ('files with two owners: 0' — consume the F2a check if the engine exposes it by then, otherwise compute from section lane declarations client-side; a concurrent run is landing F2a in internal/**); (3) actions: Approve (artifact promote — if task birth is a separate step today, say what approving does honestly on the card), Ask for changes (the existing proposal discard/revise signpost), and Examine opening the EvidenceDrawer in a plan variant whose first line is 'you approve these tasks being born and their lanes — you are not approving code yet'. Vitest pins: card appears only with a pending plan proposal, evidence lines from fixture data flowing through the SAME join the view uses, drawer variant first line, and card absence when no proposal waits.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: frontend/src/views/Now.tsx, components/WaitingCard.tsx or a sibling PlanCard component, components/EvidenceDrawer.tsx (plan variant), and tests. Do NOT touch internal/** (a concurrent run owns it), cmd/fake-engine, Cycle.tsx, Settings.tsx, or Sidebar.
+
+### T-202 — Dedupe staging exclusions and make accept staging immune to ignored/symlinked link_deps
+
+Fixes B-227.
+
+## Reported
+
+Found cutting v0.9.0 (run r-20260826-035917-h6ul, deterministic across retries). The release-accept staging step runs `git add -A -- . :^node_modules :^frontend/node_modules :^.venv :^.venv :^frontend/node_modules` — exclusions duplicated (link_deps entries concatenated with defaults) — and git exits 1: 'The following paths are ignored by one of your .gitignore files: frontend/node_modules, node_modules'. In a run worktree the link_deps are SYMLINKS, which changes how the pathspec engine treats them. Sibling of T-143's staging-exclusion fix — this is the release-accept path variant. Fix: dedupe exclusions, and stage in a way that cannot trip over ignored/symlinked link_deps (e.g. git add -A without pathspecs plus git reset of exclusions, or --ignore-errors semantics that T-143 chose). Go test: release accept in a worktree with link_deps symlinks and default excludes. NOTE: v0.9.0 was promoted and tagged BY HAND (commit 7054095) as recovery — the engine's release record for v0.9.0 may need reconciling with the hand landing; make the fix idempotent against that state.
+
+ESCALATED TO CRITICAL — second and third incidents: (2) T-199's TASK accept (not release) failed the same family: staging mounted nothing and commit died on 'nothing added to commit but untracked files present (frontend/node_modules)'; hand-landed as 479deb6. (3) NEW INTERACTING CAUSE: the [render] contract writes .ducklab-render-captures/*.png INSIDE the worktree; they leak into the run's DIFF as binary patches and sit untracked at staging time — capture output must be excluded from both the diff and the staging pathspec (or written outside the tree, e.g. the run's evidence dir directly). The staging fix and the capture-location fix belong together. Also: /land accepts any sha without validating it contains the run's changes — the operator briefly recorded a WRONG sha; consider a sanity check (sha exists and touches the run's files) or an explicit force flag.
+
+=== TASK FRAMING (accept-pipeline hardening — lands B-227 AND B-207 together) ===
+
+## NARROWED after one thrashing attempt (read this FIRST — the four-criteria version was too wide)
+
+This task now lands ONLY the staging fix (criteria 1+2). Atomicity and /land validation moved to their own task — do NOT touch them.
+
+1. STAGING: deduplicate exclusion pathspecs; staging succeeds in link_deps worktrees (symlinked node_modules/.venv). Reproduce both observed failures as Go tests: (a) release-accept dying 'paths are ignored' exit 1; (b) task-accept committing nothing ('nothing added to commit but untracked files present'). The intermittency correlates with untracked artifacts existing at staging time — pin that.
+2. RENDER CAPTURES: .ducklab-render-captures is excluded from BOTH the run diff and staging (or capture output moves outside the worktree into the run evidence dir). Evidence never pollutes the change. One Go test.
+
+Work in thin slices; if a step reds the suite, revert the step.
+
+LANE NOTICE: internal/service (accept/staging paths), internal/vcs if the staging helper lives there, internal/runlog only if the capture dir moves. Do NOT touch frontend/**, cmd/**, or the /land endpoint.
+
+### T-203 — The project chat has no door and seats nobody: the consultant hides in the command palette and the roster's pick is not pre-seated
+
+Fixes B-236.
+
+## Reported
+
+Field finding by Jose. (a) 'Ask how & why — chat about the project' lost its visible entry when the utility panel dissolved; it survives only inside the command palette, which a user cannot discover. Give it a worded door where asking-about-the-project belongs (candidates: the sidebar footer near engine status, or a Now affordance; choose ONE, justify in summary — no new nav entries). (b) Opening any chat (project or task) must pre-seat the ROSTER-RESOLVED consultant (luna today) — the user was asked to pick a duckling the record already knows; a field the record can fill is a system failure. Vitest: door renders and opens the chat; chat opens with the resolved consultant seated.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: the chat entry/launch surfaces (App.tsx, Sidebar footer or Now, the chat view/component) + tests. Do NOT touch internal/** (T-202 owns it), Cycle.tsx, or Settings.tsx.
+
+### T-204 — The configuration-amendment card replaces the consultant's answer instead of accompanying it
+
+Fixes B-237.
+
+## Reported
+
+Field finding by Jose: he opened a chat, asked, and got no answer — a configuration amendment card rendered on top instead. The amendment card (config doctor findings) must ACCOMPANY the conversation as a side note ('the doctor also found N configuration findings — review them'), never preempt or replace the reply; and the consultant must still answer the question that was asked. If the reply genuinely failed, the chat must say so plainly (house rules: every state carries its reason). Vitest: with amendment events present, the reply still renders and the card renders beside/below it, not instead of it.
+
+LANE NOTICE: this run shares the repo with two concurrent runs. Your lane: the chat view/components rendering replies and config_amendment cards + tests. Do NOT touch internal/**, App routing, or Settings.tsx.
+
+### T-205 — Make accept atomic: commit merge succeeds before checkout advance, downgrade advance errors to warnings
+
+Fixes B-207.
+
+## Reported
+
+Incident during T-181 accept: the API returned an internal error ('advance registered checkout to b0c33af: git checkout ... failed') while the landing commit b0c33af had already merged and the bug ladder proceeded. Residue: deleted dist/ assets and half-updated .ducklab files in the registered working tree. Likely cause: the operator's git pull on the same checkout raced the engine's post-land advance — the run-vs-human collision class. Fixes to consider: (a) the advance takes/retries under a repo lock and reports a WARNING (not an internal error) when the landing itself succeeded; (b) the advance is atomic (stash-advance-restore or worktree-switch) so a race leaves no partial state; (c) the error message says what the human should do ('your checkout raced the landing — run git status'). Repro guidance: accept a run while a concurrent git pull runs on the registered checkout.
+
+SECOND SYMPTOM (same incident): the run stayed paused-at-gate with its Accept card still offered in Now even though the commit had merged — a second accept could have been attempted against already-landed work. Recovered via POST /land with the landed sha. The fix must make accept atomic from the run-state perspective too: if the merge succeeded, the run transitions regardless of checkout-advance failures, which downgrade to a warning.
+
+SPLIT OUT of the T-202 hardening after it proved too wide: this bug now owns ONLY (a) accept atomicity (merge landed => run transitions; checkout-advance failure downgrades to a worded warning; advance atomic under concurrent pull) and (b) /land sha validation (reject a sha that does not exist or does not touch the run's files unless force:true). Launches AFTER the narrowed T-202 lands (same internal/service territory).
+
+**Deliverables:**
+- Accept merges the run commit to the default branch and only then advances the registered checkout
+- If workspace advance fails (dirty or raced), accept still returns 200 and transitions the run
+- Advance failure is downgraded to a warning on run.Warning and AcceptResult.Warning
+- Test simulates a raced git pull on the registered checkout during accept
+- Test asserts the run transitions and carries a warning instead of internal error
+
+## Triage
+
+**Component:** accept
+**Suspected files:** internal/service/service.go, internal/service/accept_worktree_test.go
+
+Accept currently errors on checkout advance, leaving the run paused despite the merge landing — a race class that can be reproduced with a concurrent git pull.
+
+**Verification (triage recommends):** test-first — B-207 is reproduced by timing a concurrent `git pull` during accept; fix converts error to warning and run transitions anyway
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-206 — The engine never notices a run is taking twice as long as its kind: wall-clock vs history joins the escalation thresholds
+
+Fixes B-239.
+
+## Reported
+
+Jose's design (2026-08-26), validated twice tonight by human-clock detection (T-184 first attempt, T-202 wide attempt — an hour each before a person noticed). The engine already computes historical run duration per mode/project (the launch modal's 'usually done in 10-15 minutes' estimate). Add a proactive escalation trigger: when a live run's wall clock exceeds a threshold relative to that history (default 2x the mode's average on this project; configurable in budgets & limits), fire the existing escalation_suggestion flow — pause with diagnoses (seat at capacity / brief too wide) and the actions card — WITHOUT waiting for a budget death. Honest-data guards: no trigger when history has fewer than ~5 runs of that shape ('no history yet'); the suggestion states the numbers ('47m so far; runs of this shape average 11m'). Go tests: trigger at 2x with history, silence without history, threshold configurable.
+
+TERRITORY: internal/service escalation/budget region — queue behind the narrowed T-202 (same lane).
+
+### T-207 — run_list punishes big asks (over-limit falls to the DEFAULT of 20) and analytics have no honest path: aggregates belong to the engine
+
+Fixes B-242.
+
+## Reported
+
+Field finding by Jose: he asked the consultant for the project's first-run pass rate; the duckling requested >100 runs from run_list and silently received 20 (over-limit input falls back to the DEFAULT instead of clamping to the max of 100) — the answer was computed over 20 runs and presented as project truth. Three fixes: (1) CLAMP, never default — limit>max returns max, and the result SAYS it ('showing 100 of 1179; use offset to continue'); (2) pagination params (offset or cursor) on run_list so complete iteration is possible when genuinely needed; (3) the real path for analytics — portion doctrine: a small model must not haul 1179 records through its context to do deterministic arithmetic. Add an engine-computed aggregate the toolbelt can READ (project stats: first-run pass rate, accept rate, cost totals per mode/duckling — cousins of the existing scorecards/report data), so the consultant answers stats questions from ONE tool call. Go tests: clamp behavior with honest count line, pagination, aggregate correctness against a fixture runlog.
+
+TERRITORY: internal/tools (run_list), internal/service or report (aggregate), MCP surface if the tool schema changes. Disjoint from T-206's escalation region — may run parallel.
+
+### T-208 — An ended or aborted chat lingers in Now wearing accept-framing it can never satisfy
+
+Fixes B-244.
+
+## Reported
+
+Field finding by Jose: he aborted a chat and it stays in Now with no way out; the chat view shows 'conversation ended · not accepted'. Chats are not accepted — a finished conversation awaits NO decision. Fix: (1) ended/aborted chats leave the Now inbox on their own (the record stays in Records like any run); if a lingering card is wanted for context, it carries a one-click dismiss ('done with this') — never an accept frame; (2) the chat view's terminal state speaks its own language ('conversation ended · N tool calls · $x') without 'not accepted'; (3) the 'failed, awaiting your call' bucket excludes chats the user aborted themselves — aborting IS the call. Vitest pins: aborted chat absent from Now (or dismissible), terminal copy without accept vocabulary.
+
+LANE NOTICE: this run shares the repo with concurrent runs. Your lane: frontend Now/WaitingCard chat-state handling + the chat view terminal header + tests. Do NOT touch internal/** (concurrent runs own tools/service), Cycle.tsx, Settings.tsx.
+
+### T-209 — The doctor's standing finding gatecrashes every chat and renders a raw struct at the user
+
+Fixes B-245.
+
+## Reported
+
+Field finding by Jose: mid-chat about run pagination, a configuration amendment card appeared for the standing 'github configuration present but unused' finding — unrelated to the question or the chat. Two fixes: (1) RELEVANCE — the doctor's card joins a chat only when the conversation touches configuration (or the finding is NEW since last shown); standing findings live in their home (Projects/Settings) with at most a quiet one-line pointer, and a shown finding can be dismissed for the session; (2) HUMAN RENDERING — the card shows 'old {false false false gh false}' raw; old/new values render as words ('github integration is configured but nothing uses it — the amendment turns it off') with the raw values behind disclosure. Vitest pins: unrelated chat shows no amendment card; values rendered worded with disclosure.
+
+LANE NOTICE: this run shares the repo with concurrent runs. Your lane: the chat view's config-amendment card rendering/gating + tests. Do NOT touch internal/**, Now.tsx (a concurrent run may own it via the chat-lifecycle task — coordinate by NOT touching WaitingCard), Cycle.tsx.
+
+### T-210 — Manual /land leaves the task in a phantom 'blocked' lane — and blocked never says why
+
+Fixes B-235.
+
+## Reported
+
+NARROWED after a grinding attempt — this task lands ONE thing:
+
+POST /v1/runs/{id}/land performs the SAME task-state advancement that accept performs (task completion, plan annotation, whatever accept writes), so a manually landed run never leaves its task in a phantom 'blocked' lane. Go test: land a run manually, assert the task leaves the blocked state.
+
+Do NOT reconcile existing tasks (the operator will, using the fixed /land). Do NOT add blocked-reason UI (moved to its own task). Do NOT investigate the autopilot path (moved elsewhere). Thin slices; revert any step that reds the suite.
+
+LANE NOTICE: your lane: internal/service land/task paths + tests ONLY. Do NOT touch frontend/**, engineapi routes, or vcs.
+
+ESCALATED TO CRITICAL with live evidence: the phantom-blocked T-181 was picked up by the AUTOPILOT and re-run (r-20260826-123740-3s4p) — a task finished 12 hours earlier got a fresh run that landed bb0a7be (benign this time: two test lines; the class is the danger the codebase itself documents at RunRequest.Redo: 'relaunched by an overnight operator that had no idea the task was finished'). ALSO investigate as part of this fix: how did that re-run LAND without a human accept under guarded autonomy — if a path exists where autopilot work auto-lands, name it and gate it. And the reconciliation now covers THREE hand-landed tasks: T-181, T-199, T-206.
+
+### T-211 — A tail-role seat serializes whole runs: provider slots are reserved for the full roster for the run's lifetime, and inconsistently across pauses
+
+Fixes B-218.
+
+## Reported
+
+NARROWED (third attempt — the wide 4-concern version ground twice and was aborted). This task lands ONE thing:
+
+**Provider slots are acquired when a ROLE actually executes and released when its turn ends** — never reserved for the whole roster for the run's lifetime. A run whose implementer/reviewer/advisor are all cloud does not hold a local provider slot for its scribe until the scribe actually runs. Go tests: (a) two runs sharing only a tail-role provider (scribe on a cap-1 local) run concurrently through their build/review phases; (b) the provider cap binds while that role executes (two scribes on a cap-1 provider serialize only their scribe turns).
+
+Do NOT touch: holder bookkeeping across pause/resume (follow-up), chat session slot behavior (follow-up), resume re-acquisition (follow-up). Thin slices; revert any step that reds the suite.
+
+LANE NOTICE: internal/service/queue.go + queue_test.go and the minimal touch points in the run loop that acquire/release. Do NOT touch frontend/**, engineapi routes, or vcs.
+
+### T-212 — No terminal chat belongs in Now, whatever killed it: stream-canceled chats still squat in 'failed, awaiting your call'
+
+Fixes B-249.
+
+## Reported
+
+Follow-up to B-244/T-208 with a real hole (Jose's screenshot): a chat killed by an engine restart records 'provider chat: stream read: context canceled' with status FAILED — not user-aborted — so T-208's exclusion misses it and the card squats in 'failed, awaiting your call' offering 'run it again with changed settings', which is meaningless for a conversation. The clean rule T-208 should have taken: a chat in ANY terminal state (ended, aborted, failed, canceled) leaves Now entirely — its record lives in Records like every run; nothing about a dead conversation awaits a call. Vitest: chats with status failed/aborted/done all absent from every Now bucket.
+
+LANE NOTICE: frontend Now/state classification + tests. Do NOT touch internal/** (T-211 owns the queue region).
+
+### T-213 — The disabled-surface state is still silent: whenever the app dims MAIN it must say why and how out — the undelivered half of B-228
+
+Fixes B-250.
+
+## Reported
+
+B-228's criterion 2 was never delivered (T-198 fixed the 404 inference in client.ts/engineapi but never touched App.tsx) and the operator STILL sees dead Settings tabs in the desktop with no explanation — undiagnosable precisely because the state is mute. Build it now: (1) ANY code path that sets the pointer-events-none/dim state on MAIN must simultaneously render an unmissable banner naming the trigger in words ('the engine reported an unknown route: GET /v1/... — this app may be newer than the engine; restart the engine' / 'the event stream disconnected — reconnecting' / whatever the actual cause) plus the recovery action; (2) inventory EVERY setter of that dim state (stale inference, connection loss, modal backdrops if they share the mechanism) and give each its wording — an unexplained dim must become impossible by construction (a single chokepoint function that takes a reason, asserted non-empty); (3) log the trigger to console with detail for field debugging. Vitest: dim implies banner with non-empty reason, for each trigger.
+
+LANE NOTICE: frontend/src/app/App.tsx + client.ts stale/connection surfaces + tests. Do NOT touch internal/** (T-211 owns the queue), Now.tsx beyond what the banner mount requires.
+
+### T-214 — The Settings frame is a one-way trap: section buttons die once you enter a room — two navigation mechanisms, one owner needed
+
+Fixes B-252.
+
+## Reported
+
+ROOT CAUSE of the dead-tabs symptom, boundary found by Jose and confirmed with content-asserting repro (Playwright, any engine — never Wails-specific): the Settings category menu mixes two mechanisms. SECTIONS (ducklings, providers, budgets, autopilot, repo/remote, appearance, engine) are state buttons that only apply while the route is #/settings; ROOMS (Roster, Skills, Project management) are hash links (#/roster etc). Section->room works (hash navigates from anywhere); room->section is DEAD: the button mutates state the room route never reads — hash stays, content stays, no error, no feedback. Repro: goto #/settings, click 'Roster board' (hash #/roster), click 'providers' -> hash and content unchanged.
+
+FIX — one mechanism owns settings navigation: make sections hash-addressable (e.g. #/settings/<section> or a section param) and render every category-menu entry as a plain link, so any entry works from any route; the frame reads the section from the route. Preserve deep links and the reachability test. Vitest MUST assert CONTENT/route outcomes, not click events: from #/roster, clicking providers lands on the providers section (hash + rendered content asserted); the full 10-entry random-walk navigates everywhere from everywhere.
+
+LANE NOTICE: frontend/src/views/Settings.tsx, app/App.tsx + routes, and tests. Do NOT touch internal/** (T-211 owns the queue region), Now.tsx, or Cycle.tsx.
+
+### T-215 — Expanding one reviewer turn expands them all: transcript expansion state is keyed by role, not by turn identity
+
+Fixes B-253.
+
+## Reported
+
+Field finding by Jose: in a run transcript with several rounds, expanding the LAST reviewer turn expands EVERY reviewer turn — each with dozens of tool calls — losing track of which one he meant to analyze. The expansion state (or the React key) is shared across turns of the same role instead of being unique per turn. Fix: key expansion per turn identity (role+round+turn, or the event's stable id); expanding one turn affects only that turn. While in there: audit the transcript list for other shared/non-unique keys (a 'unique key prop' console warning already exists for ConfigSection — same disease family, B-251 adjacent). Vitest: two same-role turns, expand the second, assert the first stays collapsed.
+
+LANE NOTICE: frontend/src/views/RunView.tsx (+ its tests). Do NOT touch Settings.tsx/App.tsx (a concurrent run owns them) or internal/**.
+
+### T-216 — A budget pause mid-turn destroys work: the interrupted turn's progress is discarded, the resume skips to the wrong role, and even completed work regresses
+
+Fixes B-254.
+
+## Reported
+
+CRITICAL field observation by Jose on T-211's transcript, explaining a full day of grinding: when budget-exceeded lands DURING a reviewer turn, the resume does NOT continue the reviewer — the turn is marked 'turn did not finish', its partial analysis (dozens of tool calls) is DISCARDED, and the run restarts with an implementer turn that never sees the feedback being generated. Worse: the implementer's own prior completed turn (5/5) was followed post-resume by a fresh start ending 2/5 — completed progress regressed as if lost. Since the 5M token ceiling fires on nearly every wide task's first turns, EVERY routine lift pays this tax: money and quality silently burned (10+ lifts today alone).
+
+FIX design: (1) an interrupted turn's partial output (tool calls made, notes, drafts) is PRESERVED and injected as context for the resumed turn ('the reviewer was mid-review; its notes so far: ...'); (2) resume continues with the SAME role that was interrupted (restart the reviewer's turn with its partial context, never skip ahead); (3) completed turns and worktree state must be provably immune to pause/resume — add a test that pauses mid-turn, resumes, and asserts prior completed work (files + recorded turn outputs) is intact and the interrupted role goes again. Go tests for all three; transcript shows 'resumed with partial notes' instead of a bare 'turn did not finish'.
+
+TERRITORY: internal/service run loop + runlog — queue behind T-211 (same region).
+
+### T-217 — Replace the fabricated reviewer checkpoint with a real budget-interruption resume test
+
+Fixes B-260.
+
+## Reported
+
+The purported end-to-end test fabricates an already-paused checkpoint instead of causing a reviewer budget interruption, and it neither verifies the resumed prompt contains the partial notes nor that the checkpoint came from preserved tool/draft progress.
+
+Where: internal/service/budgetlift_test.go:81
+
+Suggested fix: Drive a pair run with a controlled reviewer runner/provider that performs partial work then returns `ErrBudgetExceeded`, reload and resume it, and assert the persisted structured notes and resumed reviewer prompt alongside prior worktree/events.
+
+Found by terra reviewing T-216 in run r-20260826-164440-3olh (verdict: request-changes).
+
+**Deliverables:**
+- The service test uses a controlled runner/provider that completes partial work before returning ErrBudgetExceeded during the reviewer turn.
+- The test reloads and resumes the paused run through the service lifecycle rather than constructing an already-paused checkpoint.
+- The resumed reviewer prompt contains the persisted partial structured notes and prior work context.
+- The test asserts prior worktree changes and implementer/tool/events remain preserved across pause and resume.
+
+## Triage
+
+**Component:** service resume tests
+**Suspected files:** internal/service/budgetlift_test.go
+
+The current end-to-end test can pass without exercising budget interruption, durable partial progress, or prompt reconstruction, leaving the critical resume path inadequately covered.
+
+**Verification (triage recommends):** test-first — Drive an implementer/reviewer pair where the reviewer returns partial notes with ErrBudgetExceeded, then resume and assert the reviewer prompt and persisted progress.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-218 — Render interrupted-turn checkpoint notes and resumed status in the transcript
+
+Fixes B-259.
+
+## Reported
+
+The UI never consumes the new `turn_interrupted` event or renders the persisted resume notes, so the transcript still presents the interruption only as "turn did not finish" rather than "resumed with partial notes."
+
+Where: frontend/src/components/ConversationLane.tsx:242
+
+Suggested fix: Handle `turn_interrupted` in the run-view event reducer and render its checkpoint notes/status in the resumed turn transcript, with frontend coverage.
+
+Found by terra reviewing T-216 in run r-20260826-164440-3olh (verdict: request-changes).
+
+**Deliverables:**
+- The run-view reducer consumes turn_interrupted events and associates checkpoint notes with the interrupted turn.
+- ConversationLane renders persisted partial notes and a resumed-status indication instead of only "turn did not finish".
+- Frontend coverage asserts interruption events, notes, and resumed transcript rendering.
+- Existing incomplete-turn rendering remains correct when no resume notes are present.
+
+## Triage
+
+**Component:** conversation transcript
+**Suspected files:** frontend/src/lib/runview.ts, frontend/src/components/ConversationLane.tsx, frontend/src/components/runview.test.tsx
+
+This is an actionable, reproducible frontend data-rendering gap that hides persisted interruption context from users.
+
+**Verification (triage recommends):** test-first — Feed a turn_interrupted event with persisted notes through the run-view reducer and assert the transcript displays the notes and resumed status.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-219 — A desktop launch surface requests mode=solo, silently overriding the configured 'build runs open in: pair' and the pinned seats
+
+Fixes B-258.
+
+## Reported
+
+Field incident (Jose, T-216): he launched a build from the desktop and the run came up 'solo (request)' with solo's seats (terra/qwen38-max) — while Settings clearly configures 'build runs open in: pair' and the Pair board pins luna implementer, k3 advisor, terra reviewer. The launch REQUEST itself carried mode=solo, so some launch surface (find it: the bug/task card's start-run path, or a launcher preselection) hardcodes or wrongly preselects solo instead of honoring the default phase mode. Fix: every launch surface resolves its default mode from the configured phase modes (build->pair here) and sends NO explicit seats, letting the roster pins resolve; the launcher SHOWS what will run ('pair — luna builds, terra reviews, k3 advises — from your pins') before the click, per the launch-modal contract already landed in T-168. Vitest: with build=pair configured, every launch entry point produces a pair request; a regression test on the specific surface found guilty.
+
+### T-220 — Render captures still live inside the worktree and now block the accept's branch switch: move them out of the tree for good
+
+Fixes B-248.
+
+## Reported
+
+Third captures-vs-git interaction (after diff pollution and staging confusion, both fixed in T-202): T-210's accept failed with 'untracked files would be overwritten by checkout: .ducklab-render-captures/... could not detach HEAD'. The definitive fix T-197 deferred: the engine collects captures DIRECTLY into the run evidence directory (outside the worktree) or removes the capture dir immediately after collection. Go test: accept succeeds with a populated capture dir present at gate time.
+
+ESCALATED: the captures now reached the REGISTERED checkout — after T-212's accept, .ducklab-render-captures/*.png sat STAGED in the main repo's index (cleaned by hand). Fourth git interaction. The fix is not optional exclusions anymore: captures write OUTSIDE the worktree, period.
+
+WIDENED (2026-08-26, Jose's go): the accept↔human-tree relationship is this bug's real arena, and today produced a fifth incident of the class: accepts advanced main across the day while the person's checkout AND index stayed frozen pre-accept (the warning "your checkout is behind and was left untouched" fired and nothing ever reconciled). Consequences observed: (1) a `git commit -a` from that tree would have silently REVERTED T-219 and earlier landed fixes; (2) `make desktop` bundled the stale Now.tsx, shipping a desktop with an already-fixed bug live. Recovered by hand (git restore of 9 files to HEAD).
+
+Acceptance criteria, expanded:
+1. Render captures write OUTSIDE the worktree, period (original scope).
+2. Accept reconciles the human checkout when it is CLEAN and on the default branch (fast-forward index+worktree); it warns and leaves untouched ONLY when the tree is dirty. The warning must then say what is at risk: a commit from this tree reverts landed work, and builds read stale sources.
+
+### T-221 — Refuse to synchronize any dirty default-branch checkout, including .ducklab
+
+Fixes B-267.
+
+## Reported
+
+The cleanliness check excludes `.ducklab/**`, so a registered default-branch checkout with local changes under that directory is still advanced despite the requirement to leave any dirty tree untouched.
+
+Where: internal/service/service.go:2807
+
+Suggested fix: Check the whole checkout without excluding `.ducklab`, or explicitly establish that no user-visible checkout changes can exist there before synchronizing.
+
+Found by terra reviewing T-220 in run r-20260826-193858-czxz (verdict: request-changes).
+
+**Deliverables:**
+- The acceptance cleanliness check considers the entire registered default-branch checkout, including .ducklab paths.
+- A dirty checkout is never synchronized after the default branch advances, regardless of which paths are locally modified.
+- A regression test covers a local .ducklab modification and verifies the accepted files remain untouched and the warning is emitted.
+
+## Triage
+
+**Component:** acceptance checkout synchronization
+**Suspected files:** internal/service/service.go, internal/service/accept_worktree_test.go
+
+The current touched-path-only check can overwrite or partially advance a user-visible dirty checkout, violating the requirement to leave any dirty tree untouched.
+
+**Verification (triage recommends):** test-first — Accept a commit while the registered default checkout has a local .ducklab change and assert the checkout remains untouched with a behind warning.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-222 — Triage proposes decomposition and promote can birth N tasks with disjoint lanes: portion the food to the duckling's size
+
+Fixes B-241.
+
+## Reported
+
+NARROWED SCOPE (operator, 2026-08-26) — engine half ONLY, exactly two criteria. The UI surface (proposal rendering, promote button saying "creates N tasks") is deliberately OUT of this task; it gets filed at this task's gate.
+
+1. TRIAGE may propose a decomposition: when a bug's scope spans multiple concerns, the triage output may include a split proposal — [{title, acceptance (<=2 criteria), owns}] — persisted on the bug record. The proposal NEVER auto-applies (triage recommends; a person decides).
+2. PROMOTE with a stored proposal births N tasks (one per portion, each carrying its Owns: lane into the plan section) instead of one; the bug moves to in_progress and is eligible for fixed only when ALL its tasks are accepted. Promote without a stored proposal behaves exactly as today.
+
+Go tests: a triage that stores a proposal; a promote that creates N plan sections with disjoint Owns; the all-tasks-accepted gate on the bug ladder; a promote with no proposal unchanged.
+
+Do NOT touch: the desktop UI, B-240's escalation-time split, the 2x wallclock trigger (B-239), or existing single-task promote behavior.
+
+TERRITORY: internal/service (triage/promote), internal/artifact (plan section creation). Original full write-up lives in B-241.
+
+### T-223 — A single provider 520 mid-stream kills the whole run: transient upstream errors should pause as weather, not fail terminal
+
+Fixes B-255.
+
+## Reported
+
+T-215's first attempt died terminal on 'provider chat: chat stream: 520 (Z.AI via openrouter)' during the reviewer's stream — one transient upstream error destroyed a run with a completed implementation turn. The codebase already treats transient exhaustion as resumable weather and has provider_retry machinery; a 5xx mid-stream should get the same treatment: bounded retries, then a weather pause offering resume/reseat (the fallback-duckling flow), never a terminal FAILED for weather. Go test: a stubbed provider returning 520 once mid-stream -> run retries/pauses as weather and completes on the next attempt.
+
+TERRITORY: internal/service provider/stream error handling — queue behind T-211.
+
+### T-224 — Enforce one checkout root throughout turns, gates, and accept staging
+
+Fixes B-268.
+
+## Reported
+
+Observed on r-20260826-202217-aqsd (T-222, stage=test, solo terra). Forensics, all verified:
+
+1. createRunWorktree ran: the worktree exists at ~/.local/state/ducklab/worktrees/ducklab/r-20260826-202217-aqsd, branch ducklab/T-222-aqsd, base 8ba94de, registered in `git worktree list` and in state.json.
+2. The TURN executed against the REGISTERED PROJECT CHECKOUT instead: 10 successful fs_patch calls wrote internal/service/promote_carries_test.go in /home/jrullan/dev/ducklab (file mtime 20:26:18Z, inside the turn window); the transcript's fs_list/search results contain bin/ducklab-engine — gitignored artifacts that exist only in the main checkout (12 matches); the run gate (red, honest: "specifies work that does not exist") also saw that tree. The worktree copy of the file still has only the two old tests.
+3. The ACCEPT operated on the worktree: stageRun found nothing (its mixed reset is the worktree reflog's "reset: moving to HEAD"), IsClean()==true so no commit was made, and "reproducing chained red test 8ba94de" reproduced the BASE HEAD — green — so the accept refused with "the committed test passes from a clean checkout — it asserts nothing that is not already true". That message is FALSE here and misleads the human into distrusting a good test: the test never traveled in any commit.
+4. Outcome: the run is paused at its gate; the deliverable (+81 lines, TestPromotingStoredSplitProposalCreatesPortionedTasksAndWaitsForAllAcceptance) sits UNCOMMITTED in the human's checkout — the run-vs-human collision class: one careless discard destroys it.
+
+Not yet explained — the investigation's starting point: runRoot(run, entry.Path) should have returned the worktree (WorktreePath is assigned synchronously before the exec closure runs), and the IDENTICAL flow used its worktree correctly an hour earlier (T-221 test run r-20260826-195927-2hmh, 19:59, chained bd9cd81 with content). Same engine process (started 18:38Z), same binary — so the divergence is data/state-dependent, not code-version. Reproduce/diagnose from the two runs' records.
+
+Adjacent lead, possibly same family: the registered checkout's INDEX now holds staged .ducklab entries (runs/*/receipt.json, bugs/attachments/B-262/*.png) — something engine-side runs `git add` against the registered checkout. Roots are being crossed between worktree and project in more than one place.
+
+Acceptance criteria:
+1. A turn's ExecContext.ProjectRoot, its gate, and its accept staging provably reference the SAME tree — assert it at accept time: if the run records a WorktreePath, refuse to stage anywhere else, and if the turn executed elsewhere, say so instead of blaming the test.
+2. The clean-checkout guard message distinguishes "the committed test is vacuous" from "the commit contains no test changes at all" (diff empty vs HEAD) — the second wording would have named this bug instantly.
+
+Related: B-265 (worktree/project two-truths for plan reads — same schism, read side), ducklab run-vs-human collision doctrine, B-227/B-248 (accept staging family).
+
+**Deliverables:**
+- Accept refuses to stage when the recorded WorktreePath differs from the turn execution or gate tree, and reports the root mismatch explicitly.
+- ExecContext.ProjectRoot, gate evaluation, and accept staging resolve to the same recorded worktree for every turn.
+- The clean-checkout guard distinguishes an empty test diff from a committed test that is behaviorally vacuous.
+- Regression coverage reproduces the cross-root scenario and confirms test changes remain in the worktree and are not stranded in the human checkout.
+
+## Triage
+
+**Component:** run worktree and acceptance synchronization
+**Suspected files:** internal/service/service.go
+
+The engine crossed registered checkout and run-worktree boundaries, stranded valid changes in the human tree, and emitted a false diagnostic that could cause data loss.
+
+**Verification (triage recommends):** test-first — Run a test-first turn with a registered WorktreePath and verify execution, gating, and accept all use that worktree rather than the project checkout.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
 
