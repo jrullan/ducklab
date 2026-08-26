@@ -167,9 +167,9 @@ export function Settings({
         ))}
       </nav>
 
-      <div className="min-w-0 max-w-3xl flex-1 overflow-y-auto" data-testid="settings-content">
+      <div className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${room === "roster" ? "max-w-none" : "max-w-3xl"}`} data-testid="settings-content">
       {room === "roster" && client && projectId && (
-        <div className="h-full overflow-y-auto p-4" data-testid="settings-room-roster">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4" data-testid="settings-room-roster">
           <Roster client={client} projectId={projectId} projectName={projectName} />
         </div>
       )}
