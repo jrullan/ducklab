@@ -212,7 +212,6 @@ func (r *Registry) registerBuiltins() {
 	// the chat's — and sits in no role's ceiling on purpose.
 	r.Register(&BugRead{})
 	r.Register(&RunListTool{})
-	r.Register(&ProjectStatsTool{})
 	r.Register(&RosterRead{})
 	r.Register(&RunReadTool{})
 	r.Register(&BugFile{})

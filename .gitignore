@@ -1,8 +1,10 @@
 /ducklab
 /ducklab-engine
 /ducklab-desktop
-node_modules/
-frontend/node_modules/
+# no trailing slash: in run worktrees these are SYMLINKS (link_deps) and
+# a dir-only pattern leaves them untracked, confusing staging and ducklings
+node_modules
+frontend/node_modules
 
 *.exe
 *.test

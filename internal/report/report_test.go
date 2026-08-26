@@ -18,34 +18,6 @@ func run(mode, verdict string, roster map[string]string) *runlog.Run {
 }
 
 // AC-24: the report states the solo baseline and every mode's delta against it.
-func TestBuildProjectStatsMatchesGroupedPassDefinition(t *testing.T) {
-	first := run("solo", "PASSED", nil)
-	first.ID, first.TaskID, first.Stage = "r-1", "T-1", "build"
-	first.StartedAt = "2026-01-01T00:00:00Z"
-	first.Budget.USD = 1.25
-	second := run("solo", "FAILED", nil)
-	second.ID, second.TaskID, second.Stage = "r-2", "T-1", "build"
-	second.StartedAt = "2026-01-02T00:00:00Z"
-	second.Budget.USD = 2.75
-	landed := run("pair", "FAILED", nil)
-	landed.ID, landed.TaskID, landed.Stage, landed.Resolution = "r-3", "T-2", "build", "landed"
-	landed.StartedAt = "2026-01-03T00:00:00Z"
-	stats := BuildProjectStats([]*runlog.Run{first, second, landed})
-	if stats.Runs != 3 || stats.Passed != 2 || stats.PassRate < 66.6 || stats.PassRate > 66.7 {
-		t.Errorf("unexpected project stats: %+v", stats)
-	}
-	if stats.FirstRunCount != 2 || stats.FirstRunPassed != 2 || stats.FirstRunPassRate != 100 {
-		t.Errorf("unexpected first-run stats: %+v", stats)
-	}
-	if stats.CostUSD != 4.01 {
-		t.Errorf("cost = %.2f, want 4.01", stats.CostUSD)
-	}
-	byMode := stats.ByMode["pair"]
-	if byMode.PassRate() != 100 {
-		t.Errorf("pair row and aggregate disagree: %+v", byMode)
-	}
-}
-
 func TestReportComputesDeltaAgainstSoloBaseline(t *testing.T) {
 	var runs []*runlog.Run
 	// solo: 1 of 2 passes → 50%

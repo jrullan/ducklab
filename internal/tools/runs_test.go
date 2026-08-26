@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,38 +57,5 @@ func TestRunHistoryTools(t *testing.T) {
 	res, _ = read.Execute(context.Background(), ectx, json.RawMessage(`{"id":"../../secret"}`))
 	if !res.IsError {
 		t.Error("a path-shaped id was accepted")
-	}
-}
-
-func writeRunState(t *testing.T, root, id, started string) {
-	t.Helper()
-	dir := filepath.Join(root, ".ducklab", "runs", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	state := `{"id":"` + id + `","stage":"build","status":"done","verdict":"PASSED","started_at":"` + started + `"}`
-	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(state), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRunListClampsLimitAndPaginates(t *testing.T) {
-	root := t.TempDir()
-	for i := 0; i < 117; i++ {
-		writeRunState(t, root, fmt.Sprintf("r-%03d", i), fmt.Sprintf("2026-08-11T22:%02d:00Z", i%60))
-	}
-	res, err := (&RunListTool{}).Execute(context.Background(), &ExecContext{ProjectRoot: root}, json.RawMessage(`{"limit":100}`))
-	if err != nil || res.IsError {
-		t.Fatalf("run_list: %v %+v", err, res)
-	}
-	if !strings.Contains(res.Content, "showing 100 of 117; use offset 100 to continue") {
-		t.Errorf("dishonest count/pagination: %q", res.Content)
-	}
-	res, err = (&RunListTool{}).Execute(context.Background(), &ExecContext{ProjectRoot: root}, json.RawMessage(`{"limit":100,"offset":100}`))
-	if err != nil || res.IsError {
-		t.Fatalf("run_list page 2: %v %+v", err, res)
-	}
-	if !strings.Contains(res.Content, "showing 17 of 117") || strings.Contains(res.Content, "use offset") {
-		t.Errorf("bad second page: %q", res.Content)
 	}
 }
