@@ -70,6 +70,27 @@ const client = new EngineClient({
 // already knows, and stays present-but-disabled while the consultant thinks
 // so the box never jumps around.
 describe("chat transcript author avatars", () => {
+  it("keeps the consultant reply beside a configuration amendment note", async () => {
+    const amendmentEvents = [
+      ...chatEvents,
+      ev("config_amendment", 10, { key: "verify.link_deps", old: "missing", new: "frontend/node_modules", why: "the doctor found unavailable dependencies" }),
+    ];
+    useRuns.setState({
+      runs: { "r-c": chatRun },
+      events: { "r-c": amendmentEvents },
+      spend: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-c" client={client} />);
+
+    await waitFor(() => expect(screen.getByTestId("chat-config-amendments")).toBeInTheDocument());
+    const reply = screen.getByText("Yes on both counts.").closest("article");
+    expect(reply).not.toBeNull();
+    expect(screen.getByTestId("chat-config-amendments")).toBeInTheDocument();
+    expect(
+      reply!.compareDocumentPosition(screen.getByTestId("chat-config-amendments")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("uses a human avatar for every recorded human message and ducks for consultant replies", async () => {
     useRuns.setState({
       runs: { "r-c": chatRun },

@@ -1021,14 +1021,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           onContinue={() => { void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }}
         />
       ))}
-      {configFailure && (() => {
+      {run.stage !== "chat" && configFailure && (() => {
         const data = configFailure.data ?? {};
         const key = typeof data.key === "string" ? data.key : "";
         const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
         const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
         return key ? <ConfigFailureCard client={client} projectId={run.project_id} ducklings={fleet} finding={{ key, proposed, reason }} /> : null;
       })()}
-      {actionableConfigProposals.map((event, index) => {
+      {run.stage !== "chat" && actionableConfigProposals.map((event, index) => {
         const data = event.data ?? {};
         const key = typeof data.key === "string" ? data.key : "";
         const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
@@ -1714,6 +1714,26 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               );
             }}
           </VirtualList>
+          {/* Configuration diagnosis is a companion to a chat answer, not a
+              replacement for it. Keep this note in the conversation column,
+              after the transcript, so a doctor finding cannot cover the
+              consultant's reply or make an unanswered question look answered
+              by a card. */}
+          {run.stage === "chat" && configProposals.length > 0 && (
+            <section className="m-2 rounded-card border border-warning p-3" data-testid="chat-config-amendments">
+              <p className="text-sm text-ink-secondary">
+                the doctor also found {configProposals.length} configuration finding{configProposals.length === 1 ? "" : "s"} — review {configProposals.length === 1 ? "it" : "them"} below
+              </p>
+              {configProposals.map((event, index) => {
+                const data = event.data ?? {};
+                const key = typeof data.key === "string" ? data.key : "";
+                const proposed = typeof data.new === "string" ? data.new : typeof data.proposed === "string" ? data.proposed : "";
+                const reason = typeof data.why === "string" ? data.why : typeof data.reason === "string" ? data.reason : "";
+                if (!key) return null;
+                return <ConfigAmendmentCard key={event.seq ?? index} client={client} projectId={run.project_id} finding={{ key, proposed, reason }} old={typeof data.old === "string" ? data.old : ""} why={reason} />;
+              })}
+            </section>
+          )}
       {/* The chat composer, attached to the conversation box itself: the
           transcript scrolls INSIDE the list above, so sitting right under it
           keeps the reply box in reach without floating over the timeline and
