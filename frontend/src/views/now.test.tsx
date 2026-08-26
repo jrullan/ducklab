@@ -157,6 +157,7 @@ describe("Now — the inbox", () => {
     expect(within(running).getAllByRole("list")).toHaveLength(1);
     expect(screen.getAllByTestId("now-running-row")).toHaveLength(1);
     expect(screen.queryByTestId("utility-drawer")).toBeNull();
+    expect(screen.queryByTestId("guide-panel")).toBeNull();
     for (const section of [
       await screen.findByTestId("now-waiting"),
       await screen.findByTestId("now-verify"),

@@ -35,6 +35,7 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByTestId("sidebar-footer")).toHaveTextContent("engine");
     expect(screen.queryByTestId("utility-drawer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("utilities-drawer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /hide utility drawer/i })).not.toBeInTheDocument();
   });
 
   it("renders the project chat door and opens the chat", async () => {
