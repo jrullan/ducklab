@@ -322,6 +322,29 @@ func (s *Service) TestRetire(ctx context.Context, projectID, taskID string) (*ru
 	}
 
 	git := vcs.New(entry.Path)
+	// A chained red test lives only on its run branch until its build lands
+	// (the worktree design); the registered checkout has nothing to revert.
+	// Retiring it is bookkeeping — the promise is withdrawn, the branch is
+	// abandoned. The unconditional revert predates worktrees and died with
+	// "bad revision" on exactly the run it was most needed for: a mislaunched
+	// chain whose test auto-accepted. No revert also means no clean-tree
+	// requirement — this path touches no files.
+	if landed, aerr := git.IsAncestor(target.run.CommitSHA, "HEAD"); aerr == nil && !landed {
+		w, werr := s.ensureWriter(target)
+		if werr != nil {
+			return nil, fmt.Errorf("the test is branch-only but its record could not be opened: %w", werr)
+		}
+		target.run.RevertSHA = "branch-only"
+		target.run.Resolution += "; test retired by human (branch-only, nothing landed to revert)"
+		w.AppendEvent("test_retired", map[string]interface{}{
+			"task": taskID, "revert_sha": "", "reverted": target.run.CommitSHA, "branch_only": true,
+		})
+		if err := w.WriteState(); err != nil {
+			return nil, err
+		}
+		s.queue.poke(s)
+		return target.run, nil
+	}
 	if clean, cerr := git.IsClean(); cerr != nil || !clean {
 		dirty := git.DirtyPaths()
 		filtered := dirty[:0]

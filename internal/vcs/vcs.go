@@ -872,8 +872,12 @@ func (g *Git) IsAncestor(ancestor, descendant string) (bool, error) {
 		return true, nil
 	}
 	// git merge-base uses exit status 1 for the ordinary "not an ancestor"
-	// result; preserve real invocation errors for callers.
-	if strings.Contains(err.Error(), "exit status 1") {
+	// result; preserve real invocation errors for callers. The trailing colon
+	// matters: run() wraps as "...: exit status N: <stderr>", and a bare
+	// "exit status 1" also matched 128 — an INVALID sha read as an ordinary
+	// not-an-ancestor, which sent a branch-only test retire down the
+	// bookkeeping path for a commit that never existed.
+	if strings.Contains(err.Error(), "exit status 1:") {
 		return false, nil
 	}
 	return false, err
