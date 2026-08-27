@@ -649,8 +649,10 @@ func appendPlanTasks(projectRoot string, rec *store.Bug, portions []agent.SplitP
 	if !hasProposal {
 		portions = []agent.SplitProposal{{Title: promotedTaskTitle(rec)}}
 	}
+	// One shared milestone per promotion: every portion lands under the same
+	// "Reported bugs" heading, keeping the plan document's structure readable.
+	// N separate identically titled milestones would be a readability smell.
 	ids := make([]string, 0, len(portions))
-	separateMilestones := len(portions) > 1
 	for _, portion := range portions {
 		id := fmt.Sprintf("T-%03d", stage.NextFree(existing, "T"))
 		existing = append(existing, artifact.Section{ID: id})
@@ -659,26 +661,19 @@ func appendPlanTasks(projectRoot string, rec *store.Bug, portions []agent.SplitP
 			task.Body = promotedPortionBody(rec, portion)
 			task.Owns = portion.Owns
 		}
-		if separateMilestones {
+		placed := false
+		for i := range plan.Sections {
+			if plan.Sections[i].Title == bugsMilestoneTitle {
+				plan.Sections[i].Children = append(plan.Sections[i].Children, task)
+				placed = true
+				break
+			}
+		}
+		if !placed {
 			plan.Sections = append(plan.Sections, artifact.Section{
 				ID: fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")), Title: bugsMilestoneTitle,
-				Owns: portion.Owns, Children: []artifact.Section{task},
+				Children: []artifact.Section{task},
 			})
-		} else {
-			placed := false
-			for i := range plan.Sections {
-				if plan.Sections[i].Title == bugsMilestoneTitle {
-					plan.Sections[i].Children = append(plan.Sections[i].Children, task)
-					placed = true
-					break
-				}
-			}
-			if !placed {
-				plan.Sections = append(plan.Sections, artifact.Section{
-					ID: fmt.Sprintf("M-%03d", stage.NextFree(plan.Sections, "M")), Title: bugsMilestoneTitle,
-					Children: []artifact.Section{task},
-				})
-			}
 		}
 		ids = append(ids, id)
 	}
