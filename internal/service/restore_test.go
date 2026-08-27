@@ -160,6 +160,48 @@ func mustHead(t *testing.T, g *vcs.Git) string {
 	return head
 }
 
+// A run's snapshot is custody for its recorded worktree, never permission to
+// rewind a same-named file in the registered human checkout.
+func TestWorktreeRestoreDoesNotRestoreSameNamedHumanFile(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	mainGit := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-worktree-snapshot-root")
+
+	worktreeSnapshot, err := vcs.New(run.WorktreePath).SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	if rs == nil {
+		t.Fatal("recovered worktree run is absent")
+	}
+	rs.run.TreeSnapshot = worktreeSnapshot
+	rs.run.TreeSnapshotHead = mustHead(t, mainGit)
+
+	// The model's run-local edit has the same path as a person changing their
+	// registered checkout while the run waits at its gate.
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("run worktree edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("human checkout edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := restoreAfterUnaccepted(rs); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "human checkout edit\n" {
+		t.Errorf("worktree cleanup restored the registered checkout from the run snapshot: got %q", got)
+	}
+}
+
 func TestAcceptDoesNotRestore(t *testing.T) {
 	rs := &runState{run: &runlog.Run{ID: "r-2", TreeSnapshot: "abc", Accepted: true}}
 	// Must be a no-op — reaching for git with a fake path would error loudly.
