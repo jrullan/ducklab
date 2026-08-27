@@ -10,7 +10,7 @@ import { moneyOrZero } from "../lib/format";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
-import { routeHref } from "../app/routes";
+import { routeHref, type SettingsSection } from "../app/routes";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -51,8 +51,6 @@ function SettingsCard({ title, desc, children, testid }: {
  * Settings. Secrets are never displayed: a key field shows whether it is set
  * and the env var it reads, never the value (07 §4.9).
  */
-type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "remote" | "appearance" | "engine";
-
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "ducklings", label: "ducklings" },
   { id: "fleet", label: "providers" },
@@ -93,7 +91,7 @@ const SETTINGS_GROUPS: { label: string; shortLabel: string; sectionIds?: Setting
 ];
 
 export function Settings({
-  theme, onTheme, engineVersion, connection, client, projectId, projectName, onEngine, engineBusy, engineError, room, onProjectSelect, onProjectsChanged,
+  theme, onTheme, engineVersion, connection, client, projectId, projectName, onEngine, engineBusy, engineError, room, section, onProjectSelect, onProjectsChanged,
 }: {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -109,6 +107,8 @@ export function Settings({
   engineBusy?: boolean;
   engineError?: string | null;
   room?: "roster" | "skills" | "projects";
+  /** Settings section selected by the hash route. */
+  section?: SettingsSection;
   /** Display name for the selected project in the roster scope control. */
   projectName?: string;
   onProjectSelect?: (id: string) => void;
@@ -119,9 +119,10 @@ export function Settings({
     saveTheme(t);
     onTheme(t);
   };
-  const [section, setSection] = useState<SettingsSection>(() =>
-    typeof window !== "undefined" && window.location.hash.includes("section=engine") ? "engine" : "ducklings",
-  );
+  // The app owns navigation through the hash route. The fallback only keeps
+  // standalone component previews (which provide no route) interactive.
+  const [previewSection, setPreviewSection] = useState<SettingsSection>("ducklings");
+  const activeSection = section ?? previewSection;
   return (
     <div className="flex h-full min-h-0 gap-6 overflow-hidden p-4" data-testid="settings">
       {/* The sub-menu: one concern on screen at a time (the user's own
@@ -135,18 +136,18 @@ export function Settings({
               {(group.sectionIds ?? []).map((id) => {
                 const sec = SETTINGS_SECTIONS.find((item) => item.id === id)!;
                 return (
-                  <button
+                  <a
                     key={sec.id}
-                    type="button"
+                    href={routeHref({ name: "settings", section: sec.id })}
                     data-testid={`settings-nav-${sec.id}`}
-                    aria-pressed={section === sec.id}
-                    onClick={() => setSection(sec.id)}
+                    aria-current={!room && activeSection === sec.id ? "page" : undefined}
+                    onClick={section === undefined ? () => setPreviewSection(sec.id) : undefined}
                     className={`block w-full rounded px-2 py-1 text-left text-sm ${
-                      !room && section === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
+                      !room && activeSection === sec.id ? "bg-surface2 text-ink" : "text-ink-muted"
                     }`}
                   >
                     {sec.label}
-                  </button>
+                  </a>
                 );
               })}
               {(group.rooms ?? []).map((name) => {
@@ -183,19 +184,20 @@ export function Settings({
           <Projects client={client} selected={projectId ?? ""} onSelect={onProjectSelect ?? (() => {})} onChanged={onProjectsChanged ?? (() => {})} />
         </div>
       )}
-      {!room && section === "ducklings" && client && (
+      {!room && <div data-testid={`settings-section-${activeSection}`}>
+      {activeSection === "ducklings" && client && (
         <>
           <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
           <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
         </>
       )}
-      {!room && client && <ConfigSection client={client} section={section} projectId={projectId} />}
-      {!room && section === "fleet" && client && (
+      {!room && client && <ConfigSection client={client} section={activeSection} projectId={projectId} />}
+      {!room && activeSection === "fleet" && client && (
         <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
       )}
-      {!room && section === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
+      {!room && activeSection === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
 
-      {!room && <div className={section === "appearance" ? "" : "hidden"}>
+      <div className={activeSection === "appearance" ? "" : "hidden"}>
       <SettingsCard
         title="appearance & alerts"
         desc="how ducklab looks, and when it speaks up"
@@ -217,9 +219,9 @@ export function Settings({
         <QuackToggle />
         <ChipFactsPicker />
       </SettingsCard>
-      </div>}
+      </div>
 
-      {!room && <div className={section === "engine" ? "" : "hidden"}>
+      <div className={activeSection === "engine" ? "" : "hidden"}>
       <SettingsCard
         title="engine"
         desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
@@ -257,6 +259,7 @@ export function Settings({
           </div>
         )}
       </SettingsCard>
+      </div>
       </div>}
       </div>
     </div>

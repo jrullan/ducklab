@@ -1,6 +1,8 @@
 /** Hash routing. A pop-out window opens a route directly (08 §1.3), so routes
  * must be addressable without a router that owns history. */
 
+export type SettingsSection = "ducklings" | "fleet" | "budgets" | "autopilot" | "remote" | "appearance" | "engine";
+
 export type Route =
   | { name: "now" }
   | { name: "bench" }
@@ -14,13 +16,13 @@ export type Route =
   | { name: "projects" }
   | { name: "run"; id: string }
   | { name: "ducklings" }
-  | { name: "settings" }
+  | { name: "settings"; section?: SettingsSection }
   | { name: "roster" }
   | { name: "skills" };
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\//, "");
-  const pathWithoutQuery = path.split("?")[0] ?? "";
+  const [pathWithoutQuery = "", query = ""] = path.split("?");
   const [head, arg] = pathWithoutQuery.split("/");
   switch (head) {
     case "now":
@@ -49,8 +51,10 @@ export function parseRoute(hash: string): Route {
       return { name: "projects" };
     case "ducklings":
       return { name: "ducklings" };
-    case "settings":
-      return { name: "settings" };
+    case "settings": {
+      const section = arg || new URLSearchParams(query).get("section") || undefined;
+      return isSettingsSection(section) ? { name: "settings", section } : { name: "settings" };
+    }
     case "roster":
       return { name: "roster" };
     case "skills":
@@ -58,6 +62,10 @@ export function parseRoute(hash: string): Route {
     default:
       return { name: "now" };
   }
+}
+
+function isSettingsSection(value: string | undefined): value is SettingsSection {
+  return value === "ducklings" || value === "fleet" || value === "budgets" || value === "autopilot" || value === "remote" || value === "appearance" || value === "engine";
 }
 
 export function routeHref(route: Route): string {
@@ -83,7 +91,7 @@ export function routeHref(route: Route): string {
     case "ducklings":
       return "#/ducklings";
     case "settings":
-      return "#/settings";
+      return route.section ? `#/settings/${route.section}` : "#/settings";
     case "roster":
       return "#/roster";
     case "skills":

@@ -43,7 +43,7 @@ describe("Settings roster removal", () => {
     expect(screen.queryByTestId("settings-nav-team")).not.toBeInTheDocument();
     expect(screen.queryByTestId(/^fn-/)).not.toBeInTheDocument();
     expect(screen.queryByTestId(/^roster-select-/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-current", "page");
 
     fireEvent.click(screen.getByTestId("settings-nav-budgets"));
     await waitFor(() => screen.getByTestId("budget-max_tokens"));
@@ -401,7 +401,7 @@ describe("role assignments are not editable in Settings", () => {
 
     await waitFor(() => screen.getByTestId("settings-save"));
     expect(screen.queryByTestId("settings-nav-team")).toBeNull();
-    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("settings-nav-ducklings")).toHaveAttribute("aria-current", "page");
     expect(container.querySelector('[data-testid^="fn-"]')).toBeNull();
     expect(container.querySelector('[data-testid^="roster-select-"]')).toBeNull();
 

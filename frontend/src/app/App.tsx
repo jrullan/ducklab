@@ -572,6 +572,7 @@ export function App() {
             projectId={projectId}
             projectName={projects.find((p) => p.id === projectId)?.name}
             room={route.name === "settings" ? undefined : route.name}
+            section={route.name === "settings" ? route.section ?? "ducklings" : undefined}
             theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection}
             client={client ?? undefined}
             onProjectSelect={(id) => {

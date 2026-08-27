@@ -10,7 +10,9 @@ describe("routing", () => {
     expect(parseRoute("#/runs")).toEqual({ name: "runs" });
     expect(parseRoute("#/ducklings")).toEqual({ name: "ducklings" });
     expect(parseRoute("#/settings")).toEqual({ name: "settings" });
-    expect(parseRoute("#/settings?section=engine")).toEqual({ name: "settings" });
+    expect(parseRoute("#/settings?section=engine")).toEqual({ name: "settings", section: "engine" });
+    expect(parseRoute("#/settings/providers")).toEqual({ name: "settings" });
+    expect(parseRoute("#/settings/fleet")).toEqual({ name: "settings", section: "fleet" });
   });
 
   // A pop-out window opens a run route directly (08 §1.3).
@@ -31,7 +33,7 @@ describe("routing", () => {
     for (const r of [
       { name: "now" as const }, { name: "runs" as const }, { name: "bench" as const },
       { name: "run" as const, id: "r-1" }, { name: "ducklings" as const },
-      { name: "settings" as const },
+      { name: "settings" as const }, { name: "settings" as const, section: "engine" as const }, 
     ]) {
       expect(parseRoute(routeHref(r))).toEqual(r);
     }
