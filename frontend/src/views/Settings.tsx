@@ -445,6 +445,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       max_tokens: String(v.max_tokens),
       max_turns: String(v.max_turns),
       max_wallclock_s: String(v.max_wallclock_s),
+      wallclock_escalation_multiplier: String(v.wallclock_escalation_multiplier),
     });
   };
   const applyEngine = (v: EngineDefaultsView) => {
@@ -539,6 +540,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         max_tokens: Number(b.max_tokens) || 0,
         max_turns: Number(b.max_turns) || 0,
         max_wallclock_s: Number(b.max_wallclock_s) || 0,
+        wallclock_escalation_multiplier: Number(b.wallclock_escalation_multiplier) || 0,
       }),
       engine && typeof client.engineDefaultsSet === "function"
         ? client.engineDefaultsSet({ ...engine, max_concurrent_runs: Number(engineDraft) || 0 })
@@ -714,7 +716,9 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         {num(b.max_usd ?? "", (v) => setB({ ...b, max_usd: v }), "USD", "budget-max_usd")}
         {num(b.max_turns ?? "", (v) => setB({ ...b, max_turns: v }), "turns", "budget-max_turns")}
         {num(b.max_wallclock_s ?? "", (v) => setB({ ...b, max_wallclock_s: v }), "seconds", "budget-max_wallclock_s")}
+        {num(b.wallclock_escalation_multiplier ?? "", (v) => setB({ ...b, wallclock_escalation_multiplier: v }), "escalation multiplier", "budget-wallclock_escalation_multiplier")}
       </div>
+      <p className="mt-1 text-xs text-ink-muted">escalate when a run takes N x its kind's median active time</p>
       <p className="mt-1 text-sm text-ink-muted">
         tokens counts prompt and completion together, and every round re-sends the
         conversation — so a long task spends most of its budget on input.

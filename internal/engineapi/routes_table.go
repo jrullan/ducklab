@@ -274,7 +274,7 @@ func routeTable() []Route {
 			ClientMethod: "BudgetDefaults",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBudgetDefaults }},
 		{Method: "PUT", Path: "/v1/defaults/budget", Auth: true,
-			Request: service.BudgetView{}, Summary: "Replace the default run budget",
+			Request: service.BudgetUpdate{}, Summary: "Update the default run budget; a field omitted keeps its current value",
 			ClientMethod: "BudgetDefaultsSet",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBudgetDefaultsSet }},
 		{Method: "GET", Path: "/v1/defaults/autopilot", Auth: true,

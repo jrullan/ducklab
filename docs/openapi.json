@@ -168,13 +168,17 @@
           },
           "max_wallclock_s": {
             "type": "integer"
+          },
+          "wallclock_escalation_multiplier": {
+            "type": "number"
           }
         },
         "required": [
           "max_tokens",
           "max_turns",
           "max_usd",
-          "max_wallclock_s"
+          "max_wallclock_s",
+          "wallclock_escalation_multiplier"
         ],
         "type": "object"
       },
@@ -294,6 +298,18 @@
           "mirror_bugs": {
             "type": "boolean"
           },
+          "pr_base": {
+            "type": "string"
+          },
+          "pr_body_by_scribe": {
+            "type": "boolean"
+          },
+          "pr_draft": {
+            "type": "boolean"
+          },
+          "pr_tool": {
+            "type": "string"
+          },
           "repo": {
             "type": "string"
           }
@@ -301,6 +317,10 @@
         "required": [
           "enabled",
           "mirror_bugs",
+          "pr_base",
+          "pr_body_by_scribe",
+          "pr_draft",
+          "pr_tool",
           "repo"
         ],
         "type": "object"
@@ -371,6 +391,9 @@
           },
           "remote": {
             "$ref": "#/components/schemas/ConfigRemote"
+          },
+          "render": {
+            "$ref": "#/components/schemas/ConfigRenderContract"
           },
           "roster": {
             "additionalProperties": {
@@ -454,6 +477,44 @@
           "allow_mcp_verbs",
           "fetch_on_open",
           "name"
+        ],
+        "type": "object"
+      },
+      "ConfigRenderContract": {
+        "properties": {
+          "artifacts": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "string"
+          },
+          "scenes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout_s": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "viewport": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifacts",
+          "command",
+          "ready",
+          "scenes",
+          "timeout_s",
+          "url",
+          "viewport"
         ],
         "type": "object"
       },
@@ -953,6 +1014,26 @@
         ],
         "type": "object"
       },
+      "EngineapiremoteRequest": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor"
+        ],
+        "type": "object"
+      },
       "EngineapirenderedResponse": {
         "properties": {
           "rendered": {
@@ -1358,6 +1439,28 @@
         ],
         "type": "object"
       },
+      "RunlogInterruptedTurn": {
+        "properties": {
+          "index": {
+            "type": "integer"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "role",
+          "round"
+        ],
+        "type": "object"
+      },
       "RunlogRedoNote": {
         "properties": {
           "advisor": {
@@ -1385,6 +1488,12 @@
           "accepted": {
             "type": "boolean"
           },
+          "active_since": {
+            "type": "string"
+          },
+          "active_wallclock_ms": {
+            "type": "integer"
+          },
           "agent_turns": {
             "type": "integer"
           },
@@ -1399,6 +1508,12 @@
           },
           "budget": {
             "$ref": "#/components/schemas/RunlogBudgetState"
+          },
+          "captures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "chain_build": {
             "additionalProperties": {},
@@ -1416,10 +1531,16 @@
           "ended_at": {
             "type": "string"
           },
+          "execution_root": {
+            "type": "string"
+          },
           "failure": {
             "type": "string"
           },
           "gate": {
+            "type": "string"
+          },
+          "gate_root": {
             "type": "string"
           },
           "governance_modified": {
@@ -1427,6 +1548,9 @@
           },
           "id": {
             "type": "string"
+          },
+          "interrupted_turn": {
+            "$ref": "#/components/schemas/RunlogInterruptedTurn"
           },
           "local_only": {
             "type": "boolean"
@@ -1727,6 +1851,26 @@
         ],
         "type": "object"
       },
+      "ServiceBudgetUpdate": {
+        "properties": {
+          "max_tokens": {
+            "type": "integer"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "max_usd": {
+            "type": "number"
+          },
+          "max_wallclock_s": {
+            "type": "integer"
+          },
+          "wallclock_escalation_multiplier": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
       "ServiceBudgetView": {
         "properties": {
           "max_tokens": {
@@ -1740,13 +1884,17 @@
           },
           "max_wallclock_s": {
             "type": "integer"
+          },
+          "wallclock_escalation_multiplier": {
+            "type": "number"
           }
         },
         "required": [
           "max_tokens",
           "max_turns",
           "max_usd",
-          "max_wallclock_s"
+          "max_wallclock_s",
+          "wallclock_escalation_multiplier"
         ],
         "type": "object"
       },
@@ -1880,6 +2028,25 @@
         ],
         "type": "object"
       },
+      "ServiceConfigDiagnostics": {
+        "properties": {
+          "credential_helper": {
+            "type": "string"
+          },
+          "gh_auth": {
+            "type": "string"
+          },
+          "remote_reachable": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_helper",
+          "gh_auth",
+          "remote_reachable"
+        ],
+        "type": "object"
+      },
       "ServiceCriterion": {
         "properties": {
           "direction": {
@@ -1946,6 +2113,21 @@
           "model",
           "params",
           "provider"
+        ],
+        "type": "object"
+      },
+      "ServiceEngineDefaultsView": {
+        "properties": {
+          "cpu_ceiling": {
+            "type": "integer"
+          },
+          "max_concurrent_runs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu_ceiling",
+          "max_concurrent_runs"
         ],
         "type": "object"
       },
@@ -2068,6 +2250,21 @@
           "ok",
           "output",
           "seconds"
+        ],
+        "type": "object"
+      },
+      "ServiceLandingOffer": {
+        "properties": {
+          "commit_sha": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "commit_sha",
+          "evidence"
         ],
         "type": "object"
       },
@@ -2222,6 +2419,9 @@
           "autonomy": {
             "type": "string"
           },
+          "branch": {
+            "type": "string"
+          },
           "config": {
             "$ref": "#/components/schemas/ConfigProject"
           },
@@ -2309,6 +2509,41 @@
         ],
         "type": "object"
       },
+      "ServiceRemoteResult": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "compare_url": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "actor",
+          "branch",
+          "status"
+        ],
+        "type": "object"
+      },
       "ServiceReviewRequest": {
         "properties": {
           "mode": {
@@ -2383,6 +2618,9 @@
               "$ref": "#/components/schemas/RunlogEvent"
             },
             "type": "array"
+          },
+          "landing_offer": {
+            "$ref": "#/components/schemas/ServiceLandingOffer"
           },
           "run": {
             "$ref": "#/components/schemas/RunlogRun"
@@ -3071,7 +3309,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceBudgetView"
+                "$ref": "#/components/schemas/ServiceBudgetUpdate"
               }
             }
           },
@@ -3090,7 +3328,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the default run budget"
+        "summary": "Update the default run budget; a field omitted keeps its current value"
       }
     },
     "/v1/defaults/candidates": {
@@ -3151,6 +3389,59 @@
           }
         ],
         "summary": "Replace the configured seat-suggestion criteria (a role omitted keeps the default; an empty list turns its suggestions off)"
+      }
+    },
+    "/v1/defaults/engine": {
+      "get": {
+        "operationId": "EngineDefaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceEngineDefaultsView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Engine concurrency cap and CPU ceiling"
+      },
+      "put": {
+        "operationId": "EngineDefaultsSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceEngineDefaultsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the engine concurrency cap"
       }
     },
     "/v1/defaults/modes": {
@@ -4460,6 +4751,42 @@
         "summary": "Start a conversation with a chosen duckling about a bug or task, with its history as context"
       }
     },
+    "/v1/projects/{id}/diagnostics": {
+      "get": {
+        "operationId": "ConfigDiagnostics",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceConfigDiagnostics"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read-only remote and git tooling diagnostics"
+      }
+    },
     "/v1/projects/{id}/doctor": {
       "get": {
         "operationId": "ConfigDoctor",
@@ -4690,6 +5017,144 @@
           }
         ],
         "summary": "The project's suggested next steps"
+      }
+    },
+    "/v1/projects/{id}/pr": {
+      "post": {
+        "operationId": "ProjectPR",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiremoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRemoteResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Explicitly push and create a PR, or return a compare URL when gh is unavailable"
+      }
+    },
+    "/v1/projects/{id}/pull": {
+      "post": {
+        "operationId": "ProjectPull",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiremoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRemoteResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Explicitly fetch then fast-forward only; divergence always asks the person"
+      }
+    },
+    "/v1/projects/{id}/push": {
+      "post": {
+        "operationId": "ProjectPush",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngineapiremoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRemoteResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Explicitly push the current or named branch using the user's git credentials"
       }
     },
     "/v1/projects/{id}/recover/{action}": {
@@ -6417,6 +6882,43 @@
           }
         ],
         "summary": "Anonymised candidates. Carries no authorship, by design (I7)."
+      }
+    },
+    "/v1/runs/{id}/captures/{name}": {
+      "get": {
+        "operationId": "RunCapture",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "no content"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attached render capture"
       }
     },
     "/v1/runs/{id}/chat": {

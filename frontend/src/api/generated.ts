@@ -53,6 +53,7 @@ export interface ConfigBudget {
   max_turns?: number;
   max_usd?: number;
   max_wallclock_s?: number;
+  wallclock_escalation_multiplier?: number;
 }
 
 export interface ConfigCaps {
@@ -91,6 +92,10 @@ export interface ConfigGit {
 export interface ConfigGitHub {
   enabled?: boolean;
   mirror_bugs?: boolean;
+  pr_base?: string;
+  pr_body_by_scribe?: boolean;
+  pr_draft?: boolean;
+  pr_tool?: string;
   repo?: string;
 }
 
@@ -113,6 +118,7 @@ export interface ConfigProject {
   name?: string;
   references?: ConfigReferences;
   remote?: ConfigRemote;
+  render?: ConfigRenderContract;
   roster?: Record<string, string>;
   roster_seats?: Record<string, string[]>;
   run?: ConfigRunApp;
@@ -131,6 +137,16 @@ export interface ConfigRemote {
   allow_mcp_verbs?: string[];
   fetch_on_open?: boolean;
   name?: string;
+}
+
+export interface ConfigRenderContract {
+  artifacts?: string;
+  command?: string;
+  ready?: string;
+  scenes?: string[];
+  timeout_s?: number;
+  url?: string;
+  viewport?: string;
 }
 
 export interface ConfigRunApp {
@@ -279,6 +295,13 @@ export interface EngineapirejectRequest {
   resolution?: string;
 }
 
+export interface EngineapiremoteRequest {
+  actor?: string;
+  branch?: string;
+  origin?: string;
+  title?: string;
+}
+
 export interface EngineapirenderedResponse {
   rendered?: string;
 }
@@ -400,6 +423,13 @@ export interface RunlogGateReproduction {
   output?: string;
 }
 
+export interface RunlogInterruptedTurn {
+  index?: number;
+  notes?: string;
+  role?: string;
+  round?: number;
+}
+
 export interface RunlogRedoNote {
   advisor?: string;
   draft?: string;
@@ -409,20 +439,26 @@ export interface RunlogRedoNote {
 export interface RunlogRun {
   acceptance_gate?: RunlogGateReproduction;
   accepted?: boolean;
+  active_since?: string;
+  active_wallclock_ms?: number;
   agent_turns?: number;
   autonomy?: string;
   base_sha?: string;
   branch?: string;
   budget?: RunlogBudgetState;
+  captures?: string[];
   chain_build?: Record<string, unknown>;
   commit_sha?: string;
   desktop_stale?: boolean;
   dry_run?: boolean;
   ended_at?: string;
+  execution_root?: string;
   failure?: string;
   gate?: string;
+  gate_root?: string;
   governance_modified?: boolean;
   id?: string;
+  interrupted_turn?: RunlogInterruptedTurn;
   local_only?: boolean;
   mode?: string;
   mode_source?: string;
@@ -509,11 +545,20 @@ export interface ServiceBenchSummary {
   suite_version?: number;
 }
 
+export interface ServiceBudgetUpdate {
+  max_tokens?: number;
+  max_turns?: number;
+  max_usd?: number;
+  max_wallclock_s?: number;
+  wallclock_escalation_multiplier?: number;
+}
+
 export interface ServiceBudgetView {
   max_tokens?: number;
   max_turns?: number;
   max_usd?: number;
   max_wallclock_s?: number;
+  wallclock_escalation_multiplier?: number;
 }
 
 export interface ServiceBugRequest {
@@ -550,6 +595,12 @@ export interface ServiceChatStartRequest {
   message?: string;
 }
 
+export interface ServiceConfigDiagnostics {
+  credential_helper?: string;
+  gh_auth?: string;
+  remote_reachable?: string;
+}
+
 export interface ServiceCriterion {
   direction?: string;
   key?: string;
@@ -568,6 +619,11 @@ export interface ServiceDucklingView {
   params?: ConfigSamplingParams;
   provider?: string;
   roles?: string[];
+}
+
+export interface ServiceEngineDefaultsView {
+  cpu_ceiling?: number;
+  max_concurrent_runs?: number;
 }
 
 export interface ServiceGateResult {
@@ -605,6 +661,11 @@ export interface ServiceInstallResult {
   seconds?: number;
 }
 
+export interface ServiceLandingOffer {
+  commit_sha?: string;
+  evidence?: string;
+}
+
 export interface ServiceMeasuredEvidence {
   avg_cost_usd?: number;
   avg_wallclock_s?: number;
@@ -639,6 +700,7 @@ export interface ServiceNextStep {
 
 export interface ServiceProject {
   autonomy?: string;
+  branch?: string;
   config?: ConfigProject;
   gate?: string;
   has_code?: boolean;
@@ -664,6 +726,17 @@ export interface ServiceReleaseRequest {
   revise?: string;
 }
 
+export interface ServiceRemoteResult {
+  action?: string;
+  actor?: string;
+  body?: string;
+  branch?: string;
+  compare_url?: string;
+  pr_url?: string;
+  prompt?: string;
+  status?: string;
+}
+
 export interface ServiceReviewRequest {
   mode?: string;
   task_id?: string;
@@ -685,6 +758,7 @@ export interface ServiceRosterView {
 
 export interface ServiceRunDetail {
   events?: RunlogEvent[];
+  landing_offer?: ServiceLandingOffer;
   run?: RunlogRun;
 }
 
@@ -824,6 +898,8 @@ export const OPERATIONS = [
   { id: "BudgetDefaultsSet", method: "PUT", path: "/v1/defaults/budget" },
   { id: "CandidateCriteria", method: "GET", path: "/v1/defaults/candidates" },
   { id: "CandidateCriteriaSet", method: "PUT", path: "/v1/defaults/candidates" },
+  { id: "EngineDefaults", method: "GET", path: "/v1/defaults/engine" },
+  { id: "EngineDefaultsSet", method: "PUT", path: "/v1/defaults/engine" },
   { id: "ModeDefaults", method: "GET", path: "/v1/defaults/modes" },
   { id: "ModeDefaultsSet", method: "PUT", path: "/v1/defaults/modes" },
   { id: "GlobalRosterGet", method: "GET", path: "/v1/defaults/roster" },
@@ -862,12 +938,16 @@ export const OPERATIONS = [
   { id: "BugPromote", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/promote" },
   { id: "BugMove", method: "POST", path: "/v1/projects/{id}/bugs/{bug}/status" },
   { id: "ChatStart", method: "POST", path: "/v1/projects/{id}/chats" },
+  { id: "ConfigDiagnostics", method: "GET", path: "/v1/projects/{id}/diagnostics" },
   { id: "ConfigDoctor", method: "GET", path: "/v1/projects/{id}/doctor" },
   { id: "ProjectGate", method: "GET", path: "/v1/projects/{id}/gate" },
   { id: "ProjectGateAdopt", method: "POST", path: "/v1/projects/{id}/gate" },
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
   { id: "ProjectInstall", method: "POST", path: "/v1/projects/{id}/install" },
   { id: "ProjectNext", method: "GET", path: "/v1/projects/{id}/next" },
+  { id: "ProjectPR", method: "POST", path: "/v1/projects/{id}/pr" },
+  { id: "ProjectPull", method: "POST", path: "/v1/projects/{id}/pull" },
+  { id: "ProjectPush", method: "POST", path: "/v1/projects/{id}/push" },
   { id: "ProjectRecover", method: "POST", path: "/v1/projects/{id}/recover/{action}" },
   { id: "ReleaseList", method: "GET", path: "/v1/projects/{id}/releases" },
   { id: "ReleasePlan", method: "POST", path: "/v1/projects/{id}/releases" },
@@ -911,6 +991,7 @@ export const OPERATIONS = [
   { id: "RunBrief", method: "GET", path: "/v1/runs/{id}/brief" },
   { id: "RunBudgetLift", method: "POST", path: "/v1/runs/{id}/budget/lift" },
   { id: "RunCandidates", method: "GET", path: "/v1/runs/{id}/candidates" },
+  { id: "RunCapture", method: "GET", path: "/v1/runs/{id}/captures/{name}" },
   { id: "ChatSend", method: "POST", path: "/v1/runs/{id}/chat" },
   { id: "ChatEnd", method: "POST", path: "/v1/runs/{id}/chat/end" },
   { id: "RunDiff", method: "GET", path: "/v1/runs/{id}/diff" },

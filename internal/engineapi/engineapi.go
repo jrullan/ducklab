@@ -357,18 +357,19 @@ func (s *Server) handleBudgetDefaults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBudgetDefaultsSet(w http.ResponseWriter, r *http.Request) {
-	var view service.BudgetView
-	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+	var update service.BudgetUpdate
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if err := s.svc.BudgetDefaultsSet(view); err != nil {
+	saved, err := s.svc.BudgetUpdateSet(update)
+	if err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	// The saved values back, so a client never shows a number the engine did
 	// not accept.
-	s.json(w, http.StatusOK, s.svc.BudgetDefaults())
+	s.json(w, http.StatusOK, saved)
 }
 
 func (s *Server) handleModeDefaults(w http.ResponseWriter, r *http.Request) {

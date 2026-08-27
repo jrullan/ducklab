@@ -227,7 +227,7 @@ describe("the run budget in Settings", () => {
   it("renders what the engine saved, not what was typed", async () => {
     const client = clientWith({
       budgetDefaultsSet: vi.fn(() =>
-        Promise.resolve({ max_usd: 2, max_tokens: 999, max_turns: 24, max_wallclock_s: 3600 }),
+        Promise.resolve({ max_usd: 2, max_tokens: 999, max_turns: 24, max_wallclock_s: 3600, wallclock_escalation_multiplier: 2 }),
       ),
     } as Partial<EngineClient>);
     render(settings(client));

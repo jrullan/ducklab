@@ -188,6 +188,7 @@ export interface BudgetView {
   max_tokens: number;
   max_turns: number;
   max_wallclock_s: number;
+  wallclock_escalation_multiplier: number;
 }
 
 /** Mirrors service.ModeDefaultsView.
@@ -1039,7 +1040,9 @@ export class EngineClient {
   budgetDefaults() {
     return this.request<BudgetView>("GET", "/v1/defaults/budget");
   }
-  budgetDefaultsSet(body: BudgetView) {
+  /** Keep the omission-preserving BudgetUpdate contract: a field absent from
+   * the body is left at its current value, never zeroed (B-262). */
+  budgetDefaultsSet(body: Partial<BudgetView>) {
     return this.request<BudgetView>("PUT", "/v1/defaults/budget", body);
   }
   /** Rounds per mode and the per-turn model-call cap. Both lived only in the

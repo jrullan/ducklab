@@ -64,6 +64,19 @@ type BudgetView struct {
 	WallclockEscalationMultiplier float64 `json:"wallclock_escalation_multiplier"`
 }
 
+// BudgetUpdate is the PUT body for the budget defaults: one pointer per field,
+// so an omitted field means "leave it alone" while an explicitly supplied zero
+// can still be caught by the >0 validation. Plain numeric fields could not tell
+// "not sent" from "sent as zero", which is how a form with no multiplier field
+// used to zero it and fail the whole save (B-262).
+type BudgetUpdate struct {
+	MaxUSD                        *float64 `json:"max_usd,omitempty"`
+	MaxTokens                     *int64   `json:"max_tokens,omitempty"`
+	MaxTurns                      *int     `json:"max_turns,omitempty"`
+	MaxWallclockS                 *int     `json:"max_wallclock_s,omitempty"`
+	WallclockEscalationMultiplier *float64 `json:"wallclock_escalation_multiplier,omitempty"`
+}
+
 // BudgetDefaults returns the budget every run starts with.
 func (s *Service) BudgetDefaults() BudgetView {
 	s.cfgMu.RLock()
@@ -114,6 +127,47 @@ func (s *Service) BudgetDefaultsSet(v BudgetView) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Service) budgetToView(b config.Budget) BudgetView {
+	return BudgetView{
+		MaxUSD: b.MaxUSD, MaxTokens: b.MaxTokens,
+		MaxTurns: b.MaxTurns, MaxWallclockS: b.MaxWallclockS,
+		WallclockEscalationMultiplier: b.WallclockEscalationMultiplier,
+	}
+}
+
+// BudgetUpdateSet merges an update over the current budget and writes it back.
+// A field omitted from the update is left at its current value, never zeroed —
+// a form that does not know a field must not be able to destroy it. A field
+// explicitly supplied but non-positive is still rejected.
+func (s *Service) BudgetUpdateSet(u BudgetUpdate) (BudgetView, error) {
+	if err := s.canWriteConfig(); err != nil {
+		return BudgetView{}, err
+	}
+	s.cfgMu.RLock()
+	cur := s.cfg.Defaults.Budget
+	s.cfgMu.RUnlock()
+	merged := s.budgetToView(cur)
+	if u.MaxUSD != nil {
+		merged.MaxUSD = *u.MaxUSD
+	}
+	if u.MaxTokens != nil {
+		merged.MaxTokens = *u.MaxTokens
+	}
+	if u.MaxTurns != nil {
+		merged.MaxTurns = *u.MaxTurns
+	}
+	if u.MaxWallclockS != nil {
+		merged.MaxWallclockS = *u.MaxWallclockS
+	}
+	if u.WallclockEscalationMultiplier != nil {
+		merged.WallclockEscalationMultiplier = *u.WallclockEscalationMultiplier
+	}
+	if err := s.BudgetDefaultsSet(merged); err != nil {
+		return BudgetView{}, err
+	}
+	return merged, nil
 }
 
 // mergeBudget layers a request's limits over the defaults, one field at a time.
