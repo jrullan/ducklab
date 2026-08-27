@@ -50,7 +50,7 @@ export function pickedSeats(mode: string, value: PhaseConfig): Record<string, st
 }
 
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
-export type PhaseConfig = { mode: string; ducklings: string[]; seatProvenance?: string[]; maxTokens?: number; agentTurns?: number };
+export type PhaseConfig = { mode: string; ducklings: string[]; seatProvenance?: string[]; maxTokens?: number; agentTurns?: number; note?: string };
 
 /**
  * A controlled mode-and-seats configurator: one dropdown per seat, labelled

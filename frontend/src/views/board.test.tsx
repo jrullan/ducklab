@@ -73,6 +73,38 @@ describe("Board", () => {
     expect(dialog.textContent).toMatch(/tell the next run what changed since the tree answered no/i);
   });
 
+  it("sends the retry note as the request Note when relaunching from the dialog", async () => {
+    const noChange = {
+      id: "T-005", title: "Retry after tree answer", milestone: "M-02", status: "blocked",
+      blocked: "previous run made no changes",
+    };
+    const runStart = vi.fn(() => Promise.resolve({ id: "r-9" }));
+    const client = {
+      tasks: vi.fn(() => Promise.resolve([noChange])),
+      bugs: vi.fn(() => Promise.resolve([])),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      gateRun: vi.fn(() => Promise.resolve({ green: false, exit_code: 1, output: "", command: "go test ./...", gate: "tests", duration_s: 0.1 })),
+      runStart,
+      testStart: vi.fn(() => Promise.resolve({ id: "r-10" })),
+      reviewStart: vi.fn(() => Promise.resolve({ id: "r-11" })),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+    } as unknown as EngineClient;
+    render(<Board client={client} projectId="p" />);
+    await screen.findByTestId("board-card");
+    fireEvent.click(screen.getByRole("button", { name: /retry with note/i }));
+    fireEvent.change(screen.getByTestId("retry-note-input"), {
+      target: { value: "the tree changed after the no-change answer" },
+    });
+    fireEvent.click(screen.getByTestId("retry-note-launch"));
+    await waitFor(() =>
+      expect(runStart).toHaveBeenCalledWith("p", "T-005", {
+        note: "the tree changed after the no-change answer",
+      }),
+    );
+  });
+
   it("filters by milestone without losing the total", async () => {
     render(<Board client={okClient()} projectId="p" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));

@@ -153,6 +153,9 @@ export function Board({
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState<unknown>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // The no-changes brake's door: which task's retry-with-note dialog is open.
+  const [retryDialogFor, setRetryDialogFor] = useState<string | null>(null);
+  const [retryNote, setRetryNote] = useState("");
   const generation = useRef(0);
   // The selection belongs to the board that made it: keeping it across a
   // switch would leave the rail describing a task while the bugs are on
@@ -581,6 +584,66 @@ export function Board({
         )}
 
         {bugError !== null && <ErrorCard error={bugError} testId="bug-error" />}
+        {retryDialogFor && (() => {
+          const t = tasks.find((x) => x.id === retryDialogFor);
+          if (!t) return null;
+          return (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Retry ${t.id} with a note`}
+              data-testid="retry-note-dialog"
+              className="mb-3 space-y-2 rounded-card border border-hairline bg-surface p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-mono text-xs text-ink-muted">{t.id}</div>
+                  <h2 className="text-sm font-medium text-ink">retry with a note</h2>
+                </div>
+                <button
+                  type="button"
+                  data-testid="retry-note-close"
+                  aria-label="close"
+                  onClick={() => setRetryDialogFor(null)}
+                  className="text-xs text-ink-muted"
+                >
+                  close
+                </button>
+              </div>
+              <p className="text-xs text-ink-muted">
+                The last run made no changes. Tell the next run what changed since
+                the tree answered no.
+              </p>
+              <textarea
+                aria-label="note"
+                data-testid="retry-note-input"
+                value={retryNote}
+                onChange={(e) => setRetryNote(e.target.value)}
+                rows={3}
+                placeholder="what changed since the tree answered no; this rides the run's request as Note"
+                className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="retry-note-launch"
+                  className="rounded border border-hairline px-3 py-1 text-sm"
+                  onClick={() => {
+                    const note = retryNote.trim();
+                    setRetryDialogFor(null);
+                    setRetryNote("");
+                    void client.runStart(projectId, t.id, { note: note || undefined })
+                      .then(() => load())
+                      .catch((e) => setFailure(e));
+                  }}
+                >
+                  Launch with note
+                </button>
+                <span className="text-xs text-ink-muted">or close and run normally in the rail</span>
+              </div>
+            </div>
+          );
+        })()}
         {triageRun && (
           <p className="mb-2 text-sm" data-testid="triage-run">
             <a href={`#/runs/${triageRun}`} className="text-ink underline">
@@ -736,6 +799,16 @@ export function Board({
                           </div>
                         )}
                       </button>
+                      {!isBugs && (it as Task).blocked && /no.?changes|no change/i.test((it as Task).blocked ?? "") && (
+                        <button
+                          type="button"
+                          data-testid="retry-with-note"
+                          onClick={() => setRetryDialogFor(it.id)}
+                          className="mt-1 text-xs text-ink underline"
+                        >
+                          retry with note
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -1029,6 +1102,7 @@ function TaskRunner({
                 seats: pickedSeats(tdd!.build.mode || phaseDefaults.build, tdd!.build),
                 maxTokens: tdd!.build.maxTokens,
                 agentTurns: tdd!.build.agentTurns,
+                note: tdd!.build.note,
               })
             : what === "test"
               // From the TDD block, the test phase's own config; from the
@@ -1039,6 +1113,7 @@ function TaskRunner({
                       testMode: tdd.test.mode,
                       testDucklings: [],
                       testSeats: pickedSeats(tdd.test.mode, tdd.test),
+                      note: tdd.test.note,
                     })
                   : client.testStart(projectId, task.id, chosen[0] ?? ""))
               : await client.reviewStart(projectId, task.id);
@@ -1139,7 +1214,7 @@ function TaskRunner({
               onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
               onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
               onBuildOnly={(b) =>
-                void go("run", { mode: b.mode, ducklings: [], seats: pickedSeats(b.mode || phaseDefaults.build, b), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                void go("run", { mode: b.mode, ducklings: [], seats: pickedSeats(b.mode || phaseDefaults.build, b), maxTokens: b.maxTokens, agentTurns: b.agentTurns, note: b.note })
               }
             />
           );

@@ -52,6 +52,10 @@ export function TddLaunch({
     set(next);
   };
   const [tuning, setTuning] = useState(false);
+  // A note for this run — the channel the no-changes brake demands, and the
+  // gate review's "address the findings" rides too. Owned here, folded under
+  // the summary; most launches carry nothing extra.
+  const [note, setNote] = useState("");
   const resolvedTestRoster = Array.isArray(testRoster) ? testRoster : Array.isArray(roster) ? roster : undefined;
   const resolvedBuildRoster = Array.isArray(buildRoster) ? buildRoster : Array.isArray(roster) ? roster : undefined;
   // One line saying what a click does: modes and who is seated (the picked
@@ -62,13 +66,17 @@ export function TddLaunch({
   const est = estimates?.[buildDisplayMode];
   const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
   const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0, resolvedTestRoster)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0, resolvedBuildRoster)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2, resolvedBuildRoster)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
+  // The run's note rides the launch, not one phase: it answers the no-changes
+  // brake's demand ("tell the next run what changed") and carries a gate
+  // review's findings into the build. One note for one decision.
+  const withNote = <C extends PhaseConfig>(cfg: C): C => ({ ...cfg, note: note.trim() || undefined });
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
       {/* The common case is one click; the button leads. Seats and caps are
           the exception and fold beneath. */}
       <button
         type="button"
-        onClick={() => onTdd(testCfg, buildCfg)}
+        onClick={() => onTdd(withNote(testCfg), withNote(buildCfg))}
         disabled={busy}
         data-testid="tdd-start"
         className="w-full rounded border border-good px-3 py-1.5 text-sm text-good disabled:opacity-40"
@@ -79,6 +87,17 @@ export function TddLaunch({
         <span className="min-w-0 truncate" data-testid="tdd-summary" title={summary}>{summary}</span>
         <button type="button" data-testid="tdd-tune" aria-expanded={tuning} onClick={() => setTuning((v) => !v)} className="ml-auto shrink-0 underline hover:text-ink">{tuning ? "hide" : "adjust seats & caps"}</button>
       </div>
+      <label className="block text-xs text-ink-muted">
+        a note for this run
+        <textarea
+          aria-label="note"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          placeholder="what changed since the tree answered no — or what the next run should address"
+          className="mt-1 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+        />
+      </label>
       {tuning && (
         <div className="space-y-2 border-t border-hairline pt-2" data-testid="tdd-tuning">
           <div>
@@ -118,7 +137,7 @@ export function TddLaunch({
       <div className="flex items-center gap-3 text-xs">
         <button
           type="button"
-          onClick={() => onTestOnly(testCfg)}
+          onClick={() => onTestOnly(withNote(testCfg))}
           disabled={busy}
           data-testid="test-first-start"
           title="Write the failing test only; you accept it before any build"
@@ -129,7 +148,7 @@ export function TddLaunch({
         <span className="text-ink-muted">·</span>
         <button
           type="button"
-          onClick={() => onBuildOnly(buildCfg)}
+          onClick={() => onBuildOnly(withNote(buildCfg))}
           disabled={busy}
           data-testid="build-only"
           title="Build without a new test — the gate still judges the whole suite"
