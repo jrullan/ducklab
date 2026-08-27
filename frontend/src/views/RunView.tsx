@@ -275,6 +275,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const [relaunchBusy, setRelaunchBusy] = useState(false);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
   const [escalationCandidate, setEscalationCandidate] = useState<string | null>(null);
+  // Only ONE escalation suggestion card at a time, and once a decision is
+  // taken the card must not linger. Which trigger a decision dismisses is
+  // identified by the event's sequence, so a replacement suggestion arriving
+  // before a decision on the previous one still shows — only a decision hides
+  // the current card.
+  const [dismissedEscalations, setDismissedEscalations] = useState<Set<string>>(() => new Set());
+  const dismissEscalation = (event: DucklabEvent) =>
+    setDismissedEscalations((current) => new Set(current).add(String(event.seq ?? "")));
   // The accept-and-fix chain: one click accepts the green work and starts a
   // follow-up run with the reviewer's findings riding its prompt.
   const [fixBusy, setFixBusy] = useState(false);
@@ -421,6 +429,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   useEffect(() => {
     wasWaitingHere.current = false;
     followedChain.current = "";
+    // Dismissals are per-run: a sequence reused by a different run must not
+    // hide that run's active escalation card. Clear on navigation.
+    setDismissedEscalations(new Set());
+    setEscalationCandidate(null);
   }, [runId]);
   useEffect(() => {
     if (run?.status === "paused") wasWaitingHere.current = true;
@@ -609,6 +621,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // Suggestions are emitted at the pause boundary. Keep each one beside the
   // decision surface rather than burying it in the generic event timeline.
   const escalations = events.filter((event) => event.type === "escalation_suggestion");
+  // Render at most one card, for the LATEST trigger — every historical
+  // trigger stacking its own card is the defect this fixes. Earlier triggers
+  // are superseded by the one that replaced them.
+  const latestEscalation = [...escalations].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).at(-1);
   // Proposal events are advisory data emitted by the consultant/scribe; rendering
   // them never writes config. The card owns the one explicit human Apply action.
   const configProposals = events.filter((event) => event.type === "config_amendment");
@@ -1035,15 +1051,26 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           looking at the run that just failed. Doing it meant leaving for the
           board and finding the task by hand, which is enough friction that a
           re-run tends to carry the settings that just failed. */}
-      {escalations.map((event, index) => (
+      {latestEscalation && !dismissedEscalations.has(String(latestEscalation.seq ?? "")) && (
         <EscalationSuggestionCard
-          key={event.seq ?? index}
-          event={event}
-          onRelaunch={(candidate) => setEscalationCandidate(candidate)}
-          onOpenTask={() => setTaskOpen(true)}
-          onContinue={() => { void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }}
+          key={latestEscalation.seq ?? "escalation"}
+          event={latestEscalation}
+          onRelaunch={(candidate) => {
+            // A decision dispatches the card: choose the candidate AND drop the
+            // suggestion from the run view so it does not remain visible.
+            setEscalationCandidate(candidate);
+            dismissEscalation(latestEscalation);
+          }}
+          onOpenTask={() => {
+            setTaskOpen(true);
+            dismissEscalation(latestEscalation);
+          }}
+          onContinue={() => {
+            dismissEscalation(latestEscalation);
+            void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+          }}
         />
-      ))}
+      )}
       {run.stage !== "chat" && configFailure && (() => {
         const data = configFailure.data ?? {};
         const key = typeof data.key === "string" ? data.key : "";
