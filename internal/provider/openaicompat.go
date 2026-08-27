@@ -253,7 +253,7 @@ func (p *OpenAICompat) doChat(ctx context.Context, req ChatRequest) (ChatRespons
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return ChatResponse{}, classifiedChatError("chat", resp.Status, body)
+		return ChatResponse{}, classifiedChatError("chat", resp.Status, resp.StatusCode, body)
 	}
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -329,13 +329,21 @@ func applyReasoning(body []byte, out *ChatResponse) {
 
 // classifiedChatError turns the common local vision rejection into an
 // actionable capability error rather than leaking an opaque HTTP 500.
-func classifiedChatError(operation, status string, body []byte) error {
+func classifiedChatError(operation, status string, code int, body []byte) error {
 	message := string(body)
 	lower := strings.ToLower(message)
 	if strings.Contains(lower, "image input is not supported") ||
 		(strings.Contains(lower, "image") && strings.Contains(lower, "mmproj")) ||
 		strings.Contains(lower, "vision projector") {
 		return fmt.Errorf("%w: model/server has no vision projector (mmproj); start the server with --mmproj or pick a truly seeing duckling", ErrVisionUnsupported)
+	}
+	// A 5xx — a Cloudflare 520 from a flaky OpenRouter upstream, a 503/504
+	// from a gateway — is the provider being unavailable, weather worth
+	// retrying, never a verdict on the work. Mid-stream in particular one such
+	// error used to end the whole run terminal even when a completed turn was
+	// already in the bag (B-255).
+	if code >= 500 && code <= 599 {
+		return fmt.Errorf("%w: %s: %s: %s", ErrProviderUnavailable, operation, status, message)
 	}
 	return fmt.Errorf("%s: %s: %s", operation, status, message)
 }
@@ -424,17 +432,27 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 	touch()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return ChatResponse{}, classifiedChatError("chat stream", resp.Status, body)
+		return ChatResponse{}, classifiedChatError("chat stream", resp.Status, resp.StatusCode, body)
 	}
 	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		// Not actually streaming; fall back to non-streaming
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return ChatResponse{}, fmt.Errorf("read non-stream response: %w", err)
+		}
 		var chatResp ChatResponse
-		if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		if err := json.Unmarshal(body, &chatResp); err != nil {
 			return ChatResponse{}, fmt.Errorf("decode non-stream response: %w", err)
 		}
-		if len(chatResp.Choices) > 0 {
-			chatResp.FinishReason = chatResp.Choices[0].FinishReason
+		if len(chatResp.Choices) == 0 {
+			// A 200 response with no choices is still a verdict from the upstream
+			// — a provider 520 delivered as a non-SSE fallback, for instance. Classify
+			// it like a non-streaming body or it bypasses the retry/weather handling and
+			// kills the run terminal (B-255).
+			msg, kind := providerFailure(body)
+			return ChatResponse{}, fmt.Errorf("%w: %s", kind, msg)
 		}
+		chatResp.FinishReason = chatResp.Choices[0].FinishReason
 		return chatResp, nil
 	}
 
@@ -471,12 +489,26 @@ func (p *OpenAICompat) doChatStream(ctx context.Context, req ChatRequest, ch cha
 			} `json:"choices"`
 			Usage    *Usage `json:"usage"`
 			Provider string `json:"provider"`
+			// A 200-status stream can still deliver an error envelope (e.g. a
+			// Cloudflare 520 from an OpenRouter upstream). Without this, a stream
+			// carrying only the error was silently ignored and completed normally,
+			// turning one transient failure into a successful empty turn (B-255).
+			Error json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(event), &chunk); err != nil {
 			continue
 		}
 		if chunk.Provider != "" {
 			upstream = chunk.Provider
+		}
+		if len(chunk.Error) > 0 {
+			// Classify the envelope like a non-streaming body: the upstream status
+			// is inside it, not on the HTTP response. A transient 520 becomes
+			// weather the retry policy abandons, instead of a completed-wrong turn.
+			msg, kind := providerFailure(fmt.Appendf(nil, `{"error":%s}`, chunk.Error))
+			// Transient or not, the stream has failed: never emit a Done so the
+			// caller cannot mistake an error stream for a completed turn.
+			return ChatResponse{}, fmt.Errorf("%w: stream: %s", kind, msg)
 		}
 		if len(chunk.Choices) > 0 {
 			c := chunk.Choices[0]
@@ -1067,7 +1099,7 @@ func classifyUpstream(code string, fallback error) error {
 	switch code {
 	case "429":
 		return ErrRateLimit
-	case "500", "502", "503", "504", "408", "522", "524":
+	case "500", "502", "503", "504", "408", "520", "522", "524":
 		// The upstream was reachable and could not answer in time. That is what
 		// the retry policy exists for.
 		return ErrProviderUnavailable

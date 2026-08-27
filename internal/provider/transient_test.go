@@ -26,6 +26,7 @@ func TestAnUpstreamTimeoutIsTransient(t *testing.T) {
 	}{
 		{"504", ErrProviderUnavailable},
 		{"503", ErrProviderUnavailable},
+		{"520", ErrProviderUnavailable},
 		{"429", ErrRateLimit},
 		// A code nobody recognises is not a reason to retry forever.
 		{"400", ErrInvalidResponse},
@@ -57,33 +58,42 @@ func TestAnUpstreamTimeoutIsTransient(t *testing.T) {
 
 // The point of the classification: the call is actually made again.
 func TestATransientUpstreamFailureIsRetried(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if hits.Add(1) == 1 {
-			fmt.Fprint(w, `{"error":{"message":"The operation was aborted","code":504}}`)
-			return
-		}
-		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
-	}))
-	defer srv.Close()
+	// Both the plain 504 and the nested OpenRouter 520 inside a 200 envelope
+	// feed the same retry policy: 520 is weather, not a verdict on the work.
+	for _, failed := range []string{
+		`{"error":{"message":"The operation was aborted","code":504}}`,
+		`{"error":{"message":"Z.AI via openrouter","code":520}}`,
+	} {
+		t.Run(failed, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if hits.Add(1) == 1 {
+					fmt.Fprint(w, failed)
+					return
+				}
+				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer srv.Close()
 
-	p := NewOpenAICompat("t", srv.URL, "")
-	req := ChatRequest{Model: "m", Messages: []Message{{Role: "user", Content: "go"}}}
+			p := NewOpenAICompat("t", srv.URL, "")
+			req := ChatRequest{Model: "m", Messages: []Message{{Role: "user", Content: "go"}}}
 
-	var resp ChatResponse
-	err := Retry(context.Background(), RetryPolicy{MaxAttempts: 3, InitialWait: time.Millisecond, MaxWait: time.Millisecond}, func() error {
-		var e error
-		resp, e = p.Chat(context.Background(), req)
-		return e
-	})
-	if err != nil {
-		t.Fatalf("the retry gave up on a transient failure: %v", err)
-	}
-	if hits.Load() != 2 {
-		t.Errorf("the call was made %d time(s); the second one is the point", hits.Load())
-	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Errorf("content = %q", resp.Choices[0].Message.Content)
+			var resp ChatResponse
+			err := Retry(context.Background(), RetryPolicy{MaxAttempts: 3, InitialWait: time.Millisecond, MaxWait: time.Millisecond}, func() error {
+				var e error
+				resp, e = p.Chat(context.Background(), req)
+				return e
+			})
+			if err != nil {
+				t.Fatalf("the retry gave up on a transient failure: %v", err)
+			}
+			if hits.Load() != 2 {
+				t.Errorf("the call was made %d time(s); the second one is the point", hits.Load())
+			}
+			if resp.Choices[0].Message.Content != "ok" {
+				t.Errorf("content = %q", resp.Choices[0].Message.Content)
+			}
+		})
 	}
 }
 
@@ -124,6 +134,85 @@ func TestAStreaming520IsRetriedAndCompletes(t *testing.T) {
 	}
 	if len(got.Choices) != 1 || got.Choices[0].Message.Content != "recovered" {
 		t.Fatalf("recovered stream response = %#v", got)
+	}
+}
+
+// A 200-status stream delivering a 520 as an error envelope — the OpenRouter
+// failure mode where the upstream status is inside the body, not on the HTTP
+// response. It used to be silently ignored and the stream completed as an
+// empty, successful turn; it must classify as weather so the retry policy can
+// replay the turn (B-255).
+func TestAStreaming520ErrorEnvelopeIsRetriedAndCompletes(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if hits.Add(1) == 1 {
+			fmt.Fprint(w, "data: {\"error\":{\"message\":\"Z.AI via openrouter\",\"code\":520}}\n\n")
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"recovered\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat("openrouter", srv.URL, "")
+	ch := make(chan Delta, 4)
+	var got ChatResponse
+	err := Retry(context.Background(), RetryPolicy{MaxAttempts: 2, InitialWait: time.Millisecond, MaxWait: time.Millisecond}, func() error {
+		var callErr error
+		got, callErr = p.ChatStream(context.Background(), ChatRequest{
+			Model: "z-ai/glm-5.2", Messages: []Message{{Role: "user", Content: "review"}},
+		}, ch)
+		return callErr
+	})
+	if err != nil {
+		t.Fatalf("a mid-stream 520 envelope ended the turn instead of retrying: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("stream attempts = %d, want 2 after one 520 envelope", hits.Load())
+	}
+	if len(got.Choices) != 1 || got.Choices[0].Message.Content != "recovered" {
+		t.Fatalf("recovered stream response = %#v", got)
+	}
+}
+
+// A provider that agreed to stream but answered with a plain JSON body — a
+func TestANonStreaming520FallbackIsRetriedAndCompletes(t *testing.T) {
+	for _, failed := range []string{
+		`{"error":{"message":"Z.AI via openrouter","code":520}}`,
+		`{"error":{"message":"The operation was aborted","code":504}}`,
+	} {
+		t.Run(failed, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if hits.Add(1) == 1 {
+					// A 200 with a non-stream content type, carrying the error envelope.
+					fmt.Fprint(w, failed)
+					return
+				}
+				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"recovered"},"finish_reason":"stop"}]}`)
+			}))
+			defer srv.Close()
+
+			p := NewOpenAICompat("openrouter", srv.URL, "")
+			ch := make(chan Delta, 4)
+			var got ChatResponse
+			err := Retry(context.Background(), RetryPolicy{MaxAttempts: 2, InitialWait: time.Millisecond, MaxWait: time.Millisecond}, func() error {
+				var callErr error
+				got, callErr = p.ChatStream(context.Background(), ChatRequest{
+					Model: "z-ai/glm-5.2", Messages: []Message{{Role: "user", Content: "review"}},
+				}, ch)
+				return callErr
+			})
+			if err != nil {
+				t.Fatalf("a transient non-streaming 520 ended the turn instead of retrying: %v", err)
+			}
+			if hits.Load() != 2 {
+				t.Fatalf("attempts = %d, want 2 after one failure", hits.Load())
+			}
+			if len(got.Choices) != 1 || got.Choices[0].Message.Content != "recovered" {
+				t.Fatalf("recovered response = %#v", got)
+			}
+		})
 	}
 }
 
