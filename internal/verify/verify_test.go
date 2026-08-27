@@ -364,7 +364,18 @@ func TestAQuickGateIsUnaffected(t *testing.T) {
 // connections that hung the NEXT run's suite. The run's own context rides in
 // now: cancel returns promptly and leaves no survivors.
 func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
+	// This is an unrelated concurrent gate. Its sleeper must not be mistaken
+	// for this gate's child while checking that cancellation reaped ours.
 	marker := "verify_abort_repro_sleeper"
+	other := exec.Command("python3", "-c", "import time; time.sleep(3) # "+marker)
+	if err := other.Start(); err != nil {
+		t.Fatalf("start unrelated gate: %v", err)
+	}
+	defer func() {
+		_ = other.Process.Kill()
+		_ = other.Wait()
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(300 * time.Millisecond)
