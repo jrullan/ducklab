@@ -69,6 +69,24 @@ describe("what an error names", () => {
     expect(err.message).toContain("Restart the engine");
   });
 
+  it("recognizes Go's newline-terminated legacy 404 body as an older engine", async () => {
+    let stale: string | false = false;
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      onStale: (reason) => { stale = reason; },
+      fetchFn: (async () => new Response("404 page not found\n", {
+        status: 404,
+        headers: { "Content-Type": "text/plain" },
+      })) as unknown as typeof fetch,
+    });
+
+    const err = await c.benchStart({ ducklings: ["luna"], modes: ["solo"] }).catch((e) => e);
+    expect(stale).toBe("older");
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).toContain("older than this app");
+  });
+
   it("does not infer staleness from a data 404", async () => {
     let stale = false;
     const c = new EngineClient({
