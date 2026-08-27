@@ -690,6 +690,12 @@ func TestATestFirstUsesAnIndependentWorktree(t *testing.T) {
 	if run.Status != "running" {
 		t.Errorf("status = %q, want running — test-first uses an independent worktree", run.Status)
 	}
+	// The launched run keeps executing after the assertion. A test that
+	// returns while its goroutine still writes under t.TempDir loses the
+	// teardown race — "TempDir RemoveAll cleanup: directory not empty" —
+	// which fired only under full-suite load and killed two healthy runs'
+	// gates and one accept in a single evening (B-221).
+	_, _ = s.waitForRun(context.Background(), run.ID)
 }
 
 // A broken chain — test accepted, build failed — leaves the suite
