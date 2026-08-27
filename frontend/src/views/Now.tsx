@@ -501,7 +501,7 @@ function NowFooter({ runs }: { runs: Run[] }) {
       {finished > 0 && (
         <>
           {" "}
-          · {passed}/{finished} passed
+          · {passed} of {finished} finished runs passed, all time
         </>
       )}
     </p>

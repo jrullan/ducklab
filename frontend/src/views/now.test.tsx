@@ -328,7 +328,7 @@ describe("the inbox's footer", () => {
     const footer = await screen.findByTestId("now-footer");
     expect(footer.textContent).toContain("today $1.50");
     expect(footer.textContent).toContain("all time $10.50");
-    expect(footer.textContent).toContain("1/2 passed");
+    expect(footer.textContent).toContain("1 of 2 finished runs passed, all time");
   });
 
   it("formats zero spend as two decimal places", async () => {
