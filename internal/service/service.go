@@ -1691,7 +1691,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// Only ever taken ONCE: a resumed run re-enters here, and re-snapshotting
 	// would move the restore point to mid-run — reject would then keep the
 	// half-made edits it exists to remove.
-	if git := vcs.New(entry.Path); rs.run.TreeSnapshot == "" && git.HasGit() {
+	if git := vcs.New(runRoot(rs.run, entry.Path)); rs.run.TreeSnapshot == "" && git.HasGit() {
 		if snap, serr := git.SnapshotTree(); serr == nil {
 			rs.run.TreeSnapshot = snap
 			if head, herr := git.HeadSHA(); herr == nil {
@@ -4150,7 +4150,7 @@ func runHasUnsavedWork(rs *runState) bool {
 	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.projectPath == "" {
 		return false
 	}
-	now, err := vcs.New(rs.projectPath).SnapshotTree()
+	now, err := vcs.New(runRoot(rs.run, rs.projectPath)).SnapshotTree()
 	if err != nil {
 		return true
 	}
@@ -4293,7 +4293,7 @@ func restoreAfterUnaccepted(rs *runState) error {
 	if rs == nil || rs.run == nil || rs.run.TreeSnapshot == "" || rs.run.Accepted {
 		return nil
 	}
-	git := vcs.New(rs.projectPath)
+	git := vcs.New(runRoot(rs.run, rs.projectPath))
 	if err := git.RestoreTreeAtHeadScoped(rs.run.TreeSnapshot, rs.run.TreeSnapshotHead, runWrittenPaths(rs.runDir)); err != nil {
 		// Said, not swallowed: a person who believes the tree is clean will
 		// trust the next run's diff.

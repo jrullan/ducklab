@@ -202,6 +202,36 @@ func TestWorktreeRestoreDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	}
 }
 
+// A rejected worktree run drops its own checkout only: a same-named file a
+// person has edited in the registered checkout must never be restored or
+// deleted by the run's rejection.
+func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-reject-same-name")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("run worktree edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("human checkout edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RunReject(context.Background(), run.ID, "no"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "human checkout edit\n" {
+		t.Errorf("rejecting a worktree run changed the registered checkout's file: got %q", got)
+	}
+	if _, err := os.Lstat(run.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree remains after reject: %v", err)
+	}
+}
+
 func TestAcceptDoesNotRestore(t *testing.T) {
 	rs := &runState{run: &runlog.Run{ID: "r-2", TreeSnapshot: "abc", Accepted: true}}
 	// Must be a no-op — reaching for git with a fake path would error loudly.
