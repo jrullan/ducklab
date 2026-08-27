@@ -514,9 +514,10 @@ func TestQueueHostedProviderDefaultAllowsEightRuns(t *testing.T) {
 	close(release)
 }
 
-// A run reserves every provider represented by its resolved seats: a free
-// hosted provider cannot make a roster start while its local seat is full.
-func TestQueueBlocksRosterWhenAnyProviderIsAtCap(t *testing.T) {
+// Provider capacity is bound at the turn level, not reserved per run: a
+// roster spanning a full provider is still admitted without a role turn, with
+// an empty queue reason.
+func TestQueueAdmitsRosterSpanningFullProviderWithoutRoleTurn(t *testing.T) {
 	s := serviceWithDucklings(t, "local-duck", "hosted-duck")
 	s.cfg.Providers = map[config.ProviderID]config.Provider{
 		"local":  {Kind: config.ProviderKindOpenAI, BaseURL: "http://localhost:8081/v1"},
