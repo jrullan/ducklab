@@ -286,6 +286,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
+			// The person's configured role cap beats the script's baked-in
+			// number, as TurnCaps has always documented — applied HERE, on the
+			// turn copy every consumer sees, not inside one runner. It used to
+			// be consulted only by split/tournament/rubberduck (CapFor) while
+			// builds were rescued by applyRoleTurns patching the script; a
+			// test-first — which passes TurnCaps and patches nothing — ran its
+			// implementer at TestFirstScript's hardcoded 24 while role_turns
+			// said 100 and the Settings fallback said 40. A strong seat died
+			// reading a 30-file project with every configured number decorative.
+			turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
 
 			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {
 				continue
