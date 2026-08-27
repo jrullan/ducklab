@@ -318,3 +318,68 @@ func TestOnAcceptPushFailureLeavesAcceptedRunWithExactWarning(t *testing.T) {
 		t.Fatalf("stored warning = %q, result warning = %q", detail.Run.Warning, result.Warning)
 	}
 }
+
+// Major 2: baseBranchForPush must resolve the same default branch acceptance
+// advances (origin/HEAD, else main/master), never silently substitute an
+// unrelated current checkout branch. With a checkout parked on a feature
+// branch, publication must still target the default branch.
+func TestBaseBranchForPushResolvesDefaultBranchNotCheckout(t *testing.T) {
+	s := serviceWithAcceptPolicy(t, "push")
+	id, root := projectWithDocs(t, s, nil)
+	setProjectRemote(t, root)
+	gitProject(t, root)
+	p, err := s.remoteProject(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultName := gitBranch(t, root)
+	if _, err := exec.Command("git", "-C", root, "checkout", "-b", "ducklab/feature").CombinedOutput(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.baseBranchForPush(p); got != defaultName {
+		t.Fatalf("baseBranchForPush = %q, want the default branch %q (not the feature checkout)", got, defaultName)
+	}
+}
+
+// Major 1: publication lives in acceptRun's common success path, so an accept
+// that settles through acceptRun applies the on_accept push policy exactly
+// once, with the default branch in the receipt.
+func TestInternalAcceptPathPublishesThroughAcceptRun(t *testing.T) {
+	s := serviceWithAcceptPolicy(t, "push")
+	id, root := projectWithDocs(t, s, nil)
+	setProjectRemote(t, root)
+	gitProject(t, root)
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	if out, err := exec.Command("git", "init", "--bare", remote).CombinedOutput(); err != nil {
+		t.Fatalf("init bare remote: %v: %s", err, out)
+	}
+	branch := gitBranch(t, root)
+	for _, args := range [][]string{{"remote", "add", "origin", remote}, {"push", "-u", "origin", branch}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	if _, err := exec.Command("git", "-C", root, "checkout", "-b", "ducklab/feature").CombinedOutput(); err != nil {
+		t.Fatal(err)
+	}
+
+	run, _ := pausedWorktreeRun(t, s, id, root, "r-internal-path")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "internal.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	receipts := remotePushReceipts(t, root)
+	if len(receipts) != 1 {
+		t.Fatalf("accept published %d times, want exactly once: %#v", len(receipts), receipts)
+	}
+	if receipts[0]["status"] != "pushed" {
+		t.Fatalf("push status = %v, want pushed", receipts[0]["status"])
+	}
+	if receipts[0]["branch"] != branch {
+		t.Fatalf("pushed branch = %v, want the default branch %q despite the feature checkout", receipts[0]["branch"], branch)
+	}
+}

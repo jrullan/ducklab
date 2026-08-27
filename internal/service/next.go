@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/jrullan/ducklab/internal/runlog"
 )
 
@@ -92,9 +94,34 @@ func runNext(r *runlog.Run) []string {
 			case "spec":
 				return []string{"run_plan"}
 			}
+			// A successful accept is not always the end. If its on_accept
+			// publication failed, the acceptance stands but the commit never
+			// reached the remote: the same push door that published it in the
+			// first place is the retry, so the person can finish the job from
+			// the run view instead of hunting for it (B-266).
+			if failedPush(r) {
+				return []string{"push"}
+			}
 		}
 		return nil
 	}
+}
+
+// failedPush reports whether an accepted run's publication under the on_accept
+// policy failed: the commit is durable locally but did not reach the remote, so
+// the push door is the retry. It never fires for a successful publication (B-266).
+func failedPush(r *runlog.Run) bool {
+	for _, receipt := range r.RemoteReceipts {
+		if action, _ := receipt["action"].(string); action == "push" {
+			if status, _ := receipt["status"].(string); status == "failed" {
+				return true
+			}
+		}
+	}
+	if r.Warning != "" {
+		return strings.Contains(r.Warning, "push failed")
+	}
+	return false
 }
 
 // taskNextActions lists what a person may legally start from a task.

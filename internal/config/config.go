@@ -299,6 +299,10 @@ type Global struct {
 	Ducklings map[DucklingID]Duckling `toml:"duckling" json:"duckling"`
 	MCPs      map[string]MCP          `toml:"mcp" json:"mcp"`
 	Notify    Notify                  `toml:"notify" json:"notify"`
+	// Remote lets the global config name a publication policy that projects may
+	// inherit or override. Name and FetchOnOpen stay project-owned; only the
+	// policy matters here.
+	Remote Remote `toml:"remote,omitempty" json:"remote,omitempty"`
 }
 
 // Notify is the outbound webhook: where the engine announces the moments a
@@ -359,6 +363,10 @@ type Remote struct {
 	Name          string   `toml:"name" json:"name"`
 	FetchOnOpen   bool     `toml:"fetch_on_open" json:"fetch_on_open"`
 	AllowMCPVerbs []string `toml:"allow_mcp_verbs" json:"allow_mcp_verbs"`
+	// OnAccept is how an accepted run is published: nothing (default), push
+	// the default branch, or pr. The empty value means unset — resolution
+	// falls through to the global config, then to nothing (B-266).
+	OnAccept string `toml:"on_accept,omitempty" json:"on_accept,omitempty"`
 }
 
 // GitHub holds GitHub configuration.
@@ -517,6 +525,30 @@ func ValidateStage(s Stage) error {
 	return fmt.Errorf("invalid stage %q", s)
 }
 
+// ValidateOnAccept validates the remote publication policy. An empty value
+// is the unset state (resolved as nothing); a set value must be one of the three.
+func ValidateOnAccept(policy string) error {
+	switch policy {
+	case "nothing", "push", "pr":
+		return nil
+	default:
+		return fmt.Errorf("invalid on_accept %q: must be nothing | push | pr", policy)
+	}
+}
+
+// OnAcceptPolicy resolves an on_accept value across scopes: the project's own
+// setting wins, then the global, then the default nothing. Name and FetchOnOpen
+// are project-owned and never inherited.
+func OnAcceptPolicy(global, project string) string {
+	if project != "" {
+		return project
+	}
+	if global != "" {
+		return global
+	}
+	return "nothing"
+}
+
 // ValidateProviderKind validates a provider kind.
 func ValidateProviderKind(k ProviderKind) error {
 	if k != ProviderKindOpenAI && k != ProviderKindAnthropic {
@@ -629,6 +661,11 @@ func (g *Global) Validate(path string) error {
 			if _, err := time.Parse("2006-01-02", d.Index.AsOf); err != nil {
 				return &Error{File: path, Key: fmt.Sprintf("duckling.%s.index.as_of", id), Msg: "must be YYYY-MM-DD"}
 			}
+		}
+	}
+	if g.Remote.OnAccept != "" {
+		if err := ValidateOnAccept(g.Remote.OnAccept); err != nil {
+			return &Error{File: path, Key: "remote.on_accept", Msg: err.Error()}
 		}
 	}
 	return nil
@@ -778,6 +815,11 @@ func (p *Project) Validate(path string) error {
 	}
 	if p.Budget.MaxUSD < 0 {
 		return &Error{File: path, Key: "budget.max_usd", Msg: "must be non-negative"}
+	}
+	if p.Remote.OnAccept != "" {
+		if err := ValidateOnAccept(p.Remote.OnAccept); err != nil {
+			return &Error{File: path, Key: "remote.on_accept", Msg: err.Error()}
+		}
 	}
 	return nil
 }

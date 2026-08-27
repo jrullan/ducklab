@@ -217,3 +217,38 @@ func TestBuildOnlyFlipsTheFrontDoor(t *testing.T) {
 		t.Errorf("default order lost the TDD front door: %v", got)
 	}
 }
+
+// An accepted run whose on_accept publication failed keeps the acceptance but
+// offers the push door as the retry — the commit is durable locally, it just
+// never reached the remote. A successful publication stays a plain ending
+// (B-266).
+func TestAFailedPublicationOffersThePushDoor(t *testing.T) {
+	failedReceipt := runlog.Run{
+		Status: "done", Accepted: true, CommitSHA: "abc",
+		RemoteReceipts: []map[string]interface{}{
+			{"action": "push", "branch": "main", "status": "failed", "error": "dial tcp: connection refused"},
+		},
+	}
+	if got := runNext(&failedReceipt); !slices.Equal(got, []string{"push"}) {
+		t.Errorf("failed publication next = %v, want [push]", got)
+	}
+	// A warning alone (e.g. a persisted failure before receipts existed) is the
+	// same state and the same door.
+	warnOnly := runlog.Run{
+		Status: "done", Accepted: true, CommitSHA: "abc",
+		Warning: "committed as abc; push failed: remote unavailable",
+	}
+	if got := runNext(&warnOnly); !slices.Equal(got, []string{"push"}) {
+		t.Errorf("warning-only failure next = %v, want [push]", got)
+	}
+	// A successful publication is a clean ending: no push door.
+	ok := runlog.Run{
+		Status: "done", Accepted: true, CommitSHA: "abc",
+		RemoteReceipts: []map[string]interface{}{
+			{"action": "push", "branch": "main", "status": "pushed"},
+		},
+	}
+	if got := runNext(&ok); got != nil {
+		t.Errorf("successful publication next = %v, want nil", got)
+	}
+}

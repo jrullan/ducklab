@@ -510,6 +510,18 @@ func (g *Git) DefaultBranchHead() (string, error) {
 	return g.revParse(ref)
 }
 
+// DefaultBranchName returns the local default branch name that acceptance will
+// advance (origin/HEAD when known, else main/master, else the current branch).
+// Publication must push this same line of record, never an unrelated feature or
+// worktree checkout the person may be parked on (B-266).
+func (g *Git) DefaultBranchName() (string, error) {
+	ref, err := g.defaultBranchRef()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(ref, "refs/heads/"), nil
+}
+
 // OnDefaultBranch reports whether this checkout is currently on the branch
 // that acceptance will advance. It must be checked before that ref moves.
 func (g *Git) OnDefaultBranch() (bool, error) {
@@ -750,6 +762,13 @@ func (g *Git) Fetch(remote string) error {
 // delegated to git's credential helper; no credential enters Ducklab.
 func (g *Git) Push(remote, branch string) error {
 	_, err := g.run("push", shellEscape(remote), shellEscape(branch))
+	return err
+}
+
+// PushTag sends an annotated tag ref to a configured remote, so a certified
+// release's public tag exists anywhere the branch does (B-266).
+func (g *Git) PushTag(remote, tag string) error {
+	_, err := g.run("push", shellEscape(remote), shellEscape("refs/tags/"+tag))
 	return err
 }
 

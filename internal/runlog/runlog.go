@@ -172,6 +172,12 @@ type Run struct {
 	StageRequest map[string]interface{} `json:"stage_request,omitempty"`
 	// InterruptedTurn is the last turn stopped by a pausing interruption.
 	InterruptedTurn *InterruptedTurn `json:"interrupted_turn,omitempty"`
+	// RemoteReceipts are the publication receipts recorded for this accepted
+	// run under an on_accept push policy. They mirror the durable
+	// remote-actions.jsonl lines, so a client can show whether the accepted
+	// commit is live on the remote (and, if not, the push door as the retry)
+	// without re-reading the audit file (B-266).
+	RemoteReceipts []map[string]interface{} `json:"remote_receipts,omitempty"`
 }
 
 // InterruptedTurn is a durable checkpoint for resuming the same role.

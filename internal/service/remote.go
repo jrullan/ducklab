@@ -99,6 +99,141 @@ func (s *Service) writeRemoteReceipt(p *projectState, result RemoteResult) {
 	}
 }
 
+// publishAccept publishes an accepted commit under the project's on_accept
+// policy (B-266). It runs AFTER the landing and checkout sync have made the
+// commit durable, and NEVER contaminates the acceptance: on failure the accept
+// stands and the run carries a worded warning naming the commit and the push
+// failure, with the existing push door as the retry. The durable audit line is
+// written by the Push service itself; the run additionally carries its receipt
+// so a client can show live-or-live-soon without re-reading the audit file.
+func (s *Service) publishAccept(ctx context.Context, rs *runState) {
+	if s.onAcceptPolicy(rs) != "push" {
+		return
+	}
+	p, err := s.remoteProject(rs.run.ProjectID)
+	if err != nil {
+		s.recordPublishFailure(rs, "", err)
+		s.persistPublishResult(rs)
+		return
+	}
+	// Push the configured default branch explicitly, never the current checkout
+	// branch: an accept lands on the default branch, so that is what publication
+	// must publish — otherwise a checkout parked on ducklab/<task> would push the
+	// feature branch instead of the line of record (B-266).
+	branch := s.baseBranchForPush(p)
+	out, pushErr := s.Push(ctx, rs.run.ProjectID, RemoteRequest{Actor: rs.run.Resolution, Branch: branch})
+	if pushErr != nil {
+		s.recordPublishFailure(rs, branch, pushErr)
+		s.persistPublishResult(rs)
+		return
+	}
+	if out != nil {
+		s.recordPublishReceipt(rs, *out)
+	}
+	s.persistPublishResult(rs)
+}
+
+// recordPublishReceipt stores a successful publication receipt onto the run so
+// clients can show the accepted commit is live on the remote.
+func (s *Service) recordPublishReceipt(rs *runState, out RemoteResult) {
+	raw, _ := json.Marshal(out)
+	var m map[string]interface{}
+	if json.Unmarshal(raw, &m) == nil {
+		rs.run.RemoteReceipts = append(rs.run.RemoteReceipts, m)
+	}
+}
+
+// recordPublishFailure keeps the acceptance and records the exact state with
+// the push door as the retry: the accepted commit is durable, it just did not
+// reach the remote, and the person may push it by hand.
+func (s *Service) recordPublishFailure(rs *runState, branch string, err error) {
+	rs.run.Warning = fmt.Sprintf("committed as %s; push failed: %v", rs.run.CommitSHA, err)
+	receipt := map[string]interface{}{
+		"action": "push", "branch": branch, "status": "failed", "error": err.Error(),
+	}
+	rs.run.RemoteReceipts = append(rs.run.RemoteReceipts, receipt)
+}
+
+// persistPublishResult makes a publication's receipt or failure warning durable
+// on the run, so it survives an engine restart. It never reverses the accept: a
+// persistence error is reported on the run stream but must not fail acceptance
+// (B-266).
+func (s *Service) persistPublishResult(rs *runState) {
+	if rs.writer == nil {
+		if _, err := s.ensureWriter(rs); err != nil {
+			rs.run.Warning = fmt.Sprintf("committed as %s; push result could not be recorded", rs.run.CommitSHA)
+			return
+		}
+	}
+	if err := rs.writer.WriteState(); err != nil {
+		rs.writer.AppendEvent("warning", map[string]interface{}{
+			"detail": fmt.Sprintf("publication result could not be persisted: %v", err),
+		})
+	}
+}
+
+// onAcceptPolicy resolves the publication policy across scopes: the project's
+// own on_accept wins, then the global default, then nothing (B-266).
+func (s *Service) onAcceptPolicy(rs *runState) string {
+	s.cfgMu.RLock()
+	g := s.cfg.Remote.OnAccept
+	s.cfgMu.RUnlock()
+	if p, err := s.remoteProject(rs.run.ProjectID); err == nil {
+		return config.OnAcceptPolicy(g, p.cfg.Remote.OnAccept)
+	}
+	return config.OnAcceptPolicy(g, "")
+}
+
+// publishReleaseTag pushes a certified release tag under the same on_accept
+// policy a push-configured accept uses (B-266). Called after the tag is cut; a
+// completed release's tag push is best-effort and never fails the cut, BUT a
+// failure is recorded in the durable audit line and surfaced as a worded error
+// so the operator can see the tag did not reach the remote.
+func (s *Service) publishReleaseTag(ctx context.Context, projectID, projectPath, actor, tag string) error {
+	p, err := s.remoteProject(projectID)
+	if err != nil {
+		return nil // no readable policy — a release's tag push is best-effort
+	}
+	if s.onAcceptPolicyFrom(p) != "push" {
+		return nil
+	}
+	remote := strings.TrimSpace(p.cfg.Remote.Name)
+	if remote == "" {
+		// No remote to push — nothing to record, the local tag stands.
+		return nil
+	}
+	receipt := RemoteResult{Action: "push", Actor: actor, Branch: tag, Status: "pushed"}
+	if err := p.git.PushTag(remote, tag); err != nil {
+		receipt.Status = "failed"
+		s.writeRemoteReceipt(p, receipt)
+		return fmt.Errorf("release %s cut; tag push failed: %w", tag, err)
+	}
+	s.writeRemoteReceipt(p, receipt)
+	return nil
+}
+
+// onAcceptPolicyFrom resolves the policy for an already-loaded project state.
+func (s *Service) onAcceptPolicyFrom(p *projectState) string {
+	s.cfgMu.RLock()
+	g := s.cfg.Remote.OnAccept
+	s.cfgMu.RUnlock()
+	return config.OnAcceptPolicy(g, p.cfg.Remote.OnAccept)
+}
+
+// baseBranchForPush resolves the branch publication should push — the exact
+// line of record acceptance itself advances (origin/HEAD, else main/master,
+// else the current branch), never the configured Git.BaseBranch (which
+// acceptance ignores) and never an unrelated feature or worktree checkout the
+// person may be parked on. Resolving through the same default-branch mechanism
+// acceptance uses is what guarantees a configured BaseBranch differing from
+// origin/HEAD cannot publish a different line (B-266).
+func (s *Service) baseBranchForPush(p *projectState) string {
+	if def, err := p.git.DefaultBranchName(); err == nil && strings.TrimSpace(def) != "" {
+		return def
+	}
+	return "main"
+}
+
 func (s *Service) Pull(ctx context.Context, projectID string, req RemoteRequest) (*RemoteResult, error) {
 	if err := remoteAllowed(req); err != nil {
 		return nil, err

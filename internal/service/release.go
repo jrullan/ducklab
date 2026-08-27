@@ -539,10 +539,19 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		return nil, fmt.Errorf("release cut: %w", err)
 	}
 
+	// The tag is pushed under the same on_accept policy a push-configured accept
+	// uses (B-266). The cut itself already succeeded and the tag is durable; a
+	// failed publication is recorded audibly and reported without reversing the
+	// release, and the local tag stands; the worded warning rides alongside the
+	// normal result so the operator sees the tag did not reach the remote.
 	rel, _ := filepath.Rel(entry.Path, final)
-	return map[string]interface{}{
+	outer := map[string]interface{}{
 		"version": v.String(), "tag": v.String(), "commit": sha, "notes": rel,
-	}, nil
+	}
+	if err := s.publishReleaseTag(ctx, projectID, entry.Path, "release", v.String()); err != nil {
+		outer["warning"] = err.Error()
+	}
+	return outer, nil
 }
 
 // syncVersionedManifests rewrites every project-owned manifest that records

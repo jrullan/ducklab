@@ -2454,13 +2454,23 @@ func tailOf(s string, n int) string {
 
 // acceptRun accepts a run and commits.
 func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, message, actor string) (err error) {
-	// The autopilot follows every settled decision — an automatic accept and
-	// a human unblocking a paused run refuel the loop the same way.
+	// Every settled acceptance — the human RunAccept path, an automatic accept,
+	// and an auto-triage — goes through here, so publication under the on_accept
+	// policy lives in the common success path, not in any single API wrapper.
+	// It runs once, only when a commit actually landed (a triage or artifact
+	// promote accepts without a diff, so there is nothing to publish) and after
+	// the landing and checkout sync made the commit durable. It never reverses
+	// the accept: on push failure the run keeps a worded warning naming the
+	// commit and the reason, with the existing push door as the retry (B-266).
 	defer func() {
 		if err == nil {
 			s.autopilotOnAccept(rs.run)
+			if rs.run.Accepted && rs.run.CommitSHA != "" {
+				s.publishAccept(ctx, rs)
+			}
 		}
 	}()
+
 	if actor == "" {
 		if rs.run.Autonomy == "yolo" {
 			actor = "auto:yolo"
