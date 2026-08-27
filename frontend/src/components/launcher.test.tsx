@@ -114,6 +114,43 @@ describe("the TDD chain build mode", () => {
   });
 });
 
+describe("notes on shared launch controls", () => {
+  it("forwards a note entered in the plain launcher", () => {
+    const onLaunch = vi.fn();
+    render(<RunLauncher ducklings={fleet} onLaunch={onLaunch} />);
+
+    fireEvent.click(screen.getByTestId("run-note-toggle"));
+    fireEvent.change(screen.getByTestId("run-note"), { target: { value: "  the tree changed after the last run  " } });
+    fireEvent.click(screen.getByTestId("run-start"));
+
+    expect(onLaunch).toHaveBeenCalledWith(expect.objectContaining({ note: "the tree changed after the last run" }));
+  });
+
+  it("forwards the TDD note into the chained build request", () => {
+    const onTdd = vi.fn();
+    render(
+      <TddLaunch
+        ducklings={fleet}
+        preferred={{}}
+        phaseDefaults={{ test: "solo", build: "pair" }}
+        busy={false}
+        onTdd={onTdd}
+        onTestOnly={() => {}}
+        onBuildOnly={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("note"), { target: { value: "the tree changed after the no-change answer" } });
+    fireEvent.click(screen.getByTestId("tdd-start"));
+
+    expect(onTdd).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ note: "the tree changed after the no-change answer" }),
+    );
+  });
+
+});
+
 describe("the launch modal", () => {
   it("opens from the launch trigger and preselects the requested mode", () => {
     render(<RunLauncher ducklings={fleet} initialMode="pair" initiallyOpen={false} onLaunch={() => {}} />);

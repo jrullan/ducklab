@@ -54,6 +54,25 @@ describe("Board", () => {
     expect(screen.getByTestId("blocked-reason").textContent).toBe("waiting on T-003");
   });
 
+  it("names a no-change block and opens the retry-with-note explanation from its card", async () => {
+    const noChange = {
+      id: "T-005", title: "Retry after tree answer", milestone: "M-02", status: "blocked",
+      blocked: "previous run made no changes",
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/tasks")) return json({ items: [noChange], total: 1 });
+      if (p.includes("/bugs")) return json({ items: [], total: 0 });
+      return json({}, 404);
+    });
+    render(<Board client={client} projectId="p" />);
+
+    const card = await screen.findByTestId("board-card");
+    expect(card.textContent).toContain("previous run made no changes");
+    fireEvent.click(screen.getByRole("button", { name: /retry with note/i }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toMatch(/tell the next run what changed since the tree answered no/i);
+  });
+
   it("filters by milestone without losing the total", async () => {
     render(<Board client={okClient()} projectId="p" />);
     await waitFor(() => expect(screen.getAllByTestId("board-card")).toHaveLength(TASKS.length));

@@ -80,6 +80,22 @@ describe("relaunching from the run view", () => {
     expect((await screen.findByTestId("relaunch-link")).getAttribute("href")).toBe("#/runs/r-2");
   });
 
+  it("forwards the entered note when relaunching", async () => {
+    const client = clientWith();
+    render(<RunView runId="r-1" client={client} />);
+    await screen.findByTestId("run-start");
+    fireEvent.click(screen.getByTestId("run-note-toggle"));
+    fireEvent.change(screen.getByTestId("run-note"), { target: { value: "the tree changed after the no-change answer" } });
+    fireEvent.click(screen.getByTestId("run-start"));
+
+    await waitFor(() =>
+      expect(client.runStart).toHaveBeenCalledWith("p", "T-015", expect.objectContaining({
+        note: "the tree changed after the no-change answer",
+        redo: true,
+      })),
+    );
+  });
+
   it("says so when the engine refuses", async () => {
     const client = clientWith({
       runStart: vi.fn(() => Promise.reject(new Error("no duckling for role implementer"))),
