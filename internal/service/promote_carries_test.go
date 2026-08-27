@@ -110,7 +110,7 @@ func TestPromotingAStoredSplitCreatesLanesAndWaitsForEveryPortion(t *testing.T) 
 		t.Fatal(err)
 	}
 	if len(before) != 2 {
-		t.Fatalf("triage auto-applied its proposal: got %d tasks, want 2", len(before))
+		t.Fatalf("expected exactly the 2 pre-existing tasks before promotion, got %d", len(before))
 	}
 
 	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
