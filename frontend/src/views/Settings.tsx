@@ -184,83 +184,86 @@ export function Settings({
           <Projects client={client} selected={projectId ?? ""} onSelect={onProjectSelect ?? (() => {})} onChanged={onProjectsChanged ?? (() => {})} />
         </div>
       )}
-      {!room && <div data-testid={`settings-section-${activeSection}`}>
-      {activeSection === "ducklings" && client && (
-        <>
-          <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
-          <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
-        </>
-      )}
-      {!room && client && <ConfigSection client={client} section={activeSection} projectId={projectId} />}
-      {!room && activeSection === "fleet" && client && (
-        <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
-      )}
-      {!room && activeSection === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
+      {!room && (
+        <div data-testid={`settings-section-${activeSection}`}>
+          {activeSection === "ducklings" && client && (
+            <>
+              <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
+              <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
+            </>
+          )}
+          {!room && client && <ConfigSection client={client} section={activeSection} projectId={projectId} />}
+          {!room && activeSection === "fleet" && client && (
+            <Ducklings client={client} projectId={projectId ?? ""} only="providers" />
+          )}
+          {!room && activeSection === "remote" && client && projectId && <RemoteGitSection client={client} projectId={projectId} />}
 
-      <div className={activeSection === "appearance" ? "" : "hidden"}>
-      <SettingsCard
-        title="appearance & alerts"
-        desc="how ducklab looks, and when it speaks up"
-      >
-        <div className="flex gap-2">
-          {(["light", "dark", "system"] as Theme[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => change(t)}
-              data-testid={`theme-${t}`}
-              aria-pressed={theme === t}
-              className={`rounded border border-hairline px-2 py-1 text-sm ${theme === t ? "text-ink" : "text-ink-muted"}`}
+          <div className={activeSection === "appearance" ? "" : "hidden"}>
+            <SettingsCard
+              title="appearance & alerts"
+              desc="how ducklab looks, and when it speaks up"
             >
-              {t}
-            </button>
-          ))}
-        </div>
-        <QuackToggle />
-        <ChipFactsPicker />
-      </SettingsCard>
-      </div>
-
-      <div className={activeSection === "engine" ? "" : "hidden"}>
-      <SettingsCard
-        title="engine"
-        desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
-      >
-        <div className="flex items-center gap-3">
-          <StatusChip
-            role={connection === "open" ? "good" : connection === "reconnecting" ? "warning" : "critical"}
-            label={connection}
-          />
-          <span className="text-ink-secondary">version {engineVersion || "unknown"}</span>
-        </div>
-        {onEngine && (
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              data-testid="settings-restart-engine"
-              disabled={engineBusy}
-              onClick={() => onEngine("restart")}
-              title="stop the engine and start the installed binary (refused while runs are going, or if this app's environment lacks the provider keys)"
-              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
-            >
-              {engineBusy ? "Working…" : "Restart engine"}
-            </button>
-            <button
-              type="button"
-              data-testid="settings-reconnect-engine"
-              disabled={engineBusy}
-              onClick={() => onEngine("reconnect")}
-              title="adopt the engine already running — for a window whose session an external restart left behind"
-              className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
-            >
-              Reconnect
-            </button>
-            {engineError && <ErrorCard error={engineError} testId="settings-engine-error" />}
+              <div className="flex gap-2">
+                {(["light", "dark", "system"] as Theme[]).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => change(t)}
+                    data-testid={`theme-${t}`}
+                    aria-pressed={theme === t}
+                    className={`rounded border border-hairline px-2 py-1 text-sm ${theme === t ? "text-ink" : "text-ink-muted"}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <QuackToggle />
+              <ChipFactsPicker />
+            </SettingsCard>
           </div>
-        )}
-      </SettingsCard>
-      </div>
-      </div>}
+
+          <div className={activeSection === "engine" ? "" : "hidden"}>
+            <SettingsCard
+              title="engine"
+              desc="the process that runs everything — API keys are read from environment variables and are never stored or displayed here"
+            >
+              <div className="flex items-center gap-3">
+                <StatusChip
+                  role={connection === "open" ? "good" : connection === "reconnecting" ? "warning" : "critical"}
+                  label={connection}
+                />
+                <span className="text-ink-secondary">version {engineVersion || "unknown"}</span>
+              </div>
+              {onEngine && (
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="settings-restart-engine"
+                    disabled={engineBusy}
+                    onClick={() => onEngine("restart")}
+                    title="stop the engine and start the installed binary (refused while runs are going, or if this app's environment lacks the provider keys)"
+                    className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
+                  >
+                    {engineBusy ? "Working…" : "Restart engine"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-reconnect-engine"
+                    disabled={engineBusy}
+                    onClick={() => onEngine("reconnect")}
+                    title="adopt the engine already running — for a window whose session an external restart left behind"
+                    className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-50"
+                  >
+                    Reconnect
+                  </button>
+                  {engineError && <ErrorCard error={engineError} testId="settings-engine-error" />}
+                </div>
+              )}
+            </SettingsCard>
+          </div>
+        </div>
+      )}
+
       </div>
     </div>
   );
