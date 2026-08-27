@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -509,9 +510,21 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		return nil, err
 	}
 
+	// A release tag fixes the publicly declared version, so every
+	// project-owned manifest that records a version must move with it —
+	// otherwise build output, logs and render-contracts contradict the tag
+	// (B-230). Sync the files before staging so the commit contains them
+	// and the tag points at a tree that agrees with itself.
+	synced, err := syncVersionedManifests(entry.Path, v)
+	if err != nil {
+		return nil, err
+	}
+
 	// The document is committed before the tag, so the tag points at a commit
-	// that contains the notes describing it.
-	if err := git.Add(final); err != nil {
+	// that contains the notes describing it — and, from the sync above, the
+	// matching manifest versions.
+	adds := append(synced, final)
+	if err := git.Add(adds...); err != nil {
 		return nil, fmt.Errorf("release cut: %w", err)
 	}
 	sha := ""
@@ -530,6 +543,122 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 	return map[string]interface{}{
 		"version": v.String(), "tag": v.String(), "commit": sha, "notes": rel,
 	}, nil
+}
+
+// syncVersionedManifests rewrites every project-owned manifest that records
+// the project's own version to the given release version, leaving dependency
+// constraints untouched.
+//
+// Enumerated rather than scanned: a version-bearing file is a decision a
+// project makes about what the software claims to be, and discovering them by
+// pattern (say, every package.json) would sweep in a vendored or example
+// manifest whose version is not ducklab's. When a project grows another
+// manifest, this list is where it is declared.
+//
+// The paths are relative to the project root; a missing entry is a no-op (not
+// every project ships a frontend). The rewrite keeps the file valid JSON with
+// the same fields in the same order, so the diff stays human-sized.
+func syncVersionedManifests(projectRoot string, v release.Version) ([]string, error) {
+	synced := []string{}
+	for _, rel := range []string{"frontend/package.json", "frontend/package-lock.json"} {
+		path := filepath.Join(projectRoot, rel)
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("release cut: stat %s: %w", rel, err)
+		}
+		changed, err := rewriteManifestVersion(path, v.String()[1:])
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			synced = append(synced, rel)
+		}
+	}
+	return synced, nil
+}
+
+// rewriteManifestVersion sets the manifest's own "version" field to want,
+// leaving every other byte — in particular the dependency constraints, and in
+// a package-lock both the top-level version and the root package entry's
+// version — as they were.
+//
+// Line-surgical rather than a JSON round-trip: re-marshalling a map would
+// reorder keys (json.Marshal sorts map keys), turning a one-line version bump
+// of a commit-sized lockfile into a file-wide diff of dependency entries that
+// did not change.
+func rewriteManifestVersion(path, want string) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("release cut: read %s: %w", path, err)
+	}
+	// Validate before editing so a malformed manifest is refused rather than
+	// rewritten by guesswork.
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false, fmt.Errorf("release cut: parse %s: %w", path, err)
+	}
+
+	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	depth := 0 // which object the current line's start is inside
+	inPackages := false
+	pkgKey := "" // the entry of "packages" whose field we are inside
+	changed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// A key that opens an entry of the flat "packages" map; the root
+		// project's entry is the one whose key is "".
+		if inPackages && depth == 2 && strings.HasSuffix(trimmed, "{") {
+			if k, ok := manifestKey(trimmed); ok {
+				pkgKey = k
+			}
+		}
+		if strings.HasPrefix(trimmed, `"version":`) {
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, `"version":`))
+			close := strings.LastIndex(rest, `"`)
+			if close >= 1 {
+				old := rest[1:close]
+				suffix := rest[close+1:] // the comma (and anything after it)
+				topLevel := depth == 1 && !inPackages
+				rootEntry := inPackages && depth == 3 && pkgKey == ""
+				if (topLevel || rootEntry) && old != want {
+					indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+					lines[i] = indent + `"version": "` + want + `"` + suffix
+					changed = true
+				}
+			}
+		}
+		if trimmed == `"packages": {` {
+			inPackages = true
+		}
+		depth += strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+		if inPackages && depth <= 1 {
+			inPackages = false
+		}
+	}
+
+	if !changed {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		return false, fmt.Errorf("release cut: write %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// manifestKey reads the key of a line like `"node_modules/foo": {` or the
+// lockfile's root package entry `"": {`.
+func manifestKey(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, `"`) {
+		return "", false
+	}
+	end := strings.Index(trimmed, `":`)
+	if end < 1 {
+		return "", false
+	}
+	return trimmed[1:end], true
 }
 
 // ReleaseSummary is one release, cut or drafted.
