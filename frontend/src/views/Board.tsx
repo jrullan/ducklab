@@ -16,7 +16,7 @@ import { ErrorCard } from "../components/ErrorCard";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { WaitingCard } from "../components/WaitingCard";
-import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
+import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import type { MeasuredSpend } from "../components/SeatChips";
 import { TddLaunch } from "../components/TddLaunch";
 import { ChatAbout } from "../components/ChatAbout";
@@ -927,10 +927,22 @@ function TaskRunner({
   const [chosen, setChosen] = useState<string[]>([]);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [runMode, setRunMode] = useState("solo");
+  const [testRoster, setTestRoster] = useState<RosterEntry[]>([]);
+  const [testMode, setTestMode] = useState(phaseDefaults.test);
+  const [buildRoster, setBuildRoster] = useState<RosterEntry[]>([]);
+  const [buildMode, setBuildMode] = useState(phaseDefaults.build);
   useEffect(() => {
     const getRoster = client.RosterGet ?? client.rosterGet ?? (() => Promise.resolve({ entries: [] as RosterEntry[] }));
     void getRoster.call(client, projectId, runMode).then((r) => setRoster(r.entries ?? [])).catch(() => setRoster([]));
   }, [client, projectId, runMode]);
+  useEffect(() => {
+    const getRoster = client.RosterGet ?? client.rosterGet ?? (() => Promise.resolve({ entries: [] as RosterEntry[] }));
+    void getRoster.call(client, projectId, testMode).then((r) => setTestRoster(r.entries ?? [])).catch(() => setTestRoster([]));
+  }, [client, projectId, testMode]);
+  useEffect(() => {
+    const getRoster = client.RosterGet ?? client.rosterGet ?? (() => Promise.resolve({ entries: [] as RosterEntry[] }));
+    void getRoster.call(client, projectId, buildMode).then((r) => setBuildRoster(r.entries ?? [])).catch(() => setBuildRoster([]));
+  }, [client, projectId, buildMode]);
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState<string | null>(null);
   // The revert commit of a successful retire — the click's answer. The rail
@@ -1010,10 +1022,11 @@ function TaskRunner({
             ? await client.testStart(projectId, task.id, "", {
                 thenBuild: true,
                 testMode: tdd!.test.mode,
-                testDucklings: tdd!.test.ducklings,
-                testSeats: roleSeats(tdd!.test.mode, tdd!.test.ducklings),
+                testDucklings: [],
+                testSeats: pickedSeats(tdd!.test.mode, tdd!.test),
                 mode: tdd!.build.mode,
-                ducklings: tdd!.build.ducklings,
+                ducklings: [],
+                seats: pickedSeats(tdd!.build.mode || phaseDefaults.build, tdd!.build),
                 maxTokens: tdd!.build.maxTokens,
                 agentTurns: tdd!.build.agentTurns,
               })
@@ -1024,8 +1037,8 @@ function TaskRunner({
                   ? client.testStart(projectId, task.id, "", {
                       thenBuild: false,
                       testMode: tdd.test.mode,
-                      testDucklings: tdd.test.ducklings,
-
+                      testDucklings: [],
+                      testSeats: pickedSeats(tdd.test.mode, tdd.test),
                     })
                   : client.testStart(projectId, task.id, chosen[0] ?? ""))
               : await client.reviewStart(projectId, task.id);
@@ -1120,11 +1133,13 @@ function TaskRunner({
               phaseDefaults={phaseDefaults}
               estimates={estimates}
               busy={busy}
-              roster={roster}
+              testRoster={testRoster}
+              buildRoster={buildRoster}
+              onPhaseModeChange={(phase, mode) => (phase === "test" ? setTestMode(mode) : setBuildMode(mode || phaseDefaults.build))}
               onTdd={(t, b) => void go("tdd", undefined, { test: t, build: b })}
               onTestOnly={(t) => void go("test", undefined, { test: t, build: t })}
               onBuildOnly={(b) =>
-                void go("run", { mode: b.mode, ducklings: b.ducklings, maxTokens: b.maxTokens, agentTurns: b.agentTurns })
+                void go("run", { mode: b.mode, ducklings: [], seats: pickedSeats(b.mode || phaseDefaults.build, b), maxTokens: b.maxTokens, agentTurns: b.agentTurns })
               }
             />
           );

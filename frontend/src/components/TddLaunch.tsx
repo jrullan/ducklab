@@ -23,6 +23,9 @@ export function TddLaunch({
   onBuildOnly,
   measured,
   roster,
+  testRoster,
+  buildRoster,
+  onPhaseModeChange,
 }: {
   ducklings: readonly Duckling[];
   preferred: Record<string, string[]>;
@@ -33,7 +36,11 @@ export function TddLaunch({
   onTestOnly: (test: PhaseConfig) => void;
   onBuildOnly: (build: PhaseConfig) => void;
   measured?: MeasuredSpend;
+  /** Backward-compatible common roster for hosts that do not resolve per phase. */
   roster?: readonly RosterEntry[];
+  testRoster?: readonly RosterEntry[];
+  buildRoster?: readonly RosterEntry[];
+  onPhaseModeChange?: (phase: "test" | "build", mode: string) => void;
 }) {
   // Opening seats are empty: omitted ducklings leave the resolved roster in charge.
   const [testCfg, setTestCfg] = useState<PhaseConfig>(() => ({ mode: phaseDefaults.test, ducklings: [] }));
@@ -45,14 +52,16 @@ export function TddLaunch({
     set(next);
   };
   const [tuning, setTuning] = useState(false);
+  const resolvedTestRoster = Array.isArray(testRoster) ? testRoster : Array.isArray(roster) ? roster : undefined;
+  const resolvedBuildRoster = Array.isArray(buildRoster) ? buildRoster : Array.isArray(roster) ? roster : undefined;
   // One line saying what a click does: modes and who is seated (the picked
   // duckling, else the roster's), and the build's measured cost when known.
-  const seatFor = (cfg: PhaseConfig, role: string, index: number) =>
-    cfg.ducklings[index] || (Array.isArray(roster) ? roster.find((r) => r.role === role)?.duckling : undefined) || "roster";
+  const seatFor = (cfg: PhaseConfig, role: string, index: number, roster?: readonly RosterEntry[]) =>
+    cfg.ducklings[index] || roster?.find((r) => r.role === role)?.duckling || "roster";
   const buildDisplayMode = buildCfg.mode || phaseDefaults.build;
   const est = estimates?.[buildDisplayMode];
   const avg = est && est.runs > 0 ? est.usd / est.runs : undefined;
-  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
+  const summary = `test: ${testCfg.mode} · ${seatFor(testCfg, "implementer", 0, resolvedTestRoster)} → build: ${buildDisplayMode} · ${seatFor(buildCfg, "implementer", 0, resolvedBuildRoster)}${buildDisplayMode === "pair" ? ` + ${seatFor(buildCfg, "reviewer", 2, resolvedBuildRoster)}` : ""}${avg !== undefined ? ` · ~$${avg.toFixed(2)}` : ""}`;
   return (
     <div className="space-y-2 rounded border border-hairline p-2" data-testid="tdd-block">
       {/* The common case is one click; the button leads. Seats and caps are
@@ -78,9 +87,12 @@ export function TddLaunch({
               measured={measured}
               ducklings={ducklings}
               value={testCfg}
-              onChange={(next) => reseat(setTestCfg)(next, testCfg.mode)}
+              onChange={(next) => {
+                reseat(setTestCfg)(next, testCfg.mode);
+                if (next.mode !== testCfg.mode) onPhaseModeChange?.("test", next.mode);
+              }}
               modes={["solo", "pair"]}
-              roster={roster}
+              roster={resolvedTestRoster}
               defaultProvenance="roster"
             />
           </div>
@@ -90,10 +102,13 @@ export function TddLaunch({
               measured={measured}
               ducklings={ducklings}
               value={buildCfg}
-              onChange={(next) => reseat(setBuildCfg)(next, buildCfg.mode)}
+              onChange={(next) => {
+                reseat(setBuildCfg)(next, buildCfg.mode);
+                if (next.mode !== buildCfg.mode) onPhaseModeChange?.("build", next.mode);
+              }}
               estimates={estimates}
               showTokens
-              roster={roster}
+              roster={resolvedBuildRoster}
               defaultMode={phaseDefaults.build}
               defaultProvenance="roster"
             />

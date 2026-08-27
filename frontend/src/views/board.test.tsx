@@ -1029,10 +1029,11 @@ describe("the rail follows the contract's order", () => {
       expect(client.testStart).toHaveBeenCalledWith("p", "T-001", "", {
         thenBuild: true,
         testMode: "solo",
-        testDucklings: ["pato-local"],
+        testDucklings: [],
         testSeats: { implementer: "pato-local" },
         mode: "pair",
-        ducklings: ["pato-sonnet", "pato-local"],
+        ducklings: [],
+        seats: { implementer: "pato-sonnet", advisor: "pato-local" },
         maxTokens: undefined,
         agentTurns: undefined,
       }),

@@ -42,6 +42,13 @@ export function roleSeats(mode: string, ducklings: readonly string[]): Record<st
   return Object.fromEntries(ducklings.map((id, i) => [seatLabel(mode, i), id]));
 }
 
+/** Only a person’s current pick is a request override; roster resolutions stay display-only. */
+export function pickedSeats(mode: string, value: PhaseConfig): Record<string, string> {
+  return Object.fromEntries(
+    value.ducklings.flatMap((id, i) => value.seatProvenance?.[i] === "picked now" && id ? [[seatLabel(mode, i), id]] : []),
+  );
+}
+
 /** One phase's launch configuration: mode, seats, optional token ceiling. */
 export type PhaseConfig = { mode: string; ducklings: string[]; seatProvenance?: string[]; maxTokens?: number; agentTurns?: number };
 
@@ -77,20 +84,26 @@ export function LaunchConfig({
   defaultProvenance?: string;
 }) {
   const [extraSeats, setExtraSeats] = useState(0);
-  useEffect(() => {
-    if (roster?.length && value.ducklings.length === 0) {
-      onChange({
-        ...value,
-        ducklings: rosterSeats(displayMode, roster),
-        seatProvenance: rosterSeats(displayMode, roster).map((_, i) => {
-          const role = seatLabel(displayMode, i);
-          const entry = roster.find((e) => e.role === role);
-          return entry?.source === "project pin" ? "project" : "global";
-        }),
-      });
-    }
-  }, [roster, value.mode, defaultMode]);
   const displayMode = value.mode || defaultMode || modes[0] || "solo";
+  // Re-seed when this phase's resolution changes, rather than treating any
+  // nonempty seat array as permanent. Per-run picks survive a re-resolution.
+  const seededRoster = useRef<readonly RosterEntry[] | undefined>();
+  const seededMode = useRef("");
+  useEffect(() => {
+    if (!roster?.length || (seededRoster.current === roster && seededMode.current === displayMode)) return;
+    seededRoster.current = roster;
+    seededMode.current = displayMode;
+    const resolved = rosterSeats(displayMode, roster);
+    onChange({
+      ...value,
+      ducklings: resolved.map((id, i) => value.seatProvenance?.[i] === "picked now" ? value.ducklings[i] ?? "" : id),
+      seatProvenance: resolved.map((_, i) => {
+        if (value.seatProvenance?.[i] === "picked now") return "picked now";
+        const source = roster.find((entry) => entry.role === seatLabel(displayMode, i))?.source;
+        return source?.startsWith("project") ? "project" : "global";
+      }),
+    });
+  }, [roster, displayMode]);
   const seats = fixedSeats(displayMode);
   const cols = seats > 0 ? seats : Math.max(2, value.ducklings.length, extraSeats);
   const setSeat = (i: number, id: string) => {
@@ -129,8 +142,15 @@ export function LaunchConfig({
         <SeatChips
           entries={Array.from({ length: cols }, (_, i) => ({
             role: seatLabel(displayMode, i),
-            duckling: value.ducklings[i] ?? "",
-            provenance: value.seatProvenance?.[i] ?? (value.ducklings[i] ? "picked now" : defaultProvenance),
+            duckling: value.seatProvenance?.[i] === "picked now"
+              ? value.ducklings[i] ?? ""
+              : roster?.find((entry) => entry.role === seatLabel(displayMode, i))?.duckling ?? "",
+            provenance: value.seatProvenance?.[i] === "picked now"
+              ? "picked now"
+              : (() => {
+                  const source = roster?.find((entry) => entry.role === seatLabel(displayMode, i))?.source;
+                  return source?.startsWith("project") ? "project" : source ? "global" : defaultProvenance;
+                })(),
           }))}
           fleet={[...ducklings]}
           measured={measured}
