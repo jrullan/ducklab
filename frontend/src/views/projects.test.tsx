@@ -77,6 +77,23 @@ describe("Projects", () => {
     await waitFor(() => expect(client.projectPull).toHaveBeenCalledWith("alpha"));
   });
 
+  it("only surfaces publication state when commits are unpublished, with a push retry", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    (client.projectStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ ahead: 2, behind: 0 });
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+
+    expect(await screen.findByTestId("remote-status-alpha")).toHaveTextContent("main is 2 commits ahead of origin (unpublished)");
+    fireEvent.click(screen.getByTestId("project-push-alpha"));
+    await waitFor(() => expect(client.projectPush).toHaveBeenCalledWith("alpha"));
+  });
+
+  it("stays quiet about publication when local and origin are synchronized", async () => {
+    const client = clientWith([p({ id: "alpha" })]);
+    render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);
+    await screen.findByTestId("project-row-alpha");
+    expect(screen.queryByTestId("remote-status-alpha")).toBeNull();
+  });
+
   it("pushes the project when Push is clicked", async () => {
     const client = clientWith([p({ id: "alpha" })]);
     render(<Projects client={client} selected="" onSelect={noop} onChanged={noop} />);

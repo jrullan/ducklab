@@ -29,6 +29,26 @@ function seedRun(id = "run-1") {
   });
 }
 
+describe("RunView publication consequences", () => {
+  it("names the configured push consequence before accepting and preserves a failed publication for retry", async () => {
+    useRuns.setState({
+      runs: { "run-1": { id: "run-1", project_id: "project-1", stage: "build", mode: "solo", task_id: "task-1", status: "done", verdict: "PASSED", started_at: "2026-01-01T00:00:00Z", next: ["accept"] } },
+      events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open",
+    });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.projectGet = vi.fn().mockResolvedValue({ config: { remote: { name: "origin", on_accept: "push" }, github: { pr_base: "main" } } });
+    client.accept = vi.fn().mockResolvedValue({ commit_sha: "abc123456", warning: "committed as abc123456; push failed: permission denied" });
+    client.projectPush = vi.fn().mockResolvedValue({ status: "pushed", branch: "main" });
+
+    render(<RunView runId="run-1" client={client as never} />);
+    expect(await screen.findByTestId("decision-consequence")).toHaveTextContent("commits the diff and pushes to origin/main");
+    screen.getByTestId("cycle-accept").click();
+    expect(await screen.findByTestId("publication-failure")).toHaveTextContent("committed locally as abc123456; push failed: permission denied");
+    screen.getByTestId("retry-publication").click();
+    expect(client.projectPush).toHaveBeenCalledWith("project-1");
+  });
+});
+
 describe("RunView origin panel", () => {
   it("quotes the requirement and links every document in the breadcrumb", async () => {
     seedRun();
