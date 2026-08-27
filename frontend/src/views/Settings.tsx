@@ -6,7 +6,7 @@ import { Projects } from "./Projects";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
 import { CHIP_FACTS, loadChipFacts, saveChipFacts, type ChipFact } from "../lib/chipfacts";
 import { quack } from "../lib/attention";
-import { moneyOrZero } from "../lib/format";
+import { money2 } from "../lib/format";
 import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
@@ -506,7 +506,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   }, { accepted: 0, rejected: 0, failed: 0 });
   const ceilingActivity = (label: string, count: number) => count > 0 ? (
     <div key={label}>
-      <p>{count} runs hit this ceiling in the last 30 days ({label}).</p>
+      <p>{count} run{count === 1 ? "" : "s"} hit this ceiling in the last 30 days ({label}).</p>
       {count >= 2 && <p className="text-xs text-warning">Suggested adjustment: consider raising the {label} ceiling.</p>}
     </div>
   ) : null;
@@ -727,7 +727,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
             {ceilingActivity("time", hitCounts.wallclock_s)}
           </div>
           <p className="mt-3 font-medium text-ink">where the money went</p>
-          <p data-testid="budget-money">accepted work {moneyOrZero(spend.accepted)} / rejected work {moneyOrZero(spend.rejected)} / failed runs {moneyOrZero(spend.failed)}</p>
+          <p data-testid="budget-money">accepted work {money2(spend.accepted)} / rejected work {money2(spend.rejected)} / failed runs {money2(spend.failed)}</p>
           <p className="mt-1 text-xs text-ink-muted">Figures cover finished runs in the last 30 days.</p>
         </div>
       )}

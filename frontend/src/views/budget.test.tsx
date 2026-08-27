@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Settings } from "./Settings";
 import type { BudgetView, EngineClient } from "../api/client";
+import { money } from "../lib/format";
 
 const clientWith = (over: Partial<EngineClient> = {}) =>
   ({
@@ -129,7 +130,8 @@ describe("the run budget in Settings", () => {
     await waitFor(() => expect(screen.getByTestId("budget-money")).toBeInTheDocument());
     expect(screen.getByTestId("budget-hits").textContent).toContain("3 runs hit this ceiling in the last 30 days (tokens)");
     expect(screen.getByTestId("budget-hits").textContent).toContain("Suggested adjustment: consider raising the tokens ceiling.");
-    expect(screen.getByTestId("budget-money").textContent).toContain("accepted work $1.25 / rejected work $0.7500 / failed runs $0.5000");
+    expect(screen.getByTestId("budget-money").textContent).toContain("accepted work $1.25 / rejected work $0.75 / failed runs $0.50");
+    expect(money(0.75)).toBe("$0.7500");
     expect(screen.getByTestId("budget-activity").textContent).toContain("Figures cover finished runs in the last 30 days.");
   });
 
@@ -157,7 +159,7 @@ describe("the run budget in Settings", () => {
     fireEvent.click(screen.getByTestId("settings-nav-budgets"));
 
     await waitFor(() => expect(screen.getByTestId("budget-hits")).toBeInTheDocument());
-    expect(screen.getByTestId("budget-hits").textContent).toContain("1 runs hit this ceiling in the last 30 days (tokens)");
+    expect(screen.getByTestId("budget-hits").textContent).toContain("1 run hit this ceiling in the last 30 days (tokens)");
     expect(screen.getByTestId("budget-hits").textContent).not.toContain("0 runs hit this ceiling");
     expect(screen.getByTestId("budget-hits").textContent).not.toContain("Suggested adjustment");
   });

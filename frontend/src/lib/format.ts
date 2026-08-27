@@ -7,6 +7,12 @@ export function money(usd: number): string {
   return usd < 1 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+/** 2 decimals for aggregate spend values. */
+export function money2(usd: number): string {
+  if (!Number.isFinite(usd)) return "$0.00";
+  return `$${usd.toFixed(2)}`;
+}
+
 /** Money display for spend values, including an exact zero. */
 export function moneyOrZero(usd: number): string {
   return usd === 0 ? "$0.00" : money(usd);
