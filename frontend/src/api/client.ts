@@ -737,6 +737,8 @@ export class EngineClient {
     return this.request<{
       ok: boolean;
       version: string;
+      /** The engine was built from a source tree with uncommitted changes. */
+      dirty?: boolean;
       /** The run queue's live counters — what explains a run sitting queued. */
       queue?: { running: number; waiting: number; limit: number };
     }>("GET", "/v1/health");

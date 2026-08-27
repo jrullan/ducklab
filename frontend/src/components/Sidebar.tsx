@@ -27,6 +27,7 @@ export function Sidebar({
   client,
   waitingCount,
   connection,
+  update,
 }: {
   route: Route;
   zones: SidebarZone[];
@@ -39,6 +40,7 @@ export function Sidebar({
   client: EngineClient | null;
   waitingCount: number;
   connection: "open" | "connecting" | "reconnecting" | "closed";
+  update?: { version: string; dirty: boolean };
 }) {
   const baseBranch = project?.base_branch ?? (typeof project?.config?.base_branch === "string" ? project.config.base_branch : "main");
   const [ducklings, setDucklings] = useState<Duckling[]>([]);
@@ -97,6 +99,19 @@ export function Sidebar({
             label="Ask how & why — chat about the project"
           />
         )}
+        {update?.dirty ? (
+          <span data-testid="engine-source-dirty">engine built from uncommitted sources</span>
+        ) : update?.version ? (
+          <button
+            type="button"
+            data-testid="restart-available-update"
+            className="text-left text-ink-muted underline"
+            onClick={() => void client?.restart("desktop-sidebar-update")}
+            aria-label={`update ready — ${update.version} · restart when idle; restarts after the active runs finish — nothing is lost`}
+          >
+            update ready — {update.version} · restart when idle — restarts after the active runs finish — nothing is lost
+          </button>
+        ) : null}
         <StatusChip role={connection === "open" ? "good" : connection === "closed" ? "critical" : "warning"} label={connection === "open" ? "engine" : `engine · stream ${connection}`} />
         {waitingCount > 0 && <StatusChip role="serious" label={`${waitingCount} waiting for you`} />}
       </footer>

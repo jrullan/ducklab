@@ -20,8 +20,6 @@ const SRC = path.resolve(__dirname, "..");
 const knownUnwired: Record<string, string> = {
   ducklingProbe:
     "capability probing is engine-initiated today; the card shows declared caps and re-probing has no surface yet",
-  restart:
-    "an attributed restart REQUEST that checkpoints live runs; issued by the supervising Go shell through engineclt, not by this webview — the window cannot restart the engine it stands in, only resume the runs a restart left checkpointed",
   projectInstall:
     "project installation was previously exposed by the retired guide rail; the shell now requires installation outside the two-zone desktop surface",
   rosterSet:

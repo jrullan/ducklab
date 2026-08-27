@@ -27,6 +27,16 @@ const VERSION = "0.4.0";
 
 type EngineConnection = { baseUrl: string; token: string };
 
+type EngineBuild = { version: string; dirty: boolean };
+
+function isNewerVersion(available: string, running: string) {
+  const parse = (version: string) => version.replace(/^v/, "").split(/[.+-]/).slice(0, 3).map(Number);
+  const [aMajor, aMinor, aPatch] = parse(available);
+  const [rMajor, rMinor, rPatch] = parse(running);
+  return [aMajor, aMinor, aPatch].every(Number.isFinite) && [rMajor, rMinor, rPatch].every(Number.isFinite) &&
+    (aMajor! > rMajor! || (aMajor === rMajor && (aMinor! > rMinor! || (aMinor === rMinor && aPatch! > rPatch!))));
+}
+
 function devEngineConnection(): EngineConnection | null {
   if (!import.meta.env.DEV) return null;
   const params = new URLSearchParams(window.location.search);
@@ -40,6 +50,8 @@ declare global {
     ducklab?: {
       baseUrl: string;
       token: string;
+      /** Desktop version installed by the host shell. */
+      version?: string;
       /** Wails binding name for the native folder chooser. Absent outside the
        * desktop. */
       chooseDirectory?: string;
@@ -136,6 +148,7 @@ export function App() {
     () => localStorage.getItem("ducklab.project") ?? "",
   );
   const [engineVersion, setEngineVersion] = useState("");
+  const [engineBuild, setEngineBuild] = useState<EngineBuild | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<EngineClient | null>(null);
   // The engine this page talks to. State, not a constant: a restart hands
@@ -256,7 +269,10 @@ export function App() {
           );
         })
         .catch(() => {});
-      c.health().then((h) => setEngineVersion(h.version)).catch(() => {});
+      c.health().then((h) => {
+        setEngineVersion(h.version);
+        setEngineBuild({ version: h.version, dirty: h.dirty === true });
+      }).catch(() => {});
     };
     refresh();
 
@@ -444,6 +460,12 @@ export function App() {
         client={client}
         waitingCount={waitingCount}
         connection={connection}
+        update={engineBuild ? {
+          dirty: engineBuild.dirty,
+          version: !engineBuild.dirty && window.ducklab?.version && isNewerVersion(window.ducklab.version, engineBuild.version)
+            ? window.ducklab.version
+            : "",
+        } : undefined}
       />
       <div className="flex min-w-0 min-h-0 flex-1 flex-col">
       {/* The plumbing banner. A stale engine used to be a sentence buried in

@@ -65,6 +65,31 @@ describe("desktop sidebar rail", () => {
     expect(screen.getByText("on branch chore/release-0.3.48 — not the base")).toBeInTheDocument();
   });
 
+  it("is silent when the desktop and engine versions are current", () => {
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" update={{ version: "", dirty: false }} />);
+
+    expect(screen.queryByTestId("restart-available-update")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-source-dirty")).not.toBeInTheDocument();
+  });
+
+  it("words an available desktop update and restarts through the checkpointed engine action", () => {
+    const restart = vi.fn().mockResolvedValue({ status: "scheduled" });
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[]} projectId="" onProject={() => {}} client={{ restart } as never} waitingCount={0} connection="open" update={{ version: "0.9.1", dirty: false }} />);
+
+    const update = screen.getByTestId("restart-available-update");
+    expect(update).toHaveTextContent("update ready — 0.9.1 · restart when idle");
+    expect(update).toHaveTextContent("restarts after the active runs finish — nothing is lost");
+    fireEvent.click(update);
+    expect(restart).toHaveBeenCalledWith("desktop-sidebar-update");
+  });
+
+  it("words a dirty engine instead of an available update", () => {
+    render(<Sidebar route={{ name: "now" }} zones={zones} configMembers={[]} subnav={{}} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" update={{ version: "0.9.1", dirty: true }} />);
+
+    expect(screen.getByTestId("engine-source-dirty")).toHaveTextContent("engine built from uncommitted sources");
+    expect(screen.queryByTestId("restart-available-update")).not.toBeInTheDocument();
+  });
+
   it("attaches each subnav to its own parent", () => {
     render(<Sidebar route={{ name: "cycle" }} zones={zones} configMembers={[]} subnav={{ Work: [{ label: "Documents", route: { name: "cycle" } }] }} projects={[]} projectId="" onProject={() => {}} client={null} waitingCount={0} connection="open" />);
     const work = screen.getByTestId("nav-work");
