@@ -22,6 +22,21 @@ import { assignDucklingColors } from "../lib/colors";
 // remains the only surface that chooses who occupies a seat.
 const ROLES = ["architect", "implementer", "reviewer", "judge", "triager", "scribe"] as const;
 
+// Keep this endpoint test in step with Roster: LAN servers are local too.
+const isLocalProviderUrl = (baseUrl: string): boolean =>
+  /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|[^/]*\.local\b)/i.test(baseUrl);
+const concurrentRuns = (n: number): string => `${n} concurrent ${n === 1 ? "run" : "runs"}`;
+const providerCap = (provider: ProviderView): { value: number; origin?: string } => {
+  if (provider.max_concurrent && provider.max_concurrent > 0) return { value: provider.max_concurrent };
+  return isLocalProviderUrl(provider.base_url) ? { value: 1, origin: "local default" } : { value: 8, origin: "remote default" };
+};
+const backendHint = (provider: Pick<ProviderView, "id" | "base_url">): string | undefined => {
+  const name = `${provider.id} ${provider.base_url}`;
+  if (/llama[._-]?cpp/i.test(name)) return "llama.cpp servers typically seat 1";
+  if (/vllm/i.test(name)) return "vLLM handles several";
+  return undefined;
+};
+
 /**
  * `projectId` remains in the public props for callers that render the fleet
  * inside the settings shell. Seat state belongs exclusively to the Roster
@@ -458,13 +473,13 @@ function ProviderSection({
             className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
           <label className="flex items-center gap-1 text-xs text-ink-muted">
-            concurrent runs this endpoint will seat at once (blank = unlimited)
+            concurrent runs this endpoint will seat at once (blank = 1 local / 8 remote)
             <input
               aria-label="concurrent runs this endpoint will seat at once"
               data-testid="provider-max-concurrent"
               type="number"
               min="0"
-              placeholder="unlimited"
+              placeholder={isLocalProviderUrl(url) ? "1" : "8"}
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
               className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
@@ -483,6 +498,10 @@ function ProviderSection({
             That last field is the <em>name</em> of an environment variable, not a key. Ducklab
             never stores or transmits the key itself — the engine reads that variable when it makes
             a call. Leave it empty for a local server that needs none.
+          </p>
+          <p className="w-full text-xs text-ink-muted">
+            Blank uses the conservative engine default: 1 local or 8 remote.
+            {backendHint({ id, base_url: url }) && ` ${backendHint({ id, base_url: url })}.`}
           </p>
         </div>
       )}
@@ -511,8 +530,12 @@ function ProviderSection({
                 <span className="text-xs text-ink-muted">used by {p.in_use.join(", ")}</span>
               )}
               <span className="text-xs text-ink-muted">
-                {p.max_concurrent ? `${p.max_concurrent} concurrent runs` : "unlimited concurrent runs"}
+                {(() => {
+                  const cap = providerCap(p);
+                  return cap.origin ? `${cap.value} at a time — ${cap.origin}` : concurrentRuns(cap.value);
+                })()}
               </span>
+              {backendHint(p) && <span className="text-xs text-ink-muted">{backendHint(p)}</span>}
               <button
                 type="button"
                 data-testid={`provider-edit-${p.id}`}

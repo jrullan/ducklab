@@ -88,6 +88,18 @@ describe("Ducklings", () => {
     );
   });
 
+  it("shows effective local, remote, and configured provider caps", async () => {
+    const client = clientWith([], [
+      provider({ id: "local", base_url: "http://192.168.1.4:8080" }),
+      provider({ id: "remote", base_url: "https://api.example.com/v1" }),
+      provider({ id: "configured", max_concurrent: 1 }),
+    ]);
+    render(<Ducklings client={client} projectId="" />);
+    expect((await screen.findByTestId("provider-row-local")).textContent).toContain("1 at a time — local default");
+    expect(screen.getByTestId("provider-row-remote").textContent).toContain("8 at a time — remote default");
+    expect(screen.getByTestId("provider-row-configured").textContent).toContain("1 concurrent run");
+  });
+
   it("round-trips a provider concurrency cap while an unrelated field is edited", async () => {
     const existing = {
       ...provider({ id: "openrouter", api_key_env: "OPENROUTER_API_KEY" }),
@@ -98,7 +110,7 @@ describe("Ducklings", () => {
     fireEvent.click(await screen.findByTestId("provider-edit-openrouter"));
     const cap = screen.getByTestId("provider-max-concurrent") as HTMLInputElement;
     expect(cap.value).toBe("3");
-    expect(screen.getByTestId("provider-form").textContent).toMatch(/concurrent runs.*blank.*unlimited/i);
+    expect(screen.getByTestId("provider-form").textContent).toMatch(/concurrent runs.*blank.*1 local.*8 remote/i);
     fireEvent.change(screen.getByTestId("provider-url"), { target: { value: "https://changed.example/v1" } });
     fireEvent.click(screen.getByTestId("provider-save"));
     await waitFor(() =>

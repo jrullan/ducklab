@@ -364,7 +364,7 @@ export type ProviderView = {
   api_key_env?: string;
   /** Whether that variable is set in the engine's environment. */
   key_present: boolean;
-  /** Maximum concurrent runs for this provider; absent or zero means unlimited. */
+  /** Maximum concurrent runs; absent or zero uses the engine's local/remote default. */
   max_concurrent?: number;
   /** Ducklings that would break if this provider went away. */
   in_use?: string[];
