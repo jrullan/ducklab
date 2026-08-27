@@ -90,6 +90,43 @@ func TestATransientUpstreamFailureIsRetried(t *testing.T) {
 // One TCP reset from a CDN killed a forty-minute run: mid-stream resets and
 // truncated bodies never classed as transient, so the retry policy — built
 // for exactly this — never fired.
+// A Cloudflare 520 arrives while a turn is streaming, not as a normal chat
+// response. It is upstream weather just like the documented 522/524 errors:
+// retrying the same streaming turn must be able to finish it rather than
+// turning a completed run into a terminal failure.
+func TestAStreaming520IsRetriedAndCompletes(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) == 1 {
+			http.Error(w, "Z.AI via openrouter", 520)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"recovered\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat("openrouter", srv.URL, "")
+	ch := make(chan Delta, 4)
+	var got ChatResponse
+	err := Retry(context.Background(), RetryPolicy{MaxAttempts: 2, InitialWait: time.Millisecond, MaxWait: time.Millisecond}, func() error {
+		var callErr error
+		got, callErr = p.ChatStream(context.Background(), ChatRequest{
+			Model: "z-ai/glm-5.2", Messages: []Message{{Role: "user", Content: "review"}},
+		}, ch)
+		return callErr
+	})
+	if err != nil {
+		t.Fatalf("a transient streaming 520 ended the turn instead of retrying: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("stream attempts = %d, want 2 after one 520", hits.Load())
+	}
+	if len(got.Choices) != 1 || got.Choices[0].Message.Content != "recovered" {
+		t.Fatalf("recovered stream response = %#v", got)
+	}
+}
+
 func TestAPeerHangupIsTransient(t *testing.T) {
 	for _, err := range []error{
 		fmt.Errorf("read tcp 192.168.1.153:35402->104.18.3.115:443: %w", syscall.ECONNRESET),
