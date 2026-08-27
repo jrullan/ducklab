@@ -74,6 +74,32 @@ func TestSchemasAreReflectedFromDTOs(t *testing.T) {
 
 // time.Time is a struct in Go but a string on the wire; documenting its fields
 // would describe a shape no client ever sees.
+// Publication state is part of the public contract: clients must be able to
+// configure policy, show a failed publication receipt, and surface divergence.
+func TestPublicationStateIsDocumented(t *testing.T) {
+	doc := BuildOpenAPI("0.3.0")
+	components, _ := doc["components"].(map[string]any)
+	schemas, _ := components["schemas"].(map[string]any)
+	for schema, fields := range map[string][]string{
+		"ConfigRemote":        {"on_accept"},
+		"ServiceAcceptResult": {"commit_sha", "warning"},
+		"ServiceStatus":       {"ahead", "behind"},
+		"RunlogRun":           {"remote_receipts"},
+	} {
+		shape, ok := schemas[schema].(map[string]any)
+		if !ok {
+			t.Errorf("%s schema is missing", schema)
+			continue
+		}
+		props, _ := shape["properties"].(map[string]any)
+		for _, field := range fields {
+			if _, ok := props[field]; !ok {
+				t.Errorf("%s schema is missing %q", schema, field)
+			}
+		}
+	}
+}
+
 func TestTimeIsDocumentedAsAString(t *testing.T) {
 	doc := BuildOpenAPI("0.3.0")
 	raw, _ := json.Marshal(doc)

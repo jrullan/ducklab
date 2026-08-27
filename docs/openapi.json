@@ -471,6 +471,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "on_accept": {
+            "type": "string"
           }
         },
         "required": [
@@ -1597,6 +1600,13 @@
           },
           "redo_note": {
             "$ref": "#/components/schemas/RunlogRedoNote"
+          },
+          "remote_receipts": {
+            "items": {
+              "additionalProperties": {},
+              "type": "object"
+            },
+            "type": "array"
           },
           "resolution": {
             "type": "string"
@@ -6098,7 +6108,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Project status"
+        "summary": "Project status, including ahead/behind publication state when divergent"
       }
     },
     "/v1/projects/{id}/tasks": {
@@ -6716,7 +6726,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Accept and commit"
+        "summary": "Accept, commit, then publish according to the configured remote.on_accept policy"
       }
     },
     "/v1/runs/{id}/answer": {

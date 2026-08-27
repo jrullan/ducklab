@@ -141,3 +141,29 @@ describe("scorecards request", () => {
     expect(cards[0]?.measured?.runs).toBe(264);
   });
 });
+
+// A committed accept may report a retryable publication failure. Status carries
+// the independent ahead/behind evidence a client needs to offer that retry.
+describe("publication API", () => {
+  it("returns accept warning and publication status from their declared routes", async () => {
+    const paths: string[] = [];
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async (url: string) => {
+        const path = String(url).replace("http://engine", "");
+        paths.push(path);
+        const body = path.endsWith("/accept")
+          ? { commit_sha: "abc123", warning: "committed as abc123; push failed: denied" }
+          : { ahead: 2, behind: 0 };
+        return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch,
+    });
+
+    const accepted = await c.accept("run");
+    const status = await c.projectStatus("project");
+    expect(accepted).toEqual({ commit_sha: "abc123", warning: "committed as abc123; push failed: denied" });
+    expect(status).toEqual({ ahead: 2, behind: 0 });
+    expect(paths).toEqual(["/v1/runs/run/accept", "/v1/projects/project/status"]);
+  });
+});

@@ -137,6 +137,7 @@ export interface ConfigRemote {
   allow_mcp_verbs?: string[];
   fetch_on_open?: boolean;
   name?: string;
+  on_accept?: string;
 }
 
 export interface ConfigRenderContract {
@@ -473,6 +474,7 @@ export interface RunlogRun {
   project_id?: string;
   queued_reason?: string;
   redo_note?: RunlogRedoNote;
+  remote_receipts?: Record<string, unknown>[];
   resolution?: string;
   revert_sha?: string;
   roster?: Record<string, string>;

@@ -7,6 +7,61 @@
  * so that swap is mechanical.
  */
 
+/** Publication policy applied after an accepted commit. */
+export type OnAcceptPolicy = "nothing" | "push" | "pr";
+
+/** Durable outcome of an explicit or policy-driven remote publication. */
+export interface RemoteReceipt {
+  action: string;
+  actor?: string;
+  branch?: string;
+  status: string;
+  prompt?: string;
+  compare_url?: string;
+  pr_url?: string;
+  body?: string;
+  /** The exact retryable remote failure, when status is failed. */
+  error?: string;
+}
+
+/** Publication settings persisted in a project's [remote] section. */
+export interface ConfigRemote {
+  name?: string;
+  on_accept?: OnAcceptPolicy;
+}
+
+/** GitHub publication settings persisted with the project. */
+export interface ConfigGitHub {
+  /** Base branch used when on_accept is pr. */
+  pr_base?: string;
+}
+
+/** Typed project configuration returned by the project API. */
+export interface ConfigProject {
+  // Settings also reads configuration sections not modeled by this client.
+  [key: string]: unknown;
+  /** Legacy flattened base branch returned by older project responses. */
+  base_branch?: string;
+  remote?: ConfigRemote;
+  git?: { base_branch?: string };
+  github?: ConfigGitHub;
+}
+
+/** Publication divergence reported by GET project status. */
+export interface ProjectStatus {
+  /** Commits on the local branch not yet present on its configured remote. */
+  ahead?: number;
+  /** Commits present on the configured remote but absent locally. */
+  behind?: number;
+}
+
+/** The committed acceptance and its independently retryable publication outcome. */
+export interface AcceptResult {
+  commit_sha: string;
+  /** Publication failure does not revoke this committed acceptance. */
+  warning?: string;
+}
+
 export interface Project {
   id: string;
   path: string;
@@ -24,7 +79,7 @@ export interface Project {
    * not an idea to interview. Decides the Cycle empty state's doors. */
   has_code?: boolean;
   /** Current project configuration, returned by project open/update. */
-  config?: Record<string, unknown>;
+  config?: ConfigProject;
 }
 
 /** A deterministic, read-only configuration diagnosis. */
@@ -103,6 +158,8 @@ export interface Run {
   commit_sha?: string;
   /** Accepted commit is absent from all configured remote refs. */
   local_only?: boolean;
+  /** Publication receipts, including retryable policy-push failures. */
+  remote_receipts?: RemoteReceipt[];
   /** Isolated checkout retained until this run's terminal decision. */
   branch?: string;
   worktree_path?: string;
@@ -1008,7 +1065,7 @@ export class EngineClient {
     return this.request<unknown>("DELETE", `/v1/projects/${id}`);
   }
   projectStatus(id: string) {
-    return this.request<{ ahead?: number; behind?: number }>("GET", `/v1/projects/${id}/status`);
+    return this.request<ProjectStatus>("GET", `/v1/projects/${id}/status`);
   }
   projectRecover(id: string, action: "cherry-pick-chain" | "restore-as-fresh-commit", commitSha: string, requester: string) {
     return this.request<{ commit_sha: string }>("POST", `/v1/projects/${id}/recover/${action}`, { commit_sha: commitSha, requester });
@@ -1181,7 +1238,7 @@ export class EngineClient {
     );
   }
   accept(id: string, message = "") {
-    return this.request<{ commit_sha: string }>("POST", `/v1/runs/${id}/accept`, { message });
+    return this.request<AcceptResult>("POST", `/v1/runs/${id}/accept`, { message });
   }
   reject(id: string, reason = "") {
     return this.request<void>("POST", `/v1/runs/${id}/reject`, { reason });
