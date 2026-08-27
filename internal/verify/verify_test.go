@@ -365,9 +365,12 @@ func TestAQuickGateIsUnaffected(t *testing.T) {
 // now: cancel returns promptly and leaves no survivors.
 func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
 	// This is an unrelated concurrent gate. Its sleeper must not be mistaken
-	// for this gate's child while checking that cancellation reaped ours.
-	marker := "verify_abort_repro_sleeper"
-	other := exec.Command("python3", "-c", "import time; time.sleep(3) # "+marker)
+	// for a gate's child while handling that cancellation reaped ours. Unique
+	// per invocation so concurrent gates never match its processes. This marker
+	// is the UNRELATED sleeper's; the gate under test gets its own below (the
+	// B-168 pattern) so the pgrep check can never match another gate's sleeper.
+	otherMarker := fmt.Sprintf("verify_abort_repro_unrelated_%d_%x", os.Getpid(), time.Now().UnixNano())
+	other := exec.Command("python3", "-c", "import time; time.sleep(3) # "+otherMarker)
 	if err := other.Start(); err != nil {
 		t.Fatalf("start unrelated gate: %v", err)
 	}
@@ -376,6 +379,8 @@ func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
 		_ = other.Wait()
 	}()
 
+	// A fresh unique marker for the gate under this invocation only.
+	gateMarker := fmt.Sprintf("verify_abort_repro_sleeper_%d_%x", os.Getpid(), time.Now().UnixNano())
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(300 * time.Millisecond)
@@ -383,7 +388,7 @@ func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
 	}()
 	start := time.Now()
 	res, err := Run(ctx, t.TempDir(), config.Verify{
-		Mode: "custom", Custom: "python3 -c 'import time; time.sleep(300) # " + marker + "'",
+		Mode: "custom", Custom: "python3 -c 'import time; time.sleep(300) # " + gateMarker + "'",
 		TimeoutS: 600,
 	})
 	if err != nil {
@@ -396,9 +401,20 @@ func TestAnAbortKillsTheGateAndItsChildren(t *testing.T) {
 	if res.ExitCode == 0 {
 		t.Errorf("a killed gate reported exit 0: %+v", res)
 	}
-	time.Sleep(200 * time.Millisecond)
-	out, _ := exec.Command("pgrep", "-f", marker).Output()
-	if s := strings.TrimSpace(string(out)); s != "" {
-		t.Fatalf("the gate's child survived the abort: %s", s)
+	// Poll until the children are gone, with a load-tolerant deadline instead of
+	// a fixed settle sleep: pass as soon as no marker process remains, fail only
+	// with the surviving pids if any are still alive at the deadline.
+	deadline := time.Now().Add(5 * time.Second)
+	survivors := ""
+	for {
+		out, _ := exec.Command("pgrep", "-f", gateMarker).Output()
+		survivors = strings.TrimSpace(string(out))
+		if survivors == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the gate's child survived the abort: %s", survivors)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
