@@ -128,6 +128,18 @@ func TestPromotingAStoredSplitCreatesLanesAndWaitsForEveryPortion(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	var reportedBugs []artifact.Section
+	for _, milestone := range plan.Sections {
+		if milestone.Title == "Reported bugs" {
+			reportedBugs = append(reportedBugs, milestone)
+		}
+	}
+	if len(reportedBugs) != 1 {
+		t.Fatalf("Reported bugs milestones = %d, want one shared milestone", len(reportedBugs))
+	}
+	if len(reportedBugs[0].Children) != 2 {
+		t.Fatalf("tasks under the Reported bugs milestone = %d, want both promoted portions", len(reportedBugs[0].Children))
+	}
 	want := map[string]struct {
 		owns       string
 		acceptance string
@@ -138,6 +150,23 @@ func TestPromotingAStoredSplitCreatesLanesAndWaitsForEveryPortion(t *testing.T) 
 		"Refresh the avatar cache after profile save": {
 			owns: "internal/profile/cache.go", acceptance: "the cache serves the newly saved avatar",
 		},
+	}
+	reportedPortions := make(map[string]bool)
+	for _, task := range reportedBugs[0].Children {
+		portion, ok := want[task.Title]
+		if !ok {
+			t.Errorf("Reported bugs contains unexpected task %q", task.Title)
+			continue
+		}
+		reportedPortions[task.Title] = true
+		if len(task.Owns) != 1 || task.Owns[0] != portion.owns {
+			t.Errorf("Reported bugs child %q owns %v, want its lane %q", task.Title, task.Owns, portion.owns)
+		}
+	}
+	for title := range want {
+		if !reportedPortions[title] {
+			t.Errorf("Reported bugs does not contain promoted portion %q", title)
+		}
 	}
 	var portionIDs []string
 	for _, task := range tasks {
