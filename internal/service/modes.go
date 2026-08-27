@@ -808,6 +808,12 @@ func recordLimits(rs *runState, b *budget.Budget) {
 
 // recordSpend copies the budget tracker's totals onto the run record.
 func recordSpend(rs *runState, tracker *budget.Tracker) {
+	if rs == nil || rs.run == nil {
+		return
+	}
+	// Settle the active interval whenever execution records progress. A later
+	// pause or queue transition therefore cannot leak its wait into history.
+
 	if tracker == nil || tracker.Spend == nil {
 		return
 	}
@@ -817,8 +823,8 @@ func recordSpend(rs *runState, tracker *budget.Tracker) {
 	rs.run.Budget.Turns = snap.Turns
 	rs.run.Budget.WallclockS = snap.WallclockS
 
-	// WallclockMs is what reports average over; deriving it here means a run
-	// that ends any way at all still records its duration.
+	// WallclockMs remains the legacy elapsed field for reports. Duration
+	// escalation instead uses ActiveWallclockMs, which excludes waits.
 	if started, err := time.Parse(time.RFC3339, rs.run.StartedAt); err == nil {
 		rs.run.WallclockMs = time.Since(started).Milliseconds()
 	}

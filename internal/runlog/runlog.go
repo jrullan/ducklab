@@ -76,18 +76,23 @@ type Run struct {
 	// where a build would name its task. Without it a triage row said
 	// "triage" and nothing else, and telling two triages apart meant opening
 	// both.
-	Subject      string                 `json:"subject,omitempty"`
-	StartedAt    string                 `json:"started_at"`
-	EndedAt      string                 `json:"ended_at"`
-	WallclockMs  int64                  `json:"wallclock_ms"`
-	PendingSince string                 `json:"pending_since,omitempty"`
-	PendingKind  string                 `json:"pending_kind,omitempty"` // gate|question
-	PendingData  map[string]interface{} `json:"pending_data,omitempty"`
-	Captures     []string               `json:"captures,omitempty"`
-	UnsafeWrites bool                   `json:"unsafe_writes"`
-	Stream       bool                   `json:"stream"`
-	DryRun       bool                   `json:"dry_run"`
-	Autonomy     string                 `json:"autonomy"`
+	Subject   string `json:"subject,omitempty"`
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at"`
+	// WallclockMs is retained for report compatibility. ActiveWallclockMs is the
+	// execution time used by history-duration comparisons: queue and human wait
+	// time never belong to it.
+	WallclockMs       int64                  `json:"wallclock_ms"`
+	ActiveWallclockMs int64                  `json:"active_wallclock_ms,omitempty"`
+	ActiveSince       string                 `json:"active_since,omitempty"`
+	PendingSince      string                 `json:"pending_since,omitempty"`
+	PendingKind       string                 `json:"pending_kind,omitempty"` // gate|question
+	PendingData       map[string]interface{} `json:"pending_data,omitempty"`
+	Captures          []string               `json:"captures,omitempty"`
+	UnsafeWrites      bool                   `json:"unsafe_writes"`
+	Stream            bool                   `json:"stream"`
+	DryRun            bool                   `json:"dry_run"`
+	Autonomy          string                 `json:"autonomy"`
 	// Origin says who started the run when it was not a person at a button:
 	// "autopilot" today. Empty means human-initiated.
 	Origin             string      `json:"origin,omitempty"`

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 
@@ -120,6 +121,7 @@ func (q *runQueue) submit(s *Service, item *queued) {
 	}
 	q.mu.Unlock()
 
+	settleActiveWallclock(item.rs.run, time.Now())
 	item.rs.run.Status = "queued"
 	item.rs.run.QueuedReason = reason
 	item.rs.writer.AppendEvent("run_queued", map[string]interface{}{
@@ -202,6 +204,7 @@ func (q *runQueue) reserve(item *queued) {
 
 func (q *runQueue) start(s *Service, item *queued) {
 	item.rs.run.Status = "running"
+	startActiveWallclock(item.rs.run, time.Now())
 	item.rs.run.QueuedReason = ""
 	item.rs.writer.WriteState()
 	if s.bus != nil {

@@ -43,6 +43,7 @@ export function EscalationSuggestionCard({
       <h2 className="text-sm font-medium text-ink">escalation suggestion</h2>
       <p className="mt-1 text-sm text-ink-secondary">The run paused with evidence that continuing may not be the best recovery.</p>
       {thresholds.length > 0 && <p className="mt-2 text-sm"><span className="text-ink-muted">thresholds fired · </span>{thresholds.map(label).join(" · ")}</p>}
+      {typeof data.current_stage === "string" && <p className="mt-2 text-sm" data-testid="escalation-current-stage"><span className="text-ink-muted">current stage · </span>{data.current_stage}</p>}
       {Object.keys(diagnoses).length > 0 && (
         <div className="mt-2 text-sm" data-testid="escalation-diagnoses">
           <span className="text-ink-muted">diagnoses</span>

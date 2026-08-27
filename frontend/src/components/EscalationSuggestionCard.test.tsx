@@ -16,6 +16,7 @@ const suggestion: DucklabEvent = {
       task_brief_quality: "the task body needs detail",
     },
     candidate: { id: "stronger-seat", wilson_floor: 82.5 },
+    current_stage: "reviewer mid-read, round 1, no red gates",
   },
 };
 
@@ -29,6 +30,7 @@ describe("EscalationSuggestionCard", () => {
     expect(card).toHaveTextContent("stronger-seat");
     expect(card).toHaveTextContent("Wilson floor 82.5%");
     expect(card).toHaveTextContent("turns 12");
+    expect(card).toHaveTextContent("reviewer mid-read, round 1, no red gates");
   });
 
   it("renders RunView's card only when its event history has a suggestion", async () => {

@@ -3181,6 +3181,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
+		startActiveWallclock(rs.run, time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
 		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
@@ -3217,6 +3218,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		rs.cancel = cancel
 		rs.done = make(chan struct{})
 		rs.run.Status = "running"
+		startActiveWallclock(rs.run, time.Now())
 		clearPending(rs.run)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
@@ -3239,6 +3241,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// and a run still wearing "paused" would hold the project against its own
 	// resume — queued forever behind itself.
 	rs.run.Status = "running"
+	startActiveWallclock(rs.run, time.Now())
 	clearPending(rs.run)
 	// The failure text was the pause's reason (a budget pause records it);
 	// resuming answers it. Left in place, a resumed, working run went on
@@ -4317,7 +4320,38 @@ func restoreAfterUnaccepted(rs *runState) error {
 // an adapter is built — the same one-of-six disease as the streaming callbacks
 // and the budget ceilings before it — so a council's intake showed a meter at
 // zero for the whole run, and a triage's calls were attributed to nobody.
+// activeWallclock measures execution time only. StartedAt is intentionally not
+// consulted: it includes both queue waits and human pauses.
+func activeWallclock(run *runlog.Run, now time.Time) time.Duration {
+	if run == nil {
+		return 0
+	}
+	elapsed := time.Duration(run.ActiveWallclockMs) * time.Millisecond
+	if run.Status == "running" && run.ActiveSince != "" {
+		if since, err := time.Parse(time.RFC3339Nano, run.ActiveSince); err == nil && now.After(since) {
+			elapsed += now.Sub(since)
+		}
+	}
+	return elapsed
+}
+
+func settleActiveWallclock(run *runlog.Run, now time.Time) {
+	if run == nil {
+		return
+	}
+	run.ActiveWallclockMs = activeWallclock(run, now).Milliseconds()
+	run.ActiveSince = ""
+}
+
+func startActiveWallclock(run *runlog.Run, now time.Time) {
+	if run != nil && run.ActiveSince == "" {
+		run.ActiveSince = now.UTC().Format(time.RFC3339Nano)
+	}
+}
+
 func (s *Service) monitorWallclockEscalation(ctx context.Context, rs *runState) {
+	startActiveWallclock(rs.run, time.Now())
+	defer settleActiveWallclock(rs.run, time.Now())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -4351,9 +4385,16 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 			continue
 		}
 		r := prior.run
-		if r.ProjectID == rs.run.ProjectID && r.Mode == rs.run.Mode && r.WallclockMs > 0 && r.EndedAt != "" {
-			total += float64(r.WallclockMs) / 1000
-			count++
+		if r.ProjectID == rs.run.ProjectID && r.Mode == rs.run.Mode && r.EndedAt != "" {
+			ms := r.ActiveWallclockMs
+			// Records written before active timing have no interval history.
+			if ms == 0 {
+				ms = r.WallclockMs
+			}
+			if ms > 0 {
+				total += float64(ms) / 1000
+				count++
+			}
 		}
 	}
 	s.runsMu.RUnlock()
@@ -4361,22 +4402,25 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 		return
 	}
 	average := total / float64(count)
-	started, err := time.Parse(time.RFC3339, rs.run.StartedAt)
-	if err != nil {
-		return
-	}
-	elapsed := time.Since(started).Seconds()
+	elapsed := activeWallclock(rs.run, time.Now()).Seconds()
+
 	if elapsed < multiplier*average || !rs.historyEscalated.CompareAndSwap(false, true) {
 		return
 	}
+	stage := rs.run.Stage
+	if rs.run.InterruptedTurn != nil {
+		stage = fmt.Sprintf("%s, round %d", rs.run.InterruptedTurn.Role, rs.run.InterruptedTurn.Round)
+	}
 	data := map[string]interface{}{
 		"point": "wallclock_history", "thresholds_fired": []string{"wallclock_over_history"},
-		"wallclock_s": elapsed, "history_average_s": average, "history_runs": count,
+		"current_stage": stage,
+		"wallclock_s":   elapsed, "history_average_s": average, "history_runs": count,
 		"detail":    fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60),
 		"diagnoses": map[string]interface{}{"seat_at_capacity": "the current seat may be saturated", "task_brief_quality": "the brief may be too wide"},
 		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
 	rs.writer.AppendEvent("escalation_suggestion", data)
+	settleActiveWallclock(rs.run, time.Now())
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "history_duration"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)

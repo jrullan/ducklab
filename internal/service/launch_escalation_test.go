@@ -40,7 +40,7 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	s := newTestService(t)
 	dir := t.TempDir()
 	started := time.Now().Add(-130 * time.Second)
-	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: started.UTC().Format(time.RFC3339)}
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano)}
 	w, err := runlog.NewWriter(dir, current)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	s.runs = map[string]*runState{current.ID: rs}
 	for i := 0; i < 5; i++ {
 		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
-			ID: "history", ProjectID: "p", Mode: "solo", WallclockMs: 60_000,
+			ID: "history", ProjectID: "p", Mode: "solo", ActiveWallclockMs: 60_000,
 			EndedAt: time.Now().UTC().Format(time.RFC3339),
 		}}
 	}
@@ -70,10 +70,31 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	}
 }
 
+func TestWallclockEscalationExcludesQueuedAndPausedTime(t *testing.T) {
+	s := newTestService(t)
+	dir := t.TempDir()
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: time.Now().Add(-10 * time.Hour).UTC().Format(time.RFC3339), ActiveWallclockMs: 30_000, ActiveSince: time.Now().UTC().Format(time.RFC3339Nano)}
+	w, err := runlog.NewWriter(dir, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: current, writer: w, runDir: w.RunDir()}
+	s.runs = map[string]*runState{current.ID: rs}
+	for i := 0; i < 5; i++ {
+		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{ID: "history", ProjectID: "p", Mode: "solo", ActiveWallclockMs: 60_000, EndedAt: time.Now().UTC().Format(time.RFC3339)}}
+	}
+
+	s.checkWallclockEscalation(rs)
+	if current.Status != "running" {
+		t.Fatalf("queued or paused time triggered escalation: %s", current.Status)
+	}
+}
+
 func TestWallclockEscalationIsSilentWithoutEnoughHistory(t *testing.T) {
 	s := newTestService(t)
 	dir := t.TempDir()
-	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: time.Now().Add(-10 * time.Hour).UTC().Format(time.RFC3339)}
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: time.Now().Add(-10 * time.Hour).UTC().Format(time.RFC3339), ActiveSince: time.Now().UTC().Format(time.RFC3339Nano)}
 	w, err := runlog.NewWriter(dir, current)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +104,7 @@ func TestWallclockEscalationIsSilentWithoutEnoughHistory(t *testing.T) {
 	s.runs = map[string]*runState{current.ID: rs}
 	for i := 0; i < 4; i++ {
 		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
-			ID: "history", ProjectID: "p", Mode: "solo", WallclockMs: 60_000,
+			ID: "history", ProjectID: "p", Mode: "solo", ActiveWallclockMs: 60_000,
 			EndedAt: time.Now().UTC().Format(time.RFC3339),
 		}}
 	}
@@ -104,7 +125,8 @@ func TestWallclockEscalationMultiplierIsConfigurable(t *testing.T) {
 	s := newTestService(t)
 	s.cfg.Defaults.Budget.WallclockEscalationMultiplier = 3
 	dir := t.TempDir()
-	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: time.Now().Add(-130 * time.Second).UTC().Format(time.RFC3339)}
+	activeSince := time.Now().Add(-130 * time.Second).UTC().Format(time.RFC3339Nano)
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: time.Now().Add(-130 * time.Second).UTC().Format(time.RFC3339), ActiveSince: activeSince}
 	w, err := runlog.NewWriter(dir, current)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +136,7 @@ func TestWallclockEscalationMultiplierIsConfigurable(t *testing.T) {
 	s.runs = map[string]*runState{current.ID: rs}
 	for i := 0; i < 5; i++ {
 		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
-			ID: "history", ProjectID: "p", Mode: "solo", WallclockMs: 60_000,
+			ID: "history", ProjectID: "p", Mode: "solo", ActiveWallclockMs: 60_000,
 			EndedAt: time.Now().UTC().Format(time.RFC3339),
 		}}
 	}

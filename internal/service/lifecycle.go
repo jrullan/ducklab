@@ -557,6 +557,7 @@ func (s *Service) pauseForQuestion(rs *runState, q *tools.PendingQuestion) {
 	if err != nil {
 		return
 	}
+	settleActiveWallclock(rs.run, time.Now())
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "question"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
