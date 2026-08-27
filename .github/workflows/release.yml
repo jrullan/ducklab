@@ -18,7 +18,21 @@ jobs:
           go-version-file: go.mod
       - name: Build MCPB release artifact
         run: make mcpb
+      # The curated notes live in the repo (.ducklab/docs/releases/<tag>.md,
+      # written by the release stage and accepted by a human). Without
+      # body_path they never reached the Release page: v0.9.0 shipped 13KB of
+      # notes into git and an EMPTY body onto the public release. The YAML
+      # frontmatter is for the harness, not the reader — strip it.
+      - name: Prepare release notes
+        run: |
+          notes=".ducklab/docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            awk 'BEGIN{fm=0} /^---$/{ if (fm<2) {fm++; next} } fm!=1{print}' "$notes" > /tmp/notes.md
+          else
+            echo "Release ${GITHUB_REF_NAME}. Notes were not written for this tag." > /tmp/notes.md
+          fi
       - name: Create GitHub release and attach MCPB
         uses: softprops/action-gh-release@v2
         with:
+          body_path: /tmp/notes.md
           files: dist/ducklab-mcp.mcpb
