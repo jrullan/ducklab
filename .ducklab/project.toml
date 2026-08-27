@@ -38,10 +38,6 @@ autonomy = "guarded"
 [mode_seats]
   [mode_seats.council]
     advisor = ["terra"]
-  [mode_seats.pair]
-    advisor = ["k3"]
-    implementer = ["glm53"]
-    reviewer = ["terra"]
 
 [modes]
 

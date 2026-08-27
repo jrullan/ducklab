@@ -4335,4 +4335,144 @@ The engine crossed registered checkout and run-worktree boundaries, stranded val
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-225 — Reword or remove the unexplained 'N/M passed' stat in the Now footer
+
+Fixes B-202.
+
+## Reported
+
+Real-render finding. The footer stat reads as alarming and unexplained — passed of WHAT (all-time run gates? tests? bench)? Either word it plainly ('288 of 526 gates passed all time') if it earns its place, or remove it; a number without a sentence violates the house rules. Decide what job the stat does; if none, rule 4 applies.
+
+**Deliverables:**
+- The NowFooter stat either reads as a full phrase naming what passed (e.g. '1 of 2 runs passed, all time') or is removed entirely — no bare 'N/M passed'
+- now.test.tsx footer tests updated to assert the new wording (or assert the stat's absence if removed)
+- The today/all-time spend figures in the footer are unchanged and still covered by the existing tests
+- If kept, the wording says what the denominator is (finished runs, all time), not gates or tests
+
+## Triage
+
+**Component:** Now view footer
+**Suspected files:** frontend/src/views/Now.tsx, frontend/src/views/now.test.tsx
+
+NowFooter at Now.tsx:471-480 renders '{passed}/{finished} passed' with no noun or timeframe, a copy bug fixable in one component with the existing footer test as the verification harness.
+
+**Verification (triage recommends):** test-first — Render Now with mixed-verdict runs and assert the footer either spells the stat out ('1 of 2 runs passed all time') or drops it; now.test.tsx already pins '1/2 passed' at line 258 and must be updated either way.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-226 — Show the effective per-provider run cap (1 local, 8 remote, or configured) instead of 'unlimited' in the Providers list
+
+Fixes B-217.
+
+## Reported
+
+Found while diagnosing why T-184 sat queued with 2/4 engine slots free: with max_concurrent=0 the engine defaults LOCAL providers (IsLocalHost, which includes LAN IPs) to ONE run at a time and remote to 8 (queue.go providerCap), but the Settings providers row renders 'unlimited concurrent runs' for those same providers. The row must state the EFFECTIVE cap and its origin: '1 at a time — local default', '8 at a time — remote default', or the configured number. Bonus honesty: when a run queues on a provider slot, the desktop should surface the queued_reason the engine already produces ('waiting for a slot on provider X held by Y') on the run row — the reason existed and was invisible in the UI. Vitest pins effective-cap wording and queued-reason rendering.
+
+ESCALATED with the operator's screenshot of the provider editor: the edit form itself promises 'concurrent runs this endpoint will seat at once (blank = unlimited)' — a FALSE contract; the engine maps blank to 1 for local providers and 8 for remote (queue.go providerCap defaults). DESIGN DECISION inside the fix: either (a) make blank truly unlimited (dangerous for a local GPU — the conservative default exists for a reason), or (b) keep the defaults and make BOTH the editor and the rows tell the truth: 'blank = 1 at a time on local providers (protects the GPU), 8 on remote'. Recommendation: (b) — honest defaults over honored lies. The spinner should show the EFFECTIVE value as placeholder, not the word 'unlimited'.
+
+POLICY INPUT from the operator: caps must follow the serving backend — llama.cpp providers seat 1 (raising it degrades service), vLLM batches happily at 4+. The honest-defaults fix should TEACH this at point of use: the provider row/editor hints 'llama.cpp servers typically seat 1; vLLM handles several' when the backend is recognizable, and the default stays conservative.
+
+**Deliverables:**
+- Providers row in Ducklings.tsx renders '1 at a time — local default' when max_concurrent is blank and base_url is local (same locality regex as Roster.tsx)
+- Renders '8 at a time — remote default' when blank and base_url is remote
+- Renders '<N> concurrent runs' (or '<N> at a time') when max_concurrent is set; runs.test-style guard keeps singular/plural honest
+- Form label '(blank = unlimited)' updated to state the actual default behavior (engine default: 1 local / 8 remote)
+- Vitest cases cover local, remote, and configured providers
+
+## Triage
+
+**Component:** frontend ducklings/providers copy
+**Suspected files:** frontend/src/views/Ducklings.tsx, frontend/src/views/ducklings.test.tsx, frontend/src/views/Roster.tsx
+
+UI claims unlimited concurrency while the engine enforces 1 (local) or 8 (remote) when max_concurrent is blank; the fix is a copy/locality-computation change viewable and testable in Ducklings.tsx, reusing the Roster.tsx locality regex.
+
+**Verification (triage recommends):** test-first — Vitest renders a provider row with blank max_concurrent and a local base_url, asserts '1 at a time — local default'; a remote row asserts '8 at a time — remote default'; a configured row asserts the number.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-227 — Pluralize 'N runs hit this ceiling' and add a two-decimal money variant for budget aggregates
+
+Fixes B-185.
+
+## Reported
+
+Residue from T-172 (accepted under the gate ratchet). (1) 'N runs hit this ceiling' needs the singular form at N=1. (2) 'where the money went' aggregates use money()'s four-decimal sub-dollar precision ($0.7500) — right for per-run costs, odd for monthly aggregates; give aggregates a two-decimal variant in lib/format and pin both in budget.test.tsx.
+
+**Deliverables:**
+- The ceiling-hits line renders '1 run hit this ceiling' at N=1 and 'N runs' otherwise
+- lib/format gains a two-decimal money variant (e.g. money2) used by the budget money/activity aggregates
+- Per-run costs still render with money()'s four-decimal sub-dollar precision
+- budget.test.tsx pins the singular form and both aggregate and per-run decimal behaviors
+
+## Triage
+
+**Component:** frontend budget settings
+**Suspected files:** frontend/src/views/Settings.tsx, frontend/src/lib/format.ts, frontend/src/views/budget.test.tsx
+
+Cosmetic copy/formatting residue from T-172, exactly localized by the reporter to Settings budget copy and lib/format money(), with an existing test file to pin both fixes.
+
+**Verification (triage recommends):** test-first — budget.test.tsx already asserts the hit-count copy and money strings; add cases with 1 hit (expects '1 run hit this ceiling') and sub-dollar aggregates (expects '$0.75' not '$0.7500'), while per-run money() keeps four decimals
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-228 — Show available update in the sidebar footer with a checkpointed restart action
+
+Fixes B-199.
+
+## Reported
+
+Design decided with Jose (blueprint section 1, committed): when a newer desktop version exists than the one running, the sidebar footer — the system-truth zone — shows one worded line ('update ready — 0.9.1 · restart when idle'); silent when current. Its action performs the engine's checkpointed restart (the /v1/restart contract) and says so plainly ('restarts after the active runs finish — nothing is lost'). The existing blocking-mismatch banner (engine older than the app) is unchanged — broken-now interrupts, available-later does not. Needs: a version-comparison source (installed vs running — the build info endpoints likely suffice), the footer line, the action wiring, vitest for silent-when-current / worded-when-newer / action calls restart.
+
+NARROWED FOR THIS RUN (operator, 2026-08-27) — exactly two criteria; the landed-vs-serving comparison (engine behind repo HEAD) is DEFERRED to a follow-up filed at this task's gate, because it needs a new repo-head source; this task uses ONLY data the API already serves.
+
+1. The sidebar footer renders one worded exception line, silent when everything is current: 'update ready — <version> · restart when idle' when the available desktop version is newer than the running one, and 'engine built from uncommitted sources' when /v1/health reports dirty: true (the field already exists). One line, worded, never two banners.
+2. The update line's action calls the engine's checkpointed restart (POST /v1/restart with a requester) and labels it plainly ('restarts after the active runs finish — nothing is lost'). Vitest: silent-when-current, worded-when-newer, worded-when-dirty, action calls restart.
+
+Do NOT touch: the existing blocking version-skew banner (engine older than app — broken-now interrupts, available-later does not), the health endpoint, the engine.
+
+Original full write-up lives in B-199.
+- The version comparison uses the build-info source (health endpoint version vs the desktop-injected window.ducklab.version)
+- The existing blocking engine-mismatch banner (engine older than the app) remains unchanged
+- Frontend vitest covers silent-when-current, worded-when-newer, and action-invokes-restart
+
+## Triage
+
+**Component:** desktop sidebar footer
+**Suspected files:** frontend/src/components/Sidebar.tsx, frontend/src/app/App.tsx, frontend/src/api/client.ts, cmd/ducklab-desktop/main.go
+
+A decided blueprint feature (footer update notice is absent while the health version endpoint and /v1/restart contract exist) with explicitly specified vitest coverage, so it is reproducible-as-absent and test-first.
+
+**Verification (triage recommends):** test-first — vitest on Sidebar: no line when running==available; worded line ('update ready — 0.9.1 · restart when idle') when newer; clicking calls POST /v1/restart
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-229 — The history_duration trigger counts queued and paused time as work: elapsed should be active wall clock only
+
+Fixes B-246.
+
+## Reported
+
+Calibration finding from the trigger's FIRST production firing (T-210: '30m so far; runs of this shape average 15m' — but a third of those 30m were queue waits and budget-pause dances, and the run was healthily mid-review). The elapsed side of the comparison should count ACTIVE time only (exclude queued and paused stretches), or the trigger over-fires on any run that waited for a slot. The historical average should use the same definition (symmetry). Also worth adding to the suggestion card: the run's current stage ('reviewer mid-read, round 1, no red gates') so the human's continue-vs-narrow call is one glance. Go test: a run with long queued time does not trigger at 2x; one with long active time does.
+
+FIELD INCIDENT (2026-08-26, r-20260826-214453-prgc / T-222 relaunch): the trigger fired 3 SECONDS after a resume — the run had paused 16 minutes on an ask_human question (the human's own answer latency), that paused time counted as work, and history_duration escalated a perfectly healthy run into another pause immediately after the human's answer. The pause/resume machinery itself behaved exactly as designed (same-role same-turn re-entry, checkpoints intact — B-254 fix verified working in this same record). This bug is a PREREQUISITE for the escalation-as-pause design (escalation timeline/pause bug): with elapsed counting paused/queued time, every slow human answer buys a spurious escalation pause right after resume. Fix restated: elapsed = active execution time only (sum of running intervals), never queued or paused time.
+
+### T-230 — Adjust-seats shows empty seats: the rail fetches the roster for mode=solo regardless of the phase being tuned, and the one-shot pre-seed bakes the blanks in
+
+Fixes B-264.
+
+## Reported
+
+Symptom (reported by Jose): select a task on the board, open the rail, click "adjust seats & caps" — the seat dropdowns are NOT pre-selected with the pinned roster.
+
+Cause, three parts:
+1. Board.tsx:929-933 — the rail fetches /v1/projects/{id}/roster?mode={runMode}, where runMode is useState("solo") and is only ever updated by the plain RunLauncher (onModeChange, Board.tsx:1104). The TddLaunch flow never updates it, so the roster handed down is resolved for SOLO.
+2. RunLauncher.tsx rosterSeats() projects that solo roster onto the build phase in PAIR: roles advisor/reviewer are absent from a solo resolution, so those seats project to "" — unselected dropdowns.
+3. The pre-seed effect (RunLauncher.tsx:81-92) is one-shot, guarded by value.ducklings.length === 0. Once it bakes ["luna","",""], a later correct roster never refills; the blanks are permanent for the session.
+
+Latent collision with T-219/B-258/SPEC-026: the pre-seed turns roster resolution into EXPLICIT seats on the request (provenance project/global, not picked now). After T-219 lands (untouched = no override), this UI would still send explicit seats derived from a roster resolved for the WRONG mode — re-introducing the phantom override through another door.
+
+Fix direction: fetch the roster per the MODE OF THE PHASE being tuned (test and build each ask for their own); display the resolution as the selected value with its provenance chip; send the engine only genuine picks (provenance "picked now"), leaving untouched seats omitted so the single launch path resolves them. The one-shot guard must key on the roster identity/mode, not on ducklings.length.
+
+Related: B-258 (T-219, engine-side single launch path), SPEC-026, B-261 (decision surfaces carrying their own seat overrides).
+
 

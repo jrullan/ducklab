@@ -1,0 +1,88 @@
+---
+kind: release
+version: v0.9.1
+since: v0.9.0
+tasks: 33
+unverified: 1
+unverified_tasks: T-208
+---
+
+# v0.9.1
+
+### The Now view
+- The Now view no longer shows the rail's running list twice, and the floating utilities drawer no longer overlaps page content.
+- Chats that ended, were aborted, or had their stream cancelled no longer linger in Now under "failed, awaiting your call" — a finished chat no longer claims it needs your decision.
+- Approving a plan is now a real decision made in Now: a card shows what the plan covers, with evidence, and a drawer explains exactly what approving will do.
+- The unexplained "N/M passed" stat in the Now footer has been reworded or removed.
+
+### When something is wrong, it tells you why
+- A single stale (404) page no longer dims and freezes the whole desktop.
+- Whenever part of the app is dimmed or disabled, it now says why it is and how to get out.
+- Items marked blocked now explain why they are blocked, and manually landing a task no longer leaves it stuck in a phantom "blocked" lane.
+- The doctor's standing finding no longer interrupts every chat, and when it is shown it renders as readable text instead of raw data.
+
+### Your work survives
+- A budget pause mid-run no longer destroys progress: the interrupted turn's work is kept, the resume lands on the right role, completed work no longer regresses, and the transcript shows a checkpoint note where the run was interrupted and resumed.
+- Accepts are more robust: an accept completes fully or fails clearly, some former hard errors are now reported as warnings, leftover render captures no longer block the accept's branch switch, and unusual file layouts (ignored or symlinked links) no longer break accept staging.
+- A run taking roughly twice as long as its kind usually does is now flagged for escalation — and that clock counts only active work, not time spent queued or paused.
+- Runs no longer serialize behind a single seat holding a provider slot for the run's whole lifetime; slot reservations now behave the same on either side of a pause.
+- After an accept, your checkout now advances by itself: sync checks only the files it is about to touch, so unrelated local changes — including the app's own state files — no longer block it and are never overwritten. If a file the landing would update has local changes, sync leaves everything untouched and says so.
+
+### Chat
+- Project chat now has a proper door, and the roster seats you picked are pre-seated when you open it.
+- A configuration-amendment suggestion now accompanies the consultant's answer instead of replacing it.
+- Expanding one turn in a transcript expands only that turn, not every turn by the same role.
+- Launching a run from the desktop no longer silently forces solo mode — your configured "build runs open in: pair" setting and pinned seats are honored.
+- Adjust-seats now shows the seats of the phase being tuned, instead of blank ones.
+
+### Settings & status
+- Settings is no longer a one-way trap: the section buttons keep working once you've entered a room.
+- The Providers list shows the real per-provider run cap (1 local, 8 remote, or your configured value) instead of "unlimited".
+- The sidebar footer now shows when an update is available, with a checkpointed restart action to take it.
+- Small text fixes: "N runs hit this ceiling" now pluralizes correctly, and budget aggregates show money to two decimals.
+
+### Tasks
+- Triage can now break a big ask into a set of smaller tasks sized to the work, each on its own lane, instead of handing over one oversized task.
+
+> 1 of these changes (T-208) was accepted with no gate that could run, so nothing was verified about it beyond a person reading the diff.
+
+> 1 of these changes (T-208) was accepted with no gate that could run, so nothing was verified about it beyond a person reading the diff.
+
+## What shipped
+
+### M-001
+
+- **T-181** T-177 left the dissolution half-done: a floating utilities drawer overlaps content and the whole GuideRail is embedded in Now, duplicating its running list (`bb0a7be`)
+- **T-198** One stray 404 bricks the whole desktop: staleness inference dims every surface with pointer-events-none and never says why (`f5ef2d8`)
+- **T-199** Fake engine drifted again: seven endpoints unknown — the parity test does not walk the real routes (`479deb6`)
+- **T-200** F2a — plan sections declare their lanes: owned files become a validated contract that briefs inherit (`76bb4dd`)
+- **T-201** F2b — approving a plan is a Now decision: a card with coverage evidence, and a drawer that says what approving means (`4f56136`)
+- **T-202** Dedupe staging exclusions and make accept staging immune to ignored/symlinked link_deps (`7a78f99`)
+- **T-203** The project chat has no door and seats nobody: the consultant hides in the command palette and the roster's pick is not pre-seated (`d5c38a7`)
+- **T-204** The configuration-amendment card replaces the consultant's answer instead of accompanying it (`8563368`)
+- **T-205** Make accept atomic: commit merge succeeds before checkout advance, downgrade advance errors to warnings (`521dccf`)
+- **T-206** The engine never notices a run is taking twice as long as its kind: wall-clock vs history joins the escalation thresholds (`26600c0`)
+- **T-207** run_list punishes big asks (over-limit falls to the DEFAULT of 20) and analytics have no honest path: aggregates belong to the engine (`291d737`)
+- **T-208** An ended or aborted chat lingers in Now wearing accept-framing it can never satisfy (`d3e74ba`)
+- **T-209** The doctor's standing finding gatecrashes every chat and renders a raw struct at the user (`a2c09ca`)
+- **T-210** Manual /land leaves the task in a phantom 'blocked' lane — and blocked never says why (`2fd47ec`)
+- **T-211** A tail-role seat serializes whole runs: provider slots are reserved for the full roster for the run's lifetime, and inconsistently across pauses (`f133e4d`)
+- **T-212** No terminal chat belongs in Now, whatever killed it: stream-canceled chats still squat in 'failed, awaiting your call' (`aa0f8b0`)
+- **T-213** The disabled-surface state is still silent: whenever the app dims MAIN it must say why and how out — the undelivered half of B-228 (`6802843`)
+- **T-214** The Settings frame is a one-way trap: section buttons die once you enter a room — two navigation mechanisms, one owner needed (`6702d6d`)
+- **T-215** Expanding one reviewer turn expands them all: transcript expansion state is keyed by role, not by turn identity (`b0663da`)
+- **T-216** A budget pause mid-turn destroys work: the interrupted turn's progress is discarded, the resume skips to the wrong role, and even completed work regresses (`0dc4b47`)
+- **T-217** Replace the fabricated reviewer checkpoint with a real budget-interruption resume test (`d7fa5bd`)
+- **T-218** Render interrupted-turn checkpoint notes and resumed status in the transcript (`29aea0f`)
+- **T-219** A desktop launch surface requests mode=solo, silently overriding the configured 'build runs open in: pair' and the pinned seats (`3e8880e`)
+- **T-220** Render captures still live inside the worktree and now block the accept's branch switch: move them out of the tree for good (`842b838`)
+- **T-221** Refuse to synchronize any dirty default-branch checkout, including .ducklab (`938e212`)
+- **T-222** Triage proposes decomposition and promote can birth N tasks with disjoint lanes: portion the food to the duckling's size (`ea634cc`)
+- **T-224** Enforce one checkout root throughout turns, gates, and accept staging (`65cf4ee`)
+- **T-225** Reword or remove the unexplained 'N/M passed' stat in the Now footer (`f2993a1`)
+- **T-226** Show the effective per-provider run cap (1 local, 8 remote, or configured) instead of 'unlimited' in the Providers list (`b666835`)
+- **T-227** Pluralize 'N runs hit this ceiling' and add a two-decimal money variant for budget aggregates (`9ffaf72`)
+- **T-228** Show available update in the sidebar footer with a checkpointed restart action (`3d22b8f`)
+- **T-229** The history_duration trigger counts queued and paused time as work: elapsed should be active wall clock only (`471b597`)
+- **T-230** Adjust-seats shows empty seats: the rail fetches the roster for mode=solo regardless of the phase being tuned, and the one-shot pre-seed bakes the blanks in (`99811cb`)
+
