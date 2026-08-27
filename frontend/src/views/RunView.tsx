@@ -201,7 +201,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // being read.
   const [taskOpen, setTaskOpen] = useState(false);
   const tabPanelRef = useRef<HTMLDivElement | null>(null);
-  // Explicit expand/collapse choices per turn, keyed round:turn. Held HERE
+  // Explicit expand/collapse choices per turn identity. Held HERE
   // because the virtualiser unmounts off-screen turns — state inside the turn
   // would forget the reader's choice the moment they scrolled away.
   const [turnChoice, setTurnChoice] = useState<Record<string, boolean>>({});
@@ -1722,15 +1722,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
           {/* Viewport-relative, so it adapts to the window without depending on
               a chain of parent heights resolving — which is what broke. */}
-          <VirtualList items={turns} height="60vh" followTail={liveNow}>
+          <VirtualList items={turns} height="60vh" followTail={liveNow} getItemKey={(turn) => turn.key}>
             {(t, i) => {
               // A finished turn folds to its summary; the LIVE turn and the
               // last one stay open — that is where the reader's eyes are.
               // Human chat messages never fold: they are short and they ARE
               // the conversation.
-              const key = `${t.round}:${t.turn}`;
+              // A role is part of a turn's identity: a round can contain
+              // multiple actors at the same coordinates. `t.key` also keeps
+              // synthetic transcript entries distinct from model turns.
+              const turnKey = `${t.role}:${t.key}`;
               const foldable = t.done && !t.messageOnly;
-              const isCollapsed = foldable && !(turnChoice[key] ?? i === turns.length - 1);
+              const isCollapsed = foldable && !(turnChoice[turnKey] ?? i === turns.length - 1);
               return (
                 <ConversationTurn
                   block={t}
@@ -1742,7 +1745,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   deliverableTexts={deliverables?.lines.map((l) => l.text)}
                   onToggle={
                     foldable
-                      ? () => setTurnChoice((c) => ({ ...c, [key]: isCollapsed }))
+                      ? () => setTurnChoice((c) => ({ ...c, [turnKey]: isCollapsed }))
                       : undefined
                   }
                 />

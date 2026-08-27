@@ -173,6 +173,30 @@ describe("RunView", () => {
     expect(screen.getAllByTestId("budget-meter").length).toBeGreaterThan(0);
   });
 
+  it("expands only the selected reviewer turn", () => {
+    useRuns.getState().setRun(run);
+    for (const event of [
+      { type: "turn_start", run_id: "r-1", seq: 1, data: { round: 1, turn: 0, role: "reviewer", duckling: "pato-dos" } },
+      { type: "turn_end", run_id: "r-1", seq: 2, data: { round: 1, turn: 0, role: "reviewer" } },
+      { type: "turn_start", run_id: "r-1", seq: 3, data: { round: 2, turn: 0, role: "reviewer", duckling: "pato-dos" } },
+      { type: "turn_end", run_id: "r-1", seq: 4, data: { round: 2, turn: 0, role: "reviewer" } },
+      { type: "turn_start", run_id: "r-1", seq: 5, data: { round: 2, turn: 1, role: "implementer", duckling: "pato-uno" } },
+      { type: "turn_end", run_id: "r-1", seq: 6, data: { round: 2, turn: 1, role: "implementer" } },
+    ]) useRuns.getState().applyEvent(event);
+
+    render(<RunView runId="r-1" client={okClient()} />);
+
+    const reviewers = screen.getAllByTestId("conversation-turn").filter((turn) => turn.dataset.role === "reviewer");
+    expect(reviewers).toHaveLength(2);
+    expect(reviewers[0]).toHaveAttribute("data-collapsed", "true");
+    expect(reviewers[1]).toHaveAttribute("data-collapsed", "true");
+
+    fireEvent.click(reviewers[1]!.querySelector('[data-testid="turn-toggle"]')!);
+
+    expect(reviewers[0]).toHaveAttribute("data-collapsed", "true");
+    expect(reviewers[1]).toHaveAttribute("data-collapsed", "false");
+  });
+
   // AC-34: no optimistic UI. The commit appears only after the engine says so.
   it("shows pending during accept and the sha only once confirmed", async () => {
     useRuns.getState().setRun(run);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type Key, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 /**
@@ -19,6 +19,7 @@ export function VirtualList<T>({
   height = 520,
   followTail = false,
   children,
+  getItemKey,
 }: {
   items: readonly T[];
   estimateSize?: number;
@@ -32,6 +33,8 @@ export function VirtualList<T>({
    * the follow; returning to the bottom reattaches it. */
   followTail?: boolean;
   children: (item: T, index: number) => ReactNode;
+  /** Stable identity for list entries that can be inserted or reordered. */
+  getItemKey?: (item: T, index: number) => Key;
 }) {
   const parentRef = useRef<HTMLDivElement>(null);
   // Whether the person is AT the tail. Starts true; their own scrolling is
@@ -69,6 +72,7 @@ export function VirtualList<T>({
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
+    getItemKey: (index) => getItemKey?.(items[index]!, index) ?? index,
     estimateSize: () => estimateSize,
     overscan,
     enabled: items.length >= threshold,
@@ -87,7 +91,7 @@ export function VirtualList<T>({
         style={{ height, overflow: "auto" }}
       >
         {items.map((item, i) => (
-          <div key={i}>{children(item, i)}</div>
+          <div key={getItemKey?.(item, i) ?? i}>{children(item, i)}</div>
         ))}
       </div>
     );
