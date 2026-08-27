@@ -678,7 +678,7 @@ export class EngineClient {
         // Compatibility with older muxes: Go's default unmatched-route body is
         // a precise, unmistakable marker. Do not broaden this to arbitrary
         // text/plain 404s, which may be data/resource failures.
-        (res.status === 404 && text === "404 page not found");
+        (res.status === 404 && text.trim() === "404 page not found");
       if (unknownRoute) {
         this.stale = "older";
         this.opts.onStale?.("older", { method, path });
