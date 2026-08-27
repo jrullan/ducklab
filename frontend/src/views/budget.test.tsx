@@ -7,7 +7,7 @@ import { money } from "../lib/format";
 const clientWith = (over: Partial<EngineClient> = {}) =>
   ({
     budgetDefaults: vi.fn(() =>
-      Promise.resolve({ max_usd: 2, max_tokens: 400000, max_turns: 24, max_wallclock_s: 3600 }),
+      Promise.resolve({ max_usd: 2, max_tokens: 400000, max_turns: 24, max_wallclock_s: 3600, wallclock_escalation_multiplier: 2 }),
     ),
     budgetDefaultsSet: vi.fn((b: BudgetView) => Promise.resolve(b)),
     modeDefaults: vi.fn(() =>
@@ -91,7 +91,51 @@ describe("the run budget in Settings", () => {
         max_tokens: 1500000,
         max_turns: 24,
         max_wallclock_s: 3600,
+        wallclock_escalation_multiplier: 2,
       }),
+    );
+  });
+
+  it("renders, saves, and rehydrates the wallclock escalation multiplier", async () => {
+    const client = clientWith({
+      budgetDefaults: vi.fn(() =>
+        Promise.resolve({
+          max_usd: 2,
+          max_tokens: 400000,
+          max_turns: 24,
+          max_wallclock_s: 3600,
+          wallclock_escalation_multiplier: 2.5,
+        }),
+      ),
+      budgetDefaultsSet: vi.fn(() =>
+        Promise.resolve({
+          max_usd: 2,
+          max_tokens: 400000,
+          max_turns: 24,
+          max_wallclock_s: 3600,
+          wallclock_escalation_multiplier: 3.5,
+        }),
+      ),
+    } as Partial<EngineClient>);
+    render(settings(client));
+
+    const multiplier = await screen.findByTestId("budget-wallclock_escalation_multiplier") as HTMLInputElement;
+    expect(multiplier.value).toBe("2.5");
+    expect(screen.getByTestId("config-settings").textContent).toContain("escalate when a run takes N x its kind's median active time");
+    fireEvent.change(multiplier, { target: { value: "4" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+
+    await waitFor(() =>
+      expect(client.budgetDefaultsSet).toHaveBeenCalledWith({
+        max_usd: 2,
+        max_tokens: 400000,
+        max_turns: 24,
+        max_wallclock_s: 3600,
+        wallclock_escalation_multiplier: 4,
+      }),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId("budget-wallclock_escalation_multiplier") as HTMLInputElement).value).toBe("3.5"),
     );
   });
 
