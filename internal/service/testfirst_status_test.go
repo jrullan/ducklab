@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // Accepting a test-first run commits a FAILING test — the definition of done,
@@ -493,6 +495,104 @@ func TestAnAnsweredTestRunResumesItsOwnStrategy(t *testing.T) {
 // the work already in the tree — no_changes, worn as FAILED for honest
 // pass-rates — pushed a DELIVERED task into Blocked, and the person hunted a
 // bug that lived elsewhere while the board said their task needed retrying.
+// The before gate is a launch-time measurement. If a writer pauses after
+// creating its test, resuming must not measure that half-finished work as a new
+// baseline: the original green-to-red transition is still the evidence.
+func TestResumedTestFirstUsesItsLaunchBaseline(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	native := true
+	for id, duck := range s.cfg.Ducklings {
+		duck.Caps.NativeTools = &native
+		s.cfg.Ducklings[id] = duck
+	}
+	projectID, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if err := vcs.New(dir).Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ProjectUpdate(context.Background(), projectID, map[string]string{
+		"verify.mode": "tests", "verify.tests": "test ! -f regression_test.go",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	toolCall := func(name, args string) provider.ToolCall {
+		call := provider.ToolCall{ID: "call-" + name, Type: "function"}
+		call.Function.Name, call.Function.Arguments = name, args
+		return call
+	}
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(_ provider.ChatRequest, call int) *provider.ChatResponse {
+		var message provider.Message
+		switch call {
+		case 1:
+			message.ToolCalls = []provider.ToolCall{toolCall("fs_write", `{"path":"regression_test.go","content":"package fixture\n\nimport \"testing\"\n\nfunc TestRegression(t *testing.T) { t.Fatal(\"missing\") }\n"}`)}
+		case 2:
+			message.ToolCalls = []provider.ToolCall{toolCall("ask_human", `{"question":"Should the regression cover the legacy format too?"}`)}
+		default:
+			message.Content = "The failing regression test is complete."
+		}
+		finish := provider.FinishStop
+		if len(message.ToolCalls) > 0 {
+			finish = provider.FinishToolCalls
+		}
+		return &provider.ChatResponse{Choices: []provider.Choice{{Message: message, FinishReason: finish}}}
+	}
+
+	run, err := s.TestStart(context.Background(), projectID, TestFirstRequest{TaskID: "T-001", Duckling: "pato-uno"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	select {
+	case <-rs.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("test writer did not pause")
+	}
+	if rs.run.Status != "paused" || rs.run.PendingKind != "question" {
+		t.Fatalf("state = %s/%s, want paused/question", rs.run.Status, rs.run.PendingKind)
+	}
+	if _, err := os.Stat(filepath.Join(rs.run.WorktreePath, "regression_test.go")); err != nil {
+		t.Fatalf("the pause did not retain the already-written test: %v", err)
+	}
+	questionID, _ := rs.run.PendingData["question_id"].(string)
+	if questionID == "" {
+		t.Fatalf("paused question has no id: %#v", rs.run.PendingData)
+	}
+	if err := s.RunAnswer(context.Background(), run.ID, questionID, "yes"); err != nil {
+		t.Fatal(err)
+	}
+	s.runsMu.RLock()
+	rs = s.runs[run.ID]
+	s.runsMu.RUnlock()
+	select {
+	case <-rs.done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("resumed test writer did not finish")
+	}
+	if rs.run.Verdict != "PASSED" {
+		t.Fatalf("verdict = %q, want PASSED; detail: %#v", rs.run.Verdict, rs.run.PendingData)
+	}
+	detail, _ := rs.run.PendingData["detail"].(string)
+	if strings.Contains(detail, "already red before this run") {
+		t.Fatalf("resume judged the worked tree as its baseline: %q", detail)
+	}
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeGates := 0
+	for _, event := range events {
+		if event.Type == "gate" && event.Data["phase"] == "before" {
+			beforeGates++
+		}
+	}
+	if beforeGates != 1 {
+		t.Errorf("before-gate measurements = %d, want exactly one", beforeGates)
+	}
+}
+
 func TestNoChangeRetriesDoNotUndeliverAnAcceptedTask(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
