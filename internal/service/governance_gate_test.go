@@ -60,12 +60,19 @@ func TestDesktopStaleReachesReviewerAndHumanGatePayload(t *testing.T) {
 	if !strings.Contains(payload, desktopStaleMessage) {
 		t.Errorf("reviewer payload omitted desktop warning %q:\n%s", desktopStaleMessage, payload)
 	}
+	const recovery = "run make desktop, or cut a release"
+	if !strings.Contains(payload, recovery) {
+		t.Errorf("reviewer payload omitted stale-bundle recovery %q:\n%s", recovery, payload)
+	}
 	// PendingData and human_needed use this same plain-words value when the
 	// paused-gate branch observes DesktopStale.
 	run := &runlog.Run{DesktopStale: true, PendingData: map[string]interface{}{"desktop_stale": desktopStaleMessage}}
 	gateData := map[string]interface{}{"desktop_stale": run.PendingData["desktop_stale"]}
 	if gateData["desktop_stale"] != desktopStaleMessage {
 		t.Fatalf("human_needed gate data = %#v", gateData)
+	}
+	if warning, _ := gateData["desktop_stale"].(string); !strings.Contains(warning, recovery) {
+		t.Errorf("human_needed gate data omitted stale-bundle recovery %q: %#v", recovery, gateData)
 	}
 	encoded, err := json.Marshal(run)
 	if err != nil {
