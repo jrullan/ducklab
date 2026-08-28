@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const rosterModule = "./Roster";
 const loadRoster = () => import(/* @vite-ignore */ rosterModule);
@@ -84,23 +84,29 @@ async function renderRoster(options: { rejectSet?: boolean; pairOverlap?: boolea
   return client;
 }
 
-function dataTransfer(id: string) {
-  return { getData: vi.fn(() => id), setData: vi.fn() };
-}
-
 async function projectScope() {
   fireEvent.click(screen.getByRole("button", { name: /Project · Pond/i }));
   await waitFor(() => expect(screen.getByTestId("roster-card-pair-implementer-builder").textContent).toContain("builder"));
 }
 
+function openSeat(mode: string, role: string) {
+  fireEvent.click(screen.getByTestId(`roster-drop-${mode}-${role}`));
+  return screen.getByTestId("duckling-picker-drawer");
+}
+
+function choose(id: string) {
+  const catalog = screen.getByRole("heading", { name: "All candidates" }).parentElement as HTMLElement;
+  fireEvent.click(within(catalog).getByRole("button", { name: new RegExp(id) }));
+}
+
 describe("Roster assignment", () => {
-  it("assigns a flock duckling dropped onto a project seat", async () => {
+  it("assigns a duckling chosen for a project seat", async () => {
     const client = await renderRoster();
     await projectScope();
-    const transfer = dataTransfer("critic-b");
-    fireEvent.dragStart(screen.getByTestId("roster-flock-card-critic-b"), { dataTransfer: transfer });
-    fireEvent.drop(screen.getByTestId("roster-column-council-reviewer"), { dataTransfer: transfer });
-    await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-b"]));
+    const drawer = openSeat("council", "reviewer");
+    choose("critic-b");
+    fireEvent.click(within(drawer).getByRole("button", { name: /apply 2 ducklings/i }));
+    await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-a", "critic-b"]));
   });
 
   it("opens the comparison drawer by keyboard and applies a multi-seat selection", async () => {
@@ -117,17 +123,21 @@ describe("Roster assignment", () => {
   // The SEAT decides append vs replace, never a drag flag (B-067): a pinned
   // multi-slot seat appends in displayed order; an inherited one starts the
   // pin fresh; a single-slot seat always replaces.
-  it("appends drops to a pinned multi-slot seat in displayed order", async () => {
+  it("stages additions to a pinned multi-slot seat in displayed order", async () => {
     const client = await renderRoster({ pinnedCouncilCritics: true });
     await projectScope();
-    fireEvent.drop(screen.getByTestId("roster-column-council-reviewer"), { dataTransfer: dataTransfer("critic-b") });
+    const drawer = openSeat("council", "reviewer");
+    choose("critic-b");
+    fireEvent.click(within(drawer).getByRole("button", { name: /apply 2 ducklings/i }));
     await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-a", "critic-b"]));
   });
 
   it("replaces a single-slot seat even when it is already pinned", async () => {
     const client = await renderRoster({ pinnedCouncilCritics: true });
     await projectScope();
-    fireEvent.drop(screen.getByTestId("roster-column-solo-implementer"), { dataTransfer: dataTransfer("worker-b") });
+    const drawer = openSeat("solo", "implementer");
+    choose("worker-b");
+    fireEvent.click(within(drawer).getByRole("button", { name: /^apply$/i }));
     await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "solo", "implementer", ["worker-b"]));
   });
 
@@ -148,9 +158,9 @@ describe("Roster assignment", () => {
 
   it("writes global edits only through the global roster API", async () => {
     const client = await renderRoster();
-    const transfer = dataTransfer("critic-b");
-    fireEvent.dragStart(screen.getByTestId("roster-flock-card-critic-b"), { dataTransfer: transfer });
-    fireEvent.drop(screen.getByTestId("roster-column-council-reviewer"), { dataTransfer: transfer });
+    const drawer = openSeat("council", "reviewer");
+    choose("critic-b");
+    fireEvent.click(within(drawer).getByRole("button", { name: /apply 2 ducklings/i }));
     await waitFor(() => expect(client.GlobalRosterSet).toHaveBeenCalledWith("council", "reviewer", ["critic-a", "critic-b"]));
     expect(client.RosterSetManyMode).not.toHaveBeenCalled();
   });
@@ -158,10 +168,10 @@ describe("Roster assignment", () => {
   it("renders engine validation errors beside the board", async () => {
     const client = await renderRoster({ rejectSet: true });
     await projectScope();
-    fireEvent.drop(screen.getByTestId("roster-column-split-implementer"), { dataTransfer: dataTransfer("worker-b") });
-    // Beside the board that produced it — an error at the top of the view
-    // was invisible from the lower boards.
-    const err = await screen.findByTestId("roster-error-split");
+    const drawer = openSeat("split", "implementer");
+    choose("worker-b");
+    fireEvent.click(within(drawer).getByRole("button", { name: /apply 2 ducklings/i }));
+    const err = await screen.findByRole("alert");
     expect(err.textContent).toMatch(/field ducklings: split requires at least two workers/i);
     expect(client.RosterSetManyMode).toHaveBeenCalled();
   });

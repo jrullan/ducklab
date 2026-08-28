@@ -75,23 +75,14 @@ describe("Roster board as a decision surface", () => {
   });
 });
 
-// Dragging shows a small name chip at the cursor (the browser's whole-card
-// ghost landed far from the pointer on WebKitGTK and looked like the drop was
-// going elsewhere), and the column under the pointer says it is the target.
-describe("Roster drag feedback", () => {
-  it("uses a name chip as the drag image and highlights the hovered column", async () => {
+describe("Flock contextual selection", () => {
+  it("opens the complete catalog from the seat instead of showing a permanent inventory", async () => {
     await renderRoster();
-    const setDragImage = vi.fn();
-    const card = screen.getByTestId("roster-flock-card-k3");
-    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), setDragImage, effectAllowed: "", dropEffect: "" } });
-    expect(setDragImage).toHaveBeenCalledTimes(1);
-    const ghost = setDragImage.mock.calls[0]![0] as HTMLElement;
-    expect(ghost.textContent).toBe("k3");
-    expect(setDragImage.mock.calls[0]![1]).toBe(12); // pointer at the chip's left edge
-    const column = screen.getByTestId("roster-column-solo-advisor");
-    fireEvent.dragOver(column, { dataTransfer: { dropEffect: "" } });
-    await waitFor(() => expect(column.getAttribute("data-dragover")).toBe("true"));
-    fireEvent.dragLeave(column, { relatedTarget: document.body });
-    await waitFor(() => expect(column.getAttribute("data-dragover")).toBeNull());
+    expect(screen.queryByTestId("roster-flock")).toBeNull();
+    fireEvent.click(screen.getByTestId("roster-drop-solo-advisor"));
+    const drawer = screen.getByTestId("duckling-picker-drawer");
+    expect(drawer).toHaveTextContent("All candidates");
+    expect(drawer).toHaveTextContent("k3");
+    expect(drawer).toHaveTextContent("terra");
   });
 });

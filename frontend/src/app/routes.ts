@@ -17,7 +17,7 @@ export type Route =
   | { name: "run"; id: string }
   | { name: "ducklings" }
   | { name: "settings"; section?: SettingsSection }
-  | { name: "roster" }
+  | { name: "flock" }
   | { name: "skills" };
 
 export function parseRoute(hash: string): Route {
@@ -55,8 +55,9 @@ export function parseRoute(hash: string): Route {
       const section = arg || new URLSearchParams(query).get("section") || undefined;
       return isSettingsSection(section) ? { name: "settings", section } : { name: "settings" };
     }
-    case "roster":
-      return { name: "roster" };
+    case "flock":
+    case "roster": // Backward-compatible bookmarks; Flock is the public name.
+      return { name: "flock" };
     case "skills":
       return { name: "skills" };
     default:
@@ -92,8 +93,8 @@ export function routeHref(route: Route): string {
       return "#/ducklings";
     case "settings":
       return route.section ? `#/settings/${route.section}` : "#/settings";
-    case "roster":
-      return "#/roster";
+    case "flock":
+      return "#/flock";
     case "skills":
       return "#/skills";
     case "now":

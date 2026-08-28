@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { CandidateCriteriaView, Duckling, EngineClient, Scorecard } from "../api/client";
 import { DuckAvatar } from "../components/DuckAvatar";
-import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import { rolesForMode } from "../lib/seats";
-import type { ProviderView } from "../api/client";
 import { DucklingPickerDrawer } from "../components/DucklingPickerDrawer";
 
 type Entry = { role: string; duckling?: string; ducklings?: string[]; source?: string; default?: string; global_ducklings?: string[]; candidates?: { id: string; why: string }[] };
@@ -31,26 +29,6 @@ const multiSlot = (mode: string, role: string): boolean =>
   (mode === "council" && role === "reviewer") || ((mode === "split" || mode === "tournament") && role === "implementer");
 const columnsFor = (mode: string): string[] | null =>
   mode === "common" ? ["triager", "consultant", "scribe"] : rolesForMode(mode);
-// A duckling is local when its provider answers on this machine or the LAN;
-// the provider id says nothing about that ("beelink" is local, "openrouter"
-// is not), so the endpoint decides. A provider literally named "local" counts.
-const isLocal = (d: Duckling, providers: ProviderView[]): boolean => {
-  if (d.provider === "local") return true;
-  const p = providers.find((x) => x.id === d.provider);
-  if (!p) return false;
-  return /^(https?:\/\/)?(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|[^/]*\.local\b)/i.test(p.base_url ?? "");
-};
-
-const CONTEXT_TIERS = [{ label: "128k", tokens: 128_000 }, { label: "256k", tokens: 256_000 }, { label: "1M", tokens: 1_000_000 }];
-const SORTS: { key: string; label: string; value: (s: Scorecard) => number | undefined; format: (v: number) => string }[] = [
-  { key: "pass-rate", label: "pass rate", value: (s) => (s.measured?.runs ? s.measured.pass_rate : undefined), format: (v) => `${Math.round(v)}%` },
-  { key: "avg-cost", label: "cost per run", value: (s) => (s.measured?.runs ? s.measured.avg_cost_usd : undefined), format: (v) => `$${v.toFixed(2)}/run` },
-  { key: "input-cost", label: "input cost", value: (s) => s.cost?.input_per_mtok, format: (v) => `$${v}/Mtok in` },
-  { key: "output-cost", label: "output cost", value: (s) => s.cost?.output_per_mtok, format: (v) => `$${v}/Mtok out` },
-  { key: "bench:arena", label: "bench · arena", value: (s) => s.bench?.arena?.score, format: (v) => `bench ${Math.round(v * 100)}` },
-  { key: "coding-index", label: "coding index", value: (s) => s.index?.coding_score, format: (v) => `coding ${v}` },
-  { key: "context", label: "context", value: (s) => s.caps?.context_tokens, format: (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(v % 1_000_000 ? 1 : 0)}M ctx` : `${Math.round(v / 1000)}k ctx`) },
-];
 // One grammar for evidence everywhere: "84% · 198 runs · $0.21/run ·
 // coding 68.8". Positive when there is some, one quiet word when there is
 // none — not three negatives in a row. Few runs are said to be few: a 0%
@@ -68,26 +46,11 @@ const evidenceParts = (s: Scorecard, m: { runs?: number; pass_rate?: number; avg
   if (s.index?.coding_score !== undefined) parts.push(`coding ${s.index.coding_score}`);
   return parts;
 };
-const evidenceLine = (s: Scorecard): string => { const parts = evidenceParts(s, s.measured); return parts.length ? parts.join(" · ") : "no evidence yet"; };
-
-// Portraits are deliberately prose: the compact evidence line remains useful
-// for comparison, while this sentence tells a person what the record means.
 type Measurement = { runs?: number; pass_rate?: number; accepted_rate?: number; avg_cost_usd?: number; avg_cost_per_accept_usd?: number; cost_per_accept_usd?: number; cost_per_accepted_run_usd?: number; accepted?: number; accepted_runs?: number; send_back_rate?: number; sent_back?: number; send_backs?: number };
 // Scorecards serve pass rates as percentages. Keep the compatibility path for
 // legacy fractional fixtures, but 1 is a real one-percent value, not 100%.
 const rate = (value: number | undefined): number | undefined => value === undefined ? undefined : (value < 1 ? value * 100 : value);
 const money = (value: number | undefined): string | undefined => value === undefined ? undefined : `$${value.toFixed(2)}`;
-const portrait = (s: Scorecard): string => {
-  const m = s.measured as (Measurement | undefined);
-  if (!m?.runs) return "No measured runs yet.";
-  const early = m.runs < 15 ? "Early numbers: " : "";
-  const acceptedRate = rate(m.pass_rate ?? m.accepted_rate ?? (m.accepted_runs !== undefined || m.accepted !== undefined ? ((m.accepted_runs ?? m.accepted)! / m.runs) : undefined));
-  const sentBackRate = rate(m.send_back_rate ?? ((m.sent_back ?? m.send_backs) !== undefined ? ((m.sent_back ?? m.send_backs)! / m.runs) : undefined));
-  const cost = m.cost_per_accept_usd ?? m.cost_per_accepted_run_usd ?? m.avg_cost_per_accept_usd ?? (m.avg_cost_usd !== undefined && acceptedRate ? m.avg_cost_usd / (acceptedRate / 100) : undefined);
-  const parts = [acceptedRate === undefined ? undefined : `${Math.round(acceptedRate)}% accepted`, sentBackRate === undefined ? undefined : `${Math.round(sentBackRate)}% sent back`, cost === undefined || s.locality === "local" ? undefined : `${money(cost)} per accept`].filter(Boolean);
-  return `${early}${parts.length ? parts.join("; ") : `${m.runs} ${m.runs === 1 ? "run" : "runs"} measured`}.`;
-};
-
 const suggestionArithmetic = (id: string, role: string | undefined, candidates: { id: string; why: string }[], scorecards: Scorecard[]): string | undefined => {
   const s = scorecards.find((c) => c.id === id);
   if (!s) return undefined;
@@ -102,10 +65,6 @@ const suggestionArithmetic = (id: string, role: string | undefined, candidates: 
   if (acceptance !== undefined) return `${id} produced findings in ${Math.round(acceptance)}% of reviews`;
   return undefined;
 };
-function FilterChip({ testId, label, on, onClick }: { testId: string; label: string; on: boolean; onClick: () => void }) {
-  return <button type="button" data-testid={testId} aria-pressed={on} onClick={onClick} className={`rounded-full border px-2 py-0.5 ${on ? "border-ink bg-surface2 text-ink" : "border-hairline text-ink-muted hover:text-ink"}`}>{label}</button>;
-}
-
 // The criteria a seat's suggestions are ordered by, per role, editable in
 // place: the engine ships a default and one developer wants cost first while
 // another wants the coding index. Every list is visible — a rule the engine
@@ -146,18 +105,6 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const [activeMode, setActiveMode] = useState("pair");
   const [ducks, setDucks] = useState<Duckling[]>([]);
   const [scorecards, setScorecards] = useState<Scorecard[]>([]);
-  const [flockText, setFlockText] = useState("");
-  const [flockProvider, setFlockProvider] = useState("");
-  const [flockLocality, setFlockLocality] = useState("");
-  const [flockVision, setFlockVision] = useState(false);
-  const [flockTools, setFlockTools] = useState(false);
-  const [flockContext, setFlockContext] = useState(0);
-  // Evidence first: what a duckling has done here outranks what its provider
-  // charges. Highest first, because that is the question ("who is best?").
-  const [flockSort, setFlockSort] = useState("pass-rate");
-  const [flockDir, setFlockDir] = useState<"asc" | "desc">("desc");
-  const clearFlockFilters = () => { setFlockText(""); setFlockProvider(""); setFlockLocality(""); setFlockVision(false); setFlockTools(false); setFlockContext(0); };
-  const [providers, setProviders] = useState<ProviderView[]>([]);
   const [boards, setBoards] = useState<Record<string, Entry[]>>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [warnings, setWarnings] = useState<Record<string, string | undefined>>({});
@@ -176,27 +123,6 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
     setChosenSeat(null);
     if (seat) queueMicrotask(() => (document.querySelector(`[data-testid="roster-column-${seat.mode}-${seat.role}"]`) as HTMLElement | null)?.focus());
   };
-  const dragging = useRef(false);
-  const [dragOver, setDragOver] = useState<string | null>(null);
-  // The drag image. Left to the browser, WebKitGTK renders the whole card
-  // as the ghost, anchored far from the pointer — it looked like the drop
-  // was landing on the next column. A small chip with the duckling's name,
-  // held at the cursor, says exactly what is in hand and where it is.
-  const startDrag = (id: string, event: React.DragEvent) => {
-    dragging.current = true;
-    event.dataTransfer.setData("text/plain", id);
-    event.dataTransfer.effectAllowed = "copy";
-    if (typeof event.dataTransfer.setDragImage !== "function") return;
-    const ghost = document.createElement("div");
-    ghost.textContent = id;
-    ghost.setAttribute("data-testid", "roster-drag-ghost");
-    ghost.style.cssText = "position:fixed;top:-100px;left:-100px;padding:4px 10px;border-radius:9999px;font:600 13px system-ui,sans-serif;background:var(--surface,#222);color:var(--text,#eee);border:1px solid var(--border,#666);box-shadow:0 2px 8px rgba(0,0,0,.35);white-space:nowrap;pointer-events:none;";
-    document.body.appendChild(ghost);
-    // Anchor the chip so the pointer sits at its left-middle: the name
-    // trails the cursor and the drop point is the cursor, not the card.
-    event.dataTransfer.setDragImage(ghost, 12, ghost.offsetHeight / 2 || 12);
-    setTimeout(() => ghost.remove(), 0);
-  };
   const editable = typeof client.RosterSetManyMode === "function" && typeof client.GlobalRosterSet === "function";
 
   const reload = () => Promise.all(MODES.map(async (mode) => {
@@ -211,25 +137,8 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   });
 
   useEffect(() => { client.ducklings().then(setDucks).catch(() => {}); }, [client]);
-  // Evidence failing to load is said, not swallowed: a Flock that shows "no
-  // runs yet" for a duckling with 264 runs is a lie the operator will act on.
+  // Evidence powers the seat summaries and the comparison drawer.
   useEffect(() => { if (typeof client.Scorecards === "function") client.Scorecards().then(setScorecards).catch((e) => setError("", e)); }, [client]);
-  const flock = (() => {
-    const all = ducks.map((d) => scorecards.find((s) => s.id === d.id) ?? ({ ...d } as Scorecard));
-    const sort = SORTS.find((o) => o.key === flockSort) ?? SORTS[0]!;
-    const filtering = Boolean(flockText || flockProvider || flockLocality || flockVision || flockTools || flockContext);
-    const filtered = all.filter((s) => (!flockText || `${s.id} ${s.model}`.toLowerCase().includes(flockText.toLowerCase())) && (!flockProvider || s.provider === flockProvider) && (!flockLocality || (s.locality ?? (isLocal(ducks.find((d) => d.id === s.id)!, providers) ? "local" : "remote")) === flockLocality) && (!flockVision || s.caps?.vision) && (!flockTools || s.caps?.native_tools) && (!flockContext || (s.caps?.context_tokens ?? 0) >= flockContext))
-      .sort((a, b) => { const av = sort.value(a), bv = sort.value(b); if (av === undefined && bv === undefined) return 0; if (av === undefined) return 1; if (bv === undefined) return -1; return (av - bv) * (flockDir === "asc" ? 1 : -1); });
-    const active = chosenSeat ? (boards[chosenSeat.mode] ?? []).find((e) => e.role === chosenSeat.role) : undefined;
-    const candidates = active?.candidates ?? [];
-    const rank = new Map(candidates.map((c, i) => [c.id, i]));
-    const shown = chosenSeat && !["triager", "consultant", "scribe"].includes(chosenSeat.role) ? filtered.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id)! : 999) - (rank.has(b.id) ? rank.get(b.id)! : 999)) : filtered;
-    return { all, shown, filtering, providers: [...new Set(all.map((s) => s.provider).filter(Boolean))] as string[], value: sort.value, format: sort.format, sortLabel: sort.label, candidates, forRole: active?.role };
-  })();
-  useEffect(() => {
-    if (typeof client.providers !== "function") return;
-    client.providers().then(setProviders).catch(() => {});
-  }, [client]);
   useEffect(() => { reload(); }, [client, projectId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const write = async (mode: string, role: string, ids: string[], propagate = false) => {
@@ -260,24 +169,13 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   const applySelection = async (mode: string, role: string, ids: string[]) => {
     await write(mode, role, ids, true);
   };
-  const drop = (mode: string, role: string, event: React.DragEvent) => {
-    event.preventDefault();
-    const id = event.dataTransfer.getData("text/plain") || event.dataTransfer.getData("text");
-    if (id) assign(mode, role, id);
-  };
-
   const roster = ducks.map((d) => d.id);
   const pair = (boards.pair ?? []);
   const implementers = new Set((pair.find((e) => e.role === "implementer") ? names(pair.find((e) => e.role === "implementer")!) : []));
   const reviewers = new Set((pair.find((e) => e.role === "reviewer") ? names(pair.find((e) => e.role === "reviewer")!) : []));
   const overlap = [...implementers].some((id) => reviewers.has(id));
-  // The Flock and the boards scroll on their own: the flock is as long as the
-  // roster of ducklings, the boards as long as the modes, and scrolling one
-  // to reach its tail must not hide the other's head (Council, Solo).
-  // Evidence for a seated duckling IN THAT SEAT, and the seat's suggestion,
-  // so the board is a decision surface and not a map of names.
-  // The seat line is 14rem wide: rate, runs and coding index fit; the cost
-  // per run rides the tooltip (the Flock card shows it in full).
+  // Evidence for a seated duckling IN THAT SEAT keeps the board a decision
+  // surface instead of an inventory. The inventory now belongs to the drawer.
   const seatEvidence = (id: string, role: string): { line: string; full: string } => {
     const s = scorecards.find((c) => c.id === id);
     if (!s) return { line: "", full: "" };
@@ -287,51 +185,18 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
   };
   return <div className="flex h-full min-h-0 flex-col gap-4" data-testid="roster-view">
     <header className="flex flex-wrap items-start gap-4 border-b border-hairline pb-4">
-      <div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-[0.14em] text-ink-muted">Team defaults</p><h1 className="mt-1 text-xl font-semibold">Roster</h1><p className="mt-1 max-w-2xl text-sm text-ink-muted">Choose the default ducklings for each operating mode. Task launches and relaunches can override these seats for an individual run.</p></div>
-      <div className="flex rounded border border-hairline bg-surface1 p-1" data-testid="roster-scope" aria-label="Roster scope">
+      <div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-[0.14em] text-ink-muted">Team defaults</p><h1 className="mt-1 text-xl font-semibold">Flock</h1><p className="mt-1 max-w-2xl text-sm text-ink-muted">Choose the default ducklings for each operating mode. Task launches and relaunches can override these seats for an individual run.</p></div>
+      <div className="flex rounded border border-hairline bg-surface1 p-1" data-testid="roster-scope" aria-label="Flock scope">
         <button type="button" className={`rounded px-3 py-1.5 text-sm ${scope === "project" ? "bg-surface2 font-semibold text-ink" : "text-ink-muted"}`} onClick={() => setScope("project")}>Project · {projectName ?? projectId}</button>
         <button type="button" className={`rounded px-3 py-1.5 text-sm ${scope === "global" ? "bg-surface2 font-semibold text-ink" : "text-ink-muted"}`} onClick={() => setScope("global")}>Global defaults</button>
       </div>
+      <button type="button" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-muted hover:text-ink" data-testid="roster-criteria-toggle" aria-expanded={criteriaOpen} title="how seats are suggested" onClick={() => setCriteriaOpen((v) => !v)}>{criteriaOpen ? "Hide criteria" : "Suggestion criteria"}</button>
     </header>
     {criteriaOpen && <CriteriaPanel client={client} onSaved={() => { void reload(); }} />}
-    <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline" aria-label="Roster modes" data-testid="roster-mode-tabs">
+    <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline" aria-label="Flock modes" data-testid="roster-mode-tabs">
       {MODES.map((mode) => { const warning = Boolean(warnings[mode]); const entries = boards[mode] ?? []; const projectPins = entries.filter(pinned).length; return <button key={mode} type="button" data-testid={`roster-tab-${mode}`} aria-selected={activeMode === mode} onClick={() => setActiveMode(mode)} className={`relative min-w-fit px-3 py-2 text-sm capitalize ${activeMode === mode ? "text-ink" : "text-ink-muted"}`}><span>{mode}</span>{scope === "project" && projectPins > 0 && <span className="ml-1 text-[10px]">{projectPins} override{projectPins === 1 ? "" : "s"}</span>}{warning && <span className="ml-1 text-warning">●</span>}{activeMode === mode && <span className="absolute inset-x-2 bottom-0 h-0.5 bg-ink" />}</button>; })}
     </nav>
-    <div className="flex min-h-0 flex-1 gap-6 items-stretch">
-    <aside className="flex w-72 shrink-0 flex-col min-h-0" data-testid="roster-flock">
-      <div className="flex items-baseline gap-2"><h2 className="text-lg font-semibold">Flock</h2>
-        <span data-testid="roster-flock-count" className={`text-xs ${flock.filtering ? "font-medium text-ink" : "text-ink-muted"}`}>{flock.shown.length === flock.all.length ? `${flock.all.length} ducklings` : `${flock.shown.length} of ${flock.all.length}`}{flock.filtering && <> · <button type="button" className="underline" data-testid="roster-flock-clear" onClick={clearFlockFilters}>clear</button></>}</span>
-        <button type="button" className="ml-auto text-xs text-ink-muted underline hover:text-ink" data-testid="roster-criteria-toggle" aria-expanded={criteriaOpen} title="how seats are suggested" onClick={() => setCriteriaOpen((v) => !v)}>{criteriaOpen ? "hide criteria" : "criteria"}</button></div>
-      <input data-testid="roster-flock-filter-text" value={flockText} onChange={(e) => setFlockText(e.target.value)} placeholder="search id or model" aria-label="search the flock" className="mt-2 w-full rounded border border-hairline bg-surface px-2 py-1 text-sm" />
-      <div className="mt-2 flex flex-wrap items-center gap-1 text-xs" aria-label="flock filters">
-        <span className="mr-1 text-ink-muted" data-testid="roster-flock-filter-caption">filter the flock:</span>
-        {flock.providers.map((p) => <FilterChip key={p} testId={`roster-flock-filter-provider-${p}`} label={p} on={flockProvider === p} onClick={() => setFlockProvider(flockProvider === p ? "" : p)} />)}
-        <span aria-hidden="true" className="mx-1 h-4 w-px bg-hairline" />
-        {(["local", "remote"] as const).map((l) => <FilterChip key={l} testId={`roster-flock-filter-locality-${l}`} label={l} on={flockLocality === l} onClick={() => setFlockLocality(flockLocality === l ? "" : l)} />)}
-        <span aria-hidden="true" className="mx-1 h-4 w-px bg-hairline" />
-        <FilterChip testId="roster-flock-filter-vision" label="vision" on={flockVision} onClick={() => setFlockVision(!flockVision)} />
-        <FilterChip testId="roster-flock-filter-native-tools" label="tools" on={flockTools} onClick={() => setFlockTools(!flockTools)} />
-        <span aria-hidden="true" className="mx-1 h-4 w-px bg-hairline" />
-        {CONTEXT_TIERS.map((t) => <FilterChip key={t.label} testId={`roster-flock-filter-context-${t.label}`} label={`≥${t.label}`} on={flockContext === t.tokens} onClick={() => setFlockContext(flockContext === t.tokens ? 0 : t.tokens)} />)}
-      </div>
-      <div className="mt-2 flex items-center gap-1 text-xs text-ink-muted"><span>sort by</span>
-        <select data-testid="roster-flock-sort" aria-label="sort the flock by" value={flockSort} onChange={(e) => setFlockSort(e.target.value)} className="rounded border border-hairline bg-surface px-1 py-0.5 text-xs text-ink">{SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select>
-        <button type="button" data-testid="roster-flock-sort-dir" aria-label={flockDir === "desc" ? "highest first — switch to lowest first" : "lowest first — switch to highest first"} title={flockDir === "desc" ? "highest first" : "lowest first"} onClick={() => setFlockDir(flockDir === "desc" ? "asc" : "desc")} className="rounded border border-hairline px-1.5 py-0.5">{flockDir === "desc" ? "↓" : "↑"}</button>
-      </div>
-      <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1" data-testid="roster-flock-list">
-      {flock.shown.length === 0 && <p className="text-sm text-ink-muted" data-testid="roster-flock-empty">no duckling matches these filters.</p>}
-      {/* Compact: two lines per duckling so the whole flock fits the height
-          it is dragged across. Name, locality and the sort value on the
-          first; the evidence line on the second. Model and list price ride
-          the tooltip. */}
-      {flock.shown.map((s) => { const d = ducks.find((x) => x.id === s.id)!; const candidate = flock.candidates.find((c) => c.id === s.id); const local = s.locality ?? ""; const v = flock.value(s); const price = s.cost ? `$${s.cost.input_per_mtok} / $${s.cost.output_per_mtok} per Mtok` : "price unknown"; return <div key={s.id} draggable data-testid={`roster-flock-card-${s.id}`} title={`${s.model} · ${price}${s.index?.source ? `\ncoding index: ${s.index.source} · as of ${s.index.as_of ?? "?"}` : ""}`} onDragStart={(event) => startDrag(s.id, event)} onDragEnd={() => { dragging.current = false; setDragOver(null); }} className={`rounded border px-2 py-1.5 bg-surface ${candidate ? "border-ink-muted" : "border-hairline"}`}>
-        <div className="flex items-center gap-2"><DuckAvatar id={s.id} roster={roster} /><span className="font-medium truncate">{s.id}</span><span className="text-xs text-ink-muted"><StatusChip role="muted" label={local || (isLocal(d, providers) ? "local" : "remote")} /></span><span data-testid={`roster-flock-value-${s.id}`} className="ml-auto text-sm tabular-nums" title={flock.sortLabel}>{v === undefined ? "—" : flock.format(v)}</span></div>
-        <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-flock-evidence-${s.id}`}>{evidenceLine(s)}</div>
-        <div className="mt-0.5 truncate text-xs text-ink-muted" data-testid={`roster-flock-portrait-${s.id}`}>{portrait(s)}</div>
-        {candidate && <div className="mt-0.5 text-xs"><span data-testid={`roster-suggested-${s.id}`} className="font-medium">suggested for {flock.forRole}</span> <span data-testid={`roster-suggested-why-${s.id}`} className="text-ink-muted">· {candidate.why}</span></div>}
-      </div>; })}
-    </div></aside>
-    <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1" data-testid="roster-boards">
+    <div className="min-h-0 flex-1 overflow-y-auto pr-1" data-testid="roster-boards">
     {errors[""] !== undefined && <ErrorCard error={errors[""]} testId="roster-error" />}
     {overlap && <p role="alert">implementer and reviewer are the same duckling</p>}
     <div>{MODES.map((mode) => { const common = mode === "common"; const notRunnable = Boolean(warnings[mode]); return <section key={mode} className={activeMode === mode ? "" : "hidden"} data-testid={`roster-board-${mode}`} data-runnable={common ? undefined : String(!notRunnable)}>
@@ -349,7 +214,7 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
       {mode === "common" && scope === "project" && !(boards[mode] ?? []).some((entry) => pinned(entry)) && <p className="text-xs text-ink-muted">no pins</p>}
       <div className="mt-2 flex flex-wrap gap-3">{(boards[mode] ?? []).filter((entry) => { const cols = columnsFor(mode); return !cols || cols.includes(entry.role); }).sort((a, b) => { const cols = columnsFor(mode) ?? []; return cols.indexOf(a.role) - cols.indexOf(b.role); }).map((entry) => {
       const ids = names(entry); const isPinned = pinned(entry); const ghost = scope === "project" && !isPinned; const open = chosenSeat?.mode === mode && chosenSeat.role === entry.role; const top = entry.candidates?.[0]; const suggestion = top && !ids.includes(top.id) ? top : undefined;
-      return <div key={entry.role} className={`w-56 shrink-0 rounded transition-colors ${dragOver === `${mode}/${entry.role}` ? "bg-surface2 outline outline-1 outline-ink-muted" : ""}`} tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (dragOver !== `${mode}/${entry.role}`) setDragOver(`${mode}/${entry.role}`); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver((cur) => (cur === `${mode}/${entry.role}` ? null : cur)); }} onDrop={(event) => { setDragOver(null); drop(mode, entry.role, event); }} data-dragover={dragOver === `${mode}/${entry.role}` ? "true" : undefined} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
+      return <div key={entry.role} className="min-w-64 flex-1 rounded" tabIndex={0} data-testid={`roster-column-${mode}-${entry.role}`} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setChosenSeat({ mode, role: entry.role }); } }}>
         {/* Column header: the role, and — when the seat is occupied — one
             small "+" to add or change. The dashed drop zone is for empty
             seats only; an occupied seat with a big "+ assign" over it was
@@ -365,7 +230,6 @@ export function Roster({ client, projectId, projectName }: { client: EngineClien
         {suggestion && !open && <div className="mb-2 text-[11px] text-ink-muted" data-testid={`roster-seat-suggestion-${mode}-${entry.role}`} title={suggestion.why}>suggested: <button type="button" className="underline hover:text-ink" aria-label={`assign suggested ${suggestion.id} to ${entry.role} in ${mode}`} onClick={() => assign(mode, entry.role, suggestion.id)}>{suggestion.id}</button>{suggestionArithmetic(suggestion.id, entry.role, entry.candidates ?? [], scorecards) && <span className="ml-1" data-testid={`roster-seat-suggestion-arithmetic-${mode}-${entry.role}`}> · {suggestionArithmetic(suggestion.id, entry.role, entry.candidates ?? [], scorecards)}</span>}</div>}
       </div>;
     })}</div></section>; })}</div>
-    </div>
     </div>
     {chosenSeat && (() => { const entry = (boards[chosenSeat.mode] ?? []).find((candidate) => candidate.role === chosenSeat.role); const candidates = (entry?.candidates ?? []).map((candidate) => ({ ...candidate, arithmetic: suggestionArithmetic(candidate.id, chosenSeat.role, entry?.candidates ?? [], scorecards) })); return <DucklingPickerDrawer mode={chosenSeat.mode} role={chosenSeat.role} ducklings={ducks} scorecards={scorecards} candidates={candidates} current={entry ? names(entry) : []} multiple={multiSlot(chosenSeat.mode, chosenSeat.role)} scope={scope} onClose={closePicker} onApply={(ids) => applySelection(chosenSeat.mode, chosenSeat.role, ids)} />; })()}
   </div>;
