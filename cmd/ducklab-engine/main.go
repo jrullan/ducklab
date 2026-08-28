@@ -67,20 +67,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Find port
-	port := cfg.Engine.Port
-	if port == 0 {
-		// Ephemeral port
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: listen: %v\n", err)
-			os.Exit(1)
-		}
-		port = listener.Addr().(*net.TCPAddr).Port
-		listener.Close()
+	// Bind the port once and keep it: the same socket serves below. Probing
+	// an ephemeral port and closing it left a window in which nothing
+	// listened on the port engine.json advertised.
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Engine.Port))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: listen: %v\n", err)
+		os.Exit(1)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	// Rehydrate runs from disk and repair anything a dead engine left
+	// mid-flight. This runs BEFORE the listener accepts connections, so no
+	// client can observe a half-recovered state.
+	if err := svc.RecoverRuns(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: recover runs: %v\n", err)
 	}
 
-	// Write engine.json
+	// Write engine.json only now, when the next thing that happens is
+	// Serve on the bound socket: a caller that finds engine.json can trust
+	// /v1/health to answer. Written earlier, it named a port that refused
+	// connections for as long as recovery took, and `ducklab engine restart`
+	// reported "did not become ready within 15s" about an engine that came
+	// up fine (B-298).
 	stateDir, _ := daemon.StateDir()
 	info := &daemon.EngineInfo{
 		PID:        os.Getpid(),
@@ -96,13 +105,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer daemon.DeleteEngineJSON()
-
-	// Rehydrate runs from disk and repair anything a dead engine left
-	// mid-flight. This runs BEFORE the listener accepts connections, so no
-	// client can observe a half-recovered state.
-	if err := svc.RecoverRuns(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: recover runs: %v\n", err)
-	}
 
 	// Create server
 	server := engineapi.New(svc, b, token, build.Semver(), build.Provenance(), *allowOrigin)
@@ -144,7 +146,7 @@ func main() {
 		fmt.Println("WARNING: built from a working tree that differed from HEAD (-dirty) — " +
 			"what this engine serves may not match any commit; rebuild from a clean checkout before trusting run results")
 	}
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "error: serve: %v\n", err)
 		os.Exit(1)
 	}
