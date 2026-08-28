@@ -125,6 +125,39 @@ func TestATestReadyTasksDoorIsTheBuildOfItsCommittedTest(t *testing.T) {
 	}
 }
 
+// Accepted work's next act is shipping: the release door leads, and the
+// redo stays behind it.
+func TestAnAcceptedTasksDoorIsTheRelease(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil || len(tasks) == 0 {
+		t.Fatalf("no tasks: %v", err)
+	}
+	run := &runlog.Run{
+		ID: "r-built", ProjectID: id, TaskID: tasks[0].ID, Stage: "build",
+		Status: "done", Verdict: "PASSED", Accepted: true, CommitSHA: "def456",
+		StartedAt: "2026-08-06T16:00:00Z",
+	}
+	w, err := runlog.NewWriter(dir, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	s.RecoverRuns(context.Background())
+
+	j, err := s.NextFor(context.Background(), id, tasks[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Door == nil || j.Door.ID != "release" {
+		t.Fatalf("accepted task door = %+v, want release", j.Door)
+	}
+	if j.Rungs[len(j.Rungs)-1].State != "current" {
+		t.Fatalf("accepted rung is not current: %+v", j.Rungs)
+	}
+}
+
 // Unknown refs are refused with the shape named, not with an empty journey.
 func TestAJourneyForAnUnknownRefIsRefused(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")

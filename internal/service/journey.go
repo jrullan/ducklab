@@ -253,10 +253,13 @@ func (s *Service) taskJourney(ctx context.Context, projectID, id string) (*Journ
 				Reason: "the promise has two exits: keep it (build) or withdraw it"})
 		}
 	}
-	if t.Status == "accepted" && len(j.Steps) == 0 {
-		j.Steps = []NextStep{{ID: "release", Kind: "release",
+	if t.Status == "accepted" {
+		// Accepted work's natural next act is shipping, not rebuilding: the
+		// release door leads and "build it again" (a redo, which needs a
+		// note) stays available behind it.
+		j.Steps = append([]NextStep{{ID: "release", Kind: "release",
 			Action: "Cut a release to ship it",
-			Reason: "accepted work waits for a release to reach people"}}
+			Reason: "accepted work waits for a release to reach people"}}, j.Steps...)
 	}
 	if len(j.Steps) > 0 {
 		d := j.Steps[0]
