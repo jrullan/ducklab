@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const desktopStaleMessage = "this diff changes the frontend source but not the shipped bundle; the desktop will not show it until make desktop runs"
+const desktopStaleMessage = "this diff changes the frontend source but not the shipped bundle; run make desktop, or cut a release"
 
 // governanceCallouts describes changes to settings that control how a project
 // is run. It reads only project.toml hunks, so similarly named source settings
