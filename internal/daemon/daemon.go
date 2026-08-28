@@ -144,12 +144,43 @@ func GenerateToken() (string, error) {
 // StartEngine spawns the engine binary detached: the engine outlives whoever
 // started it by design, so nothing waits on the process.
 func StartEngine(path string) error {
+	_, err := StartEnginePID(path)
+	return err
+}
+
+// StartEnginePID starts the engine and returns its process id, so a caller
+// can tell "still recovering" from "died".
+func StartEnginePID(path string) (int, error) {
 	cmd := exec.Command(path)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start engine: %w", err)
+		return 0, fmt.Errorf("start engine: %w", err)
 	}
 	go func() { _ = cmd.Wait() }()
-	return nil
+	return cmd.Process.Pid, nil
+}
+
+// StartCap bounds WaitReadyWhileAlive: generous, because it only matters when
+// the engine is alive yet never serves.
+const StartCap = 5 * time.Minute
+
+// WaitReadyWhileAlive waits for the engine that StartEnginePID spawned. An
+// engine that is still recovering its runs is not a failure — a state dir
+// with a thousand runs took 25 s, and a fixed 15 s wait reported a healthy
+// engine as "did not become ready" (B-298). So the wait is bounded by the
+// process, not by a guess: it returns as soon as the engine serves, fails at
+// once if the process exits first, and gives up only at the generous cap.
+func WaitReadyWhileAlive(pid int, cap time.Duration) (*EngineInfo, error) {
+	deadline := time.Now().Add(cap)
+	for time.Now().Before(deadline) {
+		if info, err := ReadEngineJSON(); err == nil && info.PID == pid && IsEngineRunning(info) {
+			return info, nil
+		}
+		if !processAlive(pid) {
+			return nil, fmt.Errorf("engine (pid %d) exited before it became ready", pid)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("engine (pid %d) still starting after %s", pid, cap)
 }
 
 // WaitReady polls until a healthy engine has written its connection details,

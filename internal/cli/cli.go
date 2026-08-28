@@ -215,10 +215,11 @@ func discoverEngine(noAutostart bool) (*engineclt.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("engine not running and ducklab-engine is not on PATH; run `make install` or start the desktop app")
 	}
-	if err := daemon.StartEngine(path); err != nil {
+	pid, err := daemon.StartEnginePID(path)
+	if err != nil {
 		return nil, fmt.Errorf("engine not running and auto-start failed: %w", err)
 	}
-	started, err := daemon.WaitReady(15 * time.Second)
+	started, err := daemon.WaitReadyWhileAlive(pid, daemon.StartCap)
 	if err != nil {
 		return nil, fmt.Errorf("engine auto-started but did not become ready: %w", err)
 	}
@@ -298,11 +299,14 @@ func engineCmd(verb string, args []string) int {
 			fmt.Fprintln(os.Stderr, "error: ducklab-engine not on PATH")
 			return 1
 		}
-		if err := daemon.StartEngine(path); err != nil {
+		pid, err := daemon.StartEnginePID(path)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
-		info, err := daemon.WaitReady(15 * time.Second)
+		// Recovery of a large state dir takes as long as it takes; the wait
+		// is bounded by the process staying alive, not by a guess (B-298).
+		info, err := daemon.WaitReadyWhileAlive(pid, daemon.StartCap)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1

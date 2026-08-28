@@ -2,9 +2,11 @@ package runlog
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -164,6 +166,25 @@ func TestReadEventsStopsAtTornTail(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("got %d events, want 2 (torn tail not discarded)", len(events))
+	}
+}
+
+// A long event log is not read whole to learn its last seq: only the tail
+// window is, and a line cut by the window's edge must not poison the answer.
+func TestLastSeqReadsOnlyTheTailOfALongLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := strings.Repeat("x", 900)
+	const n = 500 // ~450 KiB, several tail windows
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(f, `{"seq":%d,"type":"turn","data":{"pad":"%s"}}`+"\n", i, pad)
+	}
+	f.Close()
+	if got := lastSeq(path); got != n {
+		t.Fatalf("lastSeq = %d, want %d", got, n)
 	}
 }
 

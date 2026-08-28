@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -594,13 +595,37 @@ func splitLines(s string) []string {
 
 // lastSeq returns the highest seq recorded in a JSONL file, or 0.
 // A torn final line is ignored, matching ReadEvents.
+//
+// Only the tail of the file is read: seq is assigned by an append-only
+// writer, so the last complete line carries the highest one. Reopening a
+// writer used to parse every event of the run — at engine start, across
+// every recovered run, that was 17 of a 23 s startup (B-298).
 func lastSeq(path string) int {
-	data, err := os.ReadFile(path)
+	const tail = 64 * 1024
+	f, err := os.Open(path)
 	if err != nil {
 		return 0
 	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return 0
+	}
+	offset := st.Size() - tail
+	if offset < 0 {
+		offset = 0
+	}
+	data := make([]byte, st.Size()-offset)
+	if _, err := f.ReadAt(data, offset); err != nil && err != io.EOF {
+		return 0
+	}
+	lines := splitLines(string(data))
+	if offset > 0 && len(lines) > 0 {
+		// The first line of a mid-file window is a fragment.
+		lines = lines[1:]
+	}
 	max := 0
-	for _, line := range splitLines(string(data)) {
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}

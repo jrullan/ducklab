@@ -230,6 +230,14 @@ func (s *Service) hygieneWorktrees(projectRoot, projectID string) {
 	for _, rs := range runs {
 		decided := rs.run.Accepted || rs.run.Status == "failed" || (rs.run.Status == "done" && !rs.run.Accepted)
 		if decided {
+			// A directory that is already gone needs no writer: cleanup only
+			// retires the branch. Most recovered runs are in this state, and
+			// opening a writer for each of them was the bulk of engine startup
+			// (B-298).
+			if _, err := os.Lstat(rs.run.WorktreePath); os.IsNotExist(err) {
+				s.cleanupRunWorktree(rs, projectRoot)
+				continue
+			}
 			// Recovered records have no open writer; cleanup may need to record a
 			// removal warning, so restore it before mutating the worktree.
 			if _, err := s.ensureWriter(rs); err == nil {
