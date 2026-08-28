@@ -164,7 +164,6 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 		}
 	}
 	titles := s.taskTitles(ctx, projectID)
-	seen := map[string]bool{}
 	var items []release.Item
 	var landed []release.Landed
 	var unverified, uncovered []string
@@ -186,10 +185,6 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 			uncovered = append(uncovered, c.SHA)
 			continue
 		}
-		if seen[r.TaskID] {
-			continue
-		}
-		seen[r.TaskID] = true
 		t := titles[r.TaskID]
 		items = append(items, release.Item{TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: c.SHA, Summary: t.summary})
 		if r.Verdict == "UNVERIFIED" {
@@ -247,23 +242,6 @@ func firstParagraph(body string, max int) string {
 		return out
 	}
 	return ""
-}
-
-// commitsAfter returns the commits since a tag, or nil when there is no tag
-// and therefore no range to filter by.
-func commitsAfter(root, sinceTag string) (map[string]bool, error) {
-	if sinceTag == "" {
-		return nil, nil // the first release contains everything accepted
-	}
-	out, err := vcs.New(root).RevListAfter(sinceTag)
-	if err != nil {
-		return nil, err
-	}
-	set := map[string]bool{}
-	for _, sha := range out {
-		set[sha] = true
-	}
-	return set, nil
 }
 
 func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot string, notes release.Notes, revise, priorDraft string) {
