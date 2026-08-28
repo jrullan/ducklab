@@ -103,6 +103,66 @@ func TestReleasePlanInventoriesTrailerlessCommitsAlongsideTaskWork(t *testing.T)
 	}
 }
 
+// A task id cannot make a second range commit disappear. One task may have
+// more than one accepted run (for example, an accepted correction), and each
+// commit in the range is task-backed. The frontmatter must count both task
+// items, and the durable inventory must expose both commit records.
+func TestReleasePlanInventoriesEveryTaskBackedCommitForTheSameTask(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, root := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-001 — Inventory\n\n### T-001 — Tracked work\n\nShip the tracked change.\n",
+	})
+	git := gitProject(t, root)
+	if err := git.Tag("v0.1.0", "previous release"); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(name, runID string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(runID+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := git.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		sha, err := git.CommitWithTrailer("tracked "+runID, map[string]string{"Ducklab-Run": runID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.runs[runID] = &runState{run: &runlog.Run{
+			ID: runID, ProjectID: projectID, TaskID: "T-001", Accepted: true,
+			CommitSHA: sha, Verdict: "PASSED", StartedAt: time.Now().UTC().Format(time.RFC3339),
+		}}
+		return sha
+	}
+	first := commit("first.txt", "r-first")
+	second := commit("second.txt", "r-second")
+
+	fake := s.providers["fake"].(*provider.Fake)
+	fake.ScriptFunc = func(provider.ChatRequest, int) *provider.ChatResponse {
+		return &provider.ChatResponse{Choices: []provider.Choice{{
+			Message: provider.Message{Role: "assistant", Content: "The release prose."}, FinishReason: provider.FinishStop,
+		}}}
+	}
+	run, err := s.ReleasePlan(context.Background(), projectID, ReleaseRequest{Bump: "minor"})
+	if err != nil {
+		t.Fatalf("release planning with two task-backed commits: %v", err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	<-rs.done
+	body, err := os.ReadFile(release.Path(root, release.Version{Major: 0, Minor: 2, Patch: 0}) + ".proposed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := string(body)
+	for _, want := range []string{"tasks: 2\n", "landed_outside: 0\n", first[:7], second[:7]} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("release inventory missing %q:\n%s", want, notes)
+		}
+	}
+}
+
 func commitAuthor(t *testing.T, root, sha string) string {
 	t.Helper()
 	cmd := exec.Command("git", "log", "-1", "--format=%an", sha)
