@@ -111,6 +111,9 @@ type Notes struct {
 	Version    Version
 	Since      string // the previous tag, or "" for the first release
 	Milestones []Milestone
+	// Landed contains commits in the release range which were landed outside a
+	// Ducklab task run. They are inventory facts, not inferred release prose.
+	Landed []Landed
 	// Unverified counts accepted work whose gate never ran. Reported rather
 	// than hidden: a release note that reads the same whether or not anything
 	// was tested is a release note that cannot be trusted (P3).
@@ -124,6 +127,13 @@ type Notes struct {
 type Milestone struct {
 	ID    string
 	Items []Item
+}
+
+// Landed is a commit not backed by a Ducklab task run.
+type Landed struct {
+	SHA, Subject, Author string
+	PRNumber             int
+	PRTitle              string
 }
 
 // Group orders items into milestones, and both deterministically.
@@ -178,6 +188,7 @@ func Render(n Notes, prose string) string {
 		fmt.Fprintf(&b, "since: %s\n", n.Since)
 	}
 	fmt.Fprintf(&b, "tasks: %d\n", count(n))
+	fmt.Fprintf(&b, "landed_outside: %d\n", len(n.Landed))
 	if n.Unverified > 0 {
 		fmt.Fprintf(&b, "unverified: %d\n", n.Unverified)
 		if len(n.UnverifiedTasks) > 0 {
@@ -188,7 +199,7 @@ func Render(n Notes, prose string) string {
 
 	fmt.Fprintf(&b, "# %s\n\n", n.Version)
 
-	if count(n) == 0 {
+	if count(n)+len(n.Landed) == 0 {
 		// The exact wording AC-58 asks for. A release document that says
 		// nothing shipped is a statement someone may act on, so it says the
 		// same thing every time rather than a phrasing that drifts.
@@ -220,6 +231,16 @@ func Render(n Notes, prose string) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+	}
+	if len(n.Landed) > 0 {
+		b.WriteString("## Landed outside the loop\n\n")
+		for _, it := range n.Landed {
+			fmt.Fprintf(&b, "- %s (%s) — %s", it.Subject, short(it.SHA), it.Author)
+			if it.PRNumber > 0 {
+				fmt.Fprintf(&b, " [PR #%d: %s]", it.PRNumber, it.PRTitle)
+			}
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

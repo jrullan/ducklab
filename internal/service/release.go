@@ -72,13 +72,13 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 		since = prev.String()
 	}
 
-	items, unverifiedIDs, err := s.acceptedSince(ctx, projectID, entry.Path, since)
+	items, landed, unverifiedIDs, err := s.releaseInventory(ctx, projectID, entry.Path, since)
 	if err != nil {
 		return nil, err
 	}
 	notes := release.Notes{
-		Version: next, Since: since,
-		Milestones: release.Group(items), Unverified: len(unverifiedIDs), UnverifiedTasks: unverifiedIDs,
+		Version: next, Since: since, Milestones: release.Group(items), Landed: landed,
+		Unverified: len(unverifiedIDs), UnverifiedTasks: unverifiedIDs,
 	}
 	// A revision reads the draft it revises. Refused without one: a note
 	// about a draft that does not exist is a launch mistake worth catching.
@@ -145,49 +145,64 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 	return run, nil
 }
 
-// acceptedSince lists the accepted work after a tag, newest tag first.
-//
-// A run counts when a person accepted it and it produced a commit. Runs that
-// failed, were rejected, or committed nothing are not part of a release, and
-// including them would make the notes describe work that does not exist.
-func (s *Service) acceptedSince(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, []string, error) {
+// releaseInventory classifies every commit in the release range. A
+// Ducklab-Run trailer requires a corresponding accepted task run; no trailer is
+// ordinary landed work. Anything else makes a completeness claim impossible.
+func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, []release.Landed, []string, error) {
 	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	inRange, err := commitsAfter(root, sinceTag)
+	commits, err := vcs.New(root).CommitsAfter(sinceTag)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-
+	byID := map[string]*runlog.Run{}
+	for _, r := range runs {
+		if r.Accepted && r.TaskID != "" {
+			byID[r.ID] = r
+		}
+	}
 	titles := s.taskTitles(ctx, projectID)
 	seen := map[string]bool{}
 	var items []release.Item
-	var unverified []string
-
-	for _, r := range runs { // newest first
-		if !r.Accepted || r.CommitSHA == "" || r.TaskID == "" {
+	var landed []release.Landed
+	var unverified, uncovered []string
+	git := vcs.New(root)
+	for _, c := range commits {
+		if c.DucklabRun == "" {
+			entry := release.Landed{SHA: c.SHA, Subject: c.Subject, Author: c.Author}
+			if match := localPRRe.FindStringSubmatch(c.Subject); match != nil {
+				fmt.Sscanf(match[1], "%d", &entry.PRNumber)
+				entry.PRTitle = strings.TrimSpace(strings.TrimSuffix(c.Subject, match[0]))
+			} else if pr, ok := git.PRForCommit(ctx, c.SHA); ok {
+				entry.PRNumber, entry.PRTitle = pr.Number, pr.Title
+			}
+			landed = append(landed, entry)
+			continue
+		}
+		r := byID[c.DucklabRun]
+		if r == nil {
+			uncovered = append(uncovered, c.SHA)
 			continue
 		}
 		if seen[r.TaskID] {
-			// A task re-run and re-accepted ships once, described by its
-			// latest state. Listing it twice would suggest two changes.
-			continue
-		}
-		if inRange != nil && !inRange[r.CommitSHA] {
 			continue
 		}
 		seen[r.TaskID] = true
 		t := titles[r.TaskID]
-		items = append(items, release.Item{
-			TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: r.CommitSHA, Summary: t.summary,
-		})
+		items = append(items, release.Item{TaskID: r.TaskID, Title: t.title, Milestone: t.milestone, CommitSHA: c.SHA, Summary: t.summary})
 		if r.Verdict == "UNVERIFIED" {
 			unverified = append(unverified, r.TaskID)
 		}
 	}
-	return items, unverified, nil
+	if len(uncovered) > 0 {
+		return nil, nil, nil, fmt.Errorf("release inventory incomplete: commits with unresolved Ducklab-Run trailers: %s", strings.Join(uncovered, ", "))
+	}
+	return items, landed, unverified, nil
 }
+
+var localPRRe = regexp.MustCompile(`\s*\(#(\d+)\)$`)
 
 type taskFacts struct{ title, milestone, summary string }
 
@@ -257,7 +272,7 @@ func (s *Service) executeRelease(ctx context.Context, rs *runState, projectRoot 
 	defer rs.writer.Close()
 
 	prose := ""
-	if len(notes.Milestones) > 0 {
+	if len(notes.Milestones) > 0 || len(notes.Landed) > 0 {
 		var err error
 		prose, err = s.scribeNotes(ctx, rs, projectRoot, notes, revise, priorDraft)
 		if err != nil {
@@ -455,6 +470,13 @@ func scribePrompt(n release.Notes) string {
 			} else {
 				fmt.Fprintf(&b, "- %s: %s\n", it.TaskID, title)
 			}
+		}
+		b.WriteString("\n")
+	}
+	if len(n.Landed) > 0 {
+		b.WriteString("## Landed outside the loop\n\n")
+		for _, it := range n.Landed {
+			fmt.Fprintf(&b, "- %s (%s) — %s\n", it.Subject, it.SHA, it.Author)
 		}
 		b.WriteString("\n")
 	}

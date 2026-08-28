@@ -4,8 +4,10 @@ package vcs
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -735,6 +737,72 @@ func (g *Git) Tags() ([]string, error) {
 		}
 	}
 	return tags, nil
+}
+
+// Commit is the durable local record used to inventory a release range.
+type Commit struct {
+	SHA        string
+	Subject    string
+	Author     string
+	DucklabRun string
+}
+
+// CommitsAfter lists every commit reachable from HEAD but not from ref, newest first.
+// An empty ref means all commits reachable from HEAD, for a first release.
+func (g *Git) CommitsAfter(ref string) ([]Commit, error) {
+	args := []string{"log", "--format=%H%x1f%s%x1f%an%x1f%B%x1e"}
+	if ref != "" {
+		args = append(args, ref+"..HEAD")
+	} else {
+		args = append(args, "HEAD")
+	}
+	out, err := g.run(args...)
+	if err != nil {
+		return nil, err
+	}
+	var commits []Commit
+	for _, record := range strings.Split(out, "\x1e") {
+		parts := strings.SplitN(record, "\x1f", 4)
+		if len(parts) != 4 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		c := Commit{SHA: strings.TrimSpace(parts[0]), Subject: strings.TrimSpace(parts[1]), Author: strings.TrimSpace(parts[2])}
+		for _, line := range strings.Split(parts[3], "\n") {
+			if key, value, ok := strings.Cut(strings.TrimSpace(line), ": "); ok && key == "Ducklab-Run" {
+				c.DucklabRun = strings.TrimSpace(value)
+				break
+			}
+		}
+		commits = append(commits, c)
+	}
+	return commits, nil
+}
+
+// PR is optional pull-request metadata associated with a landed commit.
+type PR struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+}
+
+// PRForCommit asks gh for metadata when it is available. Failure is deliberately
+// indistinguishable from no match: release inventory must work offline.
+func (g *Git) PRForCommit(ctx context.Context, sha string) (PR, bool) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return PR{}, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3e9)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--state", "merged", "--search", sha, "--json", "number,title", "--limit", "1")
+	cmd.Dir = g.Root
+	out, err := cmd.Output()
+	if err != nil {
+		return PR{}, false
+	}
+	var prs []PR
+	if json.Unmarshal(out, &prs) != nil || len(prs) == 0 || prs[0].Number == 0 {
+		return PR{}, false
+	}
+	return prs[0], true
 }
 
 // RevListAfter lists the commits reachable from HEAD but not from a ref.
