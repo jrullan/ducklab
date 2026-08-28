@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -114,6 +116,89 @@ func TestReleaseCutSynchronizesFrontendManifestVersionsInTaggedCommit(t *testing
 		if !strings.Contains(diff, path) {
 			t.Errorf("release commit does not contain %s:\n%s", path, diff)
 		}
+	}
+}
+
+func TestReleaseCutRebuildsDesktopBundleInTaggedCommit(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, dir := projectWithDocs(t, s, nil)
+	frontend := filepath.Join(dir, "frontend")
+	desktop := filepath.Join(dir, "cmd", "ducklab-desktop", "frontend", "dist")
+	if err := os.MkdirAll(desktop, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(desktop, "stale.js"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(frontend, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := gitProject(t, dir)
+	version := release.Version{Major: 0, Minor: 9, Patch: 1}
+	draft := release.Path(dir, version) + ".proposed"
+	if err := os.MkdirAll(filepath.Dir(draft), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(draft, []byte("# Release v0.9.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath, oldCommand := desktopLookPath, desktopCommandContext
+	t.Cleanup(func() { desktopLookPath, desktopCommandContext = oldLookPath, oldCommand })
+	desktopLookPath = func(string) (string, error) { return "tool", nil }
+	desktopCommandContext = func(_ context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "mkdir -p dist/assets; printf refreshed > dist/assets/app.js")
+	}
+
+	cut, err := s.ReleaseCut(context.Background(), projectID, version.String())
+	if err != nil {
+		t.Fatalf("release cut: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(desktop, "assets", "app.js")); err != nil {
+		t.Fatalf("rebuilt bundle missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(desktop, "stale.js")); !os.IsNotExist(err) {
+		t.Fatalf("stale bundle remains: %v", err)
+	}
+	diff, err := git.ShowCommit(cut["commit"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "cmd/ducklab-desktop/frontend/dist/assets/app.js") {
+		t.Errorf("release commit does not contain rebuilt bundle:\n%s", diff)
+	}
+}
+
+func TestReleaseCutRefusesMissingDesktopToolchain(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, dir := projectWithDocs(t, s, nil)
+	if err := os.MkdirAll(filepath.Join(dir, "cmd", "ducklab-desktop", "frontend"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := gitProject(t, dir)
+	version := release.Version{Major: 0, Minor: 9, Patch: 1}
+	draft := release.Path(dir, version) + ".proposed"
+	if err := os.MkdirAll(filepath.Dir(draft), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(draft, []byte("# Release v0.9.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldLookPath := desktopLookPath
+	t.Cleanup(func() { desktopLookPath = oldLookPath })
+	desktopLookPath = func(tool string) (string, error) {
+		return "", fmt.Errorf("%s unavailable", tool)
+	}
+
+	_, err := s.ReleaseCut(context.Background(), projectID, version.String())
+	if err == nil || !strings.Contains(err.Error(), "missing desktop toolchain: node") {
+		t.Fatalf("release cut error = %v, want missing node toolchain", err)
+	}
+	if git.HasTag(version.String()) {
+		t.Fatal("release cut tagged despite missing desktop toolchain")
+	}
+	if _, err := os.Stat(draft); err != nil {
+		t.Fatalf("release draft was promoted despite missing toolchain: %v", err)
 	}
 }
 

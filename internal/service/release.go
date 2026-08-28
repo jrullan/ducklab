@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -502,6 +504,11 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		// every earlier statement about that release retroactively false.
 		return nil, fmt.Errorf("release cut: %s is already tagged", v)
 	}
+	// The desktop embeds its checked-in bundle. Refuse before promoting the
+	// draft when its toolchain is absent, rather than tagging stale assets.
+	if err := preflightDesktopToolchain(entry.Path); err != nil {
+		return nil, err
+	}
 
 	if err := os.WriteFile(final, body, 0o644); err != nil {
 		return nil, err
@@ -519,11 +526,16 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 	if err != nil {
 		return nil, err
 	}
+	bundled, err := rebuildDesktopBundle(ctx, entry.Path)
+	if err != nil {
+		return nil, err
+	}
 
 	// The document is committed before the tag, so the tag points at a commit
 	// that contains the notes describing it — and, from the sync above, the
 	// matching manifest versions.
 	adds := append(synced, final)
+	adds = append(adds, bundled...)
 	if err := git.Add(adds...); err != nil {
 		return nil, fmt.Errorf("release cut: %w", err)
 	}
@@ -552,6 +564,87 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 		outer["warning"] = err.Error()
 	}
 	return outer, nil
+}
+
+// desktopLookPath is a variable so toolchain refusal can be tested without
+// depending on the host's installed Node toolchain.
+var (
+	desktopLookPath       = exec.LookPath
+	desktopCommandContext = exec.CommandContext
+)
+
+// preflightDesktopToolchain confirms that a project which ships the embedded
+// desktop bundle can rebuild it. Projects without the desktop source do not
+// have a bundle for a release cut to own.
+func preflightDesktopToolchain(projectRoot string) error {
+	if _, err := os.Stat(filepath.Join(projectRoot, "cmd", "ducklab-desktop", "frontend")); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("release cut: stat desktop frontend: %w", err)
+	}
+	for _, tool := range []string{"node", "npm"} {
+		if _, err := desktopLookPath(tool); err != nil {
+			return fmt.Errorf("release cut: missing desktop toolchain: %s", tool)
+		}
+	}
+	return nil
+}
+
+// rebuildDesktopBundle regenerates the frontend assets that the desktop embeds
+// and copies them to the tracked bundle directory for the release commit.
+func rebuildDesktopBundle(ctx context.Context, projectRoot string) ([]string, error) {
+	desktop := filepath.Join(projectRoot, "cmd", "ducklab-desktop", "frontend")
+	if _, err := os.Stat(desktop); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("release cut: stat desktop frontend: %w", err)
+	}
+	frontend := filepath.Join(projectRoot, "frontend")
+	cmd := desktopCommandContext(ctx, "npm", "run", "build")
+	cmd.Dir = frontend
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("release cut: rebuild desktop frontend: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	source := filepath.Join(frontend, "dist")
+	target := filepath.Join(desktop, "dist")
+	if err := os.RemoveAll(target); err != nil {
+		return nil, fmt.Errorf("release cut: remove desktop bundle: %w", err)
+	}
+	if err := copyDirectory(source, target); err != nil {
+		return nil, fmt.Errorf("release cut: copy desktop bundle: %w", err)
+	}
+	return []string{filepath.Join("cmd", "ducklab-desktop", "frontend", "dist")}, nil
+}
+
+func copyDirectory(source, target string) error {
+	return filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, rel)
+		if d.IsDir() {
+			return os.MkdirAll(destination, 0o755)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(out, in)
+		closeErr := out.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	})
 }
 
 // syncVersionedManifests rewrites every project-owned manifest that records
