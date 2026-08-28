@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 )
@@ -107,7 +108,13 @@ func TestScorecardsFillUndeclaredIndicesFromOpenRouter(t *testing.T) {
 	orig := fetchIndexFn
 	fetchIndexFn = func(p config.Provider) (*indexCache, error) {
 		calls++
-		return &indexCache{FetchedAt: "2026-08-18T12:00:00Z", AsOf: "2026-08-18", Source: "artificial-analysis", Items: []indexItem{
+		// FetchedAt must be NOW: a hardcoded past date left the on-disk cache
+		// permanently stale (TTL 24h), so the second service served it AND
+		// kicked the background refresh — and the final assert only passed by
+		// WINNING the race against that goroutine's calls++. On an idle box it
+		// won; on a loaded gate at midnight it lost ("2 fetches"), killing an
+		// approved run (T-248, r-20260828-003439-defz). B-221's fifth member.
+		return &indexCache{FetchedAt: time.Now().UTC().Format(time.RFC3339), AsOf: "2026-08-18", Source: "artificial-analysis", Items: []indexItem{
 			{Permaslug: "z-ai/glm-5.2-20260616", Coding: 68.8},
 			{Permaslug: "openai/gpt-5.6-luna-20260709", Coding: 71.4},
 		}}, nil
