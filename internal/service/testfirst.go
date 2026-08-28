@@ -417,28 +417,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		}
 	}
 
-	// The gate before anything is written. A suite that was already red stays
-	// red for its own reasons, and reading that as "the new test fails" would
-	// accept a test that asserts nothing (05 §5.2).
-	// Announced BEFORE it runs: the suite takes minutes, and a transcript
-	// that stays blank while it does reads as an engine hang or a bug —
-	// the person must see that something is happening and what.
-	rs.writer.AppendEvent("gate_started", map[string]interface{}{
-		"phase":  "before",
-		"detail": "running the suite before any test is written — a red test only means something against a green baseline",
-	})
-	rs.gateRoot = projectRoot
-	rs.run.GateRoot = projectRoot
-	rs.writer.WriteState()
-	before, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	// The baseline is a launch-time fact. On resume it is read from its durable
+	// event rather than measured again over the test the writer already made.
+	before, err := s.testFirstBaseline(ctx, rs, projectRoot, projCfg)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("gate before: %w", err))
 		return
 	}
-	rs.writer.AppendEvent("gate", map[string]interface{}{
-		"gate": string(before.Gate), "cmd": before.Command, "exit": before.ExitCode,
-		"phase": "before",
-	})
 
 	roster, warning := s.resolveRoster(projCfg, rs.run.Mode)
 	if req.Duckling != "" {
@@ -624,6 +609,55 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		"kind": "gate", "verdict": verdict, "detail": detail,
 	})
 	rs.writer.WriteState()
+}
+
+// testFirstBaseline returns the durable launch-time gate measurement. A resume
+// must never run this gate in the working tree: it may already contain the
+// test whose red result is about to be judged.
+func (s *Service) testFirstBaseline(ctx context.Context, rs *runState, projectRoot string, projCfg *config.Project) (*verify.Result, error) {
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		return nil, fmt.Errorf("read recorded baseline: %w", err)
+	}
+	for _, event := range events {
+		if event.Type != "gate" || event.Data["phase"] != "before" {
+			continue
+		}
+		exit, ok := event.Data["exit"].(float64)
+		if !ok {
+			if code, isCode := event.Data["exit"].(int); isCode {
+				exit = float64(code)
+				ok = true
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("recorded baseline has no exit code")
+		}
+		gate, _ := event.Data["gate"].(string)
+		command, _ := event.Data["cmd"].(string)
+		return &verify.Result{Gate: verify.Gate(gate), Command: command, ExitCode: int(exit)}, nil
+	}
+
+	// No event means this is the initial launch. Announce and persist the
+	// measurement before strategy execution so every later resume can reuse it.
+	rs.writer.AppendEvent("gate_started", map[string]interface{}{
+		"phase":  "before",
+		"detail": "running the suite before any test is written — a red test only means something against a green baseline",
+	})
+	rs.gateRoot = projectRoot
+	rs.run.GateRoot = projectRoot
+	rs.writer.WriteState()
+	before, err := verify.Run(ctx, projectRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
+	if err != nil {
+		return nil, err
+	}
+	rs.writer.AppendEvent("gate", map[string]interface{}{
+		"gate": string(before.Gate), "cmd": before.Command, "exit": before.ExitCode,
+		"phase": "before",
+	})
+	// Read back the event so the judge has one baseline source on both launch
+	// and resume, rather than a launch-only in-memory exception.
+	return s.testFirstBaseline(ctx, rs, projectRoot, projCfg)
 }
 
 // judgeTestFirst decides whether the written test is worth accepting.
