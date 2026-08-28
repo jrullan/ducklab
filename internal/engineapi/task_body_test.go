@@ -84,19 +84,33 @@ This body must not change.
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if got.ID != "T-001" || got.Body != "Parse only the header first, then validate its bounds." {
-		t.Errorf("PUT response = %+v, want the amended task", got)
+	if got.ID != "T-001" || !strings.Contains(got.Body, "Parse only the header first, then validate its bounds.") || !strings.Contains(got.Body, "**Owns:** internal/parser") || !strings.Contains(got.Body, "**Depends on:** T-000") {
+		t.Errorf("PUT response = %+v, want the full amended task section", got)
 	}
 	stored, err := os.ReadFile(artifact.Path(project, artifact.KindPlan))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(stored)
-	if !strings.Contains(text, "**Owns:** internal/parser") || !strings.Contains(text, "**Depends on:** T-000") {
-		t.Errorf("amendment discarded the target section's lanes: %s", text)
+	if strings.Contains(text, "Parse only the header first, then validate its bounds.") {
+		t.Error("PUT changed the approved plan without the amendment gate")
 	}
-	if !strings.Contains(text, "Parse only the header first, then validate its bounds.") || !strings.Contains(text, "### T-002 — Keep this task\n\n**Owns:** frontend/src/keep.ts\n\nThis body must not change.") {
-		t.Errorf("amendment changed more than T-001's body: %s", text)
+	proposal, err := os.ReadFile(artifact.ProposedPath(project, artifact.KindPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed := string(proposal)
+	if !strings.Contains(proposed, "**Owns:** internal/parser") || !strings.Contains(proposed, "**Depends on:** T-000") {
+		t.Errorf("amendment discarded the target section's lanes: %s", proposed)
+	}
+	if !strings.Contains(proposed, "Parse only the header first, then validate its bounds.") || !strings.Contains(proposed, "### T-002 — Keep this task\n\n**Owns:** frontend/src/keep.ts\n\nThis body must not change.") {
+		t.Errorf("amendment changed more than T-001's body: %s", proposed)
+	}
+
+	resp, _ = put("T-001", `{"body":"**Owns:** elsewhere"}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("metadata-bearing PUT status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 
 	resp, _ = put("T-404", `{"body":"must not create a task"}`)

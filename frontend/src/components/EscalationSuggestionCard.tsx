@@ -61,10 +61,19 @@ export function EscalationSuggestionCard({
           {floor !== undefined && ` · Wilson floor ${floor}%`}
         </p>
       )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" data-testid="escalation-relaunch" disabled={!candidateID} onClick={() => onRelaunch(candidateID)} className="rounded border border-hairline px-2 py-1 text-sm">Relaunch with stronger seat</button>
-        <button type="button" data-testid="escalation-task-body" onClick={onOpenTask} className="rounded border border-hairline px-2 py-1 text-sm">Open task body</button>
-        <button type="button" data-testid="escalation-continue" onClick={onContinue} className="rounded border border-hairline px-2 py-1 text-sm">Continue as is</button>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <div>
+          <button type="button" data-testid="escalation-relaunch" disabled={!candidateID} onClick={() => onRelaunch(candidateID)} className="rounded border border-hairline px-2 py-1 text-sm">Relaunch with stronger seat</button>
+          <p className="mt-1 text-xs text-ink-muted">Relaunch re-rolls the dice; money already spent stays on the record.</p>
+        </div>
+        <div>
+          <button type="button" data-testid="escalation-task-body" onClick={onOpenTask} className="rounded border border-hairline px-2 py-1 text-sm">Open task body</button>
+          <p className="mt-1 text-xs text-ink-muted">Editing creates a plan amendment before any relaunch; fixed lanes stay fixed.</p>
+        </div>
+        <div>
+          <button type="button" data-testid="escalation-continue" onClick={onContinue} className="rounded border border-hairline px-2 py-1 text-sm">Continue as is</button>
+          <p className="mt-1 text-xs text-ink-muted">Continue keeps this scope and this run's dice in play.</p>
+        </div>
       </div>
     </section>
   );

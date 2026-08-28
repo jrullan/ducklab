@@ -83,6 +83,9 @@ type Params struct {
 	// text — the screenshot that says what a paragraph cannot. The caller
 	// gates them on the architect's vision capability.
 	Images []string
+	// SplitTask replaces this one approved task with two narrowly-scoped,
+	// independently-owned sections through the plan amendment gate.
+	SplitTask string
 	// Extend is the plan amendment: the architect returns ONLY the new task
 	// sections and the engine merges them — a fragment by contract, because
 	// re-emitting a hundred-task plan to add two tasks made a cosmetic
@@ -134,7 +137,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(p.Extend) != "" {
+	if strings.TrimSpace(p.Extend) != "" || strings.TrimSpace(p.SplitTask) != "" {
 		return runExtend(ctx, p, current)
 	}
 	// A revision works from the draft that was actually shown, which is the

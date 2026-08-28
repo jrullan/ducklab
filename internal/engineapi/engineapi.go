@@ -1200,6 +1200,27 @@ func (s *Server) handleBugEdit(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, b)
 }
 
+func (s *Server) handleTaskBodyUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	task, err := s.svc.TaskBodyUpdate(r.Context(), r.PathValue("id"), r.PathValue("task"), req.Body)
+	if err != nil {
+		status := http.StatusBadRequest
+		code := "invalid_request"
+		if strings.Contains(err.Error(), "no task ") {
+			status, code = http.StatusNotFound, "not_found"
+		}
+		s.error(w, status, code, err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, task)
+}
+
 func (s *Server) handleTaskRemove(w http.ResponseWriter, r *http.Request) {
 	out, err := s.svc.TaskRemove(r.Context(), r.PathValue("id"), r.PathValue("task"))
 	if err != nil {

@@ -39,7 +39,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 			prior = drafts[0]
 		}
 	}
-	prompt, err := buildExtendPrompt(p.ProjectRoot, current, p.Extend, p.Revision, previousExtensionFragment(current, prior))
+	prompt, err := buildExtendPrompt(p.ProjectRoot, current, extendChange(p), p.Revision, previousExtensionFragment(current, prior))
 	if err != nil {
 		return nil, err
 	}
@@ -90,13 +90,28 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
 
-	proposed := mergeExtension(current, tasks)
+	var proposed *artifact.Document
+	if p.SplitTask != "" {
+		proposed, err = mergeSplit(current, p.SplitTask, tasks)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		proposed = mergeExtension(current, tasks)
+	}
 	proposed.Front.Kind = kind
 	proposed.Front.Project = current.Front.Project
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: proposed, Raw: raw}, nil
+}
+
+func extendChange(p Params) string {
+	if p.SplitTask == "" {
+		return p.Extend
+	}
+	return fmt.Sprintf("Replace task %s with exactly two narrowly-scoped task sections. Each replacement must have a non-empty **Owns:** field, and their Owns lanes must be pairwise disjoint. Preserve the original task's traceability (Milestone and Implements).", p.SplitTask)
 }
 
 // normalizeFragment makes the architect's fragment parseable as a plan: the
@@ -205,6 +220,58 @@ func previousExtensionFragment(current *artifact.Document, raw string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// mergeSplit replaces target with exactly two proposed sections. It deliberately
+// shares the normal fragment merger, then proves the replacements own disjoint
+// non-empty lanes before a proposal can reach the approval gate.
+func mergeSplit(current *artifact.Document, target string, tasks []artifact.Section) (*artifact.Document, error) {
+	if len(tasks) != 2 {
+		return nil, fmt.Errorf("splitting %s requires exactly two replacement sections", target)
+	}
+	var original *artifact.Section
+	originalMilestone := ""
+	for _, milestone := range current.Sections {
+		for i := range milestone.Children {
+			if milestone.Children[i].ID == target {
+				copy := milestone.Children[i]
+				original = &copy
+				originalMilestone = milestone.ID
+			}
+		}
+	}
+	if original == nil {
+		return nil, fmt.Errorf("no task %s in the plan", target)
+	}
+	for i := range tasks {
+		if len(tasks[i].Owns) == 0 {
+			return nil, fmt.Errorf("split replacement %q must declare a non-empty Owns lane", tasks[i].Title)
+		}
+		if len(tasks[i].Implements) == 0 {
+			tasks[i].Implements = append([]string(nil), original.Implements...)
+		}
+		if tasks[i].Fields == nil {
+			tasks[i].Fields = map[string]string{}
+		}
+		tasks[i].Fields["milestone"] = originalMilestone
+		if !strings.Contains(tasks[i].Body, "**Milestone:**") {
+			tasks[i].Body = "**Milestone:** " + originalMilestone + "\n" + tasks[i].Body
+		}
+	}
+	out := mergeExtension(current, tasks)
+	for mi := range out.Sections {
+		children := out.Sections[mi].Children[:0]
+		for _, task := range out.Sections[mi].Children {
+			if task.ID != target {
+				children = append(children, task)
+			}
+		}
+		out.Sections[mi].Children = children
+	}
+	if collisions := artifact.LaneCollisions(out); len(collisions) > 0 {
+		return nil, fmt.Errorf("split lanes overlap: %s", collisions[0].Detail)
+	}
+	return out, nil
+}
+
 // mergeExtension appends the produced tasks to a copy of the current plan:
 // fresh sequential ids, placed under the named milestone or the last one.
 // The untouched hundred tasks are copied by code, which cannot truncate.
@@ -282,6 +349,7 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 			Title:      t.Title,
 			Body:       strings.TrimSpace(strings.Join(kept, "\n")),
 			Implements: t.Implements,
+			Owns:       append([]string(nil), t.Owns...),
 		}
 		existing = append(existing, task)
 

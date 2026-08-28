@@ -1269,7 +1269,7 @@ export class EngineClient {
   stageStart(
     projectId: string,
     stage: string,
-    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[] } = {},
+    opts: { from?: string; mode?: string; revise?: string; rounds?: number; adopt?: boolean; extend?: string; splitTask?: string; settle?: boolean; images?: string[]; ducklings?: string[]; agentTurns?: number; refs?: string[] } = {},
   ) {
     return this.request<Run>("POST", `/v1/projects/${projectId}/stages/${stage}`, {
       stage,
@@ -1288,6 +1288,7 @@ export class EngineClient {
       // Plan only: the light path out of review — an architect amends the
       // plan for a small change instead of running the whole design cycle.
       extend: opts.extend ?? "",
+      split_task: opts.splitTask ?? "",
       // Spec only: settle spec-debt — the engine assembles the revision
       // prompt from the debt itself, so the person clicks instead of writing.
       settle: opts.settle ?? false,
@@ -1420,6 +1421,10 @@ export class EngineClient {
    * and the triager, and then the implementer, worked from it. */
   bugEdit(projectId: string, bugId: string, body: { title?: string; body?: string; severity?: string }) {
     return this.request<Bug>("PUT", `/v1/projects/${projectId}/bugs/${bugId}`, body);
+  }
+  /** Amend one task's prose through the plan document; its lanes stay intact. */
+  taskBodyUpdate(projectId: string, taskId: string, body: string) {
+    return this.request<Task>("PUT", `/v1/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`, { body });
   }
   /** Remove a task from the plan. The engine refuses once a run has named it,
    * because the runs, the reports and the spine all point at it. */

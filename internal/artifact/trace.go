@@ -248,12 +248,13 @@ func checkLaneCollisions(plan *Document) []TraceError {
 	// A milestone's lane is inherited by its tasks. Keep the milestone index so
 	// that this inheritance is not mistaken for two independent claims.
 	type claim struct {
-		section   Section
-		milestone int
+		section     Section
+		milestone   int
+		isMilestone bool
 	}
 	var claims []claim
 	for mi, m := range plan.Sections {
-		claims = append(claims, claim{section: m, milestone: mi})
+		claims = append(claims, claim{section: m, milestone: mi, isMilestone: true})
 		for i := range m.Children {
 			child := m.Children[i]
 			if len(child.Owns) == 0 {
@@ -265,7 +266,11 @@ func checkLaneCollisions(plan *Document) []TraceError {
 	var errs []TraceError
 	for i := 0; i < len(claims); i++ {
 		for j := i + 1; j < len(claims); j++ {
-			if claims[i].milestone == claims[j].milestone {
+			// A milestone's lane is inherited by its children, not a competing
+			// claim. Sibling task lanes, however, must be disjoint even under
+			// the same milestone.
+			if claims[i].milestone == claims[j].milestone &&
+				(claims[i].isMilestone || claims[j].isMilestone) {
 				continue
 			}
 			for _, a := range claims[i].section.Owns {
@@ -279,6 +284,12 @@ func checkLaneCollisions(plan *Document) []TraceError {
 		}
 	}
 	return errs
+}
+
+// LaneCollisions exposes the plan-lane half of the trace gate to amendment
+// code that must reject an invalid candidate before it reaches human review.
+func LaneCollisions(plan *Document) []TraceError {
+	return checkLaneCollisions(plan)
 }
 
 func laneOverlap(a, b string) bool {

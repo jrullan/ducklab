@@ -64,6 +64,12 @@ function traceHref(crumb: TraceCrumb): string {
   return `#/cycle/${stage}?section=${encodeURIComponent(crumb.id)}`;
 }
 
+// The task endpoint returns the canonical section, including immutable fields.
+// The editor accepts prose only, so never feed those fields back into its PUT.
+function taskProse(body: string | undefined): string {
+  return (body ?? "").split("\n").filter((line) => !/^\s*(?:-\s*)?\*\*[^*]+:\*\*/.test(line)).join("\n").trim();
+}
+
 /** The Run view: conversation lanes, gate and budget, tool timeline, tabs. */
 /** Where this run sits in the development cycle, at a glance.
  *
@@ -284,6 +290,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // `accepted: false` — it was never accepted — so the relaunch panel sat on
   // every old failure in the project's history offering to redo finished work.
   const [task, setTask] = useState<Task | null>(null);
+  const [taskBodyDraft, setTaskBodyDraft] = useState("");
+  const [taskEditing, setTaskEditing] = useState(false);
+  const [taskBodyBusy, setTaskBodyBusy] = useState(false);
+  const [taskBodySaved, setTaskBodySaved] = useState(false);
   const [originTrace, setOriginTrace] = useState<TraceCrumb[] | null>(null);
   const [anyway, setAnyway] = useState(false);
   const [relaunchBusy, setRelaunchBusy] = useState(false);
@@ -366,7 +376,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
     client
       .tasks(projectId)
-      .then((all) => setTask(all.find((t) => t.id === taskId) ?? null))
+      .then((all) => {
+        const found = all.find((t) => t.id === taskId) ?? null;
+        setTask(found);
+        if (!taskEditing) setTaskBodyDraft(taskProse(found?.body));
+      })
       .catch(() => setTask(null));
   }, [client, projectId, taskId]);
 
@@ -1035,7 +1049,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               covered by {task.implements!.join(", ")}
             </p>
           ) : null}
-          {task.body ? (
+          {taskEditing ? (
+            <textarea aria-label="task body" value={taskBodyDraft} onChange={(event) => setTaskBodyDraft(event.target.value)} className="mt-2 min-h-32 w-full rounded border border-hairline bg-surface2 p-2 text-sm" />
+          ) : task.body ? (
             <div className="mt-1 max-h-36 overflow-y-auto overscroll-contain text-sm">
               <Prose body={task.body} />
             </div>
@@ -1044,6 +1060,39 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               this task has no body — a model working it would have to guess what it means
             </p>
           )}
+          <div className="mt-2 flex flex-wrap gap-2 text-sm" data-testid="task-scope-actions">
+            {taskEditing ? <>
+              <button type="button" disabled={taskBodyBusy} onClick={() => {
+                setTaskBodyBusy(true); setActionError(null);
+                void client.taskBodyUpdate(run.project_id, task.id, taskBodyDraft).then((updated) => {
+                  setTask(updated); setTaskEditing(false); setTaskBodySaved(true);
+                }).catch((e) => setActionError(e instanceof Error ? e.message : String(e))).finally(() => setTaskBodyBusy(false));
+              }} className="rounded border border-hairline px-2 py-1">{taskBodyBusy ? "Proposing…" : "Propose amended body"}</button>
+              <span className="self-center text-xs text-ink-muted">Changes the approved plan only after you accept its amendment; lanes stay fixed.</span>
+              <button type="button" disabled={taskBodyBusy} onClick={() => { setTaskEditing(false); setTaskBodyDraft(task.body ?? ""); }} className="rounded border border-hairline px-2 py-1">Cancel</button>
+            </> : <><button type="button" onClick={() => { setTaskBodyDraft(taskProse(task.body)); setTaskEditing(true); setTaskBodySaved(false); }} className="rounded border border-hairline px-2 py-1">Improve the task body</button><span className="self-center text-xs text-ink-muted">Refine the ask before another model guesses; metadata and lanes stay fixed.</span></>}
+            <button type="button" onClick={() => { void client.stageStart(run.project_id, "plan", { splitTask: task.id }).then((started) => { window.location.hash = routeHref({ name: "run", id: started.id }); }).catch((e) => setActionError(e instanceof Error ? e.message : String(e))); }} className="rounded border border-hairline px-2 py-1">Split this task</button>
+            <span className="self-center text-xs text-ink-muted">Starts an amendment proposal: it must preview two sections with disjoint Owns lanes before the plan changes.</span>
+          </div>
+          {taskBodySaved && <div className="mt-2 rounded border border-warn p-2 text-sm" data-testid="task-relaunch-offer">
+            <p>This click accepts the amendment, aborts this run, then starts a new attributed run against the amended body. Relaunch re-rolls the dice; the spent {money(run.budget?.usd ?? 0)} stays on the record.</p>
+            <button type="button" disabled={taskBodyBusy} className="mt-2 rounded border border-hairline px-2 py-1" onClick={() => {
+              setTaskBodyBusy(true); setActionError(null);
+              void client.promote(run.project_id, "plan", "human")
+                .then(() => client.abort(runId))
+                .then(() => client.runStart(run.project_id, task.id, {
+                  mode: run.mode,
+                  ducklings: seatsFromRoster(run.mode, run.roster),
+                  seats: run.roster,
+                  note: `Relaunched by human after amending ${task.id}'s task body from ${runId}.`,
+                  redo: true,
+                }))
+                .then((started) => { window.location.hash = routeHref({ name: "run", id: started.id }); })
+                .catch((e) => setActionError(e instanceof Error ? e.message : String(e)))
+                .finally(() => setTaskBodyBusy(false));
+            }}>{taskBodyBusy ? "Relaunching…" : "Accept amendment and relaunch"}</button>
+            <a className="ml-2 inline-block rounded border border-hairline px-2 py-1" href="#/cycle/plan">Review amendment only</a>
+          </div>}
           {/* Every legal manipulation, offered where the task is on screen:
               the person reading this run's failure should not have to hunt
               the task down on the board to act on what they just learned. */}

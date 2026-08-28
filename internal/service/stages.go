@@ -67,6 +67,9 @@ type StageRequest struct {
 	// the product IS belong to a brief, and the note tells the architect to
 	// add nothing in that case so the empty diff says so.
 	Extend string `json:"extend,omitempty"`
+	// SplitTask replaces this task with exactly two independently-owned tasks
+	// through the same proposal and approval gate as every plan amendment.
+	SplitTask string `json:"split_task,omitempty"`
 	// Adopt turns intake into a survey: the architect reads the tree and
 	// writes the requirements the code ALREADY satisfies, instead of
 	// interviewing a person about a product that is still an idea. For a
@@ -134,7 +137,7 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	// Solo and one round unless asked otherwise: the architect returns a
 	// fragment the engine merges, and a council re-reading a hundred-task
 	// outline to add two tasks is cost without judgment.
-	if strings.TrimSpace(req.Extend) != "" {
+	if strings.TrimSpace(req.Extend) != "" || strings.TrimSpace(req.SplitTask) != "" {
 		if req.Stage != "plan" {
 			return nil, fmt.Errorf("extend amends the plan; %s grows through a brief", req.Stage)
 		}
@@ -142,6 +145,9 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		if pErr != nil || plan == nil || len(plan.Sections) == 0 {
 			return nil, fmt.Errorf("no plan to extend yet — the design cycle creates it; " +
 				"describe what to build in a brief instead")
+		}
+		if strings.TrimSpace(req.SplitTask) != "" && plan.Section(req.SplitTask) == nil {
+			return nil, fmt.Errorf("no task %s in the plan", req.SplitTask)
 		}
 		if req.Mode == "" {
 			req.Mode = "solo"
@@ -483,8 +489,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 			return rs.writer.AppendEvent("survey_inventory", detail)
 		},
-		Extend: req.Extend,
-		Images: images,
+		Extend:    req.Extend,
+		SplitTask: req.SplitTask,
+		Images:    images,
 		// A small architect gets the engine as its working memory: below
 		// 64k of declared context, document updates run sectioned — one
 		// triage pass, then one fresh conversation per touched section.
@@ -957,6 +964,101 @@ type TaskView struct {
 	// tasks: their bug edge justifies them, but does not document the behavior
 	// in the spec. The scribe settles the debt by teaching the spec what was built.
 	SpecDebt bool `json:"spec_debt,omitempty"`
+}
+
+// TaskBodyUpdate proposes a prose-only plan amendment. The approved plan is
+// deliberately untouched here: artifact.Promote supplies the human approval,
+// stale-document check, and durable attribution boundary.
+func (s *Service) TaskBodyUpdate(ctx context.Context, projectID, taskID, body string) (*TaskView, error) {
+	entry, err := s.registry.Get(projectID)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := artifact.Load(entry.Path, artifact.KindPlan)
+	if err != nil {
+		return nil, err
+	}
+	for i := range plan.Sections {
+		for j := range plan.Sections[i].Children {
+			task := &plan.Sections[i].Children[j]
+			if task.ID != taskID {
+				continue
+			}
+			if pending, err := artifact.LoadProposed(entry.Path, artifact.KindPlan); err != nil {
+				return nil, err
+			} else if pending != nil {
+				return nil, fmt.Errorf("a plan amendment is already awaiting approval")
+			}
+			if taskBodyHasFields(body) {
+				return nil, fmt.Errorf("task-body amendments contain prose only; task metadata and Owns lanes are immutable")
+			}
+			prose := strings.TrimSpace(body)
+			task.Body = canonicalTaskFields(task.Fields) + prose
+			run := &runlog.Run{ID: runlog.GenerateRunID(), ProjectID: projectID, Stage: "plan", Mode: "human", Status: "paused", StartedAt: time.Now().UTC().Format(time.RFC3339), Gate: "none", Verdict: "UNVERIFIED", PendingKind: "gate"}
+			writer, err := runlog.NewWriter(entry.Path, run)
+			if err != nil {
+				return nil, err
+			}
+			rs := &runState{run: run, writer: writer, runDir: writer.RunDir(), projectPath: entry.Path, done: make(chan struct{})}
+			s.attachWriter(rs, writer)
+			s.runsMu.Lock()
+			s.runs[run.ID] = rs
+			s.runsMu.Unlock()
+			if err := artifact.WriteProposal(entry.Path, artifact.KindPlan, plan, run.ID, []string{"human"}); err != nil {
+				_ = writer.Close()
+				return nil, err
+			}
+			writer.AppendEvent("task_body_amendment", map[string]interface{}{"task": taskID, "by": "human", "detail": "proposed prose-only scope refinement; approval is required before relaunch"})
+			writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "artifact": "plan", "verdict": "UNVERIFIED"})
+			writer.WriteState()
+			// Return the exact effective section that was persisted in the proposal.
+			// The editor submits prose, but a task representation includes its
+			// canonical metadata too; returning only prose made this response
+			// disagree with the amendment a relaunch will actually receive.
+			return &TaskView{ID: task.ID, Title: task.Title, Milestone: plan.Sections[i].ID, Implements: task.Implements, Complexity: task.Field("complexity"), DependsOn: splitList(task.Field("depends on")), Body: task.Body}, nil
+		}
+	}
+	return nil, fmt.Errorf("no task %s in the plan", taskID)
+}
+
+// taskBodyHasFields prevents submitted prose from overwriting plan metadata.
+// Bold fields are all parser-visible; unbolded fields are accepted only for
+// the parser's documented vocabulary.
+func taskBodyHasFields(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
+		key := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "**"), "**"))
+		if key, _, ok := strings.Cut(key, ":"); ok {
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "implements", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns", "milestone":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// canonicalTaskFields preserves every parsed field, including unbolded source
+// fields, in one stable form so Render cannot duplicate or drop metadata.
+func canonicalTaskFields(fields map[string]string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		label := strings.Title(key)
+		if key == "depends on" {
+			label = "Depends on"
+		}
+		fmt.Fprintf(&b, "**%s:** %s\n", label, fields[key])
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // TaskList reads tasks from the plan and folds in what runs have done to them.
