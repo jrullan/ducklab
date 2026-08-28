@@ -3850,12 +3850,11 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	if err != nil {
 		return err
 	}
-	// A worktree run never touched the person's checkout; rejection simply
-	// drops its isolated branch and checkout. Shared-tree runs retain restore.
-	if rs.run.WorktreePath == "" {
-		if err := restoreAfterUnaccepted(rs); err != nil {
-			return err
-		}
+	// Restore through the run's execution root before removing an isolated
+	// checkout. Its snapshot and recorded writes belong to that worktree, never
+	// the registered human checkout.
+	if err := restoreAfterUnaccepted(rs); err != nil {
+		return err
 	}
 	// Rejecting the test revokes the pre-authorized build.
 	rs.run.ChainBuild = nil
