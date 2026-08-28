@@ -13,7 +13,11 @@ TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 # over a roster pin dies of alarm fatigue. Why the marker exists at all: a
 # binary built over a stale checkout wore HEAD's clean sha and served pre-fix
 # code — an evening went to chasing that phantom regression.
-SRCDIRTY = $$(git diff-index --quiet HEAD -- . ':(exclude).ducklab' 2>/dev/null || echo -dirty)
+# The tracked desktop bundle is excluded as well: it is a build ARTIFACT the
+# release cut owns (T-248) — a regenerated bundle never means the engine's
+# code differs from HEAD, and stamping every dev desktop build -dirty for it
+# taught the person to ignore the stamp.
+SRCDIRTY = $$(git diff-index --quiet HEAD -- . ':(exclude).ducklab' ':(exclude)cmd/ducklab-desktop/frontend/dist' 2>/dev/null || echo -dirty)
 STAMPVER = $$(git describe --tags --always 2>/dev/null || echo unknown)$(SRCDIRTY)
 STAMPSHA = $$(git rev-parse HEAD 2>/dev/null || echo unknown)$(SRCDIRTY)
 
@@ -93,6 +97,14 @@ desktop:
 	rm -rf cmd/ducklab-desktop/frontend/dist
 	cp -r frontend/dist cmd/ducklab-desktop/frontend/dist
 	$(GO) build -ldflags "-X github.com/jrullan/ducklab/internal/build.Version=$(STAMPVER) -X github.com/jrullan/ducklab/internal/build.Branch=$$(git branch --show-current 2>/dev/null || echo unknown) -X github.com/jrullan/ducklab/internal/build.Commit=$(STAMPSHA)" -o bin/ducklab-desktop ./cmd/ducklab-desktop
+	@# A dev build embeds the fresh bundle and then puts the TRACKED bundle
+	@# back exactly as committed: the release cut is its only committer
+	@# (T-248/B-290). Before this, every `make desktop` between releases
+	@# left the tree dirty and the operator committing bundles by hand —
+	@# five times in three days.
+	@if git rev-parse --git-dir >/dev/null 2>&1; then \
+	  git checkout -q -- cmd/ducklab-desktop/frontend/dist && git clean -fdq cmd/ducklab-desktop/frontend/dist; \
+	fi
 
 cross:
 	@for t in $(TARGETS); do \
