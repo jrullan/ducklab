@@ -147,6 +147,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const live = useRuns((s) => s.spend[runId]);
   const acceptState = useRuns((s) => s.acceptState[runId] ?? { kind: "idle" as const });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [publication, setPublication] = useState<{ policy: "nothing" | "push" | "pr"; remote: string; base: string }>({ policy: "push", remote: "origin", base: "main" });
+  const [publicationFailure, setPublicationFailure] = useState<{ sha: string; error: string } | null>(null);
   const [landingSHA, setLandingSHA] = useState("");
   const [landingNote, setLandingNote] = useState("");
   const [landingOffer, setLandingOffer] = useState<LandingOffer | null>(null);
@@ -176,7 +178,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       .then((d) => {
         if (!cancelled) {
           setLandingOffer(d.landing_offer ?? null);
-          useRuns.getState().resyncRun(d.run, d.events as DucklabEvent[]);
+          // Some lightweight run responses omit legal actions; retain the
+          // streamed record's actions rather than making an open gate vanish.
+          const current = useRuns.getState().runs[runId];
+          useRuns.getState().resyncRun(d.run.next === undefined && current?.next ? { ...d.run, next: current.next } : d.run, d.events as DucklabEvent[]);
         }
       })
       .catch(() => {
@@ -305,6 +310,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   }, [client]);
 
   const projectId = run?.project_id ?? "";
+  useEffect(() => {
+    if (!projectId || typeof client.projectGet !== "function") return;
+    let cancelled = false;
+    client.projectGet(projectId).then((project) => {
+      if (cancelled) return;
+      const config = project.config ?? {};
+      const remote = (config.remote ?? {}) as { name?: string; on_accept?: "nothing" | "push" | "pr" };
+      const github = (config.github ?? {}) as { pr_base?: string };
+      const git = (config.git ?? {}) as { base_branch?: string };
+      setPublication({ policy: remote.on_accept ?? (remote.name ? "push" : "nothing"), remote: remote.name || "origin", base: github.pr_base || git.base_branch || project.base_branch || "main" });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [client, projectId]);
   useEffect(() => {
     if (!projectId) return;
     void (async () => {
@@ -710,7 +728,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           ? "nothing passed, so there is nothing to accept — reject discards this run's diff and frees the task to retry"
           : events.some((e) => e.type === "commit_withdrawn")
             ? "The last accept committed the diff, but it did not reproduce from a clean checkout, so the commit was taken back — the diff is still in the tree, uncommitted. Fix the tree and accept again (a new commit, verified again), or reject to restore the tree."
-            : "commits the diff to the project";
+            : publication.policy === "push"
+              ? `commits the diff and pushes to ${publication.remote}/${publication.base}`
+              : publication.policy === "pr"
+                ? `commits the diff, pushes a branch, and opens or updates a pull request into ${publication.base}`
+                : "commits the diff locally without publishing it";
   const chatToolCalls = run.stage === "chat"
     ? turns.reduce((count, turn) => count + turn.toolCalls.length, 0)
     : 0;
@@ -817,6 +839,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     try {
       const res = await client.accept(runId);
       store.confirmAccept(runId, res.commit_sha);
+      setPublicationFailure(res.warning ? { sha: res.commit_sha, error: res.warning.replace(/^.*?push failed:\s*/i, "") } : null);
     } catch (e) {
       // Never show a commit the engine did not confirm (AC-34).
       store.failAccept(runId, e instanceof Error ? e.message : String(e));
@@ -1648,10 +1671,18 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           accept failed: {acceptState.message}
         </p>
       )}
-      {acceptState.kind === "committed" && (
+      {acceptState.kind === "committed" && !publicationFailure && (
         <p className="m-2 text-good" data-testid="accept-committed">
           committed {acceptState.sha.slice(0, 8)}
         </p>
+      )}
+      {publicationFailure && (
+        <section className="m-2 rounded-card border border-warning p-3" data-testid="publication-failure">
+          <p className="text-sm text-ink">committed locally as {publicationFailure.sha}; push failed: {publicationFailure.error}</p>
+          <button type="button" data-testid="retry-publication" className="mt-2 rounded border border-hairline px-2 py-1 text-sm" onClick={() => {
+            void client.projectPush(projectId).then(() => setPublicationFailure(null)).catch((e) => setPublicationFailure((current) => current ? { ...current, error: e instanceof Error ? e.message : String(e) } : current));
+          }}>Retry push to {publication.remote}/{publication.base}</button>
+        </section>
       )}
 
       {/* Yolo resumes immediately after an advisor answer. This is deliberately

@@ -274,7 +274,7 @@ export function Settings({
  * action. Diagnostics has no controls or setter wiring. */
 function RemoteGitSection({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [draft, setDraft] = useState<Record<string, string>>({
-    "remote.name": "", "remote.fetch_on_open": "false", "remote.allow_mcp_verbs": "",
+    "remote.name": "", "remote.on_accept": "nothing", "remote.fetch_on_open": "false", "remote.allow_mcp_verbs": "",
     "github.pr_base": "", "github.pr_draft": "false", "github.pr_tool": "", "github.pr_body_by_scribe": "false",
     "shell.allow_prefixes": "", "shell.deny": "", "git.protected_paths": "", "verify.link_deps": "",
   });
@@ -298,7 +298,7 @@ function RemoteGitSection({ client, projectId }: { client: EngineClient; project
       const remote = section("remote"), github = section("github"), shell = section("shell"), git = section("git"), verify = section("verify");
       const value = (v: unknown) => Array.isArray(v) ? v.join(",") : v === undefined || v === null ? "" : String(v);
       setDraft({
-        "remote.name": value(remote.name), "remote.fetch_on_open": value(remote.fetch_on_open), "remote.allow_mcp_verbs": value(remote.allow_mcp_verbs),
+        "remote.name": value(remote.name), "remote.on_accept": value(remote.on_accept ?? (remote.name ? "push" : "nothing")), "remote.fetch_on_open": value(remote.fetch_on_open), "remote.allow_mcp_verbs": value(remote.allow_mcp_verbs),
         "github.pr_base": value(github.pr_base), "github.pr_draft": value(github.pr_draft), "github.pr_tool": value(github.pr_tool), "github.pr_body_by_scribe": value(github.pr_body_by_scribe),
         "shell.allow_prefixes": value(shell.allow_prefixes), "shell.deny": value(shell.deny), "git.protected_paths": value(git.protected_paths), "verify.link_deps": value(verify.link_deps),
       });
@@ -319,7 +319,7 @@ function RemoteGitSection({ client, projectId }: { client: EngineClient; project
   );
   return <>
     <SettingsCard title="remote & pull requests" desc="how this project uses its one named git remote; fetching remains opt-in" testid="remote-git-settings">
-      <div className="grid gap-3">{text("remote.name", "remote name")}{text("remote.fetch_on_open", "fetch on open", "true or false")}
+      <div className="grid gap-3">{text("remote.name", "remote name")}<label className="flex flex-col gap-0.5 text-sm text-ink-secondary">after accepting a run<span className="text-xs text-ink-muted">commit first, then choose whether to leave it local, push it, or open/update a pull request</span><select data-testid="remote-on_accept" value={draft["remote.on_accept"]} onChange={(e) => update("remote.on_accept", e.target.value)} className="rounded border border-hairline bg-surface2 px-2 py-1"><option value="nothing">nothing (commit locally)</option><option value="push">push to the base branch</option><option value="pr">push and open/update a pull request</option></select></label>{text("remote.fetch_on_open", "fetch on open", "true or false")}
       {text("github.pr_base", "pull request base branch")}{text("github.pr_draft", "create draft pull requests", "true or false")}{text("github.pr_tool", "pull request tool")}{text("github.pr_body_by_scribe", "scribe writes PR body", "true or false")}</div>
     </SettingsCard>
     <SettingsCard title="lists & safety rules" desc="one item per comma; these lists constrain commands, protected files, and acceptance checkouts" testid="slice-key-editors">
