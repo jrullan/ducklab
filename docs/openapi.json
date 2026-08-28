@@ -2263,6 +2263,63 @@
         ],
         "type": "object"
       },
+      "ServiceJourney": {
+        "properties": {
+          "door": {
+            "$ref": "#/components/schemas/ServiceNextStep"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "rungs": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceJourneyRung"
+            },
+            "type": "array"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceNextStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "ref",
+          "rungs",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "ServiceJourneyRung": {
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state"
+        ],
+        "type": "object"
+      },
       "ServiceLandingOffer": {
         "properties": {
           "commit_sha": {
@@ -5027,6 +5084,50 @@
           }
         ],
         "summary": "The project's suggested next steps"
+      }
+    },
+    "/v1/projects/{id}/next/{ref}": {
+      "get": {
+        "operationId": "NextFor",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceJourney"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "One bug's or task's journey: its ladder position and the door that is next"
       }
     },
     "/v1/projects/{id}/pr": {

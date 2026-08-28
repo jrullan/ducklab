@@ -19,6 +19,7 @@ import { WaitingCard } from "../components/WaitingCard";
 import { pickedSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import type { MeasuredSpend } from "../components/SeatChips";
 import { TddLaunch } from "../components/TddLaunch";
+import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { ChatAbout } from "../components/ChatAbout";
 import { RemoveTask } from "../components/RemoveTask";
 import { OriginLine } from "../components/OriginLine";
@@ -1025,6 +1026,11 @@ function TaskRunner({
   // Accepted work is not waiting to be built. The controls follow the task's
   // state rather than being offered whatever it is.
   const accepted = task.status === "accepted";
+  // The guide, localized: this task's ladder and its next door. The door's
+  // wording labels the launcher below — "Build the committed test — make it
+  // pass" instead of a generic "Build it" beside "Test first" as peers.
+  const journey = useJourney(client, projectId, task.id, `${task.status}:${task.test_ready ? 1 : 0}:${(task.next ?? []).join(",")}`);
+  const doorLabel = journey?.door?.id === "build" && !accepted ? journey.door.action : undefined;
   // What may be started from here, stated by the engine. The conditionals
   // below render from this list — the client stopped encoding "todo means
   // Build it" the day those rules were wrong for the fourth time
@@ -1186,6 +1192,7 @@ function TaskRunner({
               preferred={preferred}
               estimates={estimates}
               busy={busy}
+              label={doorLabel}
               onDucklingsChange={setChosen}
               roster={roster}
               onModeChange={setRunMode}
@@ -1313,6 +1320,7 @@ function TaskRunner({
           />
         </ul>
       )}
+      <JourneyRail journey={journey} testId="task-journey" />
       <div className="space-y-2" data-testid="task-actions">
         {ordered.map((a, i) => renderAction(a, i === 0))}
       </div>
@@ -1467,11 +1475,17 @@ function BugRail({
   ducklings: readonly Duckling[];
   onDone: () => void;
 }) {
+  // The guide, localized: this bug's ladder and its next door, refreshed on
+  // every status move. While the bug is in progress the door is its TASK's
+  // door, shown here — the person does not travel to the board to learn
+  // that the next act is to write the test or build.
+  const journey = useJourney(client, projectId, bug.id, `${bug.status}:${bug.task_id ?? ""}`);
   return (
     <div className="space-y-3" data-testid="bug-rail">
       <div>
         <div className="flex items-baseline gap-2"><span className="font-mono text-xs text-ink-muted">{bug.id}</span><SeverityChip severity={bug.severity} /><span className="ml-auto text-xs text-ink-muted">{bug.status.replace("_", " ")}</span></div>
         <div className="mt-1 text-sm font-medium text-ink">{bug.title}</div>
+        <div className="mt-2"><JourneyRail journey={journey} testId="bug-journey" /></div>
       </div>
       {/* Actions first, together, under the title — what to do next depends
           on where the bug is, and the loop's rules live in the engine: the
@@ -1723,10 +1737,10 @@ function BugNext({
       {bug.task_id && (
         <p className="text-xs text-ink-muted">
           Tracked as{" "}
-          <a href="#/board" className="text-ink underline">
+          <a href="#/board" className="text-ink underline" data-testid="bug-task-link">
             {bug.task_id}
           </a>
-          . Run it from the tasks board.
+          {" "}— its next door is named above; the launch controls live on that task.
         </p>
       )}
       {/* Every legal move, from the engine's own table. Without these a report

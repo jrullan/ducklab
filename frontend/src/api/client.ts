@@ -1570,4 +1570,17 @@ export class EngineClient {
       `/v1/projects/${projectId}/next`,
     ).then((r) => r.items ?? []);
   }
+
+  /** The guide, localized: one bug's or task's ladder position and the door
+   * that is next — the answer the record's own card carries, so the person
+   * examining B-012 never has to visit Now to learn what to do with it. */
+  nextFor(projectId: string, ref: string) {
+    return this.request<Journey>("GET", `/v1/projects/${projectId}/next/${encodeURIComponent(ref)}`);
+  }
 }
+
+/** One rung of an entity's ladder. State: done | current | next | later | skipped | exit. */
+export type JourneyRung = { id: string; label: string; state: string; at?: string; actor?: string };
+
+/** An entity's position and its doors; door is steps[0] for one-button clients. */
+export type Journey = { ref: string; kind: string; rungs: JourneyRung[]; steps: NextStep[]; door?: NextStep | null };

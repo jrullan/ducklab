@@ -24,6 +24,7 @@ import { SeatChips, type MeasuredSpend } from "../components/SeatChips";
 import { money, moneyOrZero, tokens, duration } from "../lib/format";
 import { routeHref } from "../app/routes";
 import { seatsFromRoster, rolesForMode } from "../lib/seats";
+import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
 import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
@@ -138,6 +139,14 @@ function CycleMap({ stage }: { stage: string }) {
 
 export function RunView({ runId, client }: { runId: string; client: EngineClient }) {
   const run = useRuns((s) => s.runs[runId]);
+  // The door this run's accept opened for its task, fetched once the accept
+  // is confirmed (the version key flips on accepted/status).
+  const journey = useJourney(
+    client,
+    run?.project_id ?? "",
+    run?.accepted && run?.task_id ? run.task_id : undefined,
+    `${run?.accepted ? 1 : 0}:${run?.status ?? ""}`,
+  );
   const events = useRuns((s) => s.events[runId] ?? []);
   const deltas = useRuns((s) => s.deltas[runId] ?? {});
   const reasoning = useRuns((s) => s.reasoning[runId] ?? {});
@@ -1259,6 +1268,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               )}
             </div>
           )}
+        </section>
+      )}
+      {/* The transition proposes in place: the accept that just moved this
+          task's ladder shows the door it opened, here, instead of leaving
+          the person to find it on Now or the board. */}
+      {run.accepted && run.task_id && journey && journey.door && !(run.stage === "test" && chainBuild) && (
+        <section data-testid="next-door" className="m-2 rounded-card border border-good p-3">
+          <JourneyRail journey={journey} testId="run-journey" />
+          <a href="#/board" className="mt-1 inline-block text-xs text-good underline" data-testid="next-door-link">
+            open {run.task_id} on the board
+          </a>
         </section>
       )}
       {run.stage === "test" && run.accepted && chainBuild && (

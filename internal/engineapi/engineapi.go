@@ -1892,6 +1892,18 @@ func (s *Server) handleProjectNext(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": steps, "total": len(steps)})
 }
 
+// handleNextFor is the guide, localized: where one bug or task stands on its
+// ladder and which door is next — the answer the record's own card should
+// carry, instead of pointing the person at another view to find it.
+func (s *Server) handleNextFor(w http.ResponseWriter, r *http.Request) {
+	j, err := s.svc.NextFor(r.Context(), r.PathValue("id"), r.PathValue("ref"))
+	if err != nil {
+		s.error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, j)
+}
+
 func (s *Server) handleTaskNext(w http.ResponseWriter, r *http.Request) {
 	task, err := s.svc.TaskNext(r.Context(), r.PathValue("id"))
 	if err != nil {

@@ -663,6 +663,22 @@ export interface ServiceInstallResult {
   seconds?: number;
 }
 
+export interface ServiceJourney {
+  door?: ServiceNextStep;
+  kind?: string;
+  ref?: string;
+  rungs?: ServiceJourneyRung[];
+  steps?: ServiceNextStep[];
+}
+
+export interface ServiceJourneyRung {
+  actor?: string;
+  at?: string;
+  id?: string;
+  label?: string;
+  state?: string;
+}
+
 export interface ServiceLandingOffer {
   commit_sha?: string;
   evidence?: string;
@@ -947,6 +963,7 @@ export const OPERATIONS = [
   { id: "GateRun", method: "POST", path: "/v1/projects/{id}/gate/run" },
   { id: "ProjectInstall", method: "POST", path: "/v1/projects/{id}/install" },
   { id: "ProjectNext", method: "GET", path: "/v1/projects/{id}/next" },
+  { id: "NextFor", method: "GET", path: "/v1/projects/{id}/next/{ref}" },
   { id: "ProjectPR", method: "POST", path: "/v1/projects/{id}/pr" },
   { id: "ProjectPull", method: "POST", path: "/v1/projects/{id}/pull" },
   { id: "ProjectPush", method: "POST", path: "/v1/projects/{id}/push" },
