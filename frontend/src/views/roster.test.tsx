@@ -139,7 +139,7 @@ describe("Roster", () => {
 
     const pinned = screen.getByTestId("roster-card-pair-implementer-project-builder");
     expect(pinned.dataset.ghost).not.toBe("true");
-    expect(pinned.textContent).toContain("pinned");
+    expect(pinned.textContent).toContain("project default");
     expect(pinned.title).toContain("builder");
     expect(screen.getByTestId("roster-board-common").textContent).toMatch(/no pins/i);
 

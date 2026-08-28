@@ -6,7 +6,7 @@ import { routeHref } from "../app/routes";
 
 const zones = [
   { label: "Now", testid: "nav-now", home: { name: "now" as const }, members: ["now" as const] },
-  { label: "Work", testid: "nav-work", home: { name: "board" as const }, members: ["board" as const, "cycle" as const] },
+  { label: "Work", testid: "nav-work", home: { name: "board" as const }, members: ["board" as const, "cycle" as const, "roster" as const] },
   { label: "Records", testid: "nav-records", home: { name: "runs" as const }, members: ["runs" as const] },
 ];
 const config = [

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Ducklings } from "./Ducklings";
-import { Roster } from "./Roster";
 import { Skills } from "./Skills";
 import { Projects } from "./Projects";
 import { applyTheme, saveTheme, type Theme } from "../app/theme";
@@ -62,7 +61,6 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
 ];
 
 const SETTINGS_ROOMS = [
-  { name: "roster" as const, label: "Roster board" },
   { name: "skills" as const, label: "Skills" },
   { name: "projects" as const, label: "Project management" },
 ];
@@ -75,7 +73,7 @@ const SETTINGS_GROUPS: { label: string; shortLabel: string; sectionIds?: Setting
     label: "Who works for you — and how far they may go",
     shortLabel: "People & autonomy",
     sectionIds: ["ducklings", "fleet", "budgets", "autopilot"],
-    rooms: ["roster", "skills"],
+    rooms: ["skills"],
   },
   {
     label: "Your projects",
@@ -91,7 +89,7 @@ const SETTINGS_GROUPS: { label: string; shortLabel: string; sectionIds?: Setting
 ];
 
 export function Settings({
-  theme, onTheme, engineVersion, connection, client, projectId, projectName, onEngine, engineBusy, engineError, room, section, onProjectSelect, onProjectsChanged,
+  theme, onTheme, engineVersion, connection, client, projectId, onEngine, engineBusy, engineError, room, section, onProjectSelect, onProjectsChanged,
 }: {
   theme: Theme;
   onTheme: (t: Theme) => void;
@@ -106,11 +104,9 @@ export function Settings({
   onEngine?: (action: "restart" | "reconnect") => void;
   engineBusy?: boolean;
   engineError?: string | null;
-  room?: "roster" | "skills" | "projects";
+  room?: "skills" | "projects";
   /** Settings section selected by the hash route. */
   section?: SettingsSection;
-  /** Display name for the selected project in the roster scope control. */
-  projectName?: string;
   onProjectSelect?: (id: string) => void;
   onProjectsChanged?: () => void;
 }) {
@@ -168,12 +164,7 @@ export function Settings({
         ))}
       </nav>
 
-      <div className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${room === "roster" ? "max-w-none" : "max-w-3xl"}`} data-testid="settings-content">
-      {room === "roster" && client && projectId && (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-4" data-testid="settings-room-roster">
-          <Roster client={client} projectId={projectId} projectName={projectName} />
-        </div>
-      )}
+      <div className="flex min-h-0 min-w-0 max-w-3xl flex-1 flex-col overflow-y-auto" data-testid="settings-content">
       {room === "skills" && client && projectId && (
         <div className="h-full overflow-y-auto p-4" data-testid="settings-room-skills">
           <Skills client={client} projectId={projectId} />
@@ -189,7 +180,7 @@ export function Settings({
           {activeSection === "ducklings" && client && (
             <>
               <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
-              <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open roster</a>
+              <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open Roster board</a>
             </>
           )}
           {!room && client && <ConfigSection client={client} section={activeSection} projectId={projectId} />}

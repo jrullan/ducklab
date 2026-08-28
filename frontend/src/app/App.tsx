@@ -17,6 +17,7 @@ import { Release } from "../views/Release";
 import { Reports } from "../views/Reports";
 import { Review } from "../views/Review";
 import { Ducklings } from "../views/Ducklings";
+import { Roster } from "../views/Roster";
 import { Settings } from "../views/Settings";
 import { parseRoute, routeHref, type Route } from "./routes";
 import { loadTheme, type Theme } from "./theme";
@@ -88,14 +89,14 @@ const ZONES: Zone[] = [
   { label: "Now", testid: "nav-now", home: { name: "now" }, members: ["now"] },
   {
     label: "Work", testid: "nav-work", home: { name: "board" },
-    members: ["board", "cycle"],
+    members: ["board", "cycle", "roster"],
   },
   {
     label: "Records", testid: "nav-records", home: { name: "runs" },
     members: ["runs", "run", "reports", "review", "release", "bench"],
   },
 ];
-const CONFIG_MEMBERS: Route["name"][] = ["settings", "ducklings", "projects", "roster", "skills"];
+const CONFIG_MEMBERS: Route["name"][] = ["settings", "ducklings", "projects", "skills"];
 
 // Within a zone, its rooms. Documents is the old Cycle: for a solo dev the
 // lifecycle documents are work items, not a separate ceremony.
@@ -104,6 +105,7 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
     { label: "Documents", route: { name: "cycle" } },
     { label: "Tasks", route: { name: "board" } },
     { label: "Bugs", route: { name: "board", tab: "bugs" } },
+    { label: "Roster", route: { name: "roster" } },
   ],
   Records: [
     { label: "Runs", route: { name: "runs" } },
@@ -589,10 +591,14 @@ export function App() {
             <NoProject />
           ))}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
-        {(route.name === "settings" || route.name === "roster" || route.name === "skills" || route.name === "projects") && (
+        {route.name === "roster" && (client && projectId ? (
+          <div className="h-full min-h-0 p-4">
+            <Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} />
+          </div>
+        ) : <NoProject />)}
+        {(route.name === "settings" || route.name === "skills" || route.name === "projects") && (
           <Settings
             projectId={projectId}
-            projectName={projects.find((p) => p.id === projectId)?.name}
             room={route.name === "settings" ? undefined : route.name}
             section={route.name === "settings" ? route.section ?? "ducklings" : undefined}
             theme={theme} onTheme={setTheme} engineVersion={engineVersion} connection={connection}

@@ -63,7 +63,6 @@ describe("Settings", () => {
       "settings-nav-fleet",
       "settings-nav-budgets",
       "settings-nav-autopilot",
-      "settings-nav-roster",
       "settings-nav-skills",
       "settings-nav-remote",
       "settings-nav-projects",
@@ -74,16 +73,17 @@ describe("Settings", () => {
     }
   });
 
-  it("keeps the settings frame when a room is open", () => {
+  it("keeps the settings frame when a settings room is open", () => {
     const client = {
       ducklings: vi.fn().mockResolvedValue([]),
       globalRosterGet: vi.fn().mockResolvedValue({ entries: [] }),
       providers: vi.fn().mockResolvedValue([]),
       Scorecards: vi.fn().mockResolvedValue([]),
+      skills: vi.fn().mockResolvedValue({ items: [] }),
     };
-    render(<Settings theme="system" onTheme={() => {}} engineVersion="" connection="open" client={client as any} projectId="p" room="roster" projectName="Demo" />);
+    render(<Settings theme="system" onTheme={() => {}} engineVersion="" connection="open" client={client as any} projectId="p" room="skills" />);
     expect(screen.getByTestId("settings-nav")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-content")).toContainElement(screen.getByTestId("roster-view"));
+    expect(screen.getByTestId("settings-content")).toContainElement(screen.getByTestId("settings-room-skills"));
   });
 
   it("uses labels for groups, not links", () => {
