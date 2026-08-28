@@ -91,15 +91,8 @@ describe("Roster", () => {
     expect(screen.getByTestId("roster-scope").textContent).toContain("Global");
     expect(screen.getByTestId("roster-scope").textContent).toContain("Project · Pond");
 
-    // The flock is the available fleet, not just whoever happens to have a seat.
-    const flock = screen.getByTestId("roster-flock");
-    expect(flock.textContent).toContain("architect");
-    expect(flock.textContent).toMatch(/local/i);
-    expect(flock.textContent).toContain("critic-a");
-    expect(flock.textContent).toMatch(/remote/i);
-    // List price rides the card's tooltip (compact cards; the value column
-    // shows whatever the sort is by).
-    expect(screen.getByTestId("roster-flock-card-critic-a").getAttribute("title")).toContain("$3 / $15 per Mtok");
+    expect(screen.getByRole("heading", { name: "Flock", level: 1 })).toBeTruthy();
+    expect(screen.queryByTestId("roster-flock")).toBeNull();
 
     for (const mode of ["council", "solo", "pair", "split", "tournament", "common"]) {
       expect(screen.getByTestId(`roster-board-${mode}`)).toBeTruthy();

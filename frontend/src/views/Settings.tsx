@@ -180,7 +180,7 @@ export function Settings({
           {activeSection === "ducklings" && client && (
             <>
               <Ducklings client={client} projectId={projectId ?? ""} only="ducklings" />
-              <a href={routeHref({ name: "roster" })} role="link" className="ml-4 text-sm text-ink underline">Open Roster board</a>
+              <a href={routeHref({ name: "flock" })} role="link" className="ml-4 text-sm text-ink underline">Open Flock</a>
             </>
           )}
           {!room && client && <ConfigSection client={client} section={activeSection} projectId={projectId} />}

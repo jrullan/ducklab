@@ -89,7 +89,7 @@ const ZONES: Zone[] = [
   { label: "Now", testid: "nav-now", home: { name: "now" }, members: ["now"] },
   {
     label: "Work", testid: "nav-work", home: { name: "board" },
-    members: ["board", "cycle", "roster"],
+    members: ["board", "cycle", "flock"],
   },
   {
     label: "Records", testid: "nav-records", home: { name: "runs" },
@@ -105,7 +105,7 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
     { label: "Documents", route: { name: "cycle" } },
     { label: "Tasks", route: { name: "board" } },
     { label: "Bugs", route: { name: "board", tab: "bugs" } },
-    { label: "Roster", route: { name: "roster" } },
+    { label: "Flock", route: { name: "flock" } },
   ],
   Records: [
     { label: "Runs", route: { name: "runs" } },
@@ -118,7 +118,7 @@ const SUBNAV: Record<string, { label: string; route: Route }[]> = {
   Config: [
     { label: "Settings", route: { name: "settings" } },
     { label: "Ducklings", route: { name: "ducklings" } },
-    { label: "Roster", route: { name: "roster" } },
+    { label: "Flock", route: { name: "flock" } },
     { label: "Skills", route: { name: "skills" } },
     { label: "Projects", route: { name: "projects" } },
   ],
@@ -591,7 +591,7 @@ export function App() {
             <NoProject />
           ))}
         {route.name === "ducklings" && client && <Ducklings client={client} projectId={projectId} />}
-        {route.name === "roster" && (client && projectId ? (
+        {route.name === "flock" && (client && projectId ? (
           <div className="h-full min-h-0 p-4">
             <Roster client={client} projectId={projectId} projectName={projects.find((p) => p.id === projectId)?.name} />
           </div>

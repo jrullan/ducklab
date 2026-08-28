@@ -37,8 +37,8 @@ async function openRunner(client: ReturnType<typeof runClient>) {
   fireEvent.change(screen.getByTestId("run-mode"), { target: { value: "pair" } });
 }
 
-describe("Roster launchers", () => {
-  it("moves positional mode line-ups out of Settings and links to the Roster board", async () => {
+describe("Flock launchers", () => {
+  it("moves positional mode line-ups out of Settings and links to Flock", async () => {
     const client = {
       budgetDefaults: vi.fn(() => Promise.resolve({ max_usd: 0, max_tokens: 0, max_turns: 0, max_wallclock_s: 0 })),
       modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 0 })),
@@ -49,7 +49,7 @@ describe("Roster launchers", () => {
     render(<Settings theme="dark" onTheme={vi.fn()} engineVersion="test" connection="open" client={client as any} projectId="p" />);
 
     await waitFor(() => expect(screen.queryByTestId("seat-council-0")).not.toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /roster board/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open flock/i })).toHaveAttribute("href", "#/flock");
   });
 
   it("prefills a task run with canonical roster seats and their provenance", async () => {
