@@ -29,7 +29,7 @@ function HashSettings() {
     addEventListener("hashchange", changed);
     return () => removeEventListener("hashchange", changed);
   }, []);
-  const room = route.name === "roster" || route.name === "skills" || route.name === "projects" ? route.name : undefined;
+  const room = route.name === "skills" || route.name === "projects" ? route.name : undefined;
   return <Settings theme="light" onTheme={() => {}} engineVersion="" connection="open" client={client} projectId="p" room={room} section={route.name === "settings" ? route.section ?? "ducklings" : undefined} />;
 }
 
@@ -41,16 +41,15 @@ const entries: { id: string; route: Route; content: string }[] = [
   { id: "remote", route: { name: "settings", section: "remote" }, content: "settings-section-remote" },
   { id: "appearance", route: { name: "settings", section: "appearance" }, content: "settings-section-appearance" },
   { id: "engine", route: { name: "settings", section: "engine" }, content: "settings-section-engine" },
-  { id: "roster", route: { name: "roster" }, content: "settings-room-roster" },
   { id: "skills", route: { name: "skills" }, content: "settings-room-skills" },
   { id: "projects", route: { name: "projects" }, content: "settings-room-projects" },
 ];
 
 describe("Settings hash navigation", () => {
   it("navigates from a room to providers and renders its section", async () => {
-    location.hash = "#/roster";
+    location.hash = "#/skills";
     render(<HashSettings />);
-    await screen.findByTestId("settings-room-roster");
+    await screen.findByTestId("settings-room-skills");
 
     fireEvent.click(screen.getByTestId("settings-nav-fleet"));
     await waitFor(() => expect(location.hash).toBe("#/settings/fleet"));

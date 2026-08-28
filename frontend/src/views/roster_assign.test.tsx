@@ -103,14 +103,15 @@ describe("Roster assignment", () => {
     await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-b"]));
   });
 
-  it("offers an equivalent keyboard assignment flow", async () => {
+  it("opens the comparison drawer by keyboard and applies a multi-seat selection", async () => {
     const client = await renderRoster();
     await projectScope();
     const seat = screen.getByTestId("roster-column-council-reviewer");
     seat.focus();
     fireEvent.keyDown(seat, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: /assign critic-b to reviewer/i }));
-    await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-b"]));
+    fireEvent.click(screen.getByRole("button", { name: "critic-b" }));
+    fireEvent.click(screen.getByRole("button", { name: /apply 2 ducklings/i }));
+    await waitFor(() => expect(client.RosterSetManyMode).toHaveBeenCalledWith("p-1", "council", "reviewer", ["critic-a", "critic-b"]));
   });
 
   // The SEAT decides append vs replace, never a drag flag (B-067): a pinned
