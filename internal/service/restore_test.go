@@ -208,7 +208,7 @@ func TestWorktreeRestoreDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
-	gitProject(t, dir)
+	mainGit := gitProject(t, dir)
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-reject-same-name")
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("run worktree edit\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -216,6 +216,11 @@ func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("human checkout edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Preserve both checkout content and git metadata before rejection. The
+	// worktree's cleanup must not touch either one.
+	beforeTree := snapshotFixtureTree(t, dir)
+	beforeHead := mustHead(t, mainGit)
+	beforeDirty := strings.Join(mainGit.DirtyPaths(), "\x00")
 
 	if err := s.RunReject(context.Background(), run.ID, "no"); err != nil {
 		t.Fatal(err)
@@ -226,6 +231,13 @@ func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	}
 	if string(got) != "human checkout edit\n" {
 		t.Errorf("rejecting a worktree run changed the registered checkout's file: got %q", got)
+	}
+	assertFixtureTreeEqual(t, beforeTree, snapshotFixtureTree(t, dir))
+	if got := mustHead(t, mainGit); got != beforeHead {
+		t.Errorf("rejecting a worktree run changed registered checkout HEAD: got %q, want %q", got, beforeHead)
+	}
+	if got := strings.Join(mainGit.DirtyPaths(), "\x00"); got != beforeDirty {
+		t.Errorf("rejecting a worktree run changed registered checkout status: got %q, want %q", got, beforeDirty)
 	}
 	if _, err := os.Lstat(run.WorktreePath); !os.IsNotExist(err) {
 		t.Fatalf("worktree remains after reject: %v", err)
