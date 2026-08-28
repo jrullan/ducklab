@@ -6,7 +6,7 @@ id = "ducklab"
 name = "ducklab"
 describe = ""
 created = "2026-08-03T13:35:24Z"
-autonomy = "guarded"
+autonomy = "yolo"
 
 [verify]
   mode = "tests"
@@ -28,16 +28,20 @@ autonomy = "guarded"
   max_files = 0
 
 [roster]
-  consultant = "dsv4flash"
+  consultant = "k3"
   triager = "luna"
 
 [roster_seats]
-  consultant = ["dsv4flash"]
+  consultant = ["k3"]
   triager = ["luna"]
 
 [mode_seats]
   [mode_seats.council]
     advisor = ["terra"]
+  [mode_seats.pair]
+    advisor = ["k3"]
+    implementer = ["terra"]
+    reviewer = ["glm52"]
 
 [modes]
 

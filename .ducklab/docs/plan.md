@@ -4475,4 +4475,746 @@ Fix direction: fetch the roster per the MODE OF THE PHASE being tuned (test and 
 
 Related: B-258 (T-219, engine-side single launch path), SPEC-026, B-261 (decision surfaces carrying their own seat overrides).
 
+### T-231 — Reword the pre-promotion task-count assertion message
+
+Fixes B-272.
+
+## Reported
+
+The fatalf message implies the failure is 'triage auto-applied' but fires whenever the count is not 2, making the assertion's intent hard to parse.
+
+Where: internal/service/promote_carries_test.go:113
+
+Suggested fix: Reword the message to state the actual invariant (e.g. 'expected exactly the 2 pre-existing tasks before promotion, got %d').
+
+Found by glm52 reviewing T-222 in run r-20260826-230244-ma75 (verdict: approve).
+
+**Deliverables:**
+- The pre-promotion count failure explicitly states that exactly 2 pre-existing tasks are expected.
+- The failure message reports the observed task count without implying triage auto-application caused the failure.
+
+## Triage
+
+**Component:** promotion tests
+**Suspected files:** internal/service/promote_carries_test.go
+
+The assertion is functionally correct but its low-severity diagnostic message misstates what the invariant checks.
+
+**Verification (triage recommends):** build-only — This is a test-diagnostic wording issue, so an automated test would only pin the message text rather than validate behavior.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-232 — Rename the roster admission test and update its comment to match turn-level binding
+
+Fixes B-263.
+
+## Reported
+
+TestQueueBlocksRosterWhenAnyProviderIsAtCap keeps its old name and doc comment claiming 'a run reserves every provider' / 'cannot make a roster start while its local seat is full', but the assertions now expect the spanning roster to be admitted as running with an empty reason.
+
+Where: internal/service/queue_test.go:517
+
+Suggested fix: Rename the test and rewrite the comment to describe that a roster spanning a full provider is admitted without a role turn (turn-level binding), matching the new assertions.
+
+Found by glm52 reviewing T-211 in run r-20260826-174717-rgwc (verdict: approve).
+
+**Deliverables:**
+- The test name describes admission of a roster spanning a full provider without a role turn.
+- The comment states that provider capacity is bound at the turn level rather than reserving every provider for the run.
+- The existing assertions remain intact and continue to document the admitted running state and empty queue reason.
+
+## Triage
+
+**Component:** queue
+**Suspected files:** internal/service/queue_test.go
+
+The test's name and comment contradict its assertions, obscuring the intended turn-level provider-binding behavior.
+
+**Verification (triage recommends):** build-only — This is a test-name and documentation mismatch, so visual review is more honest than an automated behavior test.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-233 — Reformat the Settings content block for auditable closing-tag nesting
+
+Fixes B-273.
+
+## Reported
+
+Closing-tag nesting in the restructured content region is hard to audit (three nested divs closed by inline fragments) though it parses and tests green.
+
+Where: frontend/src/views/Settings.tsx:263
+
+Suggested fix: Reformat the settings-section block so each conditional/div pair is indented consistently.
+
+Found by k3 reviewing T-214 in run r-20260827-000244-wy5b (verdict: approve).
+
+**Deliverables:**
+- The conditional settings-section and nested div blocks use consistent indentation in Settings.tsx.
+- Each closing tag is visually aligned with its corresponding opening tag without changing rendered behavior.
+- The Settings.tsx file continues to parse and build successfully.
+
+## Triage
+
+**Component:** Settings UI
+**Suspected files:** frontend/src/views/Settings.tsx
+
+This is an actionable, deterministic low-severity readability issue in the Settings component with no reported runtime behavior defect.
+
+**Verification (triage recommends):** build-only — The issue is source formatting and visual auditability; automated tests would only pin indentation rather than behavior.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-234 — Nest multi-portion promoted tasks under one Reported bugs milestone
+
+Fixes B-271.
+
+## Reported
+
+Multi-portion promotes create N separate milestones all titled "Reported bugs", which is a readability/structure smell in the plan document.
+
+Where: internal/service/bugs.go:672
+
+Suggested fix: Consider nesting all portions under a single "Reported bugs" milestone, or giving each portion-milestone a distinct title derived from the portion.
+
+Found by glm52 reviewing T-222 in run r-20260826-230244-ma75 (verdict: approve).
+
+**Deliverables:**
+- Multi-portion promotion creates exactly one Reported bugs milestone.
+- All promoted portion tasks remain children of that shared milestone with their own titles and ownership lanes.
+- An automated test asserts the milestone count and child task structure.
+
+## Triage
+
+**Component:** bug promotion plan rendering
+**Suspected files:** internal/service/bugs.go, internal/service/promote_carries_test.go
+
+The multi-portion branch explicitly appends one identically titled milestone per portion, producing a deterministic readability defect.
+
+**Verification (triage recommends):** test-first — Promoting a bug with multiple portions can assert that the plan contains one Reported bugs milestone containing all portion tasks.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-237 — Trim the response body before matching the legacy Go 404 fallback text
+
+Fixes B-233.
+
+## Reported
+
+The backward-compat text fallback `text === "404 page not found"` will never match Go's actual http.NotFound output, which is `"404 page not found\n"` (trailing newline from fmt.Fprintln), so the stated compatibility with older muxes is dead code.
+
+Where: frontend/src/api/client.ts:681
+
+Suggested fix: Compare against the trimmed text (e.g. `text.trim() === "404 page not found"`) or include the newline, so older engines without the X-Ducklab-Unknown-Route header are still detected.
+
+Found by glm52 reviewing T-198 in run r-20260826-102417-tuwc (verdict: approve).
+
+**Deliverables:**
+- The legacy text fallback at client.ts:681 matches Go's http.NotFound output including its trailing newline (e.g. via text.trim() comparison)
+- A test constructs a 404 Response with body "404 page not found\n" and no marker header and asserts the client flags the engine as older
+- The existing 'does not infer staleness from a data 404' test still passes (no broadening to arbitrary text/plain 404s)
+
+## Triage
+
+**Component:** frontend api client
+**Suspected files:** frontend/src/api/client.ts, frontend/src/api/client.test.ts
+
+The exact-match fallback can never fire against real Go http.NotFound output, making the documented older-mux compatibility dead code; a one-token fix plus a newline-body test restores it.
+
+**Verification (triage recommends):** test-first — Client receives 404 with body "404 page not found\n" and no X-Ducklab-Unknown-Route header; expect stale='older' and the 'older than this app' ApiError
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-238 — Make TestAnAbortKillsTheGateAndItsChildren load-tolerant: unique marker and poll-until for the survivor check
+
+Fixes B-221.
+
+## Reported
+
+Failed T-190's gate ('the gate's child survived the abort: <pids>') with 4 concurrent gates; 3/3 green in isolation on the same tree. Same class as B-166 (shell timeout) and B-174 (cherry-pick sha): process/timing assumptions that hold alone and break under load. Treat like T-155 treated its sibling: poll-until with a load-tolerant deadline for the children-are-dead check, unique markers per gate (the B-168 pattern) if it greps processes. internal/verify/verify_test.go:391.
+
+ESCALATED (2026-08-26 23:5x): the flake family now BLOCKS ACCEPTS. T-222's build (r-20260826-230244-ma75, reviewer-approved, gates green) was refused at the clean-checkout reproduction because TestATestFirstUsesAnIndependentWorktree (T-224's custody test) failed its t.TempDir cleanup under full-suite concurrent load — "TempDir RemoveAll cleanup: unlinkat ...: directory not empty" — a git-worktree-in-tempdir teardown race. Verified NOT a candidate defect: the same test passes 3x consecutively (and xplat, misread as failing, was ok) on the exact candidate tree. Every flaky test is now a die roll at every accept: the human retries and burns wall-clock. New member for the list: TestATestFirstUsesAnIndependentWorktree (teardown must remove the git worktree before TempDir cleanup, or use its own out-of-TempDir scratch).
+
+WORDING CORRECTED (Jose, 2026-08-26): "concurrent gate load" misleads — tonight's blocking flake fired on a SOLO accept with nothing else running. The concurrency that matters is the suite's own: `go test ./...` runs packages in parallel and internal/service alone spends ~25s spawning fake engines, worktrees and gates, so a single reproduction is already a loaded machine. A test must survive its own suite; no second run is required to expose these.
+
+MEMBER FIXED (60e1ace, direct): TestATestFirstUsesAnIndependentWorktree now waits for the run it launches (waitForRun, the sibling pattern) — it was returning while the run's goroutine still wrote under t.TempDir. Before the fix it struck three times in one evening: blocked T-222's first accept and failed the gates of two healthy wave runs (T-225/T-226 r-20260827-002034-*). Stress-verified -count=10 plus full package. The bug stays open for the original member (TestAnAbortKillsTheGateAndItsChildren) and any future teardown racers; the class lesson stands: a test must survive its own suite.
+
+**Deliverables:**
+- The pgrep marker is unique per test invocation (e.g. includes PID or random suffix) so concurrent gates cannot match each other's sleeper processes
+- The children-are-dead check polls on an interval with a load-tolerant deadline (seconds, not a fixed 200ms sleep) and passes as soon as no marker process remains
+- The test fails only when marker processes are still alive at the deadline, reporting the surviving pids
+- Existing assertions are retained: abort lands within 5s and a killed gate never reports exit 0
+
+## Triage
+
+**Component:** verify tests
+**Suspected files:** internal/verify/verify_test.go
+
+Flaky test with a fixed 200ms settle sleep and a process-global pgrep marker breaks only under concurrent gate load, exactly like its closed siblings B-166/B-174.
+
+**Verification (triage recommends):** test-first — Run TestAnAbortKillsTheGateAndItsChildren with several concurrent instances (e.g. go test -count=8 -parallel) and expect zero 'child survived' failures
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-243 — Synchronize version-bearing project files during release cuts
+
+Fixes B-230.
+
+## Reported
+
+Field finding by Jose: make output says 'ducklab-frontend@0.3.0 build' while the release is v0.9.0. The Go side is immune (version derives from git describe at build), but frontend/package.json is hand-maintained and nobody bumps it — it leaks into build logs, render-contract warnings, and dev output, contradicting the tag. Fix in the release flow: cutting a release bumps every version-bearing file to the new version as part of the release commit (today that is frontend/package.json; enumerate rather than hardcode if there are others), so tag and files can never disagree. Go test on the release path asserting the bump. Note: 0.9.0 was synced BY HAND (this bug is about the flow, not the current value). Related: B-227 (release accept broken in link_deps worktrees) — same flow, coordinate if one fix touches the other.
+
+
+The v0.9.1 release test (2026-08-27) certified this live: after 'ducklab release cut v0.9.1', frontend/package.json still reads 0.9.0. Not compensated by hand this time — the cut must bump version-bearing files itself.
+
+**Deliverables:**
+- Release cut discovers and updates all project-owned version-bearing files to the requested release version before committing and tagging.
+- frontend/package.json and the root package-lock metadata match the release version while dependency versions remain unchanged.
+- The release commit contains the version updates and the release tag points to that commit.
+- A Go release-path test asserts manifest updates, commit contents, and tag creation for a temporary project.
+
+## Triage
+
+**Component:** release flow
+**Suspected files:** internal/service/release.go, internal/service/guide_test.go, frontend/package.json, frontend/package-lock.json
+
+Every release cut currently tags and commits release notes without synchronizing frontend version metadata, so the tagged release and build output can disagree.
+
+**Verification (triage recommends):** test-first — A release-cut integration test can assert that frontend manifest versions match the requested tag after the release commit.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-244 — Show one current escalation card and close it after a decision
+
+Fixes B-280.
+
+## Reported
+
+In run view when there are multiple escalation triggers it opens separate escalation cards. The expected behavior is that once an escalation card has been shown, subsequent escalation triggers replace the escalation card with the triggers information. Also, once a decision has been made in the escalation card, the card should be dispatched and closed.
+
+**Deliverables:**
+- Run view renders at most one escalation suggestion card, using the latest trigger's information.
+- A subsequent escalation trigger replaces the existing card rather than adding another stacked card.
+- Choosing any escalation-card decision dispatches or closes the active card and prevents it from remaining visible.
+- Component tests cover replacement and post-decision closure behavior.
+
+## Triage
+
+**Component:** run view
+**Suspected files:** frontend/src/views/RunView.tsx, frontend/src/components/EscalationSuggestionCard.tsx, frontend/src/components/EscalationSuggestionCard.test.tsx
+
+The report describes a reproducible run-view state-management defect: historical escalation events are all rendered and decisions do not clear the active card.
+
+**Verification (triage recommends):** test-first — Render a run with multiple escalation_suggestion events and verify only the latest card is shown, then verify a decision removes or dispatches the card.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-245 — on_accept publication policy: accept lands, then pushes per the project's configured policy
+
+Fixes B-266 (portion 1 of 3; portions 2-3 get their own tasks after this lands).
+
+NARROWED SCOPE (operator, 2026-08-27) — exactly two criteria, engine only. This is portion 1 of the triager's split; T-246 owns the API exposure, T-247 the frontend surfaces.
+
+1. A remote policy on_accept = nothing | push | pr exists in config (default nothing; project overrides global). With push configured, a successful accept — after the landing and checkout sync — invokes the existing service.Push for the default branch and records its remote receipt on the run; a release cut under the same policy also pushes its tag (the v0.9.1-certified gap).
+2. A failed publication NEVER contaminates the accept: the accept stands, and the run carries a worded warning with the exact state ("committed as <sha>; push failed: <reason>") plus the existing push door as the retry.
+
+Do NOT touch: engineapi/API client exposure (T-246), any frontend surface (T-247), the Push implementation itself (it works — v0.9.1 exercised it).
+
+Go tests: accept with policy push -> Push invoked once with receipt; policy nothing -> no push; push failure -> accept still lands with the worded warning.
+
+Field evidence: 10 unpublished commits accumulated in one morning of accepts (2026-08-27); every push to date has been an operator's hand. Full write-up in B-266.
+
+### T-246 — Expose policy and publication state in the API
+
+Fixes B-266.
+
+**Acceptance:**
+- Project configuration and generated/client API expose on_accept and publication outcome fields.
+- Status reports ahead and behind counts and provides an explicit push action for unpublished commits.
+
+**Owns:** internal/engineapi, frontend/src/api
+
+Fixes B-266.
+
+## Reported
+
+Accept already commits (every accepted run lands its commit on main), but NOTHING pushes, and NOTHING tells the user that published state diverged from local. Evidence of the class: incident B-151 in the MiEmpresa repo — a pipeline reset main to origin and ORPHANED ducklab-landed local commits. Today (2026-08-26) every push after every accept was done by an operator by hand; had nobody pushed, nothing would have. The push machinery already exists (service.Push in remote.go, remote verbs per B-152); it is simply not wired to accept. The Settings GitHub section covers PR flow (pr_base, pr_draft, pr_tool, scribe body) and issue mirroring, not publication-on-accept.
+
+Three acceptance criteria:
+
+1. PER-PROJECT POLICY in Settings remote: on_accept = nothing | push | pr. With a configured remote and policy push: accept -> commit -> push to origin/<pr_base>. With pr: accept -> push branch + open/update the PR using the existing GitHub config. Default for a repo with a configured remote: push (solo-operator default); teams pick pr or nothing.
+
+2. THE ACCEPT ANNOUNCES ITS SCOPE BEFORE THE CLICK: the decision card says what accepting does under the active policy (e.g. "Accepting commits the diff and pushes to origin/main") — same doctrine as B-261: every button declares its consequence and cost. A failed push never contaminates the accept: the accept stands, and an exception card reports the exact state (committed locally as <sha>; push failed: <reason>) with a retry action.
+
+3. AHEAD/BEHIND SURFACE, exception-state (B-199 pattern): silent when local main == origin; "main is N commits ahead of origin (unpublished)" with a push action when diverged. This stands on its own even under policy=nothing — it answers "how does the user know what to do" (Jose's doctrine: a field the record knows is a system failure — git already knows the count).
+
+Related: B-151 incident (orphaned local commits), B-152 (remote verbs), B-199 (exception-state surfaces), B-261 (buttons declare consequences), B-248 (accept reconciles the human checkout — the other half of the accept pipeline).
+
+
+RELEASE SLICE certified by the v0.9.1 test (2026-08-27): 'release cut' creates the tag LOCALLY (release.go Tag call) and nothing in ducklab can publish it — Push moves branches only. The product can cut a release but cannot publish one: main went out through POST /v1/projects/{id}/push (first real remote-verb exercise, receipt written), while the tag needed an operator's hand. on_accept policy should gain the release case: cut -> push branch AND tag.
+
+**Deliverables:**
+- Settings persists and validates remote.on_accept as nothing, push, or pr, defaulting configured remotes to push and using the configured base branch.
+- Accept commits first, then applies push or PR publication including the release tag case, while a publication failure leaves the acceptance committed and reports the local SHA and exact retryable error.
+- The accept decision card states the active publication consequence before the click and renders publication failure state with a retry action.
+- Project status exposes ahead/behind publication state, remains quiet when synchronized, and the UI shows an unpublished-count message with a push action when local main is ahead.
+
+## Triage
+
+**Component:** git publication
+**Suspected files:** internal/config/config.go, internal/service/service.go, internal/service/remote.go, internal/engineapi/routes_table.go, frontend/src/views/Settings.tsx, frontend/src/components/DecisionCard.tsx, frontend/src/api/client.ts
+
+Accepted commits are currently never published or surfaced as divergent, risking orphaned work; the existing remote machinery and status primitives make this directly actionable.
+
+**Verification (triage recommends):** test-first — Automated tests can accept a run against a configured remote, assert commit/push or PR behavior and failure reporting, and verify ahead/behind status responses.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-247 — Present accept consequences and unpublished state
+
+Fixes B-266.
+
+**Acceptance:**
+- The accept card names the commit/push/PR consequence before acceptance and shows retry details after a failed push.
+- Settings offers the three on_accept choices and the project UI surfaces nonzero ahead state without adding noise when synchronized.
+
+**Owns:** frontend/src/views, frontend/src/components, frontend/src
+
+Fixes B-266.
+
+## Reported
+
+Accept already commits (every accepted run lands its commit on main), but NOTHING pushes, and NOTHING tells the user that published state diverged from local. Evidence of the class: incident B-151 in the MiEmpresa repo — a pipeline reset main to origin and ORPHANED ducklab-landed local commits. Today (2026-08-26) every push after every accept was done by an operator by hand; had nobody pushed, nothing would have. The push machinery already exists (service.Push in remote.go, remote verbs per B-152); it is simply not wired to accept. The Settings GitHub section covers PR flow (pr_base, pr_draft, pr_tool, scribe body) and issue mirroring, not publication-on-accept.
+
+Three acceptance criteria:
+
+1. PER-PROJECT POLICY in Settings remote: on_accept = nothing | push | pr. With a configured remote and policy push: accept -> commit -> push to origin/<pr_base>. With pr: accept -> push branch + open/update the PR using the existing GitHub config. Default for a repo with a configured remote: push (solo-operator default); teams pick pr or nothing.
+
+2. THE ACCEPT ANNOUNCES ITS SCOPE BEFORE THE CLICK: the decision card says what accepting does under the active policy (e.g. "Accepting commits the diff and pushes to origin/main") — same doctrine as B-261: every button declares its consequence and cost. A failed push never contaminates the accept: the accept stands, and an exception card reports the exact state (committed locally as <sha>; push failed: <reason>) with a retry action.
+
+3. AHEAD/BEHIND SURFACE, exception-state (B-199 pattern): silent when local main == origin; "main is N commits ahead of origin (unpublished)" with a push action when diverged. This stands on its own even under policy=nothing — it answers "how does the user know what to do" (Jose's doctrine: a field the record knows is a system failure — git already knows the count).
+
+Related: B-151 incident (orphaned local commits), B-152 (remote verbs), B-199 (exception-state surfaces), B-261 (buttons declare consequences), B-248 (accept reconciles the human checkout — the other half of the accept pipeline).
+
+
+RELEASE SLICE certified by the v0.9.1 test (2026-08-27): 'release cut' creates the tag LOCALLY (release.go Tag call) and nothing in ducklab can publish it — Push moves branches only. The product can cut a release but cannot publish one: main went out through POST /v1/projects/{id}/push (first real remote-verb exercise, receipt written), while the tag needed an operator's hand. on_accept policy should gain the release case: cut -> push branch AND tag.
+
+**Deliverables:**
+- Settings persists and validates remote.on_accept as nothing, push, or pr, defaulting configured remotes to push and using the configured base branch.
+- Accept commits first, then applies push or PR publication including the release tag case, while a publication failure leaves the acceptance committed and reports the local SHA and exact retryable error.
+- The accept decision card states the active publication consequence before the click and renders publication failure state with a retry action.
+- Project status exposes ahead/behind publication state, remains quiet when synchronized, and the UI shows an unpublished-count message with a push action when local main is ahead.
+
+## Triage
+
+**Component:** git publication
+**Suspected files:** internal/config/config.go, internal/service/service.go, internal/service/remote.go, internal/engineapi/routes_table.go, frontend/src/views/Settings.tsx, frontend/src/components/DecisionCard.tsx, frontend/src/api/client.ts
+
+Accepted commits are currently never published or surfaced as divergent, risking orphaned work; the existing remote machinery and status primitives make this directly actionable.
+
+**Verification (triage recommends):** test-first — Automated tests can accept a run against a configured remote, assert commit/push or PR behavior and failure reporting, and verify ahead/behind status responses.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-248 — Own desktop bundle generation in release cuts
+
+Fixes B-290.
+
+**Acceptance:**
+- A successful release cut rebuilds the frontend and includes cmd/ducklab-desktop/frontend/dist in the release commit.
+- When node or npm is unavailable, the cut fails with an error naming the missing toolchain before shipping.
+
+**Owns:** internal/service/release.go, internal/service/release_version_test.go, Makefile
+
+Fixes B-290.
+
+## Reported
+
+cmd/ducklab-desktop/frontend/dist/ is tracked deliberately (the desktop build embeds it; the repo ships it), but NOTHING owns committing it: every `make desktop` regenerates the hashed assets, the tree diverges from HEAD, the provenance stamp honestly turns -dirty, and an operator commits the bundle by hand. Counted: FOUR hand-made bundle commits in two days (2026-08-26/27), two of them today after B-230 was already fixed — B-230 covered version-bearing manifests (landed as syncVersionedManifests, T-243); the bundle half was never in any bug until now.
+
+Acceptance criteria (2):
+1. The release cut owns the bundle: cutting a version rebuilds the frontend and commits the refreshed cmd/ducklab-desktop/frontend/dist alongside the manifest sync, in the same release commit (requires node/npm in the cut environment; refuse the cut with a worded error naming the missing toolchain rather than shipping a stale bundle silently).
+2. Between releases, a stale bundle is VISIBLE, not silent: the existing B-147 surface (accept touching frontend/src without a dist rebuild) also names the door ("run make desktop, or cut a release").
+
+Related: B-230 (the manifest half, fixed by T-243), B-147 (stale-desktop surface), the -dirty provenance stamp (the detector that made this class visible).
+
+**Deliverables:**
+- Release cuts rebuild the frontend and include refreshed cmd/ducklab-desktop/frontend/dist files in the same release commit as synchronized manifests.
+- Release cuts preflight node and npm, refuse with an explicit missing-toolchain error, and do not ship a stale bundle.
+- Tests verify successful bundle inclusion and missing-toolchain refusal.
+- The stale-desktop warning explicitly tells operators to run make desktop or cut a release.
+
+## Triage
+
+**Component:** release flow and desktop packaging
+**Suspected files:** internal/service/release.go, internal/service/release_version_test.go, internal/service/governance.go, internal/service/governance_gate_test.go, Makefile
+
+B-230 fixed release manifest synchronization but release cuts still omit the tracked desktop bundle, causing repeatable dirty-tree hand commits and an incomplete stale-bundle warning.
+
+**Verification (triage recommends):** test-first — A release-cut integration test can verify refreshed dist files are included in the release commit, while another verifies refusal when node or npm is unavailable.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-249 — Name the release path in stale-bundle warnings
+
+Fixes B-290.
+
+**Acceptance:**
+- The stale-desktop warning directs operators to run make desktop or cut a release.
+- Tests assert the revised wording reaches the relevant warning surface.
+
+**Owns:** internal/service/governance.go, internal/service/governance_gate_test.go
+
+Fixes B-290.
+
+## Reported
+
+cmd/ducklab-desktop/frontend/dist/ is tracked deliberately (the desktop build embeds it; the repo ships it), but NOTHING owns committing it: every `make desktop` regenerates the hashed assets, the tree diverges from HEAD, the provenance stamp honestly turns -dirty, and an operator commits the bundle by hand. Counted: FOUR hand-made bundle commits in two days (2026-08-26/27), two of them today after B-230 was already fixed — B-230 covered version-bearing manifests (landed as syncVersionedManifests, T-243); the bundle half was never in any bug until now.
+
+Acceptance criteria (2):
+1. The release cut owns the bundle: cutting a version rebuilds the frontend and commits the refreshed cmd/ducklab-desktop/frontend/dist alongside the manifest sync, in the same release commit (requires node/npm in the cut environment; refuse the cut with a worded error naming the missing toolchain rather than shipping a stale bundle silently).
+2. Between releases, a stale bundle is VISIBLE, not silent: the existing B-147 surface (accept touching frontend/src without a dist rebuild) also names the door ("run make desktop, or cut a release").
+
+Related: B-230 (the manifest half, fixed by T-243), B-147 (stale-desktop surface), the -dirty provenance stamp (the detector that made this class visible).
+
+**Deliverables:**
+- Release cuts rebuild the frontend and include refreshed cmd/ducklab-desktop/frontend/dist files in the same release commit as synchronized manifests.
+- Release cuts preflight node and npm, refuse with an explicit missing-toolchain error, and do not ship a stale bundle.
+- Tests verify successful bundle inclusion and missing-toolchain refusal.
+- The stale-desktop warning explicitly tells operators to run make desktop or cut a release.
+
+## Triage
+
+**Component:** release flow and desktop packaging
+**Suspected files:** internal/service/release.go, internal/service/release_version_test.go, internal/service/governance.go, internal/service/governance_gate_test.go, Makefile
+
+B-230 fixed release manifest synchronization but release cuts still omit the tracked desktop bundle, causing repeatable dirty-tree hand commits and an incomplete stale-bundle warning.
+
+**Verification (triage recommends):** test-first — A release-cut integration test can verify refreshed dist files are included in the release commit, while another verifies refusal when node or npm is unavailable.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-250 — Strengthen worktree rejection regression coverage
+
+Fixes B-279.
+
+## Reported
+
+The rejection regression test never records a TreeSnapshot or tool write set, and RunReject explicitly skips restoration for worktree runs, so it would pass with the pre-fix implementation and does not exercise the reported root mismatch.
+
+Where: internal/service/restore_test.go:212
+
+Suggested fix: Seed the run with a snapshot and recorded run-local mutation (or otherwise invoke the rejection cleanup path that previously restored), then assert both the worktree cleanup and unchanged same-named registered-checkout file.
+
+Found by luna reviewing T-239 in run r-20260827-121630-52ft (verdict: request-changes).
+
+
+CRITERIA TRANSFERRED from B-294 (operator duplicate, deduped by triage 2026-08-28 — correctly):
+1. The test discriminates: exercised against the pre-fix behavior (a worktree run whose reject/restore path consults the registered-checkout snapshot), it FAILS; against HEAD it passes. If simulating pre-fix is impractical, rename the test to what it truly guards and add a discriminating case for the restore path B-269 actually fixed (a failed/rejected worktree run must not restore/delete same-named files in the human checkout).
+2. The test's comment states which defect it discriminates and how it was verified to fail pre-fix.
+
+Severity note: filed low as a review nit, but for a task whose TITLE is regression coverage, a non-discriminating test leaves the task's purpose unmet — normal is the honest weight.
+
+**Deliverables:**
+- The rejection regression test persists a TreeSnapshot and recorded run-local mutation before invoking RunReject.
+- The test verifies the rejected run's worktree is removed and its run-local mutation is cleaned up.
+- The test verifies a same-named file edited in the registered checkout remains unchanged.
+- The regression fails against the pre-fix cleanup behavior instead of passing vacuously.
+
+## Triage
+
+**Component:** service restore tests
+**Suspected files:** internal/service/restore_test.go
+
+The existing test checks the intended outcome but omits the persisted restoration inputs, so it does not exercise the reported rejection cleanup regression.
+
+**Verification (triage recommends):** test-first — The rejection scenario is reproducible as an automated test by persisting a snapshot and run-local write set before calling RunReject.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-251 — Collect complete commit-range inventory
+
+Fixes B-296.
+
+**Acceptance:**
+- Every sinceTag..HEAD commit is classified as trailer-backed task work or a trailerless landed commit, with no silent omissions.
+- Optional PR enrichment does not make release planning depend on network or gh availability.
+
+**Owns:** internal/service/release.go, internal/vcs/vcs.go
+
+Fixes B-296.
+
+## Reported
+
+Reported by Jose (2026-08-28), certified same day: PR #5 (Promote Roster as Flock, 3 commits, rebase-merged to main) has no ducklab task, so the next release's notes would omit the feature entirely. Cause at internal/service/release.go:153 — acceptedSince builds the scribe's material ONLY from accepted runs with a TaskID, intersected with commitsAfter(sinceTag); any commit in range without a run behind it is invisible. Prior victim: v0.9.1's notes silently omitted the operator's direct commits (the -dirty provenance stamp, the release-notes workflow fix, two flaky-test fixes) — on a PUBLIC repo whose releases are the storefront, the notes claim completeness ("Everything accepted since vX") while missing landed work.
+
+Acceptance criteria (2):
+1. The release material derives from the COMMIT RANGE sinceTag..HEAD as the primary set: commits carrying a Ducklab-Run trailer map to their task items exactly as today; commits without one become a second item class {sha, subject, author} — enriched with the PR number/title when the local history or `gh` (optional, offline-tolerant) identifies one — fed to the scribe under its own notes section (e.g. "Landed outside the loop"), with the frontmatter counting both classes.
+2. The completeness claim is honest: if any in-range commit ends up in neither class, the plan refuses with a worded error naming the shas rather than shipping notes that silently omit them.
+
+Related: PR #5 (first uncovered case), v0.9.1 notes (prior silent omissions), the release workflow body_path fix (notes now publish automatically — which makes their completeness matter more, not less).
+
+**Deliverables:**
+- Release collection uses every commit in sinceTag..HEAD, preserving existing Ducklab-Run-to-task mapping and representing trailerless commits with SHA, subject, and author.
+- Trailerless commits render under a distinct landed-outside-the-loop notes section, with optional PR metadata when locally available and offline-safe behavior when unavailable.
+- Release frontmatter counts both task-backed and trailerless commit items.
+- Release planning refuses to draft notes when any in-range commit belongs to neither class and reports all uncovered SHAs in the error.
+- Regression tests cover mixed commit ranges, rendering/counts, optional PR lookup, and incompleteness refusal.
+
+## Triage
+
+**Component:** release notes
+**Suspected files:** internal/service/release.go, internal/release/release.go, internal/vcs/vcs.go
+
+The current implementation filters the commit range through accepted runs with task IDs, so direct commits and merged PRs without Ducklab-Run trailers are silently omitted from otherwise complete release notes.
+
+**Verification (triage recommends):** test-first — Create a tagged repository with both Ducklab-Run and trailerless commits, then verify both appear in release material and uncovered commits cause an error naming their SHAs.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
+### T-252 — Render both release item classes honestly
+
+Fixes B-296.
+
+Same-lane housekeeping (reviewer finding on T-251, minor): `commitsAfter` in internal/service/release.go is now dead code — releaseInventory replaced it with vcs.CommitsAfter. Delete it in this pass; no other scope change.
+
+**Acceptance:**
+- Notes contain a distinct landed-outside-the-loop section and count both item classes in frontmatter.
+- Rendered inventory remains deterministic and exposes each trailerless commit's SHA, subject, and author.
+
+**Owns:** internal/release/release.go
+
+Fixes B-296.
+
+## Reported
+
+Reported by Jose (2026-08-28), certified same day: PR #5 (Promote Roster as Flock, 3 commits, rebase-merged to main) has no ducklab task, so the next release's notes would omit the feature entirely. Cause at internal/service/release.go:153 — acceptedSince builds the scribe's material ONLY from accepted runs with a TaskID, intersected with commitsAfter(sinceTag); any commit in range without a run behind it is invisible. Prior victim: v0.9.1's notes silently omitted the operator's direct commits (the -dirty provenance stamp, the release-notes workflow fix, two flaky-test fixes) — on a PUBLIC repo whose releases are the storefront, the notes claim completeness ("Everything accepted since vX") while missing landed work.
+
+Acceptance criteria (2):
+1. The release material derives from the COMMIT RANGE sinceTag..HEAD as the primary set: commits carrying a Ducklab-Run trailer map to their task items exactly as today; commits without one become a second item class {sha, subject, author} — enriched with the PR number/title when the local history or `gh` (optional, offline-tolerant) identifies one — fed to the scribe under its own notes section (e.g. "Landed outside the loop"), with the frontmatter counting both classes.
+2. The completeness claim is honest: if any in-range commit ends up in neither class, the plan refuses with a worded error naming the shas rather than shipping notes that silently omit them.
+
+Related: PR #5 (first uncovered case), v0.9.1 notes (prior silent omissions), the release workflow body_path fix (notes now publish automatically — which makes their completeness matter more, not less).
+
+**Deliverables:**
+- Release collection uses every commit in sinceTag..HEAD, preserving existing Ducklab-Run-to-task mapping and representing trailerless commits with SHA, subject, and author.
+- Trailerless commits render under a distinct landed-outside-the-loop notes section, with optional PR metadata when locally available and offline-safe behavior when unavailable.
+- Release frontmatter counts both task-backed and trailerless commit items.
+- Release planning refuses to draft notes when any in-range commit belongs to neither class and reports all uncovered SHAs in the error.
+- Regression tests cover mixed commit ranges, rendering/counts, optional PR lookup, and incompleteness refusal.
+
+## Triage
+
+**Component:** release notes
+**Suspected files:** internal/service/release.go, internal/release/release.go, internal/vcs/vcs.go
+
+The current implementation filters the commit range through accepted runs with task IDs, so direct commits and merged PRs without Ducklab-Run trailers are silently omitted from otherwise complete release notes.
+
+**Verification (triage recommends):** test-first — Create a tagged repository with both Ducklab-Run and trailerless commits, then verify both appear in release material and uncovered commits cause an error naming their SHAs.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
+## M-002 — Reported bugs
+
+### T-235 — Render and submit the escalation multiplier
+
+Fixes B-262.
+
+**Acceptance:**
+- The budgets section displays the multiplier control and the exact point-of-use explanation.
+- A save sends the configured multiplier and rehydrates it from the saved response.
+
+**Owns:** frontend/src/views/Settings.tsx, frontend/src/views/budget.test.tsx
+
+Fixes B-262.
+
+## Reported
+
+There are no controls on the budget and limits section of the settings for the escalation multiplier
+
+ESCALATED TO SAVE-BLOCKER (2026-08-27, Jose): pressing Save settings in budgets & limits now fails with "budget wallclock_escalation_multiplier must be greater than zero; got 0" — the form has NO field for the multiplier, so the save payload zeroes it and validation rejects the WHOLE section. The person cannot save any budget change (caps, ceilings, phase modes) until a field exists or the server treats an absent value as keep-current instead of zero. Severity: this blocks the very knobs the ceiling-hit suggestions on the same page tell the person to adjust (132 token-ceiling hits, 99 time-ceiling hits shown with "consider raising").
+
+Fix: (1) render the multiplier field (with its point-of-use explanation: "escalate when a run takes N x its kind's median active time"); (2) independently, the defaults PUT must treat omitted fields as unchanged, never as zero — a form that doesn't know a field must not be able to destroy it.
+
+**Deliverables:**
+- The budgets & limits settings render an editable wallclock escalation multiplier with the explanation “escalate when a run takes N x its kind's median active time”.
+- Saving budget settings includes the multiplier value and no longer submits it as an implicit zero.
+- The defaults PUT preserves each existing budget field when that field is omitted, including wallclock_escalation_multiplier.
+- Regression tests cover multiplier rendering/submission and omitted-field preservation without weakening positive-value validation.
+
+## Triage
+
+**Component:** settings budgets and defaults API
+**Suspected files:** frontend/src/views/Settings.tsx, frontend/src/views/budget.test.tsx, internal/service/defaults.go, internal/engineapi/routes_table.go
+
+The report identifies a reproducible high-severity save blocker caused by a missing UI field and an omission-unsafe defaults update contract, with no matching open duplicate.
+
+**Verification (triage recommends):** test-first — Rendering the missing field and PUTting a payload that omits the multiplier can be covered by frontend and backend behavior tests.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+## M-003 — Reported bugs
+
+### T-239 — Isolate snapshot and restoration roots
+
+Fixes B-269.
+
+**Acceptance:**
+- SnapshotTree, runHasUnsavedWork, and RestoreTreeAtHeadScoped use the recorded worktree when WorktreePath is set.
+- A run without WorktreePath retains registered-checkout behavior.
+
+**Owns:** internal/service/service.go
+
+Fixes B-269.
+
+## Reported
+
+Build runs with a WorktreePath still snapshot the registered checkout and later restore it via rs.projectPath, so a failed or rejected worktree run can restore/delete same-named human-checkout files based on tool writes made in the worktree.
+
+Where: internal/service/service.go:1694
+
+Suggested fix: Create and restore the run snapshot against runRoot(rs.run, entry.Path) (or persist a dedicated snapshot root) so all worktree-run lifecycle mutations remain in the recorded worktree.
+
+Found by terra reviewing T-224 in run r-20260826-205117-zeo7 (verdict: request-changes).
+
+**Deliverables:**
+- Build and test runs with WorktreePath snapshot the runRoot tree rather than the registered checkout.
+- Unsaved-work detection hashes the same runRoot tree used for execution.
+- Reject, failure, and other unaccepted-run cleanup restore only files written in the recorded run tree.
+- A regression test proves rejecting a worktree run cannot restore or delete same-named files in the registered checkout.
+
+## Triage
+
+**Component:** run snapshot and restore isolation
+**Suspected files:** internal/service/service.go, internal/service/restore_test.go
+
+The reported path-root mismatch is directly visible and can cause rejected or failed worktree runs to destructively mutate a human checkout.
+
+**Verification (triage recommends):** test-first — A rejected worktree run can be tested to ensure human-checkout files remain unchanged while worktree files are restored.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+## M-004 — Reported bugs
+
+### T-240 — Add worktree snapshot regression coverage
+
+Fixes B-269.
+
+**Acceptance:**
+- A test creates distinct same-named files in the registered checkout and worktree, rejects the run, and verifies only the worktree is restored.
+- The test verifies the registered checkout content and metadata remain unchanged.
+
+**Owns:** internal/service/restore_test.go
+
+Fixes B-269.
+
+## Reported
+
+Build runs with a WorktreePath still snapshot the registered checkout and later restore it via rs.projectPath, so a failed or rejected worktree run can restore/delete same-named human-checkout files based on tool writes made in the worktree.
+
+Where: internal/service/service.go:1694
+
+Suggested fix: Create and restore the run snapshot against runRoot(rs.run, entry.Path) (or persist a dedicated snapshot root) so all worktree-run lifecycle mutations remain in the recorded worktree.
+
+Found by terra reviewing T-224 in run r-20260826-205117-zeo7 (verdict: request-changes).
+
+**Deliverables:**
+- Build and test runs with WorktreePath snapshot the runRoot tree rather than the registered checkout.
+- Unsaved-work detection hashes the same runRoot tree used for execution.
+- Reject, failure, and other unaccepted-run cleanup restore only files written in the recorded run tree.
+- A regression test proves rejecting a worktree run cannot restore or delete same-named files in the registered checkout.
+
+## Triage
+
+**Component:** run snapshot and restore isolation
+**Suspected files:** internal/service/service.go, internal/service/restore_test.go
+
+The reported path-root mismatch is directly visible and can cause rejected or failed worktree runs to destructively mutate a human checkout.
+
+**Verification (triage recommends):** test-first — A rejected worktree run can be tested to ensure human-checkout files remain unchanged while worktree files are restored.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+## M-005 — Reported bugs
+
+### T-241 — Expose the no-changes retry door on task cards
+
+Fixes B-276.
+
+**Acceptance:**
+- A no-changes blocked card names the reason and renders a retry-with-note action.
+- The action opens a dialog explaining the purpose of the note and launches only through the note-aware path.
+
+**Owns:** frontend/src/views/Board.tsx, frontend/src/app/App.tsx
+
+Fixes B-276.
+
+## Reported
+
+Autopilot flight O-9 (2026-08-27): T-223 sits [blocked] by the designed no-changes brake, whose remedy is explicit — "add a note before trying it again" — and the desktop offers NOWHERE to add it: the blocked banner links "read it, then retry or change the task" (retry = the same noteless launch the brake will refuse... or worse, a silent bypass), and the TddLaunch rail has mode/seats/caps but NO note field. The API carries Note (TestFirstRequest.Note, RunRequest note) — the record knows the field; the person cannot reach it. Doctrine: a remedy the system demands must be enterable at the decision point.
+
+Acceptance criteria:
+1. The blocked-for-no-changes state names its reason ON the task card and offers the door: a retry-with-note action whose dialog explains what the note is for ("tell the next run what changed since the tree answered no").
+2. The launch surfaces (TddLaunch, plain launcher, RunView relaunch) gain the optional note input wired to the request Note field.
+
+Related: the no-changes brake design (autopilotNoChangesNeedsHumanNote), O-7 in ~/wiki/Desarrollo/ducklab/observaciones-autopilot.md (blocked without why or door), B-240 (refine-scope: the escalation-card sibling of this gap).
+
+**Deliverables:**
+- The no-changes blocked task card states that the prior run made no changes and provides a retry-with-note action.
+- The retry dialog explains that the note tells the next run what changed since the tree answered no, and requires or accepts the optional note according to the API contract.
+- TddLaunch, plain RunLauncher, and RunView relaunch expose a note input and forward its value as the request Note field.
+- Frontend tests assert the blocked-card action, dialog explanation, and Note propagation for each launch path.
+
+## Triage
+
+**Component:** desktop launch and retry workflow
+**Suspected files:** frontend/src/components/RunLauncher.tsx, frontend/src/components/TddLaunch.tsx, frontend/src/views/RunView.tsx, frontend/src/views/Board.tsx, frontend/src/app/App.tsx
+
+The engine already carries Note and enforces the no-changes brake, but the desktop exposes neither a usable note field nor a retry-with-note door.
+
+**Verification (triage recommends):** test-first — A component test can render a no-changes blocked task, enter the retry note, and assert the launch request carries Note across board, TDD, plain, and relaunch surfaces.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+## M-006 — Reported bugs
+
+### T-242 — Wire notes through shared launch controls
+
+Fixes B-276.
+
+**Acceptance:**
+- TddLaunch and plain RunLauncher expose note input and include it in launch callbacks.
+- RunView relaunch exposes the same input and sends the entered value as Note.
+
+**Owns:** frontend/src/components/RunLauncher.tsx, frontend/src/components/TddLaunch.tsx, frontend/src/views/RunView.tsx
+
+Fixes B-276.
+
+## Reported
+
+Autopilot flight O-9 (2026-08-27): T-223 sits [blocked] by the designed no-changes brake, whose remedy is explicit — "add a note before trying it again" — and the desktop offers NOWHERE to add it: the blocked banner links "read it, then retry or change the task" (retry = the same noteless launch the brake will refuse... or worse, a silent bypass), and the TddLaunch rail has mode/seats/caps but NO note field. The API carries Note (TestFirstRequest.Note, RunRequest note) — the record knows the field; the person cannot reach it. Doctrine: a remedy the system demands must be enterable at the decision point.
+
+Acceptance criteria:
+1. The blocked-for-no-changes state names its reason ON the task card and offers the door: a retry-with-note action whose dialog explains what the note is for ("tell the next run what changed since the tree answered no").
+2. The launch surfaces (TddLaunch, plain launcher, RunView relaunch) gain the optional note input wired to the request Note field.
+
+Related: the no-changes brake design (autopilotNoChangesNeedsHumanNote), O-7 in ~/wiki/Desarrollo/ducklab/observaciones-autopilot.md (blocked without why or door), B-240 (refine-scope: the escalation-card sibling of this gap).
+
+**Deliverables:**
+- The no-changes blocked task card states that the prior run made no changes and provides a retry-with-note action.
+- The retry dialog explains that the note tells the next run what changed since the tree answered no, and requires or accepts the optional note according to the API contract.
+- TddLaunch, plain RunLauncher, and RunView relaunch expose a note input and forward its value as the request Note field.
+- Frontend tests assert the blocked-card action, dialog explanation, and Note propagation for each launch path.
+
+## Triage
+
+**Component:** desktop launch and retry workflow
+**Suspected files:** frontend/src/components/RunLauncher.tsx, frontend/src/components/TddLaunch.tsx, frontend/src/views/RunView.tsx, frontend/src/views/Board.tsx, frontend/src/app/App.tsx
+
+The engine already carries Note and enforces the no-changes brake, but the desktop exposes neither a usable note field nor a retry-with-note door.
+
+**Verification (triage recommends):** test-first — A component test can render a no-changes blocked task, enter the retry note, and assert the launch request carries Note across board, TDD, plain, and relaunch surfaces.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
