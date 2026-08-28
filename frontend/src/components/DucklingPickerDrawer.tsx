@@ -26,6 +26,7 @@ export const MAP_METRICS: MapMetric[] = [
 ];
 
 type Point = { scorecard: Scorecard; x: number; y: number; xv: number; yv: number; runs: number; pareto: boolean };
+export type MapScale = "percentile" | "absolute";
 
 function extent(values: number[]): [number, number] {
   const sorted = values.slice().sort((a, b) => a - b);
@@ -33,18 +34,30 @@ function extent(values: number[]): [number, number] {
   return [sorted[Math.floor((sorted.length - 1) * 0.05)]!, sorted[Math.ceil((sorted.length - 1) * 0.95)]!];
 }
 
-export function mapPoints(scorecards: Scorecard[], role: string, xMetric: MapMetric, yMetric: MapMetric): Point[] {
+function percentile(value: number, values: number[]): number {
+  const sorted = values.slice().sort((a, b) => a - b);
+  if (sorted.length < 2) return 0.5;
+  const first = sorted.indexOf(value), last = sorted.lastIndexOf(value);
+  return ((first + last) / 2) / (sorted.length - 1);
+}
+
+export function mapPoints(scorecards: Scorecard[], role: string, xMetric: MapMetric, yMetric: MapMetric, scale: MapScale = "percentile"): Point[] {
   const raw = scorecards.flatMap((scorecard) => {
     const xv = xMetric.value(scorecard, role), yv = yMetric.value(scorecard, role);
     return xv === undefined || yv === undefined ? [] : [{ scorecard, xv, yv }];
   });
   const [xmin, xmax] = extent(raw.map((p) => p.xv));
   const [ymin, ymax] = extent(raw.map((p) => p.yv));
-  const normalize = (value: number, min: number, max: number, direction: "asc" | "desc") => {
-    const n = max === min ? 0.5 : Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const normalize = (value: number, values: number[], min: number, max: number, direction: "asc" | "desc") => {
+    const absolute = max === min ? 0.5 : Math.max(0, Math.min(1, (value - min) / (max - min)));
+    // Relative spacing prevents one outlier from compressing every useful
+    // candidate into a corner. Keep a small inset so circles and labels do
+    // not collide with the plot frame. Ties retain the same position.
+    const n = scale === "percentile" ? 0.06 + percentile(value, values) * 0.88 : absolute;
     return direction === "asc" ? 1 - n : n;
   };
-  const points = raw.map((p) => ({ ...p, x: normalize(p.xv, xmin, xmax, xMetric.direction), y: normalize(p.yv, ymin, ymax, yMetric.direction), runs: roleMeasurement(p.scorecard, role)?.runs ?? 0, pareto: false }));
+  const xValues = raw.map((p) => p.xv), yValues = raw.map((p) => p.yv);
+  const points = raw.map((p) => ({ ...p, x: normalize(p.xv, xValues, xmin, xmax, xMetric.direction), y: normalize(p.yv, yValues, ymin, ymax, yMetric.direction), runs: roleMeasurement(p.scorecard, role)?.runs ?? 0, pareto: false }));
   return points.map((point) => ({ ...point, pareto: !points.some((other) => other !== point && other.x >= point.x && other.y >= point.y && (other.x > point.x || other.y > point.y)) }));
 }
 
@@ -53,6 +66,7 @@ export function DucklingPickerDrawer({ mode, role, ducklings, scorecards, candid
 }) {
   const [xKey, setXKey] = useState("cost-per-accept");
   const [yKey, setYKey] = useState("coding-index");
+  const [scale, setScale] = useState<MapScale>("percentile");
   const [selected, setSelected] = useState<string[]>(current);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -61,7 +75,8 @@ export function DucklingPickerDrawer({ mode, role, ducklings, scorecards, candid
   const xMetric = MAP_METRICS.find((m) => m.key === xKey)!;
   const yMetric = MAP_METRICS.find((m) => m.key === yKey)!;
   const complete = useMemo(() => ducklings.map((duck) => scorecards.find((s) => s.id === duck.id) ?? ({ ...duck } as Scorecard)), [ducklings, scorecards]);
-  const points = useMemo(() => mapPoints(complete, role, xMetric, yMetric), [complete, role, xMetric, yMetric]);
+  const points = useMemo(() => mapPoints(complete, role, xMetric, yMetric, scale), [complete, role, xMetric, yMetric, scale]);
+  const frontier = points.filter((point) => point.pareto).sort((a, b) => a.x - b.x).map((point) => `${70 + point.x * 520},${355 - point.y * 320}`).join(" ");
   const plotted = new Set(points.map((p) => p.scorecard.id));
   const missing = complete.filter((s) => !plotted.has(s.id));
   useEffect(() => { closeRef.current?.focus(); }, []);
@@ -89,13 +104,21 @@ export function DucklingPickerDrawer({ mode, role, ducklings, scorecards, candid
           <label className="text-xs text-ink-muted">Vertical · better ↑<select aria-label="Vertical axis" value={yKey} onChange={(e) => setYKey(e.target.value)} className="mt-1 block w-full rounded border border-hairline bg-surface1 px-2 py-1.5 text-sm text-ink">{MAP_METRICS.filter((m) => m.key !== xKey).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}</select></label>
         </div>
         <div className="mt-4 rounded-card border border-hairline bg-surface1 p-3" data-testid="duckling-map">
-          <div className="mb-2 flex items-center justify-between text-xs text-ink-muted"><span>relative to this flock · robust 5–95% scale</span><span><i className="mr-1 inline-block h-2 w-2 rounded-full bg-good" />Pareto frontier</span></div>
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+            <div className="flex rounded border border-hairline p-0.5" role="group" aria-label="Map scale">
+              <button type="button" aria-pressed={scale === "percentile"} onClick={() => setScale("percentile")} className={`rounded px-2 py-0.5 ${scale === "percentile" ? "bg-surface2 text-ink" : ""}`}>Relative spacing</button>
+              <button type="button" aria-pressed={scale === "absolute"} onClick={() => setScale("absolute")} className={`rounded px-2 py-0.5 ${scale === "absolute" ? "bg-surface2 text-ink" : ""}`}>Absolute values</button>
+            </div>
+            <span>{scale === "percentile" ? "evenly spaced by rank within this flock" : "robust 5–95% value scale"}</span>
+            <span className="ml-auto"><i className="mr-1 inline-block h-2 w-2 rounded-full bg-good" />Best trade-offs</span>
+          </div>
           <svg viewBox="0 0 640 430" className="h-auto w-full" role="img" aria-label={`${yMetric.label} by ${xMetric.label} duckling map`}>
             <rect x="55" y="20" width="550" height="350" rx="8" fill="var(--surface-2)" />
             <line x1="330" y1="20" x2="330" y2="370" stroke="var(--border)" /><line x1="55" y1="195" x2="605" y2="195" stroke="var(--border)" />
             <text x="70" y="44" fill="var(--text-muted)" fontSize="11">stronger {yMetric.label.toLowerCase()}</text><text x="470" y="44" fill="var(--status-good)" fontSize="11">best trade-offs</text>
             <text x="330" y="410" textAnchor="middle" fill="var(--text-muted)" fontSize="12">{xMetric.label} · more desirable →</text>
             <text x="16" y="195" textAnchor="middle" transform="rotate(-90 16 195)" fill="var(--text-muted)" fontSize="12">{yMetric.label} · more desirable →</text>
+            {frontier && <polyline points={frontier} fill="none" stroke="var(--status-good)" strokeWidth="2" strokeOpacity=".45" strokeDasharray="4 4" pointerEvents="none" aria-hidden="true" />}
             {points.map((point) => { const cx = 70 + point.x * 520, cy = 355 - point.y * 320; const chosen = selected.includes(point.scorecard.id); const radius = 7 + Math.min(8, Math.sqrt(point.runs)); return <g key={point.scorecard.id} role="button" tabIndex={0} aria-label={`${point.scorecard.id}: ${xMetric.format(point.xv)} ${xMetric.label}, ${yMetric.format(point.yv)} ${yMetric.label}${chosen ? ", selected" : ""}`} onClick={() => toggle(point.scorecard.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggle(point.scorecard.id); }} className="cursor-pointer">
               <circle cx={cx} cy={cy} r={radius} fill={point.pareto ? "var(--status-good)" : "var(--text-muted)"} fillOpacity={point.runs < 5 ? .35 : .75} stroke={chosen ? "var(--text-primary)" : current.includes(point.scorecard.id) ? "var(--status-warning)" : "var(--surface-1)"} strokeWidth={chosen ? 4 : 2}><title>{point.scorecard.id} · {xMetric.format(point.xv)} · {yMetric.format(point.yv)} · {point.runs} runs</title></circle>
               <text x={cx} y={cy + radius + 14} textAnchor="middle" fill="var(--text-primary)" fontSize="11">{point.scorecard.id}</text>
@@ -105,7 +128,7 @@ export function DucklingPickerDrawer({ mode, role, ducklings, scorecards, candid
         {missing.length > 0 && <details className="mt-3 text-xs text-ink-muted"><summary>Not plotted · {missing.length} missing one or both metrics</summary><p className="mt-1">{missing.map((s) => s.id).join(", ")}</p></details>}
         <div className="mt-5"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">All candidates</h3><div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">{complete.slice().sort((a, b) => { const ai = candidates.findIndex((candidate) => candidate.id === a.id), bi = candidates.findIndex((candidate) => candidate.id === b.id); return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi); }).map((scorecard) => { const candidate = candidates.find((item) => item.id === scorecard.id); const chosen = selected.includes(scorecard.id); return <button key={scorecard.id} type="button" aria-pressed={chosen} onClick={() => toggle(scorecard.id)} data-testid={candidate ? `roster-pick-suggested-${scorecard.id}` : undefined} className={`rounded border px-2 py-2 text-left ${chosen ? "border-ink bg-surface2" : "border-hairline bg-surface1"}`}><span className="text-sm font-medium"><DuckAvatar id={scorecard.id} roster={roster} /> <span className="ml-1">{scorecard.id}</span></span>{candidate && <span className="mt-1 block text-xs text-ink-muted">{candidate.why}</span>}{candidate?.arithmetic && <span data-testid={`roster-pick-suggested-arithmetic-${scorecard.id}`} className="mt-1 block text-xs text-ink-muted">{candidate.arithmetic}</span>}</button>; })}</div></div>
         <div className="mt-5"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Selection · {selected.length}</h3><div className="mt-2 flex flex-wrap gap-2">{selected.length === 0 ? <span className="text-sm text-ink-muted">No duckling selected.</span> : selected.map((id, index) => <button key={id} type="button" onClick={() => toggle(id)} className="rounded-full border border-hairline bg-surface1 px-2 py-1 text-sm"><DuckAvatar id={id} roster={roster} /> <span className="ml-1">{multiple ? `${index + 1}. ` : ""}{id} ×</span></button>)}</div></div>
-        <div className="mt-5 space-y-1 border-t border-hairline pt-4 text-xs text-ink-muted"><p>Circle size represents the amount of run evidence.</p><p>Faded circles have fewer than five measured runs. Axes always point toward the more desirable outcome.</p></div>
+        <div className="mt-5 space-y-1 border-t border-hairline pt-4 text-xs text-ink-muted"><p>Circle size represents the amount of run evidence.</p><p>Faded circles have fewer than five measured runs. Axes always point toward the more desirable outcome.</p><p>Relative spacing improves comparison; switch to absolute values to judge the real size of the differences.</p></div>
       </div>
       {saveError && <p role="alert" className="border-t border-critical px-5 py-2 text-xs text-critical">{saveError}</p>}
       <footer className="flex items-center gap-3 border-t border-hairline px-5 py-3"><span className="text-xs text-ink-muted">{current.length ? `Current: ${current.join(", ")}` : "Currently unseated"}</span><button type="button" onClick={onClose} className="ml-auto rounded border border-hairline px-3 py-1.5 text-sm">Cancel</button><button type="button" disabled={saving || selected.length === 0} onClick={() => void apply()} className="rounded bg-ink px-3 py-1.5 text-sm text-page disabled:opacity-40">{saving ? "Applying…" : `Apply${multiple ? ` ${selected.length} ducklings` : ""}`}</button></footer>
