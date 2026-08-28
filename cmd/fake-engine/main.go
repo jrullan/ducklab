@@ -142,6 +142,7 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects/{id}/roster", f.auth(f.roster))
 	f.mux.HandleFunc("GET /v1/projects/{id}/skills", f.auth(f.skills))
 	f.mux.HandleFunc("GET /v1/projects/{id}/tasks", f.auth(f.tasks))
+	f.mux.HandleFunc("GET /v1/projects/{id}/next/{ref}", f.auth(f.journey))
 	f.mux.HandleFunc("GET /v1/projects/{id}/bugs", f.auth(f.bugs))
 	f.mux.HandleFunc("GET /v1/runs", f.auth(f.runs))
 	f.mux.HandleFunc("GET /v1/runs/{id}", f.auth(f.runGet))
@@ -439,6 +440,24 @@ func (f *fakeEngine) skills(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeEngine) tasks(w http.ResponseWriter, r *http.Request) {
 	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{{"id": "T-001", "title": "Implement the example", "milestone": "M-001", "status": "todo"}}, "total": 1})
+}
+
+// journey answers the guide-localized projection for one record: its ladder
+// and its door, in the shape the JourneyRail renders. The fake's example task
+// sits at "planned" with test-first as the front door.
+func (f *fakeEngine) journey(w http.ResponseWriter, r *http.Request) {
+	ref := r.PathValue("ref")
+	f.write(w, http.StatusOK, map[string]interface{}{
+		"ref": ref, "kind": "task",
+		"rungs": []map[string]interface{}{
+			{"id": "todo", "label": "planned", "state": "current"},
+			{"id": "test", "label": "test", "state": "next"},
+			{"id": "build", "label": "build", "state": "later"},
+			{"id": "accepted", "label": "accepted", "state": "later"},
+		},
+		"steps": []map[string]interface{}{{"id": "test-first", "kind": "task", "ref": ref, "action": "Write the failing test first, then build", "reason": "tests-gated task with no committed test"}},
+		"door":  map[string]interface{}{"id": "test-first", "kind": "task", "ref": ref, "action": "Write the failing test first, then build", "reason": "tests-gated task with no committed test"},
+	})
 }
 
 func (f *fakeEngine) bugs(w http.ResponseWriter, r *http.Request) {
