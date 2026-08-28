@@ -521,7 +521,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 		// The gate runs after the round's turns, and it — not any model —
 		// decides whether the work is green (I2).
-		if params.Gate != nil {
+		//
+		// Except on a replayed round: a resume skips every turn of the rounds
+		// before its checkpoint (their work is already in the tree), and the
+		// gate that judged them is already in the record — re-running it
+		// bought a full suite (36 s measured, minutes on a slow gate) before
+		// the interrupted seat could even re-enter, on every question,
+		// escalation and budget lift. The person read it as "continue" →
+		// wait → and only then the run continues.
+		replayedRound := params.ResumeFrom != nil && round < params.ResumeFrom.Round
+		if params.Gate != nil && !replayedRound {
 			// Announced BEFORE it runs: a full suite can legally take minutes,
 			// and a transcript whose reviewer just approved while nothing moved
 			// read as a hang — the person could not see the harness working.
