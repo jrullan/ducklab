@@ -202,14 +202,42 @@ func TestWorktreeRestoreDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	}
 }
 
-// A rejected worktree run drops its own checkout only: a same-named file a
-// person has edited in the registered checkout must never be restored or
-// deleted by the run's rejection.
-func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
+// B-279: rejecting a worktree run used to restore its snapshot from the
+// registered checkout root, overwriting a person's same-named edit. This seeds
+// the persisted snapshot and fs_write receipt that make rejection exercise that
+// restore path; it was verified to fail against that pre-fix cleanup because
+// the human checkout was restored to "original".
+func TestRejectWorktreeRestoresOnlyItsRecordedMutation(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)
 	mainGit := gitProject(t, dir)
 	run, _ := pausedWorktreeRun(t, s, id, dir, "r-reject-same-name")
+
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	if rs == nil {
+		t.Fatal("recovered worktree run is absent")
+	}
+	snapshot, err := vcs.New(run.WorktreePath).SnapshotTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs.run.TreeSnapshot = snapshot
+	rs.run.TreeSnapshotHead = mustHead(t, mainGit)
+	w, err := s.ensureWriter(rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.AppendEvent("tool_call", map[string]interface{}{
+		"tool": "fs_write", "ok": true, "args": `{"path":"index.html"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteState(); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("run worktree edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +269,20 @@ func TestRejectWorktreeDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	}
 	if _, err := os.Lstat(run.WorktreePath); !os.IsNotExist(err) {
 		t.Fatalf("worktree remains after reject: %v", err)
+	}
+	events, err := runlog.ReadEvents(rs.runDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := false
+	for _, event := range events {
+		if event.Type == "tree_restored" {
+			restored = true
+			break
+		}
+	}
+	if !restored {
+		t.Error("reject did not restore the recorded worktree mutation before removing its checkout")
 	}
 }
 
