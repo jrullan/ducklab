@@ -49,4 +49,10 @@ describe("the cycle and board routes round-trip", () => {
       expect(routeHref({ name })).toBe(`#/${name}`);
     }
   });
+
+  it("keeps a selected document section addressable", () => {
+    const route = { name: "cycle" as const, stage: "spec", section: "SPEC-012" };
+    expect(routeHref(route)).toBe("#/cycle/spec/SPEC-012");
+    expect(parseRoute(routeHref(route))).toEqual(route);
+  });
 });

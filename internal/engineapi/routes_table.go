@@ -528,7 +528,7 @@ func routeTable() []Route {
 			handler: func(s *Server) http.HandlerFunc { return s.handleReviewStart }},
 		{Method: "POST", Path: "/v1/projects/{id}/chats", Auth: true,
 			Request: service.ChatStartRequest{}, Response: runlog.Run{},
-			Summary:      "Start a conversation with a chosen duckling about a bug or task, with its history as context",
+			Summary:      "Start a conversation with a chosen duckling about a bug, task, or document section, with its history as context",
 			ClientMethod: "ChatStart",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleChatStart }},
 		{Method: "POST", Path: "/v1/runs/{id}/chat/end", Auth: true,

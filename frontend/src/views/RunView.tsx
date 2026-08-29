@@ -61,7 +61,7 @@ function traceKind(crumb: TraceCrumb): string {
 function traceHref(crumb: TraceCrumb): string {
   const kind = traceKind(crumb);
   const stage = kind.includes("require") || kind === "req" ? "intake" : kind.includes("spec") ? "spec" : "plan";
-  return `#/cycle/${stage}?section=${encodeURIComponent(crumb.id)}`;
+  return routeHref({ name: "cycle", stage, section: crumb.id });
 }
 
 // The task endpoint returns the canonical section, including immutable fields.
@@ -875,6 +875,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // children kept painting, so a finished run drew its diff on top of its own
   // conversation. The page scrolls; only the conversation is bounded, and the
   // nav stays visible because the app shell holds the scroll, not this view.
+  const documentChat = run.stage === "chat" ? /^chat about document ((?:REQ|SPEC|M|T)-\d+)$/i.exec(run.note ?? "")?.[1] : undefined;
+  const documentStage = documentChat?.startsWith("REQ-") ? "intake" : documentChat?.startsWith("SPEC-") ? "spec" : documentChat ? "plan" : undefined;
   return (
     <div data-testid="run-view">
       {/* Pinned while the transcript scrolls: the header is the run's
@@ -884,6 +886,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           abort without scrolling back up. Opaque so the lanes pass under
           it, not through it. */}
       <header className="sticky top-0 z-20 border-b border-hairline bg-page px-4 py-3">
+        {documentChat && documentStage && <a data-testid="chat-document-return" href={routeHref({ name: "cycle", stage: documentStage, section: documentChat })} className="mb-2 inline-block text-xs font-medium text-ink-muted underline hover:text-ink">← Back to {documentChat}</a>}
         <div className="flex flex-wrap items-center gap-3">
         {/* A run with no task showed nothing at all: the header of a triage or
             a stage opened with an empty space where its name should be. The

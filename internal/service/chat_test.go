@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -15,11 +16,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
+
+func TestDocumentChatReceivesTheSelectedSectionAndItsChain(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	dir := t.TempDir()
+	p, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for kind, body := range map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Export invoices\n\nThe product exports invoices.\n",
+		artifact.KindSpec:         "## SPEC-001 — CSV exporter\n\n**Implements:** REQ-001\n\nThe exporter writes CSV.\n",
+	} {
+		if err := os.WriteFile(artifact.Path(dir, kind), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prompt := s.chatPromptFor(context.Background(), &runState{run: &runlog.Run{ProjectID: p.ID}}, dir, "document", "SPEC-001")
+	for _, want := range []string{"REQ-001", "Export invoices", "SPEC-001", "CSV exporter", "The exporter writes CSV"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("document dossier is missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Configuration findings") {
+		t.Errorf("an unrelated doctor finding contaminated the document dossier:\n%s", prompt)
+	}
+}
 
 // A chat is a run: the person picks a duckling, asks about a subject, the
 // consultant answers with the dossier in hand and read-only tools, and the

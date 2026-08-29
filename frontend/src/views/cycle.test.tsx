@@ -60,6 +60,42 @@ describe("Cycle", () => {
     expect(narrative).toHaveTextContent("cut into tasks; you birth them");
   });
 
+  it("presents Documents as a pipeline with contextual inspection and an operational drawer", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(TRACE);
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    expect(await screen.findByRole("heading", { name: "Documents", level: 1 })).toBeInTheDocument();
+    expect(screen.getByTestId("cycle-stage-control").querySelectorAll('[role="tab"]')).toHaveLength(3);
+    const inspector = screen.getByTestId("cycle-inspector");
+    expect(inspector).toHaveTextContent("No section selected");
+    expect(screen.getByTestId("cycle-selection-empty")).toHaveTextContent("Select a requirement");
+    expect(screen.queryByTestId("cycle-section")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId("cycle-index-row")[1]!);
+    expect(inspector).toHaveTextContent("REQ-002");
+    expect(inspector).toHaveTextContent("no spec section implements this requirement");
+    expect(screen.getAllByTestId("cycle-index-row")[1]).toHaveAttribute("aria-current", "true");
+    expect(screen.getAllByTestId("cycle-section")).toHaveLength(1);
+    expect(screen.getByTestId("cycle-section")).toHaveTextContent("REQ-002");
+    expect(screen.getByTestId("cycle-section-details")).toHaveTextContent("Export to CSV");
+    expect(screen.queryByText("More detail")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cycle-start")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("Clear selection");
+
+    fireEvent.click(screen.getByTestId("cycle-show-all"));
+    expect(screen.queryByTestId("cycle-section")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cycle-selection-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("cycle-start")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+    expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");
+    expect(screen.getByRole("heading", { name: "Enter requirements" })).toBeInTheDocument();
+    expect(screen.getByText(/approved requirements remain unchanged/i)).toBeInTheDocument();
+  });
+
   it("lists sections and marks the ones the spine reports broken", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
@@ -68,13 +104,51 @@ describe("Cycle", () => {
     });
     render(<Cycle client={client} projectId="p" />);
 
-    await waitFor(() => expect(screen.getAllByTestId("cycle-section")).toHaveLength(2));
-    const cards = screen.getAllByTestId("cycle-section") as HTMLElement[];
-    // The orphan is flagged and the covered requirement is not: a rail that
-    // marked everything, or nothing, would carry no information.
-    expect(cards[0]!.dataset.broken).toBe("false");
-    expect(cards[1]!.dataset.broken).toBe("true");
+    const rows = await waitFor(() => screen.getAllByTestId("cycle-index-row"));
+    expect(rows[0]).not.toHaveTextContent("break");
+    expect(rows[1]).toHaveTextContent("break");
+    fireEvent.click(rows[1]!);
+    expect(screen.getByTestId("cycle-section").dataset.broken).toBe("true");
     expect(screen.getByTestId("cycle-health").textContent).toContain("1 break");
+  });
+
+  it("turns a selected requirement into a navigable chain with contextual actions", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.endsWith("/trace/REQ-001")) return json({ id: "REQ-001", kind: "requirement", title: "Mobile-first timesheet", down: ["SPEC-001"] });
+      if (p.endsWith("/trace/SPEC-001")) return json({ id: "SPEC-001", kind: "spec_section", title: "Responsive time entry", up: ["REQ-001"], down: ["T-001"] });
+      if (p.endsWith("/trace/T-001")) return json({ id: "T-001", kind: "task", title: "Build time entry", up: ["SPEC-001"] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      if (p.endsWith("/ducklings")) return json({ items: [{ id: "k3", provider: "openrouter", model: "k3", caps: {} }] });
+      if (p.includes("/roster")) return json({ entries: [{ role: "consultant", duckling: "k3" }] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    const row = (await screen.findAllByTestId("cycle-index-row"))[0]!;
+    fireEvent.click(row);
+    expect(row.className).toContain("border-warning");
+    await waitFor(() => expect(screen.getAllByTestId("cycle-chain-node")).toHaveLength(3));
+    expect(screen.getByTestId("cycle-document-chain")).toHaveTextContent("SPEC-001");
+    expect(screen.getByTestId("cycle-document-chain")).toHaveTextContent("T-001");
+    expect(screen.queryByText("Review traceability issue")).not.toBeInTheDocument();
+    expect(await screen.findByText("Chat about REQ-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("cycle-propose-section"));
+    expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain("REQ-001 — Mobile-first timesheet");
+  });
+
+  it("restores the exact selected section from a document deep link", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/spec")) return json({ kind: "spec", version: 1, approved: true, markdown: "", sections: [{ id: "SPEC-005", title: "Configurable timer", body: "Timers support selectable units.", implements: ["REQ-004"] }] });
+      if (p.endsWith("/trace/SPEC-005")) return json({ id: "SPEC-005", kind: "spec_section", title: "Configurable timer", up: ["REQ-004"] });
+      if (p.endsWith("/trace/REQ-004")) return json({ id: "REQ-004", kind: "requirement", title: "Timer units", down: ["SPEC-005"] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" section="SPEC-005" />);
+    expect(await screen.findByTestId("cycle-section")).toHaveTextContent("Configurable timer");
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("aria-current", "true");
   });
 
   it("counts the API trace errors array, not only errors joined to visible sections", async () => {
@@ -230,12 +304,13 @@ describe("Cycle", () => {
     expect(proposal).toHaveTextContent("REQ-001");
     expect(proposal).not.toHaveTextContent("SPEC-008");
     expect(proposal).not.toHaveTextContent("M-001");
-    expect(screen.getAllByText("REQ-001", { exact: true })).toHaveLength(1);
+    expect(screen.getAllByTestId("cycle-section")).toHaveLength(1);
+    expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(1);
     expect(screen.queryByText("SPEC-008", { exact: true })).toBeNull();
 
     fireEvent.click(screen.getByTestId("cycle-tab-spec"));
-    await waitFor(() => expect(screen.getAllByText("SPEC-008", { exact: true })).toHaveLength(1));
-    expect(screen.queryByText("REQ-001", { exact: true })).toBeNull();
+    await waitFor(() => expect(screen.getAllByTestId("cycle-section")).toHaveLength(1));
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("data-id", "SPEC-008");
   });
 });
 
@@ -305,6 +380,7 @@ describe("Cycle, plan tab", () => {
   it("shows live task state from the Down walk and task status", async () => {
     render(<Cycle client={client()} projectId="p" />);
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     await waitFor(() => expect(screen.getByTestId("cycle-live-state")).toHaveTextContent("T-001 landed"));
     expect(screen.getByTestId("cycle-live-state").dataset.traceLoaded).toBe("true");
   });
@@ -312,12 +388,14 @@ describe("Cycle, plan tab", () => {
   it("shows no task born yet when the Down walk has no tasks", async () => {
     render(<Cycle client={client({ down: [] }, [])} projectId="p" />);
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     await waitFor(() => expect(screen.getByTestId("cycle-live-state")).toHaveTextContent("no task born yet"));
   });
 
   it("shows what each task implements", async () => {
     render(<Cycle client={client()} projectId="p" />);
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     await waitFor(() => expect(screen.getAllByTestId("cycle-child")).toHaveLength(2));
     const t1 = screen.getAllByTestId("cycle-child").find((el) => el.dataset.id === "T-001")!;
     expect(t1.textContent).toContain("SPEC-007");
@@ -328,6 +406,7 @@ describe("Cycle, plan tab", () => {
   it("marks a task the spine flagged, not just top-level sections", async () => {
     render(<Cycle client={client()} projectId="p" />);
     fireEvent.click(screen.getByTestId("cycle-tab-plan"));
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     await waitFor(() => expect(screen.getAllByTestId("cycle-child")).toHaveLength(2));
     const kids = screen.getAllByTestId("cycle-child");
     expect(kids.find((el) => el.dataset.id === "T-002")!.dataset.broken).toBe("true");
@@ -350,15 +429,15 @@ describe("Cycle — verified detail pane", () => {
     });
     render(<Cycle client={client} projectId="p" stage="spec" />);
 
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     const card = await waitFor(() => screen.getByTestId("cycle-section"));
     expect(card.dataset.broken).toBe("true");
-    fireEvent.click(screen.getByText("More detail"));
     expect(card).toHaveTextContent("claims REQ-008 — no such requirement exists");
     expect(card).toHaveTextContent("implements SPEC-001");
     expect(screen.getByTestId("cycle-index-row")).toHaveTextContent("break");
   });
 
-  it("shows one summary sentence and keeps detail behind disclosure", async () => {
+  it("shows the complete clean section once when it is selected", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json({
         ...REQUIREMENTS,
@@ -369,12 +448,13 @@ describe("Cycle — verified detail pane", () => {
     });
     render(<Cycle client={client} projectId="p" />);
 
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[0]!);
     const card = await waitFor(() => screen.getByTestId("cycle-section"));
-    expect(screen.getByTestId("cycle-section-summary")).toHaveTextContent("The app records hours.");
-    expect(screen.getByTestId("cycle-section-summary")).not.toHaveTextContent("As-built");
-    expect(screen.getByTestId("cycle-section-summary")).not.toHaveTextContent("Internal implementation notes");
-    expect(card.querySelector("details")).toBeTruthy();
-    expect(card.querySelector("details")?.open).toBe(false);
+    expect(card).toHaveTextContent("The app records hours.");
+    expect(card).toHaveTextContent("Internal implementation notes");
+    expect(card).not.toHaveTextContent("As-built");
+    expect(card.querySelector("details")).toBeNull();
+    expect(card.textContent?.match(/The app records hours\./g)).toHaveLength(1);
   });
 
   it("computes the redraft line from the seated models' measured spend", async () => {

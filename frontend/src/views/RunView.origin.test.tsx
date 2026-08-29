@@ -63,10 +63,19 @@ describe("RunView origin panel", () => {
 
     expect(await screen.findByText("“People can see why a run exists.”")).toBeInTheDocument();
     const breadcrumb = await screen.findByTestId("run-origin-breadcrumb");
-    expect(breadcrumb.querySelector('a[href="#/cycle/intake?section=REQ-1"]')).toHaveTextContent("Origin is visible");
-    expect(breadcrumb.querySelector('a[href="#/cycle/plan?section=plan-1"]')).toHaveTextContent("Build origin panel");
-    expect(breadcrumb.querySelector('a[href="#/cycle/spec?section=spec-1"]')).toHaveTextContent("Origin visibility");
-    expect(breadcrumb.querySelector('a[href="#/cycle/plan?section=task-1"]')).toHaveTextContent("Implement origin panel");
+    expect(breadcrumb.querySelector('a[href="#/cycle/intake/REQ-1"]')).toHaveTextContent("Origin is visible");
+    expect(breadcrumb.querySelector('a[href="#/cycle/plan/plan-1"]')).toHaveTextContent("Build origin panel");
+    expect(breadcrumb.querySelector('a[href="#/cycle/spec/spec-1"]')).toHaveTextContent("Origin visibility");
+    expect(breadcrumb.querySelector('a[href="#/cycle/plan/task-1"]')).toHaveTextContent("Implement origin panel");
+  });
+
+  it("returns a document chat to its exact section", async () => {
+    const chat = { id: "run-1", project_id: "project-1", stage: "chat", mode: "solo", task_id: "", status: "paused", verdict: "", started_at: "2026-01-01T00:00:00Z", note: "chat about document REQ-005" };
+    useRuns.setState({ runs: { "run-1": chat as never }, events: { "run-1": [] }, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open" });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.run = vi.fn().mockResolvedValue({ run: chat, events: [] });
+    render(<RunView runId="run-1" client={client as never} />);
+    expect(await screen.findByTestId("chat-document-return")).toHaveAttribute("href", "#/cycle/intake/REQ-005");
   });
 
   it("says plainly when the run has no document spine", async () => {
