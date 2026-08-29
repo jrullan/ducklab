@@ -1262,7 +1262,7 @@ export function Cycle({
           {!inspectorOpen && inspectorContent}
         </aside>
       </div>
-      {inspectorOpen && <SideDrawer title="Section inspector" subtitle={inspectedSection ? `${inspectedSection.id} · ${inspectedSection.title}` : undefined} onClose={() => setInspectorOpen(false)}>{inspectorContent}</SideDrawer>}
+      {inspectorOpen && <SideDrawer title="Section inspector" subtitle={inspectedSection ? `${inspectedSection.id} · ${inspectedSection.title}` : undefined} size="inspector" onClose={() => setInspectorOpen(false)}>{inspectorContent}</SideDrawer>}
     </div>
   );
 }

@@ -2,12 +2,13 @@ import { useEffect, type ReactNode } from "react";
 
 /** Stable editing surface for forms that used to expand inside cards and
  * move the collection underneath the pointer. */
-export function SideDrawer({ title, subtitle, onClose, children, testId }: {
+export function SideDrawer({ title, subtitle, onClose, children, testId, size = "wide" }: {
   title: string;
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
   testId?: string;
+  size?: "inspector" | "wide";
 }) {
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -20,7 +21,7 @@ export function SideDrawer({ title, subtitle, onClose, children, testId }: {
   return (
     <div className="fixed inset-0 z-50 flex justify-end" data-testid={testId}>
       <button type="button" aria-label="Close drawer" className="absolute inset-0 bg-ink/20" onClick={onClose} />
-      <aside role="dialog" aria-modal="true" aria-label={title} className="relative flex h-full w-full max-w-2xl flex-col border-l border-hairline bg-page shadow-2xl">
+      <aside role="dialog" aria-modal="true" aria-label={title} className={`relative flex h-full w-full flex-col border-l border-hairline bg-page shadow-2xl ${size === "inspector" ? "max-w-md" : "max-w-2xl"}`}>
         <header className="flex items-start gap-4 border-b border-hairline p-4">
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold text-ink">{title}</h2>
