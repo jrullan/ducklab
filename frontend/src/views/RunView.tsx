@@ -228,6 +228,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // The right rail folds away like the guide rail does: budget and gate are
   // glanced at, and on a small window they tax every line of transcript.
   const [railOpen, setRailOpen] = useState(() => localStorage.getItem("ducklab.runrail") !== "off");
+  const runContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastCompact = useRef<boolean | null>(null);
+  const [compactRun, setCompactRun] = useState(false);
   const toggleRail = () => {
     setRailOpen((v) => {
       if (v) localStorage.setItem("ducklab.runrail", "off");
@@ -235,6 +238,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       return !v;
     });
   };
+  useEffect(() => {
+    const element = runContainerRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const compact = entry.contentRect.width < 960;
+      if (compact && lastCompact.current !== true) setRailOpen(false);
+      lastCompact.current = compact;
+      setCompactRun(compact);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   // A stage run's subject: the document it proposed. Fetched from the
   // artifact store once the run pauses at its gate, shown only when the
   // pending proposal is THIS run's — an older proposal would be someone
@@ -878,10 +894,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const documentChat = run.stage === "chat" ? /^chat about document ((?:INT|REQ|SPEC|M|T)-\d+)$/i.exec(run.note ?? "")?.[1] : undefined;
   const documentStage = documentChat?.startsWith("INT-") ? "intent" : documentChat?.startsWith("REQ-") ? "intake" : documentChat?.startsWith("SPEC-") ? "spec" : documentChat ? "plan" : undefined;
   const jumpTo = (testId: string) => {
-    document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
   return (
-    <div data-testid="run-view">
+    <div ref={runContainerRef} data-testid="run-view">
       {/* Pinned while the transcript scrolls: the header is the run's
           identity — what is being built, where in the cycle, and the one
           control that stops it — and losing it to the scroll meant reading
@@ -1136,11 +1152,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           scrolling region (cards, transcript, dock, diff), which is what
           lets the aside's sticky keep its grip from the first card to the
           last hunk of the diff instead of drowning when the grid ended. */}
-      <div className="md:flex md:items-start">
+      <div className={compactRun ? "block" : "flex items-start"}>
         {/* While the run lives the column takes the viewport's height and the
             dock rides its bottom edge (mt-auto): a short transcript used to
             leave the dock adrift with dead space beneath it. */}
-        <div className={finished ? "min-w-0 flex-1" : "min-w-0 flex-1 md:flex md:min-h-[calc(100vh-8rem)] md:flex-col"}>
+        <div className={finished ? "min-w-0 flex-1" : compactRun ? "min-w-0 flex-1" : "flex min-h-[calc(100vh-8rem)] min-w-0 flex-1 flex-col"}>
 
       {/* The moment you most want to change a setting and go again is while
           looking at the run that just failed. Doing it meant leaving for the
@@ -2112,13 +2128,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       )}
         </div>
 
+        {railOpen && compactRun && <button type="button" aria-label="Close run details" className="fixed inset-0 z-40 bg-ink/20" onClick={toggleRail} />}
         {railOpen ? (
         <aside
           data-testid="run-rail"
+          role={compactRun ? "dialog" : undefined}
+          aria-modal={compactRun ? "true" : undefined}
+          aria-label={compactRun ? "Run details" : undefined}
           // overscroll-contain: the dock's scroll ends AT the dock. Without
           // it, reaching its bottom chained the wheel into the page scroller
           // and the transcript crawled away under a rail that felt "linked".
-          className={`flex flex-col gap-3 p-4 md:sticky md:top-14 md:w-72 md:shrink-0 md:self-start md:overflow-y-auto md:overscroll-contain md:border-l md:border-hairline ${finished ? "md:max-h-[calc(100vh-12rem)]" : "md:h-[calc(100vh-12rem)]"}`}
+          className={compactRun
+            ? "fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col gap-3 overflow-y-auto overscroll-contain border-l border-hairline bg-page p-4 shadow-2xl"
+            : `sticky top-14 flex w-72 shrink-0 flex-col gap-3 self-start overflow-y-auto overscroll-contain border-l border-hairline p-4 ${finished ? "max-h-[calc(100vh-12rem)]" : "h-[calc(100vh-12rem)]"}`}
         >
           <button
             type="button"
@@ -2296,7 +2318,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             // against the window edge, every click landed on the scrollbar
             // and the collapsed rail could never be reopened. A full border
             // now that it floats free of the edge it used to hug.
-            className="mr-3 self-start rounded border border-hairline px-2 py-2 text-xs text-ink-muted md:sticky md:top-14"
+            className={`${compactRun ? "hidden" : "sticky top-14"} mr-3 self-start rounded border border-hairline px-2 py-2 text-xs text-ink-muted`}
           >
             ‹
           </button>

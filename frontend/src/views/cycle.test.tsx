@@ -156,6 +156,14 @@ describe("Cycle", () => {
     expect(screen.getByTestId("cycle-start")).not.toHaveAttribute("open");
     expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("Clear selection");
 
+    // When the room cannot hold the third pane, the same inspector remains
+    // reachable as a drawer instead of disappearing at a viewport breakpoint.
+    fireEvent.click(screen.getByTestId("cycle-inspector-open"));
+    const drawer = screen.getByRole("dialog", { name: "Section inspector" });
+    expect(drawer).toHaveTextContent("REQ-002");
+    expect(drawer).toHaveTextContent("no spec section implements this requirement");
+    fireEvent.click(screen.getByRole("button", { name: "Close Section inspector" }));
+
     fireEvent.click(screen.getByTestId("cycle-show-all"));
     expect(screen.queryByTestId("cycle-section")).not.toBeInTheDocument();
     expect(screen.getByTestId("cycle-selection-empty")).toBeInTheDocument();
