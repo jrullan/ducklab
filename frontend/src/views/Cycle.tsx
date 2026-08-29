@@ -372,7 +372,7 @@ export function Cycle({
         );
         if (seats.some((_d, i) => seatPicks[`extend:${i}`])) ducklings = seats;
       }
-      const run = await client.stageStart(projectId, active.stage, {
+      const run = await client.stageStart(projectId, operationStage, {
         from: brief.trim(),
         mode,
         rounds,
@@ -507,6 +507,12 @@ export function Cycle({
     : active.stage === "spec"
       ? sections.length === 0 ? "Draft specification" : "Propose specification update"
       : sections.length === 0 ? "Draft plan" : "Extend plan";
+  // Adding an intention is implemented by the Intake engine stage, but that
+  // is an implementation detail. Keep the person in Intent and let the drawer
+  // speak in terms of the document they are adding to.
+  const operationStage = active.stage === "intent" ? "intake" : active.stage;
+  const operationLabel = active.stage === "intent" ? "Intent" : active.label;
+  const operationSectionsLength = active.stage === "intent" ? requirementIds.size : sections.length;
 
   return (
     <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
@@ -514,7 +520,7 @@ export function Cycle({
         <div className="flex items-center gap-3 py-3">
           <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Intent, requirements, specification and plan — one traceable project spine.</p></div>
           <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
-          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intent") { setActive(STAGES[1]); location.hash = routeHref({ name: "cycle", stage: "intake" }); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
+          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
         </div>
         <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-4 gap-3">
           {STAGES.map((s) => (
@@ -733,7 +739,7 @@ export function Cycle({
           <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "hidden"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
-            {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{active.label} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">Creates a proposal; approved {active.label.toLowerCase()} remain unchanged until you accept it.</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
+            {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{operationLabel} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">{active.stage === "intent" ? "Preserves what you ask for and asks the council to translate it into requirement changes." : `Creates a proposal; approved ${active.label.toLowerCase()} remain unchanged until you accept it.`}</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the
                 architect the whole document with orders to keep it — and the
@@ -742,11 +748,13 @@ export function Cycle({
                 who found this gap asked whether features had to arrive as fake
                 bug reports. */}
             <div className="mb-2 text-sm text-ink">
-              {sections.length === 0
-                ? `Draft the ${active.label.toLowerCase()}`
-                : active.stage === "intake"
+              {active.stage === "intent"
+                ? "Describe the addition or change you want"
+                : operationSectionsLength === 0
+                ? `Draft the ${operationLabel.toLowerCase()}`
+                : operationStage === "intake"
                   ? "Add to the requirements — a feature, a change of scope"
-                  : `Extend the ${active.label.toLowerCase()}`}
+                  : `Extend the ${operationLabel.toLowerCase()}`}
             </div>
             {active.stage === "plan" && sections.length > 0 && (
               <>
@@ -782,7 +790,7 @@ export function Cycle({
                 an idea, while forty thousand lines already ran. Adoption
                 surveys the tree into the requirements the code ALREADY
                 satisfies; the extension flow is then the development model. */}
-            {active.stage === "intake" && sections.length === 0 && hasCode && (
+            {operationStage === "intake" && operationSectionsLength === 0 && hasCode && (
               <div
                 className="mb-3 rounded-card border border-hairline bg-surface2 p-2"
                 data-testid="cycle-adopt-door"
@@ -821,14 +829,14 @@ export function Cycle({
                 </div>
               </div>
             )}
-            {active.stage === "intake" && (
+            {operationStage === "intake" && (
               <>
                 <textarea
                   aria-label="brief"
                   data-testid="cycle-brief"
                   rows={4}
                   placeholder={
-                    sections.length === 0
+                    operationSectionsLength === 0
                       ? "What do you want built? A paragraph is enough. A file path works too."
                       : "Describe the new feature. Existing requirements survive while the new one is added."
                   }
@@ -837,23 +845,23 @@ export function Cycle({
                   className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
                 />
                 <p className="mb-2 text-xs text-ink-muted">
-                  {sections.length === 0
+                  {operationSectionsLength === 0
                     ? "Leave it empty and the council will interview you instead, asking questions you answer in the run."
                     : "Accept the new requirements, then continue to spec and plan — each stage extends its document and the new tasks arrive with full traceability."}
                 </p>
               </>
             )}
-            {active.stage !== "intake" && (
+            {operationStage !== "intake" && (
               <div className="mb-2">
               <p className="text-xs text-ink-muted">
-                {active.stage === "spec"
+                {operationStage === "spec"
                   ? "Reads the accepted requirements and proposes a specification."
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
-              {active.stage === "spec" && selectedSection && <textarea aria-label="requested specification change" data-testid="cycle-brief" rows={4} value={brief} onChange={(event) => setBrief(event.target.value)} className="mt-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />}
+              {operationStage === "spec" && selectedSection && <textarea aria-label="requested specification change" data-testid="cycle-brief" rows={4} value={brief} onChange={(event) => setBrief(event.target.value)} className="mt-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />}
               </div>
             )}
-            {(active.stage === "intake" || active.stage === "spec") && (
+            {(operationStage === "intake" || operationStage === "spec") && (
               <div className="mb-2">
                 {/* A door, not a form field: most launches carry no
                     references, and an always-open input would tax the card.
@@ -898,7 +906,7 @@ export function Cycle({
                 )}
               </div>
             )}
-            {active.stage === "spec" && debtCount > 0 && (
+            {operationStage === "spec" && debtCount > 0 && (
               <div className="mb-3 rounded-card border border-hairline p-2" data-testid="spec-settle">
                 <p className="mb-1 text-xs text-ink-muted">
                   {debtCount} task(s) wear spec-debt: the plan grew without a redesign and the spec
@@ -1020,7 +1028,7 @@ export function Cycle({
                 </button>
               </div>
             )}
-            {(active.stage !== "plan" || sections.length === 0 || planAction === "extend") && (
+            {(operationStage !== "plan" || operationSectionsLength === 0 || planAction === "extend") && (
             <>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
               <select
@@ -1094,16 +1102,16 @@ export function Cycle({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => void start(active.stage === "intake" && sections.length === 0 && hasCode && (intakePath ?? "adopt") === "adopt")}
+                onClick={() => void start(operationStage === "intake" && operationSectionsLength === 0 && hasCode && (intakePath ?? "adopt") === "adopt")}
                 disabled={starting}
                 data-testid="cycle-run"
                 className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
               >
                 {starting
                   ? "Starting…"
-                  : active.stage === "intake" && sections.length === 0 && hasCode && (intakePath ?? "adopt") === "adopt"
+                  : operationStage === "intake" && operationSectionsLength === 0 && hasCode && (intakePath ?? "adopt") === "adopt"
                     ? "Survey the code"
-                    : sections.length === 0
+                    : operationSectionsLength === 0
                       ? "Draft it"
                       : "Redraft"}
               </button>

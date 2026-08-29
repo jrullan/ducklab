@@ -83,6 +83,40 @@ describe("Cycle", () => {
     expect(screen.queryByRole("group", { name: "section state filters" })).toBeNull();
   });
 
+  it("adds an intention without exposing Intake or leaving the Intent document", async () => {
+    const intent = {
+      kind: "intent", version: 1, approved: true, markdown: "",
+      sections: [{ id: "INT-001", title: "Initial product", body: "### Original brief\n\nBuild it." }],
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/intent")) return json(intent);
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    const stageStart = vi.spyOn(client, "stageStart").mockResolvedValue({
+      id: "r-intent", project_id: "p", stage: "intake", mode: "council", task_id: "",
+      status: "running", verdict: "", started_at: "2026-08-29T00:00:00Z",
+    });
+    render(<Cycle client={client} projectId="p" stage="intent" />);
+
+    await screen.findByTestId("cycle-primary-action");
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Add intention" })).toBeInTheDocument();
+    expect(screen.getByText("Intent operation")).toBeInTheDocument();
+    expect(screen.queryByText("Requirements operation")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("cycle-brief"), { target: { value: "Add offline mode." } });
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() => expect(stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({
+      from: "Add offline mode.",
+      adopt: false,
+    })));
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+  });
+
   it("presents Documents as a pipeline with contextual inspection and an operational drawer", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
