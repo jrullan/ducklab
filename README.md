@@ -195,6 +195,7 @@ git init                                    # ducklab needs a git repo
 ducklab project init --name MyProject       # auto-starts the engine if none is running
 
 ducklab intake --from brief.txt             # brief        → requirements
+ducklab intent                              # your briefs, verbatim, and what each one changed
 ducklab spec                                # requirements → spec
 ducklab plan                                # spec         → milestones and tasks
 
@@ -204,6 +205,11 @@ ducklab run accept r-20260729-...           # commit it
 ducklab review T-001                        # read the commit
 ducklab release plan --bump minor           # what shipped
 ```
+
+Your words are part of the record: every brief is kept verbatim as an
+`INT-nnn` entry before any model reads it, and the requirements it added or
+changed point back to it — so a requirement can always answer "who asked for
+this, and in what words".
 
 Each stage writes a `.proposed` file first and waits for you. `accept`
 promotes it; `reject` restores exactly what the run wrote and nothing else;

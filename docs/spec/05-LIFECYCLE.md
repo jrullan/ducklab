@@ -20,7 +20,7 @@ no client needs to be attached for a run to reach its gate and wait there.
 
 | Stage | Input | Conversation | Output artifact | Gate |
 |-------|-------|--------------|-----------------|------|
-| `intake` | human intent, optional seed doc | `council` | `docs/requirements.md` (REQ-*) | human approve |
+| `intake` | human intent, optional seed doc | `council` | `docs/intent.md` (INT-*, the brief verbatim, append-only) + `docs/requirements.md` (REQ-*) | human approve |
 | `spec` | approved requirements | `council` | `docs/spec.md` (SPEC-*) | human approve + trace: every `must` REQ covered |
 | `plan` | spec | `council` | `docs/plan.md`, milestones + tasks in DB | human approve + trace: every task implements a SPEC |
 | `build` | one task | `solo`/`pair`/`tournament`/`split` | a diff on a branch | verify gate + human accept |
@@ -31,6 +31,20 @@ no client needs to be attached for a run to reach its gate and wait there.
 Stages are **not** enforced as a strict sequence. A user may run `build` on a
 hand-written task with no requirements at all; `trace check` will report the gap
 and nothing will block. Ducklab records the truth; it does not impose ceremony.
+Two exceptions are refusals, not ceremony: `spec` needs accepted requirements
+and `plan` (a fresh draft) needs an accepted spec — the engine says which
+prerequisite is missing before any run record exists (2026-08-29).
+
+**Intent is the human side of the record** (2026-08-29). Requirements are a
+council's interpretation; `intent.md` is the journal of the briefs that caused
+them. An intake run appends its brief as `INT-nnn` before the model runs (the
+interview's answers, when there was no brief); when the proposal lands, the
+requirement sections it added or changed carry `Originates from: INT-nnn`, and
+the entry records the outcome (`accepted` with its `Requirements:`, `not
+accepted`, `superseded`). Unchanged requirements never acquire an origin;
+historical intake runs are imported without invented edges. The spine walks
+both ways (`INT-001 ↓ REQ-004`, `REQ-004 ↑ INT-001`) and `trace check` flags
+an accepted intention that changed no requirement.
 
 ### 1.1 Stage execution (uniform)
 
@@ -563,8 +577,15 @@ Tools: `status`, `run_get`, `decide`, `answer`, `artifact_get`, `task_list`,
 2. Group by milestone.
 3. One `scribe` turn renders user-facing notes (§6.7 of `04`).
 4. Write `docs/releases/<version>.md` as a proposal; human gate.
-5. `ducklab release cut <version>` writes the release row, tags the commit
-   (`vX.Y.Z`), and — if configured — runs the deploy recipe.
+5. `ducklab release cut <version>` syncs the manifests, rebuilds the desktop
+   bundle, commits notes + manifests + bundle on the default branch, tags that
+   commit (`vX.Y.Z`), and — if configured — runs the deploy recipe.
+6. Under `[remote] on_accept = "push"` the cut **publishes the default branch
+   first, then the tag**, each with its own receipt in
+   `.ducklab/remote-actions.jsonl`. If the branch push fails the tag stays
+   local and the cut returns a worded warning: a tag (and a GitHub release
+   built from it) on a commit the branch does not carry is the incoherent
+   state, not a partial success (v0.9.3, 2026-08-29).
 
 ### 9.2 Deploy recipes
 

@@ -74,6 +74,13 @@ ducklab engine restart
 ducklab engine log [--tail 200] [--follow]
 ```
 
+`start`/`restart` wait for the spawned engine **as long as its process lives**
+(capped at 5 min), not for a fixed number of seconds: recovery of a large state
+dir takes what it takes, and the engine writes `engine.json` only when it is
+about to serve, so "engine.json exists" means "health answers". `restart`
+refuses to proceed from a shell missing a provider key the running engine has
+(the replacement would inherit this shell's environment); `--force` overrides.
+
 ### 3.2 `project`
 
 ```
@@ -116,10 +123,17 @@ per role, breaks ties by cost, prints the evidence, and **never calls a model**.
 ### 3.4 Lifecycle stages
 
 ```
+ducklab intent [show]                      # the append-only journal of human briefs (INT-*)
 ducklab intake [--mode council] [--from <file>]
 ducklab spec   [--mode council]
 ducklab plan   [--mode council]
 ```
+
+`intent` prints `.ducklab/docs/intent.md`: every brief an intake run received,
+verbatim, with its run, outcome and the requirements it introduced or changed
+(`05 §1`). `spec` and `plan` refuse to start without their prerequisite and
+name it (accept the requirements proposal first; draft the specification first)
+before any run record exists.
 
 Each runs the stage conversation, writes `docs/<name>.md.proposed`, shows a diff
 against the current artifact, and waits at the human gate. On accept the proposal

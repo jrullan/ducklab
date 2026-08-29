@@ -234,10 +234,61 @@ record) gets **two doors** in the Cycle empty state, each with its meaning:
 adoption`). The second door is what makes an existing repo's first screen
 answer "what can I do here" instead of going mute.
 
-### 4.2 Cycle — requirements, spec, plan
+### 4.2 Documents — intent, requirements, spec, plan
 
-Three tabs. Each has the same three-part shape, because they are the same
-mechanism (`05-LIFECYCLE.md §1.1`):
+*As built (2026-08-29, #7 and #8). The original three-tab sketch is kept below
+this block for the parts that still hold.*
+
+Documents is one workspace with four stages in reading order — **Intent →
+Requirements → Specification → Plan** — shown as a numbered stage strip, a
+health line (`✓ 0 breaks in the spine` / `⚠ N breaks`, coverage, a `Review
+issues` door to the ledger) and a three-column body:
+
+- **Outline** (left): the stage's sections as a searchable list with state
+  filters (all / breaks / no task), each row marking `break`, `no task yet`,
+  `proposal pending`. Selecting a row focuses it.
+- **Reading pane** (middle): **empty until a section is selected** — by
+  design, the pane shows *one* section in full (complete body, no disclosure)
+  rather than the whole document; `Clear selection` returns to the empty
+  state. The selection is addressable: `#/cycle/<stage>/<SECTION-ID>` (the old
+  `?section=` form still parses), so run-origin breadcrumbs, task cards and
+  chats deep-link into the exact section.
+- **Section inspector** (right, at widths ≥ 1280 px): the selected section's
+  id, title and state; its **document chain** (intent ↔ requirement ↔ spec ↔
+  milestone ↔ tasks, from `trace/{id}` walked two levels, each node clickable
+  and carrying live task status); `Propose change to <id>` (pre-fills the
+  operation drawer with a focused brief, or a plan amendment on the plan tab);
+  `Review traceability issue` when the spine reports one; and `Chat about
+  <id>` — a consultant chat whose dossier is the approved section plus its
+  chain (`about_kind: document`). A chat run's header carries `← Back to
+  <id>`.
+- **Operation drawer**: the stage's one primary action (`+ Add intention` /
+  `Propose specification update` / `Extend plan`, named from the stage state)
+  opens a right drawer with the roster, mode and brief; it says outright that
+  it creates a proposal and the approved document stays unchanged until
+  accepted. Spec and Plan refuse impossible launches and name the missing
+  prerequisite instead (accept the requirements proposal first, draft the
+  specification first); the engine enforces the same rule before a run record
+  exists.
+
+**Intent** (#8) is the human input boundary: every Intake brief (pasted, from
+a file, or the answers of an interview) is preserved verbatim as an
+immutable, addressable `INT-nnn` entry in `.ducklab/docs/intent.md` before a
+model sees it — never the references or digests appended to the prompt.
+When the requirements proposal lands, only the sections it added or textually
+changed acquire `Originates from: INT-nnn`; on accept the entry records
+`Outcome: accepted` and `Requirements: REQ-…`; reject and supersede record
+theirs. Historical intake runs are imported lazily (marked as imported, no
+invented edges; adoption runs excluded). Empty projects land on Intent;
+established ones on Requirements. `trace check` reports an accepted intention
+that changed no requirement (`unrealized_intent`). CLI: `ducklab intent`;
+MCP: `artifact_get kind=intent`.
+
+**Journey rail.** Bug and task rails, and a run after accept, show the
+record's ladder with the current rung and name the next door (`GET
+/v1/projects/{id}/next/{ref}`): the launcher's label *is* the door.
+
+The original sketch, for what still applies:
 
 - **Left**: the artifact rendered as a document, sections addressable by id
   (`REQ-003`). Inline edit via a Monaco pane toggled with `E` — this is the one

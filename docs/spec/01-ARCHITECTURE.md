@@ -315,8 +315,14 @@ notification.
 - **One engine per OS user.** Discovery and locking via
   `<state-dir>/ducklab/engine.json` (`02-DATA-MODEL.md §8`).
 - **Auto-start**: both the CLI and the desktop app spawn `ducklab-engine` if
-  none is running, wait up to 10 s for the health endpoint, then proceed.
-  Disable with `--no-autostart` / `[engine] autostart = false`.
+  none is running and wait for the health endpoint, then proceed. Disable
+  with `--no-autostart` / `[engine] autostart = false`.
+- **Readiness is honest** (B-298, 2026-08-28): the engine binds its port
+  once, recovers runs, and only then writes `engine.json` and serves on that
+  same socket — a caller that finds `engine.json` can trust `/v1/health`. The
+  CLI waits while the spawned pid lives (cap 5 min) rather than a fixed
+  number of seconds. Recovery reads only the tail of each run's event log
+  to restore its sequence; a state dir with ~1,400 runs recovers in ~6 s.
 - **Graceful stop**: `SIGTERM` (or `/v1/shutdown`) stops accepting new runs,
   checkpoints every active run at its next safe point, sets them `paused`, and
   exits within `shutdown_grace_s` (default 30). A killed engine is equivalent:

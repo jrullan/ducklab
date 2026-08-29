@@ -172,3 +172,32 @@ a skill a duckling writes is now pending until the run is accepted. What that
 work exposed is worth keeping in mind for the rest — the gate was easy, and
 five real runs were needed before a model could write a valid skill at all,
 because every piece of feedback arrived after the turn it was needed in.
+
+## Addendum — 2026-08-29 (v0.9.3, `cf01d02`)
+
+The two open v0.1 ergonomic criteria above are closed: the engine auto-starts
+from the CLI and the desktop, and the version carries its sha and a `-dirty`
+mark when built from a tree that differs from HEAD (`/v1/health` reports
+`dirty`). Since v0.9.2, landed outside the phase tables:
+
+- **Documents workspace** (#7): outline + focused section + inspector with the
+  document chain, `Propose change to <id>`, `Chat about <id>`, deep links
+  `#/cycle/<stage>/<id>` (`08 §4.2`).
+- **Intent as a first-class document** (#8): briefs preserved verbatim as
+  `INT-*`, `Originates from` edges on the requirements they changed, outcome
+  recorded on accept/reject/supersede, `ducklab intent`, MCP `artifact_get
+  kind=intent`; spec/plan refuse without their prerequisite (`05 §1`).
+- **Contextual guide**: every bug, task and accepted run shows its ladder and
+  names its next door (`/v1/projects/{id}/next/{ref}`); the launcher label is
+  the door.
+- **Resume does not re-run the gate of replayed rounds**: continuing a paused
+  run re-enters the interrupted seat directly (was: a full suite first).
+- **Engine start is honest and fast** (B-298): `engine.json` only when
+  serving; recovery 23.5 s → ~6 s on 1,355 runs; the CLI waits for the
+  process, not 15 s.
+- **Release publishes the line of record**: the cut pushes the default branch
+  before the tag; a failed branch push keeps the tag local and says so. Accept
+  commits without a task are named by stage and subject, never `ducklab: `.
+- **Autonomous publication**: `[remote] on_accept = "push"` publishes each
+  accepted commit with a receipt in `.ducklab/remote-actions.jsonl`; release
+  v0.9.2 and v0.9.3 were cut by the product with notes written by the scribe.
