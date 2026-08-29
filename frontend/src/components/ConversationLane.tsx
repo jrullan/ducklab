@@ -366,14 +366,18 @@ function VerdictBlock({ block }: { block: TurnBlock }) {
           {findings.map((f, i) => (
             <li key={i} data-testid="finding" className="text-sm">
               <span className="text-ink-muted">{f.severity}</span>{" "}
-              {f.file && (
+              {f.file && f.file !== "*" && (
                 <span className="font-mono text-xs text-ink-muted">
                   {f.file}
                   {f.line ? `:${f.line}` : ""}
                 </span>
+              )}
+              {(f.file === "*" || (!f.file && f.invariant)) && (
+                <span data-testid="finding-class" className="rounded border border-hairline px-1 font-mono text-xs text-ink-muted" title="A class-level finding: the rule is the location">everywhere</span>
               )}{" "}
               <span className="text-ink">{f.issue}</span>
               {f.fix && <span className="text-ink-secondary"> — {f.fix}</span>}
+              {f.invariant && <div className="text-xs text-ink-muted">invariant: {f.invariant}</div>}
             </li>
           ))}
         </ul>

@@ -169,9 +169,16 @@ func RenderFindings(findings []Finding) string {
 		if f.Line > 0 {
 			loc = fmt.Sprintf("%s:%d", f.File, f.Line)
 		}
+		if f.File == "*" || (loc == "" && strings.TrimSpace(f.Invariant) != "") {
+			// A class-level finding: the rule is the location.
+			loc = "everywhere the invariant applies"
+		}
 		fmt.Fprintf(&b, "- [%s] %s — %s", f.Severity, loc, f.Issue)
 		if strings.TrimSpace(f.Fix) != "" {
 			fmt.Fprintf(&b, " → %s", f.Fix)
+		}
+		if strings.TrimSpace(f.Invariant) != "" {
+			fmt.Fprintf(&b, " (invariant: %s)", strings.TrimSpace(f.Invariant))
 		}
 		b.WriteString("\n")
 	}
@@ -181,9 +188,10 @@ func RenderFindings(findings []Finding) string {
 // Finding mirrors agent.Finding. conv must not import agent (agent is the
 // caller), so the shape is repeated here and converted at the boundary.
 type Finding struct {
-	Severity string
-	File     string
-	Line     int
-	Issue    string
-	Fix      string
+	Severity  string
+	File      string
+	Line      int
+	Issue     string
+	Fix       string
+	Invariant string
 }

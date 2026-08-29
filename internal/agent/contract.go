@@ -17,12 +17,27 @@ import (
 // repaired or fails (I6); it is never partially salvaged.
 
 // Finding is one reviewer observation.
+//
+// A finding is either anchored (file:line) or class-level: an invariant the
+// change must hold that is violated across several places. The schema used to
+// admit only the first, so a defect living in three files came back as three
+// local symptoms across three rounds (B-286). A class-level finding carries
+// File "*" (or no file) and names its invariant.
 type Finding struct {
 	Severity string `json:"severity"` // critical | major | minor
 	File     string `json:"file"`
 	Line     int    `json:"line"`
 	Issue    string `json:"issue"`
 	Fix      string `json:"fix"`
+	// Invariant is the criterion or invariant this finding cites — the rule
+	// the change must hold. Required for a class-level finding; welcome on an
+	// anchored one.
+	Invariant string `json:"invariant,omitempty"`
+}
+
+// ClassLevel reports whether the finding names a pattern rather than a place.
+func (f Finding) ClassLevel() bool {
+	return f.File == "*" || (strings.TrimSpace(f.File) == "" && strings.TrimSpace(f.Invariant) != "")
 }
 
 // Verdict is the reviewer contract's parsed value.
@@ -114,6 +129,11 @@ func parseVerdict(text string) (*Verdict, error) {
 		}
 		if strings.TrimSpace(f.Issue) == "" {
 			return nil, fmt.Errorf("verdict contract: finding %d has an empty issue", i)
+		}
+		if f.File == "*" && strings.TrimSpace(f.Invariant) == "" {
+			// "*" says "everywhere"; without the rule it is everywhere and
+			// nowhere, and the implementer has nothing to hold the change to.
+			return nil, fmt.Errorf("verdict contract: finding %d is class-level (file \"*\") but names no invariant", i)
 		}
 	}
 	// A reviewer cannot approve and simultaneously report blocking problems.

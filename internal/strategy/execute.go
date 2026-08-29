@@ -732,7 +732,7 @@ func defaultRunner(params *ExecuteParams) TurnRunner {
 func toConvFindings(in []agent.Finding) []conv.Finding {
 	out := make([]conv.Finding, len(in))
 	for i, f := range in {
-		out[i] = conv.Finding{Severity: f.Severity, File: f.File, Line: f.Line, Issue: f.Issue, Fix: f.Fix}
+		out[i] = conv.Finding{Severity: f.Severity, File: f.File, Line: f.Line, Issue: f.Issue, Fix: f.Fix, Invariant: f.Invariant}
 	}
 	return out
 }

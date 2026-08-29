@@ -395,6 +395,29 @@ describe("ConversationTurn and a reviewer's verdict", () => {
     expect(f.textContent).toContain("start at 0");
   });
 
+  // A defect living in three files is one class-level finding (B-286): the
+  // lane shows the rule as the location instead of a literal "*".
+  it("renders a class-level finding as its invariant, not as a path", () => {
+    render(
+      <ConversationTurn
+        block={{
+          ...base,
+          text: "{...}",
+          verdict: "request-changes",
+          findings: [
+            { severity: "major", file: "*", invariant: "the published ref is the ref acceptance advances", issue: "three sites pick their own branch", fix: "define it once" },
+          ],
+        }}
+        roster={["pato-dos"]}
+      />,
+    );
+    const f = screen.getByTestId("finding");
+    expect(screen.getByTestId("finding-class").textContent).toBe("everywhere");
+    expect(f.textContent).not.toContain("*");
+    expect(f.textContent).toContain("invariant: the published ref is the ref acceptance advances");
+    expect(f.textContent).toContain("three sites pick their own branch");
+  });
+
   // Rejecting with nothing to fix is a reviewer failing its job, and the lane
   // must not make that look like an empty but valid review.
   it("says so when changes are requested with no findings", () => {

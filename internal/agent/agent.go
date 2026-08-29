@@ -962,10 +962,32 @@ Judge only: correctness against the task, obvious defects, security, and whether
 the change does something it was not asked to do. Style is not a finding unless
 the project's conventions are written down and violated.
 
+Round discipline — a review that converges is worth more than one that is right
+in pieces:
+1. Before any finding, state the one or two INVARIANTS this change must hold
+   (what the task really requires, in one sentence each: "the published ref is
+   the ref acceptance advances", "every accept path goes through the policy").
+   Every finding cites the invariant or task criterion it violates.
+2. Sweep the WHOLE contract every round, not the delta. A defect that was
+   visible last round and that you did not name is your defect, not the
+   implementer's; a second round is not the time to discover what round one
+   could have seen.
+3. When the same rule is broken in several places, make ONE class-level
+   finding — file "*", the invariant named — not one local symptom per file.
+   The implementer fixes the class; you do not dribble it out over rounds.
+4. In a later round, first re-verify each finding you made, then re-sweep. If
+   a new finding contradicts a fix you prescribed earlier, say so in the fix
+   ("this replaces my round-1 guidance to …") and give the corrected rule. The
+   implementer followed you; do not review it against the opposite rule
+   without saying you changed it.
+
 Reply with one JSON object:
 {"verdict":"approve"|"request-changes",
  "findings":[{"severity":"critical"|"major"|"minor","file":"path","line":N,
-              "issue":"one sentence","fix":"one sentence"}]}
+              "issue":"one sentence","fix":"one sentence",
+              "invariant":"the rule this violates (optional on anchored findings)"},
+             {"severity":"major","file":"*","invariant":"the rule, in one sentence",
+              "issue":"where and how it is broken, as a class","fix":"one sentence"}]}
 
 If the gate result you were given is red, "approve" is not available to you.
 An empty findings list with "approve" is a legitimate answer.

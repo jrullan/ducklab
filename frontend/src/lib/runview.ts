@@ -130,10 +130,13 @@ export interface TurnBlock {
 /** One thing a reviewer objected to. */
 export interface Finding {
   severity: string;
+  /** A path, or "*" for a class-level finding that names an invariant. */
   file?: string;
   line?: number;
   issue: string;
   fix?: string;
+  /** The rule the change must hold; required when file is "*". */
+  invariant?: string;
 }
 
 /** The implementer's deliverables report — the work contract, as filed. */
@@ -853,7 +856,8 @@ export function reviewerDissent(
   // The findings as sentences, ready to ride a follow-up run's note.
   const notes = (last.findings ?? []).map((f) => {
     let s = f.issue;
-    if (f.file) s += ` (${f.file}${f.line ? `:${f.line}` : ""})`;
+    if (f.file && f.file !== "*") s += ` (${f.file}${f.line ? `:${f.line}` : ""})`;
+    if (f.invariant) s += ` [invariant: ${f.invariant}]`;
     if (f.fix) s += ` — fix: ${f.fix}`;
     return s;
   });

@@ -112,7 +112,10 @@ func sinceLastReview(prev *reviewMemory, diff string) string {
 	var b strings.Builder
 	b.WriteString("## Since your last review\n\n")
 	b.WriteString("You reviewed an earlier version of this change; your findings are in the conversation below. " +
-		"Verify that they were addressed and that what moved is sound. Files whose hunks are byte-identical to what you already judged need no second reading.\n\n")
+		"First re-verify each of them — addressed, or not. Then re-sweep the WHOLE task contract against the invariants you stated, not only the hunks that moved: " +
+		"a defect that was visible last round and that you did not name is yours to own now, with the same severity it always had. " +
+		"If a finding you make now contradicts a fix you prescribed earlier, say so in its fix and give the corrected rule — the implementer followed you. " +
+		"Files whose hunks are byte-identical to what you already judged need no second reading for local defects, but they still count in the sweep.\n\n")
 	if len(changed) > 0 {
 		b.WriteString("Hunks changed since your review: " + strings.Join(changed, ", ") + "\n")
 	} else {
