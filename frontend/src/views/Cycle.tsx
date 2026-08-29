@@ -446,7 +446,7 @@ export function Cycle({
     return matchesText && matchesState;
   });
   const inspectedSection = indexedSections.find((section) => section.id === selectedSection);
-  const focusedSections = selectedSection && inspectedSection ? [inspectedSection] : indexedRoots;
+  const focusedSections = selectedSection && inspectedSection ? [inspectedSection] : [];
   const inspectedMarker = markers.find((marker) => marker.id === inspectedSection?.id);
   const inspectedErrors = errors.filter((error) => error.id === inspectedSection?.id);
   const stageAction = active.stage === "intake"
@@ -635,7 +635,7 @@ export function Cycle({
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             ) : proposalSections.length > 0 ? (
               <ol className="space-y-3" data-testid="proposal-sections">
-                {focusedSections.map((s) => (
+                {(selectedSection ? focusedSections : proposalSections).map((s) => (
                   <SectionCard
                     key={s.id}
                     section={s}
@@ -663,6 +663,10 @@ export function Cycle({
 
         {loading && <div className="text-sm text-ink-muted">Loading…</div>}
 
+        {!loading && !selectedSection && !(artifact?.proposal && !proposalDecided) && (
+          <DocumentSelectionEmpty stage={active.stage} />
+        )}
+
         {/* The document stays ahead of its redraft machinery in reading order. */}
         {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
           <ol className="order-3 space-y-3" data-testid="cycle-sections">
@@ -673,7 +677,7 @@ export function Cycle({
         )}
 
         {!selectedSection && !loading && (!artifact?.proposal || proposalDecided) && (
-          <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "order-4 mb-6 mt-6 rounded-card border border-hairline p-3"}>
+          <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "hidden"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
             {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{active.label} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">Creates a proposal; approved {active.label.toLowerCase()} remain unchanged until you accept it.</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
@@ -1138,12 +1142,8 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
           {liveState}
         </p>
       )}
-      <div data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
-        <SectionSummary section={section} />
-      </div>
-      <details open={focused || undefined} className="mt-2" data-testid="cycle-section-details">
-        <summary className="cursor-pointer text-xs text-ink-muted">More detail</summary>
-        <div className="pt-1">
+      {focused ? (
+        <div className="mt-3" data-testid="cycle-section-details">
           {section.implements && section.implements.length > 0 && (
             <div className="text-xs text-ink-muted">
               {section.implements.map((claim) => claim.startsWith("REQ-")
@@ -1153,9 +1153,28 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
                 : <span key={claim} className="mr-2">implements {claim}</span>)}
             </div>
           )}
-          <Prose body={cleanSectionBody(section.body)} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+          <Prose body={cleanSectionBody(section.body)} className="mt-2 space-y-3 text-sm leading-relaxed text-ink-secondary" />
         </div>
-      </details>
+      ) : <>
+        <div data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
+          <SectionSummary section={section} />
+        </div>
+        <details className="mt-2" data-testid="cycle-section-details">
+          <summary className="cursor-pointer text-xs text-ink-muted">More detail</summary>
+          <div className="pt-1">
+            {section.implements && section.implements.length > 0 && (
+              <div className="text-xs text-ink-muted">
+                {section.implements.map((claim) => claim.startsWith("REQ-")
+                  ? requirementIds.has(claim)
+                    ? <span key={claim} className="mr-2">implements {claim}</span>
+                    : <span key={claim} data-testid="cycle-invalid-claim" className="mr-2 text-serious">claims {claim} — no such requirement exists</span>
+                  : <span key={claim} className="mr-2">implements {claim}</span>)}
+              </div>
+            )}
+            <Prose body={cleanSectionBody(section.body)} className="mt-1 space-y-2 text-sm text-ink-secondary" />
+          </div>
+        </details>
+      </>}
       {section.children && section.children.length > 0 && (
         <ul className="mt-2 space-y-1 pl-3 border-l border-hairline">
           {section.children.map((c) => (
@@ -1182,6 +1201,15 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
         </ul>
       )}
     </li>
+  );
+}
+
+function DocumentSelectionEmpty({ stage }: { stage: string }) {
+  const section = stage === "intake" ? "requirement" : stage === "spec" ? "spec section" : "plan section";
+  return (
+    <section data-testid="cycle-selection-empty" className="order-3 flex min-h-64 items-center justify-center border-y border-hairline px-8 py-16 text-center">
+      <div><p className="text-sm font-medium text-ink">Select a {section}</p><p className="mt-1 text-xs text-ink-muted">Choose an item from the outline to read its complete content and inspect its traceability.</p></div>
+    </section>
   );
 }
 
