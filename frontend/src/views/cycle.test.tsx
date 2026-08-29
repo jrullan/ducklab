@@ -47,7 +47,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 describe("Cycle", () => {
-  it("narrates the three stages in house voice", async () => {
+  it("narrates intent and the three generated stages in house voice", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/")) return json({ ...REQUIREMENTS, sections: [] });
       if (p.includes("/trace/check")) return json({ errors: null });
@@ -55,9 +55,80 @@ describe("Cycle", () => {
     });
     render(<Cycle client={client} projectId="p" />);
     const narrative = await screen.findByTestId("cycle-stage-narrative");
-    expect(narrative).toHaveTextContent("you write this; nobody codes from it");
+    expect(narrative).toHaveTextContent("your briefs, preserved as the product evolves");
+    expect(narrative).toHaveTextContent("the council refines intent into a contract");
     expect(narrative).toHaveTextContent("ducklings draft; you agree behavior");
     expect(narrative).toHaveTextContent("cut into tasks; you birth them");
+  });
+
+  it("lands an empty project on Intent instead of asking for requirements input", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/")) return json({ kind: p.endsWith("intent") ? "intent" : "requirements", sections: [] });
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="new-project" />);
+
+    expect(await screen.findByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("cycle-selection-empty")).toHaveTextContent("Select an intention");
+    expect(screen.getByTestId("cycle-primary-action")).toHaveTextContent("Add intention");
+    expect(screen.queryByText("Draft requirements")).toBeNull();
+  });
+
+  it("shows Intent as its own immutable, addressable document", async () => {
+    const intent = {
+      kind: "intent", version: 3, approved: true, markdown: "",
+      sections: [{ id: "INT-002", title: "Add measurements HUD", body: "**Run:** r-2\n**Outcome:** accepted\n**Requirements:** REQ-008\n\n### Original brief\n\nShow live measurements." }],
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/intent")) return json(intent);
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/INT-002")) return json({ id: "INT-002", kind: "intent", title: "Add measurements HUD", down: ["REQ-008"] });
+      if (p.includes("/trace/REQ-008")) return json({ id: "REQ-008", kind: "requirement", title: "Live measurements", up: ["INT-002"] });
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="intent" section="INT-002" />);
+
+    expect(await screen.findByTestId("cycle-section")).toHaveTextContent("Show live measurements");
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("cycle-inspector")).toHaveTextContent("Recorded intention");
+    expect(screen.queryByTestId("cycle-propose-section")).toBeNull();
+    expect(screen.queryByRole("group", { name: "section state filters" })).toBeNull();
+  });
+
+  it("adds an intention without exposing Intake or leaving the Intent document", async () => {
+    const intent = {
+      kind: "intent", version: 1, approved: true, markdown: "",
+      sections: [{ id: "INT-001", title: "Initial product", body: "### Original brief\n\nBuild it." }],
+    };
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/intent")) return json(intent);
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    const stageStart = vi.spyOn(client, "stageStart").mockResolvedValue({
+      id: "r-intent", project_id: "p", stage: "intake", mode: "council", task_id: "",
+      status: "running", verdict: "", started_at: "2026-08-29T00:00:00Z",
+    });
+    render(<Cycle client={client} projectId="p" stage="intent" />);
+
+    await screen.findByTestId("cycle-primary-action");
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Add intention" })).toBeInTheDocument();
+    expect(screen.getByText("Intent operation")).toBeInTheDocument();
+    expect(screen.queryByText("Requirements operation")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("cycle-brief"), { target: { value: "Add offline mode." } });
+    fireEvent.click(screen.getByTestId("cycle-run"));
+    await waitFor(() => expect(stageStart).toHaveBeenCalledWith("p", "intake", expect.objectContaining({
+      from: "Add offline mode.",
+      adopt: false,
+    })));
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
   });
 
   it("presents Documents as a pipeline with contextual inspection and an operational drawer", async () => {
@@ -69,7 +140,7 @@ describe("Cycle", () => {
     render(<Cycle client={client} projectId="p" />);
 
     expect(await screen.findByRole("heading", { name: "Documents", level: 1 })).toBeInTheDocument();
-    expect(screen.getByTestId("cycle-stage-control").querySelectorAll('[role="tab"]')).toHaveLength(3);
+    expect(screen.getByTestId("cycle-stage-control").querySelectorAll('[role="tab"]')).toHaveLength(4);
     const inspector = screen.getByTestId("cycle-inspector");
     expect(inspector).toHaveTextContent("No section selected");
     expect(screen.getByTestId("cycle-selection-empty")).toHaveTextContent("Select a requirement");
@@ -91,9 +162,27 @@ describe("Cycle", () => {
     expect(screen.getByTestId("cycle-start")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("cycle-primary-action"));
-    expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");
-    expect(screen.getByRole("heading", { name: "Enter requirements" })).toBeInTheDocument();
-    expect(screen.getByText(/approved requirements remain unchanged/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("cycle-start")).toHaveAttribute("open");
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Add intention" })).toBeInTheDocument();
+    expect(screen.getByText(/translate it into requirement changes/i)).toBeInTheDocument();
+  });
+
+  it("turns a focused requirement change into contextual Intent", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="intake" />);
+
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[1]!);
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+
+    expect(screen.getByTestId("cycle-tab-intake")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Intent operation")).toBeInTheDocument();
+    expect(screen.getByText(/records a new intention about REQ-002/i)).toBeInTheDocument();
+    expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain("REQ-002");
   });
 
   it("lists sections and marks the ones the spine reports broken", async () => {
@@ -640,18 +729,63 @@ describe("Cycle — starting a stage", () => {
 
   // Spec and plan read what came before; there is nothing to paste.
   it("offers no brief on spec or plan", async () => {
-    render(<Cycle client={client()} projectId="p" stage="spec" />);
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements" ? REQUIREMENTS : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="spec" />);
     await screen.findByTestId("cycle-start");
     expect(screen.queryByTestId("cycle-brief")).toBeNull();
   });
 
-  it("shows the engine's refusal rather than failing silently", async () => {
+  it("does not offer a spec run before requirements exist", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" stage="spec" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Specification starts from accepted requirements");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Add intention");
+    expect(screen.queryByTestId("cycle-run")).toBeNull();
+    expect(c.stageStart).not.toHaveBeenCalled();
+  });
+
+  it("routes an unready plan to specification when requirements exist", async () => {
     const c = client({
-      stageStart: vi.fn(() => Promise.reject(new Error("requirements are not accepted yet"))),
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements" ? REQUIREMENTS : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="plan" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Plan needs an accepted specification");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Draft specification");
+    expect(screen.queryByTestId("cycle-run")).toBeNull();
+  });
+
+  it("routes spec to a requirements proposal that still needs a decision", async () => {
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements"
+          ? { kind, sections: [], proposal: { sections: [{ id: "REQ-001", title: "Pending", body: "" }] } }
+          : { kind, sections: [] },
+      )),
     });
     render(<Cycle client={c} projectId="p" stage="spec" />);
-    fireEvent.click(await screen.findByTestId("cycle-run"));
-    expect((await screen.findByTestId("cycle-error")).textContent).toContain("not accepted yet");
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Requirements are waiting for your decision");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Review requirements");
+  });
+
+  it("routes plan to a specification proposal that still needs a decision", async () => {
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements"
+          ? REQUIREMENTS
+          : kind === "spec"
+            ? { kind, sections: [], proposal: { sections: [{ id: "SPEC-001", title: "Pending", body: "" }] } }
+            : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="plan" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Specification is waiting for your decision");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Review specification");
   });
 
   // A proposal is already waiting for a decision; offering to make another
@@ -777,10 +911,10 @@ describe("Cycle — what was asked for", () => {
       stageStart: vi.fn(() => Promise.resolve({ id: "r-1" })),
     }) as unknown as EngineClient;
 
-  // Checking that requirements match what was asked for is the first thing
-  // anyone does with them, and the brief was reachable only by digging it out
-  // of a prompt in the run log.
-  it("offers the brief of the run that produced the accepted document", async () => {
+  // A whole requirements document points at its latest producer. That is not
+  // evidence that every section came from that run, so Requirements must not
+  // present its brief as the origin of the selected section.
+  it("does not present the latest requirements run as every requirement's intent", async () => {
     const client = withBrief({
       kind: "requirements",
       markdown: "",
@@ -789,13 +923,12 @@ describe("Cycle — what was asked for", () => {
     });
     render(<Cycle client={client} projectId="p" />);
 
-    expect((await screen.findByTestId("asked-for")).textContent).toContain("triangle tool");
-    expect(client.runBrief).toHaveBeenCalledWith("r-42");
+    await screen.findByTestId("cycle-view");
+    expect(screen.queryByTestId("asked-for")).toBeNull();
+    expect(client.runBrief).not.toHaveBeenCalled();
   });
 
-  // While a proposal is pending, the brief to compare against is the one that
-  // produced the proposal, not the older accepted version's.
-  it("prefers the pending proposal's run", async () => {
+  it("keeps a pending requirements brief in Intent rather than above the proposal", async () => {
     const client = withBrief({
       kind: "requirements",
       markdown: "",
@@ -804,15 +937,9 @@ describe("Cycle — what was asked for", () => {
       proposal: { diff: "", sections: [{ id: "REQ-001", title: "x", body: "" }], run_id: "r-new" },
     });
     render(<Cycle client={client} projectId="p" />);
-    await screen.findByTestId("asked-for");
-    expect(client.runBrief).toHaveBeenCalledWith("r-new");
-  });
-
-  // The person's words are the subject and stay open above machine text.
-  it("starts open", async () => {
-    const client = withBrief({ kind: "requirements", markdown: "", sections: [], run_id: "r-42" });
-    render(<Cycle client={client} projectId="p" />);
-    expect((await screen.findByTestId("asked-for")).textContent).toContain("triangle tool");
+    await screen.findByTestId("cycle-proposal");
+    expect(screen.queryByTestId("asked-for")).toBeNull();
+    expect(client.runBrief).not.toHaveBeenCalled();
   });
 
   // Most stages are not seeded with one, and an empty panel promising a brief
@@ -1102,21 +1229,22 @@ describe("the trace rail's scope", () => {
   });
 });
 
-// "Do features have to arrive as fake bug reports?" — asked by the user,
-// because the flow that answers it (re-run intake with a brief; the cycle
-// carries it to spec and plan) existed and nothing named it. "Redraft the
-// requirements" undersold the normal case: growing a project.
+// New functionality enters as human intent. Requirements remain the council's
+// interpretation, rather than exposing a second, competing brief intake.
 describe("adding a feature to a grown project", () => {
-  it("names the flow and promises the survivals", async () => {
+  it("routes the generic requirements action through Intent", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
       if (p.includes("/trace/check")) return json({ errors: null });
       return json({}, 404);
     });
     render(<Cycle client={client} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("cycle-start")).toBeTruthy());
-    const start = screen.getByTestId("cycle-start");
-    expect(start.textContent).toContain("Add to the requirements");
+    await screen.findByTestId("cycle-primary-action");
+    expect(screen.getByTestId("cycle-primary-action")).toHaveTextContent("Add intention");
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+    const start = await screen.findByTestId("cycle-start");
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(start.textContent).toContain("Describe the addition or change you want");
     expect(
       (screen.getByTestId("cycle-brief") as HTMLTextAreaElement).placeholder,
     ).toContain("Existing requirements survive");

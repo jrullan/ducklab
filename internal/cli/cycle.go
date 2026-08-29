@@ -10,6 +10,24 @@ import (
 	"github.com/jrullan/ducklab/internal/engineclt"
 )
 
+func intentCmd(verb, repo string) int {
+	if verb != "" && verb != "show" {
+		fmt.Fprintln(os.Stderr, "usage: ducklab intent [show]")
+		return 2
+	}
+	client, projectID, code := project(repo)
+	if code != 0 {
+		return code
+	}
+	got, err := client.ArtifactGet(projectID, "intent")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	fmt.Print(str(got["markdown"]))
+	return 0
+}
+
 // stageCmd runs intake, spec or plan and follows the council to its gate.
 // A stage takes an optional subcommand acting on the proposal it left behind:
 // `ducklab intake accept`. Without one it runs the stage.

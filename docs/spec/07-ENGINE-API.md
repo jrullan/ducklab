@@ -114,7 +114,7 @@ reading the token file. It exposes nothing sensitive.
 | GET | `/v1/projects/{id}/trace/check` | — | `{"errors":[{"kind":"orphan_requirement","id":"REQ-007"}]}` |
 | GET | `/v1/projects/{id}/trace/{anyId}` | — | the spine walked from any id, as nodes + edges |
 
-`{kind}` ∈ `requirements | spec | plan | project`. `{stage}` ∈ `intake | spec |
+`{kind}` ∈ `intent | requirements | spec | plan | project`. `{stage}` ∈ `intake | spec |
 plan | review | release | operate`.
 
 ### 4.5 Tasks and bugs

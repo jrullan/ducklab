@@ -177,6 +177,8 @@ func Run(args []string) int {
 		return budgetCmd(verb, cmdArgs)
 	case "roster":
 		return rosterCmd(verb, cmdArgs, repo)
+	case "intent":
+		return intentCmd(verb, repo)
 	case "intake", "spec", "plan":
 		return stageCmd(noun, remaining[1:], repo)
 	case "test":
@@ -237,6 +239,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
 
   engine    start | stop | restart | status | log
   project   init | list | show | describe | set | status
+  intent    show the append-only journal of human briefs
   intake    draft requirements (--from <brief>, --ref <doc|dir>, --adopt)
   spec      draft the spec from approved requirements
   plan      draft milestones and tasks from the spec

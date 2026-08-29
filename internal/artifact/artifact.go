@@ -16,6 +16,7 @@ import (
 type Kind string
 
 const (
+	KindIntent       Kind = "intent"
 	KindRequirements Kind = "requirements"
 	KindSpec         Kind = "spec"
 	KindPlan         Kind = "plan"
@@ -25,6 +26,8 @@ const (
 // Prefix is the section id prefix an artifact's sections carry.
 func (k Kind) Prefix() string {
 	switch k {
+	case KindIntent:
+		return "INT"
 	case KindRequirements:
 		return "REQ"
 	case KindSpec:
@@ -41,7 +44,7 @@ func (k Kind) Filename() string { return string(k) + ".md" }
 // ValidKind reports whether a string names an artifact.
 func ValidKind(s string) bool {
 	switch Kind(s) {
-	case KindRequirements, KindSpec, KindPlan, KindProject:
+	case KindIntent, KindRequirements, KindSpec, KindPlan, KindProject:
 		return true
 	}
 	return false
@@ -344,7 +347,7 @@ func parseFieldLine(line string) (key, value string, ok bool) {
 
 func knownField(k string) bool {
 	switch k {
-	case "implements", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns":
+	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns":
 		return true
 	}
 	return false
@@ -369,7 +372,7 @@ func splitIDs(v string) []string {
 }
 
 func looksLikeID(s string) bool {
-	for _, prefix := range []string{"REQ-", "SPEC-", "M-", "T-", "B-", "ADR-"} {
+	for _, prefix := range []string{"INT-", "REQ-", "SPEC-", "M-", "T-", "B-", "ADR-"} {
 		if strings.HasPrefix(s, prefix) {
 			return validID(s, strings.TrimSuffix(prefix, "-"))
 		}
