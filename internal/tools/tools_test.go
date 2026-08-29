@@ -640,6 +640,27 @@ func TestArtifactReadOfAnAbsentArtifactTeachesThatTheReplyIsTheDocument(t *testi
 	}
 }
 
+// A pending proposal is readable while it is being revised: a spec revision
+// got "spec does not exist yet" ten times with the draft in the prompt.
+func TestArtifactReadServesAPendingProposalWhenNothingIsApproved(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "spec.md.proposed"),
+		[]byte("## SPEC-001 — Architecture\n\n**Implements:** REQ-001\n\nGTK4 shell.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := (&ArtifactRead{}).Execute(context.Background(), &ExecContext{ProjectRoot: dir},
+		json.RawMessage(`{"kind":"spec","id":"SPEC-001"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError || !strings.Contains(res.Content, "PENDING PROPOSAL") || !strings.Contains(res.Content, "GTK4 shell") {
+		t.Fatalf("the pending proposal was not served: err=%v %.200s", res.IsError, res.Content)
+	}
+}
+
 // Identical inputs cannot produce a different answer. The third identical
 // failing call is refused with orders to change something — the generic
 // form of the gate brake, for the arguments-wrong loop.

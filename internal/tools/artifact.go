@@ -58,6 +58,23 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 		return ErrorResult("read %s: %v", a.Kind, err), nil
 	}
 	if strings.TrimSpace(doc.Raw) == "" {
+		// No approved document — but a pending proposal is still a document
+		// the seats are working on. A spec revision asked the architect to
+		// revise a proposal nobody had accepted yet; artifact_read answered
+		// "spec does not exist" ten times across both seats while the text
+		// sat in their prompt (Neocapture, 2026-08-29). Serve the proposal,
+		// labelled as what it is.
+		if proposed, perr := artifact.LoadProposed(ectx.ProjectRoot, artifact.Kind(a.Kind)); perr == nil && proposed != nil && strings.TrimSpace(proposed.Raw) != "" {
+			if a.ID != "" {
+				sec := proposed.Section(a.ID)
+				if sec == nil {
+					return ErrorResult("the pending %s proposal has no section %q (has: %s)",
+						a.Kind, a.ID, strings.Join(proposed.IDs(), ", ")), nil
+				}
+				return SuccessResult("PENDING PROPOSAL — not accepted yet; this is the draft under review.\n\n## %s — %s\n\n%s", sec.ID, sec.Title, sec.Body), nil
+			}
+			return SuccessResult("PENDING PROPOSAL — not accepted yet; this is the draft under review.\n\n%s", proposed.Raw), nil
+		}
 		// An absent document is a fact worth stating plainly: a model told
 		// "not found" may invent one instead of saying it is missing. Stated
 		// as an ERROR that prescribes, not as a success: returned as a plain
