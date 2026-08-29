@@ -4971,7 +4971,6 @@ The current implementation filters the commit range through accepted runs with t
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-
 ### T-252 — Render both release item classes honestly
 
 Fixes B-296.
@@ -5011,6 +5010,53 @@ Related: PR #5 (first uncovered case), v0.9.1 notes (prior silent omissions), th
 The current implementation filters the commit range through accepted runs with task IDs, so direct commits and merged PRs without Ducklab-Run trailers are silently omitted from otherwise complete release notes.
 
 **Verification (triage recommends):** test-first — Create a tagged repository with both Ducklab-Run and trailerless commits, then verify both appear in release material and uncovered commits cause an error naming their SHAs.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-253 — Refining scope is not a workflow: the escalation card's 'Open task body' is a dead end — no editor, no relaunch, no split
+
+Fixes B-240.
+
+## Reported
+
+Jose's question answered by the record: both thrashing recoveries tonight were done BY HAND (abort, edit plan.md on disk, relaunch) because the desktop has no refine-scope flow and the API has no task-body update endpoint. Build the workflow the escalation card already implies: (1) 'Improve the task body' opens an editor on the task's plan section (needs a task-body update endpoint — PUT tasks/{task} or a plan-section amendment via the artifact flow, choose and justify); (2) saving offers 'relaunch with the amended body' (abort+new run, attributed); (3) a 'Split this task' path: with F2a's lanes landed, splitting = the section divides into two sections with disjoint Owns lanes — reuse the plan amendment machinery rather than inventing a parallel one; (4) every escalation action states cost/consequence in house voice ('relaunch re-rolls the dice; the spent $2.18 stays on the record'). This connects to the raise-local-ceiling strategy family (narrow scope raises small-model success) — the workflow IS that doctrine made pressable.
+
+TERRITORY: engineapi (body-update endpoint) + frontend escalation card + tests. Queue behind T-202 for the engine half; the design halves may land as two tasks.
+
+### T-254 — Reuse the launch-time baseline gate when resuming test-first runs
+
+Fixes B-297.
+
+## Reported
+
+Two incidents, same signature:
+1. r-20260828-111916-esip (T-251): baseline gate GREEN at launch (11:39 exit=0), terra wrote the failing test, the after-gate went honestly red (11:46 exit=1) — but the run had paused on an ask_human question, and the resume RE-RAN the before-gate over the worktree that already carried the new test (11:52 exit=1). The judge compared red-before/red-after and ruled "the gate was already red before this run" -> UNVERIFIED, on a perfectly correct deliverable.
+2. r-20260826-214453-prgc (T-222 relaunch): the same false verdict after its two pauses — attributed at the time to the crossed-roots bug, but the custody-clean recurrence shows this mechanism was (also) at work.
+
+Impact: every test-first that pauses on a question — the COMMON case, since good implementers ask — lands UNVERIFIED regardless of the work's quality, training the human to distrust the verdict (both incidents needed operator forensics to overturn).
+
+Fix direction: the baseline is a LAUNCH-time measurement. The resume must reuse the recorded before-gate result (it is in the run's events) instead of re-measuring over half-done work. If a re-measure is ever wanted (e.g. base advanced under the run), it must run on a CLEAN checkout of the run's base, never on the working tree.
+
+Acceptance criteria (2):
+1. A test-first that pauses (question, escalation, budget) and resumes carries its original baseline verdict; writing a failing test then yields PASSED exactly as an unpaused run would. Regression test: pause after the test file exists, resume, assert the verdict is PASSED and the detail never claims the gate was red before the run.
+2. The recorded before-gate event is the single source the judge reads; a resume emits no second before-gate measurement over the worked tree.
+
+Related: B-254/T-216 (resume preserves work — this is its gate-measurement sibling), the two incident runs above.
+
+**Deliverables:**
+- A resumed test-first run judges against the before-gate result captured at launch, not a re-measurement of the worked tree.
+- A pause/resume regression test writes a failing test before pausing, resumes, and asserts PASSED without claiming the gate was already red.
+- The event stream contains exactly one before-gate measurement and the judge reads that recorded event as the baseline.
+- Any optional baseline re-measurement runs only against a clean checkout of the run base, never the working tree.
+
+## Triage
+
+**Component:** test-first gate/resume
+**Suspected files:** internal/service/testfirst.go, internal/service/service.go, internal/service/testfirst_status_test.go, internal/service/testfirst_test.go
+
+The resume path currently re-enters executeTestFirst, whose unconditional before-gate execution measures the already-modified worktree and causes false UNVERIFIED verdicts.
+
+**Verification (triage recommends):** test-first — Pause after writing a failing test, resume the run, and assert it preserves the original green baseline, reaches PASSED, and emits no second before-gate measurement.
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 

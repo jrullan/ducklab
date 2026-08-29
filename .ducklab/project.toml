@@ -41,7 +41,7 @@ autonomy = "yolo"
   [mode_seats.pair]
     advisor = ["k3"]
     implementer = ["terra"]
-    reviewer = ["glm52"]
+    reviewer = ["luna"]
 
 [modes]
 
