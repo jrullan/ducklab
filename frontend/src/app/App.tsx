@@ -545,7 +545,7 @@ export function App() {
         {route.name === "cycle" &&
           (client && projectId ? (
             <div className="p-4">
-              <Cycle client={client} projectId={projectId} stage={route.stage} />
+              <Cycle client={client} projectId={projectId} stage={route.stage} section={route.section} />
             </div>
           ) : (
             <NoProject />

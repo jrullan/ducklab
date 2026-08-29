@@ -23,7 +23,7 @@ export function ChatAbout({
   /** "ducklab" is the harness itself: the consultant gets the embedded
    * concept dossier plus the project's live state instead of one subject's
    * history — the guide rail says WHAT, this chat explains WHY. */
-  aboutKind: "bug" | "task" | "ducklab";
+  aboutKind: "bug" | "task" | "ducklab" | "document";
   aboutId: string;
   ducklings: readonly Duckling[];
   label?: string;

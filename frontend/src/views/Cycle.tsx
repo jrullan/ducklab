@@ -19,6 +19,7 @@ import { Prose } from "../components/Prose";
 import { DecisionCard } from "../components/DecisionCard";
 import { SurveyCoverageLine } from "../components/SurveyInventory";
 import { canChooseFile, chooseFile } from "../lib/picker";
+import { routeHref } from "../app/routes";
 
 const STAGES = [
   { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ", story: "you write this; nobody codes from it" },
@@ -27,15 +28,18 @@ const STAGES = [
 ] as const;
 
 type StageDef = (typeof STAGES)[number];
+type TraceNode = { id: string; kind: string; title: string; up?: string[]; down?: string[] };
 
 export function Cycle({
   client,
   projectId,
   stage,
+  section,
 }: {
   client: EngineClient;
   projectId: string;
   stage?: string;
+  section?: string;
 }) {
   const [active, setActive] = useState<StageDef>(
     () => STAGES.find((s) => s.stage === stage) ?? STAGES[0],
@@ -150,14 +154,17 @@ export function Cycle({
   const [askedFor, setAskedFor] = useState("");
   const [indexQuery, setIndexQuery] = useState("");
   const [indexFilter, setIndexFilter] = useState<"all" | "breaks" | "no-task">("all");
-  const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [selectedSection, setSelectedSection] = useState<string | null>(section ?? null);
+  const [traceChain, setTraceChain] = useState<TraceNode[]>([]);
   const [operationOpen, setOperationOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
   const detailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setSelectedSection(null);
-  }, [active.kind]);
+    const nextStage = STAGES.find((candidate) => candidate.stage === stage);
+    if (nextStage) setActive(nextStage);
+    setSelectedSection(section ?? null);
+  }, [stage, section]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -449,7 +456,47 @@ export function Cycle({
   const focusedSections = selectedSection && inspectedSection ? [inspectedSection] : [];
   const inspectedMarker = markers.find((marker) => marker.id === inspectedSection?.id);
   const inspectedErrors = errors.filter((error) => error.id === inspectedSection?.id);
-  const stageAction = active.stage === "intake"
+  const selectDocumentSection = (id: string | null) => {
+    if (!id) {
+      setSelectedSection(null);
+      location.hash = routeHref({ name: "cycle", stage: active.stage });
+      return;
+    }
+    const target = id.startsWith("REQ-") ? STAGES[0] : id.startsWith("SPEC-") ? STAGES[1] : STAGES[2];
+    setActive(target);
+    setSelectedSection(id);
+    location.hash = routeHref({ name: "cycle", stage: target.stage, section: id });
+  };
+
+  useEffect(() => {
+    if (!selectedSection) {
+      setTraceChain([]);
+      return;
+    }
+    let cancelled = false;
+    const loadChain = async () => {
+      const found = new Map<string, TraceNode>();
+      const visit = async (id: string, depth: number) => {
+        if (found.has(id) || depth > 2) return;
+        const raw = await client.traceShow(projectId, id).catch(() => null);
+        if (!raw || typeof raw.id !== "string") return;
+        const node: TraceNode = {
+          id: raw.id,
+          kind: typeof raw.kind === "string" ? raw.kind : "section",
+          title: typeof raw.title === "string" ? raw.title : raw.id,
+          up: Array.isArray(raw.up) ? raw.up.filter((value): value is string => typeof value === "string") : [],
+          down: Array.isArray(raw.down) ? raw.down.filter((value): value is string => typeof value === "string") : [],
+        };
+        found.set(id, node);
+        await Promise.all([...(node.up ?? []), ...(node.down ?? [])].map((related) => visit(related, depth + 1)));
+      };
+      await visit(selectedSection, 0);
+      if (!cancelled) setTraceChain([...found.values()]);
+    };
+    void loadChain();
+    return () => { cancelled = true; };
+  }, [client, projectId, selectedSection]);
+  const stageAction = inspectedSection ? `Propose change to ${inspectedSection.id}` : active.stage === "intake"
     ? sections.length === 0 ? "Draft requirements" : "Enter requirements"
     : active.stage === "spec"
       ? sections.length === 0 ? "Draft specification" : "Propose specification update"
@@ -470,7 +517,7 @@ export function Cycle({
               role="tab"
               aria-selected={s.kind === active.kind}
               data-testid={`cycle-tab-${s.stage}`}
-              onClick={() => setActive(s)}
+              onClick={() => { setActive(s); setSelectedSection(null); location.hash = routeHref({ name: "cycle", stage: s.stage }); }}
               className={"rounded-card border px-4 py-3 text-left transition-colors " + (s.kind === active.kind ? "border-warning bg-surface2 text-ink" : "border-hairline text-ink-muted hover:bg-surface2 hover:text-ink")}
             >
               <span className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface1 text-xs">{STAGES.indexOf(s) + 1}</span><span className="font-medium">{s.label}</span></span>
@@ -507,7 +554,7 @@ export function Cycle({
               const hasBreak = broken.has(s.id);
               const noTask = sectionHasNoTask(s);
               return <li key={s.id}>
-                <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => setSelectedSection(s.id)} className="w-full rounded border-l-2 border-transparent px-2 py-1 text-left text-xs hover:bg-surface2 aria-current:border-warning aria-current:bg-surface2 aria-current:text-ink">
+                <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => selectDocumentSection(s.id)} className={"w-full rounded-r border-l-4 px-2 py-1.5 text-left text-xs transition-colors " + (selectedSection === s.id ? "border-warning bg-surface1 font-medium text-ink shadow-sm" : "border-transparent text-ink-secondary hover:bg-surface2 hover:text-ink")}>
                   <span className="font-mono text-ink-muted">{s.id}</span><span className="ml-2">{s.title}</span>
                   {hasBreak && <span className="ml-1 text-serious" title="break">break</span>}
                   {noTask && <span className="ml-1 text-warn" title="no task yet">no task yet</span>}
@@ -519,7 +566,7 @@ export function Cycle({
         </nav>
         <main ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain px-6 py-4">
         <div className="mb-4 flex items-center gap-2 text-xs text-ink-muted">
-          {selectedSection ? <button type="button" data-testid="cycle-show-all" onClick={() => setSelectedSection(null)} className="font-medium text-ink underline-offset-2 hover:underline">← Back to all {active.label.toLowerCase()}</button> : <span>{active.label}</span>}
+          {selectedSection ? <button type="button" data-testid="cycle-show-all" onClick={() => selectDocumentSection(null)} className="font-medium text-ink underline-offset-2 hover:underline">← Clear selection</button> : <span>{active.label}</span>}
           {selectedSection && inspectedSection && <><span>/</span><span className="font-mono text-ink">{inspectedSection.id}</span></>}
         </div>
 
@@ -676,7 +723,7 @@ export function Cycle({
           </ol>
         )}
 
-        {!selectedSection && !loading && (!artifact?.proposal || proposalDecided) && (
+        {!loading && (!artifact?.proposal || proposalDecided) && (
           <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "hidden"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
@@ -791,11 +838,14 @@ export function Cycle({
               </>
             )}
             {active.stage !== "intake" && (
-              <p className="mb-2 text-xs text-ink-muted">
+              <div className="mb-2">
+              <p className="text-xs text-ink-muted">
                 {active.stage === "spec"
                   ? "Reads the accepted requirements and proposes a specification."
                   : "Reads the accepted spec and proposes milestones and tasks."}
               </p>
+              {active.stage === "spec" && selectedSection && <textarea aria-label="requested specification change" data-testid="cycle-brief" rows={4} value={brief} onChange={(event) => setBrief(event.target.value)} className="mt-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />}
+              </div>
             )}
             {(active.stage === "intake" || active.stage === "spec") && (
               <div className="mb-2">
@@ -1087,11 +1137,30 @@ export function Cycle({
           <h2 className="text-sm font-semibold text-ink">Section inspector</h2>
           {!inspectedSection ? <div className="mt-4 rounded border border-dashed border-hairline p-4"><p className="text-sm font-medium text-ink">No section selected</p><p className="mt-1 text-xs text-ink-muted">Select a {active.stage === "intake" ? "requirement" : active.stage === "spec" ? "spec section" : "plan section"} to inspect its traceability.</p></div> : <>
             <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
-            <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Traceability</h3>
+            <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Document chain</h3>
               {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warn">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warn">⚠ No planned task yet</p>}</div>}
-              {(inspectedSection.implements ?? []).length > 0 && <div className="mt-3 text-xs text-ink-secondary">{inspectedSection.implements!.map((claim) => <span key={claim} className="mr-2 rounded border border-hairline px-1.5 py-0.5 font-mono">{claim}</span>)}</div>}
+              <div className="mt-4 space-y-3" data-testid="cycle-document-chain">
+                {(["requirement", "spec_section", "milestone", "task"] as const).map((kind) => {
+                  const nodes = traceChain.filter((node) => node.kind === kind);
+                  if (nodes.length === 0) return null;
+                  const label = kind === "requirement" ? "Requirement" : kind === "spec_section" ? "Specification" : kind === "milestone" ? "Milestone" : "Plan tasks";
+                  return <div key={kind}><p className="mb-1 text-[10px] uppercase tracking-wide text-ink-muted">{label}</p><div className="space-y-1">{nodes.map((node) => {
+                    const task = tasks.find((item) => item.id === node.id);
+                    return <button key={node.id} type="button" data-testid="cycle-chain-node" data-id={node.id} aria-current={node.id === selectedSection ? "true" : undefined} onClick={() => selectDocumentSection(node.id)} className="block w-full rounded border border-hairline px-2 py-1.5 text-left hover:border-warning hover:bg-surface2"><span className="font-mono text-xs text-ink">{node.id}</span><span className="ml-2 text-xs text-ink-secondary">{node.title}</span>{task && <span className="ml-2 text-[10px] text-ink-muted">{task.status}</span>}</button>;
+                  })}</div></div>;
+                })}
+              </div>
             </section>
-            <div className="border-t border-hairline pt-4"><a href="#/cycle/ledger" className="block rounded border border-hairline px-3 py-2 text-center text-sm">Review in ledger</a><button type="button" onClick={() => setOperationOpen(true)} className="mt-2 w-full text-left text-xs text-ink-muted underline">{active.stage === "intake" ? "Propose requirements update" : stageAction}</button><p className="mt-3 text-xs text-ink-muted">Document changes are created through a run; approved content remains unchanged until you accept its proposal.</p></div>
+            <div className="border-t border-hairline pt-4">
+              <button type="button" data-testid="cycle-propose-section" onClick={() => {
+                const prompt = `Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `;
+                if (active.stage === "plan") { setPlanAction("amend"); setAmendment(prompt); } else setBrief(prompt);
+                setOperationOpen(true);
+              }} className="w-full rounded bg-ink px-3 py-2 text-sm font-medium text-page">Propose change to {inspectedSection.id}</button>
+              {(inspectedErrors.length > 0 || inspectedMarker?.break) && <a href="#/cycle/ledger" className="mt-2 block rounded border border-hairline px-3 py-2 text-center text-sm">Review traceability issue</a>}
+              {fleet.length > 0 && <div className="mt-3"><ChatAbout client={client} projectId={projectId} aboutKind="document" aboutId={inspectedSection.id} ducklings={fleet} label={`Chat about ${inspectedSection.id}`} placeholder={`What would you like to understand or explore about ${inspectedSection.id}?`} /></div>}
+              <p className="mt-3 text-xs text-ink-muted">Changes are proposed through a run. The approved document remains unchanged until you accept the proposal.</p>
+            </div>
           </>}
         </aside>
       </div>

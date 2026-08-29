@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
@@ -104,7 +105,8 @@ func (s *Service) validateChatImages(ctx context.Context, duckling string, image
 type ChatStartRequest struct {
 	// Duckling is the model the person chose from the fleet.
 	Duckling string `json:"duckling"`
-	// AboutKind and AboutID name the subject: "bug" B-004, "task" T-050.
+	// AboutKind and AboutID name the subject: "bug" B-004, "task" T-050,
+	// or "document" REQ-001/SPEC-001/M-001/T-001.
 	AboutKind string `json:"about_kind"`
 	AboutID   string `json:"about_id"`
 	// Message is the person's opening question.
@@ -131,6 +133,11 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
 		return nil, err
+	}
+	if req.AboutKind == "document" {
+		if _, err := s.TraceShow(ctx, projectID, req.AboutID); err != nil {
+			return nil, fmt.Errorf("document chat subject: %w", err)
+		}
 	}
 
 	run := &runlog.Run{
@@ -468,6 +475,40 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 			for _, r := range runs {
 				if r.TaskID == aboutID {
 					fmt.Fprintf(&b, "- run %s: %s %s %s (accepted=%v)\n", r.ID, r.Stage, r.Status, r.Verdict, r.Accepted)
+				}
+			}
+		}
+	case "document":
+		if spine, err := artifact.LoadSpine(projectRoot); err == nil {
+			if node, walkErr := spine.Walk(aboutID); walkErr == nil {
+				fmt.Fprintf(&b, "%s %s: %s\n", node.Kind, node.ID, node.Title)
+				if len(node.Up) > 0 {
+					fmt.Fprintf(&b, "Implements: %s\n", strings.Join(node.Up, ", "))
+				}
+				if len(node.Down) > 0 {
+					fmt.Fprintf(&b, "Implemented by: %s\n", strings.Join(node.Down, ", "))
+				}
+				var section *artifact.Section
+				for _, document := range []*artifact.Document{spine.Requirements, spine.Spec, spine.Plan} {
+					if document != nil {
+						if candidate := document.Section(aboutID); candidate != nil {
+							section = candidate
+							break
+						}
+					}
+				}
+				if section != nil {
+					fmt.Fprintf(&b, "\n### Approved content\n\n%s\n", section.Body)
+				}
+				b.WriteString("\n### Related document chain\n")
+				for _, relatedID := range append(append([]string{}, node.Up...), node.Down...) {
+					if related, relatedErr := spine.Walk(relatedID); relatedErr == nil {
+						fmt.Fprintf(&b, "- %s %s: %s", related.Kind, related.ID, related.Title)
+						if len(related.Down) > 0 {
+							fmt.Fprintf(&b, " → %s", strings.Join(related.Down, ", "))
+						}
+						b.WriteString("\n")
+					}
 				}
 			}
 		}

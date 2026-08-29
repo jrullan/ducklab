@@ -82,8 +82,8 @@ describe("Cycle", () => {
     expect(screen.getByTestId("cycle-section")).toHaveTextContent("REQ-002");
     expect(screen.getByTestId("cycle-section-details")).toHaveTextContent("Export to CSV");
     expect(screen.queryByText("More detail")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("cycle-start")).not.toBeInTheDocument();
-    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("Back to all requirements");
+    expect(screen.getByTestId("cycle-start")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("Clear selection");
 
     fireEvent.click(screen.getByTestId("cycle-show-all"));
     expect(screen.queryByTestId("cycle-section")).not.toBeInTheDocument();
@@ -110,6 +110,32 @@ describe("Cycle", () => {
     fireEvent.click(rows[1]!);
     expect(screen.getByTestId("cycle-section").dataset.broken).toBe("true");
     expect(screen.getByTestId("cycle-health").textContent).toContain("1 break");
+  });
+
+  it("turns a selected requirement into a navigable chain with contextual actions", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.endsWith("/trace/REQ-001")) return json({ id: "REQ-001", kind: "requirement", title: "Mobile-first timesheet", down: ["SPEC-001"] });
+      if (p.endsWith("/trace/SPEC-001")) return json({ id: "SPEC-001", kind: "spec_section", title: "Responsive time entry", up: ["REQ-001"], down: ["T-001"] });
+      if (p.endsWith("/trace/T-001")) return json({ id: "T-001", kind: "task", title: "Build time entry", up: ["SPEC-001"] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      if (p.endsWith("/ducklings")) return json({ items: [{ id: "k3", provider: "openrouter", model: "k3", caps: {} }] });
+      if (p.includes("/roster")) return json({ entries: [{ role: "consultant", duckling: "k3" }] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    const row = (await screen.findAllByTestId("cycle-index-row"))[0]!;
+    fireEvent.click(row);
+    expect(row.className).toContain("border-warning");
+    await waitFor(() => expect(screen.getAllByTestId("cycle-chain-node")).toHaveLength(3));
+    expect(screen.getByTestId("cycle-document-chain")).toHaveTextContent("SPEC-001");
+    expect(screen.getByTestId("cycle-document-chain")).toHaveTextContent("T-001");
+    expect(screen.queryByText("Review traceability issue")).not.toBeInTheDocument();
+    expect(await screen.findByText("Chat about REQ-001")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("cycle-propose-section"));
+    expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain("REQ-001 — Mobile-first timesheet");
   });
 
   it("counts the API trace errors array, not only errors joined to visible sections", async () => {

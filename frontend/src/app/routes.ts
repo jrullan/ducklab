@@ -7,7 +7,7 @@ export type Route =
   | { name: "now" }
   | { name: "bench" }
   | { name: "runs" }
-  | { name: "cycle"; stage?: string }
+  | { name: "cycle"; stage?: string; section?: string }
   | { name: "ledger" }
   | { name: "board"; tab?: string }
   | { name: "review" }
@@ -23,7 +23,7 @@ export type Route =
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, "").replace(/^\//, "");
   const [pathWithoutQuery = "", query = ""] = path.split("?");
-  const [head, arg] = pathWithoutQuery.split("/");
+  const [head, arg, detail] = pathWithoutQuery.split("/");
   switch (head) {
     case "now":
       return { name: "now" };
@@ -37,7 +37,7 @@ export function parseRoute(hash: string): Route {
       return arg ? { name: "run", id: arg } : { name: "runs" };
     case "cycle":
       // #/cycle/plan opens straight on a tab, so a pop-out can carry one.
-      return arg === "ledger" ? { name: "ledger" } : arg ? { name: "cycle", stage: arg } : { name: "cycle" };
+      return arg === "ledger" ? { name: "ledger" } : arg ? { name: "cycle", stage: arg, section: detail ? decodeURIComponent(detail) : new URLSearchParams(query).get("section") || undefined } : { name: "cycle" };
     case "board":
       // #/board/bugs opens straight on a board, so a pop-out can carry one.
       return arg ? { name: "board", tab: arg } : { name: "board" };
@@ -76,7 +76,7 @@ export function routeHref(route: Route): string {
     case "runs":
       return "#/runs";
     case "cycle":
-      return route.stage ? `#/cycle/${route.stage}` : "#/cycle";
+      return route.stage ? `#/cycle/${route.stage}${route.section ? `/${encodeURIComponent(route.section)}` : ""}` : "#/cycle";
     case "ledger":
       return "#/cycle/ledger";
     case "board":

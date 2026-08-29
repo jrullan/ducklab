@@ -167,6 +167,8 @@ export interface Run {
   revert_sha?: string;
   /** What a taskless run was about — the bug(s) a triage read. */
   subject?: string;
+  /** Durable launch context; chat runs use it to identify their subject. */
+  note?: string;
   /** The run finished without touching a file: the work was already in the
    * tree. Wears FAILED in the metrics on purpose; the UI says this instead. */
   no_changes?: boolean;
