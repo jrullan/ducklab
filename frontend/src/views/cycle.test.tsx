@@ -316,14 +316,12 @@ describe("Cycle", () => {
     expect(screen.queryByTestId("cycle-section")).toBeNull();
   });
 
-  it("pins the frame, narrows the index, and jumps to a selected section", async () => {
+  it("pins the frame, narrows the index, and anchors every selected section at the same top", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
       if (p.includes("/trace/check")) return json(TRACE);
       return json({}, 404);
     });
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
     render(<Cycle client={client} projectId="p" />);
 
     expect(screen.getByTestId("cycle-frame-header").className).toContain("sticky");
@@ -332,8 +330,10 @@ describe("Cycle", () => {
     fireEvent.change(screen.getByTestId("cycle-index-filter"), { target: { value: "Invoice" } });
     expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(1);
     expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("data-id", "REQ-002");
+    const detail = screen.getByTestId("cycle-detail");
+    detail.scrollTop = 96;
     fireEvent.click(screen.getByTestId("cycle-index-row"));
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(detail.scrollTop).toBe(0);
   });
 
   it("uses the joined trace markers for health and chip filters", async () => {

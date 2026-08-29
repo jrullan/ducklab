@@ -453,8 +453,11 @@ export function Cycle({
   // marked on the one tab that could show it.
   useEffect(() => {
     if (!selectedSection) return;
-    const section = detailRef.current?.querySelector<HTMLElement>(`[id="cycle-section-${selectedSection}"]`);
-    if (typeof section?.scrollIntoView === "function") section.scrollIntoView({ block: "start" });
+    // A focused selection is the only section in the reader. Reset its own
+    // scroller instead of asking the section to scroll into view: the browser
+    // can align a long section but cannot move a short one by the same amount,
+    // which made their headings start at different vertical positions.
+    if (detailRef.current) detailRef.current.scrollTop = 0;
   }, [selectedSection]);
 
   useEffect(() => {
