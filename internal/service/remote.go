@@ -202,6 +202,16 @@ func (s *Service) publishReleaseTag(ctx context.Context, projectID, projectPath,
 		// No remote to push — nothing to record, the local tag stands.
 		return nil
 	}
+	// The line of record goes first. A cut commits the notes, manifests and
+	// bundle on the default branch and then tags that commit; publishing the
+	// tag alone left origin/main without the release commit while the tag and
+	// the GitHub release named it (v0.9.3, 2026-08-29). A tag on a commit the
+	// branch does not carry is exactly the incoherent state, so when the
+	// branch push fails the tag stays local and the failure is worded.
+	branch := s.baseBranchForPush(p)
+	if _, err := s.Push(ctx, projectID, RemoteRequest{Actor: actor, Branch: branch}); err != nil {
+		return fmt.Errorf("release %s cut; %s push failed, tag kept local: %w", tag, branch, err)
+	}
 	receipt := RemoteResult{Action: "push", Actor: actor, Branch: tag, Status: "pushed"}
 	if err := p.git.PushTag(remote, tag); err != nil {
 		receipt.Status = "failed"

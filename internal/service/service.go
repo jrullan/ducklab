@@ -2599,7 +2599,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		return s.logResolution(rs, "accept", actor)
 	}
 	if message == "" {
-		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
+		message = acceptCommitSubject(rs.run)
 	}
 	// Announce the commit before any git mutation: staging and committing can
 	// take long enough that a completed round gate otherwise looks like an
@@ -2741,6 +2741,23 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 // acceptWorktreeRun proves exactly the commit that will be fast-forwarded into
 // the default branch. A clean registered checkout on that branch is advanced
 // after the ref so its files continue to match its HEAD.
+// acceptCommitSubject names an accepted commit when the person gave no
+// message. A task names itself; a taskless run — a release scribe, a triage,
+// a stage — used to leave "ducklab: " and an empty subject in the history
+// (6a5eecb, 2026-08-28).
+func acceptCommitSubject(run *runlog.Run) string {
+	if run.TaskID != "" {
+		return fmt.Sprintf("ducklab: %s", run.TaskID)
+	}
+	if subject := strings.TrimSpace(run.Subject); subject != "" {
+		return fmt.Sprintf("ducklab: %s — %s", run.Stage, subject)
+	}
+	if note := strings.TrimSpace(run.Note); note != "" {
+		return fmt.Sprintf("ducklab: %s — %s", run.Stage, note)
+	}
+	return fmt.Sprintf("ducklab: %s run %s", run.Stage, run.ID)
+}
+
 func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *registry.ProjectEntry, defaultGit *vcs.Git, message, actor string) error {
 	if rs.run.WorktreePath == "" || rs.run.Branch == "" || rs.run.BaseSHA == "" {
 		return fmt.Errorf("worktree acceptance is missing its path, branch, or base sha")
@@ -2749,7 +2766,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		return fmt.Errorf("worktree acceptance cannot find %s: %w", rs.run.WorktreePath, err)
 	}
 	if message == "" {
-		message = fmt.Sprintf("ducklab: %s", rs.run.TaskID)
+		message = acceptCommitSubject(rs.run)
 	}
 	workGit := vcs.New(rs.run.WorktreePath)
 	if err := stageRun(workGit, rs.run, entry.Path); err != nil {

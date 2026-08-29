@@ -11,6 +11,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/runlog"
 )
 
 // serviceWithAcceptPolicy loads the policy through the same global TOML path
@@ -275,11 +276,36 @@ func TestReleaseCutPushesCertifiedTagWhenOnAcceptIsPush(t *testing.T) {
 	if err := os.WriteFile(draft, []byte("# Release "+version+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseCut(context.Background(), id, version); err != nil {
+	cut, err := s.ReleaseCut(context.Background(), id, version)
+	if err != nil {
 		t.Fatalf("release cut: %v", err)
 	}
 	if out, err := exec.Command("git", "--git-dir", remote, "rev-parse", "refs/tags/"+version).CombinedOutput(); err != nil {
 		t.Fatalf("certified tag %s was not pushed: %v: %s", version, err, out)
+	}
+	// The release commit must be on the remote's line of record, not only
+	// under the tag: v0.9.3 was tagged and released from a commit origin/main
+	// never received.
+	head, err := exec.Command("git", "--git-dir", remote, "rev-parse", "refs/heads/"+branch).CombinedOutput()
+	if err != nil {
+		t.Fatalf("remote %s: %v: %s", branch, err, head)
+	}
+	if got, want := strings.TrimSpace(string(head)), cut["commit"]; got != want {
+		t.Fatalf("remote %s = %s, want the release commit %v", branch, got, want)
+	}
+}
+
+func TestAcceptCommitSubjectNeverEndsEmpty(t *testing.T) {
+	cases := map[string]*runlog.Run{
+		"ducklab: T-012":                   {TaskID: "T-012", Stage: "build"},
+		"ducklab: release — notes v0.9.3":  {Stage: "release", Subject: "notes v0.9.3"},
+		"ducklab: triage — B-004":          {Stage: "triage", Note: "B-004"},
+		"ducklab: release run r-2026-v44d": {Stage: "release", ID: "r-2026-v44d"},
+	}
+	for want, run := range cases {
+		if got := acceptCommitSubject(run); got != want {
+			t.Errorf("acceptCommitSubject(%+v) = %q, want %q", run, got, want)
+		}
 	}
 }
 
