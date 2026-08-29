@@ -75,6 +75,12 @@ describe("Cycle", () => {
     fireEvent.click(screen.getAllByTestId("cycle-index-row")[1]!);
     expect(inspector).toHaveTextContent("REQ-002");
     expect(inspector).toHaveTextContent("no spec section implements this requirement");
+    expect(screen.getAllByTestId("cycle-section")).toHaveLength(1);
+    expect(screen.getByTestId("cycle-section")).toHaveTextContent("REQ-002");
+    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("All requirements");
+
+    fireEvent.click(screen.getByTestId("cycle-show-all"));
+    expect(screen.getAllByTestId("cycle-section")).toHaveLength(2);
 
     fireEvent.click(screen.getByTestId("cycle-primary-action"));
     expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");

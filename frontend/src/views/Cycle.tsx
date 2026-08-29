@@ -155,6 +155,10 @@ export function Cycle({
   const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
   const detailRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setSelectedSection(null);
+  }, [active.kind]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setFailure(null);
@@ -442,6 +446,7 @@ export function Cycle({
     return matchesText && matchesState;
   });
   const inspectedSection = indexedSections.find((section) => section.id === selectedSection) ?? indexedSections[0];
+  const focusedSections = selectedSection && inspectedSection ? [inspectedSection] : indexedRoots;
   const inspectedMarker = markers.find((marker) => marker.id === inspectedSection?.id);
   const inspectedErrors = errors.filter((error) => error.id === inspectedSection?.id);
   const stageAction = active.stage === "intake"
@@ -513,7 +518,10 @@ export function Cycle({
           </ol>
         </nav>
         <main ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain px-6 py-4">
-        <div className="mb-4 flex items-center gap-2 text-xs text-ink-muted"><span>{active.label}</span>{inspectedSection && <><span>/</span><span className="font-mono">{inspectedSection.id}</span></>}</div>
+        <div className="mb-4 flex items-center gap-2 text-xs text-ink-muted">
+          {selectedSection ? <button type="button" data-testid="cycle-show-all" onClick={() => setSelectedSection(null)} className="underline-offset-2 hover:text-ink hover:underline">All {active.label.toLowerCase()}</button> : <span>{active.label}</span>}
+          {selectedSection && inspectedSection && <><span>/</span><span className="font-mono text-ink">{inspectedSection.id}</span></>}
+        </div>
 
         {failure && (
           <div data-testid="cycle-error" className="mb-4 text-sm text-critical">
@@ -627,7 +635,7 @@ export function Cycle({
               <DiffView files={parseDiff(artifact.proposal.diff)} />
             ) : proposalSections.length > 0 ? (
               <ol className="space-y-3" data-testid="proposal-sections">
-                {proposalSections.map((s) => (
+                {focusedSections.map((s) => (
                   <SectionCard
                     key={s.id}
                     section={s}
@@ -657,7 +665,7 @@ export function Cycle({
         {/* The document stays ahead of its redraft machinery in reading order. */}
         {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
           <ol className="order-3 space-y-3" data-testid="cycle-sections">
-            {sections.map((s) => (
+            {focusedSections.map((s) => (
               <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} />
             ))}
           </ol>
