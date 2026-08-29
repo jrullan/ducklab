@@ -877,6 +877,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // nav stays visible because the app shell holds the scroll, not this view.
   const documentChat = run.stage === "chat" ? /^chat about document ((?:INT|REQ|SPEC|M|T)-\d+)$/i.exec(run.note ?? "")?.[1] : undefined;
   const documentStage = documentChat?.startsWith("INT-") ? "intent" : documentChat?.startsWith("REQ-") ? "intake" : documentChat?.startsWith("SPEC-") ? "spec" : documentChat ? "plan" : undefined;
+  const jumpTo = (testId: string) => {
+    document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   return (
     <div data-testid="run-view">
       {/* Pinned while the transcript scrolls: the header is the run's
@@ -1025,6 +1028,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           )}
         </div>
         </div>
+        <nav className="mt-2 flex flex-wrap items-center gap-1 border-t border-hairline pt-2 text-xs" aria-label="Run sections" data-testid="run-section-nav">
+          <span className="mr-1 text-ink-muted">Jump to</span>
+          <button type="button" onClick={() => jumpTo("conversation")} className="rounded px-2 py-1 text-ink-secondary hover:bg-surface2 hover:text-ink">Conversation</button>
+          <button type="button" onClick={() => jumpTo("bottom-dock")} className="rounded px-2 py-1 text-ink-secondary hover:bg-surface2 hover:text-ink">Evidence</button>
+          {finished && codeRun && (diff || testHunks) && <button type="button" onClick={() => jumpTo("diff-inline")} className="rounded px-2 py-1 text-ink-secondary hover:bg-surface2 hover:text-ink">Changes</button>}
+          {decisionOpen && <button type="button" onClick={() => jumpTo("decision-card")} className="rounded px-2 py-1 font-medium text-accent hover:bg-surface2">Decision</button>}
+          <button type="button" onClick={() => { if (!railOpen) toggleRail(); requestAnimationFrame(() => jumpTo("run-rail")); }} className="ml-auto rounded px-2 py-1 text-ink-secondary hover:bg-surface2 hover:text-ink">Run details</button>
+        </nav>
         {/* The task's own words, unfolded from the pinned title: judging a
             run means reading what it did against what was ASKED, and the ask
             used to sit in a card that the transcript scrolled away. Bounded:

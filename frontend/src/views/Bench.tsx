@@ -249,7 +249,7 @@ export function Bench({ client }: { client: EngineClient }) {
     <div data-testid="bench-view" className="space-y-4">
       <PageHeader eyebrow="Records" title="Bench" subtitle="Compare ducklings against the same controlled tasks and inspect the evidence behind each result." />
       {launcher}
-      <div className="grid min-h-[32rem] grid-cols-[14rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <div className="grid min-h-[32rem] grid-cols-1 overflow-hidden rounded-card border border-hairline bg-surface1 lg:grid-cols-[14rem_minmax(0,1fr)]">
       <nav className="space-y-1 border-r border-hairline p-3">
         <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Bench history</h2><span className="text-xs text-ink-muted">{runs.length}</span></div>
         {runs.map((r) => (

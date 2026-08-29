@@ -14,7 +14,7 @@ body {
 
 /* Keyboard focus and pointer selection speak the same interaction language.
  * Status colours remain reserved for the meaning of the underlying record. */
-:where(a, button, input, select, textarea, summary):focus-visible {
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

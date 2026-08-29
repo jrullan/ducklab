@@ -863,12 +863,13 @@ export function Board({
           that describes it. The kanban and the rail are different documents;
           they scroll like it. */}
       {railOpen ? (
-      <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto overscroll-contain">
-        <div className="mb-1 flex justify-end">
+      <aside data-testid="board-rail" className="sticky top-2 max-h-[calc(100vh-8rem)] w-72 shrink-0 self-start overflow-y-auto overscroll-contain border-l border-hairline bg-surface1 p-4">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">{isBugs ? "Bug inspector" : "Task inspector"}</h2>
           <button type="button" data-testid="board-rail-hide" onClick={toggleRail} title="hide the record rail (a strip stays to bring it back)" className="text-xs text-ink-muted underline">hide</button>
         </div>
         {current === null ? (
-          <p className="text-sm text-ink-muted">
+          <p className="rounded-card border border-dashed border-hairline p-4 text-sm text-ink-muted">
             Select {isBugs ? "a bug" : "a task"} to see its record.
           </p>
         ) : isBugs ? (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { EngineClient, SkillSummary, SkillDetail } from "../api/client";
 import { ErrorCard } from "../components/ErrorCard";
+import { SideDrawer } from "../components/SideDrawer";
 
 /** The skills loop's desktop surface (spec 08 §4.9, AC-57). The engine, CLI
  * and tool belt have carried skills since v0.5 while the desktop showed
@@ -145,15 +146,16 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
       {error ? <ErrorCard error={error} testId="skills-error" /> : null}
 
       {creating && (
-        <section className="mb-4 rounded-card border border-hairline bg-surface2 p-3" data-testid="skill-new">
+        <SideDrawer title="New skill" subtitle="Scaffold a project recipe your ducklings can read or run." onClose={() => setCreating(false)} testId="skill-new">
+        <section>
           <p className="text-sm text-ink">Scaffold a skill in this project's .ducklab/skills/.</p>
-          <div className="mt-2 flex items-center gap-3">
+          <div className="mt-3 flex flex-col gap-3">
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="survey-map"
               data-testid="skill-new-name"
-              className="rounded border border-hairline bg-surface px-2 py-1 text-sm"
+              className="w-full rounded border border-hairline bg-surface px-2 py-1 text-sm"
             />
             <label className="flex items-center gap-1 text-xs text-ink-secondary">
               <input
@@ -169,7 +171,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
               onClick={() => void create()}
               disabled={!newName.trim()}
               data-testid="skill-new-create"
-              className="rounded border border-hairline px-3 py-1 text-sm disabled:opacity-50"
+              className="self-end rounded bg-ink px-3 py-1.5 text-sm text-page disabled:opacity-50"
             >
               Create
             </button>
@@ -178,7 +180,7 @@ export function Skills({ client, projectId }: { client: EngineClient; projectId:
             The scaffold is a template: it will not load until you replace its placeholders —
             open SKILL.md and write the description (say WHEN to use it) and the body.
           </p>
-        </section>
+        </section></SideDrawer>
       )}
 
       {error ? null : skills === null ? (

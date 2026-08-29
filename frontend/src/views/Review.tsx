@@ -65,7 +65,7 @@ export function Review({ client, projectId }: { client: EngineClient; projectId:
   return (
     <div data-testid="review-view" className="space-y-4">
       <PageHeader eyebrow="Records" title="Reviews" subtitle="Read the independent assessments attached to accepted work." />
-      <div className="grid min-h-[32rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <div className="grid min-h-[32rem] grid-cols-1 overflow-hidden rounded-card border border-hairline bg-surface1 lg:grid-cols-[16rem_minmax(0,1fr)]">
       <nav className="space-y-1 border-r border-hairline p-3">
         <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Review history</h2><span className="text-xs text-ink-muted">{items.length}</span></div>
         {items.map((r) => (
