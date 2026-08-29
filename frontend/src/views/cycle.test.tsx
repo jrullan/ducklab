@@ -71,16 +71,20 @@ describe("Cycle", () => {
     expect(await screen.findByRole("heading", { name: "Documents", level: 1 })).toBeInTheDocument();
     expect(screen.getByTestId("cycle-stage-control").querySelectorAll('[role="tab"]')).toHaveLength(3);
     const inspector = screen.getByTestId("cycle-inspector");
-    expect(inspector).toHaveTextContent("REQ-001");
+    expect(inspector).toHaveTextContent("No section selected");
     fireEvent.click(screen.getAllByTestId("cycle-index-row")[1]!);
     expect(inspector).toHaveTextContent("REQ-002");
     expect(inspector).toHaveTextContent("no spec section implements this requirement");
+    expect(screen.getAllByTestId("cycle-index-row")[1]).toHaveAttribute("aria-current", "true");
     expect(screen.getAllByTestId("cycle-section")).toHaveLength(1);
     expect(screen.getByTestId("cycle-section")).toHaveTextContent("REQ-002");
-    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("All requirements");
+    expect(screen.getByTestId("cycle-section-details")).toHaveAttribute("open");
+    expect(screen.queryByTestId("cycle-start")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cycle-show-all")).toHaveTextContent("Back to all requirements");
 
     fireEvent.click(screen.getByTestId("cycle-show-all"));
     expect(screen.getAllByTestId("cycle-section")).toHaveLength(2);
+    expect(screen.getByTestId("cycle-start")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("cycle-primary-action"));
     expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");

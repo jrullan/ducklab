@@ -445,7 +445,7 @@ export function Cycle({
       || (indexFilter === "no-task" && sectionHasNoTask(s));
     return matchesText && matchesState;
   });
-  const inspectedSection = indexedSections.find((section) => section.id === selectedSection) ?? indexedSections[0];
+  const inspectedSection = indexedSections.find((section) => section.id === selectedSection);
   const focusedSections = selectedSection && inspectedSection ? [inspectedSection] : indexedRoots;
   const inspectedMarker = markers.find((marker) => marker.id === inspectedSection?.id);
   const inspectedErrors = errors.filter((error) => error.id === inspectedSection?.id);
@@ -507,7 +507,7 @@ export function Cycle({
               const hasBreak = broken.has(s.id);
               const noTask = sectionHasNoTask(s);
               return <li key={s.id}>
-                <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => setSelectedSection(s.id)} className="w-full rounded px-2 py-1 text-left text-xs hover:bg-surface2">
+                <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => setSelectedSection(s.id)} className="w-full rounded border-l-2 border-transparent px-2 py-1 text-left text-xs hover:bg-surface2 aria-current:border-warning aria-current:bg-surface2 aria-current:text-ink">
                   <span className="font-mono text-ink-muted">{s.id}</span><span className="ml-2">{s.title}</span>
                   {hasBreak && <span className="ml-1 text-serious" title="break">break</span>}
                   {noTask && <span className="ml-1 text-warn" title="no task yet">no task yet</span>}
@@ -519,7 +519,7 @@ export function Cycle({
         </nav>
         <main ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain px-6 py-4">
         <div className="mb-4 flex items-center gap-2 text-xs text-ink-muted">
-          {selectedSection ? <button type="button" data-testid="cycle-show-all" onClick={() => setSelectedSection(null)} className="underline-offset-2 hover:text-ink hover:underline">All {active.label.toLowerCase()}</button> : <span>{active.label}</span>}
+          {selectedSection ? <button type="button" data-testid="cycle-show-all" onClick={() => setSelectedSection(null)} className="font-medium text-ink underline-offset-2 hover:underline">← Back to all {active.label.toLowerCase()}</button> : <span>{active.label}</span>}
           {selectedSection && inspectedSection && <><span>/</span><span className="font-mono text-ink">{inspectedSection.id}</span></>}
         </div>
 
@@ -645,6 +645,7 @@ export function Cycle({
                     isPlan={active.stage === "plan"}
                     proposalPending
                     requirementIds={requirementIds}
+                    focused={Boolean(selectedSection)}
                   />
                 ))}
               </ol>
@@ -666,12 +667,12 @@ export function Cycle({
         {!(artifact?.proposal && !proposalDecided && proposalSections.length > 0) && (
           <ol className="order-3 space-y-3" data-testid="cycle-sections">
             {focusedSections.map((s) => (
-              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} />
+              <SectionCard key={s.id} section={s} broken={broken} tasks={tasks} traceDown={traceDown[s.id]} isPlan={active.stage === "plan"} proposalPending={Boolean(artifact?.proposal && !proposalDecided)} requirementIds={requirementIds} focused={Boolean(selectedSection)} />
             ))}
           </ol>
         )}
 
-        {!loading && (!artifact?.proposal || proposalDecided) && (
+        {!selectedSection && !loading && (!artifact?.proposal || proposalDecided) && (
           <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "order-4 mb-6 mt-6 rounded-card border border-hairline p-3"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
@@ -1080,7 +1081,7 @@ export function Cycle({
         </main>
       <aside data-testid="cycle-inspector" className="hidden min-h-0 overflow-y-auto border-l border-hairline px-4 py-4 xl:block">
           <h2 className="text-sm font-semibold text-ink">Section inspector</h2>
-          {!inspectedSection ? <p className="mt-3 text-sm text-ink-muted">Select a section to inspect its traceability.</p> : <>
+          {!inspectedSection ? <div className="mt-4 rounded border border-dashed border-hairline p-4"><p className="text-sm font-medium text-ink">No section selected</p><p className="mt-1 text-xs text-ink-muted">Select a {active.stage === "intake" ? "requirement" : active.stage === "spec" ? "spec section" : "plan section"} to inspect its traceability.</p></div> : <>
             <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
             <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Traceability</h3>
               {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warn">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warn">⚠ No planned task yet</p>}</div>}
@@ -1094,7 +1095,7 @@ export function Cycle({
   );
 }
 
-function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false, requirementIds = new Set<string>() }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean; requirementIds?: Set<string> }) {
+function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, proposalPending = false, requirementIds = new Set<string>(), focused = false }: { section: Section; broken: Set<string>; tasks?: Task[]; traceDown?: unknown; isPlan?: boolean; proposalPending?: boolean; requirementIds?: Set<string>; focused?: boolean }) {
   // The Down walk is the engine's link, not a UI guess based on where a task
   // happens to be printed. Keep only task ids found in that walk, then use the
   // task record for its live state.
@@ -1140,7 +1141,7 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
       <div data-testid="cycle-section-summary" className="mt-2 text-sm text-ink">
         <SectionSummary section={section} />
       </div>
-      <details className="mt-2" data-testid="cycle-section-details">
+      <details open={focused || undefined} className="mt-2" data-testid="cycle-section-details">
         <summary className="cursor-pointer text-xs text-ink-muted">More detail</summary>
         <div className="pt-1">
           {section.implements && section.implements.length > 0 && (
