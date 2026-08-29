@@ -838,6 +838,7 @@ export interface ServiceStageRequest {
   revise?: string;
   rounds?: number;
   settle?: boolean;
+  split_task?: string;
   stage?: string;
   stream?: boolean;
 }
@@ -993,6 +994,7 @@ export const OPERATIONS = [
   { id: "TaskList", method: "GET", path: "/v1/projects/{id}/tasks" },
   { id: "TaskNext", method: "GET", path: "/v1/projects/{id}/tasks/next" },
   { id: "TaskRemove", method: "DELETE", path: "/v1/projects/{id}/tasks/{task}" },
+  { id: "TaskBodyUpdate", method: "PUT", path: "/v1/projects/{id}/tasks/{task}" },
   { id: "TestRetire", method: "POST", path: "/v1/projects/{id}/tasks/{task}/retire-test" },
   { id: "TestStart", method: "POST", path: "/v1/projects/{id}/tests" },
   { id: "TraceCheck", method: "GET", path: "/v1/projects/{id}/trace/check" },

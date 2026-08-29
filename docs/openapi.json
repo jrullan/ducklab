@@ -2917,6 +2917,9 @@
           "settle": {
             "type": "boolean"
           },
+          "split_task": {
+            "type": "string"
+          },
           "stage": {
             "type": "string"
           },
@@ -6334,6 +6337,48 @@
           }
         ],
         "summary": "Remove a task from the plan. Refused once a run has named it."
+      },
+      "put": {
+        "operationId": "TaskBodyUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTaskView"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Amend one task's body in the approved plan; task lanes and neighbouring sections remain unchanged"
       }
     },
     "/v1/projects/{id}/tasks/{task}/retire-test": {
