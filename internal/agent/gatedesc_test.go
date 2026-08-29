@@ -13,6 +13,9 @@ func TestDocumentTurnsAreNotPromisedATestGate(t *testing.T) {
 	doc := []*Turn{
 		{Role: config.RoleArchitect, Contract: "markdown_sections:REQ"},
 		{Role: config.RoleReviewer, Contract: "markdown_sections:SPEC"},
+		// A document council's critic reviews with the verdict contract; it
+		// still has nothing to run (it called verify_run on a spec draft).
+		{Role: config.RoleReviewer, Contract: "verdict", Persona: "critic"},
 		{Role: config.RoleScribe},
 		{Role: config.RoleTriager},
 	}

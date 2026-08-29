@@ -900,7 +900,7 @@ func main() {}
 // telling it "tests will run" sent a reviewer to call verify_run twice on a
 // requirements draft ("no command configured", Neocapture 2026-08-29).
 func gateDescFor(turn *Turn) string {
-	if turn != nil && (strings.HasPrefix(turn.Contract, "markdown_sections:") ||
+	if turn != nil && (strings.HasPrefix(turn.Contract, "markdown_sections:") || turn.Persona == "critic" ||
 		turn.Role == config.RoleArchitect || turn.Role == config.RoleScribe || turn.Role == config.RoleTriager) {
 		return "This is a document turn: no tests run after it. ducklab checks the " +
 			"document's structure and the person decides at the gate. verify_run has nothing to run here."
