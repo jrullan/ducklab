@@ -4818,7 +4818,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Start a conversation with a chosen duckling about a bug or task, with its history as context"
+        "summary": "Start a conversation with a chosen duckling about a bug, task, or document section, with its history as context"
       }
     },
     "/v1/projects/{id}/diagnostics": {
