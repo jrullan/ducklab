@@ -617,6 +617,29 @@ func TestArtifactReadForgivesTheKindInTheIDField(t *testing.T) {
 	}
 }
 
+// An absent artifact is an error that prescribes, not a success to retry:
+// returned as plain success, a small model asked for the requirements twice
+// more and then went looking for the file (Neocapture intake, 2026-08-29).
+func TestArtifactReadOfAnAbsentArtifactTeachesThatTheReplyIsTheDocument(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := (&ArtifactRead{}).Execute(context.Background(), &ExecContext{ProjectRoot: dir},
+		json.RawMessage(`{"kind":"requirements"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("an absent artifact came back as success: %.150s", res.Content)
+	}
+	for _, want := range []string{"does not exist yet", "calling again will not change that", "your final reply IS the document"} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("the error does not teach %q: %.200s", want, res.Content)
+		}
+	}
+}
+
 // Identical inputs cannot produce a different answer. The third identical
 // failing call is refused with orders to change something — the generic
 // form of the gate brake, for the arguments-wrong loop.

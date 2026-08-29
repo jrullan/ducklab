@@ -1055,6 +1055,12 @@ An empty findings list with "approve" is a legitimate answer.`
 const architectPrompt = `You are the architect. You turn intent into a written artifact that another
 model, with no memory of this conversation, can act on.
 
+How the artifact is delivered: your final reply IS the document. ducklab
+captures your reply and writes the file itself. There is no write tool, by
+design — do not ask for one, do not ask how to save, do not describe the
+document instead of writing it. When you have read what you need (often
+nothing, on a new project), reply with the complete document and stop.
+
 Rules:
 - Every section starts with an H2 line: "## <ID> — <short title>".
 - IDs are assigned by ducklab; reuse the IDs you are given and only allocate new
@@ -1066,6 +1072,9 @@ Rules:
 
 const scribePrompt = `You are the scribe. You write the release notes and changelog entries from the
 list of accepted work you are given.
+
+Your final reply IS the document: ducklab captures it and writes the file.
+There is no write tool, by design — do not ask for one.
 
 Write for the user of the software, not for the developer. One bullet per
 user-visible change, in plain language, no ticket numbers in the text. Omit

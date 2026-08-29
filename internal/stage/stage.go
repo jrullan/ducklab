@@ -349,6 +349,16 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 				"approved requirements follow further down and must survive.\n\n")
 		} else {
 			b.WriteString("## Your task\n\nWrite the project's requirements.\n\n")
+			if Greenfield(projectRoot) {
+				// Said outright, because the harness knows it and the model
+				// cannot: a tree with nothing in it looks, to a model with
+				// fs_list and artifact_read in hand, like something to survey.
+				b.WriteString("## The project is empty\n\n" +
+					"There is no code and no document yet — nothing to read, list or search. " +
+					"Do not explore the tree or look for existing artifacts; every such call " +
+					"returns nothing. Draft the requirements directly from the brief below, " +
+					"and reply with the complete document.\n\n")
+			}
 		}
 		if seed != "" {
 			b.WriteString("A requirement describing what is explicitly out of scope must " +

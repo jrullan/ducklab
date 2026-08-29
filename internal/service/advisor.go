@@ -184,27 +184,33 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 	// 2000, not 1200: a terse reasoning seat can spend a few hundred tokens
 	// before the answer even with suppression applied, and an advisor cut
 	// off mid-answer fails its contract as surely as an empty one.
-	maxTok := 2000
+	maxTok := oneShotCap(d, 2000)
 	resp, err := oneShotChat(ctx, p, d, systemPrompt, b.String(), maxTok)
 	if err != nil {
 		s.logFailedOneShot(rs, advisorID, d, "advisor", q.Question, err)
 		return "", string(advisorID), err
 	}
 
-	answer := truncateAdvisorAnswer(stripAdvisorThinking(answerText(resp)))
+	// The raw text is the evidence. A rejected answer used to be logged
+	// AFTER its thinking was stripped — for a seat whose whole reply was an
+	// unclosed <think>, the record showed "empty answer" and nothing else,
+	// and the failure could not be diagnosed (Neocapture intake, 2026-08-29).
+	raw := answerText(resp)
+	answer := truncateAdvisorAnswer(stripAdvisorThinking(raw))
 	if violation := advisorViolation(answer); violation != "" {
 		repairPrompt := b.String() + "\n\nYour previous answer was:\n" + answer +
 			"\n\nContract violation: " + violation +
 			". Reply with only the corrected answer text."
 		repair, repairErr := oneShotChat(ctx, p, d, systemPrompt, repairPrompt, maxTok)
 		if repairErr != nil {
-			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, answer, repairErr)
+			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, raw, repairErr)
 			return "", string(advisorID), repairErr
 		}
-		answer = truncateAdvisorAnswer(stripAdvisorThinking(answerText(repair)))
+		raw = answerText(repair)
+		answer = truncateAdvisorAnswer(stripAdvisorThinking(raw))
 		if violation = advisorPostRepairViolation(answer); violation != "" {
 			err := fmt.Errorf("advisor contract violation after repair: %s", violation)
-			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, answer, err)
+			s.logFailedAdvisorAnswer(rs, advisorID, d, "advisor", q.Question, raw, err)
 			return "", string(advisorID), err
 		}
 	}
@@ -266,6 +272,19 @@ func oneShotChat(ctx context.Context, p provider.Provider, d *duckling.Duckling,
 		})
 	}
 	return p.Chat(ctx, req)
+}
+
+// oneShotCap sizes a one-shot's output. A seat that thinks and is not
+// suppressed spends its reasoning inside the same cap as its answer: at
+// 2000 tokens a local Qwen3.6 seat ran out mid-<think>, the strip removed
+// the unclosed block, and the visible answer was empty — twice, since the
+// repair repeated the same cap (Neocapture intake, 2026-08-29). Such a seat
+// gets the room its configuration already grants it.
+func oneShotCap(d *duckling.Duckling, floor int) int {
+	if d == nil || d.Params.DisableThinking || d.Params.MaxTokens == nil || *d.Params.MaxTokens <= floor {
+		return floor
+	}
+	return *d.Params.MaxTokens
 }
 
 // wireAdvisor arms ask_advisor on an ExecContext, guarded so the tool can

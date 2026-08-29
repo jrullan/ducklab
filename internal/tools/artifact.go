@@ -59,8 +59,15 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 	}
 	if strings.TrimSpace(doc.Raw) == "" {
 		// An absent document is a fact worth stating plainly: a model told
-		// "not found" may invent one instead of saying it is missing.
-		return SuccessResult("%s does not exist yet for this project.", a.Kind), nil
+		// "not found" may invent one instead of saying it is missing. Stated
+		// as an ERROR that prescribes, not as a success: returned as a plain
+		// success, a small model read it as transient and asked twice more
+		// (Neocapture intake, 2026-08-29), then went looking for the file with
+		// fs_read. There is nothing to read, and the model's own reply is where
+		// the document comes from.
+		return ErrorResult("%s does not exist yet for this project — there is nothing to read, "+
+			"and calling again will not change that. If your task is to write it, your final "+
+			"reply IS the document: draft it now from the brief. Otherwise proceed without it.", a.Kind), nil
 	}
 
 	if a.ID == "" {
