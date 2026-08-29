@@ -729,18 +729,63 @@ describe("Cycle — starting a stage", () => {
 
   // Spec and plan read what came before; there is nothing to paste.
   it("offers no brief on spec or plan", async () => {
-    render(<Cycle client={client()} projectId="p" stage="spec" />);
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements" ? REQUIREMENTS : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="spec" />);
     await screen.findByTestId("cycle-start");
     expect(screen.queryByTestId("cycle-brief")).toBeNull();
   });
 
-  it("shows the engine's refusal rather than failing silently", async () => {
+  it("does not offer a spec run before requirements exist", async () => {
+    const c = client();
+    render(<Cycle client={c} projectId="p" stage="spec" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Specification starts from accepted requirements");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Add intention");
+    expect(screen.queryByTestId("cycle-run")).toBeNull();
+    expect(c.stageStart).not.toHaveBeenCalled();
+  });
+
+  it("routes an unready plan to specification when requirements exist", async () => {
     const c = client({
-      stageStart: vi.fn(() => Promise.reject(new Error("requirements are not accepted yet"))),
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements" ? REQUIREMENTS : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="plan" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Plan needs an accepted specification");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Draft specification");
+    expect(screen.queryByTestId("cycle-run")).toBeNull();
+  });
+
+  it("routes spec to a requirements proposal that still needs a decision", async () => {
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements"
+          ? { kind, sections: [], proposal: { sections: [{ id: "REQ-001", title: "Pending", body: "" }] } }
+          : { kind, sections: [] },
+      )),
     });
     render(<Cycle client={c} projectId="p" stage="spec" />);
-    fireEvent.click(await screen.findByTestId("cycle-run"));
-    expect((await screen.findByTestId("cycle-error")).textContent).toContain("not accepted yet");
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Requirements are waiting for your decision");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Review requirements");
+  });
+
+  it("routes plan to a specification proposal that still needs a decision", async () => {
+    const c = client({
+      artifact: vi.fn((_project: string, kind: string) => Promise.resolve(
+        kind === "requirements"
+          ? REQUIREMENTS
+          : kind === "spec"
+            ? { kind, sections: [], proposal: { sections: [{ id: "SPEC-001", title: "Pending", body: "" }] } }
+            : { kind, sections: [] },
+      )),
+    });
+    render(<Cycle client={c} projectId="p" stage="plan" />);
+    expect(await screen.findByTestId("cycle-prerequisite")).toHaveTextContent("Specification is waiting for your decision");
+    expect(screen.getByTestId("cycle-prerequisite-action")).toHaveTextContent("Review specification");
   });
 
   // A proposal is already waiting for a decision; offering to make another

@@ -99,6 +99,49 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	if err != nil {
 		return nil, err
 	}
+	// Refuse an impossible document run before it acquires an id, a queue
+	// entry, and a misleading failed-run record. The desktop normally prevents
+	// these launches, but CLI and MCP callers deserve the same invariant.
+	if req.Stage == "spec" {
+		reqs, loadErr := artifact.Load(entry.Path, artifact.KindRequirements)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if liveRequirementCount(reqs) == 0 {
+			if proposed, _ := artifact.LoadProposed(entry.Path, artifact.KindRequirements); proposed != nil {
+				return nil, fmt.Errorf("spec needs accepted requirements — review and accept the requirements proposal first")
+			}
+			return nil, fmt.Errorf("spec needs accepted requirements — add an intention and accept the resulting requirements first")
+		}
+	}
+	if req.Stage == "plan" && req.Revise == "" && req.Extend == "" && req.SplitTask == "" {
+		plan, loadErr := artifact.Load(entry.Path, artifact.KindPlan)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if len(plan.Sections) == 0 {
+			reqs, reqErr := artifact.Load(entry.Path, artifact.KindRequirements)
+			if reqErr != nil {
+				return nil, reqErr
+			}
+			if liveRequirementCount(reqs) == 0 {
+				if proposed, _ := artifact.LoadProposed(entry.Path, artifact.KindRequirements); proposed != nil {
+					return nil, fmt.Errorf("plan needs accepted requirements — review and accept the requirements proposal first")
+				}
+				return nil, fmt.Errorf("plan needs accepted requirements — add an intention and accept the resulting requirements first")
+			}
+			spec, specErr := artifact.Load(entry.Path, artifact.KindSpec)
+			if specErr != nil {
+				return nil, specErr
+			}
+			if len(spec.Sections) == 0 {
+				if proposed, _ := artifact.LoadProposed(entry.Path, artifact.KindSpec); proposed != nil {
+					return nil, fmt.Errorf("plan needs an accepted specification — review and accept the specification proposal first")
+				}
+				return nil, fmt.Errorf("plan needs an accepted specification — draft and accept the specification first")
+			}
+		}
+	}
 	// The debt settle: one click, no prose — the engine knows what is owed.
 	if req.Settle {
 		if req.Stage != "spec" {
@@ -275,6 +318,16 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		exec: func(c context.Context) { s.executeStage(c, rs, entry.Path, req) },
 	})
 	return run, nil
+}
+
+func liveRequirementCount(doc *artifact.Document) int {
+	count := 0
+	for _, section := range doc.Sections {
+		if !strings.EqualFold(section.Field("status"), "dropped") {
+			count++
+		}
+	}
+	return count
 }
 
 // stageRequestFile persists what a stage run was asked, beside its record.

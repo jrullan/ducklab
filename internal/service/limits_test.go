@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -26,6 +27,12 @@ func TestProjectBudgetOverridesGlobalDefaultsForRuns(t *testing.T) {
 	}
 	project.Budget = config.Budget{MaxUSD: 7, MaxTokens: 25000000, MaxWallclockS: 7200, MaxTurns: 99}
 	if err := config.SaveProject(filepath.Join(dir, ".ducklab", "project.toml"), project); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(artifact.DocsDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact.Path(dir, artifact.KindRequirements), []byte("## REQ-001 — Budgeted work\n\nRuns within the project budget.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

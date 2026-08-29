@@ -162,6 +162,8 @@ export function Cycle({
   const [traceChain, setTraceChain] = useState<TraceNode[]>([]);
   const [operationOpen, setOperationOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
+  const [requirementsDocument, setRequirementsDocument] = useState<Artifact | null>();
+  const [specDocument, setSpecDocument] = useState<Artifact | null>();
   const detailRef = useRef<HTMLDivElement>(null);
   const manualStageChoice = useRef(false);
 
@@ -218,11 +220,13 @@ export function Cycle({
 
   useEffect(() => {
     let cancelled = false;
-    const source = active.stage === "intake"
+    setRequirementsDocument(undefined);
+    const source = active.stage === "intake" && artifact?.kind === "requirements"
       ? Promise.resolve(artifact)
       : client.artifact(projectId, "requirements").catch(() => null);
     source.then((a) => {
       if (cancelled) return;
+      setRequirementsDocument(a);
       const ids = new Set<string>();
       const collect = (items: readonly Section[] | null | undefined) => items?.forEach((s) => {
         if (s.id.startsWith("REQ-")) ids.add(s.id);
@@ -230,6 +234,18 @@ export function Cycle({
       });
       collect(a?.sections);
       setRequirementIds(ids);
+    });
+    return () => { cancelled = true; };
+  }, [active.stage, artifact, client, projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSpecDocument(undefined);
+    const source = active.stage === "spec" && artifact?.kind === "spec"
+      ? Promise.resolve(artifact)
+      : client.artifact(projectId, "spec").catch(() => null);
+    source.then((a) => {
+      if (!cancelled) setSpecDocument(a);
     });
     return () => { cancelled = true; };
   }, [active.stage, artifact, client, projectId]);
@@ -535,6 +551,38 @@ export function Cycle({
   const operationStage = active.stage === "intent" ? "intake" : active.stage;
   const operationLabel = operationStage === "intake" ? "Intent" : active.label;
   const operationSectionsLength = active.stage === "intent" ? requirementIds.size : sections.length;
+  const requirementsReady = (requirementsDocument?.sections?.length ?? 0) > 0;
+  const specReady = (specDocument?.sections?.length ?? 0) > 0;
+  const prerequisiteLoading = active.stage === "spec"
+    ? requirementsDocument === undefined
+    : active.stage === "plan"
+      ? requirementsDocument === undefined || specDocument === undefined
+      : false;
+  const prerequisite = prerequisiteLoading
+    ? null
+    : active.stage === "spec" && sections.length === 0 && !requirementsReady
+      ? requirementsDocument?.proposal
+        ? { title: "Requirements are waiting for your decision", detail: "Accept or revise the requirements proposal before drafting a specification.", action: "Review requirements", target: STAGES[1], open: false }
+        : { title: "Specification starts from accepted requirements", detail: "Add an intention first; the council will translate it into the requirements this specification must implement.", action: "Add intention", target: STAGES[0], open: true }
+      : active.stage === "plan" && sections.length === 0 && !requirementsReady
+        ? requirementsDocument?.proposal
+          ? { title: "Requirements are waiting for your decision", detail: "The plan cannot skip requirements and specification. Decide the requirements proposal first.", action: "Review requirements", target: STAGES[1], open: false }
+          : { title: "Planning starts after Intent", detail: "Add an intention first, then accept its requirements and specification before planning the work.", action: "Add intention", target: STAGES[0], open: true }
+        : active.stage === "plan" && sections.length === 0 && !specReady
+          ? specDocument?.proposal
+            ? { title: "Specification is waiting for your decision", detail: "Accept or revise the specification proposal before breaking it into planned work.", action: "Review specification", target: STAGES[2], open: false }
+            : { title: "Plan needs an accepted specification", detail: "Turn the accepted requirements into a specification before planning implementation tasks.", action: "Draft specification", target: STAGES[2], open: true }
+          : null;
+
+  const followPrerequisite = () => {
+    if (!prerequisite) return;
+    manualStageChoice.current = true;
+    setLandingResolved(true);
+    setActive(prerequisite.target);
+    setSelectedSection(null);
+    setOperationOpen(prerequisite.open);
+    location.hash = routeHref({ name: "cycle", stage: prerequisite.target.stage });
+  };
 
   return (
     <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
@@ -542,7 +590,8 @@ export function Cycle({
         <div className="flex items-center gap-3 py-3">
           <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Intent, requirements, specification and plan — one traceable project spine.</p></div>
           <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
-          {landingResolved && (!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intake" && !inspectedSection) { setActive(STAGES[0]); location.hash = routeHref({ name: "cycle", stage: "intent" }); } else if (active.stage === "intake" && inspectedSection && !brief) { setBrief(`Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
+          {landingResolved && !prerequisiteLoading && prerequisite && <button type="button" data-testid="cycle-prerequisite-action" onClick={followPrerequisite} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">{prerequisite.action}</button>}
+          {landingResolved && !prerequisiteLoading && !prerequisite && (!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intake" && !inspectedSection) { setActive(STAGES[0]); location.hash = routeHref({ name: "cycle", stage: "intent" }); } else if (active.stage === "intake" && inspectedSection && !brief) { setBrief(`Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
         </div>
         <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-4 gap-3">
           {STAGES.map((s) => (
@@ -742,9 +791,15 @@ export function Cycle({
           </section>
         )}
 
-        {loading && <div className="text-sm text-ink-muted">Loading…</div>}
+        {(loading || prerequisiteLoading) && <div className="text-sm text-ink-muted">Loading…</div>}
 
-        {!loading && !selectedSection && !(artifact?.proposal && !proposalDecided) && (
+        {!loading && prerequisite && sections.length === 0 && (
+          <section data-testid="cycle-prerequisite" className="order-3 flex min-h-64 items-center justify-center border-y border-hairline px-8 py-16 text-center">
+            <div><p className="text-sm font-medium text-ink">{prerequisite.title}</p><p className="mt-1 max-w-xl text-xs text-ink-muted">{prerequisite.detail}</p><button type="button" onClick={followPrerequisite} className="mt-4 rounded border border-hairline px-3 py-1.5 text-sm text-ink">{prerequisite.action}</button></div>
+          </section>
+        )}
+
+        {!loading && !prerequisiteLoading && !prerequisite && !selectedSection && !(artifact?.proposal && !proposalDecided) && (
           <DocumentSelectionEmpty stage={active.stage} />
         )}
 
@@ -757,7 +812,7 @@ export function Cycle({
           </ol>
         )}
 
-        {!loading && (!artifact?.proposal || proposalDecided) && (
+        {!loading && !prerequisiteLoading && !prerequisite && (!artifact?.proposal || proposalDecided) && (
           <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "hidden"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
