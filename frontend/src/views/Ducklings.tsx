@@ -824,7 +824,7 @@ function DucklingForm({
           onClick={() => setColor(0)}
           className={
             "rounded border px-2 py-1 text-xs " +
-            (color === 0 ? "border-serious" : "border-hairline")
+            (color === 0 ? "border-accent" : "border-hairline")
           }
         >
           auto

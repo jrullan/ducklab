@@ -16,6 +16,7 @@ export default {
         hairline: "var(--border)",
         gridline: "var(--gridline)",
         axis: "var(--axis)",
+        accent: "var(--accent)",
         good: "var(--status-good)",
         warning: "var(--status-warning)",
         serious: "var(--status-serious)",

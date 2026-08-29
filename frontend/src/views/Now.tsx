@@ -23,6 +23,7 @@ import { moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
+import { ContextStrip, PageHeader } from "../components/PageShell";
 
 function nextStepHref(step: NextStep): string {
   if (step.kind === "run" && step.ref) return routeHref({ name: "run", id: step.ref });
@@ -178,13 +179,26 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   };
 
   return (
-    <div className="relative mx-auto max-w-3xl p-4" data-testid="now-view">
+    <div className="relative mx-auto max-w-5xl space-y-4 p-4" data-testid="now-view">
+      <PageHeader
+        eyebrow="Your attention"
+        title="Now"
+        subtitle="Decisions first, active work second, and the clearest next step when the queue is quiet."
+      />
+      <ContextStrip tone={waiting.length > 0 || failures.length > 0 ? "attention" : "neutral"}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-ink-secondary">
+          <span><strong className="font-medium text-ink">{waiting.length}</strong> waiting for you</span>
+          <span><strong className="font-medium text-ink">{active.length}</strong> running</span>
+          <span><strong className="font-medium text-ink">{toVerify.length}</strong> to verify</span>
+          <span><strong className="font-medium text-ink">{failures.length}</strong> failed</span>
+        </div>
+      </ContextStrip>
       {/* Running work is owned by Now; the retired guide rail no longer duplicates it. */}
       {/* The inbox's own live section carries the fuller view
           with live spend, in the inbox's own flow. */}
       {nextSteps.length > 0 && (
         <section className="mb-4" data-testid="now-next-steps">
-          <h2 className="text-sm text-ink-muted">next steps</h2>
+          <h2 className="text-sm font-medium text-ink">Next steps</h2>
           <ol className="mt-2 space-y-1.5">
             {nextSteps.map((step, index) => (
               <li key={`${step.id}:${step.ref ?? index}`} data-testid="now-next-step">
@@ -209,7 +223,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
       {active.length > 0 && (
         <section data-testid="now-running">
-          <h2 className="text-sm text-ink-muted">running</h2>
+          <h2 className="text-sm font-medium text-ink">Running</h2>
           <ul className="mt-2 space-y-1">
             {active.map((r) => (
               <RunningRow key={r.id} run={r} live={spend[r.id]} />
@@ -220,7 +234,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
       {waiting.length > 0 && (
         <section data-testid="now-waiting">
-          <h2 className="text-sm text-ink-muted">waiting for you</h2>
+          <h2 className="text-sm font-medium text-ink">Waiting for you</h2>
           <ul className="mt-2 space-y-2">
             {waiting.map((r) => (
               <WaitingCard
@@ -251,7 +265,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
       {toVerify.length > 0 && (
         <section className="mt-4" data-testid="now-verify">
-          <h2 className="text-sm text-ink-muted">fixed — did it actually answer the report?</h2>
+          <h2 className="text-sm font-medium text-ink">Fixed — did it actually answer the report?</h2>
           <ul className="mt-2 space-y-2">
             {toVerify.map((b) => (
               <li key={b.id} data-testid="now-verify-card" className="rounded-card border border-hairline p-3">
@@ -307,7 +321,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
       {reopened.length > 0 && (
         <section className="mt-4" data-testid="now-reopened">
-          <h2 className="text-sm text-ink-muted">still broken — nothing is running for these</h2>
+          <h2 className="text-sm font-medium text-ink">Still broken — nothing is running for these</h2>
           <ul className="mt-2 space-y-2">
             {reopened.map((b) => (
               <ReopenedCard
@@ -324,7 +338,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
 
       {failures.length > 0 && (
         <section className="mt-4" data-testid="now-failures">
-          <h2 className="text-sm text-ink-muted">failed, awaiting your call</h2>
+          <h2 className="text-sm font-medium text-ink">Failed, awaiting your call</h2>
           <ul className="mt-2 space-y-2">
             {failures.map((r) => (
               <li key={r.id} data-testid="now-failure" className="rounded-card border border-critical p-3">
@@ -362,7 +376,7 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       {quiet && (
         <section className="mt-4" data-testid="now-quiet">
           {active.length === 0 && list.length === 0 && (
-            <EmptyState message="No runs yet. Start below, or plan the work from Cycle." />
+            <EmptyState message="No runs yet. Start below, or plan the work from Documents." />
           )}
           <p className="text-sm text-ink-secondary">Nothing needs you.</p>
 

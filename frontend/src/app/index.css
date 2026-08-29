@@ -12,6 +12,13 @@ body {
   font-size: 13px;
 }
 
+/* Keyboard focus and pointer selection speak the same interaction language.
+ * Status colours remain reserved for the meaning of the underlying record. */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* The duck bobs while its turn is in flight (08 §4.4).
  *
  * A turn that is thinking looked exactly like one that had finished and said

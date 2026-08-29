@@ -16,6 +16,7 @@ import { runLabel } from "../lib/runview";
 import { money } from "../lib/format";
 import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
+import { CollectionToolbar, ContextStrip, PageHeader } from "../components/PageShell";
 
 const FILTERS = ["all", "waiting", "running", "landed", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -84,13 +85,25 @@ export function Runs({ runs }: { runs: Run[] }) {
   const paged = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   if (runs.length === 0) {
-    return <EmptyState message="No runs yet. Pick a task on the Board and press Run." />;
+    return <div className="space-y-4"><PageHeader eyebrow="Records" title="Runs" subtitle="Follow every execution from launch through its final decision." /><EmptyState message="No runs yet. Choose a task in Work to start the first one." /></div>;
   }
 
   return (
-    <div data-testid="runs-view">
-      <h1 className="mb-3 text-lg text-ink">Runs</h1>
-      <div className="mb-3 flex items-center gap-2">
+    <div data-testid="runs-view" className="space-y-4">
+      <PageHeader
+        eyebrow="Records"
+        title="Runs"
+        subtitle="Follow every execution from launch through its final decision."
+      />
+      <ContextStrip>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-ink-secondary">
+          <span><strong className="font-medium text-ink">{runs.length}</strong> total</span>
+          <span><strong className="font-medium text-ink">{runs.filter((r) => r.status === "paused").length}</strong> waiting</span>
+          <span><strong className="font-medium text-ink">{runs.filter((r) => r.status === "running" || r.status === "queued").length}</strong> active</span>
+          <span><strong className="font-medium text-ink">{runs.filter((r) => r.resolution === "landed").length}</strong> landed</span>
+        </div>
+      </ContextStrip>
+      <CollectionToolbar>
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -102,7 +115,7 @@ export function Runs({ runs }: { runs: Run[] }) {
             }}
             className={
               "rounded border px-2 py-1 text-sm " +
-              (filter === f ? "border-ink text-ink" : "border-hairline text-ink-muted")
+              (filter === f ? "border-accent bg-surface2 text-ink" : "border-hairline text-ink-muted")
             }
           >
             {f}
@@ -111,7 +124,7 @@ export function Runs({ runs }: { runs: Run[] }) {
         <span className="text-sm text-ink-muted" data-testid="runs-count">
           showing {paged.length} of {shown.length}
         </span>
-      </div>
+      </CollectionToolbar>
       {pageCount > 1 && (
         <nav className="mb-3 flex items-center gap-2" aria-label="Runs pagination">
           <button
@@ -138,9 +151,10 @@ export function Runs({ runs }: { runs: Run[] }) {
         </nav>
       )}
 
+      <div className="overflow-x-auto rounded-card border border-hairline bg-surface1">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="text-left text-ink-muted">
+          <tr className="sticky top-0 bg-surface1 text-left text-ink-muted">
             <th className="border-b border-hairline py-1 pr-3 font-normal">status</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">what</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">mode</th>
@@ -154,7 +168,7 @@ export function Runs({ runs }: { runs: Run[] }) {
         </thead>
         <tbody>
           {paged.map((r) => (
-            <tr key={r.id} data-testid="runs-row" data-run={r.id}>
+            <tr key={r.id} data-testid="runs-row" data-run={r.id} className="hover:bg-surface2">
               <td className="border-b border-hairline py-1 pr-3">
                 <StatusChip role={r.resolution === "landed" ? "good" : runStatusRole(r.status)} label={r.resolution === "landed" ? "landed" : r.status} />
                 {r.status === "queued" && r.queued_reason && (
@@ -203,6 +217,7 @@ export function Runs({ runs }: { runs: Run[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

@@ -74,20 +74,21 @@ export function Sidebar({
               {z.label}{z.label === "Now" && waitingCount > 0 && <span className="ml-1 text-serious" data-testid="nav-badge">● {waitingCount}</span>}
             </a>
             {rooms && <nav className="mt-1 flex flex-col gap-1 border-l border-hairline pl-3 text-sm" data-testid={`subnav-${z.label.toLowerCase()}`}>
-              {rooms.map((r) => <a key={r.label} href={routeHref(r.route)} data-testid={`subnav-${r.label.toLowerCase()}`} className={activeRoom(r.route) ? "text-ink" : "text-ink-muted"}>{r.label}</a>)}
+              {rooms.map((r) => <a key={r.label} href={routeHref(r.route)} aria-current={activeRoom(r.route) ? "page" : undefined} data-testid={`subnav-${r.label.toLowerCase()}`} className={`rounded py-1 pl-2 transition-colors ${activeRoom(r.route) ? "bg-surface2 font-medium text-ink shadow-[inset_2px_0_0_var(--accent)]" : "text-ink-muted hover:bg-surface2 hover:text-ink"}`}>{r.label}</a>)}
             </nav>}
           </div>;
         })}
       </nav>
       <nav className="mt-auto flex flex-col gap-1 border-t border-hairline pt-4" aria-label="Settings">
         {hasSettings && (
-          <a href={routeHref({ name: "settings" })} data-testid="nav-settings" className={`rounded px-2 py-1.5 ${route.name === "settings" ? "bg-surface2 text-ink" : "text-ink-muted"}`}>Settings</a>
+          <a href={routeHref({ name: "settings" })} data-testid="nav-settings" className={`rounded px-2 py-1.5 ${configMembers.includes(route.name) ? "bg-surface2 text-ink" : "text-ink-muted"}`}>Settings</a>
         )}
       </nav>
-      {client && projectId && <>
+      {client && projectId && <details className="mt-3 border-t border-hairline pt-3" data-testid="project-controls">
+        <summary className="cursor-pointer text-sm text-ink-muted hover:text-ink">Project controls</summary>
         <div className="mt-3"><AppControl client={client} projectId={projectId} /></div>
         <div className="mt-3"><AutopilotControl client={client} projectId={projectId} /></div>
-      </>}
+      </details>}
       <footer className="mt-4 flex flex-col gap-1 border-t border-hairline pt-3 text-sm" data-testid="sidebar-footer">
         {client && projectId && ducklings.length > 0 && (
           <ChatAbout
@@ -119,4 +120,3 @@ export function Sidebar({
     </aside>
   );
 }
-

@@ -14,6 +14,7 @@ import { EmptyState } from "../components/EmptyState";
 import { awards } from "../lib/leaderboard";
 import { headToHead } from "../lib/compare";
 import { Prose } from "../components/Prose";
+import { CollectionToolbar, ContextStrip, PageHeader } from "../components/PageShell";
 
 const RANGES = [
   { label: "all time", value: "" },
@@ -56,22 +57,14 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
   // Records zone gave it a room of its own — the same data reachable two ways
   // is a question ("are these different?") nobody should have to ask. One
   // home, one pointer.
-  const tabs = (
-    <p className="mb-3 text-xs text-ink-muted">
-      Cross-model comparisons live in{" "}
-      <a href="#/bench" data-testid="reports-bench-link" className="text-ink underline">
-        Bench
-      </a>
-      .
-    </p>
-  );
+  const benchLink = <a href="#/bench" data-testid="reports-bench-link" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink">Open Bench</a>;
 
-  if (loading && !byMode) return <p className="text-ink-muted">Loading…</p>;
+  if (loading && !byMode) return <div className="space-y-4"><PageHeader eyebrow="Records" title="Reports" subtitle="Understand outcomes, cost and the evidence behind each operating mode." actions={benchLink} /><p className="text-ink-muted">Loading…</p></div>;
   if (failure) {
     return (
-      <p className="text-critical" data-testid="reports-error">
+      <div className="space-y-4"><PageHeader eyebrow="Records" title="Reports" subtitle="Understand outcomes, cost and the evidence behind each operating mode." actions={benchLink} /><p className="text-critical" data-testid="reports-error">
         {failure}
-      </p>
+      </p></div>
     );
   }
 
@@ -88,7 +81,7 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
   if (rows.length === 0) {
     return (
       <div data-testid="reports-view">
-        {tabs}
+        <PageHeader eyebrow="Records" title="Reports" subtitle="Understand outcomes, cost and the evidence behind each operating mode." actions={benchLink} />
         <EmptyState message="No finished runs yet — there is nothing to measure." />
       </div>
     );
@@ -96,8 +89,8 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
 
   return (
     <div data-testid="reports-view" className="space-y-4">
-      {tabs}
-      <div className="flex items-center gap-2">
+      <PageHeader eyebrow="Records" title="Reports" subtitle="Understand outcomes, cost and the evidence behind each operating mode." actions={benchLink} />
+      <CollectionToolbar>
         {RANGES.map((r) => (
           <button
             key={r.value}
@@ -107,25 +100,25 @@ export function Reports({ client, projectId }: { client: EngineClient; projectId
             data-testid={`range-${r.value || "all"}`}
             className={
               "rounded border px-2 py-0.5 text-xs " +
-              (since === r.value ? "border-serious text-ink" : "border-hairline text-ink-muted")
+              (since === r.value ? "border-accent bg-surface2 text-ink" : "border-hairline text-ink-muted")
             }
           >
             {r.label}
           </button>
         ))}
-      </div>
+      </CollectionToolbar>
 
       {/* What the project has cost, in the selected window. Every other number
           on this page is relative — points against a baseline, rates, averages
           — and the one absolute a person budgeting needs was on none of it. */}
-      <p className="text-sm text-ink-secondary" data-testid="project-cost">
+      <ContextStrip><p className="text-sm text-ink-secondary" data-testid="project-cost">
         This project has cost{" "}
         <span className="text-ink" title={anyEstimated ? "includes estimated token counts" : undefined}>
           {anyEstimated ? "~" : ""}${totalCost.toFixed(2)}
         </span>{" "}
         across {totalRuns} finished {totalRuns === 1 ? "run" : "runs"}
         {since ? ` in the last ${since}` : ""}.
-      </p>
+      </p></ContextStrip>
 
       {/* The hero. Without a solo baseline there is no comparison to make, and
           saying so is more useful than a number with nothing behind it. */}

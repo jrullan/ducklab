@@ -23,6 +23,8 @@ import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { ChatAbout } from "../components/ChatAbout";
 import { RemoveTask } from "../components/RemoveTask";
 import { OriginLine } from "../components/OriginLine";
+import { CollectionToolbar, PageHeader } from "../components/PageShell";
+import { selectableSurface } from "../lib/ui";
 
 const COLUMNS = [
   { key: "todo", label: "Todo" },
@@ -339,6 +341,12 @@ export function Board({
   return (
     <div data-testid="board-view" className="flex items-start gap-4">
       <div className="min-w-0 flex-1">
+        <PageHeader
+          eyebrow="Work"
+          title={isBugs ? "Bugs" : "Tasks"}
+          subtitle={isBugs ? "Triage reported problems, follow their fixes and verify the result." : "Move planned work from ready through evidence-backed acceptance."}
+        />
+        <div className="h-4" />
         {loading && <div data-testid="board-loading" className="mb-3 text-sm text-ink-muted">Loading board…</div>}
         {failure !== null && <ErrorCard error={failure} testId="board-error" />}
 
@@ -370,7 +378,7 @@ export function Board({
         )}
         {empty && (
           <div className="mb-3">
-            <EmptyState message="Nothing here yet. Plan the work from Cycle, or file a report with the button below." />
+            <EmptyState message="Nothing here yet. Plan the work from Documents, or file a report with the button below." />
           </div>
         )}
 
@@ -378,7 +386,7 @@ export function Board({
             toggle that lived here is gone: the Work subnav switches boards,
             and two controls for one choice on one screen was the duplication
             it looked like. */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <CollectionToolbar>
           {isBugs ? (
             <select
               data-testid="board-severity"
@@ -458,7 +466,8 @@ export function Board({
               )}
             </span>
           )}
-        </div>
+        </CollectionToolbar>
+        <div className="h-3" />
 
         {filing && (
           <div
@@ -729,8 +738,7 @@ export function Board({
                         onClick={() => setSelected(it.id)}
                         aria-pressed={selected === it.id}
                         className={
-                          "w-full rounded-card border p-2 text-left " +
-                          (selected === it.id ? "border-serious" : "border-hairline")
+                          "w-full rounded-card border p-2 text-left transition-colors " + selectableSurface(selected === it.id)
                         }
                       >
                         <div className="flex items-baseline gap-2">

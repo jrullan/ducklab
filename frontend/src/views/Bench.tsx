@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { BenchCell, BenchResult, BenchSummary, Duckling, EngineClient, Run } from "../api/client";
 import { BarChart, ChartFrame } from "../components/Chart";
 import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageShell";
+import { selectableSurface } from "../lib/ui";
 
 export function Bench({ client }: { client: EngineClient }) {
   const [runs, setRuns] = useState<BenchSummary[]>([]);
@@ -235,7 +237,8 @@ export function Bench({ client }: { client: EngineClient }) {
     // The empty state IS the launcher: a person with no bench yet is exactly
     // the person trying to start their first.
     return (
-      <div data-testid="bench-view">
+      <div data-testid="bench-view" className="space-y-4">
+        <PageHeader eyebrow="Records" title="Bench" subtitle="Compare ducklings against the same controlled tasks and inspect the evidence behind each result." />
         {launcher}
         <EmptyState message="No bench has run yet. Pick ducklings and modes above." />
       </div>
@@ -243,10 +246,12 @@ export function Bench({ client }: { client: EngineClient }) {
   }
 
   return (
-    <div data-testid="bench-view">
+    <div data-testid="bench-view" className="space-y-4">
+      <PageHeader eyebrow="Records" title="Bench" subtitle="Compare ducklings against the same controlled tasks and inspect the evidence behind each result." />
       {launcher}
-      <div className="flex gap-6">
-      <nav className="w-56 shrink-0 space-y-1">
+      <div className="grid min-h-[32rem] grid-cols-[14rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <nav className="space-y-1 border-r border-hairline p-3">
+        <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Bench history</h2><span className="text-xs text-ink-muted">{runs.length}</span></div>
         {runs.map((r) => (
           <button
             key={r.stamp}
@@ -255,8 +260,7 @@ export function Bench({ client }: { client: EngineClient }) {
             aria-pressed={selected === r.stamp}
             onClick={() => setSelected(r.stamp)}
             className={
-              "w-full rounded-card border p-2 text-left " +
-              (selected === r.stamp ? "border-serious" : "border-hairline")
+              "w-full rounded-card border p-2 text-left transition-colors " + selectableSurface(selected === r.stamp)
             }
           >
             <div className="font-mono text-xs text-ink">{r.stamp}</div>
@@ -270,7 +274,7 @@ export function Bench({ client }: { client: EngineClient }) {
         ))}
       </nav>
 
-      <div className="min-w-0 flex-1 space-y-4">
+      <div className="min-w-0 space-y-4 p-5">
         {failure && <p className="text-critical">{failure}</p>}
         {result && <BenchDetail result={result} />}
       </div>

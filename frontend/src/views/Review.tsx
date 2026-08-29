@@ -11,6 +11,8 @@ import type { EngineClient, ReviewSummary } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
+import { PageHeader } from "../components/PageShell";
+import { selectableSurface } from "../lib/ui";
 
 export function Review({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [items, setItems] = useState<ReviewSummary[]>([]);
@@ -56,13 +58,16 @@ export function Review({ client, projectId }: { client: EngineClient; projectId:
 
   if (!loading && items.length === 0 && !failure) {
     return (
-      <EmptyState message="No reviews yet — run `ducklab review <task>` on work that has been accepted." />
+      <div className="space-y-4"><PageHeader eyebrow="Records" title="Reviews" subtitle="Read the independent assessments attached to accepted work." /><EmptyState message="No reviews yet. Reviews will appear here when accepted work has been assessed." /></div>
     );
   }
 
   return (
-    <div data-testid="review-view" className="flex gap-6">
-      <nav className="w-64 shrink-0 space-y-1">
+    <div data-testid="review-view" className="space-y-4">
+      <PageHeader eyebrow="Records" title="Reviews" subtitle="Read the independent assessments attached to accepted work." />
+      <div className="grid min-h-[32rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <nav className="space-y-1 border-r border-hairline p-3">
+        <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Review history</h2><span className="text-xs text-ink-muted">{items.length}</span></div>
         {items.map((r) => (
           <button
             key={r.task_id}
@@ -71,8 +76,7 @@ export function Review({ client, projectId }: { client: EngineClient; projectId:
             aria-pressed={selected === r.task_id}
             onClick={() => setSelected(r.task_id)}
             className={
-              "w-full rounded-card border p-2 text-left " +
-              (selected === r.task_id ? "border-serious" : "border-hairline")
+              "w-full rounded-card border p-2 text-left transition-colors " + selectableSurface(selected === r.task_id)
             }
           >
             <div className="font-mono text-xs text-ink-muted">{r.task_id}</div>
@@ -91,7 +95,7 @@ export function Review({ client, projectId }: { client: EngineClient; projectId:
         ))}
       </nav>
 
-      <div className="min-w-0 flex-1">
+      <article className="min-w-0 p-5">
         {failure && (
           <div data-testid="review-error" className="mb-3 text-sm text-critical">
             {failure}
@@ -102,6 +106,7 @@ export function Review({ client, projectId }: { client: EngineClient; projectId:
         ) : (
           <p className="text-sm text-ink-muted">Select a review.</p>
         )}
+      </article>
       </div>
     </div>
   );

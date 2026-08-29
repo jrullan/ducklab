@@ -12,6 +12,8 @@ import { EmptyState } from "../components/EmptyState";
 import { Prose } from "../components/Prose";
 import { StatusChip } from "../components/StatusChip";
 import { stripFrontmatter } from "./Review";
+import { PageHeader } from "../components/PageShell";
+import { selectableSurface } from "../lib/ui";
 
 export function Release({ client, projectId }: { client: EngineClient; projectId: string }) {
   const [items, setItems] = useState<ReleaseSummary[]>([]);
@@ -90,7 +92,8 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
     // The view used to point at the CLI from inside the desktop — the one
     // place a desktop user cannot go. The affordance lives here now.
     return (
-      <div className="p-4">
+      <div className="space-y-4">
+        <PageHeader eyebrow="Records" title="Releases" subtitle="Prepare release notes, review drafts and read the record of what shipped." />
         <EmptyState message="No releases yet." />
         {planned ? (
           <p className="mt-2 text-sm text-ink-secondary" data-testid="release-planned">
@@ -125,25 +128,26 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
   const pendingDraft = items.find((r) => r.drafted);
 
   return (
-    <div data-testid="release-view" className="flex gap-6">
-      <nav className="w-64 shrink-0 space-y-1">
+    <div data-testid="release-view" className="space-y-4">
+      <PageHeader
+        eyebrow="Records"
+        title="Releases"
+        subtitle="Prepare release notes, review drafts and read the record of what shipped."
+        actions={!loading && !planned && !pendingDraft ? <div className="flex items-center gap-2"><select aria-label="version bump" data-testid="release-bump" value={bump} onChange={(e) => setBump(e.target.value as typeof bump)} className="rounded border border-hairline bg-surface px-2 py-1.5 text-sm text-ink"><option value="patch">patch</option><option value="minor">minor</option><option value="major">major</option></select><button type="button" data-testid="release-draft" disabled={busy} onClick={() => void draft(bump)} className="rounded bg-ink px-3 py-1.5 text-sm text-page">Draft next release</button></div> : undefined}
+      />
+      <div className="grid min-h-[34rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <nav className="space-y-1 border-r border-hairline p-3">
+        <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Release history</h2><span className="text-xs text-ink-muted">{items.length}</span></div>
         {/* The door to the NEXT release lives with the list, not only in the
             empty state: with one release on file there was no way to draft
             the second from the desktop. One draft at a time — while one
             waits, the door says so instead of opening a second. */}
-        {!loading && <div className="mb-2 rounded-card border border-hairline p-2" data-testid="release-next">
+        {!loading && (planned || pendingDraft) && <div className="mb-2 rounded-card border border-hairline p-2" data-testid="release-next">
           {planned ? (
             <p className="text-xs text-ink-secondary" data-testid="release-planned">Drafting — watch the release run in Now, then come back to cut it.</p>
           ) : pendingDraft ? (
             <p className="text-xs text-ink-muted">a draft is waiting: cut or revise {pendingDraft.version} before drafting another</p>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button type="button" data-testid="release-draft" disabled={busy} onClick={() => void draft(bump)} className="rounded border border-hairline px-2 py-1 text-sm text-ink">Draft next release</button>
-              <select aria-label="version bump" data-testid="release-bump" value={bump} onChange={(e) => setBump(e.target.value as typeof bump)} className="rounded border border-hairline bg-surface px-1 py-1 text-xs text-ink">
-                <option value="patch">patch</option><option value="minor">minor</option><option value="major">major</option>
-              </select>
-            </div>
-          )}
+          ) : null}
         </div>}
         {items.map((r) => (
           <button
@@ -153,8 +157,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
             aria-pressed={selected === r.version}
             onClick={() => setSelected(r.version)}
             className={
-              "w-full rounded-card border p-2 text-left " +
-              (selected === r.version ? "border-serious" : "border-hairline")
+              "w-full rounded-card border p-2 text-left transition-colors " + selectableSurface(selected === r.version)
             }
           >
             <div className="font-mono text-sm text-ink">{r.version}</div>
@@ -175,7 +178,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         ))}
       </nav>
 
-      <div className="min-w-0 flex-1">
+      <article className="min-w-0 p-5">
         {failure && (
           <div data-testid="release-error" className="mb-3 text-sm text-critical">
             {failure}
@@ -185,7 +188,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         {current?.drafted && (
           <div
             data-testid="release-draft-notice"
-            className="mb-3 rounded-card border border-serious p-3 text-sm"
+            className="mb-3 rounded-card border border-warning p-3 text-sm"
           >
             <div className="text-ink">
               These notes are a draft. Cutting tags {current.version} and makes them the record.
@@ -216,7 +219,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
                   data-testid="release-cut"
                   disabled={busy}
                   onClick={() => void cut(current.version)}
-                  className="rounded border border-serious px-3 py-1 text-ink"
+                  className="rounded bg-ink px-3 py-1 text-page"
                 >
                   Cut {current.version}
                 </button>
@@ -238,6 +241,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         ) : (
           <p className="text-sm text-ink-muted">Select a release.</p>
         )}
+      </article>
       </div>
     </div>
   );
