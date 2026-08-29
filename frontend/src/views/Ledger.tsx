@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { EngineClient, Section, Task } from "../api/client";
+import { PageHeader } from "../components/PageShell";
 
 type LedgerRow = { id: string; says: string; exists: string; since: string; detail: string };
 
@@ -27,9 +28,7 @@ export function Ledger({ client, projectId }: { client: EngineClient; projectId:
     return () => { live = false; };
   }, [client, projectId]);
   return <section data-testid="cycle-ledger" className="p-4">
-    <a href="#/cycle" className="text-xs text-ink-muted underline">← Documents</a>
-    <h1 className="mt-2 text-xl font-medium">Spine ledger</h1>
-    <p className="mt-1 text-sm text-ink-secondary">Every break has two honest ways out: create the missing piece, which births a task; or mark it non-normative / amend the document flow.</p>
+    <PageHeader eyebrow="Documents" title="Spine ledger" subtitle="Inspect every break between the project documents and the work that exists." actions={<a href="#/cycle" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink">Back to Documents</a>} />
     {loading ? <p className="mt-4 text-sm text-ink-muted">Loading…</p> : rows.length === 0 ? <p data-testid="cycle-ledger-empty" className="mt-4 text-sm text-ink-secondary">No breaks in the spine.</p> : <div className="mt-4 overflow-x-auto">
       <table className="w-full border-collapse text-left text-sm" data-testid="cycle-ledger-table"><thead><tr className="border-b border-hairline"><th className="p-2">What the document says</th><th className="p-2">What exists</th><th className="p-2">Since when</th><th className="p-2">Settle it</th></tr></thead><tbody>
         {rows.map((row) => <tr key={row.id} className="border-b border-hairline" data-testid="cycle-ledger-row"><td className="p-2"><span className="font-mono text-xs">{row.id}</span> {row.says}<div className="text-xs text-ink-muted">{row.detail}</div></td><td className="p-2">{row.exists}</td><td className="p-2 text-ink-secondary">{row.since}</td><td className="p-2"><div className="flex flex-wrap gap-2"><a className="rounded border border-hairline px-2 py-1 text-xs underline" href="#/board">Create missing piece → birth a task</a><a className="rounded border border-hairline px-2 py-1 text-xs underline" href="#/cycle">Mark non-normative or amend → document flow</a></div></td></tr>)}

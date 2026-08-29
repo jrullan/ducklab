@@ -10,6 +10,7 @@ import { StatusChip } from "../components/StatusChip";
 import { ErrorCard } from "../components/ErrorCard";
 import type { BudgetView, ConfigDiagnostics, EngineClient, EngineDefaultsView, GateStatus, ModeDefaultsView, Run } from "../api/client";
 import { routeHref, type SettingsSection } from "../app/routes";
+import { PageHeader } from "../components/PageShell";
 
 /** The scope, as a pill the eye can file: neutral for the global defaults,
  * green for a choice this project made, amber for one the engine is making
@@ -120,7 +121,9 @@ export function Settings({
   const [previewSection, setPreviewSection] = useState<SettingsSection>("ducklings");
   const activeSection = section ?? previewSection;
   return (
-    <div className="flex h-full min-h-0 gap-6 overflow-hidden p-4" data-testid="settings">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4" data-testid="settings">
+      <PageHeader eyebrow="Configuration" title="Settings" subtitle="Manage who works for you, your projects and Ducklab's local preferences." />
+      <div className="flex min-h-0 flex-1 gap-6 overflow-hidden">
       {/* The sub-menu: one concern on screen at a time (the user's own
           mock). Nothing unmounts except the fleet — config state and its
           one Save survive switching via CSS visibility. */}
@@ -255,6 +258,7 @@ export function Settings({
         </div>
       )}
 
+      </div>
       </div>
     </div>
   );
