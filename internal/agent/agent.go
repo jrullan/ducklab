@@ -372,12 +372,22 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				resp.Usage.CompletionTokens > 0 {
 				if loop.RunWriter != nil {
 					loop.RunWriter.AppendLLM(&LLMCallRecord{
-						Duckling:     string(loop.Duckling.ID),
-						Provider:     string(loop.Duckling.Provider),
-						Model:        loop.Duckling.Model,
-						Role:         string(turn.Role),
-						Request:      requestMap(req),
-						Response:     map[string]interface{}{"error": "thought-only reply: no content, no tool calls", "usage": resp.Usage},
+						Duckling: string(loop.Duckling.ID),
+						Provider: string(loop.Duckling.Provider),
+						Model:    loop.Duckling.Model,
+						Role:     string(turn.Role),
+						Request:  requestMap(req),
+						// The hidden reasoning is the only evidence of what the
+						// model was doing for those tokens; a record that keeps
+						// just the error cannot be diagnosed (Neocapture, a
+						// 373 s thought-only revision turn, 2026-08-29).
+						Response: map[string]interface{}{
+							"error":           "thought-only reply: no content, no tool calls",
+							"usage":           resp.Usage,
+							"reasoning_chars": len(c.Message.Reasoning),
+							"reasoning_head":  firstChars(c.Message.Reasoning, 2000),
+							"reasoning_tail":  lastChars(c.Message.Reasoning, 1000),
+						},
 						LatencyMs:    time.Since(start).Milliseconds(),
 						Attempt:      attempt,
 						FinishReason: "thought_only",
@@ -825,7 +835,7 @@ Ground rules, which you cannot change:
 	if turn.Persona == "consultant" {
 		rolePrompt = consultantPrompt
 	}
-	gateDesc := "The verification gate will run tests after you finish."
+	gateDesc := gateDescFor(turn)
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
 	// Dialect B: append fenced text protocol instructions
@@ -883,6 +893,37 @@ func main() {}
 	// This is filled in by the conversation engine
 
 	return messages
+}
+
+// gateDescFor tells the seat what ducklab does after its turn. A document
+// turn has no test gate — ducklab checks the document's structure — and
+// telling it "tests will run" sent a reviewer to call verify_run twice on a
+// requirements draft ("no command configured", Neocapture 2026-08-29).
+func gateDescFor(turn *Turn) string {
+	if turn != nil && (strings.HasPrefix(turn.Contract, "markdown_sections:") ||
+		turn.Role == config.RoleArchitect || turn.Role == config.RoleScribe || turn.Role == config.RoleTriager) {
+		return "This is a document turn: no tests run after it. ducklab checks the " +
+			"document's structure and the person decides at the gate. verify_run has nothing to run here."
+	}
+	return "The verification gate will run tests after you finish."
+}
+
+// firstChars and lastChars bound a string for the record without cutting
+// inside a rune.
+func firstChars(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+func lastChars(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return "…" + string(r[len(r)-n:])
 }
 
 // getRolePrompt returns the system prompt for a role (04 §6).
