@@ -138,6 +138,19 @@ describe("Cycle", () => {
     expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain("REQ-001 — Mobile-first timesheet");
   });
 
+  it("restores the exact selected section from a document deep link", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/spec")) return json({ kind: "spec", version: 1, approved: true, markdown: "", sections: [{ id: "SPEC-005", title: "Configurable timer", body: "Timers support selectable units.", implements: ["REQ-004"] }] });
+      if (p.endsWith("/trace/SPEC-005")) return json({ id: "SPEC-005", kind: "spec_section", title: "Configurable timer", up: ["REQ-004"] });
+      if (p.endsWith("/trace/REQ-004")) return json({ id: "REQ-004", kind: "requirement", title: "Timer units", down: ["SPEC-005"] });
+      if (p.includes("/trace/check")) return json({ errors: null });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="spec" section="SPEC-005" />);
+    expect(await screen.findByTestId("cycle-section")).toHaveTextContent("Configurable timer");
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("aria-current", "true");
+  });
+
   it("counts the API trace errors array, not only errors joined to visible sections", async () => {
     const apiPayload = {
       errors: Array.from({ length: 16 }, (_, i) => ({

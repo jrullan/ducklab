@@ -182,7 +182,7 @@ func (s *Service) ChatStart(ctx context.Context, projectID string, req ChatStart
 	// Findings become inert amendment cards in the consultation. The event is
 	// deliberately advisory: it does not invoke ProjectUpdate; that remains the
 	// desktop person's explicit Apply click.
-	if findings, doctorErr := config.Doctor(entry.Path); doctorErr == nil {
+	if findings, doctorErr := config.Doctor(entry.Path); req.AboutKind != "document" && doctorErr == nil {
 		cfg, _ := config.LoadProject(filepath.Join(entry.Path, ".ducklab", "project.toml"))
 		for _, finding := range findings {
 			old := ""
@@ -479,50 +479,48 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 			}
 		}
 	case "document":
-		if spine, err := artifact.LoadSpine(projectRoot); err == nil {
-			if node, walkErr := spine.Walk(aboutID); walkErr == nil {
-				fmt.Fprintf(&b, "%s %s: %s\n", node.Kind, node.ID, node.Title)
-				if len(node.Up) > 0 {
-					fmt.Fprintf(&b, "Implements: %s\n", strings.Join(node.Up, ", "))
-				}
-				if len(node.Down) > 0 {
-					fmt.Fprintf(&b, "Implemented by: %s\n", strings.Join(node.Down, ", "))
-				}
-				var section *artifact.Section
-				for _, document := range []*artifact.Document{spine.Requirements, spine.Spec, spine.Plan} {
-					if document != nil {
-						if candidate := document.Section(aboutID); candidate != nil {
-							section = candidate
-							break
-						}
+		if node, walkErr := s.TraceShow(ctx, rs.run.ProjectID, aboutID); walkErr == nil {
+			fmt.Fprintf(&b, "%s %s: %s\n", node.Kind, node.ID, node.Title)
+			if len(node.Up) > 0 {
+				fmt.Fprintf(&b, "Implements: %s\n", strings.Join(node.Up, ", "))
+			}
+			if len(node.Down) > 0 {
+				fmt.Fprintf(&b, "Implemented by: %s\n", strings.Join(node.Down, ", "))
+			}
+			kind := artifact.KindPlan
+			if strings.HasPrefix(aboutID, "REQ-") {
+				kind = artifact.KindRequirements
+			} else if strings.HasPrefix(aboutID, "SPEC-") {
+				kind = artifact.KindSpec
+			}
+			if document, loadErr := artifact.Load(projectRoot, kind); loadErr == nil && document.Section(aboutID) != nil {
+				section := document.Section(aboutID)
+				fmt.Fprintf(&b, "\n### Approved content\n\n%s\n", section.Body)
+			}
+			b.WriteString("\n### Related document chain\n")
+			for _, relatedID := range append(append([]string{}, node.Up...), node.Down...) {
+				if related, relatedErr := s.TraceShow(ctx, rs.run.ProjectID, relatedID); relatedErr == nil {
+					fmt.Fprintf(&b, "- %s %s: %s", related.Kind, related.ID, related.Title)
+					if len(related.Down) > 0 {
+						fmt.Fprintf(&b, " → %s", strings.Join(related.Down, ", "))
 					}
-				}
-				if section != nil {
-					fmt.Fprintf(&b, "\n### Approved content\n\n%s\n", section.Body)
-				}
-				b.WriteString("\n### Related document chain\n")
-				for _, relatedID := range append(append([]string{}, node.Up...), node.Down...) {
-					if related, relatedErr := spine.Walk(relatedID); relatedErr == nil {
-						fmt.Fprintf(&b, "- %s %s: %s", related.Kind, related.ID, related.Title)
-						if len(related.Down) > 0 {
-							fmt.Fprintf(&b, " → %s", strings.Join(related.Down, ", "))
-						}
-						b.WriteString("\n")
-					}
+					b.WriteString("\n")
 				}
 			}
+		} else {
+			fmt.Fprintf(&b, "Document section %s could not be loaded: %v\n", aboutID, walkErr)
 		}
 	}
 
 	// Configuration is a first-class consultant dossier: doctor findings are
 	// deterministic and read-only, while the loaded config supplies the current
 	// values a proposal must preserve as its "old" value.
-	if cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml")); err == nil {
+	if cfg, err := config.LoadProject(filepath.Join(projectRoot, ".ducklab", "project.toml")); aboutKind != "document" && err == nil {
 		// This deliberately names only project-scoped, non-secret settings. Never
 		// serialize the config struct: provider/environment credentials may grow in it.
 		fmt.Fprintf(&b, "\n## Current project configuration\n\n[verify] mode=%q tests=%q link_deps=%q\n[remote] name=%q fetch_on_open=%t allow_mcp_verbs=%q\n[github] pr_base=%q pr_draft=%t pr_tool=%q pr_body_by_scribe=%t\n[shell] allow_prefixes=%q deny=%q\n[git] protected_paths=%q\n", cfg.Verify.Mode, cfg.Verify.Tests, cfg.Verify.LinkDeps, cfg.Remote.Name, cfg.Remote.FetchOnOpen, cfg.Remote.AllowMCPVerbs, cfg.GitHub.PRBase, cfg.GitHub.PRDraft, cfg.GitHub.PRTool, cfg.GitHub.PRBodyByScribe, cfg.Shell.AllowPrefixes, cfg.Shell.Deny, cfg.Git.ProtectedPaths)
 	}
-	if findings, err := config.Doctor(projectRoot); err == nil && len(findings) > 0 {
+	if findings, err := config.Doctor(projectRoot); aboutKind != "document" && err == nil && len(findings) > 0 {
 		b.WriteString("\n## Configuration findings (priority order)\n\n")
 		for i, f := range findings {
 			fmt.Fprintf(&b, "%d. `%s`: propose `%s` — %s\n", i+1, f.Key, f.Proposed, f.Reason)

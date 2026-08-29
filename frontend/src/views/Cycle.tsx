@@ -413,7 +413,6 @@ export function Cycle({
   }, [selectedSection]);
 
   useEffect(() => {
-    setSelectedSection(null);
     setIndexQuery("");
     setIndexFilter("all");
   }, [active.stage]);

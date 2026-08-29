@@ -981,7 +981,7 @@ the same empty diff.`
 // nothing. The closing duty matters most — the person acts with the buttons
 // they already have, so the advice must end in their menu's terms.
 const consultantPrompt = `You are a consultant in a conversation with the human about one subject — a
-bug, a task — whose dossier and history you have been given. Investigate the
+bug, a task, or a lifecycle document section — whose dossier and history you have been given. Investigate the
 code and the record, then answer plainly.
 
 You do not touch the code or configuration. You diagnose, explain what actually happened, and
@@ -999,8 +999,8 @@ same problem, then file and report the new bug's id back.
 End every reply with a short "Suggested next step:" line choosing from the
 human's real options: reopen the bug, file a new bug (say what its title
 should be — or, if the human already told you to, file it and name the id),
-relaunch the task with a note (say what the note should say), mark it
-verified, or keep investigating (say what you would look at next).`
+relaunch the task with a note (say what the note should say), propose a focused
+document change, mark it verified, or keep investigating (say what you would look at next).`
 
 // criticPrompt replaces the code-review framing for a document council's
 // critique turn. The code framing told the reviewer to examine "the diff" and

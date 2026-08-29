@@ -36,17 +36,19 @@ func TestDocumentChatReceivesTheSelectedSectionAndItsChain(t *testing.T) {
 	for kind, body := range map[artifact.Kind]string{
 		artifact.KindRequirements: "## REQ-001 — Export invoices\n\nThe product exports invoices.\n",
 		artifact.KindSpec:         "## SPEC-001 — CSV exporter\n\n**Implements:** REQ-001\n\nThe exporter writes CSV.\n",
-		artifact.KindPlan:         "## M-001 — Shipping\n\n### T-001 — Build export\n\n**Implements:** SPEC-001\n\nImplement it.\n",
 	} {
 		if err := os.WriteFile(artifact.Path(dir, kind), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	prompt := s.chatPromptFor(context.Background(), &runState{run: &runlog.Run{ProjectID: p.ID}}, dir, "document", "REQ-001")
-	for _, want := range []string{"REQ-001", "Export invoices", "The product exports invoices", "SPEC-001", "CSV exporter"} {
+	prompt := s.chatPromptFor(context.Background(), &runState{run: &runlog.Run{ProjectID: p.ID}}, dir, "document", "SPEC-001")
+	for _, want := range []string{"REQ-001", "Export invoices", "SPEC-001", "CSV exporter", "The exporter writes CSV"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("document dossier is missing %q:\n%s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Configuration findings") {
+		t.Errorf("an unrelated doctor finding contaminated the document dossier:\n%s", prompt)
 	}
 }
 
