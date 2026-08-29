@@ -151,6 +151,7 @@ export function Cycle({
   const [indexQuery, setIndexQuery] = useState("");
   const [indexFilter, setIndexFilter] = useState<"all" | "breaks" | "no-task">("all");
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [operationOpen, setOperationOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -396,9 +397,8 @@ export function Cycle({
   // marked on the one tab that could show it.
   useEffect(() => {
     if (!selectedSection) return;
-    detailRef.current
-      ?.querySelector<HTMLElement>(`[id="cycle-section-${selectedSection}"]`)
-      ?.scrollIntoView({ block: "start" });
+    const section = detailRef.current?.querySelector<HTMLElement>(`[id="cycle-section-${selectedSection}"]`);
+    if (typeof section?.scrollIntoView === "function") section.scrollIntoView({ block: "start" });
   }, [selectedSection]);
 
   useEffect(() => {
@@ -441,12 +441,24 @@ export function Cycle({
       || (indexFilter === "no-task" && sectionHasNoTask(s));
     return matchesText && matchesState;
   });
+  const inspectedSection = indexedSections.find((section) => section.id === selectedSection) ?? indexedSections[0];
+  const inspectedMarker = markers.find((marker) => marker.id === inspectedSection?.id);
+  const inspectedErrors = errors.filter((error) => error.id === inspectedSection?.id);
+  const stageAction = active.stage === "intake"
+    ? sections.length === 0 ? "Draft requirements" : "Enter requirements"
+    : active.stage === "spec"
+      ? sections.length === 0 ? "Draft specification" : "Propose specification update"
+      : sections.length === 0 ? "Draft plan" : "Extend plan";
 
   return (
     <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
-      <header data-testid="cycle-frame-header" id="cycle-ledger" className="sticky top-0 z-10 border-b border-hairline bg-surface py-2">
-        <div className="flex items-center justify-between gap-3">
-          <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="flex gap-1">
+      <header data-testid="cycle-frame-header" id="cycle-ledger" className="sticky top-0 z-10 border-b border-hairline bg-surface pb-3">
+        <div className="flex items-center gap-3 py-3">
+          <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Requirements, specification and plan — one traceable project spine.</p></div>
+          <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
+          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
+        </div>
+        <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-3 gap-3">
           {STAGES.map((s) => (
             <button
               key={s.kind}
@@ -454,28 +466,23 @@ export function Cycle({
               aria-selected={s.kind === active.kind}
               data-testid={`cycle-tab-${s.stage}`}
               onClick={() => setActive(s)}
-              className={
-                "px-3 py-2 text-sm border-b-2 -mb-px " +
-                (s.kind === active.kind
-                  ? "border-hairline text-ink"
-                  : "border-transparent text-ink-muted hover:text-ink")
-              }
+              className={"rounded-card border px-4 py-3 text-left transition-colors " + (s.kind === active.kind ? "border-warning bg-surface2 text-ink" : "border-hairline text-ink-muted hover:bg-surface2 hover:text-ink")}
             >
-              <span>{s.label}</span>
-              {s.kind === active.kind && <span data-testid="cycle-stage-caption" className="ml-2 text-xs font-normal text-ink-muted">{s.story}</span>}
+              <span className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface1 text-xs">{STAGES.indexOf(s) + 1}</span><span className="font-medium">{s.label}</span></span>
+              <span className="mt-1 block text-xs font-normal text-ink-muted" data-testid={s.kind === active.kind ? "cycle-stage-caption" : undefined}>{s.kind === active.kind ? `${indexedSections.length} sections · current view` : s.story}</span>
             </button>
           ))}
-          </div>
         </div>
-        <section data-testid="cycle-stage-narrative" className="sr-only"><h1>The document chain</h1><p>{STAGES.map((s) => s.story).join(" ")}</p></section>
-        <div data-testid="cycle-health" className="mt-1 block text-xs text-ink-secondary">
-          <a href="#/cycle/ledger" className="underline-offset-2 hover:underline"><span>{errors.length === 0 ? "0 breaks in the spine — the spine is intact" : <>{errors.length} break{errors.length === 1 ? "" : "s"} in the spine</>}</span></a>
-          <a href="#/cycle/ledger" className="ml-2 underline">Open ledger</a>
-          <p data-testid="cycle-coverage-line" className="mt-1">{coverageLine(errors)}</p>
+        <section data-testid="cycle-stage-narrative" className="sr-only"><h2>The document chain</h2><p>{STAGES.map((s) => s.story).join(" ")}</p></section>
+        <div data-testid="cycle-health" className={`mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 rounded border px-3 py-2 text-xs ${errors.length ? "border-warning bg-surface2 text-ink" : "border-hairline text-ink-secondary"}`}>
+          <a href="#/cycle/ledger" className="font-medium underline-offset-2 hover:underline"><span>{errors.length === 0 ? "✓ 0 breaks in the spine — the spine is intact" : <>⚠ {errors.length} break{errors.length === 1 ? "" : "s"} in the spine</>}</span></a>
+          <p data-testid="cycle-coverage-line">{coverageLine(errors)}</p>
+          <a href="#/cycle/ledger" className="ml-auto rounded border border-hairline px-2 py-1 hover:text-ink">Review issues</a>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1 gap-4 overflow-hidden pt-3">
-        <nav data-testid="cycle-index" aria-label={`${active.label} section index`} className="sticky top-0 h-[calc(100vh-7rem)] w-64 shrink-0 overflow-y-auto border-r border-hairline pr-3">
+      <div className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden xl:grid-cols-[17rem_minmax(24rem,1fr)_19rem]">
+        <nav data-testid="cycle-index" aria-label={`${active.label} section index`} className="sticky top-0 min-h-0 overflow-y-auto border-r border-hairline py-4 pr-3">
+          <div className="mb-3 flex items-center justify-between"><h2 className="font-medium text-ink">{active.label}</h2><span className="text-xs text-ink-muted">{indexedSections.length}</span></div>
           <label className="sr-only" htmlFor="cycle-index-filter">Find a section</label>
           <input id="cycle-index-filter" data-testid="cycle-index-filter" value={indexQuery} onChange={(e) => setIndexQuery(e.target.value)} placeholder="Find a section…" className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
           <div className="mb-2 flex gap-1" role="group" aria-label="section state filters">
@@ -496,7 +503,7 @@ export function Cycle({
               const noTask = sectionHasNoTask(s);
               return <li key={s.id}>
                 <button type="button" data-testid="cycle-index-row" data-id={s.id} aria-current={selectedSection === s.id ? "true" : undefined} onClick={() => setSelectedSection(s.id)} className="w-full rounded px-2 py-1 text-left text-xs hover:bg-surface2">
-                  <span className="font-mono">{s.id} —</span> {s.title}
+                  <span className="font-mono text-ink-muted">{s.id}</span><span className="ml-2">{s.title}</span>
                   {hasBreak && <span className="ml-1 text-serious" title="break">break</span>}
                   {noTask && <span className="ml-1 text-warn" title="no task yet">no task yet</span>}
                   {artifact?.proposal && !proposalDecided && <span className="ml-1 text-ink-muted" title="proposal pending">proposal pending</span>}
@@ -505,7 +512,8 @@ export function Cycle({
             })}
           </ol>
         </nav>
-        <div ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain pr-2">
+        <main ref={detailRef} data-testid="cycle-detail" className="flex min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain px-6 py-4">
+        <div className="mb-4 flex items-center gap-2 text-xs text-ink-muted"><span>{active.label}</span>{inspectedSection && <><span>/</span><span className="font-mono">{inspectedSection.id}</span></>}</div>
 
         {failure && (
           <div data-testid="cycle-error" className="mb-4 text-sm text-critical">
@@ -656,9 +664,10 @@ export function Cycle({
         )}
 
         {!loading && (!artifact?.proposal || proposalDecided) && (
-          <details data-testid="cycle-start" className="order-4 mb-6 rounded-card border border-hairline p-3">
-            <summary className="cursor-pointer text-sm text-ink">{redraftSummary(mode, roster, measured)}</summary>
-            <div className="pt-2">
+          <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "order-4 mb-6 mt-6 rounded-card border border-hairline p-3"}>
+            <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
+            <div className={operationOpen ? "" : "pt-2"}>
+            {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{active.label} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">Creates a proposal; approved {active.label.toLowerCase()} remain unchanged until you accept it.</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the
                 architect the whole document with orders to keep it — and the
@@ -1060,7 +1069,18 @@ export function Cycle({
         )}
 
 
-        </div>
+        </main>
+      <aside data-testid="cycle-inspector" className="hidden min-h-0 overflow-y-auto border-l border-hairline px-4 py-4 xl:block">
+          <h2 className="text-sm font-semibold text-ink">Section inspector</h2>
+          {!inspectedSection ? <p className="mt-3 text-sm text-ink-muted">Select a section to inspect its traceability.</p> : <>
+            <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
+            <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Traceability</h3>
+              {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warn">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warn">⚠ No planned task yet</p>}</div>}
+              {(inspectedSection.implements ?? []).length > 0 && <div className="mt-3 text-xs text-ink-secondary">{inspectedSection.implements!.map((claim) => <span key={claim} className="mr-2 rounded border border-hairline px-1.5 py-0.5 font-mono">{claim}</span>)}</div>}
+            </section>
+            <div className="border-t border-hairline pt-4"><a href="#/cycle/ledger" className="block rounded border border-hairline px-3 py-2 text-center text-sm">Review in ledger</a><button type="button" onClick={() => setOperationOpen(true)} className="mt-2 w-full text-left text-xs text-ink-muted underline">{active.stage === "intake" ? "Propose requirements update" : stageAction}</button><p className="mt-3 text-xs text-ink-muted">Document changes are created through a run; approved content remains unchanged until you accept its proposal.</p></div>
+          </>}
+        </aside>
       </div>
     </div>
   );
@@ -1090,13 +1110,13 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
       data-testid="cycle-section"
       data-broken={broken.has(section.id) ? "true" : "false"}
       className={
-        "rounded-card border p-3 " +
+        "border-b px-1 py-5 " +
         (broken.has(section.id) ? "border-serious" : "border-hairline")
       }
     >
       <div className="flex items-baseline gap-2">
         <span className="font-mono text-xs text-ink-muted">{section.id}</span>
-        <span className="text-sm font-medium text-ink">{section.title}</span>
+        <h2 className="text-lg font-semibold text-ink">{section.title}</h2>
       </div>
       {broken.has(section.id) && (
         <p data-testid="cycle-section-break" className="mt-1 text-xs text-serious">break in the spine</p>
@@ -1305,4 +1325,3 @@ function describeRun(mode: string, roster: readonly RosterEntry[], rounds = 2): 
   return `${architect} drafts, ${listed} ${critics.length === 1 ? "critiques" : "each critique"}` +
     (rounds > 1 ? `, and they go round again unless ${critics.length === 1 ? critics[0] : "every critic"} approves` : "");
 }
-

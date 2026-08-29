@@ -60,6 +60,28 @@ describe("Cycle", () => {
     expect(narrative).toHaveTextContent("cut into tasks; you birth them");
   });
 
+  it("presents Documents as a pipeline with contextual inspection and an operational drawer", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json(TRACE);
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" />);
+
+    expect(await screen.findByRole("heading", { name: "Documents", level: 1 })).toBeInTheDocument();
+    expect(screen.getByTestId("cycle-stage-control").querySelectorAll('[role="tab"]')).toHaveLength(3);
+    const inspector = screen.getByTestId("cycle-inspector");
+    expect(inspector).toHaveTextContent("REQ-001");
+    fireEvent.click(screen.getAllByTestId("cycle-index-row")[1]!);
+    expect(inspector).toHaveTextContent("REQ-002");
+    expect(inspector).toHaveTextContent("no spec section implements this requirement");
+
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+    expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");
+    expect(screen.getByRole("heading", { name: "Enter requirements" })).toBeInTheDocument();
+    expect(screen.getByText(/approved requirements remain unchanged/i)).toBeInTheDocument();
+  });
+
   it("lists sections and marks the ones the spine reports broken", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
@@ -230,12 +252,13 @@ describe("Cycle", () => {
     expect(proposal).toHaveTextContent("REQ-001");
     expect(proposal).not.toHaveTextContent("SPEC-008");
     expect(proposal).not.toHaveTextContent("M-001");
-    expect(screen.getAllByText("REQ-001", { exact: true })).toHaveLength(1);
+    expect(screen.getAllByTestId("cycle-section")).toHaveLength(1);
+    expect(screen.getAllByTestId("cycle-index-row")).toHaveLength(1);
     expect(screen.queryByText("SPEC-008", { exact: true })).toBeNull();
 
     fireEvent.click(screen.getByTestId("cycle-tab-spec"));
-    await waitFor(() => expect(screen.getAllByText("SPEC-008", { exact: true })).toHaveLength(1));
-    expect(screen.queryByText("REQ-001", { exact: true })).toBeNull();
+    await waitFor(() => expect(screen.getAllByTestId("cycle-section")).toHaveLength(1));
+    expect(screen.getByTestId("cycle-index-row")).toHaveAttribute("data-id", "SPEC-008");
   });
 });
 
