@@ -25,6 +25,7 @@ const (
 	UnjustifiedTask   TraceErrorKind = "unjustified_task"
 	DanglingReference TraceErrorKind = "dangling_reference"
 	AcceptedDraftReq  TraceErrorKind = "accepted_task_on_draft_requirement"
+	UnrealizedIntent  TraceErrorKind = "unrealized_intent"
 	// The horizontal edge: task → task. A cycle is fatal — every task in it
 	// waits forever. A forward dependency is a plan whose order contradicts its
 	// own graph: runnable, but not in the order it is written.
@@ -50,6 +51,7 @@ func (e TraceError) String() string {
 
 // Spine is the parsed cycle: requirements, spec sections, and plan tasks.
 type Spine struct {
+	Intent       *Document
 	Requirements *Document
 	Spec         *Document
 	Plan         *Document
@@ -57,6 +59,10 @@ type Spine struct {
 
 // LoadSpine reads the three artifacts a check needs.
 func LoadSpine(projectRoot string) (*Spine, error) {
+	intent, err := EnsureIntent(projectRoot)
+	if err != nil {
+		return nil, err
+	}
 	reqs, err := Load(projectRoot, KindRequirements)
 	if err != nil {
 		return nil, err
@@ -69,7 +75,7 @@ func LoadSpine(projectRoot string) (*Spine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Spine{Requirements: reqs, Spec: spec, Plan: plan}, nil
+	return &Spine{Intent: intent, Requirements: reqs, Spec: spec, Plan: plan}, nil
 }
 
 // LoadSpinePending reads the spine with any pending proposal standing in for
@@ -85,7 +91,11 @@ func LoadSpine(projectRoot string) (*Spine, error) {
 // different actions, and a rail that cannot tell them apart is worse than one
 // that says nothing.
 func LoadSpinePending(projectRoot string) (*Spine, []Kind, error) {
-	spine := &Spine{}
+	intent, err := EnsureIntent(projectRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	spine := &Spine{Intent: intent}
 	var proposed []Kind
 	for _, it := range []struct {
 		kind Kind
@@ -122,6 +132,15 @@ func LoadSpinePending(projectRoot string) (*Spine, []Kind, error) {
 // names the id and what it is missing.
 func (s *Spine) Check() []TraceError {
 	var errs []TraceError
+	if s.Intent != nil {
+		for _, intent := range s.Intent.Sections {
+			if strings.EqualFold(intent.Field("outcome"), "accepted") &&
+				len(idsInField(intent.Field("requirements"))) == 0 &&
+				!strings.Contains(intent.Body, "Imported from the historical run record") {
+				errs = append(errs, TraceError{Kind: UnrealizedIntent, ID: intent.ID, Detail: "accepted intention changed no requirement"})
+			}
+		}
+	}
 
 	reqIDs := map[string]Section{}
 	for _, r := range s.Requirements.Sections {
@@ -462,8 +481,19 @@ func nonNormative(sec Section) bool {
 }
 
 func (s *Spine) Walk(id string) (*Node, error) {
+	if s.Intent != nil {
+		if sec := s.Intent.Section(id); sec != nil {
+			n := &Node{ID: id, Kind: "intent", Title: sec.Title}
+			for _, req := range s.Requirements.Sections {
+				if contains(idsInField(req.Field("originates from")), id) {
+					n.Down = append(n.Down, req.ID)
+				}
+			}
+			return n, nil
+		}
+	}
 	if sec := s.Requirements.Section(id); sec != nil {
-		n := &Node{ID: id, Kind: "requirement", Title: sec.Title}
+		n := &Node{ID: id, Kind: "requirement", Title: sec.Title, Up: idsInField(sec.Field("originates from"))}
 		for _, sp := range s.Spec.Sections {
 			if contains(sp.Implements, id) {
 				n.Down = append(n.Down, sp.ID)
@@ -485,7 +515,7 @@ func (s *Spine) Walk(id string) (*Node, error) {
 	if sec := s.Plan.Section(id); sec != nil {
 		return &Node{ID: id, Kind: planKind(id), Title: sec.Title, Up: sec.Implements}, nil
 	}
-	return nil, fmt.Errorf("%q is not in requirements, spec or plan", id)
+	return nil, fmt.Errorf("%q is not in intent, requirements, spec or plan", id)
 }
 
 func planKind(id string) string {

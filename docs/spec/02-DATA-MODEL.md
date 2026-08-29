@@ -529,7 +529,7 @@ the body is the human's and the model's.
 
 ```yaml
 ---
-kind: requirements | spec | plan | adr | review | release | project
+kind: intent | requirements | spec | plan | adr | review | release | project
 project: miempresa
 version: 3                 # bumped on every write
 updated_at: 2026-07-25T15:30:12Z
@@ -543,7 +543,27 @@ approved_by: human         # or "" while unapproved
 ---
 ```
 
-### 5.2 `requirements.md`
+### 5.2 `intent.md`
+
+An engine-maintained, append-only journal of the person's briefs. The Council
+never rewrites the original text.
+
+```markdown
+## INT-003 — Add measurements HUD
+
+**Run:** r-20260803-041333-ehwj
+**Submitted at:** 2026-08-03T04:13:33Z
+**Outcome:** accepted
+**Requirements:** REQ-008, REQ-009
+
+### Original brief
+
+I want to have a HUD display that shows the current measurements…
+```
+
+### 5.3 `requirements.md`
+
+Requirements carry `**Originates from:** INT-...` edges into that journal.
 
 Every requirement is an H2 whose text starts with its id. Parsing is by this
 rule and nothing else; a section that does not match is preserved verbatim but
@@ -562,7 +582,7 @@ Body prose here.
 - Given a wrong password, the response is 401 and no session is created.
 ```
 
-### 5.3 `spec.md`
+### 5.4 `spec.md`
 
 ```markdown
 ## SPEC-004 — Session tokens
@@ -576,7 +596,7 @@ Design prose, interfaces, schemas.
 `Implements:` is the machine-readable edge into `traceability`. A spec section
 without an `Implements:` line is a trace error.
 
-### 5.4 `plan.md`
+### 5.5 `plan.md`
 
 ```markdown
 ## M-01 — Authentication
@@ -590,7 +610,7 @@ without an `Implements:` line is a trace error.
 What done looks like, in one or two sentences.
 ```
 
-### 5.5 `project.md` — rolling project memory
+### 5.6 `project.md` — rolling project memory
 
 A short, always-injected context file. Written by Ducklab, editable by the human,
 appended to on every `run accept`.

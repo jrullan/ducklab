@@ -86,10 +86,10 @@ func toolList() []map[string]interface{} {
 		},
 		{
 			"name":        "artifact_get",
-			"description": "Read a project document: requirements, spec or plan — approved content plus any pending proposal.",
+			"description": "Read a project document: intent, requirements, spec or plan — approved content plus any pending proposal.",
 			"inputSchema": obj(map[string]interface{}{
 				"project_id": str("the project id"),
-				"kind":       str("requirements | spec | plan"),
+				"kind":       str("intent | requirements | spec | plan"),
 			}, "project_id", "kind"),
 		},
 		{

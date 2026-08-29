@@ -529,6 +529,20 @@ func (rs *runState) answeredDecisions() string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
+// intentAnswers is the durable human contribution when Intake began as an
+// interview instead of a pasted brief. Questions provide necessary context,
+// but answers remain the person's words; keep the exchange without the
+// replay-only instructions answeredDecisions adds to a model prompt.
+func (rs *runState) intentAnswers() string {
+	rs.wmu.Lock()
+	defer rs.wmu.Unlock()
+	var b strings.Builder
+	for _, p := range rs.qa {
+		fmt.Fprintf(&b, "Q: %s\nA: %s\n\n", p.q, p.a)
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // answers returns the answers already given for this run, keyed by question id.
 func (rs *runState) answers() map[string]string {
 	rs.wmu.Lock()

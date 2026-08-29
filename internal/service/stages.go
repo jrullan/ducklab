@@ -317,6 +317,24 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// A --from that is not a readable path is treated as the brief text
 		// itself: a user pasting a sentence should not have to make a file.
 	}
+	// Capture the person's words before references, digests, or any other
+	// generated context are appended. Intent is provenance, not a prompt dump.
+	originalBrief := seed
+	intentText := originalBrief
+	if strings.TrimSpace(req.Revise) != "" {
+		// A requested correction is itself new human intent. Do not duplicate
+		// the inherited seed and call it new; preserve the words that changed it.
+		intentText = req.Revise
+	}
+	if req.Stage == "intake" && !req.Adopt && !req.resumed && strings.TrimSpace(intentText) != "" {
+		if _, err := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, intentText); err != nil {
+			s.failRun(rs, fmt.Errorf("record intent: %w", err))
+			return
+		}
+	}
+	if strings.TrimSpace(originalBrief) != "" {
+		rs.writer.WriteBrief(originalBrief)
+	}
 	// References load AFTER the roster and tracker below: which mode fits —
 	// inline or digest — is the architect seat's property, and digestion is
 	// real spend that must land on this run's ledger.
@@ -384,17 +402,12 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			s.failRun(rs, fmt.Errorf("references: %w", rerr))
 			return
 		}
-		// Appended to the seed, which is recorded as the brief: the
-		// references ARE part of what was asked for, and the brief file is
-		// where a person checks the draft against its inputs.
+		// References are prompt context, recorded by their own run evidence.
+		// They must not be folded into the person's verbatim Intent entry.
 		seed += refs
 	}
-	if seed != "" {
-		// Kept as its own file. Comparing requirements against what was asked
-		// for is the first thing anyone does with them, and the brief was
-		// reachable only by digging it out of a prompt in llm.jsonl.
-		rs.writer.WriteBrief(seed)
-	}
+	// `seed` now carries prompt context as well as the brief. brief.md was
+	// deliberately written above, before that enrichment.
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
 		RunID:       rs.run.ID,
@@ -612,6 +625,28 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		s.failRun(rs, err)
 		return
 	}
+	if req.Stage == "intake" && !req.Adopt && strings.TrimSpace(intentText) == "" {
+		// Empty Intake interviews the person. Once it succeeds, preserve those
+		// answers as the intention that actually produced the proposal.
+		if answers := rs.intentAnswers(); answers != "" {
+			if _, appendErr := artifact.AppendIntent(projectRoot, rs.run.ID, rs.run.StartedAt, answers); appendErr != nil {
+				s.failRun(rs, fmt.Errorf("record interviewed intent: %w", appendErr))
+				return
+			}
+		}
+	}
+	if req.Stage == "intake" {
+		// Add provenance while the proposal is still at its gate, not during
+		// promotion after the person has already read it. The edge is engine
+		// metadata, but it remains part of the document they approve.
+		if _, _, linkErr := artifact.LinkRequirementsProposal(projectRoot, rs.run.ID); linkErr != nil {
+			s.failRun(rs, fmt.Errorf("link intent to requirements proposal: %w", linkErr))
+			return
+		}
+		if linked, loadErr := artifact.LoadProposed(projectRoot, artifact.KindRequirements); loadErr == nil && linked != nil {
+			result.Proposed = linked
+		}
+	}
 
 	rs.writer.AppendEvent("proposal", map[string]interface{}{
 		"kind":     string(result.Kind),
@@ -760,6 +795,11 @@ func (s *Service) ArtifactGet(ctx context.Context, projectID, kind string) (map[
 		return nil, err
 	}
 	k := artifact.Kind(kind)
+	if k == artifact.KindIntent {
+		if _, err := artifact.EnsureIntent(entry.Path); err != nil {
+			return nil, err
+		}
+	}
 
 	current, err := artifact.Load(entry.Path, k)
 	if err != nil {
@@ -821,8 +861,21 @@ func (s *Service) ArtifactPromote(ctx context.Context, projectID, kind, approved
 	if proposed, _ := artifact.LoadProposed(entry.Path, artifact.Kind(kind)); proposed != nil {
 		runID = proposed.Front.RunID
 	}
+	var intentRequirements []string
+	if artifact.Kind(kind) == artifact.KindRequirements && runID != "" {
+		if _, linked, linkErr := artifact.LinkRequirementsProposal(entry.Path, runID); linkErr != nil {
+			return nil, linkErr
+		} else {
+			intentRequirements = linked
+		}
+	}
 	if _, err := artifact.Promote(entry.Path, artifact.Kind(kind), approvedBy); err != nil {
 		return nil, err
+	}
+	if artifact.Kind(kind) == artifact.KindRequirements && runID != "" {
+		if err := artifact.ResolveIntent(entry.Path, runID, "accepted", intentRequirements); err != nil {
+			return nil, err
+		}
 	}
 	// Close the run that produced it. Promoting answered its gate, and a run
 	// left paused on a question already decided sits in the inbox forever:

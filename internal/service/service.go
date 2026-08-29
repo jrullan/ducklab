@@ -3760,6 +3760,9 @@ func (s *Service) resolveSuperseded(id, resolution string) {
 	rs.run.Status = "done"
 	rs.run.Resolution = resolution
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if rs.run.Stage == "intake" {
+		_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "superseded", nil)
+	}
 	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "superseded", "detail": resolution})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": rs.run.Verdict})
@@ -3861,6 +3864,9 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	rs.run.Status = "done"
 	rs.run.Verdict = "FAILED"
 	rs.run.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	if rs.run.Stage == "intake" {
+		_ = artifact.ResolveIntent(rs.projectPath, rs.run.ID, "not accepted", nil)
+	}
 	clearPending(rs.run)
 	w.AppendEvent("human", map[string]interface{}{"action": "reject", "reason": reason})
 	w.AppendEvent("run_end", map[string]interface{}{"verdict": "FAILED"})

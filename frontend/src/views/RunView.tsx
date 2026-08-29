@@ -60,7 +60,7 @@ function traceKind(crumb: TraceCrumb): string {
 
 function traceHref(crumb: TraceCrumb): string {
   const kind = traceKind(crumb);
-  const stage = kind.includes("require") || kind === "req" ? "intake" : kind.includes("spec") ? "spec" : "plan";
+  const stage = kind.includes("intent") || kind === "int" ? "intent" : kind.includes("require") || kind === "req" ? "intake" : kind.includes("spec") ? "spec" : "plan";
   return routeHref({ name: "cycle", stage, section: crumb.id });
 }
 
@@ -875,8 +875,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // children kept painting, so a finished run drew its diff on top of its own
   // conversation. The page scrolls; only the conversation is bounded, and the
   // nav stays visible because the app shell holds the scroll, not this view.
-  const documentChat = run.stage === "chat" ? /^chat about document ((?:REQ|SPEC|M|T)-\d+)$/i.exec(run.note ?? "")?.[1] : undefined;
-  const documentStage = documentChat?.startsWith("REQ-") ? "intake" : documentChat?.startsWith("SPEC-") ? "spec" : documentChat ? "plan" : undefined;
+  const documentChat = run.stage === "chat" ? /^chat about document ((?:INT|REQ|SPEC|M|T)-\d+)$/i.exec(run.note ?? "")?.[1] : undefined;
+  const documentStage = documentChat?.startsWith("INT-") ? "intent" : documentChat?.startsWith("REQ-") ? "intake" : documentChat?.startsWith("SPEC-") ? "spec" : documentChat ? "plan" : undefined;
   return (
     <div data-testid="run-view">
       {/* Pinned while the transcript scrolls: the header is the run's

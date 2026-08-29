@@ -482,13 +482,23 @@ func (s *Service) chatPromptFor(ctx context.Context, rs *runState, projectRoot, 
 		if node, walkErr := s.TraceShow(ctx, rs.run.ProjectID, aboutID); walkErr == nil {
 			fmt.Fprintf(&b, "%s %s: %s\n", node.Kind, node.ID, node.Title)
 			if len(node.Up) > 0 {
-				fmt.Fprintf(&b, "Implements: %s\n", strings.Join(node.Up, ", "))
+				label := "Implements"
+				if node.Kind == "requirement" {
+					label = "Originates from"
+				}
+				fmt.Fprintf(&b, "%s: %s\n", label, strings.Join(node.Up, ", "))
 			}
 			if len(node.Down) > 0 {
-				fmt.Fprintf(&b, "Implemented by: %s\n", strings.Join(node.Down, ", "))
+				label := "Implemented by"
+				if node.Kind == "intent" {
+					label = "Refined into"
+				}
+				fmt.Fprintf(&b, "%s: %s\n", label, strings.Join(node.Down, ", "))
 			}
 			kind := artifact.KindPlan
-			if strings.HasPrefix(aboutID, "REQ-") {
+			if strings.HasPrefix(aboutID, "INT-") {
+				kind = artifact.KindIntent
+			} else if strings.HasPrefix(aboutID, "REQ-") {
 				kind = artifact.KindRequirements
 			} else if strings.HasPrefix(aboutID, "SPEC-") {
 				kind = artifact.KindSpec

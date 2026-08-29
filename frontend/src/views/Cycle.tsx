@@ -1,5 +1,5 @@
 /**
- * The Cycle view: the three artifact stages and the spine that links them
+ * The Cycle view: human intent, the three artifact stages, and the spine that links them
  * (08 §4, AC-40, AC-43).
  *
  * The point of this screen is that traceability is *visible*. A requirement
@@ -22,7 +22,8 @@ import { canChooseFile, chooseFile } from "../lib/picker";
 import { routeHref } from "../app/routes";
 
 const STAGES = [
-  { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ", story: "you write this; nobody codes from it" },
+	{ stage: "intent", kind: "intent", label: "Intent", prefix: "INT", story: "your briefs, preserved as the product evolves" },
+  { stage: "intake", kind: "requirements", label: "Requirements", prefix: "REQ", story: "the council refines intent into a contract" },
   { stage: "spec", kind: "spec", label: "Spec", prefix: "SPEC", story: "ducklings draft; you agree behavior" },
   { stage: "plan", kind: "plan", label: "Plan", prefix: "M", story: "cut into tasks; you birth them" },
 ] as const;
@@ -42,7 +43,9 @@ export function Cycle({
   section?: string;
 }) {
   const [active, setActive] = useState<StageDef>(
-    () => STAGES.find((s) => s.stage === stage) ?? STAGES[0],
+    // Existing Documents bookmarks open on Requirements; Intent is the first
+    // stage in the chain without stealing the reader's established landing.
+    () => STAGES.find((s) => s.stage === stage) ?? STAGES[1],
   );
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [errors, setErrors] = useState<TraceError[]>([]);
@@ -257,7 +260,9 @@ export function Cycle({
   // What was asked for, so the document can be read against it. The run id
   // comes from whichever version is on screen: the proposal while one is
   // pending, the accepted document afterwards.
-  const briefRun = artifact?.proposal?.run_id ?? artifact?.run_id;
+  // Requirements' run_id names only the latest whole-document producer; it
+  // is not the origin of every requirement. Intent owns that history now.
+  const briefRun = active.stage === "intent" || active.stage === "intake" ? undefined : artifact?.proposal?.run_id ?? artifact?.run_id;
   // The proposing run's legal actions, from the engine. A hardcoded
   // ["accept","request_changes","reject"] here would re-encode the rules this
   // exists to stop encoding; while they load, no button is better than a wrong
@@ -461,7 +466,7 @@ export function Cycle({
       location.hash = routeHref({ name: "cycle", stage: active.stage });
       return;
     }
-    const target = id.startsWith("REQ-") ? STAGES[0] : id.startsWith("SPEC-") ? STAGES[1] : STAGES[2];
+    const target = id.startsWith("INT-") ? STAGES[0] : id.startsWith("REQ-") ? STAGES[1] : id.startsWith("SPEC-") ? STAGES[2] : STAGES[3];
     setActive(target);
     setSelectedSection(id);
     location.hash = routeHref({ name: "cycle", stage: target.stage, section: id });
@@ -476,7 +481,9 @@ export function Cycle({
     const loadChain = async () => {
       const found = new Map<string, TraceNode>();
       const visit = async (id: string, depth: number) => {
-        if (found.has(id) || depth > 2) return;
+        // Intent adds one legitimate hop ahead of the existing spine.
+        // INT → REQ → SPEC → task must remain visible end to end.
+        if (found.has(id) || depth > 3) return;
         const raw = await client.traceShow(projectId, id).catch(() => null);
         if (!raw || typeof raw.id !== "string") return;
         const node: TraceNode = {
@@ -495,7 +502,7 @@ export function Cycle({
     void loadChain();
     return () => { cancelled = true; };
   }, [client, projectId, selectedSection]);
-  const stageAction = inspectedSection ? `Propose change to ${inspectedSection.id}` : active.stage === "intake"
+  const stageAction = active.stage === "intent" ? "Add intention" : inspectedSection ? `Propose change to ${inspectedSection.id}` : active.stage === "intake"
     ? sections.length === 0 ? "Draft requirements" : "Enter requirements"
     : active.stage === "spec"
       ? sections.length === 0 ? "Draft specification" : "Propose specification update"
@@ -505,11 +512,11 @@ export function Cycle({
     <div data-testid="cycle-view" className="flex h-[calc(100vh-4rem)] min-h-0 flex-col overflow-hidden">
       <header data-testid="cycle-frame-header" id="cycle-ledger" className="sticky top-0 z-10 border-b border-hairline bg-surface pb-3">
         <div className="flex items-center gap-3 py-3">
-          <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Requirements, specification and plan — one traceable project spine.</p></div>
+          <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Intent, requirements, specification and plan — one traceable project spine.</p></div>
           <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
-          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
+          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intent") { setActive(STAGES[1]); location.hash = routeHref({ name: "cycle", stage: "intake" }); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
         </div>
-        <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-3 gap-3">
+        <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-4 gap-3">
           {STAGES.map((s) => (
             <button
               key={s.kind}
@@ -536,7 +543,7 @@ export function Cycle({
           <div className="mb-3 flex items-center justify-between"><h2 className="font-medium text-ink">{active.label}</h2><span className="text-xs text-ink-muted">{indexedSections.length}</span></div>
           <label className="sr-only" htmlFor="cycle-index-filter">Find a section</label>
           <input id="cycle-index-filter" data-testid="cycle-index-filter" value={indexQuery} onChange={(e) => setIndexQuery(e.target.value)} placeholder="Find a section…" className="mb-2 w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm" />
-          <div className="mb-2 flex gap-1" role="group" aria-label="section state filters">
+          {active.stage !== "intent" && <div className="mb-2 flex gap-1" role="group" aria-label="section state filters">
             {([["all", "All"], ["breaks", "Breaks"], ["no-task", "No task yet"]] as const).map(([value, label]) => (
               <button
                 key={value}
@@ -547,7 +554,7 @@ export function Cycle({
                 className="rounded border border-hairline px-1.5 py-0.5 text-xs text-ink-muted aria-pressed:border-ink aria-pressed:text-ink"
               >{label}</button>
             ))}
-          </div>
+          </div>}
           <ol className="space-y-1" data-testid="cycle-index-entries">
             {visibleSections.map((s) => {
               const hasBreak = broken.has(s.id);
@@ -1134,15 +1141,15 @@ export function Cycle({
         </main>
       <aside data-testid="cycle-inspector" className="hidden min-h-0 overflow-y-auto border-l border-hairline px-4 py-4 xl:block">
           <h2 className="text-sm font-semibold text-ink">Section inspector</h2>
-          {!inspectedSection ? <div className="mt-4 rounded border border-dashed border-hairline p-4"><p className="text-sm font-medium text-ink">No section selected</p><p className="mt-1 text-xs text-ink-muted">Select a {active.stage === "intake" ? "requirement" : active.stage === "spec" ? "spec section" : "plan section"} to inspect its traceability.</p></div> : <>
-            <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
+          {!inspectedSection ? <div className="mt-4 rounded border border-dashed border-hairline p-4"><p className="text-sm font-medium text-ink">No section selected</p><p className="mt-1 text-xs text-ink-muted">Select an {active.stage === "intent" ? "intention" : active.stage === "intake" ? "requirement" : active.stage === "spec" ? "spec section" : "plan section"} to inspect its traceability.</p></div> : <>
+            <div className="mt-4 border-b border-hairline pb-4"><p className="font-mono text-xs text-ink-muted">{inspectedSection.id}</p><p className="mt-1 text-sm font-medium text-ink">{inspectedSection.title}</p><span className="mt-2 inline-flex rounded-full border border-hairline px-2 py-0.5 text-xs text-ink-secondary">{active.stage === "intent" ? "Recorded intention" : artifact?.proposal && !proposalDecided ? "Proposal pending" : "Approved section"}</span></div>
             <section className="py-4"><h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Document chain</h3>
               {inspectedErrors.length === 0 && !inspectedMarker?.noTask ? <p className="mt-2 text-sm text-good">✓ No break reported for this section</p> : <div className="mt-2 space-y-2">{inspectedErrors.map((error) => <p key={`${error.kind}-${error.detail}`} className="text-sm text-warn">⚠ {error.detail}</p>)}{inspectedMarker?.noTask && <p className="text-sm text-warn">⚠ No planned task yet</p>}</div>}
               <div className="mt-4 space-y-3" data-testid="cycle-document-chain">
-                {(["requirement", "spec_section", "milestone", "task"] as const).map((kind) => {
+                {(["intent", "requirement", "spec_section", "milestone", "task"] as const).map((kind) => {
                   const nodes = traceChain.filter((node) => node.kind === kind);
                   if (nodes.length === 0) return null;
-                  const label = kind === "requirement" ? "Requirement" : kind === "spec_section" ? "Specification" : kind === "milestone" ? "Milestone" : "Plan tasks";
+                  const label = kind === "intent" ? "Intent" : kind === "requirement" ? "Requirement" : kind === "spec_section" ? "Specification" : kind === "milestone" ? "Milestone" : "Plan tasks";
                   return <div key={kind}><p className="mb-1 text-[10px] uppercase tracking-wide text-ink-muted">{label}</p><div className="space-y-1">{nodes.map((node) => {
                     const task = tasks.find((item) => item.id === node.id);
                     return <button key={node.id} type="button" data-testid="cycle-chain-node" data-id={node.id} aria-current={node.id === selectedSection ? "true" : undefined} onClick={() => selectDocumentSection(node.id)} className="block w-full rounded border border-hairline px-2 py-1.5 text-left hover:border-warning hover:bg-surface2"><span className="font-mono text-xs text-ink">{node.id}</span><span className="ml-2 text-xs text-ink-secondary">{node.title}</span>{task && <span className="ml-2 text-[10px] text-ink-muted">{task.status}</span>}</button>;
@@ -1151,14 +1158,14 @@ export function Cycle({
               </div>
             </section>
             <div className="border-t border-hairline pt-4">
-              <button type="button" data-testid="cycle-propose-section" onClick={() => {
+              {active.stage !== "intent" && <button type="button" data-testid="cycle-propose-section" onClick={() => {
                 const prompt = `Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `;
                 if (active.stage === "plan") { setPlanAction("amend"); setAmendment(prompt); } else setBrief(prompt);
                 setOperationOpen(true);
-              }} className="w-full rounded bg-ink px-3 py-2 text-sm font-medium text-page">Propose change to {inspectedSection.id}</button>
+              }} className="w-full rounded bg-ink px-3 py-2 text-sm font-medium text-page">Propose change to {inspectedSection.id}</button>}
               {(inspectedErrors.length > 0 || inspectedMarker?.break) && <a href="#/cycle/ledger" className="mt-2 block rounded border border-hairline px-3 py-2 text-center text-sm">Review traceability issue</a>}
               {fleet.length > 0 && <div className="mt-3"><ChatAbout client={client} projectId={projectId} aboutKind="document" aboutId={inspectedSection.id} ducklings={fleet} label={`Chat about ${inspectedSection.id}`} placeholder={`What would you like to understand or explore about ${inspectedSection.id}?`} /></div>}
-              <p className="mt-3 text-xs text-ink-muted">Changes are proposed through a run. The approved document remains unchanged until you accept the proposal.</p>
+              <p className="mt-3 text-xs text-ink-muted">{active.stage === "intent" ? "Intent entries preserve what you asked for. New intentions are submitted through Intake." : "Changes are proposed through a run. The approved document remains unchanged until you accept the proposal."}</p>
             </div>
           </>}
         </aside>
@@ -1273,10 +1280,11 @@ function SectionCard({ section, broken, tasks = [], traceDown, isPlan = false, p
 }
 
 function DocumentSelectionEmpty({ stage }: { stage: string }) {
-  const section = stage === "intake" ? "requirement" : stage === "spec" ? "spec section" : "plan section";
+  const section = stage === "intent" ? "intention" : stage === "intake" ? "requirement" : stage === "spec" ? "spec section" : "plan section";
+  const article = stage === "intent" ? "an" : "a";
   return (
     <section data-testid="cycle-selection-empty" className="order-3 flex min-h-64 items-center justify-center border-y border-hairline px-8 py-16 text-center">
-      <div><p className="text-sm font-medium text-ink">Select a {section}</p><p className="mt-1 text-xs text-ink-muted">Choose an item from the outline to read its complete content and inspect its traceability.</p></div>
+      <div><p className="text-sm font-medium text-ink">Select {article} {section}</p><p className="mt-1 text-xs text-ink-muted">Choose an item from the outline to read its complete content and inspect its traceability.</p></div>
     </section>
   );
 }
@@ -1284,7 +1292,9 @@ function DocumentSelectionEmpty({ stage }: { stage: string }) {
 function sectionsForStage(sections: readonly Section[], stage: string): Section[] {
   const seen = new Set<string>();
   const belongsToStage = (id: string) =>
-    stage === "intake"
+    stage === "intent"
+      ? id.startsWith("INT-")
+      : stage === "intake"
       ? id.startsWith("REQ-")
       : stage === "spec"
         ? id.startsWith("SPEC-")
