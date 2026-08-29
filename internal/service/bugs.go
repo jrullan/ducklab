@@ -929,7 +929,11 @@ func bugProposalTasksAccepted(db *store.DB, bugID string) (bool, error) {
 			return false, nil
 		}
 	}
-	return tasks > 0, nil
+	// A proposal with no promoted task has no portion in flight: nothing can
+	// land, so nothing blocks. Refusing here stranded every bug the triager
+	// had read but a person then fixed by hand (B-286, 2026-08-29): the gate
+	// is "every portion landed", not "a proposal exists".
+	return true, nil
 }
 
 // promotedTaskTitle prefers what the triager proposed.
