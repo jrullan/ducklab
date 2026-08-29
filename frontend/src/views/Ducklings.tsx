@@ -17,6 +17,7 @@ import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
 import { assignDucklingColors } from "../lib/colors";
+import { SideDrawer } from "../components/SideDrawer";
 
 // Declared capabilities on a duckling, not seat assignments. The Roster board
 // remains the only surface that chooses who occupies a seat.
@@ -114,39 +115,11 @@ export function Ducklings({ client, only, projectId }: {
           </p>
         )}
 
-        {editing === "" && (
-          <DucklingForm
-            key={editing}
-            client={client}
-            providers={providers}
-            existing={ducklings.find((d) => d.id === editing)}
-            fleet={ducklings}
-            onDone={done}
-            onCancel={() => setEditing(null)}
-          />
-        )}
-
         {ducklings.length === 0 ? (
           <p className="text-sm text-ink-muted">None configured.</p>
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(270px,1fr))]" data-testid="ducklings">
             {ducklings.map((d) =>
-              editing === d.id ? (
-                // The form takes the card's own place in the grid: editing
-                // a duckling buried five rows deep meant the form opened at
-                // the top and the person scrolled up to it, then back down.
-                // Full-width so nine fields do not fold into a 270px column.
-                <div key={d.id} className="col-span-full" data-testid="duckling-edit-inplace">
-                  <DucklingForm
-                    client={client}
-                    providers={providers}
-                    existing={d}
-                    fleet={ducklings}
-                    onDone={done}
-                    onCancel={() => setEditing(null)}
-                  />
-                </div>
-              ) : (
               <DucklingCard
                 key={d.id}
                 duckling={d}
@@ -157,12 +130,30 @@ export function Ducklings({ client, only, projectId }: {
                 onRemove={() => void client.ducklingRemove(d.id).then(() => done()).catch(done)}
                 onSaved={done}
                 client={client}
-              />
-              ),
+              />,
             )}
           </div>
         )}
       </section>
+      )}
+
+      {editing !== null && (
+        <SideDrawer
+          title={editing === "" ? "Add duckling" : `Edit ${editing}`}
+          subtitle="Model identity and capabilities belong here; seat assignments remain in Flock."
+          onClose={() => setEditing(null)}
+          testId="duckling-edit-inplace"
+        >
+          <DucklingForm
+            key={editing}
+            client={client}
+            providers={providers}
+            existing={ducklings.find((d) => d.id === editing)}
+            fleet={ducklings}
+            onDone={done}
+            onCancel={() => setEditing(null)}
+          />
+        </SideDrawer>
       )}
 
     </div>
@@ -447,14 +438,15 @@ function ProviderSection({
       </div>
 
       {open && (
-        <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="provider-form">
+        <SideDrawer title={providers.some((p) => p.id === id) ? `Edit ${id}` : "Add provider"} subtitle="Configure the endpoint Ducklab uses to reach one or more ducklings." onClose={() => setOpen(false)} testId="provider-form">
+        <div className="flex flex-col gap-3">
           <input
             aria-label="provider id"
             data-testid="provider-id"
             placeholder="openrouter"
             value={id}
             onChange={(e) => setId(e.target.value)}
-            className="w-36 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
           <input
             aria-label="base url"
@@ -462,7 +454,7 @@ function ProviderSection({
             placeholder="https://openrouter.ai/api/v1"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="min-w-64 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
           <input
             aria-label="api key environment variable"
@@ -470,9 +462,9 @@ function ProviderSection({
             placeholder="OPENROUTER_API_KEY"
             value={keyEnv}
             onChange={(e) => setKeyEnv(e.target.value)}
-            className="w-56 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
           />
-          <label className="flex items-center gap-1 text-xs text-ink-muted">
+          <label className="flex flex-col gap-1 text-xs text-ink-muted">
             concurrent runs this endpoint will seat at once (blank = 1 local / 8 remote)
             <input
               aria-label="concurrent runs this endpoint will seat at once"
@@ -482,7 +474,7 @@ function ProviderSection({
               placeholder={isLocalProviderUrl(url) ? "1" : "8"}
               value={maxConcurrent}
               onChange={(e) => setMaxConcurrent(e.target.value)}
-              className="w-24 rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
+              className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm text-ink"
             />
           </label>
           <button
@@ -490,20 +482,20 @@ function ProviderSection({
             onClick={save}
             disabled={!id.trim() || !url.trim()}
             data-testid="provider-save"
-            className="rounded border border-hairline px-2 py-1 text-sm disabled:opacity-40"
+            className="self-end rounded bg-ink px-3 py-1.5 text-sm text-page disabled:opacity-40"
           >
             Save
           </button>
-          <p className="w-full text-xs text-ink-muted">
+          <p className="text-xs text-ink-muted">
             That last field is the <em>name</em> of an environment variable, not a key. Ducklab
             never stores or transmits the key itself — the engine reads that variable when it makes
             a call. Leave it empty for a local server that needs none.
           </p>
-          <p className="w-full text-xs text-ink-muted">
+          <p className="text-xs text-ink-muted">
             Blank uses the conservative engine default: 1 local or 8 remote.
             {backendHint({ id, base_url: url }) && ` ${backendHint({ id, base_url: url })}.`}
           </p>
-        </div>
+        </div></SideDrawer>
       )}
 
       {providers.length === 0 ? (

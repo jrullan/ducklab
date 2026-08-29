@@ -135,7 +135,7 @@ export function Release({ client, projectId }: { client: EngineClient; projectId
         subtitle="Prepare release notes, review drafts and read the record of what shipped."
         actions={!loading && !planned && !pendingDraft ? <div className="flex items-center gap-2"><select aria-label="version bump" data-testid="release-bump" value={bump} onChange={(e) => setBump(e.target.value as typeof bump)} className="rounded border border-hairline bg-surface px-2 py-1.5 text-sm text-ink"><option value="patch">patch</option><option value="minor">minor</option><option value="major">major</option></select><button type="button" data-testid="release-draft" disabled={busy} onClick={() => void draft(bump)} className="rounded bg-ink px-3 py-1.5 text-sm text-page">Draft next release</button></div> : undefined}
       />
-      <div className="grid min-h-[34rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden rounded-card border border-hairline bg-surface1">
+      <div className="grid min-h-[34rem] grid-cols-1 overflow-hidden rounded-card border border-hairline bg-surface1 lg:grid-cols-[16rem_minmax(0,1fr)]">
       <nav className="space-y-1 border-r border-hairline p-3">
         <div className="mb-3 flex items-baseline justify-between"><h2 className="text-sm font-medium text-ink">Release history</h2><span className="text-xs text-ink-muted">{items.length}</span></div>
         {/* The door to the NEXT release lives with the list, not only in the

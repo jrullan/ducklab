@@ -413,6 +413,30 @@ describe("hiding the run rail", () => {
     second.unmount();
     localStorage.removeItem("ducklab.runrail");
   });
+
+  it("moves run details into an on-demand drawer when the room is compact", async () => {
+    localStorage.removeItem("ducklab.runrail");
+    class CompactResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe() {
+        queueMicrotask(() => this.callback([{ contentRect: { width: 720 } } as ResizeObserverEntry], this as unknown as ResizeObserver));
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", CompactResizeObserver);
+    useRuns.setState({ runs: { "r-1": failed }, events: {}, deltas: {}, reasoning: {}, spend: {} });
+    const view = render(<RunView runId="r-1" client={clientWith()} />);
+    await waitFor(() => expect(view.queryByTestId("run-rail")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(await screen.findByRole("dialog", { name: "Run details" })).toBeInTheDocument();
+    expect(view.queryByTestId("run-rail-pill")).toBeNull();
+
+    view.unmount();
+    vi.unstubAllGlobals();
+    localStorage.removeItem("ducklab.runrail");
+  });
 });
 
 // Any legal manipulation, offerable where the task is on screen: removing
@@ -568,19 +592,18 @@ describe("the run header names the task", () => {
     expect(header?.className).toContain("bg-page");
   });
 
-  // The rail is metadata of the WHOLE run, so it rides as a full-height dock
-  // whose sticky container spans everything that scrolls — transcript, dock
-  // and diff alike. As a grid column it drowned when its grid ended, which
-  // was exactly at the point the diff began.
+  // In a roomy container the rail is metadata of the WHOLE run, so it rides
+  // as a full-height dock spanning transcript, dock and diff alike. Compact
+  // containers exercise the on-demand drawer separately above.
   it("docks the rail beside ALL the scrolling content, not just the lanes", async () => {
     render(<RunView runId="r-1" client={clientWith()} />);
     const rail = await screen.findByTestId("run-rail");
-    expect(rail.className).toContain("md:sticky");
-    expect(rail.className).toContain("md:border-l");
+    expect(rail.className).toContain("sticky");
+    expect(rail.className).toContain("border-l");
     // Its scroll must END at the dock: without overscroll containment,
     // bottoming out the rail chained the wheel into the page and dragged
     // the transcript along with it.
-    expect(rail.className).toContain("md:overscroll-contain");
+    expect(rail.className).toContain("overscroll-contain");
     // The sticky grip is only as long as its container: the same wrapper
     // must hold the conversation AND the bottom dock (whose tabs open the
     // diff), or the rail lets go before the read is over.

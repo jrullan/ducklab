@@ -16,7 +16,8 @@ import { runLabel } from "../lib/runview";
 import { money } from "../lib/format";
 import { runStatusRole, verdictStatus, verdictLabel, type Verdict } from "../lib/colors";
 import { waitingFor } from "../lib/format";
-import { CollectionToolbar, ContextStrip, PageHeader } from "../components/PageShell";
+import { CollectionToolbar, ContextStrip, InspectorPane, PageHeader } from "../components/PageShell";
+import { SideDrawer } from "../components/SideDrawer";
 
 const FILTERS = ["all", "waiting", "running", "landed", "failed"] as const;
 type Filter = (typeof FILTERS)[number];
@@ -47,6 +48,7 @@ function took(r: Run): string {
 export function Runs({ runs }: { runs: Run[] }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const ordered = useMemo(
     () =>
@@ -83,6 +85,18 @@ export function Runs({ runs }: { runs: Run[] }) {
   const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const paged = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const selectedRun = runs.find((run) => run.id === selectedId) ?? null;
+  const inspector = selectedRun ? <div className="mt-4 space-y-4">
+    <div><div className="font-mono text-xs text-ink-muted">{selectedRun.id}</div><div className="mt-1 text-base font-medium text-ink">{runLabel(selectedRun)}</div></div>
+    <dl className="space-y-2 border-y border-hairline py-3 text-sm">
+      <div className="flex justify-between gap-3"><dt className="text-ink-muted">Status</dt><dd><StatusChip role={selectedRun.resolution === "landed" ? "good" : runStatusRole(selectedRun.status)} label={selectedRun.resolution === "landed" ? "landed" : selectedRun.status} /></dd></div>
+      <div className="flex justify-between gap-3"><dt className="text-ink-muted">Mode</dt><dd className="text-ink">{selectedRun.mode}</dd></div>
+      <div className="flex justify-between gap-3"><dt className="text-ink-muted">Verdict</dt><dd className="text-right text-ink">{verdictText(selectedRun)}</dd></div>
+      <div className="flex justify-between gap-3"><dt className="text-ink-muted">Cost</dt><dd className="tabular-nums text-ink">{selectedRun.budget?.usd ? `${selectedRun.tokens_estimated ? "~" : ""}${money(selectedRun.budget.usd)}` : "—"}</dd></div>
+      <div className="flex justify-between gap-3"><dt className="text-ink-muted">Duration</dt><dd className="tabular-nums text-ink">{took(selectedRun)}</dd></div>
+    </dl>
+    <a href={routeHref({ name: "run", id: selectedRun.id })} className="block rounded bg-ink px-3 py-2 text-center text-sm text-page">Open full run</a>
+  </div> : undefined;
 
   if (runs.length === 0) {
     return <div className="space-y-4"><PageHeader eyebrow="Records" title="Runs" subtitle="Follow every execution from launch through its final decision." /><EmptyState message="No runs yet. Choose a task in Work to start the first one." /></div>;
@@ -151,7 +165,8 @@ export function Runs({ runs }: { runs: Run[] }) {
         </nav>
       )}
 
-      <div className="overflow-x-auto rounded-card border border-hairline bg-surface1">
+      <div className="grid min-h-[30rem] grid-cols-1 overflow-hidden rounded-card border border-hairline bg-surface1 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="sticky top-0 bg-surface1 text-left text-ink-muted">
@@ -161,14 +176,23 @@ export function Runs({ runs }: { runs: Run[] }) {
             <th className="border-b border-hairline py-1 pr-3 font-normal">verdict</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">cost</th>
             <th className="border-b border-hairline py-1 pr-3 font-normal">took</th>
-            <th className="border-b border-hairline py-1 pr-3 font-normal">turns</th>
-            <th className="border-b border-hairline py-1 pr-3 font-normal">started</th>
-            <th className="border-b border-hairline py-1 font-normal">run</th>
+            <th className="hidden border-b border-hairline py-1 pr-3 font-normal 2xl:table-cell">turns</th>
+            <th className="hidden border-b border-hairline py-1 pr-3 font-normal 2xl:table-cell">started</th>
+            <th className="hidden border-b border-hairline py-1 font-normal 2xl:table-cell">run</th>
           </tr>
         </thead>
         <tbody>
           {paged.map((r) => (
-            <tr key={r.id} data-testid="runs-row" data-run={r.id} className="hover:bg-surface2">
+            <tr
+              key={r.id}
+              data-testid="runs-row"
+              data-run={r.id}
+              aria-selected={selectedId === r.id}
+              tabIndex={0}
+              onClick={() => setSelectedId(r.id)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedId(r.id); }}
+              className={selectedId === r.id ? "bg-surface2 shadow-[inset_3px_0_0_var(--accent)]" : "hover:bg-surface2"}
+            >
               <td className="border-b border-hairline py-1 pr-3">
                 <StatusChip role={r.resolution === "landed" ? "good" : runStatusRole(r.status)} label={r.resolution === "landed" ? "landed" : r.status} />
                 {r.status === "queued" && r.queued_reason && (
@@ -204,13 +228,13 @@ export function Runs({ runs }: { runs: Run[] }) {
               <td className="border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary" data-testid="run-took">
                 {took(r)}
               </td>
-              <td className="border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary" data-testid="run-turns">
+              <td className="hidden border-b border-hairline py-1 pr-3 tabular-nums text-ink-secondary 2xl:table-cell" data-testid="run-turns">
                 {r.budget && r.budget.turns > 0 ? r.budget.turns : "—"}
               </td>
-              <td className="border-b border-hairline py-1 pr-3 text-ink-muted">
+              <td className="hidden border-b border-hairline py-1 pr-3 text-ink-muted 2xl:table-cell">
                 {r.started_at ? waitingFor(r.started_at) + " ago" : "—"}
               </td>
-              <td className="border-b border-hairline py-1 font-mono text-xs text-ink-muted">
+              <td className="hidden border-b border-hairline py-1 font-mono text-xs text-ink-muted 2xl:table-cell">
                 {r.id}
               </td>
             </tr>
@@ -218,6 +242,9 @@ export function Runs({ runs }: { runs: Run[] }) {
         </tbody>
       </table>
       </div>
+      <div className="hidden lg:block"><InspectorPane title="Run inspector" empty="Select a run to inspect its outcome and open its full record.">{inspector}</InspectorPane></div>
+      </div>
+      {selectedRun && <div className="lg:hidden"><SideDrawer title="Run inspector" subtitle={runLabel(selectedRun)} onClose={() => setSelectedId(null)}>{inspector}</SideDrawer></div>}
     </div>
   );
 }

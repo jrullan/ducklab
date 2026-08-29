@@ -292,11 +292,10 @@ describe("the vision capability", () => {
   });
 });
 
-// Editing a duckling buried deep in the grid opened the form at the TOP —
-// the person scrolled up to edit and back down to check. The form now takes
-// the card's own place in the grid.
-describe("editing in place", () => {
-  it("replaces the card with the form where it stands", async () => {
+// Editing used to replace a card inside the collection, changing the grid
+// while the person worked. The drawer keeps the fleet stable and visible.
+describe("editing without moving the fleet", () => {
+  it("opens the form in a drawer and preserves every card", async () => {
     const client = clientWith(
       [
         { id: "a1", provider: "openrouter", model: "m1" } as never,
@@ -306,10 +305,9 @@ describe("editing in place", () => {
     );
     render(<Ducklings client={client} projectId="" />);
     fireEvent.click(await screen.findByTestId("duckling-edit-b2"));
-    const inplace = screen.getByTestId("duckling-edit-inplace");
-    expect(inplace).toBeTruthy();
-    // The edited card itself is gone — the form stands in its place.
-    expect(screen.queryByTestId("duckling-card-b2")).toBeNull();
+    expect(screen.getByTestId("duckling-edit-inplace")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Edit b2" })).toBeTruthy();
+    expect(screen.getByTestId("duckling-card-b2")).toBeTruthy();
     expect(screen.getByTestId("duckling-card-a1")).toBeTruthy();
   });
 });

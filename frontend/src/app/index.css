@@ -14,9 +14,45 @@ body {
 
 /* Keyboard focus and pointer selection speak the same interaction language.
  * Status colours remain reserved for the meaning of the underlying record. */
-:where(a, button, input, select, textarea, summary):focus-visible {
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Desktop rooms live beside a permanent sidebar, so viewport breakpoints
+ * overestimate their usable width. These document decisions follow the room
+ * itself: two panes when compact, three only when all three remain readable. */
+.cycle-responsive {
+  container-name: cycle-room;
+  container-type: inline-size;
+}
+
+.cycle-body {
+  grid-template-columns: 15rem minmax(0, 1fr);
+}
+
+.cycle-inspector-desktop {
+  display: none;
+}
+
+@container cycle-room (max-width: 50rem) {
+  .cycle-stage-story {
+    display: none;
+  }
+}
+
+@container cycle-room (min-width: 64rem) {
+  .cycle-body {
+    grid-template-columns: 17rem minmax(24rem, 1fr) 19rem;
+  }
+
+  .cycle-inspector-desktop {
+    display: block;
+  }
+
+  .cycle-inspector-trigger {
+    display: none;
+  }
 }
 
 /* The duck bobs while its turn is in flight (08 §4.4).

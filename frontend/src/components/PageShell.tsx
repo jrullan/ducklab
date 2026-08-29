@@ -47,3 +47,16 @@ export function CollectionToolbar({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+export function InspectorPane({ title, children, empty }: {
+  title: string;
+  children?: ReactNode;
+  empty?: string;
+}) {
+  return (
+    <aside className="min-w-0 border-t border-hairline bg-surface1 p-4 lg:border-l lg:border-t-0">
+      <h2 className="text-sm font-semibold text-ink">{title}</h2>
+      {children ?? <p className="mt-4 rounded-card border border-dashed border-hairline p-4 text-sm text-ink-muted">{empty}</p>}
+    </aside>
+  );
+}
