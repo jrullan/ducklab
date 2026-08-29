@@ -61,6 +61,20 @@ describe("Cycle", () => {
     expect(narrative).toHaveTextContent("cut into tasks; you birth them");
   });
 
+  it("lands an empty project on Intent instead of asking for requirements input", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/")) return json({ kind: p.endsWith("intent") ? "intent" : "requirements", sections: [] });
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="new-project" />);
+
+    expect(await screen.findByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("cycle-selection-empty")).toHaveTextContent("Select an intention");
+    expect(screen.getByTestId("cycle-primary-action")).toHaveTextContent("Add intention");
+    expect(screen.queryByText("Draft requirements")).toBeNull();
+  });
+
   it("shows Intent as its own immutable, addressable document", async () => {
     const intent = {
       kind: "intent", version: 3, approved: true, markdown: "",
@@ -148,9 +162,27 @@ describe("Cycle", () => {
     expect(screen.getByTestId("cycle-start")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("cycle-primary-action"));
-    expect(screen.getByTestId("cycle-start")).toHaveAttribute("open");
-    expect(screen.getByRole("heading", { name: "Enter requirements" })).toBeInTheDocument();
-    expect(screen.getByText(/approved requirements remain unchanged/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("cycle-start")).toHaveAttribute("open");
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("heading", { name: "Add intention" })).toBeInTheDocument();
+    expect(screen.getByText(/translate it into requirement changes/i)).toBeInTheDocument();
+  });
+
+  it("turns a focused requirement change into contextual Intent", async () => {
+    const client = clientWith((p) => {
+      if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (p.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="intake" />);
+
+    fireEvent.click((await screen.findAllByTestId("cycle-index-row"))[1]!);
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+
+    expect(screen.getByTestId("cycle-tab-intake")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Intent operation")).toBeInTheDocument();
+    expect(screen.getByText(/records a new intention about REQ-002/i)).toBeInTheDocument();
+    expect((screen.getByTestId("cycle-brief") as HTMLTextAreaElement).value).toContain("REQ-002");
   });
 
   it("lists sections and marks the ones the spine reports broken", async () => {
@@ -1152,21 +1184,22 @@ describe("the trace rail's scope", () => {
   });
 });
 
-// "Do features have to arrive as fake bug reports?" — asked by the user,
-// because the flow that answers it (re-run intake with a brief; the cycle
-// carries it to spec and plan) existed and nothing named it. "Redraft the
-// requirements" undersold the normal case: growing a project.
+// New functionality enters as human intent. Requirements remain the council's
+// interpretation, rather than exposing a second, competing brief intake.
 describe("adding a feature to a grown project", () => {
-  it("names the flow and promises the survivals", async () => {
+  it("routes the generic requirements action through Intent", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);
       if (p.includes("/trace/check")) return json({ errors: null });
       return json({}, 404);
     });
     render(<Cycle client={client} projectId="p" />);
-    await waitFor(() => expect(screen.getByTestId("cycle-start")).toBeTruthy());
-    const start = screen.getByTestId("cycle-start");
-    expect(start.textContent).toContain("Add to the requirements");
+    await screen.findByTestId("cycle-primary-action");
+    expect(screen.getByTestId("cycle-primary-action")).toHaveTextContent("Add intention");
+    fireEvent.click(screen.getByTestId("cycle-primary-action"));
+    const start = await screen.findByTestId("cycle-start");
+    expect(screen.getByTestId("cycle-tab-intent")).toHaveAttribute("aria-selected", "true");
+    expect(start.textContent).toContain("Describe the addition or change you want");
     expect(
       (screen.getByTestId("cycle-brief") as HTMLTextAreaElement).placeholder,
     ).toContain("Existing requirements survive");

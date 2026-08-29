@@ -42,11 +42,12 @@ export function Cycle({
   stage?: string;
   section?: string;
 }) {
-  const [active, setActive] = useState<StageDef>(
-    // Existing Documents bookmarks open on Requirements; Intent is the first
-    // stage in the chain without stealing the reader's established landing.
-    () => STAGES.find((s) => s.stage === stage) ?? STAGES[1],
-  );
+  const routedStage = STAGES.find((candidate) => candidate.stage === stage);
+  const [active, setActive] = useState<StageDef>(() => routedStage ?? STAGES[0]);
+  // A bare Documents route is contextual: an empty project starts where the
+  // human speaks, while an established project retains its familiar
+  // Requirements landing. Explicit tabs and deep links always win.
+  const [landingResolved, setLandingResolved] = useState(Boolean(routedStage));
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [errors, setErrors] = useState<TraceError[]>([]);
   // Retained for compatibility with the engine's proposal scope response; the
@@ -162,12 +163,33 @@ export function Cycle({
   const [operationOpen, setOperationOpen] = useState(false);
   const [requirementIds, setRequirementIds] = useState<Set<string>>(new Set());
   const detailRef = useRef<HTMLDivElement>(null);
+  const manualStageChoice = useRef(false);
 
   useEffect(() => {
     const nextStage = STAGES.find((candidate) => candidate.stage === stage);
-    if (nextStage) setActive(nextStage);
     setSelectedSection(section ?? null);
-  }, [stage, section]);
+    if (nextStage) {
+      manualStageChoice.current = true;
+      setActive(nextStage);
+      setLandingResolved(true);
+      return;
+    }
+    let cancelled = false;
+    manualStageChoice.current = false;
+    setLandingResolved(false);
+    client.artifact(projectId, "requirements")
+      .then((requirements) => {
+        if (cancelled || manualStageChoice.current) return;
+        setActive((requirements.sections?.length ?? 0) > 0 || Boolean(requirements.proposal) ? STAGES[1] : STAGES[0]);
+        setLandingResolved(true);
+      })
+      .catch(() => {
+        if (cancelled || manualStageChoice.current) return;
+        setActive(STAGES[0]);
+        setLandingResolved(true);
+      });
+    return () => { cancelled = true; };
+  }, [client, projectId, stage, section]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -503,7 +525,7 @@ export function Cycle({
     return () => { cancelled = true; };
   }, [client, projectId, selectedSection]);
   const stageAction = active.stage === "intent" ? "Add intention" : inspectedSection ? `Propose change to ${inspectedSection.id}` : active.stage === "intake"
-    ? sections.length === 0 ? "Draft requirements" : "Enter requirements"
+    ? "Add intention"
     : active.stage === "spec"
       ? sections.length === 0 ? "Draft specification" : "Propose specification update"
       : sections.length === 0 ? "Draft plan" : "Extend plan";
@@ -511,7 +533,7 @@ export function Cycle({
   // is an implementation detail. Keep the person in Intent and let the drawer
   // speak in terms of the document they are adding to.
   const operationStage = active.stage === "intent" ? "intake" : active.stage;
-  const operationLabel = active.stage === "intent" ? "Intent" : active.label;
+  const operationLabel = operationStage === "intake" ? "Intent" : active.label;
   const operationSectionsLength = active.stage === "intent" ? requirementIds.size : sections.length;
 
   return (
@@ -520,7 +542,7 @@ export function Cycle({
         <div className="flex items-center gap-3 py-3">
           <div className="min-w-0 flex-1"><h1 className="text-xl font-semibold text-ink">Documents</h1><p className="text-xs text-ink-muted">Intent, requirements, specification and plan — one traceable project spine.</p></div>
           <a href="#/cycle/ledger" className="rounded border border-hairline px-3 py-1.5 text-sm text-ink-secondary hover:text-ink">Review issues</a>
-          {(!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
+          {landingResolved && (!artifact?.proposal || proposalDecided) && <button type="button" data-testid="cycle-primary-action" onClick={() => { if (active.stage === "intake" && !inspectedSection) { setActive(STAGES[0]); location.hash = routeHref({ name: "cycle", stage: "intent" }); } else if (active.stage === "intake" && inspectedSection && !brief) { setBrief(`Propose a focused change to ${inspectedSection.id} — ${inspectedSection.title}. Preserve every unrelated section.\n\nRequested change: `); } if (active.stage === "plan" && sections.length > 0) setPlanAction("extend"); setOperationOpen(true); }} className="rounded bg-ink px-3 py-1.5 text-sm font-medium text-page">+ {stageAction}</button>}
         </div>
         <div role="tablist" aria-label="Document stage" data-testid="cycle-stage-control" className="grid grid-cols-4 gap-3">
           {STAGES.map((s) => (
@@ -529,7 +551,7 @@ export function Cycle({
               role="tab"
               aria-selected={s.kind === active.kind}
               data-testid={`cycle-tab-${s.stage}`}
-              onClick={() => { setActive(s); setSelectedSection(null); location.hash = routeHref({ name: "cycle", stage: s.stage }); }}
+              onClick={() => { manualStageChoice.current = true; setLandingResolved(true); setActive(s); setSelectedSection(null); location.hash = routeHref({ name: "cycle", stage: s.stage }); }}
               className={"rounded-card border px-4 py-3 text-left transition-colors " + (s.kind === active.kind ? "border-warning bg-surface2 text-ink" : "border-hairline text-ink-muted hover:bg-surface2 hover:text-ink")}
             >
               <span className="flex items-center gap-2"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-surface1 text-xs">{STAGES.indexOf(s) + 1}</span><span className="font-medium">{s.label}</span></span>
@@ -739,7 +761,7 @@ export function Cycle({
           <details open={operationOpen} onToggle={(event) => setOperationOpen(event.currentTarget.open)} data-testid="cycle-start" className={operationOpen ? "fixed inset-y-0 right-0 z-40 m-0 w-full max-w-lg overflow-y-auto border-l border-hairline bg-page p-5 shadow-2xl" : "hidden"}>
             <summary className={operationOpen ? "hidden" : "cursor-pointer text-sm text-ink"}>{redraftSummary(mode, roster, measured)}</summary>
             <div className={operationOpen ? "" : "pt-2"}>
-            {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{operationLabel} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">{active.stage === "intent" ? "Preserves what you ask for and asks the council to translate it into requirement changes." : `Creates a proposal; approved ${active.label.toLowerCase()} remain unchanged until you accept it.`}</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
+            {operationOpen && <div className="mb-5 flex items-start gap-3 border-b border-hairline pb-4"><div className="min-w-0 flex-1"><p className="text-xs uppercase tracking-wide text-ink-muted">{operationLabel} operation</p><h2 className="mt-1 text-lg font-semibold text-ink">{stageAction}</h2><p className="mt-1 text-xs text-ink-muted">{operationStage === "intake" ? inspectedSection ? `Records a new intention about ${inspectedSection.id}; the council will propose the corresponding requirement changes.` : "Preserves what you ask for and asks the council to translate it into requirement changes." : `Creates a proposal; approved ${active.label.toLowerCase()} remain unchanged until you accept it.`}</p></div><button type="button" aria-label="Close document operation" onClick={() => setOperationOpen(false)} className="rounded border border-hairline px-2 py-1 text-ink-muted">×</button></div>}
             {/* "Redraft" undersold the normal case: growing a project. A brief
                 against approved requirements ADDS — the engine hands the
                 architect the whole document with orders to keep it — and the
@@ -748,13 +770,11 @@ export function Cycle({
                 who found this gap asked whether features had to arrive as fake
                 bug reports. */}
             <div className="mb-2 text-sm text-ink">
-              {active.stage === "intent"
-                ? "Describe the addition or change you want"
+              {operationStage === "intake"
+                ? inspectedSection ? `Describe what should change about ${inspectedSection.id}` : "Describe the addition or change you want"
                 : operationSectionsLength === 0
                 ? `Draft the ${operationLabel.toLowerCase()}`
-                : operationStage === "intake"
-                  ? "Add to the requirements — a feature, a change of scope"
-                  : `Extend the ${operationLabel.toLowerCase()}`}
+                : `Extend the ${operationLabel.toLowerCase()}`}
             </div>
             {active.stage === "plan" && sections.length > 0 && (
               <>
