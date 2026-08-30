@@ -117,7 +117,7 @@ type ExecContext struct {
 	lastFailCount int
 	// turnReads remembers the successful read-only calls of the current
 	// turn, so an identical re-read is refused with directions (BeginTurn).
-	turnReads map[string]bool
+	turnReads map[string]int
 	// searchMisses counts consecutive fs_search calls that found nothing.
 	searchMisses int
 	// fsPatchFailStreak tracks fuzzy, consecutive fs_patch failures by file.
@@ -282,13 +282,23 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	// answer is still in the conversation. Refused with directions instead
 	// of served again — a seat that re-reads the documents it was given
 	// spends its window and its minutes on nothing.
+	// Refused ONCE, then served again with a reminder: a seat that cannot
+	// use "it is above" was refused thirteen times at 37 s each and never
+	// wrote a line (Neocapture plan, 2026-08-30). Teaching once is the
+	// harness's job; stranding the turn is not.
+	repeatedRead := false
 	if readOnlyTool[name] {
 		if ectx.turnReads == nil {
-			ectx.turnReads = map[string]bool{}
+			ectx.turnReads = map[string]int{}
 		}
-		if ectx.turnReads[sig] {
+		switch ectx.turnReads[sig] {
+		case 0:
+		case 1:
+			ectx.turnReads[sig]++
 			return ErrorResult("REPEATED READ: you already called %s with these exact arguments in this turn, "+
 				"and its result is above in this conversation. Use it; do not read again.", name), nil
+		default:
+			repeatedRead = true
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
@@ -330,7 +340,10 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	} else {
 		ectx.lastFailSig, ectx.lastFailCount = "", 0
 		if readOnlyTool[name] && ectx.turnReads != nil {
-			ectx.turnReads[sig] = true
+			ectx.turnReads[sig]++
+			if repeatedRead {
+				res.Content = "(served again — you already had this result earlier in this turn; do not request it a third time)\n\n" + res.Content
+			}
 		}
 	}
 	if res != nil {
@@ -357,7 +370,7 @@ var readOnlyTool = map[string]bool{
 // new turn is a new conversation, so the earlier answers are gone and a read
 // is legitimate again.
 func (e *ExecContext) BeginTurn() {
-	e.turnReads = map[string]bool{}
+	e.turnReads = map[string]int{}
 	e.searchMisses = 0
 }
 
