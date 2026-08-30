@@ -55,9 +55,9 @@ func TestARepeatedReadInOneTurnIsRefused(t *testing.T) {
 	}
 	// Refused once; a seat that asks a third time is served with a reminder
 	// rather than stranded (thirteen refusals at 37 s each, once).
-	third, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
-	if third.IsError || !strings.Contains(third.Content, "served again") || !strings.Contains(third.Content, "package main") {
-		t.Fatalf("the third read was not served with a reminder: err=%v %.200s", third.IsError, third.Content)
+	again, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
+	if again.IsError || !strings.Contains(again.Content, "served again") || !strings.Contains(again.Content, "package main") {
+		t.Fatalf("the third read was not served with a reminder: err=%v %.200s", again.IsError, again.Content)
 	}
 	ectx.BeginTurn()
 	third, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
