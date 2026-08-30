@@ -281,7 +281,12 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		StartedAt:  time.Now().UTC().Format(time.RFC3339),
 		Autonomy:   orDefault(req.Autonomy, "guarded"),
 		AgentTurns: req.AgentTurns,
-		Stream:     req.Stream,
+		// Always. Streaming is display state the bus fans out to whoever
+		// watches; gating it on the launcher's flag meant a stage launched
+		// from the CLI showed a person watching in the desktop no text and
+		// no thinking for its whole length (Neocapture, 2026-08-30). Every
+		// other run kind already streams unconditionally.
+		Stream: true,
 		// An artifact stage has no executable gate: the verdict is UNVERIFIED
 		// until a person approves it, and saying so is the honest label (P3).
 		Gate: "none",
