@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 )
+
+var ErrStructureFailed = errors.New("document structure did not converge")
 
 // A document council's last architect turn is the one nobody reviews: after
 // the critics speak, the revision goes straight to the gate. The plan that
@@ -30,8 +33,11 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 	// deliverables (the brief asks; the check enforces — T-001 arrived with
 	// twelve, benchmark run 4); milestone lanes never overlap.
 	if isPlan {
+		var blocks []taskBlock
 		for _, s := range cur {
-			for _, block := range taskBlocks(s.Body) {
+			sectionBlocks := taskBlocks(s.Body)
+			blocks = append(blocks, sectionBlocks...)
+			for _, block := range sectionBlocks {
 				if !strings.HasPrefix(block.id, "T-") {
 					continue
 				}
@@ -44,9 +50,27 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					}
 					if !strings.Contains(strings.ToLower(block.body), "**verification:**") {
 						out = append(out, fmt.Sprintf("%s has no **Verification:** line — name the command or deterministic check that exercises this task's changed artifacts; a green project build that ignores them is not verification", block.id))
+					} else if taskVerificationCommand(block.body) == "" {
+						out = append(out, fmt.Sprintf("%s **Verification:** must put the executable command in backticks; prose is never executed", block.id))
+					}
+					if !taskHasField(block.body, "Consumes") {
+						out = append(out, fmt.Sprintf("%s has no **Consumes:** line — name prerequisite artifacts/capabilities, or write none", block.id))
+					}
+					produces := taskFieldItems(block.body, "Produces")
+					exercises := taskFieldItems(block.body, "Exercises")
+					if len(produces) == 0 {
+						out = append(out, fmt.Sprintf("%s has no **Produces:** artifacts — name the paths, build targets, or capabilities this task creates", block.id))
+					}
+					if len(exercises) == 0 {
+						out = append(out, fmt.Sprintf("%s has no **Exercises:** artifacts — name which Produced artifacts its Verification actually exercises", block.id))
+					} else if len(produces) > 0 && !itemsOverlap(produces, exercises) {
+						out = append(out, fmt.Sprintf("%s **Exercises:** none of its **Produces:** artifacts — its verification can be green without checking this task's delta", block.id))
 					}
 				}
 			}
+		}
+		if small {
+			out = append(out, taskGraphFindings(blocks)...)
 		}
 		if raw != "" {
 			if doc, err := artifact.Parse(raw, artifact.KindPlan); err == nil {
@@ -110,6 +134,81 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 	for _, p := range prev {
 		if !seen[p.ID] {
 			out = append(out, fmt.Sprintf("%s (%s) was in your previous draft and is gone — restore it, or state in it why it no longer applies (Priority: wont)", p.ID, p.Title))
+		}
+	}
+	return out
+}
+
+func taskFieldItems(body, name string) []string {
+	re := regexp.MustCompile(`(?im)^\*\*` + regexp.QuoteMeta(name) + `:\*\*\s*(.+)$`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return nil
+	}
+	var out []string
+	for _, item := range strings.Split(m[1], ",") {
+		item = strings.TrimSpace(strings.Trim(item, "`"))
+		if item != "" && item != "none" && item != "-" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func taskHasField(body, name string) bool {
+	re := regexp.MustCompile(`(?im)^\*\*` + regexp.QuoteMeta(name) + `:\*\*`)
+	return re.MatchString(body)
+}
+
+func taskVerificationCommand(body string) string {
+	re := regexp.MustCompile("(?im)^\\*\\*Verification:\\*\\*\\s*`([^`]+)`")
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+func itemsOverlap(a, b []string) bool {
+	seen := map[string]bool{}
+	for _, item := range a {
+		seen[item] = true
+	}
+	for _, item := range b {
+		if seen[item] {
+			return true
+		}
+	}
+	return false
+}
+
+func taskGraphFindings(blocks []taskBlock) []string {
+	producer := map[string]string{}
+	var out []string
+	for _, block := range blocks {
+		if !strings.HasPrefix(block.id, "T-") {
+			continue
+		}
+		for _, item := range taskFieldItems(block.body, "Produces") {
+			if prior := producer[item]; prior != "" && prior != block.id {
+				out = append(out, fmt.Sprintf("%s and %s both **Produce:** %s — one artifact needs one owner", prior, block.id, item))
+			} else {
+				producer[item] = block.id
+			}
+		}
+	}
+	for _, block := range blocks {
+		if !strings.HasPrefix(block.id, "T-") {
+			continue
+		}
+		deps := map[string]bool{}
+		for _, id := range taskFieldItems(block.body, "Depends on") {
+			deps[id] = true
+		}
+		for _, item := range taskFieldItems(block.body, "Consumes") {
+			if p := producer[item]; p != "" && p != block.id && !deps[p] {
+				out = append(out, fmt.Sprintf("%s consumes %s produced by %s but has no **Depends on:** %s", block.id, item, p, p))
+			}
 		}
 	}
 	return out
@@ -185,6 +284,30 @@ func structureNote(findings []string) string {
 		"It is not yet acceptable. Return the WHOLE document again with every item below repaired, " +
 		"changing nothing else:\n\n")
 	for _, f := range findings {
+		b.WriteString("- " + f + "\n")
+	}
+	return b.String()
+}
+
+func structureProgressNote(findings, previous []string) string {
+	open := map[string]bool{}
+	for _, f := range findings {
+		open[f] = true
+	}
+	var resolved []string
+	for _, f := range previous {
+		if !open[f] {
+			resolved = append(resolved, f)
+		}
+	}
+	note := structureNote(findings)
+	if len(resolved) == 0 {
+		return note
+	}
+	var b strings.Builder
+	b.WriteString(note)
+	b.WriteString("\n## Resolved since the previous attempt — do not reintroduce\n\n")
+	for _, f := range resolved {
 		b.WriteString("- " + f + "\n")
 	}
 	return b.String()

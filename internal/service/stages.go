@@ -682,6 +682,16 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				},
 				KnownIDs:  s.knownIDs(projectRoot),
 				SmallSeat: s.smallImplementerSeat(rs.run.ProjectID),
+				StructureCheck: func(raw string) []string {
+					if req.Stage != "plan" {
+						return nil
+					}
+					doc, err := artifact.Parse(raw, artifact.KindPlan)
+					if err != nil {
+						return nil
+					}
+					return capabilityStructureFindings(doc)
+				},
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 					if kind == "turn_interrupted" {

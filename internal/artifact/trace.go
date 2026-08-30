@@ -276,8 +276,13 @@ func checkLaneCollisions(plan *Document) []TraceError {
 		claims = append(claims, claim{section: m, milestone: mi, isMilestone: true})
 		for i := range m.Children {
 			child := m.Children[i]
+			// An inherited lane is membership in the milestone's claim, not a
+			// second claim by every child. Materialising inheritance here made
+			// every pair of sibling tasks collide with itself (25 tasks produced
+			// dozens of impossible lane findings in Neocapture run 7). Only an
+			// explicit task-level Owns line creates an independent child claim.
 			if len(child.Owns) == 0 {
-				child.Owns = append([]string(nil), m.Owns...)
+				continue
 			}
 			claims = append(claims, claim{section: child, milestone: mi})
 		}

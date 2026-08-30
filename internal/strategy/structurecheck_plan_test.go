@@ -30,3 +30,17 @@ func TestPlanStructureIsCheckedPerTask(t *testing.T) {
 		t.Fatalf("a full seat's plan was portioned: %v", big)
 	}
 }
+
+func TestTaskGraphRequiresDependencyAndVerificationCoverage(t *testing.T) {
+	blocks := []taskBlock{
+		{id: "T-001", body: "**Produces:** meson.build\n**Consumes:** src/main.c\n**Depends on:** none\n**Exercises:** meson.build\n"},
+		{id: "T-002", body: "**Produces:** src/main.c\n**Exercises:** something-else\n"},
+	}
+	joined := strings.Join(taskGraphFindings(blocks), "\n")
+	if !strings.Contains(joined, "T-001 consumes src/main.c produced by T-002") {
+		t.Fatalf("task graph did not require the producer dependency: %s", joined)
+	}
+	if itemsOverlap(taskFieldItems(blocks[1].body, "Produces"), taskFieldItems(blocks[1].body, "Exercises")) {
+		t.Fatal("unrelated Exercises artifact was treated as coverage")
+	}
+}

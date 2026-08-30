@@ -557,7 +557,10 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"  - <indented sub-bullets carry the how: files, conventions, edge cases; they are not deliverables>\n" +
 	"- <the next outcome; 3-8 top-level bullets, each independently checkable>\n" +
 	"- <tests are a deliverable when the task needs them: name what they must assert>\n\n" +
+	"**Produces:** <comma-separated repository paths, build-target:NAME, or capability:NAME this task creates>\n\n" +
+	"**Consumes:** <optional comma-separated artifacts from earlier tasks or external capability:NAME values>\n\n" +
 	"**Verification:** <the command or deterministic check that exercises THIS task's changed artifacts; a project build that does not consume them is not verification>\n\n" +
+	"**Exercises:** <comma-separated Produced artifacts that the verification actually loads, compiles, tests, or validates>\n\n" +
 	"**Out of scope:** <what a diligent implementer might reasonably do and must not>\n\n" +
 	"**Assumption:** <optional — what you took as given>\n\n" +
 	"Top-level bullets are the implementer's numbered contract; it reports on each by number when it " +
@@ -588,7 +591,7 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"that task writes, not merely code in the same area — add a **Depends on:** line " +
 	"naming those task ids. Write it only where it is true: a plan where every task " +
 	"depends on the one before it is a plan that can only ever run one task at a " +
-	"time, and a task with no real prerequisite should have no line at all.\n\n" +
+	"time, and a task with no real prerequisite should have no line at all. Every **Consumes:** item produced by another task must name that producer in **Depends on:**; ducklab checks this graph.\n\n" +
 	TaskBodyContract
 
 // hasAsBuilt reports whether any section carries the as-built marker.

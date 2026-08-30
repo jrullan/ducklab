@@ -1545,6 +1545,9 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	if command := taskVerificationCommand(entry.Path, req.TaskID); command != "" {
+		ectx.Verify = config.Verify{Mode: "custom", Custom: command, TimeoutS: projCfg.Verify.TimeoutS}
+	}
 	rs.execCtx = ectx
 
 	// Build the turn that would be sent

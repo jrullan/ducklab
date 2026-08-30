@@ -552,6 +552,17 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			mc.rs.gateRoot = root
 			mc.rs.run.GateRoot = root
 			mc.rs.writer.WriteState()
+			var taskLog string
+			if command := taskVerificationCommand(mc.entry.Path, mc.req.TaskID); command != "" {
+				res, err := verify.Run(ctx, root, config.Verify{Mode: "custom", Custom: command, TimeoutS: mc.projCfg.Verify.TimeoutS}, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
+				if err != nil {
+					return "none", "", err
+				}
+				taskLog = "task verification: " + command + "\n" + res.Output
+				if !verify.IsGreen(res) {
+					return "red", taskLog, nil
+				}
+			}
 			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
 				// A build-system marker without its tool is not a gate error:
@@ -567,7 +578,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 				}
 				return "none", "", err
 			}
-			return gateWord(res), res.Output, nil
+			log := res.Output
+			if taskLog != "" {
+				log = taskLog + "\nproject verification:\n" + res.Output
+			}
+			return gateWord(res), log, nil
 		},
 		Diff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(mc.rs.run.LinkedDeps...)

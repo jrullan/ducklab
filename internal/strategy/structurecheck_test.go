@@ -2,6 +2,8 @@ package strategy
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,6 +64,28 @@ func TestARevisionThatLosesStructureIsSentBackOnce(t *testing.T) {
 	retry := prompts[2]
 	if !strings.Contains(retry, "Structure check") || !strings.Contains(retry, "SPEC-001 has no **Implements:** line") {
 		t.Fatalf("the retry prompt does not name the defect:\n%s", retry)
+	}
+}
+
+func TestStructureThatDoesNotConvergeFailsClosed(t *testing.T) {
+	var events []string
+	bad := agent.Section{ID: "SPEC-001", Title: "Shell", Body: "missing implements"}
+	params := &ExecuteParams{
+		OnEvent: func(kind string, _ map[string]interface{}) { events = append(events, kind) },
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				return verdictOutcome("request-changes"), nil
+			}
+			return sectioned("bad", bad), nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	_, err := ExecuteScript(context.Background(), CouncilScript("SPEC", nil), params)
+	if !errors.Is(err, ErrStructureFailed) {
+		t.Fatalf("non-converging structure error = %v, want ErrStructureFailed", err)
+	}
+	if !slices.Contains(events, "structure_failed") {
+		t.Fatalf("structure_failed event missing: %v", events)
 	}
 }
 

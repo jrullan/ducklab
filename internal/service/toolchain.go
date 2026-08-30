@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -110,6 +111,95 @@ func missingTools(declared []string) []string {
 	return missing
 }
 
+func capabilityStructureFindings(plan *artifact.Document) []string {
+	if plan == nil {
+		return nil
+	}
+	modules := installedPkgConfigModules()
+	var out []string
+	seen := map[string]bool{}
+	for _, sec := range plan.Sections {
+		for _, item := range strings.Split(sec.Field("toolchain"), ",") {
+			item = strings.TrimSpace(strings.Trim(item, "`"))
+			m := pkgConfigCapability.FindStringSubmatch(item)
+			if m == nil || capabilityAvailable(item) {
+				continue
+			}
+			if suggestion := closestCapability(m[1], modules); suggestion != "" && suggestion != m[1] {
+				key := m[1] + "|" + suggestion
+				if !seen[key] {
+					seen[key] = true
+					out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable; installed pkg-config metadata suggests pkg-config:%s — use the module name, not the OS package name", sec.ID, item, suggestion))
+				}
+			}
+		}
+	}
+	return out
+}
+
+func installedPkgConfigModules() []string {
+	cmd := exec.Command("pkg-config", "--list-all")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var modules []string
+	s := bufio.NewScanner(strings.NewReader(string(out)))
+	for s.Scan() {
+		if fields := strings.Fields(s.Text()); len(fields) > 0 {
+			modules = append(modules, fields[0])
+		}
+	}
+	return modules
+}
+
+func closestCapability(want string, modules []string) string {
+	best, bestDistance := "", 1<<30
+	for _, candidate := range modules {
+		d := editDistance(strings.ToLower(want), strings.ToLower(candidate))
+		if normalized := editDistance(capabilityKey(want), capabilityKey(candidate)); normalized < d {
+			d = normalized
+		}
+		if d < bestDistance {
+			best, bestDistance = candidate, d
+		}
+	}
+	limit := 3
+	if len(want) > 10 {
+		limit = 5
+	}
+	if bestDistance > limit {
+		return ""
+	}
+	return best
+}
+
+func capabilityKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimPrefix(s, "lib")
+	return strings.NewReplacer("-", "", "_", "", ".", "").Replace(s)
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
 // toolchainQuestion is the pause a build stops on when the plan's toolchain
 // is not on the machine.
 func toolchainQuestion(taskID string, missing []string) *tools.PendingQuestion {
@@ -128,4 +218,35 @@ func (s *Service) missingToolchainFor(docsRoot, taskID string) []string {
 		return nil
 	}
 	return missingTools(declaredToolchain(plan, taskID))
+}
+
+func taskField(projectRoot, taskID, field string) string {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return ""
+	}
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if strings.EqualFold(task.ID, taskID) {
+				return strings.TrimSpace(task.Field(field))
+			}
+		}
+	}
+	return ""
+}
+
+// taskVerificationCommand accepts the plan's deliberately narrow syntax: the
+// command is the first backtick-delimited value. Prose after it explains the
+// assertion to a person but is never interpreted by a shell.
+func taskVerificationCommand(projectRoot, taskID string) string {
+	value := taskField(projectRoot, taskID, "verification")
+	if value == "" {
+		return ""
+	}
+	if start := strings.Index(value, "`"); start >= 0 {
+		if end := strings.Index(value[start+1:], "`"); end >= 0 {
+			return strings.TrimSpace(value[start+1 : start+1+end])
+		}
+	}
+	return ""
 }

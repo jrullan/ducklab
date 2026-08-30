@@ -60,6 +60,10 @@ type ExecuteParams struct {
 	// plan's structure check enforces the portion rule (≤3 top-level
 	// deliverables per task) instead of only asking for it.
 	SmallSeat bool
+	// StructureCheck adds project/environment facts to the document's
+	// deterministic structure check. The plan stage uses it to distinguish a
+	// valid-but-missing capability from a likely misspelled local capability.
+	StructureCheck func(raw string) []string
 
 	// Runner executes a turn. Defaults to agent.RunTurn via AgentLoop.
 	Runner TurnRunner
@@ -289,7 +293,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// the one-shot structure note for a retried revision, and whether the
 	// latest revision changed anything at all.
 	var lastArchitect *agent.Outcome
-	structureRetried := false
+	var bestArchitect *agent.Outcome
+	bestStructureProblems := int(^uint(0) >> 1)
+	structureAttempts := 0
+	var previousStructureProblems []string
+	previousStructureSignature := ""
 	pendingStructureNote := ""
 	identicalRevision := false
 	stuck := map[int]int{}
@@ -300,7 +308,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		result.Rounds = round
 		// One structure retry per ROUND: per run, a plan whose round-2
 		// draft collided its lanes was only recorded (benchmark run 5).
-		structureRetried = false
+		structureAttempts = 0
+		previousStructureProblems = nil
+		previousStructureSignature = ""
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
@@ -441,17 +451,38 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// revision that changed nothing, which no further round will fix.
 			if turn.Role == config.RoleArchitect && strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				if cur := sectionsOf(outcome); cur != nil {
-					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract, params.KnownIDs, params.SmallSeat, outcome.Text); len(problems) > 0 {
+					problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract, params.KnownIDs, params.SmallSeat, outcome.Text)
+					if params.StructureCheck != nil {
+						problems = append(problems, params.StructureCheck(outcome.Text)...)
+					}
+					if len(problems) > 0 {
+						structureAttempts++
+						signature := strings.Join(problems, "\n")
 						emit(params, "structure_check", map[string]interface{}{
-							"round": round, "turn": i, "findings": problems, "retried": !structureRetried,
+							"round": round, "turn": i, "findings": problems, "attempt": structureAttempts, "max_attempts": 3,
 						})
-						if !structureRetried {
-							structureRetried = true
-							pendingStructureNote = structureNote(problems)
+						if structureAttempts < 3 && signature != previousStructureSignature {
+							pendingStructureNote = structureProgressNote(problems, previousStructureProblems)
+							previousStructureProblems = append([]string(nil), problems...)
+							previousStructureSignature = signature
 							emitMessage(params, round, i, turn.Role, duckling, outcome)
 							i-- // the architect goes again, findings in hand
 							continue
 						}
+						best := bestArchitect
+						if best == nil {
+							best = outcome
+						}
+						result.Outcome, result.Text, result.Error = best, best.Text, ErrStructureFailed
+						emit(params, "structure_failed", map[string]interface{}{
+							"round": round, "turn": i, "findings": problems,
+							"reason":             map[bool]string{true: "stalled", false: "attempts_exhausted"}[signature == previousStructureSignature],
+							"best_problem_count": bestStructureProblems,
+						})
+						return result, ErrStructureFailed
+					}
+					if bestArchitect == nil || 0 < bestStructureProblems {
+						bestArchitect, bestStructureProblems = outcome, 0
 					}
 				}
 				if lastArchitect != nil && i == len(script.Turns)-1 &&

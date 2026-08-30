@@ -1,7 +1,9 @@
 package service
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,5 +53,28 @@ func TestToolchainCapabilitiesIncludePkgConfigModules(t *testing.T) {
 	}
 	if strings.Contains(got, "cmd:sh") {
 		t.Fatalf("missing capabilities = %q; available command was reported missing", got)
+	}
+}
+
+func TestClosestCapabilityCorrectsPackageNamesToPkgConfigModules(t *testing.T) {
+	modules := []string{"gtk4", "x11", "gdk-pixbuf-2.0"}
+	for input, want := range map[string]string{"libgtk-4": "gtk4", "libx11": "x11"} {
+		if got := closestCapability(input, modules); got != want {
+			t.Errorf("closestCapability(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestTaskVerificationCommandIsTheBacktickedCommandOnly(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "## M-01 — Core\n\n### T-001 — Header\n\n**Implements:** SPEC-001\n**Verification:** `cc -fsyntax-only src/app.h` proves the header compiles.\n**Exercises:** src/app.h\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := taskVerificationCommand(dir, "T-001"); got != "cc -fsyntax-only src/app.h" {
+		t.Fatalf("task verification command = %q", got)
 	}
 }

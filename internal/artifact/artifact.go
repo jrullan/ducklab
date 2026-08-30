@@ -354,7 +354,7 @@ func parseFieldLine(line string) (key, value string, ok bool) {
 
 func knownField(k string) bool {
 	switch k {
-	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "dependencies", "role hint", "acceptance", "owns", "toolchain":
+	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "dependencies", "role hint", "acceptance", "owns", "toolchain", "produces", "consumes", "verification", "exercises":
 		return true
 	}
 	return false
