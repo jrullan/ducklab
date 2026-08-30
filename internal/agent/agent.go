@@ -183,6 +183,9 @@ type DucklingConfig struct {
 // RunTurn executes a single conversation turn.
 func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContext) (*Outcome, error) {
 	outcome := &Outcome{}
+	if ectx != nil {
+		ectx.BeginTurn()
+	}
 
 	// Determine dialect
 	useNative := loop.Duckling.Caps.NativeTools

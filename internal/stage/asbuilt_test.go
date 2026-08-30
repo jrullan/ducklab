@@ -27,7 +27,7 @@ func TestAdoptedSpecPromptTeachesTheAsBuiltMarker(t *testing.T) {
 	writeDoc(t, root, artifact.KindRequirements,
 		"---\nkind: requirements\norigin: adopted\napproved_by: human\n---\n\n"+
 			"## REQ-001 — Engine\n\n**Priority:** must\n\nIt runs.\n")
-	prompt, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false)
+	prompt, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestGreenfieldSpecPromptStaysClean(t *testing.T) {
 	writeDoc(t, root, artifact.KindRequirements,
 		"---\nkind: requirements\napproved_by: human\n---\n\n"+
 			"## REQ-001 — Engine\n\n**Priority:** must\n\nIt runs.\n")
-	prompt, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false)
+	prompt, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestPlanPromptSkipsAsBuiltSections(t *testing.T) {
 	writeDoc(t, root, artifact.KindSpec,
 		"## SPEC-001 — Engine\n\n**Implements:** REQ-001\n**As-built:** yes\n\nRuns.\n\n"+
 			"## SPEC-002 — New thing\n\n**Implements:** REQ-002\n\nNot built yet.\n")
-	prompt, err := BuildPrompt(root, Plan, "", &artifact.Document{}, "", false)
+	prompt, err := BuildPrompt(root, Plan, "", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

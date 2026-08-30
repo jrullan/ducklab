@@ -22,7 +22,7 @@ func TestAGreenfieldIntakeTellsTheArchitectNotToExplore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".ducklab/runs/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := BuildPrompt(root, Intake, "a screen capture tool", &artifact.Document{}, "", false)
+	prompt, err := BuildPrompt(root, Intake, "a screen capture tool", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestAGreenfieldIntakeTellsTheArchitectNotToExplore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prompt, err = BuildPrompt(root, Intake, "a screen capture tool", &artifact.Document{}, "", false)
+	prompt, err = BuildPrompt(root, Intake, "a screen capture tool", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

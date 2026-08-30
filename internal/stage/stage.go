@@ -62,6 +62,9 @@ type Params struct {
 	// shown. Set only when revising, and it changes the job entirely: the
 	// architect edits an existing document rather than writing a new one.
 	Revision string
+	// SmallSeat says the project's implementer is a small seat (a local
+	// model): the plan is portioned for it — few criteria per task.
+	SmallSeat bool
 	// Ducklings that took part, recorded in the artifact's frontmatter.
 	Ducklings []string
 	// PriorFragment is this amendment's earlier task fragment. Unlike the
@@ -191,7 +194,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			}
 		}
 	}
-	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision, p.Adopt)
+	prompt, err := BuildPrompt(p.ProjectRoot, p.Stage, p.Seed, base, p.Revision, p.Adopt, p.SmallSeat)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +267,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 // Each stage sees only what it needs: intake sees the brief, spec sees approved
 // requirements, plan sees the spec. Feeding a stage the whole cycle would bury
 // the thing it is meant to work on.
-func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document, revision string, adopt bool) (string, error) {
+func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.Document, revision string, adopt bool, smallSeat bool) (string, error) {
 	var b strings.Builder
 
 	memory, err := artifact.LoadMemory(projectRoot)
@@ -434,6 +437,17 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			return "", fmt.Errorf("plan needs a spec: run `ducklab spec` first")
 		}
 		b.WriteString(planInstruction)
+		if smallSeat {
+			// Portion for the seat that will build it. Tasks of 6-11 criteria
+			// went to a local 35B implementer (Neocapture, 2026-08-29); a
+			// small seat lands one thing at a time.
+			b.WriteString("## Portion the tasks for a small implementer\n\n" +
+				"The implementer of this project is a small local model. Cut the work so that " +
+				"each task has ONE primary deliverable and AT MOST THREE acceptance criteria, " +
+				"each verifiable by a command or a test. Prefer more, smaller tasks with " +
+				"**Depends on:** lines over fewer large ones. A task whose deliverables span " +
+				"several files or concerns is two tasks.\n\n")
+		}
 		if hasAsBuilt(spec) {
 			b.WriteString("Sections marked **As-built:** yes are already delivered by the " +
 				"existing code. Plan NO tasks for them — a task to build what is built " +

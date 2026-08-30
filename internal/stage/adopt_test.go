@@ -12,7 +12,7 @@ import (
 // the tree, with inferred intent marked — not an interview about an idea.
 func TestAdoptIntakeAsksForASurveyOfTheTree(t *testing.T) {
 	root := t.TempDir()
-	prompt, err := BuildPrompt(root, Intake, "", &artifact.Document{}, "", true)
+	prompt, err := BuildPrompt(root, Intake, "", &artifact.Document{}, "", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestAdoptIntakeAsksForASurveyOfTheTree(t *testing.T) {
 // A brief alongside adoption is orientation, not the task.
 func TestAdoptCarriesThePersonsContext(t *testing.T) {
 	root := t.TempDir()
-	prompt, err := BuildPrompt(root, Intake, "It is a multi-LLM dev harness.", &artifact.Document{}, "", true)
+	prompt, err := BuildPrompt(root, Intake, "It is a multi-LLM dev harness.", &artifact.Document{}, "", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}

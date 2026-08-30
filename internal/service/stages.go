@@ -320,6 +320,32 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	return run, nil
 }
 
+// smallImplementerSeat reports whether the project's build implementer is a
+// local seat — a small model, by the founding thesis — so document stages
+// can portion the plan for it (ducklab_portion_control).
+func (s *Service) smallImplementerSeat(projectID string) bool {
+	cfg, err := s.projectConfig(projectID)
+	if err != nil {
+		return false
+	}
+	roster, _ := s.resolveRoster(cfg, "build")
+	id := roster[config.RoleImplementer]
+	if id == "" {
+		return false
+	}
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	d, ok := s.cfg.Ducklings[id]
+	if !ok {
+		return false
+	}
+	p, ok := s.cfg.Providers[d.Provider]
+	if !ok {
+		return false
+	}
+	return IsLocalHost(p.BaseURL)
+}
+
 func liveRequirementCount(doc *artifact.Document) int {
 	count := 0
 	for _, section := range doc.Sections {
@@ -528,6 +554,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Mode:        req.Mode,
 		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
+		SmallSeat:   s.smallImplementerSeat(rs.run.ProjectID),
 		// An amendment revision edits its own pending fragment, not the
 		// approved plan it originally extended.
 		PriorFragment: func() string {

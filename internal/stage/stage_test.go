@@ -188,7 +188,7 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 		artifact.KindPlan:         "## M-01 — Should not appear\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	prompt, err := BuildPrompt(root, Spec, "", current, "", false)
+	prompt, err := BuildPrompt(root, Spec, "", current, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestSpecAndPlanPromptsCarryTheSeed(t *testing.T) {
 	seed := "## Reference documents\n\nThe wiki spec of the login module."
 	for _, name := range []Name{Spec, Plan} {
 		current, _ := artifact.Load(root, name.Kind())
-		prompt, err := BuildPrompt(root, name, seed, current, "", false)
+		prompt, err := BuildPrompt(root, name, seed, current, "", false, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,7 +246,7 @@ func TestRevisionPromptCarriesTheSeed(t *testing.T) {
 		artifact.KindSpec:         "## SPEC-001 — Login\n\n**Implements:** REQ-001\n\nDetail.\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	prompt, err := BuildPrompt(root, Spec, "## Reference documents\n\nThe wiki RBAC spec.", current, "cover RBAC", false)
+	prompt, err := BuildPrompt(root, Spec, "## Reference documents\n\nThe wiki RBAC spec.", current, "cover RBAC", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestRevisionPromptCarriesTheSeed(t *testing.T) {
 func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindSpec)
-	_, err := BuildPrompt(root, Spec, "", current, "", false)
+	_, err := BuildPrompt(root, Spec, "", current, "", false, false)
 	if err == nil {
 		t.Fatal("spec ran with no requirements")
 	}
@@ -275,7 +275,7 @@ func TestSpecWithoutRequirementsFailsWithAnAction(t *testing.T) {
 func TestPlanWithoutSpecFailsWithAnAction(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindPlan)
-	_, err := BuildPrompt(root, Plan, "", current, "", false)
+	_, err := BuildPrompt(root, Plan, "", current, "", false, false)
 	if err == nil || !strings.Contains(err.Error(), "spec") {
 		t.Errorf("err = %v", err)
 	}
@@ -287,7 +287,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 		artifact.KindRequirements: "## REQ-007 — Existing\n\n**Priority:** must\n",
 	})
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false)
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false, false)
 	if !strings.Contains(prompt, "REQ-008") {
 		t.Errorf("prompt does not state the next free id:\n%s", prompt)
 	}
@@ -300,7 +300,7 @@ func TestPromptStatesTheNextFreeID(t *testing.T) {
 func TestIntakeWithoutASeedAsksTheHuman(t *testing.T) {
 	root := projectWith(t, nil)
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "", current, "", false)
+	prompt, _ := BuildPrompt(root, Intake, "", current, "", false, false)
 	if !strings.Contains(prompt, "Ask the human") {
 		t.Errorf("prompt does not ask for an interview:\n%s", prompt)
 	}
@@ -313,7 +313,7 @@ func TestPromptCarriesProjectMemory(t *testing.T) {
 	artifact.SaveMemory(root, m)
 
 	current, _ := artifact.Load(root, artifact.KindRequirements)
-	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false)
+	prompt, _ := BuildPrompt(root, Intake, "brief", current, "", false, false)
 	if !strings.Contains(prompt, "billing product") {
 		t.Errorf("project memory not injected:\n%s", prompt)
 	}
@@ -374,7 +374,7 @@ func TestARevisionAsksForAnEditNotANewDocument(t *testing.T) {
 		},
 	}
 	got, err := BuildPrompt(root, Spec, "", current,
-		"SPEC-004 should stop the opposite vertex from being dragged", false)
+		"SPEC-004 should stop the opposite vertex from being dragged", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
 		[]byte("---\nkind: requirements\napproved_by: human\n---\n\n## REQ-001 — A thing\n\nBody.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false)
+	got, err := BuildPrompt(root, Spec, "", &artifact.Document{}, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

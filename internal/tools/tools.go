@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"github.com/jrullan/ducklab/internal/verify"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -114,6 +115,9 @@ type ExecContext struct {
 	// change something.
 	lastFailSig   string
 	lastFailCount int
+	// turnReads remembers the successful read-only calls of the current
+	// turn, so an identical re-read is refused with directions (BeginTurn).
+	turnReads map[string]bool
 	// fsPatchFailStreak tracks fuzzy, consecutive fs_patch failures by file.
 	// Unlike the exact-call brake above, changing the search text does not
 	// disguise a model fighting the same file.
@@ -262,6 +266,29 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			return &Result{IsError: true, Content: message}, nil
 		}
 	}
+	// A document is read as an artifact, not as a file: artifact_read knows
+	// the sections and the pending proposal; fs_read of the same .md is a
+	// second copy of the same text in the context (a plan architect read
+	// requirements and spec twice each, once per tool — Neocapture).
+	if name == "fs_read" {
+		if kind := artifactKindOfPath(args); kind != "" {
+			return ErrorResult("%s is a project document — read it with artifact_read {\"kind\":%q} "+
+				"(it knows the sections and any pending proposal). If you already did, the text is above: use it.", fsReadPath(args), kind), nil
+		}
+	}
+	// Reading the same thing twice in one turn changes nothing: the first
+	// answer is still in the conversation. Refused with directions instead
+	// of served again — a seat that re-reads the documents it was given
+	// spends its window and its minutes on nothing.
+	if readOnlyTool[name] {
+		if ectx.turnReads == nil {
+			ectx.turnReads = map[string]bool{}
+		}
+		if ectx.turnReads[sig] {
+			return ErrorResult("REPEATED READ: you already called %s with these exact arguments in this turn, "+
+				"and its result is above in this conversation. Use it; do not read again.", name), nil
+		}
+	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
 		return &Result{IsError: true, Content: fmt.Sprintf(
 			"REFUSED: you have made this exact failing call %d times — %s with the same "+
@@ -283,6 +310,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		}
 	} else {
 		ectx.lastFailSig, ectx.lastFailCount = "", 0
+		if readOnlyTool[name] && ectx.turnReads != nil {
+			ectx.turnReads[sig] = true
+		}
 	}
 	if res != nil {
 		// Capped here rather than in each tool, so a tool cannot forget.
@@ -295,6 +325,45 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+// readOnlyTool names the tools whose identical call in one turn returns the
+// same answer, so the second call is refused with directions.
+var readOnlyTool = map[string]bool{
+	"fs_read": true, "fs_list": true, "fs_search": true, "artifact_read": true, "task_read": true,
+	"skill_list": true, "skill_read": true, "ref_read": true, "git_log": true, "git_diff": true, "git_status": true,
+}
+
+// BeginTurn resets what is remembered per turn: the repeated-read brake. A
+// new turn is a new conversation, so the earlier answers are gone and a read
+// is legitimate again.
+func (e *ExecContext) BeginTurn() {
+	e.turnReads = map[string]bool{}
+}
+
+// fsReadPath extracts the path argument of an fs_read call, if any.
+func fsReadPath(args json.RawMessage) string {
+	var a struct {
+		Path string `json:"path"`
+	}
+	_ = json.Unmarshal(args, &a)
+	return strings.TrimSpace(a.Path)
+}
+
+// artifactKindOfPath maps .ducklab/docs/<kind>.md (or .md.proposed) to the
+// artifact kind, or "" when the path is not a project document.
+func artifactKindOfPath(args json.RawMessage) string {
+	p := filepath.ToSlash(filepath.Clean(fsReadPath(args)))
+	p = strings.TrimPrefix(p, "./")
+	if !strings.HasPrefix(p, ".ducklab/docs/") {
+		return ""
+	}
+	base := strings.TrimSuffix(strings.TrimSuffix(path.Base(p), ".proposed"), ".md")
+	switch base {
+	case "requirements", "spec", "plan", "project", "intent":
+		return base
+	}
+	return ""
 }
 
 const FSPatchFailLimit = 5
