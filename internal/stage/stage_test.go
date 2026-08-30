@@ -209,9 +209,31 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 		"HOW the system delivers",
 		"Cross-cutting design",
 		"Do not shape the document as one section per requirement",
+		"Approved requirement invariant matrix",
+		"Treat these as simultaneous constraints",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("spec prompt lacks %q", want)
+		}
+	}
+}
+
+func TestSpecAndPlanPutMustAndWontInOneInvariantMatrix(t *testing.T) {
+	root := projectWith(t, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-004 — Desktop integration\n\nRegister a fixed shortcut.\n\n**Priority:** must\n\n" +
+			"## REQ-006 — Configurable shortcut\n\nUser configuration is out of scope.\n\n**Priority:** wont\n",
+		artifact.KindSpec: "## SPEC-001 — Integration\n\n**Implements:** REQ-004, REQ-006\n\nUse one fixed shortcut.\n",
+	})
+	for _, name := range []Name{Spec, Plan} {
+		current, _ := artifact.Load(root, name.Kind())
+		prompt, err := BuildPrompt(root, name, "", current, "", false, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"REQ-004 — Desktop integration", "must", "REQ-006 — Configurable shortcut", "wont"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s invariant matrix lost %q:\n%s", name, want, prompt)
+			}
 		}
 	}
 }

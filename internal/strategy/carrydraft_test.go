@@ -89,3 +89,40 @@ func TestAFragmentCouncilCarriesTheMaterializedCandidate(t *testing.T) {
 		}
 	}
 }
+
+// The candidate a person accepts is the closing architect revision, not the
+// draft the round-two critic saw immediately before it. Record one bounded
+// verdict on that exact text without opening an unbounded third repair lap.
+func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
+	script := CouncilScript("REQ", nil)
+	architectTurns, reviewerTurns := 0, 0
+	var finalPrompt string
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				reviewerTurns++
+				if tc.Index >= len(script.Turns) {
+					finalPrompt = prompt
+					return verdictOutcome("approve"), nil
+				}
+				return verdictOutcome("request-changes"), nil
+			}
+			architectTurns++
+			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\nRevision " + string(rune('0'+architectTurns)) + ".", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate"}}}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewerTurns != 3 {
+		t.Fatalf("reviewer turns = %d, want two round reviews plus final verification", reviewerTurns)
+	}
+	if !strings.Contains(finalPrompt, "Revision 3.") || !strings.Contains(finalPrompt, "verification only") {
+		t.Errorf("final reviewer did not receive the closing revision:\n%s", finalPrompt)
+	}
+	if res.State.Verdict != "approve" {
+		t.Errorf("final verdict = %q, want approve", res.State.Verdict)
+	}
+}

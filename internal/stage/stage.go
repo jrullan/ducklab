@@ -434,6 +434,7 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			b.WriteString(strings.TrimSpace(seed))
 			b.WriteString("\n\n")
 		}
+		b.WriteString(requirementInvariantMatrix(reqs))
 		b.WriteString("## Requirements\n\n")
 		for _, r := range approved {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", r.ID, r.Title, strings.TrimSpace(r.Body))
@@ -473,6 +474,9 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			b.WriteString(strings.TrimSpace(seed))
 			b.WriteString("\n\n")
 		}
+		if reqs, err := artifact.Load(projectRoot, artifact.KindRequirements); err == nil {
+			b.WriteString(requirementInvariantMatrix(reqs))
+		}
 		b.WriteString("## Specification\n\n")
 		for _, s := range spec.Sections {
 			fmt.Fprintf(&b, "### %s — %s\n%s\n\n", s.ID, s.Title, strings.TrimSpace(s.Body))
@@ -506,6 +510,35 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		kind.Prefix(), NextFree(current.Sections, kind.Prefix()))
 
 	return b.String(), nil
+}
+
+// requirementInvariantMatrix keeps approved obligations and exclusions next
+// to each other. A small council alternated between “no configurable shortcut”
+// and “desktop integration requires shortcut registration” because those facts
+// lived fifty lines apart; a fixed shortcut satisfies both, but only when the
+// distinction is visible at the point of design and planning.
+func requirementInvariantMatrix(reqs *artifact.Document) string {
+	if reqs == nil || len(reqs.Sections) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Approved requirement invariant matrix\n\n")
+	b.WriteString("Treat these as simultaneous constraints. `wont` excludes only what its requirement actually names; it does not cancel a related `must`. If two rows appear to conflict, state one explicit policy that satisfies both and use it consistently in every section.\n\n")
+	b.WriteString("| ID | Priority | Constraint |\n|---|---|---|\n")
+	for _, sec := range approvedSections(reqs) {
+		priority := strings.ToLower(strings.TrimSpace(sec.Field("priority")))
+		if priority == "" {
+			priority = "unspecified"
+		}
+		constraint := strings.Join(strings.Fields(strings.TrimSpace(sec.Body)), " ")
+		constraint = strings.ReplaceAll(constraint, "|", "\\|")
+		if len(constraint) > 220 {
+			constraint = constraint[:217] + "..."
+		}
+		fmt.Fprintf(&b, "| %s — %s | %s | %s |\n", sec.ID, strings.ReplaceAll(sec.Title, "|", "\\|"), priority, constraint)
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 // inventoryTurn limits the extra pass to adoption intake and the first spec

@@ -787,6 +787,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		}
 	}
 
+	// A two-round council used to end on an unreviewed architect revision:
+	// reviewer requests one last change, architect applies it, gate receives
+	// UNVERIFIED without knowing whether the real candidate fixed the issue or
+	// introduced a new contradiction. One bounded, read-only critic pass does
+	// not open a third repair loop; it gives the person evidence about exactly
+	// what they are being asked to accept.
+	if script.RevisionOpensNextRound && result.Rounds == maxRounds &&
+		result.State.Verdict == "request-changes" && lastArchitect != nil {
+		if err := finalDocumentReview(ctx, script, params, runner, registry, lastArchitect, result); err != nil {
+			result.Error = err
+			return result, err
+		}
+	}
+
 	// The stage merger must receive the same cumulative candidate the critic
 	// judged, not merely the final one-section patch emitted by the architect.
 	if script.FragmentPrefix != "" && lastArchitect != nil {
@@ -794,6 +808,76 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		result.Text = lastArchitect.Text
 	}
 	return result, nil
+}
+
+func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, result *ExecuteResult) error {
+	emit(params, "final_review_started", map[string]interface{}{
+		"round": result.Rounds, "detail": "the last revision is being checked without opening another repair round",
+	})
+	verdict := "approve"
+	var finalFindings []conv.Finding
+	reviewers := 0
+	for _, scripted := range script.Turns {
+		if scripted.Persona != PersonaCritic {
+			continue
+		}
+		turn := scripted
+		toolbelt, err := turn.ResolveToolbelt(registry)
+		if err != nil {
+			return err
+		}
+		duckling := resolveDuckling(params, turn)
+		prompt, err := buildPrompt(&turn, params, result.Transcript, nil, nil, "", nil, nil, nil)
+		if err != nil {
+			return err
+		}
+		prompt += "\n\n## Final candidate under review\n\n" + candidate.Text +
+			"\n\nThis is verification only. Return a verdict on this exact candidate; no architect turn follows automatically."
+
+		index := script.TurnIndexBase + len(script.Turns) + reviewers
+		emit(params, "turn_start", map[string]interface{}{
+			"round": result.Rounds, "turn": index, "role": string(turn.Role),
+			"duckling": string(duckling), "final_review": true,
+		})
+		outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: result.Rounds, Index: index})
+		if err != nil {
+			return err
+		}
+		emitMessage(params, result.Rounds, index, turn.Role, duckling, outcome)
+		emit(params, "turn_end", map[string]interface{}{
+			"round": result.Rounds, "turn": index, "role": string(turn.Role), "final_review": true,
+		})
+		result.Transcript.Add(conv.Entry{
+			Round: result.Rounds, Index: index, Role: turn.Role, Duckling: duckling, Text: transcriptText(outcome),
+		})
+		if result.RoleTexts == nil {
+			result.RoleTexts = map[string][]string{}
+		}
+		result.RoleTexts[string(turn.Role)] = append(result.RoleTexts[string(turn.Role)], outcome.Text)
+		reviewers++
+
+		v, ok := outcome.Parsed.(*agent.Verdict)
+		if !ok || v == nil {
+			return fmt.Errorf("final document reviewer returned no verdict")
+		}
+		if v.Verdict != "approve" {
+			verdict = v.Verdict
+		}
+		finalFindings = append(finalFindings, toConvFindings(v.Findings)...)
+	}
+	if reviewers == 0 {
+		return nil
+	}
+	result.State.Verdict = verdict
+	result.State.NoFindings = len(finalFindings) == 0
+	if n := len(result.Records); n > 0 {
+		result.Records[n-1].Verdict = verdict
+	}
+	emit(params, "final_review_completed", map[string]interface{}{
+		"round": result.Rounds, "verdict": verdict, "findings": len(finalFindings),
+		"detail": "final evidence recorded; no additional revision was started",
+	})
+	return nil
 }
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
