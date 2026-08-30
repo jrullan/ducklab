@@ -28,17 +28,25 @@ type reviewMemory struct {
 
 // rememberReview records a finished reviewer turn.
 func rememberReview(diff string, outcome *agent.Outcome) *reviewMemory {
-	m := &reviewMemory{diff: diff}
+	return &reviewMemory{diff: diff, looked: lookedFrom(outcome)}
+}
+
+// lookedFrom lists what a turn read or searched: tool + target, successful
+// calls only, deduplicated, in order. It is the working memory a seat is
+// handed when it comes back — after a round, a pause or an answered
+// question — so it does not survey the project again.
+func lookedFrom(outcome *agent.Outcome) []string {
 	if outcome == nil {
-		return m
+		return nil
 	}
+	var out []string
 	seen := map[string]bool{}
 	for _, c := range outcome.ToolCalls {
 		if c.Result == nil || c.Result.IsError {
 			continue
 		}
 		switch c.Name {
-		case "fs_read", "fs_search", "fs_list", "artifact_read", "task_read", "git_diff", "git_log":
+		case "fs_read", "fs_search", "fs_list", "artifact_read", "task_read", "git_diff", "git_log", "skill_list", "skill_read", "ref_read":
 		default:
 			continue
 		}
@@ -48,10 +56,47 @@ func rememberReview(diff string, outcome *agent.Outcome) *reviewMemory {
 		}
 		if !seen[line] {
 			seen[line] = true
-			m.looked = append(m.looked, line)
+			out = append(out, line)
 		}
 	}
-	return m
+	return out
+}
+
+// mergeLooked appends what is new, keeping order and dropping duplicates.
+func mergeLooked(have, more []string) []string {
+	seen := map[string]bool{}
+	for _, l := range have {
+		seen[l] = true
+	}
+	for _, l := range more {
+		if !seen[l] {
+			seen[l] = true
+			have = append(have, l)
+		}
+	}
+	return have
+}
+
+// alreadyRead renders a seat's working memory for its prompt. Empty when
+// there is nothing to remember.
+func alreadyRead(looked []string) string {
+	if len(looked) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## What you already read in this run\n\n")
+	b.WriteString("Earlier turns of yours in this run read or searched the following. The documents that " +
+		"matter are in this prompt; do not read them again and do not survey the tree again — " +
+		"go straight to the work.\n\n")
+	max := 40
+	for i, l := range looked {
+		if i == max {
+			fmt.Fprintf(&b, "- … and %d more\n", len(looked)-max)
+			break
+		}
+		b.WriteString("- " + l + "\n")
+	}
+	return b.String()
 }
 
 // diffByFile splits a unified diff into per-file bodies keyed by path.

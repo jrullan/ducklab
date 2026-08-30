@@ -98,6 +98,9 @@ type ResumeTurn struct {
 	Index int
 	Role  config.Role
 	Notes string
+	// Looked is what the interrupted turn had already read (tool + target),
+	// handed back to the resumed seat so it does not start over.
+	Looked []string
 }
 
 // RoundRecord is what happened in one round.
@@ -267,6 +270,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var correctiveNotes []string
 	// What the reviewer may remember of its own previous round (reviewmemory.go).
 	var lastReview *reviewMemory
+	// What every other seat may remember of its own earlier turns: the
+	// reads. A resumed or revising architect used to start from nothing.
+	seatLooked := map[config.Role][]string{}
+	if params.ResumeFrom != nil && len(params.ResumeFrom.Looked) > 0 {
+		seatLooked[params.ResumeFrom.Role] = mergeLooked(nil, params.ResumeFrom.Looked)
+	}
 	stuck := map[int]int{}
 	redGateStreak := 0
 	var evidence escalationEvidence
@@ -318,7 +327,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				evidence.RedGateStreak = redGateStreak
 			}
 
-			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview)
+			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
 			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
 				prompt += "\n\n## Resumed with partial notes\n\nThe " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from these notes:\n\n" + params.ResumeFrom.Notes
 			}
@@ -344,7 +353,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			if err != nil {
 				notes := partialTurnNotes(outcome)
-				emit(params, "turn_interrupted", map[string]interface{}{"round": round, "turn": i, "role": string(turn.Role), "notes": notes})
+				emit(params, "turn_interrupted", map[string]interface{}{"round": round, "turn": i, "role": string(turn.Role), "notes": notes,
+					"looked": mergeLooked(seatLooked[turn.Role], lookedFrom(outcome))})
 				// What it managed
 				// way out. This used to return first, so a turn that failed took
 				// its whole record with it: a run that patched a file seventeen
@@ -394,6 +404,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					lastReview = rememberReview(diff, outcome)
 				}
 			}
+			seatLooked[turn.Role] = mergeLooked(seatLooked[turn.Role], lookedFrom(outcome))
 
 			// What the model actually said, and what it did.
 			//
@@ -602,7 +613,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
-func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory) (string, error) {
+func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
 
@@ -612,6 +623,12 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		if rendered := tr.Render(false, ""); rendered != "" {
 			b.WriteString("\n\n")
 			b.WriteString(rendered)
+		}
+		// And a revision that forgot what it read is a survey all over
+		// again: two resumptions cost an architect 17 tool calls and 22
+		// minutes re-reading the same documents (Neocapture, 2026-08-29).
+		if memo := alreadyRead(looked); memo != "" {
+			b.WriteString("\n\n" + memo)
 		}
 	case config.RoleImplementer:
 		if rendered := conv.RenderFindings(findings); rendered != "" {

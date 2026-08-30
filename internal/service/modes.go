@@ -478,12 +478,30 @@ func resumeTurn(run *runlog.Run) *strategy.ResumeTurn {
 		return nil
 	}
 	t := run.InterruptedTurn
-	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes}
+	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes, Looked: t.Looked}
 }
 
 func stringValueAny(v interface{}) string {
 	s, _ := v.(string)
 	return s
+}
+
+// stringSliceAny reads a []string that may arrive as []interface{} from an
+// event map.
+func stringSliceAny(v interface{}) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func intValue(v interface{}) int {
@@ -546,7 +564,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
 			if kind == "turn_interrupted" {
-				mc.rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"])}
+				mc.rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
 				mc.rs.writer.WriteState()
 			} else if kind == "turn_end" && data["incomplete"] != true {
 				mc.rs.run.InterruptedTurn = nil

@@ -187,6 +187,11 @@ type InterruptedTurn struct {
 	Index int    `json:"index"`
 	Role  string `json:"role"`
 	Notes string `json:"notes,omitempty"`
+	// Looked is what the interrupted turn had already read or searched
+	// (tool + target). A resumed seat is a fresh conversation; without this
+	// it re-reads everything — an architect resumed twice re-explored the
+	// project twice, 17 tool calls and 22 minutes (Neocapture, 2026-08-29).
+	Looked []string `json:"looked,omitempty"`
 }
 
 // GateReproduction is the result of proving the accepted commit in a clean checkout.
