@@ -298,6 +298,13 @@ func parseSectionFields(s *Section, body string) {
 		if !ok {
 			continue
 		}
+		// "Dependencies:" is what a model writes when nobody spelled the
+		// field: a plan revision carried 15 of them and the parser dropped
+		// every edge in silence (Neocapture, 2026-08-30). Same meaning, same
+		// field — aliased before it is stored, so every reader sees it.
+		if key == "dependencies" {
+			key = "depends on"
+		}
 		s.Fields[key] = value
 		if key == "owns" {
 			for _, path := range strings.Split(value, ",") {
@@ -347,7 +354,7 @@ func parseFieldLine(line string) (key, value string, ok bool) {
 
 func knownField(k string) bool {
 	switch k {
-	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns":
+	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "dependencies", "role hint", "acceptance", "owns":
 		return true
 	}
 	return false
