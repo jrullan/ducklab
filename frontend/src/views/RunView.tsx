@@ -878,7 +878,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     try {
       const res = await client.accept(runId);
       store.confirmAccept(runId, res.commit_sha);
-      setPublicationFailure(res.warning ? { sha: res.commit_sha, error: res.warning.replace(/^.*?push failed:\s*/i, "") } : null);
+      // Accept responses also carry unrelated caveats (for example, the
+      // benchmark's same-model self-review warning). Treating every warning
+      // as a publication failure made a local-only accept claim that a push
+      // had failed even though the engine recorded no remote action.
+      const pushFailure = /push failed:\s*(.+)$/i.exec(res.warning ?? "");
+      setPublicationFailure(pushFailure ? { sha: res.commit_sha, error: pushFailure[1]! } : null);
     } catch (e) {
       // Never show a commit the engine did not confirm (AC-34).
       store.failAccept(runId, e instanceof Error ? e.message : String(e));

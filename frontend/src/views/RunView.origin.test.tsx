@@ -47,6 +47,25 @@ describe("RunView publication consequences", () => {
     screen.getByTestId("retry-publication").click();
     expect(client.projectPush).toHaveBeenCalledWith("project-1");
   });
+
+  it("does not mislabel an unrelated accept warning as a failed push", async () => {
+    useRuns.setState({
+      runs: { "run-1": { id: "run-1", project_id: "project-1", stage: "spec", mode: "council", task_id: "", status: "paused", verdict: "UNVERIFIED", started_at: "2026-01-01T00:00:00Z", next: ["accept"] } },
+      events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {}, needsResync: false, connection: "open",
+    });
+    const client = makeClient({}) as Record<string, ReturnType<typeof vi.fn>>;
+    client.projectGet = vi.fn().mockResolvedValue({ config: { remote: { name: "origin", on_accept: "nothing" } } });
+    client.accept = vi.fn().mockResolvedValue({
+      commit_sha: "be7087d9",
+      warning: "beelink-local is on both sides of the pair: this measures self-consistency, not review.",
+    });
+
+    render(<RunView runId="run-1" client={client as never} />);
+    screen.getByTestId("cycle-accept").click();
+
+    expect(await screen.findByTestId("accept-committed")).toHaveTextContent("committed be7087d9");
+    expect(screen.queryByTestId("publication-failure")).not.toBeInTheDocument();
+  });
 });
 
 describe("RunView origin panel", () => {
