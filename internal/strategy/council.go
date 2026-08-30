@@ -133,5 +133,9 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 		// among approvals is a request for changes.
 		Until:     `verdict == "approve"`,
 		MaxRounds: 2,
+		// Round 2 opens on the revision round 1 closed with: re-drafting it
+		// first cost every council an architect turn per extra round
+		// (benchmark run 6: draft → critique → revision → draft again).
+		RevisionOpensNextRound: true,
 	}
 }

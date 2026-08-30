@@ -344,6 +344,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// A human turn is scheduled by the stage runner, not here.
 				continue
 			}
+			// The previous round's revision IS this round's draft: the
+			// critics judge it as it stands, and the architect speaks again
+			// only after them.
+			if script.RevisionOpensNextRound && round > 1 && i == 0 && lastArchitect != nil {
+				emit(params, "draft_carried", map[string]interface{}{"round": round, "detail": "the previous round's revision is this round's draft"})
+				continue
+			}
 
 			toolbelt, err := turn.ResolveToolbelt(registry)
 			if err != nil {

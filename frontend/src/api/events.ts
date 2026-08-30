@@ -293,6 +293,7 @@ export const KNOWN_EVENT_TYPES = [
   "dedupe",
   "no_gate",
   "toolchain_missing",
+  "draft_carried",
   "contestant_failed",
   "no_changes",
   "tests_modified",

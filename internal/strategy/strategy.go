@@ -105,6 +105,10 @@ type Script struct {
 	// coordinates their streamed text lands in the same delta key and the
 	// lanes concatenate strangers.
 	TurnIndexBase int
+	// RevisionOpensNextRound skips the first turn of every round after the
+	// first: the previous round's closing revision is the draft the next
+	// round's critics judge (council).
+	RevisionOpensNextRound bool
 }
 
 // Turn is a script turn.
