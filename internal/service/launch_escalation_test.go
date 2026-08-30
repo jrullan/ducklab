@@ -60,14 +60,31 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var suggestion, human bool
+	var suggestion, requested, human bool
 	for _, event := range events {
 		suggestion = suggestion || event.Type == "escalation_suggestion"
+		requested = requested || event.Type == "pause_requested"
 		human = human || event.Type == "human_needed"
 	}
-	if !suggestion || !human {
-		t.Fatalf("wallclock history did not pause with both events: suggestion=%v human=%v", suggestion, human)
+	// The card is filed and the pause is REQUESTED; the run keeps its turn in
+	// flight. Cancelling at once threw away a 110 s reviewer turn.
+	if !suggestion || !requested || human || current.Status != "running" {
+		t.Fatalf("escalation must request a pause, not cancel mid-turn: suggestion=%v requested=%v human=%v status=%s", suggestion, requested, human, current.Status)
 	}
+	// The turn ends: now the pause lands with its card.
+	s.pauseAtSafePoint(rs)
+	events, err = runlog.ReadEvents(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		human = human || event.Type == "human_needed"
+	}
+	if !human || current.Status != "paused" || current.PendingKind != "history_duration" {
+		t.Fatalf("the pause did not land at the safe point: human=%v status=%s pending=%s", human, current.Status, current.PendingKind)
+	}
+	// Idempotent: a second turn end does nothing.
+	s.pauseAtSafePoint(rs)
 }
 
 func TestWallclockEscalationExcludesQueuedAndPausedTime(t *testing.T) {

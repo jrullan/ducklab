@@ -569,6 +569,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			} else if kind == "turn_end" && data["incomplete"] != true {
 				mc.rs.run.InterruptedTurn = nil
 				mc.rs.writer.WriteState()
+				s.pauseAtSafePoint(mc.rs)
 			}
 		},
 	}

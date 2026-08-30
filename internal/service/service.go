@@ -124,6 +124,13 @@ type runState struct {
 	// duration threshold; it prevents repeated suggestions while cancellation
 	// unwinds the strategy.
 	historyEscalated atomic.Bool
+	// pauseAfterTurn asks the run to pause at its next safe point — the end
+	// of the turn in flight — instead of cancelling mid-turn. A history
+	// escalation used to cancel at once and throw away a 110 s reviewer turn
+	// (Neocapture plan, 2026-08-29). pausePending holds the card to file when
+	// the pause lands.
+	pauseAfterTurn atomic.Bool
+	pausePending   map[string]interface{}
 	// refMu guards the run's reference bookkeeping: ref_read executes on
 	// agent turns while critics may run concurrently.
 	refMu sync.Mutex
@@ -4452,12 +4459,33 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
 	rs.writer.AppendEvent("escalation_suggestion", data)
+	// Pause at the next safe point, not now: the turn in flight finishes
+	// and its work lands on the record before the run stops (I9). The
+	// turn_end hook files the card and cancels.
+	rs.wmu.Lock()
+	rs.pausePending = data
+	rs.wmu.Unlock()
+	rs.pauseAfterTurn.Store(true)
+	rs.writer.AppendEvent("pause_requested", map[string]interface{}{"kind": "history_duration", "detail": "pausing when the current turn ends"})
+}
+
+// pauseAtSafePoint lands a requested pause once the turn in flight has
+// ended: the run is marked paused with its card, and only then cancelled.
+func (s *Service) pauseAtSafePoint(rs *runState) {
+	if rs == nil || rs.run == nil || rs.writer == nil || !rs.pauseAfterTurn.CompareAndSwap(true, false) {
+		return
+	}
+	rs.wmu.Lock()
+	data := rs.pausePending
+	rs.pausePending = nil
+	rs.wmu.Unlock()
+	detail, _ := data["detail"].(string)
 	settleActiveWallclock(rs.run, time.Now())
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "history_duration"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
 	rs.run.PendingData = data
-	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "history_duration", "detail": fmt.Sprintf("%.0fm so far; runs of this shape average %.0fm", elapsed/60, average/60)})
+	rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "history_duration", "detail": detail})
 	rs.writer.WriteState()
 	if rs.cancel != nil {
 		rs.cancel()

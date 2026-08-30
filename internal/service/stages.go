@@ -636,6 +636,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					} else if kind == "turn_end" && data["incomplete"] != true {
 						rs.run.InterruptedTurn = nil
 						rs.writer.WriteState()
+						s.pauseAtSafePoint(rs)
 					}
 				},
 			})

@@ -287,6 +287,9 @@ export const KNOWN_EVENT_TYPES = [
   // yet: an event the desktop does not know cannot be stored or replayed, and
   // the run log a client rebuilds would be missing what actually happened.
   "settled",
+  "structure_check",
+  "revision_identical",
+  "pause_requested",
   "contestant_failed",
   "no_changes",
   "tests_modified",
