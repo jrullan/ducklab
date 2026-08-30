@@ -292,6 +292,7 @@ export const KNOWN_EVENT_TYPES = [
   "pause_requested",
   "dedupe",
   "no_gate",
+  "toolchain_missing",
   "contestant_failed",
   "no_changes",
   "tests_modified",

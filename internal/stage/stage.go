@@ -574,6 +574,11 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"A milestone may declare its implementation lane with an **Owns:** line listing comma-separated repository paths or directory globs (for example, **Owns:** `internal/service`, `internal/artifact/**`). The lane is inherited by every task under that milestone; do not claim the same path in two live milestones.\n\n" +
 	"Every task must carry an **Implements:** line naming the spec section it delivers. " +
 	"Name only ids that exist in the specification above; an id that is not there is a broken link, not a placeholder.\n\n" +
+	"The stack you chose has a toolchain, and the plan declares it: every milestone that builds or tests carries a " +
+	"**Toolchain:** line naming the command-line tools its tasks need, as the binaries are invoked (for example, " +
+	"**Toolchain:** meson, ninja, pkg-config, gcc — or cargo, or python3, pytest). ducklab checks the machine for them " +
+	"before the first build of the milestone and asks the person to install what is missing; an undeclared tool is a " +
+	"build that fails for a reason nobody named.\n\n" +
 	"Lanes are exclusive: two milestones must never list the same path or overlapping directories in their **Owns:** lines, " +
 	"and a broad lane (`src/`, `.`) is not a lane. When you cannot name a disjoint path set, write no **Owns:** line at all — " +
 	"the absence is honest; an overlap is a collision the person has to untangle.\n\n" +

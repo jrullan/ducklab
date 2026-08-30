@@ -1692,6 +1692,15 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// task) without changing the project's durable verification contract.
 		projCfg.Verify = verifyOverride(projCfg.Verify, req.Verify)
 	}
+	// The plan's toolchain, checked on this machine before a single model
+	// turn is spent: a tool the plan declares and PATH lacks is the person's
+	// to install, asked for by name, now (toolchain.go).
+	if req.TaskID != "" {
+		if missing := s.missingToolchainFor(entry.Path, req.TaskID); len(missing) > 0 {
+			s.pauseForQuestion(rs, toolchainQuestion(req.TaskID, missing))
+			return
+		}
+	}
 
 	// The tree as it stands, before the run touches it. What "reject" and
 	// "failed" restore; without it they were words on a record while the

@@ -37,6 +37,17 @@ type Result struct {
 
 // Detect auto-detects the verification gate for a project.
 // Returns the gate and the command to run.
+// MissingToolchain says a build-system marker is in the tree but the tool
+// that runs it is not on the machine.
+type MissingToolchain struct {
+	Tool   string
+	Marker string
+}
+
+func (e *MissingToolchain) Error() string {
+	return fmt.Sprintf("the tree has %s but %s is not installed on this machine", e.Marker, e.Tool)
+}
+
 func Detect(root string) (Gate, string, error) {
 	// Rung 1: Go tests
 	if fileExists(filepath.Join(root, "go.mod")) {
@@ -73,8 +84,12 @@ func Detect(root string) (Gate, string, error) {
 	}
 	// Rung 4b: Meson. A GTK project's first task wrote meson.build and the
 	// gate stayed "none" for the rest of the run (T-001, benchmark run 5).
-	// Only when meson is installed: a gate that cannot start is not a gate.
-	if fileExists(filepath.Join(root, "meson.build")) && commandSucceeds(root, "meson --version") {
+	// A marker without its tool is not "no gate": it is a toolchain the
+	// person has not installed yet, said so by name.
+	if fileExists(filepath.Join(root, "meson.build")) {
+		if !commandSucceeds(root, "meson --version") {
+			return GateNone, "", &MissingToolchain{Tool: "meson", Marker: "meson.build"}
+		}
 		return GateBuild, "(test -d build || meson setup build) && ninja -C build", nil
 	}
 	// Rung 5: Go build

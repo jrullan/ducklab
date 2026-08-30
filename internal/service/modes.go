@@ -554,6 +554,17 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			mc.rs.writer.WriteState()
 			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
+				// A build-system marker without its tool is not a gate error:
+				// it is a toolchain the person has not installed, named on the
+				// record so the next launch's pre-flight (toolchain.go) can ask.
+				var missing *verify.MissingToolchain
+				if errors.As(err, &missing) {
+					mc.rs.writer.AppendEvent("toolchain_missing", map[string]interface{}{
+						"tool": missing.Tool, "marker": missing.Marker,
+						"detail": fmt.Sprintf("the tree has %s but %s is not installed — the gate cannot run; install %s to verify this work", missing.Marker, missing.Tool, missing.Tool),
+					})
+					return "none", "", nil
+				}
 				return "none", "", err
 			}
 			return gateWord(res), res.Output, nil
@@ -615,6 +626,17 @@ func (s *Service) runTournament(ctx context.Context, mc *modeContext, base strat
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
 			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
+				// A build-system marker without its tool is not a gate error:
+				// it is a toolchain the person has not installed, named on the
+				// record so the next launch's pre-flight (toolchain.go) can ask.
+				var missing *verify.MissingToolchain
+				if errors.As(err, &missing) {
+					mc.rs.writer.AppendEvent("toolchain_missing", map[string]interface{}{
+						"tool": missing.Tool, "marker": missing.Marker,
+						"detail": fmt.Sprintf("the tree has %s but %s is not installed — the gate cannot run; install %s to verify this work", missing.Marker, missing.Tool, missing.Tool),
+					})
+					return "none", "", nil
+				}
 				return "none", "", err
 			}
 			return gateWord(res), res.Output, nil
@@ -652,6 +674,17 @@ func (s *Service) runSplit(ctx context.Context, mc *modeContext, base strategy.E
 		GateIn: func(ctx context.Context, root string) (string, string, error) {
 			res, err := verify.Run(ctx, root, mc.projCfg.Verify, verify.Identity{RunID: mc.rs.run.ID, ProjectID: mc.rs.run.ProjectID})
 			if err != nil {
+				// A build-system marker without its tool is not a gate error:
+				// it is a toolchain the person has not installed, named on the
+				// record so the next launch's pre-flight (toolchain.go) can ask.
+				var missing *verify.MissingToolchain
+				if errors.As(err, &missing) {
+					mc.rs.writer.AppendEvent("toolchain_missing", map[string]interface{}{
+						"tool": missing.Tool, "marker": missing.Marker,
+						"detail": fmt.Sprintf("the tree has %s but %s is not installed — the gate cannot run; install %s to verify this work", missing.Marker, missing.Tool, missing.Tool),
+					})
+					return "none", "", nil
+				}
 				return "none", "", err
 			}
 			return gateWord(res), res.Output, nil
