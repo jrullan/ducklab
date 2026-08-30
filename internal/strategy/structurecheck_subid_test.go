@@ -29,7 +29,7 @@ func TestOneDeliverablesPerTaskIsNotADuplicate(t *testing.T) {
 	if findings := structureFindings(nil, []agent.Section{milestone}, "markdown_sections:M", nil, false, ""); len(findings) != 0 {
 		t.Fatalf("a well-formed milestone was flagged: %v", findings)
 	}
-	dup := agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Scaffold\n\n**Deliverables:**\n- a\n\n**Deliverables:**\n- b\n"}
+	dup := agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Scaffold\n\n**Implements:** SPEC-001\n\n**Deliverables:**\n- a\n\n**Deliverables:**\n- b\n"}
 	findings := structureFindings(nil, []agent.Section{dup}, "markdown_sections:M", nil, false, "")
 	if len(findings) != 1 || !strings.Contains(findings[0], "T-001 has 2") {
 		t.Fatalf("a task with two Deliverables headings was not flagged: %v", findings)

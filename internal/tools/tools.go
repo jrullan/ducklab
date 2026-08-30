@@ -322,6 +322,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
 		ectx.lastFailCount++
 		if ectx.lastFailCount >= RepeatFailEndTurn {
+			ectx.ToolsClosed = true
 			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
 				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
 					"and you kept repeating it. Answer now with what you already have — your next message must be "+
