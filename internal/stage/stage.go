@@ -65,6 +65,8 @@ type Params struct {
 	// SmallSeat says the project's implementer is a small seat (a local
 	// model): the plan is portioned for it — few criteria per task.
 	SmallSeat bool
+	// OnEvent, if set, receives the stage's own record events (dedupe).
+	OnEvent func(kind string, data map[string]interface{})
 	// Ducklings that took part, recorded in the artifact's frontmatter.
 	Ducklings []string
 	// PriorFragment is this amendment's earlier task fragment. Unlike the
@@ -254,6 +256,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	if p.Stage == Spec && len(current.Sections) == 0 {
 		if reqs, rErr := artifact.Load(p.ProjectRoot, artifact.KindRequirements); rErr == nil && reqs.Front.Origin == "adopted" {
 			produced.Front.Origin = "adopted"
+		}
+	}
+	if dropped := dedupeSections(produced); len(dropped) > 0 {
+		raw = produced.Raw
+		if p.OnEvent != nil {
+			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 		}
 	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {
@@ -563,7 +571,11 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 const planInstruction = "## Your task\n\nBreak this specification into milestones and tasks. " +
 	"Milestones are H2 (`## M-01 — Title`), tasks are H3 under them (`### T-001 — Title`). " +
 	"A milestone may declare its implementation lane with an **Owns:** line listing comma-separated repository paths or directory globs (for example, **Owns:** `internal/service`, `internal/artifact/**`). The lane is inherited by every task under that milestone; do not claim the same path in two live milestones.\n\n" +
-	"Every task must carry an **Implements:** line naming the spec section it delivers.\n\n" +
+	"Every task must carry an **Implements:** line naming the spec section it delivers. " +
+	"Name only ids that exist in the specification above; an id that is not there is a broken link, not a placeholder.\n\n" +
+	"Lanes are exclusive: two milestones must never list the same path or overlapping directories in their **Owns:** lines, " +
+	"and a broad lane (`src/`, `.`) is not a lane. When you cannot name a disjoint path set, write no **Owns:** line at all — " +
+	"the absence is honest; an overlap is a collision the person has to untangle.\n\n" +
 	"When a task cannot be started until another task is finished — it needs code " +
 	"that task writes, not merely code in the same area — add a **Depends on:** line " +
 	"naming those task ids. Write it only where it is true: a plan where every task " +

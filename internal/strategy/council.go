@@ -84,7 +84,7 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 	turns := []Turn{
 		{
 			Role:     config.RoleArchitect,
-			Toolbelt: "full",
+			Toolbelt: "document",
 			Contract: contract,
 			MaxTurns: 12,
 		},
@@ -96,7 +96,7 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 		turns = append(turns, Turn{
 			Role:     config.RoleReviewer,
 			Duckling: c,
-			Toolbelt: "full", // narrowed to the reviewer's read-only ceiling
+			Toolbelt: "document", // read-only, minus the gate and the diff: a draft lives in the conversation
 			Contract: "verdict",
 			MaxTurns: 6,
 			Persona:  PersonaCritic,
@@ -119,7 +119,7 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 		},
 		Turn{
 			Role:     config.RoleArchitect,
-			Toolbelt: "full",
+			Toolbelt: "document",
 			Contract: contract,
 			MaxTurns: 12,
 		},

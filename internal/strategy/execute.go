@@ -51,6 +51,11 @@ type ExecuteParams struct {
 	AgentLoop    *agent.Loop
 	ExecContext  *tools.ExecContext
 	Rounds       int
+	// KnownIDs are the section ids that exist across the project's documents
+	// (requirements, spec, plan). A document council's structure check flags
+	// an Implements: target outside this set — eleven dangling references
+	// reached a plan's gate (benchmark run 3). Empty means "do not check".
+	KnownIDs map[string]bool
 
 	// Runner executes a turn. Defaults to agent.RunTurn via AgentLoop.
 	Runner TurnRunner
@@ -400,7 +405,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// revision that changed nothing, which no further round will fix.
 			if turn.Role == config.RoleArchitect && strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				if cur := sectionsOf(outcome); cur != nil {
-					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract); len(problems) > 0 {
+					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract, params.KnownIDs); len(problems) > 0 {
 						emit(params, "structure_check", map[string]interface{}{
 							"round": round, "turn": i, "findings": problems, "retried": !structureRetried,
 						})

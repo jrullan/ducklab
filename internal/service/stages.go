@@ -325,6 +325,25 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 	return run, nil
 }
 
+// knownIDs collects every section id across the project's approved
+// documents and pending proposals, for the council's structure check.
+func (s *Service) knownIDs(projectRoot string) map[string]bool {
+	known := map[string]bool{}
+	for _, kind := range []artifact.Kind{artifact.KindIntent, artifact.KindRequirements, artifact.KindSpec, artifact.KindPlan} {
+		if doc, err := artifact.Load(projectRoot, kind); err == nil {
+			for _, id := range doc.IDs() {
+				known[id] = true
+			}
+		}
+		if doc, err := artifact.LoadProposed(projectRoot, kind); err == nil && doc != nil {
+			for _, id := range doc.IDs() {
+				known[id] = true
+			}
+		}
+	}
+	return known
+}
+
 // smallImplementerSeat reports whether the project's build implementer is a
 // local seat — a small model, by the founding thesis — so document stages
 // can portion the plan for it (ducklab_portion_control).
@@ -560,6 +579,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:    req.Revise,
 		SmallSeat:   s.smallImplementerSeat(rs.run.ProjectID),
+		OnEvent:     func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 		// An amendment revision edits its own pending fragment, not the
 		// approved plan it originally extended.
 		PriorFragment: func() string {
@@ -660,6 +680,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					}
 					return inventoryUnaccounted(inventory.Items, doc)
 				},
+				KnownIDs: s.knownIDs(projectRoot),
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 					if kind == "turn_interrupted" {

@@ -101,6 +101,9 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	}
 	proposed.Front.Kind = kind
 	proposed.Front.Project = current.Front.Project
+	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
+		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}

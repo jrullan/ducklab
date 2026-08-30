@@ -121,6 +121,20 @@ func (r *Registry) NarrowToolbelt(role config.Role, spec string) ([]string, erro
 		return r.Available(role), nil
 	case "read-only":
 		return r.ReadOnly(role), nil
+	case "document":
+		// A document council has no gate to run and no tree diff to judge:
+		// the draft lives in the conversation. Left in the belt, verify_run
+		// was called ten times on a spec draft ("no command configured")
+		// by a seat told in its brief that there was nothing to run.
+		var out []string
+		for _, name := range r.ReadOnly(role) {
+			switch name {
+			case "verify_run", "git_diff", "git_status", "shell":
+				continue
+			}
+			out = append(out, name)
+		}
+		return out, nil
 	}
 
 	var out []string

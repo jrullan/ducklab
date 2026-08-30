@@ -18,13 +18,27 @@ import (
 // structureFindings lists what a revised draft lost or broke against the
 // draft before it and against the contract of its document kind. Empty
 // means the draft is structurally sound.
-func structureFindings(prev, cur []agent.Section, contract string) []string {
+func structureFindings(prev, cur []agent.Section, contract string, known map[string]bool) []string {
 	var out []string
 	prefix := strings.TrimPrefix(contract, "markdown_sections:")
 	needsImplements := prefix == "SPEC" || prefix == "M" || prefix == "T"
+	implementsLine := regexp.MustCompile(`(?im)^\*\*Implements:\*\*\s*(.+)$`)
+	idToken := regexp.MustCompile(`[A-Z]+-\d+`)
 
 	seen := map[string]bool{}
 	for _, s := range cur {
+		// Every Implements: target must exist in the project's documents;
+		// an id that is not there is a dangling reference the spine will
+		// report, and a task built against it has no contract.
+		if len(known) > 0 {
+			for _, m := range implementsLine.FindAllStringSubmatch(s.Body, -1) {
+				for _, id := range idToken.FindAllString(m[1], -1) {
+					if !known[id] {
+						out = append(out, fmt.Sprintf("%s implements %s, which is not a section of any project document — name an id that exists, or drop it", s.ID, id))
+					}
+				}
+			}
+		}
 		if seen[s.ID] {
 			out = append(out, fmt.Sprintf("%s appears twice", s.ID))
 		}
