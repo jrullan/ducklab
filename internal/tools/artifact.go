@@ -58,6 +58,19 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 	if err != nil {
 		return ErrorResult("read %s: %v", a.Kind, err), nil
 	}
+	// The draft a council is judging right now: it exists nowhere but the
+	// conversation, and the seat asking for it here gets it, labelled.
+	if draft := ectx.DraftUnderReview[a.Kind]; strings.TrimSpace(draft) != "" && strings.TrimSpace(doc.Raw) == "" {
+		if a.ID == "" {
+			return SuccessResult("DRAFT UNDER REVIEW — the document this council is judging; it is also in your prompt, and it is not accepted yet.\n\n%s", draft), nil
+		}
+		if parsed, perr := artifact.Parse(draft, artifact.Kind(a.Kind)); perr == nil {
+			if sec := parsed.Section(a.ID); sec != nil {
+				return SuccessResult("DRAFT UNDER REVIEW — not accepted yet; from the draft in your prompt.\n\n## %s — %s\n\n%s", sec.ID, sec.Title, sec.Body), nil
+			}
+			return ErrorResult("the draft under review has no section %q (has: %s)", a.ID, strings.Join(parsed.IDs(), ", ")), nil
+		}
+	}
 	if strings.TrimSpace(doc.Raw) == "" {
 		// No approved document — but a pending proposal is still a document
 		// the seats are working on. A spec revision asked the architect to

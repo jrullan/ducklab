@@ -130,6 +130,30 @@ func structureNote(findings []string) string {
 	return b.String()
 }
 
+// kindOfContract maps a council's document contract to its artifact kind.
+// A critic's own contract is "verdict", so the architect turns' contract is
+// consulted through the script.
+func kindOfContract(contract string, script *Script) string {
+	prefix := strings.TrimPrefix(contract, "markdown_sections:")
+	if prefix == contract && script != nil {
+		for _, t := range script.Turns {
+			if strings.HasPrefix(t.Contract, "markdown_sections:") {
+				prefix = strings.TrimPrefix(t.Contract, "markdown_sections:")
+				break
+			}
+		}
+	}
+	switch prefix {
+	case "REQ":
+		return "requirements"
+	case "SPEC":
+		return "spec"
+	case "M", "T":
+		return "plan"
+	}
+	return ""
+}
+
 // sectionsOf returns a parsed document's sections, or nil.
 func sectionsOf(outcome *agent.Outcome) []agent.Section {
 	if outcome == nil {

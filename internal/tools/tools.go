@@ -120,6 +120,12 @@ type ExecContext struct {
 	turnReads map[string]int
 	// searchMisses counts consecutive fs_search calls that found nothing.
 	searchMisses int
+	// DraftUnderReview holds, per artifact kind, the draft a document
+	// council is currently judging. It lives only in the conversation until
+	// a person accepts it; a seat that asks artifact_read for it is served
+	// the draft rather than told it does not exist (nineteen refusals in a
+	// row on a spec review, benchmark run 4).
+	DraftUnderReview map[string]string
 	// fsPatchFailStreak tracks fuzzy, consecutive fs_patch failures by file.
 	// Unlike the exact-call brake above, changing the search text does not
 	// disguise a model fighting the same file.

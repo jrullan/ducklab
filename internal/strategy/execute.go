@@ -340,6 +340,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			// The draft a critic is about to judge is served by artifact_read
+			// too: told "spec does not exist yet", a small seat asked nineteen
+			// times (benchmark run 4).
+			if params.ExecContext != nil && turn.Persona == PersonaCritic && lastArchitect != nil {
+				if kind := kindOfContract(turn.Contract, script); kind != "" {
+					if params.ExecContext.DraftUnderReview == nil {
+						params.ExecContext.DraftUnderReview = map[string]string{}
+					}
+					params.ExecContext.DraftUnderReview[kind] = lastArchitect.Text
+				}
+			}
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
 				prompt += "\n\n" + pendingStructureNote
 				pendingStructureNote = ""
