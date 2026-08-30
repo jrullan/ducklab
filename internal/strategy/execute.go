@@ -276,6 +276,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	if params.ResumeFrom != nil && len(params.ResumeFrom.Looked) > 0 {
 		seatLooked[params.ResumeFrom.Role] = mergeLooked(nil, params.ResumeFrom.Looked)
 	}
+	// Council convergence (structurecheck.go): the previous architect draft,
+	// the one-shot structure note for a retried revision, and whether the
+	// latest revision changed anything at all.
+	var lastArchitect *agent.Outcome
+	structureRetried := false
+	pendingStructureNote := ""
+	identicalRevision := false
 	stuck := map[int]int{}
 	redGateStreak := 0
 	var evidence escalationEvidence
@@ -328,6 +335,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
+				prompt += "\n\n" + pendingStructureNote
+				pendingStructureNote = ""
+			}
 			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
 				prompt += "\n\n## Resumed with partial notes\n\nThe " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from these notes:\n\n" + params.ResumeFrom.Notes
 			}
@@ -383,6 +394,33 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// and the loop resumes from the top once answered.
 				result.Error = err
 				return result, err
+			}
+			// A document council's architect: check the structure of the draft
+			// against the rules and the draft before it, once; and notice a
+			// revision that changed nothing, which no further round will fix.
+			if turn.Role == config.RoleArchitect && strings.HasPrefix(turn.Contract, "markdown_sections:") {
+				if cur := sectionsOf(outcome); cur != nil {
+					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract); len(problems) > 0 {
+						emit(params, "structure_check", map[string]interface{}{
+							"round": round, "turn": i, "findings": problems, "retried": !structureRetried,
+						})
+						if !structureRetried {
+							structureRetried = true
+							pendingStructureNote = structureNote(problems)
+							emitMessage(params, round, i, turn.Role, duckling, outcome)
+							i-- // the architect goes again, findings in hand
+							continue
+						}
+					}
+				}
+				if lastArchitect != nil && i == len(script.Turns)-1 &&
+					strings.TrimSpace(outcome.Text) == strings.TrimSpace(lastArchitect.Text) {
+					identicalRevision = true
+					emit(params, "revision_identical", map[string]interface{}{
+						"round": round, "detail": "the revision is byte-identical to the previous draft; another round would change nothing",
+					})
+				}
+				lastArchitect = outcome
 			}
 			result.Outcome = outcome
 			result.Text = outcome.Text
@@ -587,6 +625,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			return result, err
 		}
 		if done {
+			break
+		}
+		// A revision identical to the draft it revised: the critics will read
+		// the same document and object the same way. Two byte-identical
+		// revisions cost 3 minutes and 9.5k tokens each (Neocapture plan,
+		// 2026-08-29). The person decides at the gate with the verdict as is.
+		if identicalRevision {
 			break
 		}
 
