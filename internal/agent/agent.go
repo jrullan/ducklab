@@ -250,7 +250,9 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			Model:    loop.Duckling.Model,
 			Messages: conversation,
 		}
-		if useNative {
+		// No tools once a result closed tool use for this reply: the seat
+		// answers in text with what it has (tools.Result.EndTurn).
+		if useNative && !(ectx != nil && ectx.ToolsClosed) {
 			req.Tools = nativeTools
 		}
 		if loop.Duckling.Params.Temperature != nil {

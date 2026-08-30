@@ -456,11 +456,12 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			// went to a local 35B implementer (Neocapture, 2026-08-29); a
 			// small seat lands one thing at a time.
 			b.WriteString("## Portion the tasks for a small implementer\n\n" +
-				"The implementer of this project is a small local model. Cut the work so that " +
-				"each task has ONE primary deliverable and AT MOST THREE acceptance criteria, " +
-				"each verifiable by a command or a test. Prefer more, smaller tasks with " +
-				"**Depends on:** lines over fewer large ones. A task whose deliverables span " +
-				"several files or concerns is two tasks.\n\n")
+				"The implementer of this project is a small local model. This rule overrides the " +
+				"general '3-8 top-level bullets' below: each task has ONE primary deliverable and " +
+				"AT MOST THREE top-level **Deliverables:** bullets, each verifiable by a command or a " +
+				"test. Prefer more, smaller tasks with **Depends on:** lines over fewer large ones. A " +
+				"task whose deliverables span several files or concerns is two tasks. ducklab checks " +
+				"the count and returns a draft that exceeds it.\n\n")
 		}
 		if hasAsBuilt(spec) {
 			b.WriteString("Sections marked **As-built:** yes are already delivered by the " +

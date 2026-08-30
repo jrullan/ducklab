@@ -24,7 +24,7 @@ func TestAPlanForASmallSeatIsPortioned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(small, "Portion the tasks for a small implementer") || !strings.Contains(small, "AT MOST THREE acceptance criteria") {
+	if !strings.Contains(small, "Portion the tasks for a small implementer") || !strings.Contains(small, "AT MOST THREE top-level") {
 		t.Fatalf("the small-seat plan brief is not portioned:\n%s", small)
 	}
 	big, err := BuildPrompt(root, Plan, "", &artifact.Document{}, "", false, false)

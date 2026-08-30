@@ -120,6 +120,9 @@ type ExecContext struct {
 	turnReads map[string]int
 	// searchMisses counts consecutive fs_search calls that found nothing.
 	searchMisses int
+	// ToolsClosed is set once a tool result asked to end the reply: the
+	// loop offers no tools on the next call and refuses any further call.
+	ToolsClosed bool
 	// DraftUnderReview holds, per artifact kind, the draft a document
 	// council is currently judging. It lives only in the conversation until
 	// a person accepts it; a seat that asks artifact_read for it is served
@@ -160,6 +163,12 @@ type ExecContext struct {
 type Result struct {
 	Content string `json:"content"`
 	IsError bool   `json:"is_error,omitempty"`
+	// EndTurn asks the loop to close tool use for this reply: the seat is
+	// told so in Content and its next call carries no tools, so it answers
+	// with what it has. Set by the repeat brake once refusal alone has
+	// failed to change the seat's behaviour (29 identical failing calls in
+	// a row, benchmark run 4).
+	EndTurn bool `json:"end_turn,omitempty"`
 }
 
 // ErrorResult creates an error result.
@@ -258,6 +267,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if err != nil {
 		return ErrorResult("unknown tool %q", name), nil
 	}
+	if ectx.ToolsClosed {
+		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
+	}
 	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
@@ -308,6 +320,13 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
+		ectx.lastFailCount++
+		if ectx.lastFailCount >= RepeatFailEndTurn {
+			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
+				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has failed %d times "+
+					"and you kept repeating it. Answer now with what you already have — your next message must be "+
+					"your final reply, not a tool call.", name, ectx.lastFailCount)}, nil
+		}
 		return &Result{IsError: true, Content: fmt.Sprintf(
 			"REFUSED: you have made this exact failing call %d times — %s with the same "+
 				"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
@@ -324,6 +343,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit), nil
 	}
 	res, err := t.Execute(ctx, ectx, args)
+	if res != nil && res.EndTurn {
+		ectx.ToolsClosed = true
+	}
 	if name == "fs_search" && res != nil {
 		if !res.IsError && strings.TrimSpace(res.Content) == "no matches" {
 			ectx.searchMisses++
@@ -378,11 +400,15 @@ var readOnlyTool = map[string]bool{
 func (e *ExecContext) BeginTurn() {
 	e.turnReads = map[string]int{}
 	e.searchMisses = 0
+	e.ToolsClosed = false
+	e.lastFailSig, e.lastFailCount = "", 0
 }
 
 // SearchMissLimit is how many fs_search calls may find nothing in a row
 // before the next one is refused with directions.
-const SearchMissLimit = 3
+// Five, not three: a strong seat checking that a symbol is ABSENT from a
+// large repository legitimately searches several patterns in a row.
+const SearchMissLimit = 5
 
 // fsReadPath extracts the path argument of an fs_read call, if any.
 func fsReadPath(args json.RawMessage) string {
@@ -483,6 +509,10 @@ const MaxToolResultBytes = 32768
 // executor refuses the repeat: identical inputs cannot produce a different
 // answer, and a model that has not changed anything is not going to.
 const RepeatFailLimit = 3
+
+// RepeatFailEndTurn is the identical-failure count at which refusal gives
+// way to closing tool use for the reply.
+const RepeatFailEndTurn = 6
 
 // IsHarnessPath reports whether a path belongs to ducklab's own record rather
 // than to the project.

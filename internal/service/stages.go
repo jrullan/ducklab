@@ -680,7 +680,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					}
 					return inventoryUnaccounted(inventory.Items, doc)
 				},
-				KnownIDs: s.knownIDs(projectRoot),
+				KnownIDs:  s.knownIDs(projectRoot),
+				SmallSeat: s.smallImplementerSeat(rs.run.ProjectID),
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
 					if kind == "turn_interrupted" {

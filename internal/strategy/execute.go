@@ -56,6 +56,10 @@ type ExecuteParams struct {
 	// an Implements: target outside this set — eleven dangling references
 	// reached a plan's gate (benchmark run 3). Empty means "do not check".
 	KnownIDs map[string]bool
+	// SmallSeat says the project's implementer is a small local seat: the
+	// plan's structure check enforces the portion rule (≤3 top-level
+	// deliverables per task) instead of only asking for it.
+	SmallSeat bool
 
 	// Runner executes a turn. Defaults to agent.RunTurn via AgentLoop.
 	Runner TurnRunner
@@ -416,7 +420,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// revision that changed nothing, which no further round will fix.
 			if turn.Role == config.RoleArchitect && strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				if cur := sectionsOf(outcome); cur != nil {
-					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract, params.KnownIDs); len(problems) > 0 {
+					if problems := structureFindings(sectionsOf(lastArchitect), cur, turn.Contract, params.KnownIDs, params.SmallSeat, outcome.Text); len(problems) > 0 {
 						emit(params, "structure_check", map[string]interface{}{
 							"round": round, "turn": i, "findings": problems, "retried": !structureRetried,
 						})

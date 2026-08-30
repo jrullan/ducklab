@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 )
 
 // A document council's last architect turn is the one nobody reviews: after
@@ -18,10 +19,45 @@ import (
 // structureFindings lists what a revised draft lost or broke against the
 // draft before it and against the contract of its document kind. Empty
 // means the draft is structurally sound.
-func structureFindings(prev, cur []agent.Section, contract string, known map[string]bool) []string {
+func structureFindings(prev, cur []agent.Section, contract string, known map[string]bool, small bool, raw string) []string {
 	var out []string
 	prefix := strings.TrimPrefix(contract, "markdown_sections:")
 	needsImplements := prefix == "SPEC" || prefix == "M" || prefix == "T"
+	isPlan := prefix == "M" || prefix == "T"
+
+	// Plan rules live at task granularity: every task names what it
+	// implements; a small seat's task carries at most three top-level
+	// deliverables (the brief asks; the check enforces — T-001 arrived with
+	// twelve, benchmark run 4); milestone lanes never overlap.
+	if isPlan {
+		for _, s := range cur {
+			for _, block := range taskBlocks(s.Body) {
+				if !strings.HasPrefix(block.id, "T-") {
+					continue
+				}
+				if !strings.Contains(strings.ToLower(block.body), "**implements:**") {
+					out = append(out, fmt.Sprintf("%s has no **Implements:** line", block.id))
+				}
+				if small {
+					if n := topLevelDeliverables(block.body); n > 3 {
+						out = append(out, fmt.Sprintf("%s has %d top-level **Deliverables:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
+					}
+				}
+			}
+		}
+		if raw != "" {
+			if doc, err := artifact.Parse(raw, artifact.KindPlan); err == nil {
+				seenPair := map[string]bool{}
+				for _, e := range artifact.LaneCollisions(doc) {
+					key := e.ID + "|" + e.Detail
+					if !seenPair[key] {
+						seenPair[key] = true
+						out = append(out, fmt.Sprintf("%s: lane collision — %s; make the **Owns:** lanes disjoint or drop them", e.ID, e.Detail))
+					}
+				}
+			}
+		}
+	}
 	implementsLine := regexp.MustCompile(`(?im)^\*\*Implements:\*\*\s*(.+)$`)
 	idToken := regexp.MustCompile(`[A-Z]+-\d+`)
 
@@ -74,6 +110,27 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+// topLevelDeliverables counts the un-indented bullets under a task's
+// **Deliverables:** heading, up to the next field or heading.
+func topLevelDeliverables(body string) int {
+	n := 0
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimRight(line, " \t")
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(t), "**Deliverables:**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
+			in = false
+		}
+		if in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")) {
+			n++
+		}
+	}
+	return n
 }
 
 type taskBlock struct {
