@@ -65,7 +65,13 @@ type ExecContext struct {
 	// --output json and non-interactive contexts.
 	NoHuman bool
 
-	ProjectRoot  string
+	ProjectRoot string
+	// DocsRoot is where the project's documents live when the run works in
+	// an isolated worktree: the worktree has the code, the project has
+	// .ducklab/docs. Left empty, ProjectRoot is used. A build implementer
+	// asked for its own task and the spec and was told neither existed
+	// (T-001, benchmark run 5).
+	DocsRoot     string
 	RunID        string
 	ProjectID    string
 	Turn         int
@@ -347,6 +353,13 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if res != nil && res.EndTurn {
 		ectx.ToolsClosed = true
 	}
+	// No gate configured: verify_run says so as an ERROR, so the identical
+	// call brake escalates instead of serving 73 identical "nothing to
+	// run" successes (T-001, benchmark run 5).
+	if name == "verify_run" && res != nil && !res.IsError && (strings.HasPrefix(strings.TrimSpace(res.Content), "gate: none") || strings.Contains(res.Content, "no command configured for gate")) {
+		res = ErrorResult("no verification gate is configured for this project, so verify_run has nothing to run — " +
+			"it will answer this every time. Do not call it again in this reply; finish your work and report on your deliverables.")
+	}
 	if name == "fs_search" && res != nil {
 		if !res.IsError && strings.TrimSpace(res.Content) == "no matches" {
 			ectx.searchMisses++
@@ -393,6 +406,14 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 var readOnlyTool = map[string]bool{
 	"fs_read": true, "fs_list": true, "fs_search": true, "artifact_read": true, "task_read": true,
 	"skill_list": true, "skill_read": true, "ref_read": true, "git_log": true, "git_diff": true, "git_status": true,
+}
+
+// Docs returns the root that holds .ducklab/docs for this run.
+func (e *ExecContext) Docs() string {
+	if e.DocsRoot != "" {
+		return e.DocsRoot
+	}
+	return e.ProjectRoot
 }
 
 // BeginTurn resets what is remembered per turn: the repeated-read brake. A
@@ -712,7 +733,8 @@ func WriteGuard(ectx *ExecContext, path string, content []byte, isWrite bool) *R
 			oldSize := len(existing)
 			newSize := len(content)
 			if oldSize > 200 && newSize < oldSize*40/100 {
-				return ErrorResult("truncation guard: refused: this would shrink %s from %d to %d bytes. If that is intended, use fs_patch, or write the file in full.",
+				return ErrorResult("truncation guard: refused: this would shrink %s from %d to %d bytes. If the shorter file IS what you want, "+
+					"say so by removing first — fs_delete the file, then fs_write it — or replace only the lines that change with fs_patch / fs_write_lines.",
 					path, oldSize, newSize)
 			}
 		}
@@ -794,6 +816,16 @@ func ShellPolicyCheck(ectx *ExecContext, cmd string) *Result {
 		}
 	}
 	if !matched {
+		// File operations have their own tools; a seat denied `mkdir -p`
+		// was told to ask a person (T-001, benchmark run 5).
+		first := strings.Fields(cmd)
+		if len(first) > 0 {
+			switch first[0] {
+			case "mkdir", "touch", "cp", "mv", "rm", "cat", "echo", "tee", "sed", "chmod":
+				return ErrorResult("shell policy: %q is not in the allowlist, and file operations are not done through the shell here: "+
+					"fs_write creates a file AND its directories, fs_patch/fs_write_lines edit, fs_delete removes, fs_read/fs_list inspect. Use those.", first[0])
+			}
+		}
 		return ErrorResult("shell policy: command not in allowlist. This command is not model-runnable under this policy; ask for the needed outcome or decision instead, or use a different command.")
 	}
 

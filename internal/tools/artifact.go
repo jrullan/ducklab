@@ -54,7 +54,7 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 			"— e.g. {%q:%q}. You sent kind=%q id=%q", "kind", "kind", "plan", a.Kind, a.ID), nil
 	}
 
-	doc, err := artifact.Load(ectx.ProjectRoot, artifact.Kind(a.Kind))
+	doc, err := artifact.Load(ectx.Docs(), artifact.Kind(a.Kind))
 	if err != nil {
 		return ErrorResult("read %s: %v", a.Kind, err), nil
 	}
@@ -78,7 +78,7 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 		// "spec does not exist" ten times across both seats while the text
 		// sat in their prompt (Neocapture, 2026-08-29). Serve the proposal,
 		// labelled as what it is.
-		if proposed, perr := artifact.LoadProposed(ectx.ProjectRoot, artifact.Kind(a.Kind)); perr == nil && proposed != nil && strings.TrimSpace(proposed.Raw) != "" {
+		if proposed, perr := artifact.LoadProposed(ectx.Docs(), artifact.Kind(a.Kind)); perr == nil && proposed != nil && strings.TrimSpace(proposed.Raw) != "" {
 			if a.ID != "" {
 				sec := proposed.Section(a.ID)
 				if sec == nil {
@@ -141,7 +141,7 @@ func (t *TaskRead) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
-	plan, err := artifact.Load(ectx.ProjectRoot, artifact.KindPlan)
+	plan, err := artifact.Load(ectx.Docs(), artifact.KindPlan)
 	if err != nil {
 		return ErrorResult("read plan: %v", err), nil
 	}

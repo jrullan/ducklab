@@ -298,6 +298,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
+		// One structure retry per ROUND: per run, a plan whose round-2
+		// draft collided its lanes was only recorded (benchmark run 5).
+		structureRetried = false
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
@@ -645,6 +648,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			return result, err
 		}
 		if done {
+			break
+		}
+		// No gate is configured: "green" cannot come, and waiting for it
+		// bought two more rounds of an approved change (T-001, benchmark run
+		// 5: 3 rounds, 2.15M tokens). Approved without a gate is UNVERIFIED —
+		// honest — and it is final.
+		if state.Gate == "none" && state.Verdict == "approve" {
+			emit(params, "no_gate", map[string]interface{}{
+				"round":  round,
+				"detail": "the reviewer approved and no verification gate is configured — the run ends UNVERIFIED; further rounds could not turn it green",
+			})
 			break
 		}
 		// A revision identical to the draft it revised: the critics will read

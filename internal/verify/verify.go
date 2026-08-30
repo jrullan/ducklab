@@ -71,6 +71,12 @@ func Detect(root string) (Gate, string, error) {
 	if fileExists(filepath.Join(root, "Cargo.toml")) {
 		return GateTests, "cargo test", nil
 	}
+	// Rung 4b: Meson. A GTK project's first task wrote meson.build and the
+	// gate stayed "none" for the rest of the run (T-001, benchmark run 5).
+	// Only when meson is installed: a gate that cannot start is not a gate.
+	if fileExists(filepath.Join(root, "meson.build")) && commandSucceeds(root, "meson --version") {
+		return GateBuild, "(test -d build || meson setup build) && ninja -C build", nil
+	}
 	// Rung 5: Go build
 	if fileExists(filepath.Join(root, "go.mod")) {
 		return GateBuild, "go build ./...", nil

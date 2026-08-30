@@ -47,7 +47,7 @@ func (t *RunListTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 	if a.Limit <= 0 || a.Limit > 100 {
 		a.Limit = 20
 	}
-	dir := filepath.Join(ectx.ProjectRoot, ".ducklab", "runs")
+	dir := filepath.Join(ectx.Docs(), ".ducklab", "runs")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ErrorResult("no runs recorded yet"), nil
@@ -125,7 +125,7 @@ func (t *RunReadTool) Execute(ctx context.Context, ectx *ExecContext, args json.
 	}
 	// The id is a directory name here; a path would escape the record.
 	id := filepath.Base(strings.TrimSpace(a.ID))
-	dir := filepath.Join(ectx.ProjectRoot, ".ducklab", "runs", id)
+	dir := filepath.Join(ectx.Docs(), ".ducklab", "runs", id)
 	st, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if err != nil {
 		return ErrorResult("no run %q — run_list shows what exists", id), nil

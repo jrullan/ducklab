@@ -291,6 +291,7 @@ export const KNOWN_EVENT_TYPES = [
   "revision_identical",
   "pause_requested",
   "dedupe",
+  "no_gate",
   "contestant_failed",
   "no_changes",
   "tests_modified",

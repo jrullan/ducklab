@@ -1535,6 +1535,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
 		ProjectRoot:  root,
+		DocsRoot:     entry.Path,
 		RunID:        rs.run.ID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
 		UnsafeWrites: rs.run.UnsafeWrites,
@@ -1751,6 +1752,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
 		ProjectRoot:  root,
+		DocsRoot:     entry.Path,
 		RunID:        rs.run.ID,
 		ProjectID:    rs.run.ProjectID,
 		Autonomy:     config.Autonomy(rs.run.Autonomy),
