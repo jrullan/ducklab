@@ -100,6 +100,11 @@ type Script struct {
 	Turns     []Turn
 	Until     string
 	MaxRounds int
+	// FragmentPrefix marks an artifact update whose architect replies are
+	// partial H2 patches. The scheduler materializes those patches before a
+	// critic sees them and before returning the proposal; otherwise a revision
+	// of REQ-001 makes unchanged REQ-006/009 appear deleted in the next round.
+	FragmentPrefix string
 	// TurnIndexBase offsets every turn's Index. A sectioned document update
 	// runs MANY small conversations in one run; without distinct
 	// coordinates their streamed text lands in the same delta key and the

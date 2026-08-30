@@ -122,6 +122,33 @@ func TestThePerRunOverrideReachesScriptModes(t *testing.T) {
 	}
 }
 
+// Neocapture's fragment reviewer inherited the configured generic reviewer
+// cap of 100 and exposed that service-side script rewriting happened before
+// ExecuteScript's critic guard. Document critics carry their draft in the
+// prompt; their six-call design cap remains an upper bound, while a lower
+// project or run cap is still honored.
+func TestRoleConfigurationCannotRaiseADocumentCriticCap(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	council := s.applyRoleTurns(strategy.CouncilScript("REQ", nil), 0)
+	for _, turn := range council.Turns {
+		if turn.Persona == strategy.PersonaCritic && turn.MaxTurns != 6 {
+			t.Fatalf("configured critic cap = %d, want 6", turn.MaxTurns)
+		}
+	}
+
+	council = s.applyRoleTurns(strategy.CouncilScript("REQ", nil), 3)
+	for _, turn := range council.Turns {
+		if turn.Persona == strategy.PersonaCritic && turn.MaxTurns != 3 {
+			t.Fatalf("lower run critic cap = %d, want 3", turn.MaxTurns)
+		}
+	}
+}
+
 // Negative is "no cap", the same word the budget lifts speak: finite in
 // letter (I3), beyond use in practice, with the token and cost budgets still
 // guarding every call. A human turn keeps its cap — the lift unblocks

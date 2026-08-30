@@ -37,6 +37,7 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		return nil, err
 	}
 	script := strategy.ArtifactScript(prefix, p.Mode, p.Critics)
+	script.FragmentPrefix = prefix
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}

@@ -612,9 +612,18 @@ func (s *Service) applyRoleTurns(script *strategy.Script, override int) *strateg
 		return script
 	}
 	for i := range script.Turns {
-		script.Turns[i].MaxTurns = s.turnsFor(string(script.Turns[i].Role), script.Turns[i].MaxTurns)
+		designCap := script.Turns[i].MaxTurns
+		configured := s.turnsFor(string(script.Turns[i].Role), designCap)
+		if script.Turns[i].Persona == strategy.PersonaCritic && configured > designCap {
+			configured = designCap
+		}
+		script.Turns[i].MaxTurns = configured
 		if override != 0 && script.Turns[i].Role != config.RoleHuman {
-			script.Turns[i].MaxTurns = capOverride(override)
+			overridden := capOverride(override)
+			if script.Turns[i].Persona == strategy.PersonaCritic && overridden > designCap {
+				overridden = designCap
+			}
+			script.Turns[i].MaxTurns = overridden
 		}
 	}
 	return script

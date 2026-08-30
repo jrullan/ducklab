@@ -389,6 +389,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			// A fragment council's transcript contains the individual patches,
+			// newest last. That is useful history but it is not the document: a
+			// small critic treated the latest one-section repair as the complete
+			// amendment and reported the other amended sections missing. Present
+			// the deterministically materialized candidate as the review object.
+			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" && lastArchitect != nil {
+				prompt += "\n\n## Materialized fragment candidate\n\n" + lastArchitect.Text
+			}
 			// The draft a critic is about to judge is served by artifact_read
 			// too: told "spec does not exist yet", a small seat asked nineteen
 			// times (benchmark run 4).
@@ -531,7 +539,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// judge and the revision that opens a possible next round. Tracking it
 			// must not depend on the output parser selected for that turn.
 			if turn.Role == config.RoleArchitect && script.RevisionOpensNextRound && !strings.HasPrefix(turn.Contract, "markdown_sections:") {
-				lastArchitect = outcome
+				if script.FragmentPrefix != "" {
+					lastArchitect = materializeFragment(lastArchitect, outcome)
+				} else {
+					lastArchitect = outcome
+				}
 			}
 			result.Outcome = outcome
 			result.Text = outcome.Text
@@ -775,6 +787,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		}
 	}
 
+	// The stage merger must receive the same cumulative candidate the critic
+	// judged, not merely the final one-section patch emitted by the architect.
+	if script.FragmentPrefix != "" && lastArchitect != nil {
+		result.Outcome = lastArchitect
+		result.Text = lastArchitect.Text
+	}
 	return result, nil
 }
 
