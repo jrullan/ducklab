@@ -20,3 +20,18 @@ func TestStructureCheckFlagsSubNumberedHeadings(t *testing.T) {
 		t.Fatalf("findings = %v, want one naming the sub-numbered heading", findings)
 	}
 }
+
+// A plan's parsed sections are milestones holding their tasks: one
+// Deliverables heading per task is correct, however many tasks a milestone
+// has. Counted per milestone, every plan was sent back (benchmark run 2).
+func TestOneDeliverablesPerTaskIsNotADuplicate(t *testing.T) {
+	milestone := agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Scaffold\n\n**Implements:** SPEC-001\n\n**Deliverables:**\n- a\n\n### T-002 — Shell\n\n**Implements:** SPEC-001\n\n**Deliverables:**\n- b\n"}
+	if findings := structureFindings(nil, []agent.Section{milestone}, "markdown_sections:M"); len(findings) != 0 {
+		t.Fatalf("a well-formed milestone was flagged: %v", findings)
+	}
+	dup := agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Scaffold\n\n**Deliverables:**\n- a\n\n**Deliverables:**\n- b\n"}
+	findings := structureFindings(nil, []agent.Section{dup}, "markdown_sections:M")
+	if len(findings) != 1 || !strings.Contains(findings[0], "T-001 has 2") {
+		t.Fatalf("a task with two Deliverables headings was not flagged: %v", findings)
+	}
+}

@@ -33,8 +33,14 @@ func structureFindings(prev, cur []agent.Section, contract string) []string {
 			!strings.Contains(strings.ToLower(s.Body), "**implements:**") {
 			out = append(out, fmt.Sprintf("%s has no **Implements:** line", s.ID))
 		}
-		if n := strings.Count(s.Body, "**Deliverables:**"); n > 1 {
-			out = append(out, fmt.Sprintf("%s has %d **Deliverables:** headings; one per task", s.ID, n))
+		// One Deliverables heading per TASK. A plan's parsed sections are
+		// milestones whose bodies hold their tasks as H3 blocks — counted
+		// per milestone, every plan was a false positive and the architect
+		// was sent back four times for nothing (benchmark run 2).
+		for _, block := range taskBlocks(s.Body) {
+			if n := strings.Count(block.body, "**Deliverables:**"); n > 1 {
+				out = append(out, fmt.Sprintf("%s has %d **Deliverables:** headings; one per task", block.id, n))
+			}
 		}
 	}
 	// Sub-numbered ids are invisible to the spine: a requirements draft with
@@ -51,6 +57,47 @@ func structureFindings(prev, cur []agent.Section, contract string) []string {
 	for _, p := range prev {
 		if !seen[p.ID] {
 			out = append(out, fmt.Sprintf("%s (%s) was in your previous draft and is gone — restore it, or state in it why it no longer applies (Priority: wont)", p.ID, p.Title))
+		}
+	}
+	return out
+}
+
+type taskBlock struct {
+	id   string
+	body string
+}
+
+// taskBlocks splits a milestone body into its H3 task blocks; a body with no
+// tasks is one block under the section's own id.
+func taskBlocks(body string) []taskBlock {
+	lines := strings.Split(body, "\n")
+	var out []taskBlock
+	cur := taskBlock{id: "", body: ""}
+	var b strings.Builder
+	flush := func() {
+		cur.body = b.String()
+		out = append(out, cur)
+		b.Reset()
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "### ") {
+			if cur.id != "" || strings.TrimSpace(b.String()) != "" {
+				flush()
+			}
+			id := strings.TrimSpace(strings.TrimPrefix(line, "### "))
+			if i := strings.Index(id, " —"); i > 0 {
+				id = id[:i]
+			}
+			cur = taskBlock{id: strings.TrimSpace(id)}
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	flush()
+	for i := range out {
+		if out[i].id == "" {
+			out[i].id = "(section)"
 		}
 	}
 	return out
