@@ -354,6 +354,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// A human turn is scheduled by the stage runner, not here.
 				continue
 			}
+			// A unanimous, finding-free approval is the end of a document
+			// council. The old fixed sequence always bought a final architect
+			// call before evaluating Until; in Neocapture corrida 9 that call
+			// merely re-emitted an approved fragment. A requested change still
+			// gets the revision turn below.
+			if script.RevisionOpensNextRound && turn.Role == config.RoleArchitect && i == len(script.Turns)-1 &&
+				verdictsThisRound > 0 && state.Verdict == "approve" && len(findings) == 0 && lastArchitect != nil {
+				result.Outcome = lastArchitect
+				result.Text = lastArchitect.Text
+				emit(params, "revision_skipped", map[string]interface{}{
+					"round": round, "detail": "all reviewers approved without findings; the reviewed draft is the proposal",
+				})
+				continue
+			}
 			// The previous round's revision IS this round's draft: the
 			// critics judge it as it stands, and the architect speaks again
 			// only after them.
@@ -510,6 +524,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						"round": round, "detail": "the revision is byte-identical to the previous draft; another round would change nothing",
 					})
 				}
+				lastArchitect = outcome
+			}
+			// Fragment councils intentionally have no markdown_sections contract
+			// on architect turns, but their draft is still the object reviewers
+			// judge and the revision that opens a possible next round. Tracking it
+			// must not depend on the output parser selected for that turn.
+			if turn.Role == config.RoleArchitect && script.RevisionOpensNextRound && !strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				lastArchitect = outcome
 			}
 			result.Outcome = outcome

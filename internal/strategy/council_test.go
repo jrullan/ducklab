@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,6 +47,55 @@ func TestCouncilReviewerSeesTheDraft(t *testing.T) {
 	reviewerPrompt := rec.prompts[1]
 	if !strings.Contains(reviewerPrompt, "Body of the draft.") {
 		t.Errorf("the reviewer was not shown the draft:\n%s", reviewerPrompt)
+	}
+}
+
+// A finding-free approval settles the council at the reviewer. Requiring the
+// architect to repeat an already-approved document spent a full turn per
+// successful round and created another opportunity to regress it.
+func TestCouncilApprovalSkipsTheFinalRevision(t *testing.T) {
+	rec := &recorder{}
+	draft := &agent.Outcome{Text: "## REQ-001 — Draft\n\nApproved body.", Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: "Approved body."}}}
+	res, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), councilParams(rec,
+		draft,
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: "this turn must not run"},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.roles) != 2 || rec.roles[0] != config.RoleArchitect || rec.roles[1] != config.RoleReviewer {
+		t.Fatalf("roles = %v, want architect → reviewer", rec.roles)
+	}
+	if res.Text != draft.Text {
+		t.Fatalf("proposal = %q, want reviewed draft %q", res.Text, draft.Text)
+	}
+}
+
+func TestFragmentCouncilParsesApprovalAndCarriesARequestedRevision(t *testing.T) {
+	script := CouncilScript("REQ", nil)
+	for i := range script.Turns {
+		if script.Turns[i].Role == config.RoleArchitect {
+			script.Turns[i].Contract = "" // fragment update shape
+		}
+	}
+	rec := &recorder{}
+	params := councilParams(rec,
+		&agent.Outcome{Text: "## REQ-001 — Draft\n\nold"},
+		verdictOutcome("request-changes", agent.Finding{Severity: "major", Issue: "old", Fix: "write new"}),
+		&agent.Outcome{Text: "## REQ-001 — Draft\n\nnew"},
+		verdictOutcome("approve"),
+	)
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Role{config.RoleArchitect, config.RoleReviewer, config.RoleArchitect, config.RoleReviewer}
+	if !slices.Equal(rec.roles, want) {
+		t.Fatalf("roles = %v, want %v (no opening or closing architect in round 2)", rec.roles, want)
+	}
+	if res.Rounds != 2 || !strings.Contains(res.Text, "new") {
+		t.Fatalf("result rounds=%d text=%q, want carried R1 revision approved in R2", res.Rounds, res.Text)
 	}
 }
 
@@ -144,19 +194,19 @@ func TestCouncilSeatsOneCritiqueTurnPerCritic(t *testing.T) {
 	if err := script.Validate(testRegistry(t)); err != nil {
 		t.Fatalf("multi-critic council does not validate: %v", err)
 	}
-	// The line-up order runs in order: drafter first, then each critic, then
-	// the revision.
+	// The line-up order runs in order: drafter first, then each critic. A
+	// unanimous finding-free approval needs no revision.
 	rec := &recorder{}
 	params := councilParams(rec,
 		&agent.Outcome{Text: "## REQ-001 — Draft\n"},
 		verdictOutcome("approve"),
 		verdictOutcome("approve"),
-		&agent.Outcome{Text: "## REQ-001 — Final\n"},
+		&agent.Outcome{Text: "## REQ-001 — Final that must not run\n"},
 	)
 	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
 		t.Fatal(err)
 	}
-	want := []config.DucklingID{"pato-atom", "pato-local", "pato-luna", "pato-atom"}
+	want := []config.DucklingID{"pato-atom", "pato-local", "pato-luna"}
 	if len(rec.ducklings) != len(want) {
 		t.Fatalf("%d turns ran with %v, want %v", len(rec.ducklings), rec.ducklings, want)
 	}

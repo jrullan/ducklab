@@ -40,12 +40,14 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}
-	// The document contract demands a full document's shape; the fragment
-	// contract in the prompt is the only law (the amendment learned this
-	// the hard way: two contradictory contracts split the models between
-	// them).
+	// The architect's document contract demands a full document's shape; the
+	// fragment contract in the prompt is the only law for AUTHOR turns. A
+	// reviewer verdict remains a contract: an approve rendered as JSON but
+	// parsed as freeform bought a needless second council round in Neocapture.
 	for i := range script.Turns {
-		script.Turns[i].Contract = ""
+		if script.Turns[i].Role == config.RoleArchitect && strings.HasPrefix(script.Turns[i].Contract, "markdown_sections:") {
+			script.Turns[i].Contract = ""
+		}
 	}
 	if len(p.Images) > 0 {
 		for i := range script.Turns {

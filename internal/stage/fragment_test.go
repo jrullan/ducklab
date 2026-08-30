@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -113,6 +114,33 @@ func TestRunFragmentWritesAMergedProposal(t *testing.T) {
 	}
 	if prop, pErr := artifact.LoadProposed(root, artifact.KindSpec); pErr != nil || prop == nil {
 		t.Errorf("no proposal on disk: %v", pErr)
+	}
+}
+
+func TestFragmentCouncilRelaxesOnlyArchitectDocumentContracts(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindRequirements, "## REQ-001 — Trigger\n\nOld trigger.\n")
+	base, _ := artifact.Load(root, artifact.KindRequirements)
+	_, err := runFragment(context.Background(), Params{
+		ProjectRoot: root, Stage: Intake, RunID: "r-contract", Mode: "council",
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			for _, turn := range script.Turns {
+				switch turn.Role {
+				case config.RoleArchitect:
+					if turn.Contract != "" {
+						t.Errorf("fragment architect contract = %q, want prompt-defined fragment", turn.Contract)
+					}
+				case config.RoleReviewer:
+					if turn.Contract != "verdict" {
+						t.Errorf("fragment reviewer contract = %q, want verdict", turn.Contract)
+					}
+				}
+			}
+			return "## REQ-001 — Trigger\n\nNew trigger.\n", nil
+		},
+	}, base, "change trigger")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
