@@ -34,3 +34,22 @@ func TestDeclaredToolchainComesFromTheTasksMilestone(t *testing.T) {
 		t.Fatalf("question = %+v", q)
 	}
 }
+
+func TestToolchainCapabilitiesIncludePkgConfigModules(t *testing.T) {
+	declared := []string{
+		"cmd:sh",
+		"cmd:definitely-not-a-command-xyz",
+		"pkg-config:definitely-not-a-module-xyz>=99.0",
+	}
+	missing := missingTools(declared)
+	got := strings.Join(missing, ",")
+	if !strings.Contains(got, "cmd:definitely-not-a-command-xyz") {
+		t.Fatalf("missing capabilities = %q; absent command was not reported", got)
+	}
+	if !strings.Contains(got, "pkg-config:definitely-not-a-module-xyz>=99.0") {
+		t.Fatalf("missing capabilities = %q; absent pkg-config module was not reported", got)
+	}
+	if strings.Contains(got, "cmd:sh") {
+		t.Fatalf("missing capabilities = %q; available command was reported missing", got)
+	}
+}

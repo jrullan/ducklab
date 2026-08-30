@@ -42,6 +42,9 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					if n := topLevelDeliverables(block.body); n > 3 {
 						out = append(out, fmt.Sprintf("%s has %d top-level **Deliverables:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
 					}
+					if !strings.Contains(strings.ToLower(block.body), "**verification:**") {
+						out = append(out, fmt.Sprintf("%s has no **Verification:** line — name the command or deterministic check that exercises this task's changed artifacts; a green project build that ignores them is not verification", block.id))
+					}
 				}
 			}
 		}

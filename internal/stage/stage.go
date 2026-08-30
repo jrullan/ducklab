@@ -557,6 +557,7 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"  - <indented sub-bullets carry the how: files, conventions, edge cases; they are not deliverables>\n" +
 	"- <the next outcome; 3-8 top-level bullets, each independently checkable>\n" +
 	"- <tests are a deliverable when the task needs them: name what they must assert>\n\n" +
+	"**Verification:** <the command or deterministic check that exercises THIS task's changed artifacts; a project build that does not consume them is not verification>\n\n" +
 	"**Out of scope:** <what a diligent implementer might reasonably do and must not>\n\n" +
 	"**Assumption:** <optional — what you took as given>\n\n" +
 	"Top-level bullets are the implementer's numbered contract; it reports on each by number when it " +
@@ -575,8 +576,9 @@ const planInstruction = "## Your task\n\nBreak this specification into milestone
 	"Every task must carry an **Implements:** line naming the spec section it delivers. " +
 	"Name only ids that exist in the specification above; an id that is not there is a broken link, not a placeholder.\n\n" +
 	"The stack you chose has a toolchain, and the plan declares it: every milestone that builds or tests carries a " +
-	"**Toolchain:** line naming the command-line tools its tasks need, as the binaries are invoked (for example, " +
-	"**Toolchain:** meson, ninja, pkg-config, gcc — or cargo, or python3, pytest). ducklab checks the machine for them " +
+	"**Toolchain:** line naming the environment capabilities its tasks need. Use `cmd:NAME` for executables and " +
+	"`pkg-config:MODULE>=VERSION` for native development libraries (for example, **Toolchain:** cmd:meson, cmd:ninja, " +
+	"pkg-config:gtk4>=4.0, pkg-config:libadwaita-1>=1.0 — or cmd:cargo, or cmd:python3, cmd:pytest). ducklab checks the machine for them " +
 	"before the first build of the milestone and asks the person to install what is missing; an undeclared tool is a " +
 	"build that fails for a reason nobody named.\n\n" +
 	"Lanes are exclusive: two milestones must never list the same path or overlapping directories in their **Owns:** lines, " +

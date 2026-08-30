@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -58,23 +59,50 @@ func declaredToolchain(plan *artifact.Document, taskID string) []string {
 	return out
 }
 
-// binaryOf strips an install hint: "meson (apt: meson)" -> "meson".
+// binaryOf strips an install hint and the optional cmd: capability prefix.
+// Bare names remain supported so existing plans do not become unreadable.
 func binaryOf(item string) string {
 	if i := strings.Index(item, "("); i > 0 {
+		item = item[:i]
+	}
+	item = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(item), "cmd:"))
+	if i := strings.IndexAny(item, "<>="); i > 0 {
 		item = item[:i]
 	}
 	return strings.TrimSpace(item)
 }
 
-// missingTools reports which declared tools are not on PATH.
+var pkgConfigCapability = regexp.MustCompile(`^pkg-config:([^<>= ]+)(?:>=([^ ]+))?$`)
+
+// capabilityAvailable checks the two environment facts a plan can declare:
+// commands on PATH and pkg-config modules (optionally at a minimum version).
+// Installation remains a human action; this only makes the preflight honest.
+func capabilityAvailable(item string) bool {
+	clean := strings.TrimSpace(strings.Trim(item, "`"))
+	if m := pkgConfigCapability.FindStringSubmatch(clean); m != nil {
+		if _, err := exec.LookPath("pkg-config"); err != nil {
+			return false
+		}
+		args := []string{"--exists"}
+		if m[2] != "" {
+			args = []string{"--atleast-version=" + m[2]}
+		}
+		args = append(args, m[1])
+		return exec.Command("pkg-config", args...).Run() == nil
+	}
+	bin := binaryOf(clean)
+	if bin == "" {
+		return true
+	}
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
+
+// missingTools reports which declared environment capabilities are absent.
 func missingTools(declared []string) []string {
 	var missing []string
 	for _, item := range declared {
-		bin := binaryOf(item)
-		if bin == "" {
-			continue
-		}
-		if _, err := exec.LookPath(bin); err != nil {
+		if !capabilityAvailable(item) {
 			missing = append(missing, item)
 		}
 	}
@@ -87,7 +115,7 @@ func missingTools(declared []string) []string {
 func toolchainQuestion(taskID string, missing []string) *tools.PendingQuestion {
 	return &tools.PendingQuestion{
 		ID:       "toolchain-" + taskID,
-		Question: fmt.Sprintf("The plan declares a toolchain this machine does not have: %s. Install it and continue, or change the plan.", strings.Join(missing, ", ")),
+		Question: fmt.Sprintf("The plan declares environment capabilities this machine does not have: %s. Install them and continue, or change the plan.", strings.Join(missing, ", ")),
 		Options:  []string{"Installed — continue", "Change the plan (revise it) instead"},
 	}
 }

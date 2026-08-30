@@ -71,6 +71,39 @@ func TestDetectGoProject(t *testing.T) {
 	}
 }
 
+func TestDetectMesonGateUsesTheConfigurationArtifact(t *testing.T) {
+	if _, err := exec.LookPath("meson"); err != nil {
+		t.Skip("meson is not installed")
+	}
+	dir := t.TempDir()
+	write(t, dir, "meson.build", "project('x', 'c')\n")
+
+	gate, cmd, err := Detect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate != GateBuild {
+		t.Fatalf("gate = %q, want build", gate)
+	}
+	if !strings.Contains(cmd, "build/build.ninja") || !strings.Contains(cmd, "rm -rf build") {
+		t.Fatalf("meson gate %q does not recover an incomplete configuration", cmd)
+	}
+
+	// A failed setup leaves the directory but no manifest. The detected gate
+	// must discard that partial state and configure successfully.
+	if err := os.Mkdir(filepath.Join(dir, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "build/meson-private/coredata.dat", "partial")
+	res, err := Run(context.Background(), dir, config.Verify{Mode: "auto", TimeoutS: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsGreen(res) {
+		t.Fatalf("gate did not recover partial build: %#v", res)
+	}
+}
+
 // A repository with both the Go service and the desktop must not silently
 // measure only one language. The detected tests gate is the project's shared
 // verification contract, so it must execute the frontend typecheck and Vitest

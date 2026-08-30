@@ -19,7 +19,7 @@ func TestPlanStructureIsCheckedPerTask(t *testing.T) {
 	}
 	findings := structureFindings(nil, cur, "markdown_sections:M", map[string]bool{"SPEC-001": true}, true, raw)
 	joined := strings.Join(findings, "\n")
-	for _, want := range []string{"T-002 has no **Implements:** line", "T-001 has 4 top-level **Deliverables:** bullets", "lane collision"} {
+	for _, want := range []string{"T-002 has no **Implements:** line", "T-001 has 4 top-level **Deliverables:** bullets", "T-001 has no **Verification:** line", "lane collision"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("findings lack %q:\n%s", want, joined)
 		}

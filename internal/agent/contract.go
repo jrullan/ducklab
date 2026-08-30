@@ -130,6 +130,14 @@ func parseVerdict(text string) (*Verdict, error) {
 		if strings.TrimSpace(f.Issue) == "" {
 			return nil, fmt.Errorf("verdict contract: finding %d has an empty issue", i)
 		}
+		// A small self-reviewer twice padded an approval with "no defects" as a
+		// minor finding and "N/A" as its fix. Those are not observations: they
+		// corrupt convergence metrics and make later seats search for a defect
+		// that the reviewer explicitly says does not exist. Approval with no
+		// defect is represented by findings: [].
+		if noOpFinding(f) {
+			return nil, fmt.Errorf("verdict contract: finding %d describes no defect or actionable change; omit it and use an empty findings list", i)
+		}
 		if f.File == "*" && strings.TrimSpace(f.Invariant) == "" {
 			// "*" says "everywhere"; without the rule it is everywhere and
 			// nowhere, and the implementer has nothing to hold the change to.
@@ -142,6 +150,18 @@ func parseVerdict(text string) (*Verdict, error) {
 			len(v.Blocking()))
 	}
 	return &v, nil
+}
+
+func noOpFinding(f Finding) bool {
+	issue := strings.ToLower(strings.TrimSpace(f.Issue))
+	fix := strings.ToLower(strings.Trim(strings.TrimSpace(f.Fix), "."))
+	noIssue := strings.Contains(issue, "no defect") ||
+		strings.Contains(issue, "no issue") ||
+		strings.Contains(issue, "exactly what was asked") ||
+		strings.Contains(issue, "no change needed")
+	noFix := fix == "" || fix == "n/a" || fix == "none" ||
+		strings.Contains(fix, "no change needed") || strings.Contains(fix, "no change required")
+	return noIssue || noFix
 }
 
 func parseChoice(text string) (*Choice, error) {

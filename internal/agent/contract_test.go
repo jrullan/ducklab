@@ -60,6 +60,17 @@ func TestVerdictApproveWithNoFindingsIsValid(t *testing.T) {
 	}
 }
 
+func TestVerdictRejectsFindingsThatSayNothingIsWrong(t *testing.T) {
+	for _, text := range []string{
+		`{"verdict":"approve","findings":[{"severity":"minor","file":"x.h","issue":"Task delivered exactly what was asked — no defects found.","fix":"N/A"}]}`,
+		`{"verdict":"approve","findings":[{"severity":"minor","file":"x.h","issue":"Looks good","fix":"No change needed"}]}`,
+	} {
+		if _, err := ParseContract("verdict", text); err == nil || !strings.Contains(err.Error(), "empty findings list") {
+			t.Fatalf("no-op finding was accepted: %v", err)
+		}
+	}
+}
+
 // A reviewer cannot approve while reporting blocking problems; accepting that
 // would let a run look approved with majors outstanding.
 func TestVerdictApproveWithBlockingFindingsIsRejected(t *testing.T) {

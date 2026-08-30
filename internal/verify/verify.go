@@ -90,7 +90,12 @@ func Detect(root string) (Gate, string, error) {
 		if !commandSucceeds(root, "meson --version") {
 			return GateNone, "", &MissingToolchain{Tool: "meson", Marker: "meson.build"}
 		}
-		return GateBuild, "(test -d build || meson setup build) && ninja -C build", nil
+		// Meson creates build/ before configuration has succeeded. Testing only
+		// the directory stranded Neocapture's first small-model build in a loop:
+		// every later gate skipped setup and ninja could not find build.ninja.
+		// The generated manifest is the configuration checkpoint; an incomplete
+		// tree is disposable and must be rebuilt by the gate that created it.
+		return GateBuild, "test -f build/build.ninja || (rm -rf build && meson setup build); ninja -C build", nil
 	}
 	// Rung 5: Go build
 	if fileExists(filepath.Join(root, "go.mod")) {
