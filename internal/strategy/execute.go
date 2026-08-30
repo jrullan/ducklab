@@ -296,9 +296,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var bestArchitect *agent.Outcome
 	bestStructureProblems := int(^uint(0) >> 1)
 	structureAttempts := 0
-	var previousStructureProblems []string
 	previousStructureSignature := ""
 	pendingStructureNote := ""
+	var pendingRepairBase *agent.Outcome
 	identicalRevision := false
 	stuck := map[int]int{}
 	redGateStreak := 0
@@ -309,8 +309,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// One structure retry per ROUND: per run, a plan whose round-2
 		// draft collided its lanes was only recorded (benchmark run 5).
 		structureAttempts = 0
-		previousStructureProblems = nil
 		previousStructureSignature = ""
+		pendingRepairBase = nil
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
@@ -386,9 +386,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					params.ExecContext.DraftUnderReview[kind] = lastArchitect.Text
 				}
 			}
+			var repairBase *agent.Outcome
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
 				prompt += "\n\n" + pendingStructureNote
 				pendingStructureNote = ""
+				repairBase = pendingRepairBase
+				pendingRepairBase = nil
+			}
+			if turn.Role == config.RoleArchitect && params.ProjectRoot != "" {
+				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
 			}
 			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
 				prompt += "\n\n## Resumed with partial notes\n\nThe " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from these notes:\n\n" + params.ResumeFrom.Notes
@@ -407,6 +413,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			emit(params, "turn_start", startData)
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
+			if err == nil && repairBase != nil {
+				outcome = mergeStructureRepair(repairBase, outcome, turn.Contract)
+			}
 			if outcome != nil {
 				result.Outcome = outcome
 				if turn.Role == config.RoleArchitect && params.InventoryCoverage != nil {
@@ -457,13 +466,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 					if len(problems) > 0 {
 						structureAttempts++
+						if structureAttempts == 1 || bestArchitect == nil || len(problems) < bestStructureProblems {
+							bestArchitect, bestStructureProblems = outcome, len(problems)
+						}
 						signature := strings.Join(problems, "\n")
 						emit(params, "structure_check", map[string]interface{}{
-							"round": round, "turn": i, "findings": problems, "attempt": structureAttempts, "max_attempts": 3,
+							"round": round, "turn": i, "findings": problems, "attempt": structureAttempts, "max_attempts": maxStructureAttempts,
 						})
-						if structureAttempts < 3 && signature != previousStructureSignature {
-							pendingStructureNote = structureProgressNote(problems, previousStructureProblems)
-							previousStructureProblems = append([]string(nil), problems...)
+						if structureAttempts < maxStructureAttempts && signature != previousStructureSignature {
+							pendingStructureNote = structureRepairNote(problems, sectionsOf(bestArchitect))
+							pendingRepairBase = bestArchitect
 							previousStructureSignature = signature
 							emitMessage(params, round, i, turn.Role, duckling, outcome)
 							i-- // the architect goes again, findings in hand
@@ -484,6 +496,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if bestArchitect == nil || 0 < bestStructureProblems {
 						bestArchitect, bestStructureProblems = outcome, 0
 					}
+					// A clean draft ends this repair chain. A later architect
+					// revision starts a fresh checkpoint even in the same council
+					// round; otherwise an older structurally clean but semantically
+					// superseded draft would win over the new revision.
+					structureAttempts = 0
+					previousStructureSignature = ""
 				}
 				if lastArchitect != nil && i == len(script.Turns)-1 &&
 					strings.TrimSpace(outcome.Text) == strings.TrimSpace(lastArchitect.Text) {

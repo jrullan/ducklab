@@ -306,6 +306,16 @@ func (t *AskHuman) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 
 	id := QuestionID(a.Question)
 
+	// Environment facts are not decisions. Resolve them inline before looking
+	// for a human answer so a small seat cannot turn known workspace metadata
+	// into a pause (or invite an advisor to invent a different path).
+	normalizedQuestion := strings.ToLower(a.Question)
+	for phrase, answer := range ectx.DeterministicAnswers {
+		if strings.Contains(normalizedQuestion, strings.ToLower(strings.TrimSpace(phrase))) {
+			return SuccessResult("Harness fact (no human decision required): %s", answer), nil
+		}
+	}
+
 	// A resumed run replays the turn with the answer already available, so the
 	// same question resolves instead of pausing again.
 	if ans, ok := ectx.Answers[id]; ok {

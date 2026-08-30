@@ -69,6 +69,25 @@ func TestAskHumanSaysWhenAskingWins(t *testing.T) {
 	}
 }
 
+func TestAskHumanResolvesDeterministicWorkspaceFactsWithoutPausing(t *testing.T) {
+	ectx := &ExecContext{DeterministicAnswers: map[string]string{
+		"project root": "use `.`; absolute root is `/work/neocapture`",
+	}}
+	res, err := (&AskHuman{}).Execute(context.Background(), ectx, json.RawMessage(`{
+		"question":"What is the project root path?",
+		"options":[".","/workspace/gnome-screenshot"]
+	}`))
+	if err != nil {
+		t.Fatalf("deterministic question paused: %v", err)
+	}
+	if res.IsError || !strings.Contains(res.Content, "use `.`") {
+		t.Fatalf("deterministic answer = %+v", res)
+	}
+	if ectx.Pending != nil {
+		t.Fatalf("deterministic question created a human pending: %+v", ectx.Pending)
+	}
+}
+
 // 45 verify_run calls, all red, 53 patches between them, 32KB of test output
 // ballooning the context each time — 8.7M tokens on a datepicker default,
 // ended only by the wallclock. An approach that has failed ten times straight

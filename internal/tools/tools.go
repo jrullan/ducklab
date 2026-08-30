@@ -59,6 +59,11 @@ type ExecContext struct {
 	// replays its turn with these available so the same question does not
 	// pause it a second time.
 	Answers map[string]string
+	// DeterministicAnswers are facts the harness can answer without a person,
+	// keyed by a lowercase phrase expected in the question. A plan architect
+	// paused Neocapture to ask for its project root even though Ducklab had
+	// already supplied that root to every filesystem tool.
+	DeterministicAnswers map[string]string
 	// Pending is set by ask_human when the run must stop for a human.
 	Pending *PendingQuestion
 	// NoHuman disables pausing: the tool returns an error result instead, for

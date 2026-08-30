@@ -89,6 +89,32 @@ func TestStructureThatDoesNotConvergeFailsClosed(t *testing.T) {
 	}
 }
 
+func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
+	baseText := "# Plan\n\n## M-001 — Setup\n\n### T-001 — Build\n\nold setup\n\n## M-002 — UI\n\n### T-002 — Window\n\nkeep this exactly"
+	base := sectioned(baseText,
+		agent.Section{ID: "M-001", Title: "Setup", Body: "### T-001 — Build\n\nold setup"},
+		agent.Section{ID: "M-002", Title: "UI", Body: "### T-002 — Window\n\nkeep this exactly"},
+	)
+	findings := []string{
+		"T-001 has no **Produces:** artifacts",
+		"T-001 has no **Exercises:** artifacts",
+		"T-002 has no **Produces:** artifacts",
+	}
+	note := structureRepairNote(findings, sectionsOf(base))
+	if !strings.Contains(note, "Return ONLY") || !strings.Contains(note, "M-001") || strings.Contains(note, "T-002 has no") {
+		t.Fatalf("repair note is not bounded to the first milestone:\n%s", note)
+	}
+	patch := sectioned("## M-001 — Setup\n\n### T-001 — Build\n\nnew bounded setup",
+		agent.Section{ID: "M-001", Title: "Setup", Body: "### T-001 — Build\n\nnew bounded setup"})
+	merged := mergeStructureRepair(base, patch, "markdown_sections:M")
+	if !strings.Contains(merged.Text, "new bounded setup") || !strings.Contains(merged.Text, "keep this exactly") || strings.Contains(merged.Text, "old setup") {
+		t.Fatalf("bounded repair was not merged into the complete checkpoint:\n%s", merged.Text)
+	}
+	if len(sectionsOf(merged)) != 2 {
+		t.Fatalf("merged sections = %d, want complete two-section plan", len(sectionsOf(merged)))
+	}
+}
+
 // A revision byte-identical to the previous draft ends the council: another
 // round would spend minutes and tokens to change nothing.
 func TestAnIdenticalRevisionEndsTheCouncil(t *testing.T) {

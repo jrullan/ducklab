@@ -749,20 +749,21 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   const stageToRevise = ["intake", "spec", "plan"].includes(run.stage) ? run.stage : "";
   const next = run.next ?? [];
   const decisionOpen = next.some((v) => ["accept", "reject", "resume", "request_changes"].includes(v));
+	const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
-  const consequence = stageToRevise
-    ? `replaces the approved ${run.stage} and closes the run`
-    : run.stage === "triage"
+  const consequence = next.includes("resume")
+    ? run.pending_kind === "budget"
+      ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
+      : run.pending_kind === "provider"
+        ? "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
+        : run.pending_kind === "error"
+          ? "The run stopped on an error — see why above. Resume retries from its last real checkpoint; abort closes the failed attempt."
+          : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
+    : documentProposal
+      ? `replaces the approved ${run.stage} and closes the run`
+      : run.stage === "triage"
       ? `applies ${triage.length || "the"} classification${triage.length === 1 ? "" : "s"} to the report${triage.length === 1 ? "" : "s"}`
-      : next.includes("resume")
-        ? run.pending_kind === "budget"
-          ? "This run hit its own budget cap; its work is intact. Lift the binding cap on the meter below, then resume."
-          : run.pending_kind === "provider"
-            ? "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
-            : run.pending_kind === "error"
-              ? "The run stopped on an error — see why above. Its work is intact: resume to continue over it, or abort to discard it."
-              : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
         : !next.includes("accept")
           ? "nothing passed, so there is nothing to accept — reject discards this run's diff and frees the task to retry"
           : events.some((e) => e.type === "commit_withdrawn")
@@ -1691,7 +1692,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           <DecisionCard
             next={next}
             title={
-              stageToRevise ? "Proposal awaiting your decision" : "Waiting for your decision"
+				run.pending_kind === "error"
+					? "Run stopped on an error"
+					: documentProposal ? "Proposal awaiting your decision" : "Waiting for your decision"
             }
             subtitle={`${run.stage} · ${run.task_id || run.id}`}
             consequence={consequence}
@@ -1714,7 +1717,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             revisionRun={revisionRun}
             redoNote={run.redo_note}
             onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
-            documentGate={!!(stageToRevise || run.stage === "release")}
+			documentGate={!!(documentProposal || run.stage === "release")}
           />
           <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
           {(() => {

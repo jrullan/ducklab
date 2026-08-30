@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -11,6 +12,11 @@ import (
 )
 
 var ErrStructureFailed = errors.New("document structure did not converge")
+
+const (
+	maxStructureAttempts = 12
+	maxRepairFindings    = 12
+)
 
 // A document council's last architect turn is the one nobody reviews: after
 // the critics speak, the revision goes straight to the gate. The plan that
@@ -287,6 +293,146 @@ func structureNote(findings []string) string {
 		b.WriteString("- " + f + "\n")
 	}
 	return b.String()
+}
+
+// structureRepairNote turns a large document rewrite into a bounded section
+// repair. Neocapture's 25-task plan produced 52 findings; asking a 35B seat to
+// return the whole plan for that flat list exhausted a 20k output cap. The
+// harness owns the complete checkpoint, so the seat only needs to return the
+// H2 section being repaired and the harness can merge it deterministically.
+func structureRepairNote(findings []string, sections []agent.Section) string {
+	batch, ids := structureRepairBatch(findings, sections)
+	var b strings.Builder
+	b.WriteString("## Structure check — repair one bounded section\n\n")
+	b.WriteString("ducklab has checkpointed your best complete draft. Return ONLY the complete H2 section")
+	if len(ids) > 0 {
+		b.WriteString(" named " + strings.Join(ids, ", "))
+	} else {
+		b.WriteString(" that contains the affected item(s)")
+	}
+	b.WriteString("; do not repeat the rest of the document. Ducklab will merge this section into the checkpoint and validate the whole document again. Fix these findings and change nothing unrelated:\n\n")
+	for _, f := range batch {
+		b.WriteString("- " + f + "\n")
+	}
+	if len(findings) > len(batch) {
+		b.WriteString(fmt.Sprintf("\n%d additional findings remain checkpointed; they will be handled in later bounded repairs.\n", len(findings)-len(batch)))
+	}
+	return b.String()
+}
+
+func structureRepairBatch(findings []string, sections []agent.Section) ([]string, []string) {
+	taskParent := map[string]string{}
+	for _, sec := range sections {
+		taskParent[sec.ID] = sec.ID
+		for _, block := range taskBlocks(sec.Body) {
+			if strings.HasPrefix(block.id, "T-") {
+				taskParent[block.id] = sec.ID
+			}
+		}
+	}
+	idRE := regexp.MustCompile(`[A-Z]+-\d+`)
+	parentOf := func(f string) string {
+		for _, id := range idRE.FindAllString(f, -1) {
+			if parent := taskParent[id]; parent != "" {
+				return parent
+			}
+		}
+		return ""
+	}
+	target := ""
+	for _, f := range findings {
+		if target = parentOf(f); target != "" {
+			break
+		}
+	}
+	var batch []string
+	for _, f := range findings {
+		if target == "" || parentOf(f) == target {
+			batch = append(batch, f)
+			if len(batch) == maxRepairFindings {
+				break
+			}
+		}
+	}
+	if len(batch) == 0 {
+		batch = append(batch, findings[:min(len(findings), maxRepairFindings)]...)
+	}
+	var ids []string
+	if target != "" {
+		ids = append(ids, target)
+	}
+	sort.Strings(ids)
+	return batch, ids
+}
+
+// mergeStructureRepair replaces only H2 sections returned by a bounded
+// repair. Returning a whole document remains compatible: every returned
+// section simply replaces its checkpoint counterpart.
+func mergeStructureRepair(base, patch *agent.Outcome, contract string) *agent.Outcome {
+	if base == nil || patch == nil {
+		return patch
+	}
+	patches := sectionsOf(patch)
+	if len(patches) == 0 {
+		return patch
+	}
+	text := base.Text
+	prefix := strings.TrimPrefix(contract, "markdown_sections:")
+	for _, sec := range patches {
+		text = replaceH2Section(text, prefix, sec)
+	}
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return patch
+	}
+	merged := *patch
+	merged.Text = text
+	merged.Parsed = parsed
+	return &merged
+}
+
+func replaceH2Section(text, prefix string, patch agent.Section) string {
+	lines := strings.Split(text, "\n")
+	start, end := -1, len(lines)
+	heading := regexp.MustCompile(`^##\s+` + regexp.QuoteMeta(prefix) + `-\d+(?:\s|$)`)
+	for i, line := range lines {
+		id, _, ok := parseRepairHeading(line, prefix)
+		if !ok {
+			continue
+		}
+		if start >= 0 && heading.MatchString(strings.TrimSpace(line)) {
+			end = i
+			break
+		}
+		if id == patch.ID {
+			start = i
+		}
+	}
+	if start < 0 {
+		return text
+	}
+	title := "## " + patch.ID
+	if strings.TrimSpace(patch.Title) != "" {
+		title += " — " + strings.TrimSpace(patch.Title)
+	}
+	replacement := strings.Split(title+"\n\n"+strings.TrimSpace(patch.Body), "\n")
+	out := append([]string{}, lines[:start]...)
+	out = append(out, replacement...)
+	out = append(out, lines[end:]...)
+	return strings.Join(out, "\n")
+}
+
+func parseRepairHeading(line, prefix string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "## "+prefix+"-") {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+	parts := strings.Fields(rest)
+	if len(parts) == 0 {
+		return "", "", false
+	}
+	return parts[0], strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(rest, parts[0])), "—")), true
 }
 
 func structureProgressNote(findings, previous []string) string {

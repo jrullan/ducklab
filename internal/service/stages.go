@@ -513,6 +513,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// deliberately written above, before that enrichment.
 	ectx := &tools.ExecContext{
 		ProjectRoot: projectRoot,
+		DeterministicAnswers: map[string]string{
+			"project root": fmt.Sprintf("use `.` for tool paths; the absolute project root is `%s`", projectRoot),
+		},
 		RunID:       rs.run.ID,
 		Autonomy:    config.Autonomy(rs.run.Autonomy),
 		ShellPolicy: projCfg.Shell,

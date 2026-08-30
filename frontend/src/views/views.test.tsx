@@ -432,6 +432,15 @@ describe("RunView — what can still be decided", () => {
     expect(screen.queryByTestId("cycle-accept")).toBeNull();
     expect(screen.getByTestId("abort-button")).toBeTruthy();
   });
+
+  it("does not invent a document proposal when a stage paused on an error", async () => {
+	show({ stage: "plan", status: "paused", pending_kind: "error", verdict: "", failure: "response truncated", next: ["resume", "abort"] });
+	await screen.findByTestId("run-view");
+	expect(screen.getByText("Run stopped on an error")).toBeTruthy();
+	expect(screen.queryByText("Proposal awaiting your decision")).toBeNull();
+	expect(screen.getByTestId("decision-consequence").textContent).toContain("last real checkpoint");
+	expect(screen.getByTestId("decision-consequence").textContent).not.toContain("replaces the approved plan");
+  });
 });
 
 // The human gate of a stage run appears in two places — the Cycle view and the
