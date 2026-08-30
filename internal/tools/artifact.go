@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -92,6 +93,14 @@ func (t *ArtifactRead) Execute(ctx context.Context, ectx *ExecContext, args json
 	}
 	sec := doc.Section(a.ID)
 	if sec == nil {
+		if strings.ContainsAny(a.ID, ".") || regexp.MustCompile(`-\d+-\d+$`).MatchString(a.ID) {
+			// A sub-numbered id is never a section: it was a heading inside
+			// its parent. Say so, or the seat searches the tree for it.
+			parent := regexp.MustCompile(`^([A-Z]+-\d+)`).FindString(a.ID)
+			return ErrorResult("%q is a sub-numbered id and sub-numbered ids are not sections — the spine does not know it, "+
+				"and searching the tree for it finds nothing. Read its parent %q instead; the item is inside it. Sections: %s",
+				a.ID, parent, strings.Join(doc.IDs(), ", ")), nil
+		}
 		return ErrorResult("%s has no section %q (has: %s)",
 			a.Kind, a.ID, strings.Join(doc.IDs(), ", ")), nil
 	}

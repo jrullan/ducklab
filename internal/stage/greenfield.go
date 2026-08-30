@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// greenfieldDocumentNotice tells every seat of a document council on an
+// empty tree that there is no code to consult. The spec reviewer of a
+// greenfield project ran 21 fs_search calls over nothing (Neocapture,
+// 2026-08-30).
+const greenfieldDocumentNotice = "## The project has no code yet\n\n" +
+	"The tree holds no source: there is nothing to list, read or search there, and every " +
+	"such call returns nothing. The documents you need — the approved ones and the draft " +
+	"under review — are in this prompt. Work from them; do not search the tree.\n\n"
+
 // Greenfield reports whether a project tree has nothing to read: no source,
 // no documents — only ducklab's own state and git's dotfiles. An intake on
 // such a tree has no reason to explore, and a small model that is not told

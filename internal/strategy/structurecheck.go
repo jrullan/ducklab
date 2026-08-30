@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -34,6 +35,17 @@ func structureFindings(prev, cur []agent.Section, contract string) []string {
 		}
 		if n := strings.Count(s.Body, "**Deliverables:**"); n > 1 {
 			out = append(out, fmt.Sprintf("%s has %d **Deliverables:** headings; one per task", s.ID, n))
+		}
+	}
+	// Sub-numbered ids are invisible to the spine: a requirements draft with
+	// `### REQ-003.1 …` sub-sections sent the spec reviewer on 21 searches for
+	// ids that were never sections (Neocapture, 2026-08-30).
+	if prefix != "" {
+		subID := regexp.MustCompile(`(?m)^#{2,4}\s+` + regexp.QuoteMeta(prefix) + `-\d+[.\-]\d+\b`)
+		for _, s := range cur {
+			if m := subID.FindString(s.Body); m != "" {
+				out = append(out, fmt.Sprintf("%s contains a sub-numbered heading (%q): sub-numbered ids are not sections and their traceability is lost — give the item its own %s-NNN H2 id, or fold it into the section's body as bullets", s.ID, strings.TrimSpace(m), prefix))
+			}
 		}
 	}
 	for _, p := range prev {

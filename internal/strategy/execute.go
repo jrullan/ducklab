@@ -710,6 +710,11 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 				"It exists only there — not in the tree, not in the artifact " +
 				"store — until a person accepts it, so do not go looking for " +
 				"it with tools.\n")
+			// A critic that comes back after a pause is a fresh conversation
+			// too; it gets its reads back like the architect does.
+			if memo := alreadyRead(looked); memo != "" {
+				b.WriteString("\n" + memo)
+			}
 		}
 		// The reviewer gets the diff and the conversation with the author's
 		// own turns removed (I7). Compacted per file: a tracked build

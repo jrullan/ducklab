@@ -1109,6 +1109,11 @@ Rules:
 - Every section starts with an H2 line: "## <ID> — <short title>".
 - IDs are assigned by ducklab; reuse the IDs you are given and only allocate new
   ones from the next-free number you are told.
+- An ID is PREFIX-NNN, three digits, nothing else: REQ-004, SPEC-012, T-031.
+  Never sub-number (REQ-003.1, REQ-003-1, REQ-003a): ducklab does not see a
+  sub-numbered id as a section, its traceability is lost, and the next seat
+  cannot find it. To group related items, give each its own H2 id and say
+  in the body what it belongs with, or use plain bullets inside one section.
 - Prefer fewer, sharper items over exhaustive lists.
 - State what is OUT of scope as explicitly as what is in.
 - Where you had to assume something, add "**Assumption:**" and say it.

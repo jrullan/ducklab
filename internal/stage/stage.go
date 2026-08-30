@@ -383,6 +383,9 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		if len(approved) == 0 {
 			return "", fmt.Errorf("spec needs requirements: run `ducklab intake` first")
 		}
+		if Greenfield(projectRoot) {
+			b.WriteString(greenfieldDocumentNotice)
+		}
 		b.WriteString("## Your task\n\nWrite the specification for these requirements. " +
 			"Every section must carry an **Implements:** line naming the requirements it covers.\n\n" +
 			"A specification says HOW the system delivers its requirements — it is not a " +
@@ -435,6 +438,9 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		}
 		if len(spec.Sections) == 0 {
 			return "", fmt.Errorf("plan needs a spec: run `ducklab spec` first")
+		}
+		if Greenfield(projectRoot) {
+			b.WriteString(greenfieldDocumentNotice)
 		}
 		b.WriteString(planInstruction)
 		if smallSeat {

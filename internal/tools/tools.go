@@ -118,6 +118,8 @@ type ExecContext struct {
 	// turnReads remembers the successful read-only calls of the current
 	// turn, so an identical re-read is refused with directions (BeginTurn).
 	turnReads map[string]bool
+	// searchMisses counts consecutive fs_search calls that found nothing.
+	searchMisses int
 	// fsPatchFailStreak tracks fuzzy, consecutive fs_patch failures by file.
 	// Unlike the exact-call brake above, changing the search text does not
 	// disguise a model fighting the same file.
@@ -295,7 +297,24 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 				"arguments. Repeating it cannot change the answer. Re-read the tool's error and "+
 				"its schema, CHANGE the arguments, or use a different tool.", ectx.lastFailCount, name)}, nil
 	}
+	// A seat that keeps searching and keeps finding nothing is looking for
+	// something that is not there — 21 fs_search calls at 50 s each on an
+	// empty tree (Neocapture spec, 2026-08-30). Different patterns dodge the
+	// identical-call brake, so misses are counted in a row.
+	if name == "fs_search" && ectx.searchMisses >= SearchMissLimit {
+		ectx.searchMisses = 0
+		return ErrorResult("STOP SEARCHING: %d searches in a row found nothing. What you are looking for is not in "+
+			"the tree — either the project has no such code yet, or the id you search for is not a section "+
+			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit), nil
+	}
 	res, err := t.Execute(ctx, ectx, args)
+	if name == "fs_search" && res != nil {
+		if !res.IsError && strings.TrimSpace(res.Content) == "no matches" {
+			ectx.searchMisses++
+		} else if !res.IsError {
+			ectx.searchMisses = 0
+		}
+	}
 	if name == "fs_read" && res != nil && !res.IsError {
 		resetFSPatchFailureStreak(ectx, args)
 	}
@@ -339,7 +358,12 @@ var readOnlyTool = map[string]bool{
 // is legitimate again.
 func (e *ExecContext) BeginTurn() {
 	e.turnReads = map[string]bool{}
+	e.searchMisses = 0
 }
+
+// SearchMissLimit is how many fs_search calls may find nothing in a row
+// before the next one is refused with directions.
+const SearchMissLimit = 3
 
 // fsReadPath extracts the path argument of an fs_read call, if any.
 func fsReadPath(args json.RawMessage) string {
