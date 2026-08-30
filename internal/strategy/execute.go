@@ -323,7 +323,18 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// implementer at TestFirstScript's hardcoded 24 while role_turns
 			// said 100 and the Settings fallback said 40. A strong seat died
 			// reading a 30-file project with every configured number decorative.
-			turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
+			if turn.Persona == PersonaCritic {
+				// A document critic reads a draft that is in its prompt; the
+				// script's six calls are the design. The configured reviewer
+				// cap (for code reviews of large diffs) must not raise it: at
+				// 100, a critic re-read the same sections for 29 calls of 41 s
+				// (benchmark run 6). It may still lower it.
+				if c := CapFor(params.TurnCaps, turn.Role, turn.MaxTurns); c < turn.MaxTurns {
+					turn.MaxTurns = c
+				}
+			} else {
+				turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
+			}
 
 			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {
 				continue

@@ -59,6 +59,12 @@ func TestARepeatedReadInOneTurnIsRefused(t *testing.T) {
 	if again.IsError || !strings.Contains(again.Content, "served again") || !strings.Contains(again.Content, "package main") {
 		t.Fatalf("the third read was not served with a reminder: err=%v %.200s", again.IsError, again.Content)
 	}
+	// A fourth identical read is reading as a way of thinking: the reply
+	// closes (25 re-reads at 41 s each on a spec review, benchmark run 6).
+	fourth, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
+	if !fourth.IsError || !fourth.EndTurn || !ectx.ToolsClosed {
+		t.Fatalf("the fourth identical read did not close the reply: %+v", fourth)
+	}
 	ectx.BeginTurn()
 	third, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
 	if third.IsError {

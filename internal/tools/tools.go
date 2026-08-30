@@ -321,8 +321,18 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			ectx.turnReads[sig]++
 			return ErrorResult("REPEATED READ: you already called %s with these exact arguments in this turn, "+
 				"and its result is above in this conversation. Use it; do not read again.", name), nil
-		default:
+		case 2:
+			// Served once more, with a reminder (a seat that cannot act on
+			// "it is above" is not stranded).
 			repeatedRead = true
+		default:
+			// A third identical read is reading as a way of thinking: a spec
+			// critic re-read the same sections 25 times at 41 s each
+			// (benchmark run 6). The reply closes; the seat answers.
+			ectx.ToolsClosed = true
+			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
+				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has been served twice "+
+					"already in this turn. You have everything; your next message must be your final reply.", name)}, nil
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
