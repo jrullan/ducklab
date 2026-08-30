@@ -751,3 +751,23 @@ describe("the round divider", () => {
     expect(turns.findIndex((t) => t.role === "round")).toBe(2); // between the rounds
   });
 });
+
+describe("same-coordinate structure repairs", () => {
+  const ev = (type: string, data: Record<string, unknown>, seq: number) => ({ type, data, seq }) as unknown as DucklabEvent;
+
+  it("renders sequential attempts with unique blocks and one live owner", () => {
+    const blocks = buildTurns([
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 1),
+      ev("message", { round: 1, turn: 0, role: "architect", content: "first draft" }, 2),
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 3),
+      ev("message", { round: 1, turn: 0, role: "architect", content: "second draft" }, 4),
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 5),
+    ]).filter((block) => block.role === "architect");
+
+    expect(blocks).toHaveLength(3);
+    expect(new Set(blocks.map((block) => block.key)).size).toBe(3);
+    expect(blocks.map((block) => block.done)).toEqual([true, true, false]);
+    expect(blocks.map((block) => block.concurrent)).toEqual([undefined, undefined, undefined]);
+    expect(blocks.map((block) => block.streamKey)).toEqual([undefined, undefined, "1:0"]);
+  });
+});

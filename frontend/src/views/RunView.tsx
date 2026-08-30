@@ -1901,8 +1901,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   block={t}
                   roster={roster}
                   color={ducklingColors[t.duckling]}
-                  streamed={t.messageOnly ? undefined : deltas[`${t.round}:${t.turn}`]}
-                  reasoning={t.messageOnly ? undefined : (reasoning[`${t.round}:${t.turn}`] ?? t.reasoning)}
+                  streamed={t.messageOnly || !t.streamKey ? undefined : deltas[t.streamKey]}
+                  reasoning={t.messageOnly || !t.streamKey ? t.reasoning : (reasoning[t.streamKey] ?? t.reasoning)}
                   collapsed={isCollapsed}
                   deliverableTexts={deliverables?.lines.map((l) => l.text)}
                   onToggle={

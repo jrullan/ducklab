@@ -58,6 +58,10 @@ export function toolTarget(d: Record<string, unknown>): string | undefined {
 
 export interface TurnBlock {
   key: string;
+  /** Coordinate used by the ephemeral delta stores. A repeated turn_start
+   * keeps the engine's round:turn coordinate but receives a unique block key;
+   * only the newest block may own this stream key. */
+  streamKey?: string;
   round: number;
   turn: number;
   role: string;
@@ -345,14 +349,25 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
             toolCalls: [], text: `round ${round}`, done: true, messageOnly: true,
           });
         }
-        const key = keyFor(round, turn);
-        const previous = byKey.get(key);
+        const coordinate = keyFor(round, turn);
+        const previous = byKey.get(coordinate);
         // A resumed turn reuses its coordinates. Keep the interrupted block in
         // the transcript, and mark it so its durable checkpoint is readable as
         // context rather than as an unexplained incomplete answer.
         if (previous?.checkpointNotes) previous.resumed = true;
+        // Structure repair also reuses coordinates, but it is a new model
+        // reply. The engine's missing turn_end made every repair look parallel
+        // and all live deltas painted onto the first draft. Close the prior
+        // visual block and transfer the one live stream to its replacement.
+        if (previous) {
+          previous.done = true;
+          previous.streamKey = undefined;
+          open.delete(previous);
+        }
+        const key = previous ? `${coordinate}:restart:${e.seq ?? blocks.length}` : coordinate;
         const block: TurnBlock = {
           key,
+          streamKey: coordinate,
           round,
           turn,
           role: String(d.role ?? ""),
@@ -362,7 +377,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           text: "",
           done: false,
         };
-        byKey.set(key, block);
+        byKey.set(coordinate, block);
         last = block;
         blocks.push(block);
         // Anything already open overlaps this one, and this one overlaps them.

@@ -232,7 +232,10 @@ export const useRuns = create<RunsState>((set) => ({
         }
       }
 
-      const key = e.type === "turn_end" ? deltaKey(e.data) : "";
+      // A structure repair and a resumed checkpoint both restart the same
+      // round:turn coordinate. Their first token must begin a fresh live
+      // buffer; otherwise attempt three visibly continues attempt one.
+      const key = e.type === "turn_end" || e.type === "turn_start" ? deltaKey(e.data) : "";
       return {
         ...state,
         events: { ...state.events, [runId]: trimmed },

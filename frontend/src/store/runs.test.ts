@@ -81,6 +81,20 @@ describe("event application", () => {
     expect(state.deltas["r-1"]?.["1:1"]).toBe("still live");
   });
 
+  it("starts a fresh display buffer when the same turn coordinates restart", () => {
+    const s = useRuns.getState();
+    s.applyEvent({ type: "turn_start", run_id: "r-1", seq: 1, data: { round: 1, turn: 0, role: "architect" } });
+    s.applyEvent({ type: "reasoning_delta", run_id: "r-1", data: { round: 1, turn: 0, text: "first attempt" } });
+    s.applyEvent({ type: "token_delta", run_id: "r-1", data: { round: 1, turn: 0, text: "first draft" } });
+
+    s.applyEvent({ type: "turn_start", run_id: "r-1", seq: 2, data: { round: 1, turn: 0, role: "architect" } });
+    s.applyEvent({ type: "reasoning_delta", run_id: "r-1", data: { round: 1, turn: 0, text: "third-call thinking" } });
+
+    const state = useRuns.getState();
+    expect(state.deltas["r-1"]?.["1:0"]).toBeUndefined();
+    expect(state.reasoning["r-1"]?.["1:0"]).toBe("third-call thinking");
+  });
+
   // The same duckling speaking twice — a council's architect drafts and then
   // revises. Keyed by duckling, the revision appended to the draft.
   it("keeps two turns by the same duckling apart", () => {
