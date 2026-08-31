@@ -405,6 +405,41 @@ func mergeStructureRepair(base, patch *agent.Outcome, contract string) *agent.Ou
 	return merged
 }
 
+// materializePartialRevision keeps an ordinary council revision from
+// accidentally becoming the whole document. Neocapture's spec architect
+// answered a two-finding review with only SPEC-004; treating that response as
+// a replacement erased eight already-reviewed sections before the structure
+// repair loop even began. A non-empty strict subset of known H2 sections is a
+// transactional patch over the last complete draft. Unknown or duplicate
+// sections remain ordinary revisions so the structure checker can reject them.
+func materializePartialRevision(base, revision *agent.Outcome, contract string) (*agent.Outcome, []string) {
+	if base == nil || revision == nil {
+		return revision, nil
+	}
+	baseSections, revisedSections := sectionsOf(base), sectionsOf(revision)
+	if len(revisedSections) == 0 || len(revisedSections) >= len(baseSections) {
+		return revision, nil
+	}
+	known := map[string]bool{}
+	for _, sec := range baseSections {
+		known[sec.ID] = true
+	}
+	seen := map[string]bool{}
+	ids := make([]string, 0, len(revisedSections))
+	for _, sec := range revisedSections {
+		if !known[sec.ID] || seen[sec.ID] {
+			return revision, nil
+		}
+		seen[sec.ID] = true
+		ids = append(ids, sec.ID)
+	}
+	merged, err := mergeStructureRepairScoped(base, revision, contract, ids)
+	if err != nil {
+		return revision, nil
+	}
+	return merged, ids
+}
+
 // mergeStructureRepairScoped treats a bounded repair as a transaction. The
 // Neocapture plan run returned unrelated milestones during a one-H2 repair;
 // merging every returned H2 duplicated task IDs across untouched siblings.
@@ -416,7 +451,10 @@ func mergeStructureRepairScoped(base, patch *agent.Outcome, contract string, all
 	if len(patches) == 0 {
 		return base, fmt.Errorf("%w: response contained no H2 section", ErrStructureRepairScope)
 	}
-	if len(allowed) > 0 {
+	if allowed != nil {
+		if len(allowed) == 0 {
+			return base, fmt.Errorf("%w: no section was assigned", ErrStructureRepairScope)
+		}
 		want := map[string]bool{}
 		for _, id := range allowed {
 			want[id] = true

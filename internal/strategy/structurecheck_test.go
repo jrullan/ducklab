@@ -174,6 +174,65 @@ func TestBoundedRepairRejectsUnexpectedOrMissingSectionsAtomically(t *testing.T)
 	if _, err := mergeStructureRepairScoped(base, missing, "markdown_sections:M", []string{"M-001", "M-002"}); !errors.Is(err, ErrStructureRepairScope) {
 		t.Fatalf("missing-section error = %v, want ErrStructureRepairScope", err)
 	}
+	if _, err := mergeStructureRepairScoped(base, missing, "markdown_sections:M", []string{}); !errors.Is(err, ErrStructureRepairScope) {
+		t.Fatalf("empty assignment error = %v, want ErrStructureRepairScope", err)
+	}
+}
+
+func TestPartialCouncilRevisionIsMaterializedOverCompleteDraft(t *testing.T) {
+	baseText := "## SPEC-001 — Core\n\n**Implements:** REQ-001\n\nkeep core\n\n## SPEC-002 — UI\n\n**Implements:** REQ-002\n\nold ui"
+	base := sectioned(baseText,
+		agent.Section{ID: "SPEC-001", Title: "Core", Body: "**Implements:** REQ-001\n\nkeep core"},
+		agent.Section{ID: "SPEC-002", Title: "UI", Body: "**Implements:** REQ-002\n\nold ui"},
+	)
+	revision := sectioned("## SPEC-002 — UI\n\n**Implements:** REQ-002\n\nnew ui",
+		agent.Section{ID: "SPEC-002", Title: "UI", Body: "**Implements:** REQ-002\n\nnew ui"})
+	merged, ids := materializePartialRevision(base, revision, "markdown_sections:SPEC")
+	if !slices.Equal(ids, []string{"SPEC-002"}) {
+		t.Fatalf("materialized sections = %v, want SPEC-002", ids)
+	}
+	if !strings.Contains(merged.Text, "keep core") || !strings.Contains(merged.Text, "new ui") || strings.Contains(merged.Text, "old ui") {
+		t.Fatalf("partial revision did not preserve the complete checkpoint:\n%s", merged.Text)
+	}
+	if findings := structureFindings(sectionsOf(base), sectionsOf(merged), "markdown_sections:SPEC", nil, false, merged.Text); len(findings) != 0 {
+		t.Fatalf("materialized revision has findings: %v", findings)
+	}
+}
+
+func TestCouncilKeepsCompleteCheckpointWhenArchitectReturnsOneChangedSection(t *testing.T) {
+	architectTurns, reviewerTurns := 0, 0
+	var events []string
+	params := &ExecuteParams{
+		OnEvent: func(kind string, _ map[string]interface{}) { events = append(events, kind) },
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				reviewerTurns++
+				if reviewerTurns == 1 {
+					return verdictOutcome("request-changes"), nil
+				}
+				return verdictOutcome("approve"), nil
+			}
+			architectTurns++
+			if architectTurns == 1 {
+				return sectioned("## SPEC-001 — Core\n\n**Implements:** REQ-001\n\nkeep core\n\n## SPEC-002 — UI\n\n**Implements:** REQ-002\n\nold ui",
+					agent.Section{ID: "SPEC-001", Title: "Core", Body: "**Implements:** REQ-001\n\nkeep core"},
+					agent.Section{ID: "SPEC-002", Title: "UI", Body: "**Implements:** REQ-002\n\nold ui"}), nil
+			}
+			return sectioned("## SPEC-002 — UI\n\n**Implements:** REQ-002\n\nnew ui",
+				agent.Section{ID: "SPEC-002", Title: "UI", Body: "**Implements:** REQ-002\n\nnew ui"}), nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), CouncilScript("SPEC", nil), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "keep core") || !strings.Contains(res.Text, "new ui") {
+		t.Fatalf("proposal lost part of its checkpoint:\n%s", res.Text)
+	}
+	if !slices.Contains(events, "revision_materialized") || slices.Contains(events, "structure_failed") {
+		t.Fatalf("events = %v, want materialization without structure failure", events)
+	}
 }
 
 func TestStructureRepairStopsAfterThreeNonImprovingPatches(t *testing.T) {

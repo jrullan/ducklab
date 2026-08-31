@@ -460,6 +460,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					})
 				}
 			}
+			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect &&
+				strings.HasPrefix(turn.Contract, "markdown_sections:") && lastArchitect != nil {
+				if materialized, sections := materializePartialRevision(lastArchitect, outcome, turn.Contract); len(sections) > 0 {
+					outcome = materialized
+					emit(params, "revision_materialized", map[string]interface{}{
+						"round": round, "turn": i, "sections": sections,
+						"detail": "partial revision merged transactionally into the last complete draft",
+					})
+				}
+			}
 			if outcome != nil {
 				result.Outcome = outcome
 				if turn.Role == config.RoleArchitect && params.InventoryCoverage != nil {
@@ -527,10 +537,18 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						})
 						if structureAttempts < maxStructureAttempts && signature != previousStructureSignature && structureStagnation < maxStructureStagnation {
 							pendingStructureNote, pendingRepairSections = structureRepairInstruction(bestStructureFindings, sectionsOf(bestArchitect))
+							if len(pendingRepairSections) == 0 {
+								// An empty allowlist must never mean unrestricted repair.
+								// If a finding cannot be mapped to an H2 checkpoint,
+								// ask for a complete revision and validate it normally.
+								pendingStructureNote = structureNote(bestStructureFindings)
+								pendingRepairBase = nil
+							} else {
+								pendingRepairBase = bestArchitect
+							}
 							if repairScopeProblem != "" {
 								pendingStructureNote += "\nThe previous patch was rejected without changing the checkpoint: " + repairScopeProblem + "\n"
 							}
-							pendingRepairBase = bestArchitect
 							previousStructureSignature = signature
 							emitMessage(params, round, i, turn.Role, duckling, outcome)
 							i-- // the architect goes again, findings in hand
