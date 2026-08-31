@@ -412,7 +412,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// amendment and reported the other amended sections missing. Present
 			// the deterministically materialized candidate as the review object.
 			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" && lastArchitect != nil {
-				prompt += "\n\n## Materialized fragment candidate\n\n" + lastArchitect.Text
+				prompt += "\n\n## Materialized fragment candidate — authoritative\n\n" + lastArchitect.Text +
+					"\n\nReview ONLY the materialized candidate above. Earlier architect messages may repeat the `" +
+					fragmentPlaceholderForPrompt(script.FragmentPrefix) + "` new-section placeholder; that is the required input protocol, not a duplicate-id defect. " +
+					"Ducklab has already assigned stable temporary identities in the authoritative candidate."
 			}
 			// The draft a critic is about to judge is served by artifact_read
 			// too: told "spec does not exist yet", a small seat asked nineteen
@@ -675,7 +678,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// must not depend on the output parser selected for that turn.
 			if turn.Role == config.RoleArchitect && script.RevisionOpensNextRound && !strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				if script.FragmentPrefix != "" {
-					lastArchitect = materializeFragment(lastArchitect, outcome)
+					lastArchitect = materializeFragment(lastArchitect, outcome, script.FragmentPrefix)
 				} else {
 					lastArchitect = outcome
 				}

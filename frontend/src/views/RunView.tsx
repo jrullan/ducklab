@@ -1432,9 +1432,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             ))}
           </ul>
           <p className="mt-2 text-sm text-ink">
-            These are revision notes on the draft, not bugs. If they should be addressed,
-            send the proposal back with <strong>Request changes</strong> below — the note
-            carries them into the revision run.
+            These are revision notes on the draft, not bugs. {run.pending_data?.review_verdict
+              ? <>Acceptance is blocked while this dissent stands. Send the proposal back with <strong>Request changes</strong> below, or discard it.</>
+              : <>If they should be addressed, send the proposal back with <strong>Request changes</strong> below — the note carries them into the revision run.</>}
           </p>
         </section>
       )}

@@ -220,7 +220,11 @@ func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
 			"## REQ-002 — Exercise search\n\n**Priority:** must\n\nUsers search the catalog.\n")
 	writeDoc(t, root, artifact.KindSpec,
 		"## SPEC-001 — Login\n\n**Implements:** REQ-001\n\nLogin flow.\n")
-	hint := coverageGapsHint(root, artifact.KindSpec)
+	base, err := artifact.Load(root, artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint := coverageGapsHint(root, artifact.KindSpec, base)
 	if !strings.Contains(hint, "REQ-002") || !strings.Contains(hint, "Exercise search") {
 		t.Errorf("the uncovered requirement is missing from the hint: %q", hint)
 	}
@@ -235,8 +239,26 @@ func TestSpecUpdatesCarryTheCoverageGaps(t *testing.T) {
 		}
 	}
 	// Other kinds stay quiet; a plan prompt owes the spine nothing here.
-	if coverageGapsHint(root, artifact.KindPlan) != "" {
+	if coverageGapsHint(root, artifact.KindPlan, base) != "" {
 		t.Error("the hint leaked outside spec updates")
+	}
+}
+
+// A proposal revision is based on the pending candidate passed to the stage,
+// not necessarily an approved spec visible through LoadSpine. Corrida 13
+// revised one duplicate section but was told that nine already-covered
+// requirements were gaps, so every repair round appended the spec again.
+func TestSpecRevisionCoverageUsesTheMaterializedBase(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindRequirements,
+		"## REQ-001 — Capture\n\nMust capture.\n\n"+
+			"## REQ-002 — Save\n\nMust save.\n")
+	base := &artifact.Document{Sections: []artifact.Section{
+		{ID: "SPEC-001", Title: "Capture", Implements: []string{"REQ-001"}},
+		{ID: "SPEC-002", Title: "Save", Implements: []string{"REQ-002"}},
+	}}
+	if hint := coverageGapsHint(root, artifact.KindSpec, base); hint != "" {
+		t.Fatalf("materialized proposal was fully covered but got gaps:\n%s", hint)
 	}
 }
 

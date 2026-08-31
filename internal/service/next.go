@@ -65,7 +65,7 @@ func runNext(r *runlog.Run) []string {
 			// A FAILED verdict has nothing to accept; offering the button and
 			// disabling it is the client's courtesy, offering the action is not
 			// the engine's.
-			if r.Verdict != "FAILED" {
+			if r.Verdict != "FAILED" && stringValueAny(r.PendingData["review_verdict"]) != "request-changes" {
 				out = append(out, "accept")
 			}
 			// Only a document can be sent back with a note; code runs are

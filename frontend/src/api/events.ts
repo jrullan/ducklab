@@ -297,6 +297,8 @@ export const KNOWN_EVENT_TYPES = [
   "revision_skipped",
   "final_review_started",
   "final_review_completed",
+  "proposal_review_blocked",
+  "proposal_structure_blocked",
   "pause_requested",
   "dedupe",
   "no_gate",

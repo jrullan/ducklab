@@ -303,6 +303,14 @@ another draft: the next architect turn must render the same milestones, tasks,
 producers, consumers and verification commands. On later rounds the accepted
 manifest and the previous revision are carried; neither is regenerated.
 
+Document revisions are fragments over a materialized candidate. Coverage is
+computed from that candidate — including a pending proposal — rather than only
+from approved artifacts. New flat-document sections may all arrive under the
+repeatable `<PREFIX>-900` wire placeholder; Ducklab assigns stable temporary
+ids before review, and later rounds address the same additions by title or
+their temporary id. The service consumes the scheduler's materialized result
+directly and never folds the raw fragment replies a second time.
+
 The council seats **one drafter plus N critics**: the first duckling of the
 mode's line-up drafts, and every further duckling gets its own critique turn,
 pinned to it. The product's thesis is decorrelation between models; a draft
@@ -319,6 +327,11 @@ documents. Two rules keep the extra seats honest:
 
 With a line-up of one or none, the council keeps its original two-chair shape:
 the roster's reviewer takes the single critique turn.
+
+If the bounded final review still returns `request-changes`, the proposal is
+kept for human revision or discard but its gate is red: `accept` is neither
+offered nor accepted by the API. Exact semantic duplicates (same title and
+same `Implements` set) are a deterministic blocker under the same rule.
 
 The `human` turn is **conditional**: it executes when autonomy is `manual` or
 when the architect's turn used `ask_human`; otherwise it is skipped. The human's

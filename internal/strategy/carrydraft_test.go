@@ -90,6 +90,53 @@ func TestAFragmentCouncilCarriesTheMaterializedCandidate(t *testing.T) {
 	}
 }
 
+// New fragment sections deliberately share the -900 wire placeholder. The
+// scheduler must give them stable temporary ids before review and must not
+// append them again when a later repair uses sequential placeholder ids.
+func TestAFragmentCouncilCanonicalizesNewSectionsAcrossRounds(t *testing.T) {
+	script := CouncilScript("SPEC", nil)
+	script.FragmentPrefix = "SPEC"
+	for i := range script.Turns {
+		if script.Turns[i].Role == config.RoleArchitect {
+			script.Turns[i].Contract = ""
+		}
+	}
+	architectTurns, reviewerTurns := 0, 0
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				reviewerTurns++
+				if reviewerTurns == 1 {
+					for _, want := range []string{"## SPEC-900 — Capture", "## SPEC-901 — Save", "authoritative"} {
+						if !strings.Contains(prompt, want) {
+							t.Errorf("first critic lacks %q:\n%s", want, prompt)
+						}
+					}
+					return verdictOutcome("request-changes"), nil
+				}
+				authoritative := prompt[strings.LastIndex(prompt, "## Materialized fragment candidate — authoritative"):]
+				if strings.Count(authoritative, "## SPEC-900 — Capture") != 1 || strings.Count(authoritative, "## SPEC-901 — Save") != 1 {
+					t.Errorf("second critic received duplicated authoritative additions:\n%s", authoritative)
+				}
+				return verdictOutcome("approve"), nil
+			}
+			architectTurns++
+			if architectTurns == 1 {
+				return &agent.Outcome{Text: "## SPEC-900 — Capture\n\nold\n\n## SPEC-900 — Save\n\nold\n"}, nil
+			}
+			return &agent.Outcome{Text: "## SPEC-900 — Capture\n\nfixed\n\n## SPEC-901 — Save\n\nfixed\n"}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(res.Text, "## SPEC-") != 2 || !strings.Contains(res.Text, "## SPEC-901 — Save") {
+		t.Fatalf("materialized result duplicated or lost sections:\n%s", res.Text)
+	}
+}
+
 // The candidate a person accepts is the closing architect revision, not the
 // draft the round-two critic saw immediately before it. Record one bounded
 // verdict on that exact text without opening an unbounded third repair lap.

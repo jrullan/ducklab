@@ -566,6 +566,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// the fallback must read the pass it belongs to, never a stale one.
 	var lastArchitectTexts atomic.Pointer[[]string]
 	var inventory *agent.Inventory
+	finalReviewVerdict := ""
+	finalReviewFindings := 0
 	adoptSurvey := req.Adopt
 	if req.Stage == "spec" && !req.Adopt {
 		if reqs, e := artifact.Load(projectRoot, artifact.KindRequirements); e == nil && reqs.Front.Origin == "adopted" {
@@ -698,6 +700,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				},
 				OnEvent: func(kind string, data map[string]interface{}) {
 					rs.writer.AppendEvent(kind, data)
+					if kind == "final_review_completed" {
+						finalReviewVerdict = stringValueAny(data["verdict"])
+						finalReviewFindings = intValue(data["findings"])
+					}
 					if kind == "turn_interrupted" {
 						rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
 						rs.writer.WriteState()
@@ -723,6 +729,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			// The document is the FOLD of the architect's passes, never the
 			// last reply alone: a round-2 revision that re-emits only the
 			// sections it retouched must not erase the rest (B-089).
+			// Fragment councils are already materialized turn by turn inside the
+			// scheduler. Folding their raw replies a second time discarded those
+			// stable identities and appended the same additions again (Neocapture
+			// corrida 13: 19 sections became 36). The materialized result is the
+			// exact candidate the final reviewer saw.
+			if script.FragmentPrefix != "" {
+				return res.Text, nil
+			}
 			if texts := res.RoleTexts[string(config.RoleArchitect)]; len(texts) > 1 {
 				folded, kept := stage.FoldPasses(texts, stage.Name(req.Stage).Kind())
 				if len(kept) > 0 {
@@ -841,11 +855,6 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 		}
 	}
-	// No executable gate exists for a document, so the verdict is UNVERIFIED
-	// and the human gate is the only gate (P3).
-	rs.run.Verdict = "UNVERIFIED"
-	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": "UNVERIFIED"})
-
 	rs.run.Status = "paused"
 	rs.run.PendingKind = "gate"
 	rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
@@ -854,6 +863,46 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	rs.run.PendingData["artifact"] = string(result.Kind)
 	rs.run.PendingData["sections"] = len(result.Proposed.Sections)
+	semanticDuplicates := duplicateSemanticSections(result.Proposed.Sections)
+	if len(semanticDuplicates) > 0 {
+		rs.run.PendingData["proposal_blockers"] = semanticDuplicates
+		detail := fmt.Sprintf("proposal contains %d semantic duplicate section pair(s): %s", len(semanticDuplicates), strings.Join(semanticDuplicates, "; "))
+		if rs.run.Warning != "" {
+			rs.run.Warning += " · " + detail
+		} else {
+			rs.run.Warning = detail
+		}
+		rs.writer.AppendEvent("proposal_structure_blocked", map[string]interface{}{
+			"duplicates": semanticDuplicates, "detail": detail,
+		})
+	}
+	// A final document review is semantic evidence, not an executable test,
+	// but request-changes is still a red decision. Calling that candidate
+	// merely UNVERIFIED offered Accept beside critical findings and made the
+	// last reviewer look decorative. Keep the proposal so the person can send
+	// it back with a note, but do not offer or permit acceptance while dissent
+	// stands.
+	if finalReviewVerdict != "" && finalReviewVerdict != "approve" {
+		rs.run.Verdict = "FAILED"
+		rs.run.PendingData["review_verdict"] = finalReviewVerdict
+		rs.run.PendingData["review_findings"] = finalReviewFindings
+		detail := fmt.Sprintf("final reviewer requested changes with %d finding(s); revise or discard this proposal", finalReviewFindings)
+		if rs.run.Warning != "" {
+			rs.run.Warning += " · " + detail
+		} else {
+			rs.run.Warning = detail
+		}
+		rs.writer.AppendEvent("proposal_review_blocked", map[string]interface{}{
+			"verdict": finalReviewVerdict, "findings": finalReviewFindings, "detail": detail,
+		})
+	} else if len(semanticDuplicates) > 0 {
+		rs.run.Verdict = "FAILED"
+	} else {
+		// No executable gate exists for a document, so an approved or
+		// unreviewed proposal remains UNVERIFIED until the person decides (P3).
+		rs.run.Verdict = "UNVERIFIED"
+	}
+	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": rs.run.Verdict})
 	// In digest mode "the references were considered" is a claim about tool
 	// use, not about the prompt — so the gate names the documents no one
 	// opened, and the person weighs the draft knowing it. The same honesty
@@ -862,7 +911,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		rs.run.PendingData["unread_refs"] = unread
 	}
 	rs.writer.AppendEvent("human_needed", map[string]interface{}{
-		"kind": "gate", "verdict": "UNVERIFIED", "artifact": string(result.Kind),
+		"kind": "gate", "verdict": rs.run.Verdict, "artifact": string(result.Kind),
 	})
 	rs.writer.WriteState()
 }
@@ -889,6 +938,31 @@ func sectionsBodySize(secs []artifact.Section) int {
 		}
 	}
 	return total
+}
+
+func duplicateSemanticSections(sections []artifact.Section) []string {
+	type seenSection struct {
+		id string
+	}
+	seen := map[string]seenSection{}
+	var duplicates []string
+	for _, sec := range sections {
+		if len(sec.Implements) == 0 {
+			continue
+		}
+		implements := append([]string(nil), sec.Implements...)
+		for i := range implements {
+			implements[i] = strings.ToUpper(strings.TrimSpace(implements[i]))
+		}
+		sort.Strings(implements)
+		key := strings.ToLower(strings.TrimSpace(sec.Title)) + "|" + strings.Join(implements, ",")
+		if prior, ok := seen[key]; ok {
+			duplicates = append(duplicates, prior.id+" and "+sec.ID+" — "+sec.Title)
+			continue
+		}
+		seen[key] = seenSection{id: sec.ID}
+	}
+	return duplicates
 }
 
 // missingSectionIDs lists the ids present in current and absent from

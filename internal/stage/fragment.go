@@ -136,7 +136,7 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	}
 	b.WriteString("\n")
 
-	b.WriteString(coverageGapsHint(projectRoot, kind))
+	b.WriteString(coverageGapsHint(projectRoot, kind, base))
 	b.WriteString(planGapsHint(projectRoot, kind))
 	if kind == artifact.KindPlan {
 		b.WriteString("## Rules\n\n" +
@@ -274,24 +274,30 @@ func stripMilestoneField(body string) string {
 // by a sectioned update simply skipped two new requirements; nobody noticed
 // until the person read both documents side by side. The engine reads them
 // on every update instead.
-func coverageGapsHint(projectRoot string, kind artifact.Kind) string {
+func coverageGapsHint(projectRoot string, kind artifact.Kind, base *artifact.Document) string {
 	if kind != artifact.KindSpec {
 		return ""
 	}
-	spine, err := artifact.LoadSpine(projectRoot)
-	if err != nil {
-		return ""
-	}
-	titles := map[string]string{}
-	if reqs, rerr := artifact.Load(projectRoot, artifact.KindRequirements); rerr == nil && reqs != nil {
-		for _, r := range reqs.Sections {
-			titles[r.ID] = r.Title
+	covered := map[string]bool{}
+	if base != nil {
+		for _, sec := range base.Sections {
+			for _, id := range sec.Implements {
+				covered[strings.ToUpper(strings.TrimSpace(id))] = true
+			}
 		}
 	}
+	titles := map[string]string{}
+	reqs, err := artifact.Load(projectRoot, artifact.KindRequirements)
+	if err != nil || reqs == nil {
+		return ""
+	}
+	for _, r := range reqs.Sections {
+		titles[r.ID] = r.Title
+	}
 	var gaps []string
-	for _, te := range spine.Check() {
-		if te.Kind == artifact.OrphanRequirement {
-			gaps = append(gaps, fmt.Sprintf("- %s — %s", te.ID, titles[te.ID]))
+	for _, req := range reqs.Sections {
+		if !covered[strings.ToUpper(req.ID)] {
+			gaps = append(gaps, fmt.Sprintf("- %s — %s", req.ID, titles[req.ID]))
 		}
 	}
 	if len(gaps) == 0 {

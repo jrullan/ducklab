@@ -498,6 +498,36 @@ describe("RunView — asking a stage for changes", () => {
     expect(JSON.parse(sent.body!).revise).toBe("SPEC-004 should lock the opposite vertex too");
   });
 
+  it("blocks acceptance when the final document reviewer still requests changes", async () => {
+    show({
+      stage: "spec",
+      project_id: "p",
+      verdict: "FAILED",
+      next: ["request_changes", "reject"],
+      pending_data: { review_verdict: "request-changes", review_findings: 1 },
+    });
+    useRuns.setState((state) => ({
+      ...state,
+      events: {
+        ...state.events,
+        "r-1": [{
+          type: "message",
+          run_id: "r-1",
+          data: {
+            role: "reviewer",
+            verdict: "request-changes",
+            findings: [{ severity: "critical", issue: "The proposal duplicates a section." }],
+          },
+        }],
+      },
+    }));
+    render(<RunView runId="r-1" client={recording({})} />);
+
+    expect(await screen.findByTestId("stage-dissent")).toHaveTextContent("Acceptance is blocked");
+    expect(screen.queryByTestId("cycle-accept")).toBeNull();
+    expect(screen.getByTestId("request-changes-button")).toBeInTheDocument();
+  });
+
   // A build run produces code. There is no draft to send back to anyone.
   it("offers nothing to revise on a build run", async () => {
     show({ stage: "build", project_id: "p" });

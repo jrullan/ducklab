@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
@@ -31,6 +32,8 @@ func TestWhatARunOffersMatchesItsState(t *testing.T) {
 		// new run.
 		{"a stage's gate", runlog.Run{Status: "paused", PendingKind: "gate", Verdict: "UNVERIFIED", Stage: "spec"},
 			[]string{"accept", "request_changes", "reject"}},
+		{"a stage blocked by final review", runlog.Run{Status: "paused", PendingKind: "gate", Verdict: "FAILED", Stage: "spec", PendingData: map[string]interface{}{"review_verdict": "request-changes"}},
+			[]string{"request_changes", "reject"}},
 		{"a release draft gate", runlog.Run{Status: "paused", PendingKind: "gate", Verdict: "UNVERIFIED", Stage: "release"},
 			[]string{"accept", "request_changes", "reject"}},
 		{"a question", runlog.Run{Status: "paused", PendingKind: "question"}, []string{"answer", "abort"}},
@@ -46,6 +49,22 @@ func TestWhatARunOffersMatchesItsState(t *testing.T) {
 				t.Errorf("next = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFinalReviewDissentCannotBeAcceptedThroughTheAPI(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindSpec: specDoc})
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: &runlog.Run{
+		ID: "r-red-doc", ProjectID: id, Stage: "spec", Status: "paused", PendingKind: "gate", Verdict: "FAILED",
+		PendingData: map[string]interface{}{"review_verdict": "request-changes"},
+	}, projectPath: dir}
+	if err := s.acceptRun(context.Background(), rs, entry, "", "human"); err == nil || !strings.Contains(err.Error(), "final reviewer requested changes") {
+		t.Fatalf("accept error = %v, want final-review guard", err)
 	}
 }
 

@@ -26,6 +26,18 @@ func projectWithDocs(t *testing.T, s *Service, docs map[artifact.Kind]string) (s
 	return id, dir
 }
 
+func TestSemanticDuplicateSpecSectionsAreDeterministicBlockers(t *testing.T) {
+	sections := []artifact.Section{
+		{ID: "SPEC-020", Title: "Settings Interface", Implements: []string{"REQ-008"}},
+		{ID: "SPEC-029", Title: "Settings Interface", Implements: []string{"REQ-008"}},
+		{ID: "SPEC-030", Title: "Settings Interface", Implements: []string{"REQ-009"}},
+	}
+	got := duplicateSemanticSections(sections)
+	if len(got) != 1 || !strings.Contains(got[0], "SPEC-020 and SPEC-029") {
+		t.Fatalf("duplicates = %v, want only the same-title/same-contract pair", got)
+	}
+}
+
 const planDoc = `## M-01 — Auth
 
 ### T-001 — Issue tokens
