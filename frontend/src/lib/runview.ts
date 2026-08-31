@@ -368,8 +368,11 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
         const repairAttempt = Number(d.repair_attempt ?? 0);
         const repairMax = Number(d.repair_max ?? 0);
         const repairSections = Array.isArray(d.repair_sections) ? d.repair_sections.map(String) : [];
+		const repairStagnant = Number(d.repair_stagnant_attempts ?? 0);
+		const repairStagnationLimit = Number(d.repair_stagnation_limit ?? 0);
+		const repairBest = Number(d.repair_best_problem_count ?? 0);
         const repairSubject = repairAttempt > 0
-          ? `structure repair ${repairAttempt}/${repairMax || "?"}${repairSections.length ? ` · ${repairSections.join(", ")}` : ""}`
+          ? `structure repair ${repairAttempt}/${repairMax || "?"}${repairSections.length ? ` · ${repairSections.join(", ")}` : ""}${repairStagnationLimit ? ` · no-best-progress ${repairStagnant}/${repairStagnationLimit}` : ""}${repairBest ? ` · best ${repairBest}` : ""}`
           : undefined;
         const block: TurnBlock = {
           key,

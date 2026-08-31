@@ -121,6 +121,21 @@ describe("RunView", () => {
     expect(screen.getByTestId("run-failure").textContent).toContain("claimed by both");
   });
 
+  it("distinguishes an early structure stall from the hard repair maximum", () => {
+    useRuns.getState().setRun({
+      ...run, stage: "plan", status: "failed", verdict: "FAILED", pending_kind: undefined,
+      failure: "document structure did not converge",
+    });
+    useRuns.getState().applyEvent({ type: "structure_failed", run_id: "r-1", seq: 9, data: {
+      reason: "stalled", attempt: 4, max_attempts: 12, stagnant_attempts: 3,
+      stagnation_limit: 3, best_problem_count: 10,
+    } });
+    render(<RunView runId="r-1" client={okClient()} />);
+    expect(screen.getByTestId("structure-failure-detail").textContent).toContain("repair 4/12");
+    expect(screen.getByTestId("structure-failure-detail").textContent).toContain("3/3 consecutive");
+    expect(screen.getByTestId("structure-failure-detail").textContent).toContain("10 findings");
+  });
+
   it("shows no failure banner on a run that did not fail", () => {
     useRuns.getState().setRun(run);
     render(<RunView runId="r-1" client={okClient()} />);

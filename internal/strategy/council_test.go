@@ -171,9 +171,46 @@ func TestCouncilStopsAtTwoRounds(t *testing.T) {
 
 func TestCouncilContractFollowsThePrefix(t *testing.T) {
 	for prefix, want := range map[string]string{"REQ": "markdown_sections:REQ", "SPEC": "markdown_sections:SPEC", "M": "markdown_sections:M"} {
-		if got := CouncilScript(prefix, nil).Turns[0].Contract; got != want {
+		got := ""
+		for _, turn := range CouncilScript(prefix, nil).Turns {
+			if strings.HasPrefix(turn.Contract, "markdown_sections:") {
+				got = turn.Contract
+				break
+			}
+		}
+		if got != want {
 			t.Errorf("prefix %q: contract = %q, want %q", prefix, got, want)
 		}
+	}
+}
+
+func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
+	turns := CouncilScript("M", nil).Turns
+	if len(turns) < 2 || turns[0].Contract != "json:plan_manifest" || turns[0].Persona != PersonaPlanManifest || turns[0].Toolbelt != "none" {
+		t.Fatalf("plan opening turn = %+v, want tool-free manifest", turns[0])
+	}
+	if turns[1].Contract != "markdown_sections:M" {
+		t.Fatalf("plan document turn = %+v", turns[1])
+	}
+}
+
+func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"produces":["file:meson.build","build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
+	manifest := &agent.Outcome{Text: manifestText, Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"}, Produces: []string{"file:meson.build", "build-target:app"}, Verification: "meson compile -C build"}},
+	}}}}
+	planText := "## M-01 — Setup\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n**Produces:** file:meson.build, build-target:app\n**Consumes:** none\n**Verification:** `meson compile -C build`"
+	plan := &agent.Outcome{Text: planText, Parsed: []agent.Section{{ID: "M-01", Title: "Setup", Body: strings.SplitN(planText, "\n\n", 2)[1]}}}
+	rec := &recorder{}
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec, manifest, plan, verdictOutcome("approve")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rec.roles, []config.Role{config.RoleArchitect, config.RoleArchitect, config.RoleReviewer}) {
+		t.Fatalf("plan roles = %v", rec.roles)
+	}
+	if !strings.Contains(res.Text, "### T-001") || !strings.Contains(res.Text, "**Owns:**") {
+		t.Fatalf("rendered plan = %s", res.Text)
 	}
 }
 

@@ -306,6 +306,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	stuck := map[int]int{}
 	redGateStreak := 0
 	var evidence escalationEvidence
+	var planManifest *agent.PlanManifest
+	for _, entry := range result.Transcript.Entries {
+		if parsed, parseErr := agent.ParseContract("json:plan_manifest", entry.Text); parseErr == nil {
+			if manifest, ok := parsed.(*agent.PlanManifest); ok {
+				planManifest = manifest
+			}
+		}
+	}
 
 	for round := 1; round <= maxRounds; round++ {
 		result.Rounds = round
@@ -329,6 +337,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
+			if round > 1 && turn.Persona == PersonaPlanManifest {
+				continue
+			}
 			// The person's configured role cap beats the script's baked-in
 			// number, as TurnCaps has always documented — applied HERE, on the
 			// turn copy every consumer sees, not inside one runner. It used to
@@ -376,7 +387,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// The previous round's revision IS this round's draft: the
 			// critics judge it as it stands, and the architect speaks again
 			// only after them.
-			if script.RevisionOpensNextRound && round > 1 && i == 0 && lastArchitect != nil {
+			if script.RevisionOpensNextRound && round > 1 && verdictsThisRound == 0 && lastArchitect != nil &&
+				turn.Role == config.RoleArchitect && (i == 0 || strings.HasPrefix(turn.Contract, "markdown_sections:")) {
 				emit(params, "draft_carried", map[string]interface{}{"round": round, "detail": "the previous round's revision is this round's draft"})
 				continue
 			}
@@ -415,6 +427,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			var repairBase *agent.Outcome
 			var repairSections []string
+			documentContract := turn.Contract
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
 				prompt += "\n\n" + pendingStructureNote
 				pendingStructureNote = ""
@@ -431,6 +444,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// whole spec twice instead of returning SPEC-010. Remove that
 				// branch of the state space for transactional repair turns.
 				toolbelt = nil
+				turn.Contract = "json:structure_patch"
 			}
 			if turn.Role == config.RoleArchitect && params.ProjectRoot != "" {
 				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
@@ -453,19 +467,42 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				startData["repair_attempt"] = structureAttempts + 1
 				startData["repair_max"] = maxStructureAttempts
 				startData["repair_sections"] = repairSections
+				startData["repair_best_problem_count"] = bestStructureProblems
+				startData["repair_stagnant_attempts"] = structureStagnation
+				startData["repair_stagnation_limit"] = maxStructureStagnation
 			}
 			emit(params, "turn_start", startData)
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
+			turn.Contract = documentContract
 			repairScopeProblem := ""
 			if err == nil && repairBase != nil {
-				merged, mergeErr := mergeStructureRepairScoped(repairBase, outcome, turn.Contract, repairSections)
+				var merged *agent.Outcome
+				var mergeErr error
+				if _, structured := outcome.Parsed.(map[string]interface{}); structured {
+					merged, mergeErr = applyStructurePatch(repairBase, outcome, documentContract, repairSections)
+				} else {
+					// Test and old-run compatibility: a resumed checkpoint may
+					// still carry the former H2 repair response shape.
+					merged, mergeErr = mergeStructureRepairScoped(repairBase, outcome, documentContract, repairSections)
+				}
 				outcome = merged
 				if mergeErr != nil {
 					repairScopeProblem = mergeErr.Error()
 					emit(params, "structure_patch_rejected", map[string]interface{}{
 						"round": round, "turn": i, "attempt": structureAttempts + 1,
 						"sections": repairSections, "detail": repairScopeProblem,
+					})
+				}
+			}
+			if err == nil && turn.Persona == PersonaPlanManifest {
+				manifest, ok := outcome.Parsed.(*agent.PlanManifest)
+				if !ok || manifest == nil {
+					err = fmt.Errorf("plan manifest turn returned no validated topology")
+				} else {
+					planManifest = manifest
+					emit(params, "plan_manifest", map[string]interface{}{
+						"round": round, "milestones": len(manifest.Milestones), "detail": "validated topology will constrain the rendered plan",
 					})
 				}
 			}
@@ -476,6 +513,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					emit(params, "revision_materialized", map[string]interface{}{
 						"round": round, "turn": i, "sections": sections,
 						"detail": "partial revision merged transactionally into the last complete draft",
+					})
+				}
+			}
+			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
+				if normalized, changes, normalizeErr := normalizePlanGraph(outcome, documentContract); normalizeErr != nil {
+					err = normalizeErr
+				} else if changes > 0 {
+					outcome = normalized
+					emit(params, "structure_normalized", map[string]interface{}{
+						"round": round, "turn": i, "fields": changes,
+						"detail": "derived Owns and Depends on fields from the plan artifact graph",
 					})
 				}
 			}
@@ -527,8 +575,30 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if params.StructureCheck != nil {
 						problems = append(problems, params.StructureCheck(outcome.Text)...)
 					}
+					if turn.Contract == "markdown_sections:M" {
+						problems = append(problems, planManifestFindings(planManifest, outcome)...)
+					}
 					if repairScopeProblem != "" {
 						problems = append([]string{repairScopeProblem}, problems...)
+					}
+					if repairBase != nil && repairScopeProblem == "" {
+						baseProblems := structureFindings(sectionsOf(lastArchitect), sectionsOf(repairBase), turn.Contract, params.KnownIDs, params.SmallSeat, repairBase.Text)
+						if params.StructureCheck != nil {
+							baseProblems = append(baseProblems, params.StructureCheck(repairBase.Text)...)
+						}
+						if turn.Contract == "markdown_sections:M" {
+							baseProblems = append(baseProblems, planManifestFindings(planManifest, repairBase)...)
+						}
+						if len(problems) >= len(baseProblems) {
+							repairScopeProblem = fmt.Sprintf("structure repair made no monotonic progress: %d findings before, %d after; checkpoint rolled back", len(baseProblems), len(problems))
+							emit(params, "structure_patch_rejected", map[string]interface{}{
+								"round": round, "turn": i, "attempt": structureAttempts + 1,
+								"sections": repairSections, "detail": repairScopeProblem,
+							})
+							outcome = repairBase
+							result.Outcome = outcome
+							problems = append([]string{repairScopeProblem}, baseProblems...)
+						}
 					}
 					if len(problems) > 0 {
 						structureAttempts++
@@ -573,6 +643,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 							"reason":             map[bool]string{true: "stalled", false: "attempts_exhausted"}[signature == previousStructureSignature || structureStagnation >= maxStructureStagnation],
 							"best_problem_count": bestStructureProblems,
 							"stagnant_attempts":  structureStagnation,
+							"attempt":            structureAttempts,
+							"max_attempts":       maxStructureAttempts,
+							"stagnation_limit":   maxStructureStagnation,
+							"stall_cause":        map[bool]string{true: "repeated_findings", false: "no_best_progress"}[signature == previousStructureSignature],
 						})
 						return result, ErrStructureFailed
 					}
@@ -960,6 +1034,9 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		if memo := alreadyRead(looked); memo != "" {
 			b.WriteString("\n\n" + memo)
 		}
+		if turn.Contract == "markdown_sections:M" {
+			b.WriteString("\n\n## Validated topology\n\nThe earlier JSON plan manifest is the structural source of truth. Render it as milestones and H3 tasks without changing task ownership, producers, consumers, or verification. Ducklab derives `Owns` and `Depends on` from that graph; do not invent broad aggregate lanes such as `src/`.")
+		}
 	case config.RoleImplementer:
 		if rendered := conv.RenderFindings(findings); rendered != "" {
 			b.WriteString("\n\n")
@@ -1077,6 +1154,7 @@ func defaultRunner(params *ExecuteParams) TurnRunner {
 			Contract:  t.Contract,
 			MaxTurns:  t.MaxTurns,
 			Anonymize: t.Anonymize,
+			Persona:   t.Persona,
 		}, params.ExecContext)
 	}
 }

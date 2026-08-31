@@ -685,6 +685,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // Proposal events are advisory data emitted by the consultant/scribe; rendering
   // them never writes config. The card owns the one explicit human Apply action.
   const configProposals = events.filter((event) => event.type === "config_amendment");
+  const structureFailure = [...events].reverse().find((event) => event.type === "structure_failed");
+  const structureFailureData = structureFailure?.data ?? {};
   const configFailure = (run.status === "failed" || run.verdict === "FAILED") ? configProposals[0] : undefined;
   // A terminal configuration failure leads with understanding. Do not also
   // offer the mutation card for the same finding; amendments from chat or the
@@ -1536,6 +1538,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {run.status === "failed" ? "Why it failed" : "Why it stopped"}
           </h2>
           <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
+          {structureFailure && (
+            <p className="mt-2 text-sm text-ink-secondary" data-testid="structure-failure-detail">
+              {String(structureFailureData.reason ?? "structure guard stopped") === "stalled"
+                ? String(structureFailureData.stall_cause ?? "") === "repeated_findings"
+                  ? `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} because the exact finding set repeated; the best checkpoint has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`
+                  : `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)}: ${Number(structureFailureData.stagnant_attempts ?? 0)}/${Number(structureFailureData.stagnation_limit ?? 0)} consecutive patches did not improve the best checkpoint (${Number(structureFailureData.best_problem_count ?? 0)} findings).`
+                : `Exhausted ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} structure repair attempts; the best checkpoint still has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`}
+            </p>
+          )}
           {run.stage === "test" && /retire-test|working tree is dirty|commit or clean/i.test(run.failure) && (
             <a className="mt-2 inline-block text-sm underline" href={routeHref({ name: "projects" })}>Clean or commit the workspace</a>
           )}

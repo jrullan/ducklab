@@ -373,6 +373,7 @@ A contract is a named parser in `internal/agent/contract`.
 |----------|-----------------|------------------|
 | `freeform` | anything | returns the text |
 | `json:<name>` | one JSON object | strips fences, parses, validates against the named schema |
+| `json:plan_manifest` | milestones with compact task producer/consumer topology | validates non-empty, unique milestone/task ids and requires each task's Implements, Produces, and Verification |
 | `markdown_sections:<prefix>` | H2 sections whose text starts with `<prefix>-NNN` | returns the parsed sections; error if zero |
 | `verdict` | JSON `{"verdict":"approve"\|"request-changes","findings":[…]}` | see §6.4 |
 | `choice` | JSON `{"choice":"A"\|"B"\|…\|"none","reason":string}` | see §6.5 |
@@ -386,7 +387,17 @@ repair loop.
 
 Variables: `.Stage`, `.Context`, `.Question`.
 Contract: `markdown_sections:REQ` (intake), `markdown_sections:SPEC` (spec),
-`markdown_sections:M` (plan).
+`markdown_sections:M` (plan). Before a plan document, the same role emits a
+tool-free `json:plan_manifest`; the Markdown turn renders that validated
+topology. Ducklab derives `Owns` from exact produced paths and `Depends on`
+from producer/consumer matches so those redundant graph views cannot drift.
+
+When deterministic structure checks reject a document, recovery is not a free
+rewrite. Ducklab selects the H2 node covering the most findings and asks for a
+bounded `json:structure_patch` containing field or H3-block operations. It
+applies the operations to a copy of the best checkpoint and commits the copy
+only when the total finding count decreases. A patch outside the assigned H2,
+or one that does not improve the checkpoint, is rolled back atomically.
 
 ```
 You are the architect. You turn intent into a written artifact that another

@@ -860,6 +860,9 @@ Ground rules, which you cannot change:
 	if turn.Persona == "consultant" {
 		rolePrompt = consultantPrompt
 	}
+	if turn.Persona == "plan_manifest" && turn.Role == config.RoleArchitect {
+		rolePrompt = planManifestPrompt
+	}
 	gateDesc := gateDescFor(turn)
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
@@ -1140,6 +1143,23 @@ Rules:
 - State what is OUT of scope as explicitly as what is in.
 - Where you had to assume something, add "**Assumption:**" and say it.
 - Never write implementation code in this artifact.`
+
+const planManifestPrompt = `You are the plan topology architect. Before anyone writes a long plan,
+produce the compact dependency manifest that constrains it.
+
+Reply with exactly one JSON object:
+{"milestones":[{"id":"M-01","title":"short title","tasks":[
+ {"id":"T-001","title":"short action","implements":["SPEC-001"],
+  "produces":["file:path/or/capability"],"consumes":[],
+  "verification":"executable command"}]}]}
+
+Rules:
+- Each task belongs to exactly one milestone and each produced artifact has one producer.
+- Use exact file, directory, build-target, or capability names.
+- A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
+- Keep tasks small: at most three top-level deliverables when rendered.
+- This is topology only. No prose, markdown, Owns lanes, or implementation code.
+- The next architect turn receives this validated manifest and renders the full plan.`
 
 const scribePrompt = `You are the scribe. You write the release notes and changelog entries from the
 list of accepted work you are given.

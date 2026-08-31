@@ -198,6 +198,22 @@ Body of the second.
 	}
 }
 
+func TestPlanManifestContractRejectsIncompleteTopology(t *testing.T) {
+	valid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"produces":["build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
+	parsed, err := ParseContract("json:plan_manifest", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := parsed.(*PlanManifest)
+	if len(manifest.Milestones) != 1 || manifest.Milestones[0].Tasks[0].ID != "T-001" {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	invalid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":[],"produces":[],"verification":""}]}]}`
+	if _, err := ParseContract("json:plan_manifest", invalid); err == nil {
+		t.Fatal("incomplete topology passed the manifest contract")
+	}
+}
+
 func TestMarkdownSectionsRejectsNoMatches(t *testing.T) {
 	if _, err := ParseContract("markdown_sections:REQ", "## Introduction\n\nNo ids here."); err == nil {
 		t.Error("accepted text with no matching sections")

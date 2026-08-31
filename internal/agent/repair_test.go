@@ -535,6 +535,23 @@ func TestTheCriticPersonaSwapsTheReviewerFraming(t *testing.T) {
 	}
 }
 
+func TestPlanManifestPersonaAsksForTopologyNotMarkdown(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleArchitect, Persona: "plan_manifest", Contract: "json:plan_manifest", Prompt: "plan"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	var system string
+	for _, msg := range msgs {
+		if msg.Role == "system" {
+			system += msg.Content
+		}
+	}
+	if !strings.Contains(system, "compact dependency manifest") || !strings.Contains(system, `"milestones"`) {
+		t.Fatalf("manifest persona lacks topology contract:\n%s", system)
+	}
+	if strings.Contains(system, "final reply IS the document") {
+		t.Fatal("manifest persona was also told to emit the full Markdown document")
+	}
+}
+
 // A critic surveying a real codebase spent all its calls reading and
 // searching, legitimately, and ran out mid-verification — and the whole run
 // died with it, architect's draft included. Twice. A model out of looking is

@@ -119,6 +119,8 @@ func (r *Registry) NarrowToolbelt(role config.Role, spec string) ([]string, erro
 	switch strings.TrimSpace(spec) {
 	case "", "full":
 		return r.Available(role), nil
+	case "none":
+		return nil, nil
 	case "read-only":
 		return r.ReadOnly(role), nil
 	case "document":

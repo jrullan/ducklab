@@ -107,6 +107,17 @@ func TestExplicitListNarrowsWithinCeiling(t *testing.T) {
 	}
 }
 
+func TestNoneToolbeltIsActuallyEmpty(t *testing.T) {
+	turn := &Turn{Role: config.RoleArchitect, Toolbelt: "none"}
+	got, err := turn.ResolveToolbelt(testRegistry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("none toolbelt = %v, want empty", got)
+	}
+}
+
 // A turn may NOT widen. This is the case that used to pass silently.
 func TestExplicitListCannotWidenBeyondCeiling(t *testing.T) {
 	turn := &Turn{Role: config.RoleReviewer, Toolbelt: "fs_read,fs_write"}

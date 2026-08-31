@@ -20,6 +20,7 @@ import (
 // is a draft that exists only in the conversation, and its system prompt must
 // say so or the model spends its turns hunting for a diff.
 const PersonaCritic = "critic"
+const PersonaPlanManifest = "plan_manifest"
 
 // SoloArtifactScript is one architect, drafting alone.
 //
@@ -81,14 +82,24 @@ func ArtifactScript(prefix, mode string, critics []config.DucklingID) *Script {
 // roster's own, which is the original shape.
 func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 	contract := fmt.Sprintf("markdown_sections:%s", prefix)
-	turns := []Turn{
-		{
+	var turns []Turn
+	if prefix == "M" {
+		turns = append(turns, Turn{
+			Role:     config.RoleArchitect,
+			Toolbelt: "none",
+			Contract: "json:plan_manifest",
+			MaxTurns: 2,
+			Persona:  PersonaPlanManifest,
+		})
+	}
+	turns = append(turns,
+		Turn{
 			Role:     config.RoleArchitect,
 			Toolbelt: "document",
 			Contract: contract,
 			MaxTurns: 12,
 		},
-	}
+	)
 	if len(critics) == 0 {
 		critics = []config.DucklingID{""}
 	}

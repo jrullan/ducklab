@@ -97,6 +97,8 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseTriage(text)
 	case contract == "json:inventory":
 		return parseInventory(text)
+	case contract == "json:plan_manifest":
+		return parsePlanManifest(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
 	case strings.HasPrefix(contract, "markdown_sections:"):
@@ -104,6 +106,66 @@ func ParseContract(contract, text string) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unknown contract %q", contract)
 	}
+}
+
+type PlanManifest struct {
+	Milestones []ManifestMilestone `json:"milestones"`
+}
+
+type ManifestMilestone struct {
+	ID    string         `json:"id"`
+	Title string         `json:"title"`
+	Tasks []ManifestTask `json:"tasks"`
+}
+
+type ManifestTask struct {
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Implements   []string `json:"implements"`
+	Produces     []string `json:"produces"`
+	Consumes     []string `json:"consumes"`
+	Verification string   `json:"verification"`
+}
+
+func parsePlanManifest(text string) (*PlanManifest, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, fmt.Errorf("plan manifest contract: %w", err)
+	}
+	var manifest PlanManifest
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		return nil, fmt.Errorf("plan manifest contract: %w", err)
+	}
+	if len(manifest.Milestones) == 0 {
+		return nil, fmt.Errorf("plan manifest contract: milestones must not be empty")
+	}
+	seen := map[string]bool{}
+	for mi, milestone := range manifest.Milestones {
+		if !validContractID(milestone.ID, "M") || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestone.ID] {
+			return nil, fmt.Errorf("plan manifest contract: invalid milestone %d", mi)
+		}
+		seen[milestone.ID] = true
+		for ti, task := range milestone.Tasks {
+			if !validContractID(task.ID, "T") || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
+				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[task.ID] {
+				return nil, fmt.Errorf("plan manifest contract: invalid task %d in %s", ti, milestone.ID)
+			}
+			seen[task.ID] = true
+		}
+	}
+	return &manifest, nil
+}
+
+func validContractID(id, prefix string) bool {
+	if !strings.HasPrefix(id, prefix+"-") || len(id) <= len(prefix)+1 {
+		return false
+	}
+	for _, r := range id[len(prefix)+1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseVerdict(text string) (*Verdict, error) {

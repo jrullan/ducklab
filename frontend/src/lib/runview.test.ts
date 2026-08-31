@@ -771,4 +771,11 @@ describe("same-coordinate structure repairs", () => {
     expect(blocks.map((block) => block.streamKey)).toEqual([undefined, undefined, "1:0"]);
     expect(blocks[1]!.subject).toBe("structure repair 2/6 · M-02");
   });
+
+  it("names the early-stall guard separately from the hard maximum", () => {
+    const blocks = buildTurns([
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "local", repair_attempt: 4, repair_max: 12, repair_sections: ["M-10"], repair_stagnant_attempts: 2, repair_stagnation_limit: 3, repair_best_problem_count: 10 }, 1),
+    ]);
+    expect(blocks[0]!.subject).toBe("structure repair 4/12 · M-10 · no-best-progress 2/3 · best 10");
+  });
 });

@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,7 +20,7 @@ const (
 	maxStructureAttempts   = 12
 	maxRepairFindings      = 12
 	maxStructureStagnation = 3
-	maxRepairSections      = 2
+	maxRepairSections      = 1
 )
 
 // A document council's last architect turn is the one nobody reviews: after
@@ -312,19 +313,32 @@ func structureRepairNote(findings []string, sections []agent.Section) string {
 func structureRepairInstruction(findings []string, sections []agent.Section) (string, []string) {
 	batch, ids := structureRepairBatch(findings, sections)
 	var b strings.Builder
-	b.WriteString("## Structure check — repair one bounded section\n\n")
-	b.WriteString("ducklab has checkpointed your best complete draft. Return ONLY the complete H2 section")
+	exampleID := "SECTION-ID"
 	if len(ids) > 0 {
-		b.WriteString(" named " + strings.Join(ids, ", "))
-	} else {
-		b.WriteString(" that contains the affected item(s)")
+		exampleID = ids[0]
 	}
-	b.WriteString("; do not repeat the rest of the document. Ducklab will merge this section into the checkpoint and validate the whole document again. Fix these findings and change nothing unrelated:\n\n")
+	b.WriteString("## Structure check — return a bounded JSON patch\n\n")
+	b.WriteString("ducklab has checkpointed the complete draft. Return ONLY one JSON object; do not repeat the document. Schema:\n\n")
+	b.WriteString("```json\n{\"sections\":[\"" + exampleID + "\"],\"operations\":[{\"op\":\"set_field\",\"target\":\"" + exampleID + "\",\"field\":\"Implements\",\"value\":\"REQ-001\"}]}\n```\n\n")
+	b.WriteString("Allowed operations are `set_field`, `remove_field`, `replace_text`, `replace_block`, `append_block`, and `delete_block`. " +
+		"A field operation changes one `**Field:**` line. `replace_block` may replace one existing H3 task only, with `markdown`; it may not replace an H2 milestone. " +
+		"`replace_text` replaces one exact `old` string inside its target with `new`. " +
+		"Every target must belong to the assigned H2 section. Assigned section: " + strings.Join(ids, ", ") + ".\n\n")
+	b.WriteString("Fix these findings and nothing unrelated:\n\n")
 	for _, f := range batch {
 		b.WriteString("- " + f + "\n")
 	}
 	if len(findings) > len(batch) {
 		b.WriteString(fmt.Sprintf("\n%d additional findings remain checkpointed; they will be handled in later bounded repairs.\n", len(findings)-len(batch)))
+	}
+	for _, sec := range sections {
+		if slices.Contains(ids, sec.ID) {
+			b.WriteString("\n### Current " + sec.ID + " checkpoint\n\n## " + sec.ID)
+			if sec.Title != "" {
+				b.WriteString(" — " + sec.Title)
+			}
+			b.WriteString("\n\n" + sec.Body + "\n")
+		}
 	}
 	return b.String(), ids
 }
@@ -356,13 +370,27 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 		sort.Strings(parents)
 		return parents
 	}
-	var targets []string
+	// Repair the highest-leverage H2 first. The old first-finding policy chose
+	// M-01/M-09 while M-10's broad `src/` lane caused seven of ten findings in
+	// Neocapture corrida 12. Coverage makes one small patch remove the largest
+	// connected part of the defect graph.
+	coverage := map[string]int{}
 	for _, f := range findings {
-		if parents := parentsOf(f); len(parents) > 0 {
-			targets = append(targets, parents[:min(len(parents), maxRepairSections)]...)
-			break
+		for _, parent := range parentsOf(f) {
+			coverage[parent]++
 		}
 	}
+	var ranked []string
+	for parent := range coverage {
+		ranked = append(ranked, parent)
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if coverage[ranked[i]] != coverage[ranked[j]] {
+			return coverage[ranked[i]] > coverage[ranked[j]]
+		}
+		return ranked[i] < ranked[j]
+	})
+	targets := ranked[:min(len(ranked), maxRepairSections)]
 	targetSet := map[string]bool{}
 	for _, target := range targets {
 		targetSet[target] = true
@@ -372,11 +400,10 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 		parents := parentsOf(f)
 		belongs := len(targets) == 0
 		if len(targets) > 0 && len(parents) > 0 {
-			belongs = true
+			belongs = false
 			for _, parent := range parents {
-				if !targetSet[parent] {
-					belongs = false
-					break
+				if targetSet[parent] {
+					belongs = true
 				}
 			}
 		}
@@ -392,6 +419,426 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 	}
 	sort.Strings(targets)
 	return batch, targets
+}
+
+type structurePatch struct {
+	Sections   []string             `json:"sections"`
+	Operations []structureOperation `json:"operations"`
+}
+
+type structureOperation struct {
+	Op       string `json:"op"`
+	Target   string `json:"target"`
+	Field    string `json:"field,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Markdown string `json:"markdown,omitempty"`
+	Old      string `json:"old,omitempty"`
+	New      string `json:"new,omitempty"`
+}
+
+func applyStructurePatch(base, patch *agent.Outcome, contract string, allowed []string) (*agent.Outcome, error) {
+	if base == nil || patch == nil {
+		return base, fmt.Errorf("%w: missing checkpoint or patch", ErrStructureRepairScope)
+	}
+	raw, err := json.Marshal(patch.Parsed)
+	if err != nil {
+		return base, fmt.Errorf("%w: encode patch: %v", ErrStructureRepairScope, err)
+	}
+	var p structurePatch
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return base, fmt.Errorf("%w: decode patch: %v", ErrStructureRepairScope, err)
+	}
+	if !slices.Equal(sortedCopy(p.Sections), sortedCopy(allowed)) {
+		return base, fmt.Errorf("%w: patch sections %v; expected %v", ErrStructureRepairScope, p.Sections, allowed)
+	}
+	if len(p.Operations) == 0 || len(p.Operations) > 12 {
+		return base, fmt.Errorf("%w: patch must contain 1-12 operations", ErrStructureRepairScope)
+	}
+	parents := map[string]string{}
+	levels := map[string]int{}
+	for _, sec := range sectionsOf(base) {
+		parents[sec.ID], levels[sec.ID] = sec.ID, 2
+		for _, block := range taskBlocks(sec.Body) {
+			if strings.HasPrefix(block.id, "T-") {
+				parents[block.id], levels[block.id] = sec.ID, 3
+			}
+		}
+	}
+	want := map[string]bool{}
+	for _, id := range allowed {
+		want[id] = true
+	}
+	text := base.Text
+	for _, op := range p.Operations {
+		if !want[parents[op.Target]] {
+			return base, fmt.Errorf("%w: target %s is outside %s", ErrStructureRepairScope, op.Target, strings.Join(allowed, ", "))
+		}
+		switch op.Op {
+		case "set_field":
+			if strings.TrimSpace(op.Field) == "" || strings.TrimSpace(op.Value) == "" {
+				return base, fmt.Errorf("%w: set_field needs field and value", ErrStructureRepairScope)
+			}
+			text, err = setMarkdownField(text, op.Target, op.Field, op.Value)
+		case "remove_field":
+			if strings.TrimSpace(op.Field) == "" {
+				return base, fmt.Errorf("%w: remove_field needs field", ErrStructureRepairScope)
+			}
+			text, err = removeMarkdownField(text, op.Target, op.Field)
+		case "replace_text":
+			text, err = replaceMarkdownText(text, op.Target, op.Old, op.New)
+		case "replace_block":
+			if levels[op.Target] != 3 {
+				return base, fmt.Errorf("%w: replace_block may replace an H3 task, not %s", ErrStructureRepairScope, op.Target)
+			}
+			text, err = replaceMarkdownBlock(text, op.Target, op.Markdown)
+		case "append_block":
+			if levels[op.Target] != 2 {
+				return base, fmt.Errorf("%w: append_block target must be an H2 section, not %s", ErrStructureRepairScope, op.Target)
+			}
+			text, err = appendMarkdownBlock(text, op.Target, op.Markdown)
+		case "delete_block":
+			if levels[op.Target] != 3 {
+				return base, fmt.Errorf("%w: delete_block may delete an H3 task, not %s", ErrStructureRepairScope, op.Target)
+			}
+			text, err = replaceMarkdownBlock(text, op.Target, "")
+		default:
+			return base, fmt.Errorf("%w: unsupported operation %q", ErrStructureRepairScope, op.Op)
+		}
+		if err != nil {
+			return base, err
+		}
+	}
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return base, fmt.Errorf("%w: patched document: %v", ErrStructureRepairScope, err)
+	}
+	merged := *patch
+	merged.Text, merged.Parsed = text, parsed
+	return &merged, nil
+}
+
+func appendMarkdownBlock(text, sectionID, markdown string) (string, error) {
+	if !strings.HasPrefix(strings.TrimSpace(markdown), "### T-") || strings.Contains(markdown, "\n## ") {
+		return text, fmt.Errorf("%w: append_block must contain H3 task markdown and no H2", ErrStructureRepairScope)
+	}
+	lines, _, end, _, err := markdownBlockRange(text, sectionID)
+	if err != nil {
+		return text, err
+	}
+	insert := []string{"", strings.TrimSpace(markdown), ""}
+	out := append([]string{}, lines[:end]...)
+	out = append(out, insert...)
+	out = append(out, lines[end:]...)
+	return strings.Join(out, "\n"), nil
+}
+
+func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) []string {
+	if manifest == nil || outcome == nil {
+		return nil
+	}
+	type actualTask struct {
+		parent string
+		body   string
+	}
+	actualMilestones := map[string]bool{}
+	actualTasks := map[string]actualTask{}
+	for _, sec := range sectionsOf(outcome) {
+		actualMilestones[sec.ID] = true
+		for _, block := range taskBlocks(sec.Body) {
+			if strings.HasPrefix(block.id, "T-") {
+				actualTasks[block.id] = actualTask{parent: sec.ID, body: block.body}
+			}
+		}
+	}
+	expectedTasks := map[string]string{}
+	var findings []string
+	for _, milestone := range manifest.Milestones {
+		if !actualMilestones[milestone.ID] {
+			findings = append(findings, fmt.Sprintf("%s from the validated plan manifest is missing", milestone.ID))
+			continue
+		}
+		for _, task := range milestone.Tasks {
+			expectedTasks[task.ID] = milestone.ID
+			actual, ok := actualTasks[task.ID]
+			if !ok {
+				findings = append(findings, fmt.Sprintf("%s from the validated plan manifest is missing from %s — append that H3 task", task.ID, milestone.ID))
+				continue
+			}
+			if actual.parent != milestone.ID {
+				findings = append(findings, fmt.Sprintf("%s belongs to %s in the validated manifest, not %s", task.ID, milestone.ID, actual.parent))
+			}
+			for _, id := range task.Implements {
+				if !slices.Contains(taskFieldItems(actual.body, "Implements"), id) {
+					findings = append(findings, fmt.Sprintf("%s must **Implement:** %s from the validated manifest", task.ID, id))
+				}
+			}
+			if !sameStringSet(taskFieldItems(actual.body, "Produces"), task.Produces) {
+				findings = append(findings, fmt.Sprintf("%s **Produces:** differs from the validated manifest — set it to %s", task.ID, strings.Join(task.Produces, ", ")))
+			}
+			if !sameStringSet(taskFieldItems(actual.body, "Consumes"), task.Consumes) {
+				value := strings.Join(task.Consumes, ", ")
+				if value == "" {
+					value = "none"
+				}
+				findings = append(findings, fmt.Sprintf("%s **Consumes:** differs from the validated manifest — set it to %s", task.ID, value))
+			}
+			if strings.TrimSpace(taskVerificationCommand(actual.body)) != strings.Trim(strings.TrimSpace(task.Verification), "`") {
+				findings = append(findings, fmt.Sprintf("%s **Verification:** differs from the validated manifest — set the executable command to `%s`", task.ID, strings.Trim(strings.TrimSpace(task.Verification), "`")))
+			}
+		}
+	}
+	for id, actual := range actualTasks {
+		if expectedTasks[id] == "" {
+			findings = append(findings, fmt.Sprintf("%s in %s is absent from the validated plan manifest — delete that unplanned H3 task", id, actual.parent))
+		}
+	}
+	sort.Strings(findings)
+	return findings
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	aa, bb := sortedCopy(a), sortedCopy(b)
+	return slices.Equal(aa, bb)
+}
+
+func replaceMarkdownText(text, id, old, replacement string) (string, error) {
+	if old == "" || old == replacement {
+		return text, fmt.Errorf("%w: replace_text needs distinct old and new strings", ErrStructureRepairScope)
+	}
+	lines, start, end, _, err := markdownBlockRange(text, id)
+	if err != nil {
+		return text, err
+	}
+	body := strings.Join(lines[start:end], "\n")
+	if strings.Count(body, old) != 1 {
+		return text, fmt.Errorf("%w: replace_text old value occurs %d times in %s, want exactly once", ErrStructureRepairScope, strings.Count(body, old), id)
+	}
+	body = strings.Replace(body, old, replacement, 1)
+	out := append([]string{}, lines[:start]...)
+	out = append(out, strings.Split(body, "\n")...)
+	out = append(out, lines[end:]...)
+	return strings.Join(out, "\n"), nil
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string{}, in...)
+	sort.Strings(out)
+	return out
+}
+
+func markdownBlockRange(text, id string) ([]string, int, int, int, error) {
+	lines := strings.Split(text, "\n")
+	start, level := -1, 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "##") {
+			continue
+		}
+		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		if hashes != 2 && hashes != 3 {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[hashes:])
+		if rest == id || strings.HasPrefix(rest, id+" ") {
+			start, level = i, hashes
+			break
+		}
+	}
+	if start < 0 {
+		return lines, 0, 0, 0, fmt.Errorf("%w: target %s not found", ErrStructureRepairScope, id)
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(trimmed, "##") {
+			continue
+		}
+		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		if hashes <= level {
+			end = i
+			break
+		}
+	}
+	return lines, start, end, level, nil
+}
+
+func setMarkdownField(text, id, field, value string) (string, error) {
+	lines, start, end, level, err := markdownBlockRange(text, id)
+	if err != nil {
+		return text, err
+	}
+	fieldRE := regexp.MustCompile(`(?i)^\s*\*\*` + regexp.QuoteMeta(strings.TrimSpace(field)) + `:\*\*`)
+	searchEnd := end
+	if level == 2 {
+		for i := start + 1; i < end; i++ {
+			if strings.HasPrefix(strings.TrimSpace(lines[i]), "### ") {
+				searchEnd = i
+				break
+			}
+		}
+	}
+	line := "**" + strings.TrimSpace(field) + ":** " + strings.TrimSpace(value)
+	for i := start + 1; i < searchEnd; i++ {
+		if fieldRE.MatchString(lines[i]) {
+			lines[i] = line
+			return strings.Join(lines, "\n"), nil
+		}
+	}
+	insert := start + 1
+	lines = append(lines[:insert], append([]string{"", line}, lines[insert:]...)...)
+	return strings.Join(lines, "\n"), nil
+}
+
+func removeMarkdownField(text, id, field string) (string, error) {
+	lines, start, end, level, err := markdownBlockRange(text, id)
+	if err != nil {
+		return text, err
+	}
+	fieldRE := regexp.MustCompile(`(?i)^\s*\*\*` + regexp.QuoteMeta(strings.TrimSpace(field)) + `:\*\*`)
+	for i := start + 1; i < end; i++ {
+		if level == 2 && strings.HasPrefix(strings.TrimSpace(lines[i]), "### ") {
+			break
+		}
+		if fieldRE.MatchString(lines[i]) {
+			lines = append(lines[:i], lines[i+1:]...)
+			return strings.Join(lines, "\n"), nil
+		}
+	}
+	return text, fmt.Errorf("%w: %s has no %s field", ErrStructureRepairScope, id, field)
+}
+
+func replaceMarkdownBlock(text, id, markdown string) (string, error) {
+	lines, start, end, _, err := markdownBlockRange(text, id)
+	if err != nil {
+		return text, err
+	}
+	var replacement []string
+	if strings.TrimSpace(markdown) != "" {
+		replacement = strings.Split(strings.TrimSpace(markdown), "\n")
+		if len(replacement) == 0 || !(strings.HasPrefix(replacement[0], "### "+id+" ") || replacement[0] == "### "+id) {
+			return text, fmt.Errorf("%w: replacement must begin with ### %s", ErrStructureRepairScope, id)
+		}
+	}
+	out := append([]string{}, lines[:start]...)
+	out = append(out, replacement...)
+	out = append(out, lines[end:]...)
+	return strings.Join(out, "\n"), nil
+}
+
+// normalizePlanGraph compiles redundant prose fields from the artifact graph.
+// A small model should not have to keep Produces, Consumes, Depends on and
+// Owns mutually consistent by hand. Exact produced paths define milestone
+// lanes; producer/consumer matches define task dependencies. The generated
+// fields remain in Markdown for people and downstream readers, but their truth
+// comes from one graph.
+func normalizePlanGraph(outcome *agent.Outcome, contract string) (*agent.Outcome, int, error) {
+	if outcome == nil || contract != "markdown_sections:M" {
+		return outcome, 0, nil
+	}
+	sections := sectionsOf(outcome)
+	if len(sections) == 0 {
+		return outcome, 0, nil
+	}
+	text, changes := outcome.Text, 0
+
+	producer := map[string]string{}
+	for _, sec := range sections {
+		for _, block := range taskBlocks(sec.Body) {
+			if !strings.HasPrefix(block.id, "T-") {
+				continue
+			}
+			for _, item := range taskFieldItems(block.body, "Produces") {
+				if producer[item] == "" {
+					producer[item] = block.id
+				}
+			}
+		}
+	}
+	for _, sec := range sections {
+		for _, block := range taskBlocks(sec.Body) {
+			if !strings.HasPrefix(block.id, "T-") {
+				continue
+			}
+			deps := taskFieldItems(block.body, "Depends on")
+			seen := map[string]bool{}
+			for _, dep := range deps {
+				seen[dep] = true
+			}
+			for _, item := range taskFieldItems(block.body, "Consumes") {
+				if p := producer[item]; p != "" && p != block.id && !seen[p] {
+					deps = append(deps, p)
+					seen[p] = true
+				}
+			}
+			if len(deps) > 0 && !slices.Equal(deps, taskFieldItems(block.body, "Depends on")) {
+				var err error
+				text, err = setMarkdownField(text, block.id, "Depends on", strings.Join(deps, ", "))
+				if err != nil {
+					return outcome, changes, err
+				}
+				changes++
+			}
+		}
+	}
+
+	claimed := map[string]bool{}
+	for _, sec := range sections {
+		var files, dirs []string
+		blocks := taskBlocks(sec.Body)
+		for _, block := range blocks {
+			for _, item := range taskFieldItems(block.body, "Produces") {
+				kind, value, ok := strings.Cut(item, ":")
+				if !ok {
+					continue
+				}
+				value = strings.TrimSpace(strings.Trim(value, "`"))
+				switch kind {
+				case "file":
+					files = append(files, value)
+				case "dir":
+					dirs = append(dirs, value)
+				}
+			}
+		}
+		lanes := files
+		if len(lanes) == 0 {
+			lanes = dirs
+		}
+		var unique []string
+		for _, lane := range lanes {
+			lane = strings.TrimRight(strings.TrimSpace(lane), "/")
+			if lane == "" || claimed[lane] || slices.Contains(unique, lane) {
+				continue
+			}
+			claimed[lane] = true
+			unique = append(unique, lane)
+		}
+		if len(unique) == 0 {
+			continue
+		}
+		current := taskFieldItems(sec.Body, "Owns")
+		if !slices.Equal(current, unique) {
+			var err error
+			text, err = setMarkdownField(text, sec.ID, "Owns", strings.Join(unique, ", "))
+			if err != nil {
+				return outcome, changes, err
+			}
+			changes++
+		}
+	}
+	if changes == 0 {
+		return outcome, 0, nil
+	}
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return outcome, 0, err
+	}
+	normalized := *outcome
+	normalized.Text, normalized.Parsed = text, parsed
+	return &normalized, changes, nil
 }
 
 // mergeStructureRepair replaces only H2 sections returned by a bounded

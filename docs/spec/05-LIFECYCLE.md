@@ -288,6 +288,7 @@ Used by `intake`, `spec`, `plan`. No code is written.
 
 ```
 turns:
+  - role: architect, contract: json:plan_manifest             # plan only; no tools
   - role: architect, contract: markdown_sections:<PREFIX>   # drafts
   - role: reviewer,  contract: verdict                       # one turn PER CRITIC
     (repeated for each duckling in the line-up after the first, pinned to it)
@@ -296,6 +297,11 @@ turns:
 until: verdict == "approve" or round == max_rounds
 max_rounds: 2
 ```
+
+The manifest turn is present only for `plan`. It is a topology preflight, not
+another draft: the next architect turn must render the same milestones, tasks,
+producers, consumers and verification commands. On later rounds the accepted
+manifest and the previous revision are carried; neither is regenerated.
 
 The council seats **one drafter plus N critics**: the first duckling of the
 mode's line-up drafts, and every further duckling gets its own critique turn,

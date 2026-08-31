@@ -120,19 +120,22 @@ func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	}
 }
 
-func TestStructureRepairTargetsBothSidesOfACrossMilestoneFinding(t *testing.T) {
+func TestStructureRepairTargetsHighestCoverageSideOfCrossMilestoneFindings(t *testing.T) {
 	base := sectioned("",
 		agent.Section{ID: "M-001", Body: "### T-001 — Core"},
-		agent.Section{ID: "M-002", Body: "### T-002 — UI"},
+		agent.Section{ID: "M-002", Body: "### T-002 — UI\n### T-003 — More"},
 	)
-	findings := []string{"T-001 and T-002 both **Produce:** src/shared.h — one artifact needs one owner"}
+	findings := []string{
+		"T-001 and T-002 both **Produce:** src/shared.h — one artifact needs one owner",
+		"T-003 has no **Implements:** line",
+	}
 	_, ids := structureRepairInstruction(findings, sectionsOf(base))
-	if !slices.Equal(ids, []string{"M-001", "M-002"}) {
-		t.Fatalf("repair sections = %v, want both sides of the collision", ids)
+	if !slices.Equal(ids, []string{"M-002"}) {
+		t.Fatalf("repair sections = %v, want highest-coverage M-002", ids)
 	}
 }
 
-func TestStructureRepairDoesNotAssignAThreeSectionChainToTwoSections(t *testing.T) {
+func TestStructureRepairChoosesTheHubOfAThreeSectionChain(t *testing.T) {
 	base := sectioned("",
 		agent.Section{ID: "M-001", Body: "### T-001 — A"},
 		agent.Section{ID: "M-002", Body: "### T-002 — B"},
@@ -141,8 +144,8 @@ func TestStructureRepairDoesNotAssignAThreeSectionChainToTwoSections(t *testing.
 	first := "T-001 and T-002 both **Produce:** src/ab.h"
 	outside := "T-002 and T-003 both **Produce:** src/bc.h"
 	batch, ids := structureRepairBatch([]string{first, outside}, sectionsOf(base))
-	if !slices.Equal(ids, []string{"M-001", "M-002"}) || !slices.Equal(batch, []string{first}) {
-		t.Fatalf("repair batch = %v for %v; want only the finding wholly owned by M-001/M-002", batch, ids)
+	if !slices.Equal(ids, []string{"M-002"}) || !slices.Equal(batch, []string{first, outside}) {
+		t.Fatalf("repair batch = %v for %v; want both findings through hub M-002", batch, ids)
 	}
 }
 
@@ -152,8 +155,28 @@ func TestStructureRepairFindsEveryParentOfADuplicatedTaskID(t *testing.T) {
 		agent.Section{ID: "M-002", Body: "### T-004 — Portal duplicate"},
 	)
 	_, ids := structureRepairInstruction([]string{"T-004 is declared more than once"}, sectionsOf(base))
-	if !slices.Equal(ids, []string{"M-001", "M-002"}) {
-		t.Fatalf("duplicate task parents = %v, want both milestones", ids)
+	if !slices.Equal(ids, []string{"M-001"}) {
+		t.Fatalf("duplicate task repair = %v, want deterministic first owner", ids)
+	}
+}
+
+func TestStructureRepairSelectsBroadLaneHubBeforeFirstFinding(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-01", Body: ""},
+		agent.Section{ID: "M-03", Body: ""},
+		agent.Section{ID: "M-04", Body: ""},
+		agent.Section{ID: "M-09", Body: ""},
+		agent.Section{ID: "M-10", Body: ""},
+	)
+	findings := []string{
+		"M-01 lane overlaps M-09",
+		"M-03 lane overlaps M-10",
+		"M-04 lane overlaps M-10",
+		"M-09 lane overlaps M-10",
+	}
+	batch, ids := structureRepairBatch(findings, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-10"}) || len(batch) != 3 {
+		t.Fatalf("hub selection = %v, batch %v; want M-10 and its three findings", ids, batch)
 	}
 }
 
@@ -181,6 +204,63 @@ func TestBoundedRepairRejectsUnexpectedOrMissingSectionsAtomically(t *testing.T)
 	}
 	if _, err := mergeStructureRepairScoped(base, missing, "markdown_sections:M", []string{}); !errors.Is(err, ErrStructureRepairScope) {
 		t.Fatalf("empty assignment error = %v, want ErrStructureRepairScope", err)
+	}
+}
+
+func TestStructuredRepairChangesOnlyAssignedFields(t *testing.T) {
+	baseText := "## M-01 — Core\n\n**Owns:** src/\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n\n## M-02 — UI\n\n**Owns:** ui/\n\nkeep"
+	base := sectioned(baseText,
+		agent.Section{ID: "M-01", Title: "Core", Body: "**Owns:** src/\n\n### T-001 — Build\n\n**Implements:** SPEC-001"},
+		agent.Section{ID: "M-02", Title: "UI", Body: "**Owns:** ui/\n\nkeep"},
+	)
+	patch := &agent.Outcome{Parsed: map[string]interface{}{
+		"sections": []interface{}{"M-01"},
+		"operations": []interface{}{map[string]interface{}{
+			"op": "set_field", "target": "M-01", "field": "Owns", "value": "src/main.c",
+		}},
+	}}
+	merged, err := applyStructurePatch(base, patch, "markdown_sections:M", []string{"M-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(merged.Text, "**Owns:** src/main.c") || !strings.Contains(merged.Text, "## M-02 — UI\n\n**Owns:** ui/\n\nkeep") {
+		t.Fatalf("structured patch escaped its field:\n%s", merged.Text)
+	}
+}
+
+func TestPlanGraphNormalizationDerivesExactLanesAndDependencies(t *testing.T) {
+	raw := "## M-01 — Setup\n\n**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, build-target:app\n**Consumes:** none\n\n## M-02 — UI\n\n**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"
+	out := sectioned(raw,
+		agent.Section{ID: "M-01", Title: "Setup", Body: "**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, build-target:app\n**Consumes:** none"},
+		agent.Section{ID: "M-02", Title: "UI", Body: "**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"},
+	)
+	normalized, changes, err := normalizePlanGraph(out, "markdown_sections:M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != 3 || !strings.Contains(normalized.Text, "**Owns:** src/main.c") ||
+		!strings.Contains(normalized.Text, "**Owns:** src/ui/window.c") || !strings.Contains(normalized.Text, "**Depends on:** T-001") {
+		t.Fatalf("normalization changes=%d:\n%s", changes, normalized.Text)
+	}
+}
+
+func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
+	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{
+			ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"},
+			Produces: []string{"build-target:app"}, Consumes: []string{}, Verification: "meson compile -C build",
+		}},
+	}}}
+	missing := sectioned("## M-01 — Setup\n\nNo task yet", agent.Section{ID: "M-01", Title: "Setup", Body: "No task yet"})
+	findings := planManifestFindings(manifest, missing)
+	if len(findings) != 1 || !strings.Contains(findings[0], "T-001") || !strings.Contains(findings[0], "append") {
+		t.Fatalf("missing task findings = %v", findings)
+	}
+	body := "### T-001 — Build\n\n**Implements:** SPEC-001\n**Produces:** build-target:other\n**Consumes:** none\n**Verification:** `true`"
+	drifted := sectioned("## M-01 — Setup\n\n"+body, agent.Section{ID: "M-01", Title: "Setup", Body: body})
+	findings = planManifestFindings(manifest, drifted)
+	if len(findings) != 2 || !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "Produces") }) {
+		t.Fatalf("topology drift findings = %v", findings)
 	}
 }
 
@@ -237,6 +317,41 @@ func TestCouncilKeepsCompleteCheckpointWhenArchitectReturnsOneChangedSection(t *
 	}
 	if !slices.Contains(events, "revision_materialized") || slices.Contains(events, "structure_failed") {
 		t.Fatalf("events = %v, want materialization without structure failure", events)
+	}
+}
+
+func TestCouncilUsesStructuredPatchContractForBoundedRepair(t *testing.T) {
+	var contracts []string
+	var repairTools []string
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, toolbelt []string, _ TurnContext) (*agent.Outcome, error) {
+			contracts = append(contracts, turn.Contract)
+			if turn.Role == config.RoleReviewer {
+				return verdictOutcome("approve"), nil
+			}
+			if turn.Contract == "json:structure_patch" {
+				repairTools = append([]string{}, toolbelt...)
+				return &agent.Outcome{Parsed: map[string]interface{}{
+					"sections": []interface{}{"SPEC-001"},
+					"operations": []interface{}{map[string]interface{}{
+						"op": "set_field", "target": "SPEC-001", "field": "Implements", "value": "REQ-001",
+					}},
+				}}, nil
+			}
+			body := "GTK4 shell without traceability"
+			return sectioned("## SPEC-001 — Shell\n\n"+body, agent.Section{ID: "SPEC-001", Title: "Shell", Body: body}), nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), CouncilScript("SPEC", nil), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(contracts, "json:structure_patch") || len(repairTools) != 0 {
+		t.Fatalf("contracts=%v repair tools=%v", contracts, repairTools)
+	}
+	if !strings.Contains(res.Text, "**Implements:** REQ-001") || !strings.Contains(res.Text, "GTK4 shell") {
+		t.Fatalf("structured repair result:\n%s", res.Text)
 	}
 }
 

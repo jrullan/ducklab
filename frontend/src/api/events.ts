@@ -290,6 +290,8 @@ export const KNOWN_EVENT_TYPES = [
   "structure_check",
   "structure_patch_rejected",
   "revision_materialized",
+  "structure_normalized",
+  "plan_manifest",
   "structure_failed",
   "revision_identical",
   "revision_skipped",
