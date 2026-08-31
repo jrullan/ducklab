@@ -21,12 +21,13 @@ func sectioned(text string, secs ...agent.Section) *agent.Outcome {
 func TestARevisionThatLosesStructureIsSentBackOnce(t *testing.T) {
 	var events []string
 	var prompts []string
+	var architectToolbelts [][]string
 	architectTurns := 0
 	withImpl := agent.Section{ID: "SPEC-001", Title: "Shell", Body: "**Implements:** REQ-001\n\nGTK4."}
 	without := agent.Section{ID: "SPEC-001", Title: "Shell", Body: "GTK4, revised."}
 	params := &ExecuteParams{
 		OnEvent: func(kind string, data map[string]interface{}) { events = append(events, kind) },
-		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, toolbelt []string, _ TurnContext) (*agent.Outcome, error) {
 			if turn.Role == config.RoleReviewer {
 				if architectTurns >= 3 {
 					return verdictOutcome("approve"), nil
@@ -35,6 +36,7 @@ func TestARevisionThatLosesStructureIsSentBackOnce(t *testing.T) {
 			}
 			architectTurns++
 			prompts = append(prompts, prompt)
+			architectToolbelts = append(architectToolbelts, append([]string{}, toolbelt...))
 			switch architectTurns {
 			case 1:
 				return sectioned("## SPEC-001 — Shell\n\n**Implements:** REQ-001\n\nGTK4.", withImpl), nil
@@ -64,6 +66,9 @@ func TestARevisionThatLosesStructureIsSentBackOnce(t *testing.T) {
 	retry := prompts[2]
 	if !strings.Contains(retry, "Structure check") || !strings.Contains(retry, "SPEC-001 has no **Implements:** line") {
 		t.Fatalf("the retry prompt does not name the defect:\n%s", retry)
+	}
+	if len(architectToolbelts[2]) != 0 {
+		t.Fatalf("bounded repair tools = %v, want none", architectToolbelts[2])
 	}
 }
 

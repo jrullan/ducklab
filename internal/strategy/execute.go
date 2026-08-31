@@ -423,6 +423,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				repairSections = pendingRepairSections
 				pendingRepairSections = nil
 			}
+			if repairBase != nil {
+				// A bounded structure repair already has every input it needs:
+				// the complete checkpoint, exact H2 assignment and findings. In
+				// Neocapture corrida 11, leaving document reads enabled made the
+				// small architect re-explore requirements and then reproduce the
+				// whole spec twice instead of returning SPEC-010. Remove that
+				// branch of the state space for transactional repair turns.
+				toolbelt = nil
+			}
 			if turn.Role == config.RoleArchitect && params.ProjectRoot != "" {
 				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
 			}
