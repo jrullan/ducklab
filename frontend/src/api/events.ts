@@ -288,6 +288,7 @@ export const KNOWN_EVENT_TYPES = [
   // the run log a client rebuilds would be missing what actually happened.
   "settled",
   "structure_check",
+  "structure_patch_rejected",
   "structure_failed",
   "revision_identical",
   "revision_skipped",

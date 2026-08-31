@@ -365,6 +365,12 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           open.delete(previous);
         }
         const key = previous ? `${coordinate}:restart:${e.seq ?? blocks.length}` : coordinate;
+        const repairAttempt = Number(d.repair_attempt ?? 0);
+        const repairMax = Number(d.repair_max ?? 0);
+        const repairSections = Array.isArray(d.repair_sections) ? d.repair_sections.map(String) : [];
+        const repairSubject = repairAttempt > 0
+          ? `structure repair ${repairAttempt}/${repairMax || "?"}${repairSections.length ? ` · ${repairSections.join(", ")}` : ""}`
+          : undefined;
         const block: TurnBlock = {
           key,
           streamKey: coordinate,
@@ -372,7 +378,7 @@ export function buildTurns(events: readonly DucklabEvent[]): TurnBlock[] {
           turn,
           role: String(d.role ?? ""),
           duckling: String(d.duckling ?? ""),
-          subject: subjectOf(d),
+          subject: repairSubject ?? subjectOf(d),
           toolCalls: [],
           text: "",
           done: false,

@@ -493,6 +493,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		tracker = budget.NewTracker(limits)
 		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
 		tracker.Spend.AddUSD(rs.run.Budget.USD)
+		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
 		for i := 0; i < rs.run.Budget.Turns; i++ {
 			tracker.Spend.AddTurn()
 		}

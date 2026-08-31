@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -12,10 +13,13 @@ import (
 )
 
 var ErrStructureFailed = errors.New("document structure did not converge")
+var ErrStructureRepairScope = errors.New("structure repair changed sections outside its assignment")
 
 const (
-	maxStructureAttempts = 12
-	maxRepairFindings    = 12
+	maxStructureAttempts   = 12
+	maxRepairFindings      = 12
+	maxStructureStagnation = 3
+	maxRepairSections      = 2
 )
 
 // A document council's last architect turn is the one nobody reviews: after
@@ -301,6 +305,11 @@ func structureNote(findings []string) string {
 // harness owns the complete checkpoint, so the seat only needs to return the
 // H2 section being repaired and the harness can merge it deterministically.
 func structureRepairNote(findings []string, sections []agent.Section) string {
+	note, _ := structureRepairInstruction(findings, sections)
+	return note
+}
+
+func structureRepairInstruction(findings []string, sections []agent.Section) (string, []string) {
 	batch, ids := structureRepairBatch(findings, sections)
 	var b strings.Builder
 	b.WriteString("## Structure check — repair one bounded section\n\n")
@@ -317,37 +326,61 @@ func structureRepairNote(findings []string, sections []agent.Section) string {
 	if len(findings) > len(batch) {
 		b.WriteString(fmt.Sprintf("\n%d additional findings remain checkpointed; they will be handled in later bounded repairs.\n", len(findings)-len(batch)))
 	}
-	return b.String()
+	return b.String(), ids
 }
 
 func structureRepairBatch(findings []string, sections []agent.Section) ([]string, []string) {
-	taskParent := map[string]string{}
+	taskParents := map[string][]string{}
 	for _, sec := range sections {
-		taskParent[sec.ID] = sec.ID
+		taskParents[sec.ID] = append(taskParents[sec.ID], sec.ID)
 		for _, block := range taskBlocks(sec.Body) {
 			if strings.HasPrefix(block.id, "T-") {
-				taskParent[block.id] = sec.ID
+				if !slices.Contains(taskParents[block.id], sec.ID) {
+					taskParents[block.id] = append(taskParents[block.id], sec.ID)
+				}
 			}
 		}
 	}
 	idRE := regexp.MustCompile(`[A-Z]+-\d+`)
-	parentOf := func(f string) string {
+	parentsOf := func(f string) []string {
+		seen := map[string]bool{}
+		var parents []string
 		for _, id := range idRE.FindAllString(f, -1) {
-			if parent := taskParent[id]; parent != "" {
-				return parent
+			for _, parent := range taskParents[id] {
+				if parent != "" && !seen[parent] {
+					seen[parent] = true
+					parents = append(parents, parent)
+				}
 			}
 		}
-		return ""
+		sort.Strings(parents)
+		return parents
 	}
-	target := ""
+	var targets []string
 	for _, f := range findings {
-		if target = parentOf(f); target != "" {
+		if parents := parentsOf(f); len(parents) > 0 {
+			targets = append(targets, parents[:min(len(parents), maxRepairSections)]...)
 			break
 		}
 	}
+	targetSet := map[string]bool{}
+	for _, target := range targets {
+		targetSet[target] = true
+	}
 	var batch []string
 	for _, f := range findings {
-		if target == "" || parentOf(f) == target {
+		parents := parentsOf(f)
+		belongs := len(targets) == 0
+		if len(targets) > 0 && len(parents) > 0 {
+			belongs = true
+			for _, parent := range parents {
+				if !targetSet[parent] {
+					belongs = false
+					break
+				}
+			}
+		}
+		if belongs {
 			batch = append(batch, f)
 			if len(batch) == maxRepairFindings {
 				break
@@ -357,24 +390,49 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 	if len(batch) == 0 {
 		batch = append(batch, findings[:min(len(findings), maxRepairFindings)]...)
 	}
-	var ids []string
-	if target != "" {
-		ids = append(ids, target)
-	}
-	sort.Strings(ids)
-	return batch, ids
+	sort.Strings(targets)
+	return batch, targets
 }
 
 // mergeStructureRepair replaces only H2 sections returned by a bounded
 // repair. Returning a whole document remains compatible: every returned
 // section simply replaces its checkpoint counterpart.
 func mergeStructureRepair(base, patch *agent.Outcome, contract string) *agent.Outcome {
+	merged, err := mergeStructureRepairScoped(base, patch, contract, nil)
+	if err != nil {
+		return base
+	}
+	return merged
+}
+
+// mergeStructureRepairScoped treats a bounded repair as a transaction. The
+// Neocapture plan run returned unrelated milestones during a one-H2 repair;
+// merging every returned H2 duplicated task IDs across untouched siblings.
+func mergeStructureRepairScoped(base, patch *agent.Outcome, contract string, allowed []string) (*agent.Outcome, error) {
 	if base == nil || patch == nil {
-		return patch
+		return patch, nil
 	}
 	patches := sectionsOf(patch)
 	if len(patches) == 0 {
-		return patch
+		return base, fmt.Errorf("%w: response contained no H2 section", ErrStructureRepairScope)
+	}
+	if len(allowed) > 0 {
+		want := map[string]bool{}
+		for _, id := range allowed {
+			want[id] = true
+		}
+		seen := map[string]bool{}
+		for _, sec := range patches {
+			if !want[sec.ID] {
+				return base, fmt.Errorf("%w: got %s; expected only %s", ErrStructureRepairScope, sec.ID, strings.Join(allowed, ", "))
+			}
+			seen[sec.ID] = true
+		}
+		for _, id := range allowed {
+			if !seen[id] {
+				return base, fmt.Errorf("%w: missing assigned section %s", ErrStructureRepairScope, id)
+			}
+		}
 	}
 	text := base.Text
 	prefix := strings.TrimPrefix(contract, "markdown_sections:")
@@ -383,12 +441,12 @@ func mergeStructureRepair(base, patch *agent.Outcome, contract string) *agent.Ou
 	}
 	parsed, err := agent.ParseContract(contract, text)
 	if err != nil {
-		return patch
+		return base, fmt.Errorf("%w: merged document: %v", ErrStructureRepairScope, err)
 	}
 	merged := *patch
 	merged.Text = text
 	merged.Parsed = parsed
-	return &merged
+	return &merged, nil
 }
 
 func replaceH2Section(text, prefix string, patch agent.Section) string {

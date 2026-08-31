@@ -759,7 +759,7 @@ describe("same-coordinate structure repairs", () => {
     const blocks = buildTurns([
       ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 1),
       ev("message", { round: 1, turn: 0, role: "architect", content: "first draft" }, 2),
-      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 3),
+      ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local", repair_attempt: 2, repair_max: 6, repair_sections: ["M-02"] }, 3),
       ev("message", { round: 1, turn: 0, role: "architect", content: "second draft" }, 4),
       ev("turn_start", { round: 1, turn: 0, role: "architect", duckling: "beelink-local" }, 5),
     ]).filter((block) => block.role === "architect");
@@ -769,5 +769,6 @@ describe("same-coordinate structure repairs", () => {
     expect(blocks.map((block) => block.done)).toEqual([true, true, false]);
     expect(blocks.map((block) => block.concurrent)).toEqual([undefined, undefined, undefined]);
     expect(blocks.map((block) => block.streamKey)).toEqual([undefined, undefined, "1:0"]);
+    expect(blocks[1]!.subject).toBe("structure repair 2/6 · M-02");
   });
 });

@@ -37,11 +37,11 @@ func TestARevisionThatLosesStructureIsSentBackOnce(t *testing.T) {
 			prompts = append(prompts, prompt)
 			switch architectTurns {
 			case 1:
-				return sectioned("draft", withImpl), nil
+				return sectioned("## SPEC-001 — Shell\n\n**Implements:** REQ-001\n\nGTK4.", withImpl), nil
 			case 2:
-				return sectioned("revised without implements", without), nil
+				return sectioned("## SPEC-001 — Shell\n\nGTK4, revised.", without), nil
 			default:
-				return sectioned("revised properly", withImpl), nil
+				return sectioned("## SPEC-001 — Shell\n\n**Implements:** REQ-001\n\nGTK4.", withImpl), nil
 			}
 		},
 		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
@@ -112,6 +112,90 @@ func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	}
 	if len(sectionsOf(merged)) != 2 {
 		t.Fatalf("merged sections = %d, want complete two-section plan", len(sectionsOf(merged)))
+	}
+}
+
+func TestStructureRepairTargetsBothSidesOfACrossMilestoneFinding(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-001", Body: "### T-001 — Core"},
+		agent.Section{ID: "M-002", Body: "### T-002 — UI"},
+	)
+	findings := []string{"T-001 and T-002 both **Produce:** src/shared.h — one artifact needs one owner"}
+	_, ids := structureRepairInstruction(findings, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-001", "M-002"}) {
+		t.Fatalf("repair sections = %v, want both sides of the collision", ids)
+	}
+}
+
+func TestStructureRepairDoesNotAssignAThreeSectionChainToTwoSections(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-001", Body: "### T-001 — A"},
+		agent.Section{ID: "M-002", Body: "### T-002 — B"},
+		agent.Section{ID: "M-003", Body: "### T-003 — C"},
+	)
+	first := "T-001 and T-002 both **Produce:** src/ab.h"
+	outside := "T-002 and T-003 both **Produce:** src/bc.h"
+	batch, ids := structureRepairBatch([]string{first, outside}, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-001", "M-002"}) || !slices.Equal(batch, []string{first}) {
+		t.Fatalf("repair batch = %v for %v; want only the finding wholly owned by M-001/M-002", batch, ids)
+	}
+}
+
+func TestStructureRepairFindsEveryParentOfADuplicatedTaskID(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-001", Body: "### T-004 — Portal"},
+		agent.Section{ID: "M-002", Body: "### T-004 — Portal duplicate"},
+	)
+	_, ids := structureRepairInstruction([]string{"T-004 is declared more than once"}, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-001", "M-002"}) {
+		t.Fatalf("duplicate task parents = %v, want both milestones", ids)
+	}
+}
+
+func TestBoundedRepairRejectsUnexpectedOrMissingSectionsAtomically(t *testing.T) {
+	baseText := "## M-001 — Core\n\nold core\n\n## M-002 — UI\n\nold ui"
+	base := sectioned(baseText,
+		agent.Section{ID: "M-001", Title: "Core", Body: "old core"},
+		agent.Section{ID: "M-002", Title: "UI", Body: "old ui"},
+	)
+	patch := sectioned("## M-001 — Core\n\nnew core\n\n## M-002 — UI\n\nmodel also rewrote ui",
+		agent.Section{ID: "M-001", Title: "Core", Body: "new core"},
+		agent.Section{ID: "M-002", Title: "UI", Body: "model also rewrote ui"},
+	)
+	merged, err := mergeStructureRepairScoped(base, patch, "markdown_sections:M", []string{"M-001"})
+	if !errors.Is(err, ErrStructureRepairScope) {
+		t.Fatalf("scope error = %v, want ErrStructureRepairScope", err)
+	}
+	if merged.Text != baseText {
+		t.Fatalf("rejected transaction changed the checkpoint:\n%s", merged.Text)
+	}
+
+	missing := sectioned("## M-001 — Core\n\nnew core", agent.Section{ID: "M-001", Title: "Core", Body: "new core"})
+	if _, err := mergeStructureRepairScoped(base, missing, "markdown_sections:M", []string{"M-001", "M-002"}); !errors.Is(err, ErrStructureRepairScope) {
+		t.Fatalf("missing-section error = %v, want ErrStructureRepairScope", err)
+	}
+}
+
+func TestStructureRepairStopsAfterThreeNonImprovingPatches(t *testing.T) {
+	architectTurns := 0
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				return verdictOutcome("request-changes"), nil
+			}
+			architectTurns++
+			body := "**Implements:** REQ-001\n\nrevision " + string(rune('a'+architectTurns))
+			return sectioned("## SPEC-001 — Shell\n\n"+body, agent.Section{ID: "SPEC-001", Title: "Shell", Body: body}), nil
+		},
+		StructureCheck: func(text string) []string { return []string{"still invalid: " + text[len(text)-1:]} },
+		Roster:         map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	_, err := ExecuteScript(context.Background(), CouncilScript("SPEC", nil), params)
+	if !errors.Is(err, ErrStructureFailed) {
+		t.Fatalf("error = %v, want ErrStructureFailed", err)
+	}
+	if architectTurns != 4 {
+		t.Fatalf("architect turns = %d, want initial draft plus three non-improving patches", architectTurns)
 	}
 }
 

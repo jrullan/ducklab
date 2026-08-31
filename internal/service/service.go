@@ -1754,6 +1754,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		tracker = budget.NewTracker(&b)
 		tracker.Spend.AddTokens(rs.run.Budget.Tokens)
 		tracker.Spend.AddUSD(rs.run.Budget.USD)
+		tracker.Spend.RestoreWallclock(rs.run.Budget.WallclockS)
 		for i := 0; i < rs.run.Budget.Turns; i++ {
 			tracker.Spend.AddTurn()
 		}
@@ -2278,6 +2279,11 @@ func (s *Service) emitLaunchEscalation(rs *runState) {
 }
 
 func (s *Service) failRun(rs *runState, err error) {
+	// Failure and pause records are timing boundaries. The monitor used to
+	// settle this interval only after failRun had written state, leaving the
+	// durable active clock at its pre-resume value while the budget showed a
+	// different, stale pre-call value (Neocapture plan, 2026-08-30).
+	settleActiveWallclock(rs.run, time.Now())
 	// A budget running out is a decision point, not a defect. The run did
 	// nothing wrong — the person's own ceiling stopped it — and failing it
 	// RESTORED THE TREE, so two million tokens of work were rolled back when
@@ -2418,6 +2424,8 @@ func (s *Service) failRun(rs *runState, err error) {
 		}
 		return
 	}
+	recordSpend(rs, rs.tracker)
+	s.publishSpend(rs, rs.tracker)
 	rs.run.Status = "failed"
 	rs.run.Verdict = "FAILED"
 	rs.run.Failure = err.Error()

@@ -183,6 +183,14 @@ type DucklingConfig struct {
 // RunTurn executes a single conversation turn.
 func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContext) (*Outcome, error) {
 	outcome := &Outcome{}
+	// A budget is a deadline, not merely a checkpoint between calls. The local
+	// Qwen plan crossed its 30-minute cap inside one 139-second generation;
+	// every provider path in this turn inherits the remaining run deadline.
+	if loop.Budget != nil {
+		budgetCtx, cancel := loop.Budget.Context(ctx)
+		defer cancel()
+		ctx = budgetCtx
+	}
 	if ectx != nil {
 		ectx.BeginTurn()
 	}
@@ -313,6 +321,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				})
 			}
 			if err != nil {
+				callErr := fmt.Errorf("provider chat: %w", err)
+				if errors.Is(err, context.DeadlineExceeded) && loop.Budget != nil {
+					if msg, exceeded := loop.Budget.Check(); exceeded {
+						callErr = fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+					}
+				}
 				// The call that failed, on the record. Only successful calls
 				// were written, so a run that died on its third attempt left
 				// two entries and no trace of the one that killed it — and
@@ -331,7 +345,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 						FinishReason: "error",
 					})
 				}
-				return outcome, fmt.Errorf("provider chat: %w", err)
+				return outcome, callErr
 			}
 
 			// Record usage PER ATTEMPT: a glitched reply still billed its
@@ -449,6 +463,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				CostSource:   calc.CostSource(resp.Usage),
 				FinishReason: finishReason,
 			})
+		}
+		// Providers are expected to honor the context deadline, but a local
+		// endpoint or transport may return a completed response after it. Record
+		// that response, then stop before tools, repairs, or another model call.
+		if msg, exceeded := loop.Budget.CheckWallclock(); exceeded {
+			return outcome, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
 		}
 
 		// Handle truncation

@@ -295,10 +295,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var lastArchitect *agent.Outcome
 	var bestArchitect *agent.Outcome
 	bestStructureProblems := int(^uint(0) >> 1)
+	var bestStructureFindings []string
 	structureAttempts := 0
+	structureStagnation := 0
 	previousStructureSignature := ""
 	pendingStructureNote := ""
 	var pendingRepairBase *agent.Outcome
+	var pendingRepairSections []string
 	identicalRevision := false
 	stuck := map[int]int{}
 	redGateStreak := 0
@@ -309,8 +312,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// One structure retry per ROUND: per run, a plan whose round-2
 		// draft collided its lanes was only recorded (benchmark run 5).
 		structureAttempts = 0
+		structureStagnation = 0
 		previousStructureSignature = ""
 		pendingRepairBase = nil
+		pendingRepairSections = nil
 		state := conv.State{Round: round}
 		verdictsThisRound := 0
 		operational := ""
@@ -409,11 +414,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			var repairBase *agent.Outcome
+			var repairSections []string
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
 				prompt += "\n\n" + pendingStructureNote
 				pendingStructureNote = ""
 				repairBase = pendingRepairBase
 				pendingRepairBase = nil
+				repairSections = pendingRepairSections
+				pendingRepairSections = nil
 			}
 			if turn.Role == config.RoleArchitect && params.ProjectRoot != "" {
 				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
@@ -432,11 +440,25 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if turn.Role == config.RoleImplementer && consultRetries > 0 {
 				startData["retry"] = consultRetries
 			}
+			if repairBase != nil {
+				startData["repair_attempt"] = structureAttempts + 1
+				startData["repair_max"] = maxStructureAttempts
+				startData["repair_sections"] = repairSections
+			}
 			emit(params, "turn_start", startData)
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
+			repairScopeProblem := ""
 			if err == nil && repairBase != nil {
-				outcome = mergeStructureRepair(repairBase, outcome, turn.Contract)
+				merged, mergeErr := mergeStructureRepairScoped(repairBase, outcome, turn.Contract, repairSections)
+				outcome = merged
+				if mergeErr != nil {
+					repairScopeProblem = mergeErr.Error()
+					emit(params, "structure_patch_rejected", map[string]interface{}{
+						"round": round, "turn": i, "attempt": structureAttempts + 1,
+						"sections": repairSections, "detail": repairScopeProblem,
+					})
+				}
 			}
 			if outcome != nil {
 				result.Outcome = outcome
@@ -486,17 +508,28 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if params.StructureCheck != nil {
 						problems = append(problems, params.StructureCheck(outcome.Text)...)
 					}
+					if repairScopeProblem != "" {
+						problems = append([]string{repairScopeProblem}, problems...)
+					}
 					if len(problems) > 0 {
 						structureAttempts++
-						if structureAttempts == 1 || bestArchitect == nil || len(problems) < bestStructureProblems {
+						improved := structureAttempts == 1 || bestArchitect == nil || len(problems) < bestStructureProblems
+						if improved {
 							bestArchitect, bestStructureProblems = outcome, len(problems)
+							bestStructureFindings = append([]string{}, problems...)
+							structureStagnation = 0
+						} else {
+							structureStagnation++
 						}
 						signature := strings.Join(problems, "\n")
 						emit(params, "structure_check", map[string]interface{}{
 							"round": round, "turn": i, "findings": problems, "attempt": structureAttempts, "max_attempts": maxStructureAttempts,
 						})
-						if structureAttempts < maxStructureAttempts && signature != previousStructureSignature {
-							pendingStructureNote = structureRepairNote(problems, sectionsOf(bestArchitect))
+						if structureAttempts < maxStructureAttempts && signature != previousStructureSignature && structureStagnation < maxStructureStagnation {
+							pendingStructureNote, pendingRepairSections = structureRepairInstruction(bestStructureFindings, sectionsOf(bestArchitect))
+							if repairScopeProblem != "" {
+								pendingStructureNote += "\nThe previous patch was rejected without changing the checkpoint: " + repairScopeProblem + "\n"
+							}
 							pendingRepairBase = bestArchitect
 							previousStructureSignature = signature
 							emitMessage(params, round, i, turn.Role, duckling, outcome)
@@ -510,8 +543,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						result.Outcome, result.Text, result.Error = best, best.Text, ErrStructureFailed
 						emit(params, "structure_failed", map[string]interface{}{
 							"round": round, "turn": i, "findings": problems,
-							"reason":             map[bool]string{true: "stalled", false: "attempts_exhausted"}[signature == previousStructureSignature],
+							"reason":             map[bool]string{true: "stalled", false: "attempts_exhausted"}[signature == previousStructureSignature || structureStagnation >= maxStructureStagnation],
 							"best_problem_count": bestStructureProblems,
+							"stagnant_attempts":  structureStagnation,
 						})
 						return result, ErrStructureFailed
 					}

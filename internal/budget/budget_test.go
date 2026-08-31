@@ -1,6 +1,8 @@
 package budget
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -134,6 +136,29 @@ func TestWallclockIsMeasuredNotAssumed(t *testing.T) {
 	}
 	if got := tracker.Spend.Snapshot().WallclockS; got < 4 {
 		t.Errorf("wallclock = %.1fs, want about 5: it is not being measured", got)
+	}
+}
+
+func TestRestoredWallclockContinuesAcrossResume(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 10})
+	tracker.Spend.RestoreWallclock(12)
+	if msg, exceeded := tracker.Check(); !exceeded || !strings.Contains(msg, "wallclock") {
+		t.Fatalf("restored clock did not bind: exceeded=%v message=%q", exceeded, msg)
+	}
+}
+
+func TestWallclockContextCancelsAnInflightCall(t *testing.T) {
+	tracker := NewTracker(&Budget{MaxWallclockS: 1})
+	tracker.Spend.RestoreWallclock(0.95)
+	ctx, cancel := tracker.Context(context.Background())
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("context error = %v, want deadline", ctx.Err())
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("in-flight call survived past the wall-clock budget")
 	}
 }
 

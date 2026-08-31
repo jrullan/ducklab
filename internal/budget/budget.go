@@ -2,6 +2,7 @@
 package budget
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -58,6 +59,19 @@ func (s *Spend) UpdateWallclock() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.WallclockS = time.Since(s.StartTime).Seconds()
+}
+
+// RestoreWallclock carries active execution time across a pause/resume. The
+// Neocapture plan resumed with its tokens and turns intact but a fresh clock,
+// turning a 30-minute cap into another 30 minutes.
+func (s *Spend) RestoreWallclock(seconds float64) {
+	if seconds < 0 {
+		seconds = 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.WallclockS = seconds
+	s.StartTime = time.Now().Add(-time.Duration(seconds * float64(time.Second)))
 }
 
 // Snapshot returns a copy of the current spend.
@@ -191,6 +205,42 @@ func (t *Tracker) Check() (string, bool) {
 	b := *t.Budget
 	t.mu.Unlock()
 	return b.Exceeded(t.Spend)
+}
+
+// CheckWallclock refreshes and checks only the active-time ceiling. It is used
+// after a provider response: token/cost ceilings deliberately stop before the
+// next call so a tool action already returned by the model is not discarded.
+func (t *Tracker) CheckWallclock() (string, bool) {
+	t.Spend.UpdateWallclock()
+	t.mu.Lock()
+	maxWallclock := t.Budget.MaxWallclockS
+	t.mu.Unlock()
+	if maxWallclock > 0 {
+		spent := t.Spend.Snapshot().WallclockS
+		if spent >= float64(maxWallclock) {
+			return fmt.Sprintf("wallclock budget exceeded: %.0fs >= %ds", spent, maxWallclock), true
+		}
+	}
+	return "", false
+}
+
+// Context returns a context that expires when the run's remaining active
+// wall-clock budget does. Checking only between model calls let a long local
+// generation cross the cap and continue until an unrelated validator failed.
+func (t *Tracker) Context(parent context.Context) (context.Context, context.CancelFunc) {
+	t.Spend.UpdateWallclock()
+	t.mu.Lock()
+	maxWallclock := t.Budget.MaxWallclockS
+	t.mu.Unlock()
+	if maxWallclock <= 0 {
+		return context.WithCancel(parent)
+	}
+	remainingSeconds := float64(maxWallclock) - t.Spend.Snapshot().WallclockS
+	remaining := time.Duration(remainingSeconds * float64(time.Second))
+	if remaining <= 0 {
+		remaining = time.Nanosecond
+	}
+	return context.WithTimeout(parent, remaining)
 }
 
 // WouldExceed checks if a proposed call would exceed the budget.
