@@ -74,6 +74,20 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	}
 }
 
+func TestRequirementsSectionPassCarriesAmendmentInvariants(t *testing.T) {
+	prompt := buildSectionPassPrompt(artifact.KindRequirements, "Saving shall be implemented.", &artifact.Section{
+		ID: "REQ-007", Title: "File saving", Body: "**Priority:** wont\nNo saving.",
+	})
+	for _, want := range []string{
+		"smallest semantic delta", "exactly one `**Priority:**` marker", "`must`, `should`, `could`, or `wont`",
+		"require `Priority: must`", "request did not name",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("requirements section prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+}
+
 // UNCHANGED is a real answer: the section survives byte for byte, and an
 // unusable pass loses only its own section — never the document.
 func TestSectionedRespectsUnchangedAndSurvivesBadPasses(t *testing.T) {

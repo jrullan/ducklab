@@ -224,6 +224,13 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 		"section passes. Apply ONLY the clauses whose subject belongs to this section's existing " +
 		"title and behavior. Do not copy, summarize, or mention clauses about another capability. " +
 		"If no clause belongs to this section, answer UNCHANGED.\n\n")
+	if kind == artifact.KindRequirements {
+		b.WriteString("## Requirements invariants\n\n" +
+			"- Make the smallest semantic delta and preserve every unrelated constraint already in this section.\n" +
+			"- Keep exactly one `**Priority:**` marker, whose value is exactly `must`, `should`, `could`, or `wont`.\n" +
+			"- `shall`, `must`, and `required` are mandatory and require `Priority: must`; optional/`may` behavior is not mandatory.\n" +
+			"- Do not add a storage destination, integration, or behavior the request did not name.\n\n")
+	}
 	fmt.Fprintf(&b, "## Answer format\n\nEither the full replacement section — heading and body, "+
 		"under the SAME id:\n\n## %s — <title>\n<body>\n\nOr, if the request does not change this "+
 		"section, reply with exactly the single word UNCHANGED.\n", sec.ID)
