@@ -209,6 +209,8 @@ func TestSpecPromptCarriesRequirementsNotThePlan(t *testing.T) {
 		"HOW the system delivers",
 		"Cross-cutting design",
 		"Do not shape the document as one section per requirement",
+		"Do not list it in an active design section's **Implements:** line",
+		"marked **Priority:** wont",
 		"Approved requirement invariant matrix",
 		"Treat these as simultaneous constraints",
 	} {
@@ -448,11 +450,11 @@ func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
 // draft that converges and buys another lap on one that does not.
 func TestRoundsOverridesTheScriptsLimit(t *testing.T) {
 	council := strategy.ArtifactScript("REQ", "council", nil)
-	if council.MaxRounds != 2 {
+	if council.MaxRounds != 3 {
 		t.Fatalf("test assumption broken: council MaxRounds = %d", council.MaxRounds)
 	}
 	// Zero leaves the script's own answer alone.
-	for _, c := range []struct{ rounds, want int }{{0, 2}, {1, 1}, {4, 4}} {
+	for _, c := range []struct{ rounds, want int }{{0, 3}, {1, 1}, {4, 4}} {
 		s := strategy.ArtifactScript("REQ", "council", nil)
 		if c.rounds > 0 {
 			s.MaxRounds = c.rounds

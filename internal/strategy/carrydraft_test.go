@@ -9,9 +9,9 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 )
 
-// A council's second round opens on the revision the first round closed
-// with: draft → critique → revision → critique → revision, not draft →
-// critique → revision → DRAFT AGAIN → critique → revision.
+// Later council rounds open on the revision the previous round closed with:
+// the architect revises once per rejected round and never re-drafts at the
+// top of the next round.
 func TestACouncilsSecondRoundOpensOnTheRevision(t *testing.T) {
 	architectTurns := 0
 	var events []string
@@ -29,8 +29,8 @@ func TestACouncilsSecondRoundOpensOnTheRevision(t *testing.T) {
 	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
-	if architectTurns != 3 {
-		t.Fatalf("architect turns = %d, want 3 (draft, revision, revision) — not a re-draft at the top of round 2", architectTurns)
+	if architectTurns != 4 {
+		t.Fatalf("architect turns = %d, want 4 (draft plus three revisions) — not a re-draft at the top of a later round", architectTurns)
 	}
 	carried := false
 	for _, e := range events {
@@ -138,8 +138,8 @@ func TestAFragmentCouncilCanonicalizesNewSectionsAcrossRounds(t *testing.T) {
 }
 
 // The candidate a person accepts is the closing architect revision, not the
-// draft the round-two critic saw immediately before it. Record one bounded
-// verdict on that exact text without opening an unbounded third repair lap.
+// draft the last round critic saw immediately before it. Record one bounded
+// verdict on that exact text without opening an unbounded repair lap.
 func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 	script := CouncilScript("REQ", nil)
 	architectTurns, reviewerTurns := 0, 0
@@ -163,10 +163,10 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewerTurns != 3 {
-		t.Fatalf("reviewer turns = %d, want two round reviews plus final verification", reviewerTurns)
+	if reviewerTurns != 4 {
+		t.Fatalf("reviewer turns = %d, want three round reviews plus final verification", reviewerTurns)
 	}
-	if !strings.Contains(finalPrompt, "Revision 3.") || !strings.Contains(finalPrompt, "verification only") {
+	if !strings.Contains(finalPrompt, "Revision 4.") || !strings.Contains(finalPrompt, "verification only") {
 		t.Errorf("final reviewer did not receive the closing revision:\n%s", finalPrompt)
 	}
 	if res.State.Verdict != "approve" {

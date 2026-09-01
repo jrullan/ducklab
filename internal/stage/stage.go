@@ -416,6 +416,9 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 		}
 		b.WriteString("## Your task\n\nWrite the specification for these requirements. " +
 			"Every section must carry an **Implements:** line naming the requirements it covers.\n\n" +
+			"A requirement marked **Priority:** wont is an exclusion, not active behavior. " +
+			"Do not list it in an active design section's **Implements:** line. Trace it only " +
+			"from a section that records exclusions and is itself marked **Priority:** wont.\n\n" +
 			"A specification says HOW the system delivers its requirements — it is not a " +
 			"restatement of them. Name the concrete design: the data model and its key " +
 			"entities, the access-control model with its exact scheme, the architecture and " +
