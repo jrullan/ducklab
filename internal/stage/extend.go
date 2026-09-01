@@ -8,7 +8,6 @@ import (
 
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
-	"github.com/jrullan/ducklab/internal/strategy"
 )
 
 // The plan amendment: Review's light exit, executed light.
@@ -43,7 +42,11 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if err != nil {
 		return nil, err
 	}
-	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
+	// This is an update over an approved topology. Re-running the first-draft
+	// manifest persona gives the amendment turn two incompatible jobs: return a
+	// JSON topology and return only new Markdown task fragments. Use the same
+	// update script as sectioned and fragment revisions.
+	script := artifactUpdateScript(kind.Prefix(), p.Mode, p.Critics)
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}

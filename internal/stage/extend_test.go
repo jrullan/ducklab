@@ -146,6 +146,11 @@ func TestRunExtendWritesAMergedProposal(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-amend", Mode: "solo",
 		Extend: "recolor the header",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			for _, turn := range script.Turns {
+				if turn.Persona == strategy.PersonaPlanManifest || turn.Contract == "json:plan_manifest" {
+					t.Fatalf("plan amendment retained first-draft manifest turn: %+v", turn)
+				}
+			}
 			return "## T-900 — Recolor the header\n\nSwap the palette token.\n", nil
 		},
 	}, current)
