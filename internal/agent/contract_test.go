@@ -236,6 +236,16 @@ func TestPlanManifestCanonicalizesNumericPadding(t *testing.T) {
 	}
 }
 
+func TestPlanManifestRejectsDuplicateProducers(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[` +
+		`{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"produces":["src/main.c"],"consumes":[],"verification":"true"},` +
+		`{"id":"T-002","title":"Wire app","implements":["SPEC-002"],"produces":[" src/main.c "],"consumes":[],"verification":"true"}` +
+		`]}]}`
+	if _, err := ParseContract("json:plan_manifest", text); err == nil || !strings.Contains(err.Error(), "both produce src/main.c") {
+		t.Fatalf("duplicate producer error = %v", err)
+	}
+}
+
 func TestMarkdownSectionsRejectsNoMatches(t *testing.T) {
 	if _, err := ParseContract("markdown_sections:REQ", "## Introduction\n\nNo ids here."); err == nil {
 		t.Error("accepted text with no matching sections")

@@ -141,6 +141,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 		return nil, fmt.Errorf("plan manifest contract: milestones must not be empty")
 	}
 	seen := map[string]bool{}
+	producer := map[string]string{}
 	for mi, milestone := range manifest.Milestones {
 		milestoneID, ok := canonicalContractID(milestone.ID, "M")
 		if !ok || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestoneID] {
@@ -156,6 +157,17 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			}
 			manifest.Milestones[mi].Tasks[ti].ID = taskID
 			seen[taskID] = true
+			for pi, item := range task.Produces {
+				item = strings.TrimSpace(item)
+				if item == "" {
+					return nil, fmt.Errorf("plan manifest contract: empty produced artifact in %s", taskID)
+				}
+				if prior := producer[item]; prior != "" && prior != taskID {
+					return nil, fmt.Errorf("plan manifest contract: %s and %s both produce %s", prior, taskID, item)
+				}
+				producer[item] = taskID
+				manifest.Milestones[mi].Tasks[ti].Produces[pi] = item
+			}
 		}
 	}
 	return &manifest, nil
