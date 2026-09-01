@@ -447,6 +447,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
 			}
 			prompt, err := buildPrompt(&turn, params, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" {
+				prompt = fragmentCriticContext(prompt)
+			}
 			// A fragment council's transcript contains the individual patches,
 			// newest last. That is useful history but it is not the document: a
 			// small critic treated the latest one-section repair as the complete
@@ -1043,6 +1046,9 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if err != nil {
 			return err
 		}
+		if script.FragmentPrefix != "" {
+			prompt = fragmentCriticContext(prompt)
+		}
 		prompt += "\n\n## Final candidate under review\n\n" + candidate.Text +
 			"\n\nThis is verification only. Return a verdict on this exact candidate; no architect turn follows automatically."
 		if script.FragmentPrefix != "" {
@@ -1106,6 +1112,28 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		"detail": "final evidence recorded; no additional revision was started",
 	})
 	return nil
+}
+
+// fragmentCriticContext removes the fragment author's wire protocol from a
+// critic prompt. Corrida 28 showed the critic obeying the leading "Update this
+// requirements" and "omitting does not delete" rules against the later
+// post-merge candidate: it demanded consumed tombstones be persisted and sent
+// the architect into malformed deletion loops. A critic needs the human's
+// request and the materialized result, never the patch encoding.
+func fragmentCriticContext(prompt string) string {
+	start := strings.Index(prompt, "## Your task\n\nUpdate this ")
+	draft := strings.Index(prompt, "## The draft under review")
+	requestStart := strings.Index(prompt, "## The request\n\n")
+	outline := strings.Index(prompt, "\n\n## The document today")
+	if start < 0 || draft <= start || requestStart < start || outline <= requestStart || outline > draft {
+		return prompt
+	}
+	requestStart += len("## The request\n\n")
+	request := strings.TrimSpace(prompt[requestStart:outline])
+	replacement := "## Amendment under review\n\nJudge whether the authoritative POST-MERGE candidate faithfully applies the human request. " +
+		"Do not review or request author-side fragment syntax: placeholders and deletion tombstones have already been applied and consumed.\n\n" +
+		"## Human request\n\n" + request + "\n\n"
+	return prompt[:start] + replacement + prompt[draft:]
 }
 
 func documentCandidateDigest(text string) string {

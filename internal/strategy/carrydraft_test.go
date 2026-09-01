@@ -93,6 +93,24 @@ func TestAFragmentCouncilCarriesTheMaterializedCandidate(t *testing.T) {
 	}
 }
 
+func TestFragmentCriticContextRemovesAuthorWireProtocol(t *testing.T) {
+	prompt := "preamble\n\n## Your task\n\nUpdate this requirements for the request below WITHOUT rewriting it.\n\n" +
+		"## The request\n\nEnable saving.\n\n## The document today (outline)\n\n- REQ-001\n\n" +
+		"## Rules\n\n- To DELETE an existing section, emit **Delete:** yes.\n\n" +
+		"## The draft under review\n\nDraft follows."
+	got := fragmentCriticContext(prompt)
+	for _, absent := range []string{"Update this requirements", "The document today", "To DELETE an existing section"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("critic prompt retained %q:\n%s", absent, got)
+		}
+	}
+	for _, present := range []string{"preamble", "Amendment under review", "Enable saving.", "The draft under review", "Draft follows."} {
+		if !strings.Contains(got, present) {
+			t.Errorf("critic prompt lost %q:\n%s", present, got)
+		}
+	}
+}
+
 // New fragment sections deliberately share the -900 wire placeholder. The
 // scheduler must give them stable temporary ids before review and must not
 // append them again when a later repair uses sequential placeholder ids.
