@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -219,7 +220,10 @@ type ExecuteResult struct {
 	// lacks. The stage layer falls back through an architect's earlier
 	// drafts when the final revise carries no sections.
 	RoleTexts map[string][]string
-	Error     error
+	// CandidateDigest identifies the exact body passed to the bounded final
+	// reviewer. The stage gate compares it with the persisted proposal body.
+	CandidateDigest string
+	Error           error
 }
 
 // ExecuteSolo executes the solo mode.
@@ -925,6 +929,27 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		}
 	}
 
+	// The proposal is not the model's last bytes. Stage-owned folding and id
+	// assignment can change section order and identity. Neocapture corrida 15
+	// reviewed SPEC-005→SPEC-004, then offered a canonically renumbered
+	// SPEC-004→SPEC-005 at the gate. Materialize once before review and return
+	// that same body to proposal storage.
+	if script.MaterializeCandidate != nil && lastArchitect != nil {
+		materialized, err := script.MaterializeCandidate(result.RoleTexts[string(config.RoleArchitect)], lastArchitect)
+		if err != nil {
+			result.Error = err
+			return result, err
+		}
+		lastArchitect = materialized
+		result.Outcome = materialized
+		result.Text = materialized.Text
+		result.CandidateDigest = documentCandidateDigest(materialized.Text)
+		emit(params, "candidate_materialized", map[string]interface{}{
+			"candidate_digest": result.CandidateDigest,
+			"detail":           "the stage-final candidate is frozen before final review and proposal storage",
+		})
+	}
+
 	// A two-round council used to end on an unreviewed architect revision:
 	// reviewer requests one last change, architect applies it, gate receives
 	// UNVERIFIED without knowing whether the real candidate fixed the issue or
@@ -949,8 +974,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 }
 
 func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, result *ExecuteResult) error {
+	digest := documentCandidateDigest(candidate.Text)
+	result.CandidateDigest = digest
 	emit(params, "final_review_started", map[string]interface{}{
-		"round": result.Rounds, "detail": "the last revision is being checked without opening another repair round",
+		"round": result.Rounds, "candidate_digest": digest,
+		"detail": "the last revision is being checked without opening another repair round",
 	})
 	verdict := "approve"
 	var finalFindings []conv.Finding
@@ -1012,10 +1040,15 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		result.Records[n-1].Verdict = verdict
 	}
 	emit(params, "final_review_completed", map[string]interface{}{
-		"round": result.Rounds, "verdict": verdict, "findings": len(finalFindings),
+		"round": result.Rounds, "verdict": verdict, "findings": len(finalFindings), "candidate_digest": digest,
 		"detail": "final evidence recorded; no additional revision was started",
 	})
 	return nil
+}
+
+func documentCandidateDigest(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return fmt.Sprintf("%x", sum[:8])
 }
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's

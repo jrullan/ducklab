@@ -488,7 +488,16 @@ func Render(doc *Document) string {
 	}
 	fmt.Fprintf(&b, "approved_by: %s\n", doc.Front.ApprovedBy)
 	b.WriteString("---\n\n")
+	b.WriteString(RenderBody(doc))
+	return b.String()
+}
 
+// RenderBody writes the exact human/model document without transport
+// frontmatter. Document councils review this representation; proposal storage
+// adds volatile run metadata later, so comparing whole-file bytes would make
+// identity impossible even when the reviewed sections are identical.
+func RenderBody(doc *Document) string {
+	var b strings.Builder
 	if doc.Preamble != "" {
 		b.WriteString(doc.Preamble)
 		b.WriteString("\n\n")

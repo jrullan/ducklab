@@ -173,3 +173,47 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 		t.Errorf("final verdict = %q, want approve", res.State.Verdict)
 	}
 }
+
+// The final reviewer and the proposal gate must share one materialized body.
+// In Neocapture corrida 15 the reviewer saw SPEC-005 before SPEC-004, while
+// stage id assignment later renumbered the persisted proposal into the
+// opposite order and left a red verdict attached to a defect no longer shown.
+func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
+	script := CouncilScript("REQ", nil)
+	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n"
+	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+		out := *candidate
+		out.Text = canonical
+		return &out, nil
+	}
+	reviewerTurns := 0
+	architectTurns := 0
+	var finalPrompt string
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				reviewerTurns++
+				if tc.Index >= len(script.Turns) {
+					finalPrompt = prompt
+					return verdictOutcome("approve"), nil
+				}
+				return verdictOutcome("request-changes"), nil
+			}
+			architectTurns++
+			body := "uncanonical body " + string(rune('0'+architectTurns))
+			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\n" + body + "\n", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: body}}}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalCandidate := finalPrompt[strings.LastIndex(finalPrompt, "## Final candidate under review"):]
+	if !strings.Contains(finalCandidate, canonical) || strings.Contains(finalCandidate, "uncanonical body") {
+		t.Fatalf("final reviewer did not receive the materialized candidate (reviewers=%d rounds=%d verdict=%s):\n%s", reviewerTurns, res.Rounds, res.State.Verdict, finalPrompt)
+	}
+	if res.Text != canonical || res.CandidateDigest != documentCandidateDigest(canonical) {
+		t.Fatalf("result text/digest = %q/%q", res.Text, res.CandidateDigest)
+	}
+}

@@ -568,6 +568,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	var inventory *agent.Inventory
 	finalReviewVerdict := ""
 	finalReviewFindings := 0
+	reviewedCandidateDigest := ""
 	adoptSurvey := req.Adopt
 	if req.Stage == "spec" && !req.Adopt {
 		if reqs, e := artifact.Load(projectRoot, artifact.KindRequirements); e == nil && reqs.Front.Origin == "adopted" {
@@ -717,6 +718,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			if res != nil {
 				texts := res.RoleTexts[string(config.RoleArchitect)]
 				lastArchitectTexts.Store(&texts)
+				reviewedCandidateDigest = res.CandidateDigest
 			}
 			if rerr != nil {
 				// pendingOrErr, or the question dies with the run: this
@@ -734,7 +736,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			// stable identities and appended the same additions again (Neocapture
 			// corrida 13: 19 sections became 36). The materialized result is the
 			// exact candidate the final reviewer saw.
-			if script.FragmentPrefix != "" {
+			if script.FragmentPrefix != "" || res.CandidateDigest != "" {
 				return res.Text, nil
 			}
 			if texts := res.RoleTexts[string(config.RoleArchitect)]; len(texts) > 1 {
@@ -784,10 +786,13 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		}
 	}
 
+	proposalDigest := artifact.ContentHash(artifact.RenderBody(result.Proposed))
 	rs.writer.AppendEvent("proposal", map[string]interface{}{
-		"kind":     string(result.Kind),
-		"sections": len(result.Proposed.Sections),
-		"remapped": len(result.Remapped),
+		"kind":             string(result.Kind),
+		"sections":         len(result.Proposed.Sections),
+		"remapped":         len(result.Remapped),
+		"candidate_digest": reviewedCandidateDigest,
+		"proposal_digest":  proposalDigest,
 	})
 	if adoptSurvey && inventory != nil {
 		unaccounted := inventoryUnaccounted(inventory.Items, result.Proposed)
@@ -863,6 +868,23 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	rs.run.PendingData["artifact"] = string(result.Kind)
 	rs.run.PendingData["sections"] = len(result.Proposed.Sections)
+	if reviewedCandidateDigest != "" {
+		rs.run.PendingData["candidate_digest"] = reviewedCandidateDigest
+		rs.run.PendingData["proposal_digest"] = proposalDigest
+	}
+	identityMismatch := reviewedCandidateDigest != "" && reviewedCandidateDigest != proposalDigest
+	if identityMismatch {
+		rs.run.PendingData["proposal_identity_mismatch"] = true
+		detail := fmt.Sprintf("reviewed candidate %s differs from proposal %s; discard and redraft", reviewedCandidateDigest, proposalDigest)
+		if rs.run.Warning != "" {
+			rs.run.Warning += " · " + detail
+		} else {
+			rs.run.Warning = detail
+		}
+		rs.writer.AppendEvent("proposal_identity_blocked", map[string]interface{}{
+			"candidate_digest": reviewedCandidateDigest, "proposal_digest": proposalDigest, "detail": detail,
+		})
+	}
 	semanticDuplicates := duplicateSemanticSections(result.Proposed.Sections)
 	if len(semanticDuplicates) > 0 {
 		rs.run.PendingData["proposal_blockers"] = semanticDuplicates
@@ -882,8 +904,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// last reviewer look decorative. Keep the proposal so the person can send
 	// it back with a note, but do not offer or permit acceptance while dissent
 	// stands.
-	if finalReviewVerdict != "" && finalReviewVerdict != "approve" {
-		rs.run.Verdict = "FAILED"
+	finalReviewBlocked := finalReviewVerdict != "" && finalReviewVerdict != "approve"
+	if finalReviewBlocked {
 		rs.run.PendingData["review_verdict"] = finalReviewVerdict
 		rs.run.PendingData["review_findings"] = finalReviewFindings
 		detail := fmt.Sprintf("final reviewer requested changes with %d finding(s); revise or discard this proposal", finalReviewFindings)
@@ -895,7 +917,8 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		rs.writer.AppendEvent("proposal_review_blocked", map[string]interface{}{
 			"verdict": finalReviewVerdict, "findings": finalReviewFindings, "detail": detail,
 		})
-	} else if len(semanticDuplicates) > 0 {
+	}
+	if identityMismatch || finalReviewBlocked || len(semanticDuplicates) > 0 {
 		rs.run.Verdict = "FAILED"
 	} else {
 		// No executable gate exists for a document, so an approved or

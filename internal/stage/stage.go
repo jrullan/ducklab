@@ -202,6 +202,24 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	}
 
 	script := strategy.ArtifactScript(kind.Prefix(), p.Mode, p.Critics)
+	// Freeze the same folded, id-assigned body before a bounded final review
+	// that this function will later persist as the proposal. The callback
+	// lives on the script to keep stage semantics out of the scheduler.
+	script.MaterializeCandidate = func(texts []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+		materialized, _, kept, dropped, err := materializeCandidate(current, texts, candidate, kind)
+		if err != nil {
+			return nil, err
+		}
+		if p.OnEvent != nil && len(kept) > 0 {
+			p.OnEvent("sections_folded", map[string]interface{}{
+				"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
+			})
+		}
+		if p.OnEvent != nil && len(dropped) > 0 {
+			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
+		}
+		return materialized, nil
+	}
 	if inventoryTurn(p, current) && p.Inventory != nil {
 		var checklist strings.Builder
 		checklist.WriteString("\n## Survey inventory checklist\nEvery inventoried item must be covered by a section or named in the document as deliberately out of scope.\n")
@@ -218,28 +236,14 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		return nil, err
 	}
 
-	produced, err := artifact.Parse(raw, kind)
+	materialized, remap, _, dropped, err := materializeCandidate(current, []string{raw}, &agent.Outcome{Text: raw}, kind)
 	if err != nil {
 		return nil, err
 	}
-	if len(produced.Sections) == 0 {
-		// The contract should have caught this, but a stage that silently
-		// wrote an empty artifact would erase the previous one on accept.
-		return nil, fmt.Errorf("stage %s produced no %s sections", p.Stage, kind.Prefix())
+	produced, err := artifact.Parse(materialized.Text, kind)
+	if err != nil {
+		return nil, err
 	}
-
-	sections, remap := AssignIDs(current.Sections, produced.Sections, kind.Prefix())
-	sections = RewriteReferences(sections, remap)
-	if p.Stage == Plan {
-		sections = PlanTaskIDs(current.Sections, sections)
-	}
-	produced.Sections = sections
-	// Anything before the first section is the model narrating its own
-	// process ("Let me check the requirements I wrote…"), not the artifact.
-	// The architect's contract is sections; a preamble a human wrote in an
-	// existing document is preserved by Parse, but a stage's proposal starts
-	// at its first section.
-	produced.Preamble = ""
 	produced.Front.Kind = kind
 	produced.Front.Project = current.Front.Project
 
@@ -258,8 +262,8 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			produced.Front.Origin = "adopted"
 		}
 	}
-	if dropped := dedupeSections(produced); len(dropped) > 0 {
-		raw = produced.Raw
+	if len(dropped) > 0 {
+		raw = materialized.Text
 		if p.OnEvent != nil {
 			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 		}

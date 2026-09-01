@@ -5,6 +5,7 @@ package strategy
 import (
 	"fmt"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
 )
@@ -114,6 +115,11 @@ type Script struct {
 	// first: the previous round's closing revision is the draft the next
 	// round's critics judge (council).
 	RevisionOpensNextRound bool
+	// MaterializeCandidate performs the stage-owned deterministic operations
+	// that happen before proposal storage: folding partial passes, assigning
+	// stable ids and rewriting references. The final reviewer must see this
+	// exact candidate, not the model reply that will later be transformed.
+	MaterializeCandidate func(texts []string, candidate *agent.Outcome) (*agent.Outcome, error)
 }
 
 // Turn is a script turn.

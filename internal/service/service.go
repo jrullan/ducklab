@@ -2514,6 +2514,9 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	if rs.run.PendingKind == "gate" && len(stringSliceAny(rs.run.PendingData["proposal_blockers"])) > 0 {
 		return fmt.Errorf("proposal has deterministic structure blockers; revise or reject it before accepting")
 	}
+	if rs.run.PendingKind == "gate" && rs.run.PendingData["proposal_identity_mismatch"] == true {
+		return fmt.Errorf("reviewed candidate differs from the persisted proposal; reject and redraft before accepting")
+	}
 	// A recorded worktree is a custody boundary. Check every known execution
 	// root before promotion or staging can mutate a different checkout.
 	if rs.run.WorktreePath != "" {
