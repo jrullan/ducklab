@@ -210,6 +210,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		if p.Stage == Intake && !p.Adopt {
+			materialized, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if p.OnEvent != nil && len(kept) > 0 {
 			p.OnEvent("sections_folded", map[string]interface{}{
 				"ids": kept, "detail": "the final revision re-emitted only what it changed; these sections survive from the earlier pass",
@@ -239,6 +245,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 	materialized, remap, _, dropped, err := materializeCandidate(current, []string{raw}, &agent.Outcome{Text: raw}, kind)
 	if err != nil {
 		return nil, err
+	}
+	if p.Stage == Intake && !p.Adopt {
+		materialized, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+		if err != nil {
+			return nil, err
+		}
 	}
 	produced, err := artifact.Parse(materialized.Text, kind)
 	if err != nil {

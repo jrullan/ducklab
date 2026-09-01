@@ -67,6 +67,13 @@ func TestAcceptedRequirementsLinkOnlyChangedSectionsToTheirIntent(t *testing.T) 
 		t.Fatal(err)
 	}
 	proposal, _ := Parse("## REQ-001 — Existing\n\nKeep this.\n\n## REQ-002 — Export\n\nDownload the result.\n", KindRequirements)
+	linkedInMemory := LinkRequirementsDocument(current, proposal, "INT-001")
+	if strings.Join(linkedInMemory, ",") != "REQ-002" {
+		t.Fatalf("in-memory links = %v", linkedInMemory)
+	}
+	if strings.Contains(proposal.Section("REQ-001").Body, "Originates from") || !strings.Contains(proposal.Section("REQ-002").Body, "**Originates from:** INT-001") {
+		t.Fatalf("in-memory provenance was not applied selectively: %+v", proposal.Sections)
+	}
 	if err := WriteProposal(root, KindRequirements, proposal, "r-new", nil); err != nil {
 		t.Fatal(err)
 	}

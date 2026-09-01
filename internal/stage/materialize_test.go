@@ -8,6 +8,31 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 )
 
+func TestLinkCandidateIntentMakesProvenancePartOfReviewedBody(t *testing.T) {
+	root := t.TempDir()
+	if _, err := artifact.AppendIntent(root, "r-intake", "2026-01-02T00:00:00Z", "Add capture"); err != nil {
+		t.Fatal(err)
+	}
+	current := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindRequirements}}
+	candidate := &agent.Outcome{Text: "## REQ-001 — Capture\n\nCapture the screen.\n"}
+
+	linked, err := linkCandidateIntent(root, "r-intake", current, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(linked.Text, "**Originates from:** INT-001") {
+		t.Fatalf("reviewed body lacks intention provenance:\n%s", linked.Text)
+	}
+	doc, err := artifact.Parse(linked.Text, artifact.KindRequirements)
+	if err != nil || artifact.RenderBody(doc) != linked.Text {
+		t.Fatalf("linked body is not stable: err=%v\n%s", err, linked.Text)
+	}
+	artifact.LinkRequirementsDocument(current, doc, "INT-001")
+	if got := artifact.RenderBody(doc); got != linked.Text {
+		t.Fatalf("post-review compatibility pass changed the body:\n%s", got)
+	}
+}
+
 func TestMaterializeCandidateFoldsOrderBeforeAssigningIDs(t *testing.T) {
 	current := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindSpec}}
 	first := "## SPEC-001 — Core\n\n**Implements:** REQ-001\n\ncore\n\n" +

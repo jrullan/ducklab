@@ -147,16 +147,9 @@ func intentTitle(brief string) string {
 // before the human accepts the proposal. Only new or textually changed
 // sections are linked; unchanged requirements do not acquire a false origin.
 func LinkRequirementsProposal(projectRoot, runID string) (string, []string, error) {
-	intent, err := EnsureIntent(projectRoot)
+	intentID, err := IntentIDForRun(projectRoot, runID)
 	if err != nil {
 		return "", nil, err
-	}
-	intentID := ""
-	for _, sec := range intent.Sections {
-		if sec.Field("run") == runID {
-			intentID = sec.ID
-			break
-		}
 	}
 	if intentID == "" {
 		return "", nil, nil
@@ -169,10 +162,44 @@ func LinkRequirementsProposal(projectRoot, runID string) (string, []string, erro
 	if err != nil || proposal == nil {
 		return intentID, nil, err
 	}
-	var linked []string
+	linked := LinkRequirementsDocument(current, proposal, intentID)
+	if len(linked) > 0 {
+		if err := xplat.AtomicWrite(ProposedPath(projectRoot, KindRequirements), []byte(Render(proposal)), 0o644); err != nil {
+			return "", nil, err
+		}
+	}
+	return intentID, linked, nil
+}
+
+// IntentIDForRun returns the append-only intention that caused one intake.
+// The stage needs this before final review so deterministic provenance is part
+// of the reviewed candidate, not a mutation applied afterward.
+func IntentIDForRun(projectRoot, runID string) (string, error) {
+	intent, err := EnsureIntent(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, sec := range intent.Sections {
+		if sec.Field("run") == runID {
+			return sec.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// LinkRequirementsDocument adds Intent → Requirement edges to an in-memory
+// candidate. It is shared by pre-review materialization and the proposal-file
+// compatibility path, making the latter idempotent.
+func LinkRequirementsDocument(current, proposal *Document, intentID string) (linked []string) {
+	if proposal == nil || intentID == "" {
+		return nil
+	}
 	for i := range proposal.Sections {
 		sec := &proposal.Sections[i]
-		before := current.Section(sec.ID)
+		var before *Section
+		if current != nil {
+			before = current.Section(sec.ID)
+		}
 		if before != nil && before.Title == sec.Title && strings.TrimSpace(before.Body) == strings.TrimSpace(sec.Body) {
 			continue
 		}
@@ -183,12 +210,7 @@ func LinkRequirementsProposal(projectRoot, runID string) (string, []string, erro
 		sec.Body = setIntentField(sec.Body, "Originates from", strings.Join(origins, ", "))
 		linked = append(linked, sec.ID)
 	}
-	if len(linked) > 0 {
-		if err := xplat.AtomicWrite(ProposedPath(projectRoot, KindRequirements), []byte(Render(proposal)), 0o644); err != nil {
-			return "", nil, err
-		}
-	}
-	return intentID, linked, nil
+	return linked
 }
 
 // ResolveIntent records the outcome without changing the original brief.

@@ -47,3 +47,23 @@ func materializeCandidate(current *artifact.Document, texts []string, candidate 
 	out.Parsed = parsed
 	return &out, remap, kept, dropped, nil
 }
+
+func linkCandidateIntent(projectRoot, runID string, current *artifact.Document, candidate *agent.Outcome) (*agent.Outcome, error) {
+	intentID, err := artifact.IntentIDForRun(projectRoot, runID)
+	if err != nil || intentID == "" {
+		return candidate, err
+	}
+	doc, err := artifact.Parse(candidate.Text, artifact.KindRequirements)
+	if err != nil {
+		return nil, err
+	}
+	artifact.LinkRequirementsDocument(current, doc, intentID)
+	text := artifact.RenderBody(doc)
+	parsed, err := agent.ParseContract("markdown_sections:REQ", text)
+	if err != nil {
+		return nil, err
+	}
+	out := *candidate
+	out.Text, out.Parsed = text, parsed
+	return &out, nil
+}
