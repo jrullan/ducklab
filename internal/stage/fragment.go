@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -38,6 +39,36 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	}
 	script := strategy.ArtifactScript(prefix, p.Mode, p.Critics)
 	script.FragmentPrefix = prefix
+	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+		if candidate == nil {
+			return nil, fmt.Errorf("materialize %s fragment: no architect outcome", kind)
+		}
+		var proposed *artifact.Document
+		if kind == artifact.KindPlan {
+			items, real := parsePlanItems(candidate.Text)
+			if real == 0 {
+				return nil, fmt.Errorf("materialize plan fragment: no task or milestone sections")
+			}
+			proposed = mergePlanFragment(base, items)
+		} else {
+			produced, err := artifact.Parse(candidate.Text, kind)
+			if err != nil || len(produced.Sections) == 0 {
+				return nil, fmt.Errorf("materialize %s fragment: no sections", kind)
+			}
+			proposed = mergeFragment(base, produced.Sections, prefix)
+		}
+		if p.Stage == Intake && !p.Adopt {
+			intentID, err := artifact.IntentIDForRun(p.ProjectRoot, p.RunID)
+			if err != nil {
+				return nil, err
+			}
+			artifact.LinkRequirementsDocument(base, proposed, intentID)
+		}
+		out := *candidate
+		out.Text = artifact.RenderBody(proposed)
+		out.Parsed = nil // fragment architect turns intentionally use freeform
+		return &out, nil
+	}
 	if p.Rounds > 0 {
 		script.MaxRounds = p.Rounds
 	}

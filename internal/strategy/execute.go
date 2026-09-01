@@ -311,6 +311,23 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	redGateStreak := 0
 	var evidence escalationEvidence
 	var planManifest *agent.PlanManifest
+	materialize := func(detail string) error {
+		if script.MaterializeCandidate == nil || lastArchitect == nil {
+			return nil
+		}
+		candidate, err := script.MaterializeCandidate(result.RoleTexts[string(config.RoleArchitect)], lastArchitect)
+		if err != nil {
+			return err
+		}
+		lastArchitect = candidate
+		result.Outcome, result.Text = candidate, candidate.Text
+		result.CandidateDigest = documentCandidateDigest(candidate.Text)
+		emit(params, "candidate_materialized", map[string]interface{}{
+			"candidate_digest": result.CandidateDigest,
+			"detail":           detail,
+		})
+		return nil
+	}
 	for _, entry := range result.Transcript.Entries {
 		if parsed, parseErr := agent.ParseContract("json:plan_manifest", entry.Text); parseErr == nil {
 			if manifest, ok := parsed.(*agent.PlanManifest); ok {
@@ -409,17 +426,34 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				evidence.RedGateStreak = redGateStreak
 			}
 
+			// Every document critic must judge the same deterministic object the
+			// gate could persist. This includes the finding-free R1 fast path:
+			// an intake amendment reviewer once approved four fragment sections,
+			// then the stage merged sixteen and added provenance with no final
+			// review and no candidate digest.
+			if turn.Persona == PersonaCritic && lastArchitect != nil {
+				if err := materialize("the candidate is frozen before a document critic reviews it"); err != nil {
+					result.Error = err
+					return result, err
+				}
+			}
 			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
 			// A fragment council's transcript contains the individual patches,
 			// newest last. That is useful history but it is not the document: a
 			// small critic treated the latest one-section repair as the complete
 			// amendment and reported the other amended sections missing. Present
 			// the deterministically materialized candidate as the review object.
-			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" && lastArchitect != nil {
-				prompt += "\n\n## Materialized fragment candidate — authoritative\n\n" + lastArchitect.Text +
-					"\n\nReview ONLY the materialized candidate above. Earlier architect messages may repeat the `" +
-					fragmentPlaceholderForPrompt(script.FragmentPrefix) + "` new-section placeholder; that is the required input protocol, not a duplicate-id defect. " +
-					"Ducklab has already assigned stable temporary identities in the authoritative candidate."
+			if turn.Persona == PersonaCritic && (script.MaterializeCandidate != nil || script.FragmentPrefix != "") && lastArchitect != nil {
+				heading := "## Materialized candidate — authoritative"
+				if script.FragmentPrefix != "" {
+					heading = "## Materialized fragment candidate — authoritative"
+				}
+				prompt += "\n\n" + heading + "\n\n" + lastArchitect.Text +
+					"\n\nReview ONLY the materialized candidate above. It is the exact body Ducklab will offer at the gate."
+				if script.FragmentPrefix != "" {
+					prompt += " Earlier architect messages may repeat the `" + fragmentPlaceholderForPrompt(script.FragmentPrefix) +
+						"` new-section placeholder; that is the required input protocol, not a duplicate-id defect."
+				}
 			}
 			// The draft a critic is about to judge is served by artifact_read
 			// too: told "spec does not exist yet", a small seat asked nineteen
@@ -934,20 +968,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// reviewed SPEC-005→SPEC-004, then offered a canonically renumbered
 	// SPEC-004→SPEC-005 at the gate. Materialize once before review and return
 	// that same body to proposal storage.
-	if script.MaterializeCandidate != nil && lastArchitect != nil {
-		materialized, err := script.MaterializeCandidate(result.RoleTexts[string(config.RoleArchitect)], lastArchitect)
-		if err != nil {
-			result.Error = err
-			return result, err
-		}
-		lastArchitect = materialized
-		result.Outcome = materialized
-		result.Text = materialized.Text
-		result.CandidateDigest = documentCandidateDigest(materialized.Text)
-		emit(params, "candidate_materialized", map[string]interface{}{
-			"candidate_digest": result.CandidateDigest,
-			"detail":           "the stage-final candidate is frozen before final review and proposal storage",
-		})
+	if err := materialize("the stage-final candidate is frozen before final review and proposal storage"); err != nil {
+		result.Error = err
+		return result, err
 	}
 
 	// A two-round council used to end on an unreviewed architect revision:

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -119,11 +120,21 @@ func TestRunFragmentWritesAMergedProposal(t *testing.T) {
 
 func TestFragmentCouncilRelaxesOnlyArchitectDocumentContracts(t *testing.T) {
 	root := t.TempDir()
-	writeDoc(t, root, artifact.KindRequirements, "## REQ-001 — Trigger\n\nOld trigger.\n")
+	writeDoc(t, root, artifact.KindRequirements, "## REQ-001 — Trigger\n\nOld trigger.\n\n## REQ-002 — Clipboard\n\nUntouched clipboard.\n")
 	base, _ := artifact.Load(root, artifact.KindRequirements)
 	_, err := runFragment(context.Background(), Params{
 		ProjectRoot: root, Stage: Intake, RunID: "r-contract", Mode: "council",
 		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			if script.MaterializeCandidate == nil {
+				t.Fatal("fragment council has no pre-review materializer")
+			}
+			candidate, materializeErr := script.MaterializeCandidate(nil, &agent.Outcome{Text: "## REQ-001 — Trigger\n\nNew trigger.\n"})
+			if materializeErr != nil {
+				t.Fatal(materializeErr)
+			}
+			if !strings.Contains(candidate.Text, "New trigger") || !strings.Contains(candidate.Text, "Untouched clipboard") {
+				t.Fatalf("review candidate is not the complete merged document:\n%s", candidate.Text)
+			}
 			for _, turn := range script.Turns {
 				switch turn.Role {
 				case config.RoleArchitect:

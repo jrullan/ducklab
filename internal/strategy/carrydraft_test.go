@@ -217,3 +217,35 @@ func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
 		t.Fatalf("result text/digest = %q/%q", res.Text, res.CandidateDigest)
 	}
 }
+
+func TestCouncilMaterializesCandidateBeforeFindingFreeFirstReview(t *testing.T) {
+	script := CouncilScript("REQ", nil)
+	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n"
+	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
+		out := *candidate
+		out.Text = canonical
+		return &out, nil
+	}
+	var reviewPrompt string
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				reviewPrompt = prompt
+				return verdictOutcome("approve"), nil
+			}
+			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\nraw body\n", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: "raw body"}}}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	res, err := ExecuteScript(context.Background(), script, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authoritative := reviewPrompt[strings.LastIndex(reviewPrompt, "## Materialized candidate — authoritative"):]
+	if !strings.Contains(authoritative, canonical) || strings.Contains(authoritative, "raw body") {
+		t.Fatalf("first reviewer did not receive the materialized candidate:\n%s", reviewPrompt)
+	}
+	if res.Text != canonical || res.CandidateDigest != documentCandidateDigest(canonical) {
+		t.Fatalf("fast-path result text/digest = %q/%q", res.Text, res.CandidateDigest)
+	}
+}
