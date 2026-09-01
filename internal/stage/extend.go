@@ -92,6 +92,11 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		// producing nothing usable. Either way the person gets the words.
 		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
+	if p.SplitTask == "" {
+		if id := extensionRewritesExistingTask(current, tasks); id != "" {
+			return nil, fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks but must not silently duplicate an existing task", id)
+		}
+	}
 
 	var proposed *artifact.Document
 	if p.SplitTask != "" {
@@ -111,6 +116,22 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: proposed, Raw: raw}, nil
+}
+
+func extensionRewritesExistingTask(current *artifact.Document, tasks []artifact.Section) string {
+	existing := map[string]bool{}
+	for _, milestone := range current.Sections {
+		for _, task := range milestone.Children {
+			existing[strings.ToUpper(strings.TrimSpace(task.ID))] = true
+		}
+	}
+	for _, task := range tasks {
+		id := strings.ToUpper(strings.TrimSpace(task.ID))
+		if existing[id] {
+			return task.ID
+		}
+	}
+	return ""
 }
 
 func extendChange(p Params) string {

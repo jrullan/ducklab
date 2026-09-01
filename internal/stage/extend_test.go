@@ -132,6 +132,29 @@ func TestAnEmptyAmendmentFailsWithTheArchitectsWords(t *testing.T) {
 	}
 }
 
+func TestExtendRefusesToTurnAnExistingTaskEditIntoADuplicate(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n### T-001 — Schema\n\nOriginal body.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-edit", Mode: "solo",
+		Extend: "change only T-001 verification",
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			return "## T-001 — Schema\n\nChanged body.\n", nil
+		},
+	}, current)
+	if err == nil || !strings.Contains(err.Error(), "rewrite existing task T-001") {
+		t.Fatalf("existing task edit was silently converted into a new id: %v", err)
+	}
+	if prop, pErr := artifact.LoadProposed(root, artifact.KindPlan); pErr != nil || prop != nil {
+		t.Fatalf("refused duplicate left a proposal behind: prop=%v err=%v", prop, pErr)
+	}
+}
+
 // The whole flow against disk: fragment in, merged proposal out, with every
 // existing section carried by code.
 func TestRunExtendWritesAMergedProposal(t *testing.T) {
