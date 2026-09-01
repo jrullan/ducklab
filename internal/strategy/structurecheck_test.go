@@ -436,6 +436,18 @@ func TestPlanTaskCannotImplementNone(t *testing.T) {
 	}
 }
 
+func TestRequirementsRejectGenericExclusionCatchAll(t *testing.T) {
+	cur := []agent.Section{{ID: "REQ-006", Title: "Out of Scope", Body: "**Priority:** wont\n- Saving files.\n- Cloud upload.\n- Video recording."}}
+	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, "")
+	if !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "generic exclusion catch-all") }) {
+		t.Fatalf("findings = %v, want catch-all rejection", findings)
+	}
+	cur[0].Title = "Cloud Upload"
+	if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, ""); slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "catch-all") }) {
+		t.Fatalf("specific requirement was treated as a catch-all: %v", findings)
+	}
+}
+
 func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{
 		{ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{

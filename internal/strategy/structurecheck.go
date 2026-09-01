@@ -120,6 +120,11 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 			if priority == "must" && permissiveOnlyRequirement(s.Body) {
 				out = append(out, fmt.Sprintf("%s says the capability is optional (`may` or `not required`) but retains **Priority:** must — make the body and Priority agree", s.ID))
 			}
+			if priority == "wont" && genericExclusionTitle(s.Title) {
+				if n := topLevelBulletCount(s.Body); n > 1 {
+					out = append(out, fmt.Sprintf("%s is a generic exclusion catch-all with %d independent bullets — split each excluded behavior into its own requirement so a later decision can transform it without changing unrelated exclusions", s.ID, n))
+				}
+			}
 		}
 		// Every Implements: target must exist in the project's documents;
 		// an id that is not there is a dangling reference the spine will
@@ -184,6 +189,22 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+func genericExclusionTitle(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	return title == "out of scope" || title == "exclusions" ||
+		strings.HasPrefix(title, "out of scope:") || strings.HasPrefix(title, "exclusions:")
+}
+
+func topLevelBulletCount(body string) int {
+	n := 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+			n++
+		}
+	}
+	return n
 }
 
 func permissiveOnlyRequirement(body string) bool {
