@@ -94,6 +94,21 @@ func TestStructureThatDoesNotConvergeFailsClosed(t *testing.T) {
 	}
 }
 
+func TestNumericPaddingChangeDoesNotLookLikeADeletedSection(t *testing.T) {
+	prevParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-0010 — Clipboard confirmation\n\nOld.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	curParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-010 — Clipboard confirmation\n\nRevised.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := structureFindings(prevParsed.([]agent.Section), curParsed.([]agent.Section), "markdown_sections:REQ", nil, true, "")
+	if len(findings) != 0 {
+		t.Fatalf("padding-only identity change produced findings: %v", findings)
+	}
+}
+
 func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	baseText := "# Plan\n\n## M-001 — Setup\n\n### T-001 — Build\n\nold setup\n\n## M-002 — UI\n\n### T-002 — Window\n\nkeep this exactly"
 	base := sectioned(baseText,

@@ -245,12 +245,13 @@ func parseHeading(line, marker, prefix string) (id, title string, ok bool) {
 		if !validID(rest, prefix) {
 			return "", "", false
 		}
-		return rest, "", true
+		return canonicalID(rest, prefix), "", true
 	}
 	id = rest[:end]
 	if !validID(id, prefix) {
 		return "", "", false
 	}
+	id = canonicalID(id, prefix)
 	title = strings.TrimSpace(rest[end:])
 	title = strings.TrimPrefix(title, "—")
 	title = strings.TrimPrefix(title, "–")
@@ -286,8 +287,22 @@ func validID(id, prefix string) bool {
 	if !ok || rest == "" {
 		return false
 	}
-	_, err := strconv.Atoi(rest)
-	return err == nil
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalID(id, prefix string) string {
+	rest, _ := strings.CutPrefix(id, prefix+"-")
+	n, _ := strconv.Atoi(rest)
+	width := 3
+	if prefix == "M" {
+		width = 2
+	}
+	return fmt.Sprintf("%s-%0*d", prefix, width, n)
 }
 
 // parseSectionFields extracts `**Key:** value` lines and the Implements edge.

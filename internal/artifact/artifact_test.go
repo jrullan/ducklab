@@ -80,6 +80,19 @@ func TestParseSections(t *testing.T) {
 	}
 }
 
+func TestParseSectionsCanonicalizesNumericPadding(t *testing.T) {
+	doc, err := Parse("## REQ-0010 — Clipboard confirmation\n\nBody.\n", KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Sections) != 1 || doc.Sections[0].ID != "REQ-010" {
+		t.Fatalf("sections = %+v, want canonical REQ-010", doc.Sections)
+	}
+	if body := RenderBody(doc); !strings.HasPrefix(body, "## REQ-010 — Clipboard confirmation") {
+		t.Fatalf("rendered body was not canonicalized:\n%s", body)
+	}
+}
+
 // The Implements line is the traceability edge; losing it silently would make
 // the spine wrong rather than absent.
 func TestImplementsEdges(t *testing.T) {

@@ -198,6 +198,17 @@ Body of the second.
 	}
 }
 
+func TestMarkdownSectionsCanonicalizeNumericPadding(t *testing.T) {
+	parsed, err := ParseContract("markdown_sections:REQ", "## REQ-0010 — Clipboard confirmation\n\nBody.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secs := parsed.([]Section)
+	if len(secs) != 1 || secs[0].ID != "REQ-010" {
+		t.Fatalf("sections = %+v, want canonical REQ-010", secs)
+	}
+}
+
 func TestPlanManifestContractRejectsIncompleteTopology(t *testing.T) {
 	valid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"produces":["build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
 	parsed, err := ParseContract("json:plan_manifest", valid)

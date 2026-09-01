@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -337,13 +338,37 @@ func parseSectionHeading(line, prefix string) (id, title string, ok bool) {
 	// The id runs to the first space.
 	idEnd := strings.IndexByte(rest, ' ')
 	if idEnd < 0 {
-		return rest, "", true
+		id, ok = canonicalContractID(rest, prefix)
+		return id, "", ok
 	}
-	id = rest[:idEnd]
+	id, ok = canonicalContractID(rest[:idEnd], prefix)
+	if !ok {
+		return "", "", false
+	}
 	title = strings.TrimSpace(rest[idEnd:])
 	title = strings.TrimPrefix(title, "—")
 	title = strings.TrimPrefix(title, "-")
 	return id, strings.TrimSpace(title), true
+}
+
+// canonicalContractID makes numeric identity independent of harmless zero
+// padding. Small models occasionally count 009, 0010, 011; the next revision
+// then writes 010 and a byte-oriented structure check falsely reports that
+// the section disappeared.
+func canonicalContractID(id, prefix string) (string, bool) {
+	rest, ok := strings.CutPrefix(id, prefix+"-")
+	if !ok || rest == "" {
+		return "", false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 {
+		return "", false
+	}
+	width := 3
+	if prefix == "M" {
+		width = 2
+	}
+	return fmt.Sprintf("%s-%0*d", prefix, width, n), true
 }
 
 // extractJSONObject pulls the JSON object out of a model response.
