@@ -24,10 +24,12 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	base, _ := artifact.Load(root, artifact.KindSpec)
 
 	var prompts []string
+	var scriptNames []string
 	res, err := runSectioned(context.Background(), Params{
-		ProjectRoot: root, Stage: Spec, RunID: "r-s", Mode: "council", // council asked, solo delivered
+		ProjectRoot: root, Stage: Spec, RunID: "r-s", Mode: "council",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
 			prompts = append(prompts, prompt)
+			scriptNames = append(scriptNames, script.Name)
 			switch len(prompts) {
 			case 1: // triage: touch SPEC-002, add one
 				return "SPEC-002\nNEW: Exercise search\n", nil
@@ -53,6 +55,9 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	}
 	if len(prompts) != 3 {
 		t.Fatalf("calls = %d, want triage + one per section", len(prompts))
+	}
+	if strings.Join(scriptNames, ",") != "solo,council,council" {
+		t.Fatalf("sectioned modes = %v, want solo triage then reviewed section passes", scriptNames)
 	}
 	got := res.Proposed
 	if len(got.Sections) != 4 {

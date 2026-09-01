@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -21,9 +22,9 @@ import (
 // tokens becomes coherence over eight hundred, N independent times, and the
 // conversation never grows because there is no conversation to grow.
 //
-// Solo by construction whatever mode was asked: a council over every
-// section would multiply calls for a document whose real reviewer is the
-// human at the gate.
+// Triage is solo because it writes no document. Each selected section keeps
+// the requested mode: a council means the isolated replacement is reviewed
+// before composition, rather than silently downgrading the user's choice.
 
 // sectionedPassCap bounds one update's visits. A triage that names more
 // sections than this is redesign wearing an update's clothes.
@@ -74,7 +75,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			continue
 		}
 		prompt := buildSectionPassPrompt(kind, ask, sec)
-		reply, err := p.Execute(ctx, soloPass(prefix, pass), prompt)
+		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics), prompt)
 		pass++
 		if err != nil {
 			return nil, err
@@ -99,7 +100,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			return nil, err
 		}
 		prompt := buildNewSectionPassPrompt(kind, ask, &proposed, title, prefix)
-		reply, err := p.Execute(ctx, soloPass(prefix, pass), prompt)
+		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics), prompt)
 		pass++
 		if err != nil {
 			return nil, err
@@ -134,6 +135,17 @@ func soloPass(prefix string, pass int) *strategy.Script {
 	script := strategy.ArtifactScript(prefix, "solo", nil)
 	for i := range script.Turns {
 		script.Turns[i].Contract = ""
+	}
+	script.TurnIndexBase = pass * 10
+	return script
+}
+
+func sectionPass(prefix string, pass int, mode string, critics []config.DucklingID) *strategy.Script {
+	script := strategy.ArtifactScript(prefix, mode, critics)
+	for i := range script.Turns {
+		if script.Turns[i].Role == config.RoleArchitect {
+			script.Turns[i].Contract = ""
+		}
 	}
 	script.TurnIndexBase = pass * 10
 	return script
