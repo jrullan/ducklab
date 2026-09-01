@@ -199,11 +199,17 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 		"'not required' removes a mandatory constraint; it does NOT delete or prohibit the "+
 		"capability. Preserve it as optional and state the alternative path unless the human "+
 		"explicitly asks to remove/forbid it.\n"+
+		"- Preserve the force of the human's decision: 'shall', 'must', and 'required' are "+
+		"mandatory and use **Priority:** must; never weaken them to should/could. Optional or "+
+		"'may' behavior is not mandatory.\n"+
 		"- Before ADDING, check the outline and read any section that already names the same "+
 		"capability, including an out-of-scope or opposite decision. Transform that EXISTING "+
 		"section instead. Never both change an existing section and add another section for "+
 		"the same requested behavior; add only a distinct, independently testable behavior "+
 		"that no existing section represents.\n"+
+		"- A changed section keeps only fields that belong to that section. Never copy an "+
+		"Assumption or other field from a different section; add a new field only when the "+
+		"human request or this section's behavior requires it.\n"+
 		"- To CHANGE a section, emit it in full under its EXISTING id: ## %s-012 — Title.\n"+
 		"- To DELETE an existing section, emit only its existing H2 heading followed by "+
 		"**Delete:** yes. Omitting it does NOT delete it, and prose such as REMOVED has no effect.\n"+
