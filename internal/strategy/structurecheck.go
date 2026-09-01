@@ -564,7 +564,18 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 		}
 	}
 	idRE := regexp.MustCompile(`[A-Z]+-\d+`)
+	consumerFindingRE := regexp.MustCompile(`^(T-\d+)\s+consumes\b`)
 	parentsOf := func(f string) []string {
+		// A missing dependency is repaired on the consumer. The producer id is
+		// context explaining which edge is absent, not an alternative writable
+		// endpoint. Treating both endpoints as peers made a T-008 finding select
+		// M-05 (the producer's milestone), while T-008 itself lived in M-06; the
+		// bounded patch could then never express the only valid correction.
+		if match := consumerFindingRE.FindStringSubmatch(f); len(match) == 2 {
+			parents := append([]string(nil), taskParents[match[1]]...)
+			sort.Strings(parents)
+			return parents
+		}
 		seen := map[string]bool{}
 		var parents []string
 		for _, id := range idRE.FindAllString(f, -1) {

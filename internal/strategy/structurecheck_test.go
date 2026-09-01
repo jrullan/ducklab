@@ -227,6 +227,25 @@ func TestStructureRepairTargetsHighestCoverageSideOfCrossMilestoneFindings(t *te
 	}
 }
 
+func TestStructureRepairRoutesMissingDependencyToConsumerMilestone(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-05", Body: "### T-006 — Overlay\n### T-007 — Selection"},
+		agent.Section{ID: "M-06", Body: "### T-008 — Main"},
+	)
+	findings := []string{
+		"T-007 consumes file:src/ui/overlay_window.h produced by T-006 but has no **Depends on:** T-006",
+		"T-008 consumes file:src/ui/overlay_window.h produced by T-006 but has no **Depends on:** T-006",
+	}
+	batch, ids := structureRepairBatch(findings, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-05"}) || !slices.Equal(batch, findings[:1]) {
+		t.Fatalf("first dependency repair = %v for %v, want only T-007 in M-05", batch, ids)
+	}
+	batch, ids = structureRepairBatch(findings[1:], sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-06"}) || !slices.Equal(batch, findings[1:]) {
+		t.Fatalf("remaining dependency repair = %v for %v, want T-008 in M-06", batch, ids)
+	}
+}
+
 func TestStructureRepairBatchesIndependentMissingFields(t *testing.T) {
 	base := sectioned("",
 		agent.Section{ID: "SPEC-001", Body: "core"},
