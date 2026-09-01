@@ -21,6 +21,18 @@ func TestStructureCheckFlagsSubNumberedHeadings(t *testing.T) {
 	}
 }
 
+func TestStructureCheckFlagsInlineSectionDeclarations(t *testing.T) {
+	raw := "## REQ-001 — Capture\n\nBody.\n\n## Out of Scope\n\n**REQ-013 — File saving** — excluded. **Priority:** wont\n\n- REQ-014 — Cloud upload\n"
+	cur := []agent.Section{{ID: "REQ-001", Title: "Capture", Body: "Body."}}
+	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, raw)
+	joined := strings.Join(findings, "\n")
+	for _, id := range []string{"REQ-013", "REQ-014"} {
+		if !strings.Contains(joined, id+" is written as inline/list text") {
+			t.Fatalf("missing malformed %s finding: %v", id, findings)
+		}
+	}
+}
+
 // A plan's parsed sections are milestones holding their tasks: one
 // Deliverables heading per task is correct, however many tasks a milestone
 // has. Counted per milestone, every plan was sent back (benchmark run 2).

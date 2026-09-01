@@ -150,6 +150,22 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 				out = append(out, fmt.Sprintf("%s contains a sub-numbered heading (%q): sub-numbered ids are not sections and their traceability is lost — give the item its own %s-NNN H2 id, or fold it into the section's body as bullets", s.ID, strings.TrimSpace(m), prefix))
 			}
 		}
+		// A visually titled item is still invisible when it is bold text or a
+		// list item under a generic H2. Corrida 27 put REQ-013..018 under
+		// "## Out of Scope" as `**REQ-013 — File saving**`; the reviewer saw
+		// six requirements while the parser and traceability spine saw none.
+		// Only flag title-shaped declarations whose id is absent from the
+		// parsed sections, so ordinary references to existing ids remain valid.
+		misplaced := regexp.MustCompile(`(?m)^[ \t]*(?:[-*+]\s+)?\*{0,2}(` + regexp.QuoteMeta(prefix) + `-\d+)\s+[—-]\s+`)
+		misplacedSeen := map[string]bool{}
+		for _, match := range misplaced.FindAllStringSubmatch(raw, -1) {
+			id := strings.ToUpper(match[1])
+			if seen[id] || misplacedSeen[id] {
+				continue
+			}
+			misplacedSeen[id] = true
+			out = append(out, fmt.Sprintf("%s is written as inline/list text instead of an H2 section — emit `## %s — Title`; otherwise the parser and traceability spine cannot see it", id, id))
+		}
 	}
 	for _, p := range prev {
 		if !seen[p.ID] {
