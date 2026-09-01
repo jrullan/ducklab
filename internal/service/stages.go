@@ -895,6 +895,9 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
 	proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	if req.Stage == "intake" {
+		proposalBlockers = append(proposalBlockers, amendmentCoverageFindings(req.From, result.Proposed)...)
+	}
 	if len(proposalBlockers) > 0 {
 		rs.run.PendingData["proposal_blockers"] = proposalBlockers
 		detail := fmt.Sprintf("proposal contains %d deterministic structure blocker(s): %s", len(proposalBlockers), strings.Join(proposalBlockers, "; "))

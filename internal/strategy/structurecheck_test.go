@@ -427,6 +427,15 @@ func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
 	}
 }
 
+func TestPlanTaskCannotImplementNone(t *testing.T) {
+	body := "### T-001 — Scaffold\n\n**Implements:** none\n\n**Produces:** Cargo.toml\n\n**Consumes:** none\n\n**Verification:** `cargo check`\n\n**Exercises:** Cargo.toml"
+	cur := []agent.Section{{ID: "M-01", Title: "Setup", Body: body}}
+	findings := structureFindings(nil, cur, "markdown_sections:M", nil, true, "## M-01 — Setup\n\n"+body)
+	if !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "cannot be none") }) {
+		t.Fatalf("findings = %v, want Implements none rejection", findings)
+	}
+}
+
 func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{
 		{ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{

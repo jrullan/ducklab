@@ -1158,6 +1158,7 @@ Rules:
 - Use exact file, directory, build-target, or capability names.
 - A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
 - Keep tasks small: at most three top-level deliverables when rendered.
+- Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
 - The next architect turn receives this validated manifest and renders the full plan.`
 

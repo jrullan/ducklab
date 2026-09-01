@@ -54,8 +54,11 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 				if !strings.HasPrefix(block.id, "T-") {
 					continue
 				}
-				if !strings.Contains(strings.ToLower(block.body), "**implements:**") {
+				implementsValue := strings.TrimSpace(markdownFieldValue(block.body, "Implements"))
+				if implementsValue == "" {
 					out = append(out, fmt.Sprintf("%s has no **Implements:** line", block.id))
+				} else if strings.EqualFold(implementsValue, "none") {
+					out = append(out, fmt.Sprintf("%s **Implements:** cannot be none — every task must deliver at least one accepted specification section", block.id))
 				}
 				if small {
 					if n := topLevelDeliverables(block.body); n > 3 {

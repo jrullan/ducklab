@@ -451,7 +451,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				prompt += "\n\n## Reviewed topology amendments\n\nThe manifest constrained the initial render, but the reviewer has now checked its semantics. Apply supported reviewer corrections even when they change a manifest-derived Implements, Produces, Consumes, Verification, Owns, or Depends on field. Preserve all unrelated topology. The revised, deterministically validated plan becomes authoritative."
 			}
 			if turn.Persona == PersonaCritic && strings.HasPrefix(kindOfContract(turn.Contract, script), "plan") {
-				prompt += "\n\nDucklab deterministically normalizes Toolchain entries to resolvable command and pkg-config module names. Treat normalized names such as `pkg-config:x11` as workspace facts; do not replace them with an OS package or library display name."
+				prompt += "\n\nDucklab deterministically normalizes Toolchain entries to resolvable command and pkg-config module names. Treat normalized names such as `pkg-config:x11` as workspace facts; do not replace them with an OS package or library display name. `Consumes` means a task reads or depends on an artifact; it does not claim or modify that artifact and cannot by itself create a lane collision. Ownership conflicts arise from overlapping `Owns` or multiple `Produces` entries. Every task must implement at least one accepted SPEC id; `Implements: none` is invalid."
 			}
 			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" {
 				prompt = fragmentCriticContext(prompt)
