@@ -75,7 +75,7 @@ func (t *VerifyRun) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *VerifyRun) Description() string {
-	return "Run the project's configured verification gate command."
+	return "Run the exact verification chain that decides this round: the task's Verification command, then the project's configured gate."
 }
 
 // Schema returns the argument schema.
@@ -111,13 +111,11 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	// real gate then failed on work it had been told was fine. A tool that
 	// answers a different question from the one being asked is worse than no
 	// tool.
-	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
+	gate, result, err := RunVerificationGate(ctx, ectx)
 	if err != nil {
 		return ErrorResult("verify_run: %v", err), nil
 	}
-	exitCode := res.ExitCode
-	result := fmt.Sprintf("gate: %s\ncmd: %s\nexit: %d\n%s", res.Gate, res.Command, exitCode, CapResult(res.Output, MaxToolResultBytes))
-	if exitCode != 0 {
+	if gate == "red" {
 		ectx.ConsecGateFails++
 		if ectx.ConsecGateFails >= GateFailLimit && ectx.OnDistress != nil {
 			ectx.OnDistress("failure_streak", map[string]interface{}{"count": ectx.ConsecGateFails})
@@ -131,6 +129,48 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 	}
 	ectx.ConsecGateFails = 0
 	return SuccessResult("%s", result), nil
+}
+
+// RunVerificationGate is the single verification path used by both
+// verify_run and the automatic end-of-round gate. TaskVerification goes first:
+// a task-local contract is part of the decision, not an optional hint.
+func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string, error) {
+	identity := verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID}
+	var taskLog string
+	if command := strings.TrimSpace(ectx.TaskVerification); command != "" {
+		res, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
+		}, identity)
+		if err != nil {
+			return "none", "", err
+		}
+		taskLog = "task verification:\n" + formatGateResult(res)
+		if !verify.IsGreen(res) {
+			return "red", taskLog, nil
+		}
+	}
+
+	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify, identity)
+	if err != nil {
+		return "none", "", err
+	}
+	projectLog := formatGateResult(res)
+	if taskLog != "" {
+		projectLog = taskLog + "\nproject verification:\n" + projectLog
+	}
+	switch {
+	case verify.IsGreen(res):
+		return "green", projectLog, nil
+	case verify.IsRed(res):
+		return "red", projectLog, nil
+	default:
+		return "none", projectLog, nil
+	}
+}
+
+func formatGateResult(res *verify.Result) string {
+	return fmt.Sprintf("gate: %s\ncmd: %s\nexit: %d\n%s",
+		res.Gate, res.Command, res.ExitCode, CapResult(res.Output, MaxToolResultBytes))
 }
 
 // GitStatus shows git status.

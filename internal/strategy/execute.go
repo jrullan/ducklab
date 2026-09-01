@@ -938,14 +938,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// outcome, green or red. A consumer taking the latest "gate" event
 			// got whichever happened to come last, and the desktop's gate card
 			// showed the right thing only because of event ordering.
-			emit(params, "round_gate", map[string]interface{}{"result": gate, "round": round})
+			emit(params, "round_gate", map[string]interface{}{
+				"result": gate, "round": round, "log": firstNStr(log, 4000),
+			})
 			if gate == "red" {
 				redGateStreak++
 			} else {
 				redGateStreak = 0
 			}
 			evidence.RedGateStreak = redGateStreak
-			_ = log
 		}
 		// Whether this round actually touched the tree. It used to be hardcoded
 		// true, which was never read and never true in the interesting case.

@@ -151,6 +151,10 @@ type ExecContext struct {
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
 	Verify config.Verify
+	// TaskVerification is the task's explicit Verification field. Build runs
+	// execute it before Verify, so verify_run must do the same or it can show a
+	// green gate immediately before the round gate turns red.
+	TaskVerification string
 	// ShellEnv is the environment for shell and skill commands. Nil means the
 	// engine's own, which is the default.
 	ShellEnv []string

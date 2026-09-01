@@ -52,6 +52,36 @@ func TestVerifyRunReportsAFailingGateAsAnError(t *testing.T) {
 	}
 }
 
+func TestVerifyRunIncludesTheTaskVerificationThatDecidesTheRound(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:      t.TempDir(),
+		TaskVerification: "echo task-gate-failed; exit 7",
+		Verify:           config.Verify{Mode: "custom", Custom: "echo project-gate-ran", TimeoutS: 30},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "task-gate-failed") {
+		t.Fatalf("task verification was not exposed as the deciding red gate: %s", res.Content)
+	}
+	if strings.Contains(res.Content, "project-gate-ran") {
+		t.Fatalf("project gate ran after the task gate had already failed: %s", res.Content)
+	}
+}
+
+func TestVerifyRunRunsTaskThenProjectWhenBothAreGreen(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:      t.TempDir(),
+		TaskVerification: "echo task-gate-ran",
+		Verify:           config.Verify{Mode: "custom", Custom: "echo project-gate-ran", TimeoutS: 30},
+	}
+	res, _ := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if res.IsError || !strings.Contains(res.Content, "task-gate-ran") || !strings.Contains(res.Content, "project-gate-ran") {
+		t.Fatalf("composite gate result = %s", res.Content)
+	}
+}
+
 // The description is where a model decides whether a tool is for it. The old
 // one-liner — "this pauses the run until answered" — read as a deterrent, and
 // the tool went unused while a model deliberated a question only the person

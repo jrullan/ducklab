@@ -1534,19 +1534,17 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 	// Build exec context
 	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
-		ProjectRoot:  root,
-		DocsRoot:     entry.Path,
-		RunID:        rs.run.ID,
-		Autonomy:     config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites: rs.run.UnsafeWrites,
-		ShellPolicy:  projCfg.Shell,
-		Verify:       projCfg.Verify,
-		Answers:      rs.answers(),
+		ProjectRoot:      root,
+		DocsRoot:         entry.Path,
+		RunID:            rs.run.ID,
+		Autonomy:         config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:     rs.run.UnsafeWrites,
+		ShellPolicy:      projCfg.Shell,
+		Verify:           projCfg.Verify,
+		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
+		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
-	}
-	if command := taskVerificationCommand(entry.Path, req.TaskID); command != "" {
-		ectx.Verify = config.Verify{Mode: "custom", Custom: command, TimeoutS: projCfg.Verify.TimeoutS}
 	}
 	rs.execCtx = ectx
 
@@ -1764,15 +1762,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 
 	root := runRoot(rs.run, entry.Path)
 	ectx := &tools.ExecContext{
-		ProjectRoot:  root,
-		DocsRoot:     entry.Path,
-		RunID:        rs.run.ID,
-		ProjectID:    rs.run.ProjectID,
-		Autonomy:     config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites: rs.run.UnsafeWrites,
-		ShellPolicy:  projCfg.Shell,
-		Verify:       projCfg.Verify,
-		Answers:      rs.answers(),
+		ProjectRoot:      root,
+		DocsRoot:         entry.Path,
+		RunID:            rs.run.ID,
+		ProjectID:        rs.run.ProjectID,
+		Autonomy:         config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:     rs.run.UnsafeWrites,
+		ShellPolicy:      projCfg.Shell,
+		Verify:           projCfg.Verify,
+		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
+		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
