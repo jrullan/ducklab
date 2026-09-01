@@ -155,16 +155,16 @@ func TestCouncilSkipsTheHumanTurnWhenUnattended(t *testing.T) {
 	}
 }
 
-// Three rounds at most: a rejected second-round candidate gets one more
+// Four rounds at most: a steadily converging candidate gets one final
 // reviewed repair, but the conversation remains bounded.
-func TestCouncilStopsAtThreeRounds(t *testing.T) {
+func TestCouncilStopsAtFourRounds(t *testing.T) {
 	rec := &recorder{}
 	params := councilParams(rec)
 	res, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Rounds > 3 {
+	if res.Rounds > 4 {
 		t.Errorf("ran %d rounds", res.Rounds)
 	}
 }
@@ -304,7 +304,7 @@ func TestCouncilOneRequestChangesOutvotesTheApprovals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Rounds != 3 {
+	if res.Rounds != 4 {
 		t.Errorf("ran %d rounds — unresolved request-changes must run to the bounded cap", res.Rounds)
 	}
 }

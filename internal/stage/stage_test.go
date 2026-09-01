@@ -450,11 +450,11 @@ func TestNoRevisionMeansTheOrdinaryPrompt(t *testing.T) {
 // draft that converges and buys another lap on one that does not.
 func TestRoundsOverridesTheScriptsLimit(t *testing.T) {
 	council := strategy.ArtifactScript("REQ", "council", nil)
-	if council.MaxRounds != 3 {
+	if council.MaxRounds != 4 {
 		t.Fatalf("test assumption broken: council MaxRounds = %d", council.MaxRounds)
 	}
 	// Zero leaves the script's own answer alone.
-	for _, c := range []struct{ rounds, want int }{{0, 3}, {1, 1}, {4, 4}} {
+	for _, c := range []struct{ rounds, want int }{{0, 4}, {1, 1}, {5, 5}} {
 		s := strategy.ArtifactScript("REQ", "council", nil)
 		if c.rounds > 0 {
 			s.MaxRounds = c.rounds

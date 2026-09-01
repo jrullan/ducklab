@@ -138,15 +138,14 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 	return &Script{
 		Name:  "council",
 		Turns: turns,
-		// Three rounds at most. The third is dormant when a reviewer approves
-		// early, but gives a small seat one reviewed repair after the second
-		// critic discovers defects that the first critic missed. Neocapture
-		// corrida 24 reached its final read-only review with three homogeneous
-		// traceability fixes still open; stopping at two rounds made an otherwise
-		// local repair irrecoverable. The round's verdict is the WORST across
+		// Four rounds at most. Later rounds are dormant when a reviewer approves
+		// early. Neocapture corrida 31 reached the final read-only review with one
+		// localized ownership defect after steadily reducing 6 findings to 2 to
+		// 5 to 1; a fourth reviewed repair lets that converging document finish
+		// without making successful councils longer. The round's verdict is the WORST across
 		// critics — one request-changes among approvals is a request for changes.
 		Until:     `verdict == "approve"`,
-		MaxRounds: 3,
+		MaxRounds: 4,
 		// Round 2 opens on the revision round 1 closed with: re-drafting it
 		// first cost every council an architect turn per extra round
 		// (benchmark run 6: draft → critique → revision → draft again).

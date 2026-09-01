@@ -137,6 +137,38 @@ func capabilityStructureFindings(plan *artifact.Document) []string {
 	return out
 }
 
+// wontRequirementStructureFindings prevents a specification from turning an
+// explicit requirements exclusion into active work. A wont requirement may be
+// referenced by a spec section that is itself marked wont (to preserve the
+// decision and traceability), but never by an active section.
+func wontRequirementStructureFindings(projectRoot string, spec *artifact.Document) []string {
+	if spec == nil {
+		return nil
+	}
+	requirements, err := artifact.Load(projectRoot, artifact.KindRequirements)
+	if err != nil || requirements == nil {
+		return nil
+	}
+	wont := map[string]bool{}
+	for _, req := range requirements.Sections {
+		if strings.EqualFold(strings.TrimSpace(req.Field("priority")), "wont") {
+			wont[req.ID] = true
+		}
+	}
+	var findings []string
+	for _, sec := range spec.Sections {
+		if strings.EqualFold(strings.TrimSpace(sec.Field("priority")), "wont") {
+			continue
+		}
+		for _, reqID := range sec.Implements {
+			if wont[reqID] {
+				findings = append(findings, fmt.Sprintf("%s actively implements %s, but %s has Priority: wont — remove it from this active Implements line or record the exclusion in a spec section marked Priority: wont", sec.ID, reqID, reqID))
+			}
+		}
+	}
+	return findings
+}
+
 func installedPkgConfigModules() []string {
 	cmd := exec.Command("pkg-config", "--list-all")
 	out, err := cmd.Output()

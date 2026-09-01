@@ -65,6 +65,43 @@ func TestClosestCapabilityCorrectsPackageNamesToPkgConfigModules(t *testing.T) {
 	}
 }
 
+func TestActiveSpecCannotImplementAWontRequirement(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	requirements := "## REQ-001 — Required\n\n**Priority:** must\n\nDo it.\n\n## REQ-014 — Excluded\n\n**Priority:** wont\n\nDo not do it.\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "requirements.md"), []byte(requirements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := artifact.Parse("## SPEC-001 — Active\n\n**Implements:** REQ-001, REQ-014\n\nBuild it.\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := wontRequirementStructureFindings(dir, spec)
+	if len(findings) != 1 || !strings.Contains(findings[0], "SPEC-001 actively implements REQ-014") {
+		t.Fatalf("findings = %v", findings)
+	}
+}
+
+func TestWontSpecMayTraceAWontRequirement(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	requirements := "## REQ-014 — Excluded\n\n**Priority:** wont\n\nDo not do it.\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "requirements.md"), []byte(requirements), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := artifact.Parse("## SPEC-014 — Excluded\n\n**Priority:** wont\n\n**Implements:** REQ-014\n\nNot part of the implementation.\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := wontRequirementStructureFindings(dir, spec); len(findings) != 0 {
+		t.Fatalf("wont exclusion was treated as active work: %v", findings)
+	}
+}
+
 func TestTaskVerificationCommandIsTheBacktickedCommandOnly(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {

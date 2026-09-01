@@ -29,8 +29,8 @@ func TestACouncilsSecondRoundOpensOnTheRevision(t *testing.T) {
 	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
-	if architectTurns != 4 {
-		t.Fatalf("architect turns = %d, want 4 (draft plus three revisions) — not a re-draft at the top of a later round", architectTurns)
+	if architectTurns != 5 {
+		t.Fatalf("architect turns = %d, want 5 (draft plus four revisions) — not a re-draft at the top of a later round", architectTurns)
 	}
 	carried := false
 	for _, e := range events {
@@ -186,10 +186,10 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewerTurns != 4 {
-		t.Fatalf("reviewer turns = %d, want three round reviews plus final verification", reviewerTurns)
+	if reviewerTurns != 5 {
+		t.Fatalf("reviewer turns = %d, want four round reviews plus final verification", reviewerTurns)
 	}
-	if !strings.Contains(finalPrompt, "Revision 4.") || !strings.Contains(finalPrompt, "verification only") {
+	if !strings.Contains(finalPrompt, "Revision 5.") || !strings.Contains(finalPrompt, "verification only") {
 		t.Errorf("final reviewer did not receive the closing revision:\n%s", finalPrompt)
 	}
 	if !strings.Contains(finalPrompt, "Open finding ledger") || !strings.Contains(finalPrompt, "REQ-011 still contradicts saving") ||
