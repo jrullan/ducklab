@@ -33,7 +33,7 @@ type StageRequest struct {
 	// From seeds intake with an existing document instead of interviewing.
 	From string `json:"from"`
 	// Rounds overrides the script's own limit. Zero means the script decides,
-	// which is two for a council.
+	// which is four for a document council.
 	Rounds int `json:"rounds"`
 	// Revise is what to change about the draft already on the table. Set only
 	// when revising: it turns the run from "write this document" into "edit
