@@ -48,22 +48,27 @@ func materializeCandidate(current *artifact.Document, texts []string, candidate 
 	return &out, remap, kept, dropped, nil
 }
 
-func linkCandidateIntent(projectRoot, runID string, current *artifact.Document, candidate *agent.Outcome) (*agent.Outcome, error) {
+func linkCandidateIntent(projectRoot, runID string, current *artifact.Document, candidate *agent.Outcome) (*agent.Outcome, []string, error) {
 	intentID, err := artifact.IntentIDForRun(projectRoot, runID)
 	if err != nil || intentID == "" {
-		return candidate, err
+		return candidate, nil, err
 	}
 	doc, err := artifact.Parse(candidate.Text, artifact.KindRequirements)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	artifact.LinkRequirementsDocument(current, doc, intentID)
+	// Provenance can make two previously distinct sections identical: one
+	// carried the intent edge and the other did not. Dedupe after every
+	// deterministic mutation, not before it, so the critic and gate share the
+	// fixed point rather than two successive forms of the same candidate.
+	dropped := dedupeSections(doc)
 	text := artifact.RenderBody(doc)
 	parsed, err := agent.ParseContract("markdown_sections:REQ", text)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := *candidate
 	out.Text, out.Parsed = text, parsed
-	return &out, nil
+	return &out, dropped, nil
 }

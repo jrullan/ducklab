@@ -1034,12 +1034,24 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 			return err
 		}
 		duckling := resolveDuckling(params, turn)
-		prompt, err := buildPrompt(&turn, params, result.Transcript, nil, nil, "", nil, nil, nil)
+		promptTranscript := result.Transcript
+		if script.MaterializeCandidate != nil {
+			promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
+		}
+		prompt, err := buildPrompt(&turn, params, promptTranscript, nil, nil, "", nil, nil, nil)
 		if err != nil {
 			return err
 		}
 		prompt += "\n\n## Final candidate under review\n\n" + candidate.Text +
 			"\n\nThis is verification only. Return a verdict on this exact candidate; no architect turn follows automatically."
+		if params.ExecContext != nil {
+			if kind := kindOfContract(turn.Contract, script); kind != "" {
+				if params.ExecContext.DraftUnderReview == nil {
+					params.ExecContext.DraftUnderReview = map[string]string{}
+				}
+				params.ExecContext.DraftUnderReview[kind] = candidate.Text
+			}
+		}
 
 		index := script.TurnIndexBase + len(script.Turns) + reviewers
 		emit(params, "turn_start", map[string]interface{}{

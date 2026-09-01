@@ -211,10 +211,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			return nil, err
 		}
 		if p.Stage == Intake && !p.Adopt {
-			materialized, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+			var linkedDropped []string
+			materialized, linkedDropped, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
 			if err != nil {
 				return nil, err
 			}
+			dropped = append(dropped, linkedDropped...)
 		}
 		if p.OnEvent != nil && len(kept) > 0 {
 			p.OnEvent("sections_folded", map[string]interface{}{
@@ -247,10 +249,12 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		return nil, err
 	}
 	if p.Stage == Intake && !p.Adopt {
-		materialized, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
+		var linkedDropped []string
+		materialized, linkedDropped, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
 		if err != nil {
 			return nil, err
 		}
+		dropped = append(dropped, linkedDropped...)
 	}
 	produced, err := artifact.Parse(materialized.Text, kind)
 	if err != nil {

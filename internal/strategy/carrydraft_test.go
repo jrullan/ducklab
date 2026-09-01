@@ -213,6 +213,9 @@ func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
 	if !strings.Contains(finalCandidate, canonical) || strings.Contains(finalCandidate, "uncanonical body") {
 		t.Fatalf("final reviewer did not receive the materialized candidate (reviewers=%d rounds=%d verdict=%s):\n%s", reviewerTurns, res.Rounds, res.State.Verdict, finalPrompt)
 	}
+	if strings.Contains(finalPrompt, "uncanonical body") {
+		t.Fatalf("final reviewer also received superseded architect drafts:\n%s", finalPrompt)
+	}
 	if res.Text != canonical || res.CandidateDigest != documentCandidateDigest(canonical) {
 		t.Fatalf("result text/digest = %q/%q", res.Text, res.CandidateDigest)
 	}

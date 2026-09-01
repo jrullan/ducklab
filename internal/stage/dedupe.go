@@ -20,7 +20,7 @@ func dedupeSections(doc *artifact.Document) (dropped []string) {
 	seenText := map[string]string{}
 	var kept []artifact.Section
 	for _, s := range doc.Sections {
-		key := strings.ToLower(strings.TrimSpace(s.Title)) + "\x00" + strings.TrimSpace(s.Body)
+		key := strings.ToLower(strings.TrimSpace(s.Title)) + "\x00" + semanticSectionBody(s.Body)
 		switch {
 		case s.ID != "" && seenID[s.ID]:
 			dropped = append(dropped, s.ID+" (id already used)")
@@ -40,4 +40,14 @@ func dedupeSections(doc *artifact.Document) (dropped []string) {
 		doc.Raw = artifact.Render(doc)
 	}
 	return dropped
+}
+
+func semanticSectionBody(body string) string {
+	var lines []string
+	for _, line := range strings.Split(body, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
