@@ -245,6 +245,9 @@ func TestCouncilMaterializesCandidateBeforeFindingFreeFirstReview(t *testing.T) 
 	if !strings.Contains(authoritative, canonical) || strings.Contains(authoritative, "raw body") {
 		t.Fatalf("first reviewer did not receive the materialized candidate:\n%s", reviewPrompt)
 	}
+	if strings.Contains(reviewPrompt, "### Turn 1 — architect") {
+		t.Fatalf("reviewer also received the superseded architect wire response:\n%s", reviewPrompt)
+	}
 	if res.Text != canonical || res.CandidateDigest != documentCandidateDigest(canonical) {
 		t.Fatalf("fast-path result text/digest = %q/%q", res.Text, res.CandidateDigest)
 	}

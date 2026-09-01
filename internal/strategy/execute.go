@@ -437,7 +437,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					return result, err
 				}
 			}
-			prompt, err := buildPrompt(&turn, params, result.Transcript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			promptTranscript := result.Transcript
+			if turn.Persona == PersonaCritic && script.MaterializeCandidate != nil {
+				// The authoritative candidate below supersedes architect wire
+				// fragments. Showing both made a small reviewer call REQ-900 and
+				// its assigned REQ-016 duplicate requirements, buying a needless
+				// second round. Keep human context; the existing OmitRole still
+				// hides fellow reviewers for decorrelation.
+				promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
+			}
+			prompt, err := buildPrompt(&turn, params, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
 			// A fragment council's transcript contains the individual patches,
 			// newest last. That is useful history but it is not the document: a
 			// small critic treated the latest one-section repair as the complete
@@ -1072,6 +1081,19 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 func documentCandidateDigest(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return fmt.Sprintf("%x", sum[:8])
+}
+
+func transcriptWithoutRole(in *conv.Transcript, role config.Role) *conv.Transcript {
+	out := &conv.Transcript{}
+	if in == nil {
+		return out
+	}
+	for _, entry := range in.Entries {
+		if entry.Role != role {
+			out.Entries = append(out.Entries, entry)
+		}
+	}
+	return out
 }
 
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
