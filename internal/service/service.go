@@ -3700,6 +3700,14 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	if _, err := s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
+	// Accept answers a gate; it must never masquerade as "continue" for a
+	// distress pause. Neocapture corrida 34 followed the CLI's budget-pause
+	// hint and accepted a half-finished plan run: it committed the record but
+	// had no plan proposal to promote. Budget/provider/error pauses preserve
+	// work specifically so the person can fix or lift the condition and resume.
+	if rs.run.Status == "paused" && rs.run.PendingKind != "gate" {
+		return nil, fmt.Errorf("run %q is paused for %s, not awaiting acceptance — resolve the condition and resume, or abort", id, rs.run.PendingKind)
+	}
 	if err := s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
 		return nil, err
 	}

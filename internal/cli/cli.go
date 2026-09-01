@@ -957,6 +957,23 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		fmt.Printf("run %s resumed (status: %s)\n", run["id"], run["status"])
 		return followCurrentRun(client, args[0])
+	case "lift":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: ducklab run lift <run-id> tokens|usd|turns|wallclock|calls")
+			return 2
+		}
+		info, err := daemon.ReadEngineJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "engine not running")
+			return 9
+		}
+		run, err := engineclt.New(info).RunBudgetLift(args[0], args[1], "human")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("lifted %s cap for run %s (status: %v); resume with: ducklab run resume %s\n", args[1], args[0], run["status"], args[0])
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "unknown run command: %s\n", verb)
 		return 2
@@ -1156,7 +1173,17 @@ func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *e
 			fmt.Printf("      ducklab run diff %s --tests\n", runID)
 		case "human_needed":
 			status = "paused"
-			fmt.Printf("  ⏸ waiting for you (%v) — ducklab run accept %s\n", e.Data["kind"], runID)
+			kind := fmt.Sprint(e.Data["kind"])
+			switch kind {
+			case "gate":
+				fmt.Printf("  ⏸ waiting for you (gate) — ducklab run accept %s\n", runID)
+			case "budget":
+				fmt.Printf("  ⏸ waiting for you (budget) — lift the binding cap, then resume; for example: ducklab run lift %s wallclock\n", runID)
+			case "question":
+				fmt.Printf("  ⏸ waiting for you (question) — ducklab run answer %s --answer \"...\"\n", runID)
+			default:
+				fmt.Printf("  ⏸ waiting for you (%s) — fix the condition, then ducklab run resume %s\n", kind, runID)
+			}
 			return false
 		case "checkpoint":
 			if e.Data["status"] == "paused" {

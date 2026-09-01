@@ -65,6 +65,9 @@ func TestABudgetDeathPausesWithTheWorkInPlace(t *testing.T) {
 	if got := runNext(run); len(got) == 0 || got[0] != "resume" {
 		t.Errorf("next = %v, want resume first", got)
 	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "paused for budget") {
+		t.Fatalf("budget-paused run was accepted instead of requiring resume: %v", err)
+	}
 
 	// Abort is still the exit that restores.
 	if err := s.RunAbort(context.Background(), run.ID); err != nil {

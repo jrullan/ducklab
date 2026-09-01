@@ -131,6 +131,9 @@ func capabilityStructureFindings(plan *artifact.Document) []string {
 					seen[key] = true
 					out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable; installed pkg-config metadata suggests pkg-config:%s — use the module name, not the OS package name", sec.ID, item, suggestion))
 				}
+			} else if !seen[m[1]+"|"] {
+				seen[m[1]+"|"] = true
+				out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable in installed pkg-config metadata — verify the dependency kind or module name, or remove it", sec.ID, item))
 			}
 		}
 	}
@@ -186,24 +189,18 @@ func installedPkgConfigModules() []string {
 }
 
 func closestCapability(want string, modules []string) string {
-	best, bestDistance := "", 1<<30
+	// Suggestions are corrections, not recommendations. Only collapse the
+	// spelling differences normally introduced by distro package names
+	// (libgtk-4 -> gtk4, libx11 -> x11). A fuzzy nearest neighbour turned
+	// libtoml into Qt6Xml in Neocapture corrida 34, which is syntactically
+	// close but semantically unrelated and actively misled the architect.
+	wantKey := capabilityKey(want)
 	for _, candidate := range modules {
-		d := editDistance(strings.ToLower(want), strings.ToLower(candidate))
-		if normalized := editDistance(capabilityKey(want), capabilityKey(candidate)); normalized < d {
-			d = normalized
-		}
-		if d < bestDistance {
-			best, bestDistance = candidate, d
+		if wantKey != "" && capabilityKey(candidate) == wantKey {
+			return candidate
 		}
 	}
-	limit := 3
-	if len(want) > 10 {
-		limit = 5
-	}
-	if bestDistance > limit {
-		return ""
-	}
-	return best
+	return ""
 }
 
 func capabilityKey(s string) string {

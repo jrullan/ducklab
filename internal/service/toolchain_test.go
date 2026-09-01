@@ -57,11 +57,14 @@ func TestToolchainCapabilitiesIncludePkgConfigModules(t *testing.T) {
 }
 
 func TestClosestCapabilityCorrectsPackageNamesToPkgConfigModules(t *testing.T) {
-	modules := []string{"gtk4", "x11", "gdk-pixbuf-2.0"}
+	modules := []string{"gtk4", "x11", "gdk-pixbuf-2.0", "Qt6Xml"}
 	for input, want := range map[string]string{"libgtk-4": "gtk4", "libx11": "x11"} {
 		if got := closestCapability(input, modules); got != want {
 			t.Errorf("closestCapability(%q) = %q, want %q", input, got, want)
 		}
+	}
+	if got := closestCapability("libtoml", modules); got != "" {
+		t.Errorf("closestCapability(libtoml) = %q, want no semantically unsupported suggestion", got)
 	}
 }
 
