@@ -141,7 +141,7 @@ func soloPass(prefix string, pass int) *strategy.Script {
 }
 
 func sectionPass(prefix string, pass int, mode string, critics []config.DucklingID) *strategy.Script {
-	script := strategy.ArtifactScript(prefix, mode, critics)
+	script := artifactUpdateScript(prefix, mode, critics)
 	for i := range script.Turns {
 		if script.Turns[i].Role == config.RoleArchitect {
 			script.Turns[i].Contract = ""

@@ -74,6 +74,15 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	}
 }
 
+func TestSectionedPlanUpdateDoesNotRegenerateManifest(t *testing.T) {
+	script := sectionPass("M", 1, "council", nil)
+	for _, turn := range script.Turns {
+		if turn.Persona == strategy.PersonaPlanManifest || turn.Contract == "json:plan_manifest" {
+			t.Fatalf("plan update retained first-draft manifest turn: %+v", turn)
+		}
+	}
+}
+
 func TestRequirementsSectionPassCarriesAmendmentInvariants(t *testing.T) {
 	prompt := buildSectionPassPrompt(artifact.KindRequirements, "Saving shall be implemented.", &artifact.Section{
 		ID: "REQ-007", Title: "File saving", Body: "**Priority:** wont\nNo saving.",

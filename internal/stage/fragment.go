@@ -41,7 +41,7 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	if err != nil {
 		return nil, err
 	}
-	script := strategy.ArtifactScript(prefix, p.Mode, p.Critics)
+	script := artifactUpdateScript(prefix, p.Mode, p.Critics)
 	script.FragmentPrefix = prefix
 	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
 		if candidate == nil {
@@ -144,6 +144,26 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: proposed, Raw: raw}, nil
+}
+
+// artifactUpdateScript removes plan's topology-manifest turn from updates.
+// The manifest constrains a first plan before Markdown exists. A fragment or
+// section-wise revision already has a checkpointed topology; seating that
+// persona again gives one turn two incompatible jobs (JSON manifest and
+// Markdown fragment) and fails before the actual edit can run.
+func artifactUpdateScript(prefix, mode string, critics []config.DucklingID) *strategy.Script {
+	script := strategy.ArtifactScript(prefix, mode, critics)
+	if prefix != artifact.KindPlan.Prefix() {
+		return script
+	}
+	turns := script.Turns[:0]
+	for _, turn := range script.Turns {
+		if turn.Persona != strategy.PersonaPlanManifest {
+			turns = append(turns, turn)
+		}
+	}
+	script.Turns = turns
+	return script
 }
 
 // buildFragmentPrompt is compact by design: the document as an OUTLINE plus
