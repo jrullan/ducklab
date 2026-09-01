@@ -214,6 +214,38 @@ func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	}
 }
 
+func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-008"],"produces":["file:meson.build"],"consumes":[],"verification":"meson compile -C build"}]}]}`
+	manifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planText := func(spec string) string {
+		return "## M-01 — Setup\n\n### T-001 — Build\n\nBuild the application entry point.\n\n**Deliverables:**\n- A compilable application.\n\n**Implements:** " + spec + "\n\n**Produces:** file:meson.build\n\n**Consumes:** none\n\n**Verification:** `meson compile -C build`\n\n**Exercises:** file:meson.build\n\n**Out of scope:** Packaging.\n\n**Assumption:** Meson is installed."
+	}
+	parsedPlan := func(text string) *agent.Outcome {
+		parsed, parseErr := agent.ParseContract("markdown_sections:M", text)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		return &agent.Outcome{Text: text, Parsed: parsed}
+	}
+	rec := &recorder{}
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
+		&agent.Outcome{Text: manifestText, Parsed: manifest},
+		parsedPlan(planText("SPEC-008")),
+		verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "draft", Issue: "task maps to exclusions", Fix: "use SPEC-001"}),
+		parsedPlan(planText("SPEC-001")),
+		verdictOutcome("approve"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Text, "**Implements:** SPEC-001") || strings.Contains(res.Text, "**Implements:** SPEC-008") {
+		t.Fatalf("reviewed semantic correction was restored from the manifest:\n%s", res.Text)
+	}
+}
+
 // A council with three ticked boxes seats three ducklings. For as long as the
 // council had exactly two chairs, the third box saved fine and did nothing —
 // a person ticked k3, sonnet and luna, and luna watched from the gallery.

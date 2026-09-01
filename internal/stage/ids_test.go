@@ -247,6 +247,16 @@ func TestPlanTaskIDsRenumbersTaskReferencesInBodyProse(t *testing.T) {
 	}
 }
 
+func TestAssignIDsUsesCanonicalMilestoneWidth(t *testing.T) {
+	got, remap := AssignIDs(nil, []artifact.Section{{ID: "M-001", Title: "Core"}}, "M")
+	if len(got) != 1 || got[0].ID != "M-01" {
+		t.Fatalf("milestone id = %+v, want M-01", got)
+	}
+	if remap["M-001"] != "M-01" {
+		t.Fatalf("remap = %+v, want M-001 -> M-01", remap)
+	}
+}
+
 func TestThePlanPromptAsksForDependencies(t *testing.T) {
 	for _, want := range []string{"**Depends on:**", "only where it is true"} {
 		if !strings.Contains(planInstruction, want) {

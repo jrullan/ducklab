@@ -447,6 +447,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
 			}
 			prompt, err := buildPrompt(&turn, params, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			if turn.Role == config.RoleArchitect && turn.Contract == "markdown_sections:M" && verdictsThisRound > 0 {
+				prompt += "\n\n## Reviewed topology amendments\n\nThe manifest constrained the initial render, but the reviewer has now checked its semantics. Apply supported reviewer corrections even when they change a manifest-derived Implements, Produces, Consumes, Verification, Owns, or Depends on field. Preserve all unrelated topology. The revised, deterministically validated plan becomes authoritative."
+			}
+			if turn.Persona == PersonaCritic && strings.HasPrefix(kindOfContract(turn.Contract, script), "plan") {
+				prompt += "\n\nDucklab deterministically normalizes Toolchain entries to resolvable command and pkg-config module names. Treat normalized names such as `pkg-config:x11` as workspace facts; do not replace them with an OS package or library display name."
+			}
 			if turn.Persona == PersonaCritic && script.FragmentPrefix != "" {
 				prompt = fragmentCriticContext(prompt)
 			}
@@ -570,7 +576,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					})
 				}
 			}
-			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
+			enforcePlanManifest := documentContract == "markdown_sections:M" && round == 1 && verdictsThisRound == 0
+			if err == nil && turn.Role == config.RoleArchitect && enforcePlanManifest {
 				normalized, manifestChanges, normalizeErr := reconcilePlanManifest(outcome, planManifest, documentContract)
 				if normalizeErr != nil {
 					err = normalizeErr
@@ -638,7 +645,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if params.StructureCheck != nil {
 						problems = append(problems, params.StructureCheck(outcome.Text)...)
 					}
-					if turn.Contract == "markdown_sections:M" {
+					if enforcePlanManifest {
 						problems = append(problems, planManifestFindings(planManifest, outcome)...)
 					}
 					if repairScopeProblem != "" {
@@ -649,7 +656,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						if params.StructureCheck != nil {
 							baseProblems = append(baseProblems, params.StructureCheck(repairBase.Text)...)
 						}
-						if turn.Contract == "markdown_sections:M" {
+						if enforcePlanManifest {
 							baseProblems = append(baseProblems, planManifestFindings(planManifest, repairBase)...)
 						}
 						if len(problems) >= len(baseProblems) {

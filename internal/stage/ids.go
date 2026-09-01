@@ -55,7 +55,11 @@ func AssignIDs(existing, produced []artifact.Section, prefix string) ([]artifact
 		}
 
 		if final == "" {
-			final = fmt.Sprintf("%s-%03d", prefix, next)
+			width := 3
+			if prefix == "M" {
+				width = 2
+			}
+			final = fmt.Sprintf("%s-%0*d", prefix, width, next)
 			next++
 		}
 		if final != s.ID {
