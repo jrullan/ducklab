@@ -240,7 +240,14 @@ func mergeFragment(base *artifact.Document, produced []artifact.Section, prefix 
 
 func deleteFragmentSection(sec artifact.Section) bool {
 	v := strings.ToLower(strings.TrimSpace(sec.Field("delete")))
-	return v == "yes" || v == "true"
+	if v == "yes" || v == "true" {
+		return true
+	}
+	// Small seats occasionally keep the instruction on the H2 line despite
+	// the example putting it below. The parser then treats it as title text;
+	// accept that unambiguous spelling instead of persisting a mutilated H2.
+	title := strings.ToLower(sec.Title)
+	return strings.Contains(title, "**delete:** yes") || strings.Contains(title, "**delete:** true")
 }
 
 // mergePlanFragment applies a plan fragment to a copy of the base. Task

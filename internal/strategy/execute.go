@@ -462,6 +462,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				if script.FragmentPrefix != "" {
 					prompt += " Earlier architect messages may repeat the `" + fragmentPlaceholderForPrompt(script.FragmentPrefix) +
 						"` new-section placeholder; that is the required input protocol, not a duplicate-id defect."
+					prompt += " The authoritative candidate is already POST-MERGE: a section deleted with `**Delete:** yes` is correctly absent, and the tombstone itself must not persist. Never request a tombstone merely because the deleted section is absent here."
 				}
 			}
 			// The draft a critic is about to judge is served by artifact_read
@@ -1044,6 +1045,9 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		}
 		prompt += "\n\n## Final candidate under review\n\n" + candidate.Text +
 			"\n\nThis is verification only. Return a verdict on this exact candidate; no architect turn follows automatically."
+		if script.FragmentPrefix != "" {
+			prompt += " The candidate is already POST-MERGE: explicit deletion tombstones have been applied and consumed. A deleted section's absence is correct; do not demand that `**Delete:** yes` appear in this persisted body."
+		}
 		if rendered := conv.RenderFindings(openFindings); rendered != "" {
 			prompt += "\n\n## Open finding ledger from the preceding review\n\n" + rendered +
 				"\nRe-check EACH ledger item against the exact candidate above. Approve only if every item is now resolved. " +

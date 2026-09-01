@@ -66,6 +66,16 @@ func TestMergeFragmentConsumesExplicitSectionDeletion(t *testing.T) {
 	}
 }
 
+func TestMergeFragmentAcceptsDeleteMarkerOnHeading(t *testing.T) {
+	base := &artifact.Document{Sections: []artifact.Section{{ID: "REQ-005", Title: "Keyboard shortcuts", Body: "old"}}}
+	out := mergeFragment(base, []artifact.Section{{
+		ID: "REQ-005", Title: "Keyboard shortcuts **Delete:** yes",
+	}}, "REQ")
+	if len(out.Sections) != 0 {
+		t.Fatalf("heading tombstone survived as content: %+v", out.Sections)
+	}
+}
+
 // The merge: an existing id replaces in place with the id preserved (every
 // reference to it stays true); the placeholder appends with the next free
 // id; the unchanged majority is copied by code.

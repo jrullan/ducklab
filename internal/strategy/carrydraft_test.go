@@ -65,6 +65,9 @@ func TestAFragmentCouncilCarriesTheMaterializedCandidate(t *testing.T) {
 							t.Errorf("round-2 critic lost %s:\n%s", want, prompt)
 						}
 					}
+					if !strings.Contains(prompt, "already POST-MERGE") || !strings.Contains(prompt, "tombstone itself must not persist") {
+						t.Errorf("fragment critic was not taught deletion semantics:\n%s", prompt)
+					}
 					return verdictOutcome("approve"), nil
 				}
 				return verdictOutcome("request-changes"), nil
