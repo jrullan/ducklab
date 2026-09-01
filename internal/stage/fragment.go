@@ -32,6 +32,10 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	}
 	kind := p.Stage.Kind()
 	prefix := kind.Prefix()
+	// Tombstones are input instructions and disappear from the materialized
+	// candidate. Keep their effect for the lifetime of the amendment so a
+	// later round cannot re-merge the approved base and resurrect a section.
+	deletedSections := map[string]bool{}
 
 	prompt, err := buildFragmentPrompt(p.ProjectRoot, kind, base, ask)
 	if err != nil {
@@ -55,7 +59,9 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 			if err != nil || len(produced.Sections) == 0 {
 				return nil, fmt.Errorf("materialize %s fragment: no sections", kind)
 			}
+			rememberFragmentDeletes(produced.Sections, deletedSections)
 			proposed = mergeFragment(base, produced.Sections, prefix)
+			applyFragmentDeletes(proposed, deletedSections)
 		}
 		if p.Stage == Intake && !p.Adopt {
 			intentID, err := artifact.IntentIDForRun(p.ProjectRoot, p.RunID)
@@ -125,7 +131,9 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		if perr != nil || len(produced.Sections) == 0 {
 			return nil, fmt.Errorf("the architect changed no sections: %s", clip(raw))
 		}
+		rememberFragmentDeletes(produced.Sections, deletedSections)
 		proposed = mergeFragment(base, produced.Sections, prefix)
+		applyFragmentDeletes(proposed, deletedSections)
 	}
 	proposed.Front.Kind = kind
 	proposed.Front.Project = base.Front.Project
@@ -248,6 +256,36 @@ func deleteFragmentSection(sec artifact.Section) bool {
 	// accept that unambiguous spelling instead of persisting a mutilated H2.
 	title := strings.ToLower(sec.Title)
 	return strings.Contains(title, "**delete:** yes") || strings.Contains(title, "**delete:** true")
+}
+
+func rememberFragmentDeletes(sections []artifact.Section, deleted map[string]bool) {
+	for _, sec := range sections {
+		id := strings.ToUpper(strings.TrimSpace(sec.ID))
+		if id == "" {
+			continue
+		}
+		if deleteFragmentSection(sec) {
+			deleted[id] = true
+			continue
+		}
+		// An explicit later section with the same id restores it. A normal
+		// post-merge candidate cannot accidentally clear the tombstone because
+		// the deleted id is absent from that candidate.
+		delete(deleted, id)
+	}
+}
+
+func applyFragmentDeletes(doc *artifact.Document, deleted map[string]bool) {
+	if doc == nil || len(deleted) == 0 {
+		return
+	}
+	kept := doc.Sections[:0]
+	for _, sec := range doc.Sections {
+		if !deleted[strings.ToUpper(sec.ID)] {
+			kept = append(kept, sec)
+		}
+	}
+	doc.Sections = kept
 }
 
 // mergePlanFragment applies a plan fragment to a copy of the base. Task

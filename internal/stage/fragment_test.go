@@ -76,6 +76,38 @@ func TestMergeFragmentAcceptsDeleteMarkerOnHeading(t *testing.T) {
 	}
 }
 
+func TestFragmentDeletionSurvivesLaterMaterialization(t *testing.T) {
+	base := &artifact.Document{Sections: []artifact.Section{
+		{ID: "REQ-001", Title: "Capture"},
+		{ID: "REQ-009", Title: "No saving"},
+	}}
+	deleted := map[string]bool{}
+	tombstone := artifact.Section{ID: "REQ-009", Title: "No saving", Fields: map[string]string{"delete": "yes"}}
+	rememberFragmentDeletes([]artifact.Section{tombstone}, deleted)
+	first := mergeFragment(base, []artifact.Section{tombstone}, "REQ")
+	applyFragmentDeletes(first, deleted)
+	if len(first.Sections) != 1 {
+		t.Fatalf("first materialization retained deletion: %+v", first.Sections)
+	}
+
+	// The next candidate is post-merge, so it contains no tombstone. Merging
+	// it against the approved base would resurrect REQ-009 without the ledger.
+	rememberFragmentDeletes(first.Sections, deleted)
+	second := mergeFragment(base, first.Sections, "REQ")
+	applyFragmentDeletes(second, deleted)
+	if len(second.Sections) != 1 || second.Sections[0].ID != "REQ-001" {
+		t.Fatalf("later materialization resurrected deleted section: %+v", second.Sections)
+	}
+
+	restore := artifact.Section{ID: "REQ-009", Title: "Saving", Body: "restored"}
+	rememberFragmentDeletes([]artifact.Section{restore}, deleted)
+	third := mergeFragment(base, []artifact.Section{restore}, "REQ")
+	applyFragmentDeletes(third, deleted)
+	if len(third.Sections) != 2 || third.Sections[1].Body != "restored" {
+		t.Fatalf("explicit restore stayed tombstoned: %+v", third.Sections)
+	}
+}
+
 // The merge: an existing id replaces in place with the id preserved (every
 // reference to it stays true); the placeholder appends with the next free
 // id; the unchanged majority is copied by code.
