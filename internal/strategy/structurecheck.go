@@ -105,7 +105,9 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 	for _, s := range cur {
 		if prefix == "REQ" {
 			priority := strings.ToLower(strings.TrimSpace(markdownFieldValue(s.Body, "Priority")))
-			if priority != "" && !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
+			if priority == "" {
+				out = append(out, fmt.Sprintf("%s has no **Priority:** line — use exactly must, should, could, or wont", s.ID))
+			} else if !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
 				shown := priority
 				out = append(out, fmt.Sprintf("%s has invalid **Priority:** %s — use exactly must, should, could, or wont", s.ID, shown))
 			}
@@ -209,7 +211,9 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 	var out []string
 	for _, sec := range doc.Sections {
 		priority := strings.ToLower(strings.TrimSpace(sec.Field("priority")))
-		if priority != "" && !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
+		if priority == "" {
+			out = append(out, fmt.Sprintf("%s has no **Priority:** line — use exactly must, should, could, or wont", sec.ID))
+		} else if !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
 			out = append(out, fmt.Sprintf("%s has invalid **Priority:** %s — use exactly must, should, could, or wont", sec.ID, priority))
 		}
 		if priority == "must" && permissiveOnlyRequirement(sec.Body) {

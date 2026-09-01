@@ -22,7 +22,8 @@ func TestACouncilsSecondRoundOpensOnTheRevision(t *testing.T) {
 				return verdictOutcome("request-changes"), nil
 			}
 			architectTurns++
-			return &agent.Outcome{Text: "## REQ-001 — Draft\n\nBody v" + string(rune('0'+architectTurns)), Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: "Body"}}}, nil
+			body := "Body v" + string(rune('0'+architectTurns)) + "\n\n**Priority:** must"
+			return &agent.Outcome{Text: "## REQ-001 — Draft\n\n" + body, Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: body}}}, nil
 		},
 		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
 	}
@@ -178,7 +179,8 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 				}), nil
 			}
 			architectTurns++
-			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\nRevision " + string(rune('0'+architectTurns)) + ".", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate"}}}, nil
+			body := "Revision " + string(rune('0'+architectTurns)) + ".\n\n**Priority:** must"
+			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\n" + body, Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: body}}}, nil
 		},
 		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
 	}
@@ -207,7 +209,7 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 // opposite order and left a red verdict attached to a defect no longer shown.
 func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
 	script := CouncilScript("REQ", nil)
-	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n"
+	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n\n**Priority:** must\n"
 	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
 		out := *candidate
 		out.Text = canonical
@@ -227,7 +229,7 @@ func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
 				return verdictOutcome("request-changes"), nil
 			}
 			architectTurns++
-			body := "uncanonical body " + string(rune('0'+architectTurns))
+			body := "uncanonical body " + string(rune('0'+architectTurns)) + "\n\n**Priority:** must"
 			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\n" + body + "\n", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: body}}}, nil
 		},
 		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
@@ -250,7 +252,7 @@ func TestCouncilMaterializesCandidateBeforeFinalReview(t *testing.T) {
 
 func TestCouncilMaterializesCandidateBeforeFindingFreeFirstReview(t *testing.T) {
 	script := CouncilScript("REQ", nil)
-	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n"
+	const canonical = "## REQ-001 — Candidate\n\ncanonical body\n\n**Priority:** must\n"
 	script.MaterializeCandidate = func(_ []string, candidate *agent.Outcome) (*agent.Outcome, error) {
 		out := *candidate
 		out.Text = canonical
@@ -263,7 +265,8 @@ func TestCouncilMaterializesCandidateBeforeFindingFreeFirstReview(t *testing.T) 
 				reviewPrompt = prompt
 				return verdictOutcome("approve"), nil
 			}
-			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\nraw body\n", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: "raw body"}}}, nil
+			body := "raw body\n\n**Priority:** must"
+			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\n" + body + "\n", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate", Body: body}}}, nil
 		},
 		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
 	}

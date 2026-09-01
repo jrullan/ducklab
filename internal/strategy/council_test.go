@@ -55,7 +55,7 @@ func TestCouncilReviewerSeesTheDraft(t *testing.T) {
 // successful round and created another opportunity to regress it.
 func TestCouncilApprovalSkipsTheFinalRevision(t *testing.T) {
 	rec := &recorder{}
-	draft := &agent.Outcome{Text: "## REQ-001 — Draft\n\nApproved body.", Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: "Approved body."}}}
+	draft := &agent.Outcome{Text: "## REQ-001 — Draft\n\nApproved body.\n\n**Priority:** must", Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: "Approved body.\n\n**Priority:** must"}}}
 	res, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), councilParams(rec,
 		draft,
 		verdictOutcome("approve"),

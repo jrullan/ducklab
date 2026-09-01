@@ -96,11 +96,11 @@ func TestStructureThatDoesNotConvergeFailsClosed(t *testing.T) {
 }
 
 func TestNumericPaddingChangeDoesNotLookLikeADeletedSection(t *testing.T) {
-	prevParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-0010 — Clipboard confirmation\n\nOld.\n")
+	prevParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-0010 — Clipboard confirmation\n\nOld.\n\n**Priority:** must\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	curParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-010 — Clipboard confirmation\n\nRevised.\n")
+	curParsed, err := agent.ParseContract("markdown_sections:REQ", "## REQ-010 — Clipboard confirmation\n\nRevised.\n\n**Priority:** must\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +123,11 @@ func TestRequirementsPriorityUsesTheTraceabilityVocabulary(t *testing.T) {
 		if len(findings) != 1 || !strings.Contains(findings[0], "invalid **Priority:**") {
 			t.Fatalf("priority %q findings = %v", invalid, findings)
 		}
+	}
+	cur := []agent.Section{{ID: "REQ-001", Body: "No priority here."}}
+	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, "")
+	if len(findings) != 1 || !strings.Contains(findings[0], "has no **Priority:** line") {
+		t.Fatalf("missing priority findings = %v", findings)
 	}
 }
 
@@ -149,6 +154,17 @@ func TestMaterializedRequirementsAreCheckedAfterFragmentMerge(t *testing.T) {
 	}
 	findings := ProposalStructureFindings(doc)
 	if len(findings) != 1 || !strings.Contains(findings[0], "invalid **Priority:** optional") {
+		t.Fatalf("materialized proposal findings = %v", findings)
+	}
+}
+
+func TestMaterializedRequirementsRequirePriority(t *testing.T) {
+	doc, err := artifact.Parse("## REQ-001 — Missing priority\n\nThe app shall work.\n", artifact.KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := ProposalStructureFindings(doc)
+	if len(findings) != 1 || !strings.Contains(findings[0], "has no **Priority:** line") {
 		t.Fatalf("materialized proposal findings = %v", findings)
 	}
 }

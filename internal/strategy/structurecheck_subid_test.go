@@ -12,7 +12,7 @@ import (
 // there (21 fs_search calls, Neocapture spec 2026-08-30).
 func TestStructureCheckFlagsSubNumberedHeadings(t *testing.T) {
 	cur := []agent.Section{
-		{ID: "REQ-003", Title: "Functional", Body: "Intro.\n\n### REQ-003.1 — Full-screen capture\n\nBody.\n\n### REQ-003.2 — Region\n\nBody."},
+		{ID: "REQ-003", Title: "Functional", Body: "Intro.\n\n**Priority:** must\n\n### REQ-003.1 — Full-screen capture\n\nBody.\n\n### REQ-003.2 — Region\n\nBody."},
 		{ID: "REQ-004", Title: "Platform", Body: "Ubuntu.\n\n**Priority:** must"},
 	}
 	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, "")
@@ -23,7 +23,7 @@ func TestStructureCheckFlagsSubNumberedHeadings(t *testing.T) {
 
 func TestStructureCheckFlagsInlineSectionDeclarations(t *testing.T) {
 	raw := "## REQ-001 — Capture\n\nBody.\n\n## Out of Scope\n\n**REQ-013 — File saving** — excluded. **Priority:** wont\n\n- REQ-014 — Cloud upload\n"
-	cur := []agent.Section{{ID: "REQ-001", Title: "Capture", Body: "Body."}}
+	cur := []agent.Section{{ID: "REQ-001", Title: "Capture", Body: "Body.\n\n**Priority:** must"}}
 	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, raw)
 	joined := strings.Join(findings, "\n")
 	for _, id := range []string{"REQ-013", "REQ-014"} {
