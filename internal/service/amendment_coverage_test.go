@@ -42,6 +42,17 @@ func TestAmendmentCoverageRejectsPackedAndConflictingOverride(t *testing.T) {
 	}
 }
 
+func TestAmendmentCoverageMatchesSaveAndSaving(t *testing.T) {
+	request := "1) Keyboard interaction may remain optional 2) Saving functionality shall be implemented"
+	doc, err := artifact.Parse("## REQ-001 — Keyboard\n\nKeyboard interaction is optional.\n\n## REQ-002 — Save Action\n\nThe application shall provide a Save action.\n\n**Priority:** must", artifact.KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := amendmentCoverageFindings(request, doc); len(findings) != 0 {
+		t.Fatalf("save/saving findings = %v", findings)
+	}
+}
+
 func containsFinding(findings []string, needle string) bool {
 	for _, finding := range findings {
 		if strings.Contains(finding, needle) {

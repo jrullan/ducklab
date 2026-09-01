@@ -110,6 +110,17 @@ func TestOutlineSynopsisRetainsLateBehaviorInAShortExclusionList(t *testing.T) {
 	}
 }
 
+func TestNewRequirementSectionPassKeepsOneClauseAndPriority(t *testing.T) {
+	prompt := buildNewSectionPassPrompt(artifact.KindRequirements,
+		"1) No keyboard-only operation is required 2) Saving functionality shall be implemented 3) Ubuntu newer versions use Wayland",
+		&artifact.Document{}, "Saving", "REQ")
+	for _, want := range []string{"Apply ONLY the clause", "State the requested behavior explicitly", "exactly one `**Priority:**`", "shall`, `must`, and `required`"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("new-section prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 // UNCHANGED is a real answer: the section survives byte for byte, and an
 // unusable pass loses only its own section — never the document.
 func TestSectionedRespectsUnchangedAndSurvivesBadPasses(t *testing.T) {

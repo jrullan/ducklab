@@ -260,6 +260,16 @@ func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Doc
 	fmt.Fprintf(&b, "## Your task\n\nWrite ONE new section for this %s: \"%s\". "+
 		"Everything else is handled elsewhere.\n\n", kind, title)
 	b.WriteString("## The request\n\n" + strings.TrimSpace(ask) + "\n\n")
+	b.WriteString("## Scope rule\n\nThe request may contain several independent changes assigned to other " +
+		"section passes. Apply ONLY the clause whose subject is named by this new section title. " +
+		"Do not copy, summarize, assume, or mention clauses about another capability.\n\n")
+	if kind == artifact.KindRequirements {
+		b.WriteString("## Requirements invariants\n\n" +
+			"- State the requested behavior explicitly; merely deleting or referring to an opposite decision is not implementation.\n" +
+			"- Include exactly one `**Priority:**` marker, whose value is exactly `must`, `should`, `could`, or `wont`.\n" +
+			"- `shall`, `must`, and `required` are mandatory and require `Priority: must`.\n" +
+			"- Do not add a storage destination, integration, input constraint, or platform behavior the assigned clause did not name.\n\n")
+	}
 	b.WriteString("## The document (outline, for fit)\n\n")
 	for _, sec := range doc.Sections {
 		fmt.Fprintf(&b, "- %s — %s\n", sec.ID, sec.Title)

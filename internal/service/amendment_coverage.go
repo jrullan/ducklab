@@ -38,7 +38,7 @@ func amendmentCoverageFindings(request string, doc *artifact.Document) []string 
 		}
 		var missing []string
 		for _, anchor := range anchors {
-			if !documentWords[anchor] {
+			if !containsWordFamily(documentWords, anchor) {
 				missing = append(missing, anchor)
 			}
 		}
@@ -50,7 +50,7 @@ func amendmentCoverageFindings(request string, doc *artifact.Document) []string 
 			words := wordSet(section.Title + "\n" + section.Body)
 			matches := true
 			for _, anchor := range anchors {
-				if !words[anchor] {
+				if !containsWordFamily(words, anchor) {
 					matches = false
 					break
 				}
@@ -106,7 +106,8 @@ func coverageAnchors(clause string) []string {
 		"a": true, "an": true, "and": true, "are": true, "be": true,
 		"following": true, "functionality": true, "implemented": true,
 		"is": true, "no": true, "not": true, "of": true, "only": true,
-		"operation": true, "required": true, "shall": true, "should": true,
+		"may": true, "operation": true, "optional": true, "remain": true,
+		"required": true, "shall": true, "should": true,
 		"the": true, "to": true, "use": true, "uses": true, "using": true,
 		"version": true, "versions": true, "new": true, "newer": true,
 	}
@@ -128,7 +129,31 @@ func coverageAnchors(clause string) []string {
 func wordSet(text string) map[string]bool {
 	out := map[string]bool{}
 	for _, word := range coverageWord.FindAllString(strings.ToLower(text), -1) {
-		out[word] = true
+		for _, variant := range wordFamily(word) {
+			out[variant] = true
+		}
 	}
 	return out
+}
+
+func containsWordFamily(words map[string]bool, word string) bool {
+	for _, variant := range wordFamily(word) {
+		if words[variant] {
+			return true
+		}
+	}
+	return false
+}
+
+func wordFamily(word string) []string {
+	variants := []string{word}
+	if len(word) > 5 && strings.HasSuffix(word, "ing") {
+		root := strings.TrimSuffix(word, "ing")
+		variants = append(variants, root, root+"e")
+	}
+	if len(word) > 4 && strings.HasSuffix(word, "ed") {
+		root := strings.TrimSuffix(word, "ed")
+		variants = append(variants, root, root+"e")
+	}
+	return variants
 }
