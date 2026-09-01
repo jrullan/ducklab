@@ -101,6 +101,15 @@ func TestSectionedTriageOutlineShowsHiddenCapabilities(t *testing.T) {
 	}
 }
 
+func TestOutlineSynopsisRetainsLateBehaviorInAShortExclusionList(t *testing.T) {
+	body := "**Priority:** wont\n- Video recording.\n- Image editing.\n- Delayed captures.\n- Cloud storage and network sharing.\n" +
+		strings.Repeat("context ", 25) + "Persistent local file saving is excluded."
+	got := outlineSynopsis(body)
+	if !strings.Contains(got, "Persistent local file saving") {
+		t.Fatalf("late behavior was hidden from triage: %q", got)
+	}
+}
+
 // UNCHANGED is a real answer: the section survives byte for byte, and an
 // unusable pass loses only its own section — never the document.
 func TestSectionedRespectsUnchangedAndSurvivesBadPasses(t *testing.T) {

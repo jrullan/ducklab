@@ -243,7 +243,12 @@ func outlineSynopsis(body string) string {
 	if text == "" {
 		return ""
 	}
-	const limit = 220
+	// Requirements often keep a short out-of-scope list in one section. A
+	// 220-character title synopsis cut off the fifth bullet — file saving in
+	// Neocapture corrida 44 — and made triage recreate the excluded capability
+	// instead of transforming it. Five hundred remains compact while retaining
+	// the behavior-bearing part of ordinary sections.
+	const limit = 500
 	if len(text) > limit {
 		text = text[:limit] + "…"
 	}
