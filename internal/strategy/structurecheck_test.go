@@ -109,6 +109,22 @@ func TestNumericPaddingChangeDoesNotLookLikeADeletedSection(t *testing.T) {
 	}
 }
 
+func TestRequirementsPriorityUsesTheTraceabilityVocabulary(t *testing.T) {
+	for _, valid := range []string{"must", "should", "could", "wont"} {
+		cur := []agent.Section{{ID: "REQ-001", Body: "**Priority:** " + valid}}
+		if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, ""); len(findings) != 0 {
+			t.Fatalf("priority %q produced findings: %v", valid, findings)
+		}
+	}
+	for _, invalid := range []string{"low", "high", "won't"} {
+		cur := []agent.Section{{ID: "REQ-001", Body: "**Priority:** " + invalid}}
+		findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, "")
+		if len(findings) != 1 || !strings.Contains(findings[0], "invalid **Priority:**") {
+			t.Fatalf("priority %q findings = %v", invalid, findings)
+		}
+	}
+}
+
 func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	baseText := "# Plan\n\n## M-001 — Setup\n\n### T-001 — Build\n\nold setup\n\n## M-002 — UI\n\n### T-002 — Window\n\nkeep this exactly"
 	base := sectioned(baseText,

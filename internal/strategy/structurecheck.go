@@ -102,6 +102,13 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 
 	seen := map[string]bool{}
 	for _, s := range cur {
+		if prefix == "REQ" {
+			priority := strings.ToLower(strings.TrimSpace(markdownFieldValue(s.Body, "Priority")))
+			if priority != "" && !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
+				shown := priority
+				out = append(out, fmt.Sprintf("%s has invalid **Priority:** %s — use exactly must, should, could, or wont", s.ID, shown))
+			}
+		}
 		// Every Implements: target must exist in the project's documents;
 		// an id that is not there is a dangling reference the spine will
 		// report, and a task built against it has no contract.
@@ -149,6 +156,15 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+func markdownFieldValue(body, name string) string {
+	re := regexp.MustCompile(`(?im)^\s*\*\*` + regexp.QuoteMeta(name) + `:\*\*\s*(.+)$`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 func taskFieldItems(body, name string) []string {
