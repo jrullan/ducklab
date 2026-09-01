@@ -86,6 +86,22 @@ func TestCandidateIdentityMismatchCannotBeAcceptedThroughTheAPI(t *testing.T) {
 	}
 }
 
+func TestMaterializedProposalBlockerCannotBeAcceptedThroughTheAPI(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindRequirements: "## REQ-001 — A\n\n**Priority:** must\n"})
+	entry, err := s.registry.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := &runState{run: &runlog.Run{
+		ID: "r-red-structure", ProjectID: id, Stage: "intake", Status: "paused", PendingKind: "gate", Verdict: "FAILED",
+		PendingData: map[string]interface{}{"proposal_blockers": []string{"REQ-005 has invalid Priority"}},
+	}, projectPath: dir}
+	if err := s.acceptRun(context.Background(), rs, entry, "", "human"); err == nil || !strings.Contains(err.Error(), "deterministic structure blockers") {
+		t.Fatalf("accept error = %v, want materialized-proposal guard", err)
+	}
+}
+
 // The list must arrive recomputed, not replayed from disk: a stale stored copy
 // that disagreed with the rules would be worse than none.
 func TestNextIsRecomputedOnEveryRead(t *testing.T) {

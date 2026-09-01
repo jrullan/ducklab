@@ -190,6 +190,35 @@ func permissiveOnlyRequirement(body string) bool {
 	return !regexp.MustCompile(`\bshall\b|\bmust\b|\brequired\b`).MatchString(prose)
 }
 
+// ProposalStructureFindings validates the complete, materialized document
+// that will be offered at the gate. Council structure checks see the author's
+// wire response; during an amendment that response may contain only a subset
+// of changed sections. A defect introduced in an earlier fragment therefore
+// has to be checked again after all fragments and tombstones are merged.
+func ProposalStructureFindings(doc *artifact.Document) []string {
+	if doc == nil {
+		return nil
+	}
+	isRequirements := doc.Front.Kind == artifact.KindRequirements
+	if doc.Front.Kind == "" && len(doc.Sections) > 0 {
+		isRequirements = strings.HasPrefix(doc.Sections[0].ID, "REQ-")
+	}
+	if !isRequirements {
+		return nil
+	}
+	var out []string
+	for _, sec := range doc.Sections {
+		priority := strings.ToLower(strings.TrimSpace(sec.Field("priority")))
+		if priority != "" && !slices.Contains([]string{"must", "should", "could", "wont"}, priority) {
+			out = append(out, fmt.Sprintf("%s has invalid **Priority:** %s — use exactly must, should, could, or wont", sec.ID, priority))
+		}
+		if priority == "must" && permissiveOnlyRequirement(sec.Body) {
+			out = append(out, fmt.Sprintf("%s says the capability is optional (`may` or `not required`) but retains **Priority:** must — make the body and Priority agree", sec.ID))
+		}
+	}
+	return out
+}
+
 func markdownFieldValue(body, name string) string {
 	re := regexp.MustCompile(`(?im)^\s*\*\*` + regexp.QuoteMeta(name) + `:\*\*\s*(.+)$`)
 	m := re.FindStringSubmatch(body)

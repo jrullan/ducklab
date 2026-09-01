@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 )
 
@@ -138,6 +139,17 @@ func TestMustPriorityCannotDescribeAPermissiveOnlyRequirement(t *testing.T) {
 	cur[0].Body = "The application may expose a shortcut, but it shall always provide a pointer-accessible trigger.\n\n**Priority:** must"
 	if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, ""); len(findings) != 0 {
 		t.Fatalf("mixed requirement with a mandatory clause was rejected: %v", findings)
+	}
+}
+
+func TestMaterializedRequirementsAreCheckedAfterFragmentMerge(t *testing.T) {
+	doc, err := artifact.Parse("## REQ-001 — Optional shortcut\n\nThe app may expose a shortcut. It is not required.\n\n**Priority:** optional\n", artifact.KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := ProposalStructureFindings(doc)
+	if len(findings) != 1 || !strings.Contains(findings[0], "invalid **Priority:** optional") {
+		t.Fatalf("materialized proposal findings = %v", findings)
 	}
 }
 

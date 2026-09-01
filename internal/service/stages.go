@@ -893,17 +893,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			"candidate_digest": reviewedCandidateDigest, "proposal_digest": proposalDigest, "detail": detail,
 		})
 	}
-	semanticDuplicates := duplicateSemanticSections(result.Proposed.Sections)
-	if len(semanticDuplicates) > 0 {
-		rs.run.PendingData["proposal_blockers"] = semanticDuplicates
-		detail := fmt.Sprintf("proposal contains %d semantic duplicate section pair(s): %s", len(semanticDuplicates), strings.Join(semanticDuplicates, "; "))
+	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
+	proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	if len(proposalBlockers) > 0 {
+		rs.run.PendingData["proposal_blockers"] = proposalBlockers
+		detail := fmt.Sprintf("proposal contains %d deterministic structure blocker(s): %s", len(proposalBlockers), strings.Join(proposalBlockers, "; "))
 		if rs.run.Warning != "" {
 			rs.run.Warning += " · " + detail
 		} else {
 			rs.run.Warning = detail
 		}
 		rs.writer.AppendEvent("proposal_structure_blocked", map[string]interface{}{
-			"duplicates": semanticDuplicates, "detail": detail,
+			"blockers": proposalBlockers, "detail": detail,
 		})
 	}
 	// A final document review is semantic evidence, not an executable test,
@@ -926,7 +927,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			"verdict": finalReviewVerdict, "findings": finalReviewFindings, "detail": detail,
 		})
 	}
-	if identityMismatch || finalReviewBlocked || len(semanticDuplicates) > 0 {
+	if identityMismatch || finalReviewBlocked || len(proposalBlockers) > 0 {
 		rs.run.Verdict = "FAILED"
 	} else {
 		// No executable gate exists for a document, so an approved or
