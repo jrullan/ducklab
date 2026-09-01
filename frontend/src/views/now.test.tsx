@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { Now } from "./Now";
 import { useRuns } from "../store/runs";
-import type { EngineClient, Run } from "../api/client";
+import type { Artifact, EngineClient, Run } from "../api/client";
 
 const base: Run = {
   id: "r-1", project_id: "p", stage: "build", mode: "pair", task_id: "T-026",
@@ -297,6 +297,28 @@ describe("Now — the inbox", () => {
     render(<Now client={client} projectId="p" />);
     await screen.findByTestId("now-view");
     await waitFor(() => expect(client.artifact).toHaveBeenCalledWith("p", "plan"));
+    expect(screen.queryByTestId("now-plan-card")).toBeNull();
+  });
+
+  it("does not resurrect a consumed plan from an older artifact response", async () => {
+    let resolveOld!: (artifact: Artifact) => void;
+    const old = new Promise<Artifact>((resolve) => { resolveOld = resolve; });
+    const approved: Artifact = { kind: "plan", version: 1, approved: true, markdown: "", sections: [] };
+    const proposal: Artifact = {
+      ...approved,
+      approved: false,
+      proposal: { diff: "+ stale", sections: [{ id: "T-201", title: "stale", body: "", fields: {} }] },
+    };
+    const client = clientWith({
+      artifact: vi.fn((projectId: string) => projectId === "old" ? old : Promise.resolve(approved)),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: [] })),
+    } as Partial<EngineClient>);
+
+    const view = render(<Now client={client} projectId="old" />);
+    view.rerender(<Now client={client} projectId="current" />);
+    await waitFor(() => expect(client.artifact).toHaveBeenCalledWith("current", "plan"));
+    await act(async () => { resolveOld(proposal); await old; });
+
     expect(screen.queryByTestId("now-plan-card")).toBeNull();
   });
 

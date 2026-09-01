@@ -9,7 +9,7 @@
  * with live spend, and — when the queue is empty — what is ready to start,
  * because "nothing needs me" and "what should I do next" are the same moment.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Bug, Duckling, EngineClient, NextStep, Run, Task, RosterEntry, TraceError } from "../api/client";
 import { useRuns, pendingForHuman } from "../store/runs";
 import type { LiveSpend } from "../store/runs";
@@ -57,14 +57,27 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
   const [failure, setFailure] = useState<string | null>(null);
   const [plan, setPlan] = useState<import("../api/client").Artifact | null>(null);
   const [planTrace, setPlanTrace] = useState<TraceError[]>([]);
+  // Runs can change several times while an artifact request is in flight
+  // (notably accept-plan followed immediately by start-task). Do not let the
+  // older response put a consumed proposal back into Now.
+  const planRequest = useRef(0);
 
   useEffect(() => {
     if (!projectId) return;
     client.taskNext(projectId).then(setNext).catch(() => setNext(null));
     if (typeof client.artifact === "function" && typeof client.traceCheck === "function") {
+      const request = ++planRequest.current;
       Promise.all([client.artifact(projectId, "plan"), client.traceCheck(projectId)])
-        .then(([artifact, trace]) => { setPlan(artifact.proposal ? artifact : null); setPlanTrace(trace.errors ?? []); })
-        .catch(() => { setPlan(null); setPlanTrace([]); });
+        .then(([artifact, trace]) => {
+          if (request !== planRequest.current) return;
+          setPlan(artifact.proposal ? artifact : null);
+          setPlanTrace(trace.errors ?? []);
+        })
+        .catch(() => {
+          if (request !== planRequest.current) return;
+          setPlan(null);
+          setPlanTrace([]);
+        });
     }
     client.projectNext(projectId).then(setNextSteps).catch(() => setNextSteps([]));
     client
