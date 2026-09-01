@@ -131,9 +131,6 @@ func capabilityStructureFindings(plan *artifact.Document) []string {
 					seen[key] = true
 					out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable; installed pkg-config metadata suggests pkg-config:%s — use the module name, not the OS package name", sec.ID, item, suggestion))
 				}
-			} else if !seen[m[1]+"|"] {
-				seen[m[1]+"|"] = true
-				out = append(out, fmt.Sprintf("%s declares %s, which is not resolvable in installed pkg-config metadata — verify the dependency kind or module name, or remove it", sec.ID, item))
 			}
 		}
 	}

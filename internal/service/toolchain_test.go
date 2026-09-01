@@ -68,6 +68,19 @@ func TestClosestCapabilityCorrectsPackageNamesToPkgConfigModules(t *testing.T) {
 	}
 }
 
+func TestAbsentPkgConfigModuleIsDeferredToBuildPreflight(t *testing.T) {
+	plan, err := artifact.Parse("## M-01 — Notifications\n\n**Toolchain:** pkg-config:module-that-is-valid-elsewhere\n\n### T-001 — Notify\n\n**Implements:** SPEC-001\n", artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := capabilityStructureFindings(plan); len(findings) != 0 {
+		t.Fatalf("absent module was treated as an invalid name: %v", findings)
+	}
+	if missing := missingTools([]string{"pkg-config:module-that-is-valid-elsewhere"}); len(missing) != 1 {
+		t.Fatalf("build preflight did not retain absent module: %v", missing)
+	}
+}
+
 func TestActiveSpecCannotImplementAWontRequirement(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".ducklab", "docs"), 0o755); err != nil {
