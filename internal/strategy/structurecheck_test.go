@@ -370,6 +370,27 @@ func TestStructuredRepairTrustsOperationTargetsNotDeclaredSections(t *testing.T)
 	}
 }
 
+func TestStructuredRepairMayReplaceAnAssignedRequirementSection(t *testing.T) {
+	baseText := "## REQ-005 — Out of scope\n\n**Priority:** wont\n- No saving. **Priority:** wont\n\n## REQ-006 — Keep\n\n**Priority:** must\nKeep."
+	base := sectioned(baseText,
+		agent.Section{ID: "REQ-005", Title: "Out of scope", Body: "**Priority:** wont\n- No saving. **Priority:** wont"},
+		agent.Section{ID: "REQ-006", Title: "Keep", Body: "**Priority:** must\nKeep."},
+	)
+	patch := &agent.Outcome{Parsed: map[string]interface{}{
+		"sections": []interface{}{"REQ-005"},
+		"operations": []interface{}{map[string]interface{}{
+			"op": "replace_block", "target": "REQ-005", "markdown": "## REQ-005 — Out of scope\n\n**Priority:** wont\n\nNo saving.",
+		}},
+	}}
+	merged, err := applyStructurePatch(base, patch, "markdown_sections:REQ", []string{"REQ-005"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(merged.Text, "**Priority:**") != 2 || !strings.Contains(merged.Text, "## REQ-006 — Keep") {
+		t.Fatalf("bounded H2 replacement corrupted the document:\n%s", merged.Text)
+	}
+}
+
 func TestPlanGraphNormalizationDerivesExactLanesAndDependencies(t *testing.T) {
 	raw := "## M-01 — Setup\n\n**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, build-target:app\n**Consumes:** none\n\n## M-02 — UI\n\n**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"
 	out := sectioned(raw,

@@ -414,7 +414,7 @@ func structureRepairInstruction(findings []string, sections []agent.Section) (st
 	b.WriteString("```json\n{\"sections\":[\"" + exampleID + "\"],\"operations\":[{\"op\":\"set_field\",\"target\":\"" + exampleID + "\",\"field\":\"Implements\",\"value\":\"REQ-001\"}]}\n```\n\n")
 	b.WriteString("Allowed operations are `set_field`, `remove_field`, `replace_block`, `append_block`, and `delete_block`. " +
 		"Prefer `set_field` for every `**Field:**` correction; it does not depend on reproducing old Markdown byte-for-byte. " +
-		"`replace_block` may replace one existing H3 task only, with `markdown`; `append_block` targets the assigned H2 and adds one H3 task. " +
+		"`replace_block` may replace an assigned H2 requirement/spec section or one existing H3 task, with `markdown` beginning with that same heading; plan milestones themselves are not replaceable. `append_block` targets the assigned H2 and adds one H3 task. " +
 		"Every operation target must be listed below; an identifier merely mentioned in a finding is not necessarily writable.\n\n")
 	for _, sec := range sections {
 		if !slices.Contains(ids, sec.ID) {
@@ -658,8 +658,8 @@ func applyStructurePatch(base, patch *agent.Outcome, contract string, allowed []
 		case "replace_text":
 			text, err = replaceMarkdownText(text, op.Target, op.Old, op.New)
 		case "replace_block":
-			if levels[op.Target] != 3 {
-				return base, fmt.Errorf("%w: replace_block may replace an H3 task, not %s", ErrStructureRepairScope, op.Target)
+			if levels[op.Target] != 3 && !(levels[op.Target] == 2 && contract != "markdown_sections:M") {
+				return base, fmt.Errorf("%w: replace_block may replace an H3 task or a non-plan H2 section, not %s", ErrStructureRepairScope, op.Target)
 			}
 			text, err = replaceMarkdownBlock(text, op.Target, op.Markdown)
 		case "append_block":
@@ -1004,15 +1004,16 @@ func removeMarkdownField(text, id, field string) (string, error) {
 }
 
 func replaceMarkdownBlock(text, id, markdown string) (string, error) {
-	lines, start, end, _, err := markdownBlockRange(text, id)
+	lines, start, end, level, err := markdownBlockRange(text, id)
 	if err != nil {
 		return text, err
 	}
 	var replacement []string
 	if strings.TrimSpace(markdown) != "" {
 		replacement = strings.Split(strings.TrimSpace(markdown), "\n")
-		if len(replacement) == 0 || !(strings.HasPrefix(replacement[0], "### "+id+" ") || replacement[0] == "### "+id) {
-			return text, fmt.Errorf("%w: replacement must begin with ### %s", ErrStructureRepairScope, id)
+		heading := strings.Repeat("#", level) + " " + id
+		if len(replacement) == 0 || !(strings.HasPrefix(replacement[0], heading+" ") || replacement[0] == heading) {
+			return text, fmt.Errorf("%w: replacement must begin with %s", ErrStructureRepairScope, heading)
 		}
 	}
 	out := append([]string{}, lines[:start]...)
