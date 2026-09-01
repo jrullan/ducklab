@@ -142,16 +142,20 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 	}
 	seen := map[string]bool{}
 	for mi, milestone := range manifest.Milestones {
-		if !validContractID(milestone.ID, "M") || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestone.ID] {
+		milestoneID, ok := canonicalContractID(milestone.ID, "M")
+		if !ok || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestoneID] {
 			return nil, fmt.Errorf("plan manifest contract: invalid milestone %d", mi)
 		}
-		seen[milestone.ID] = true
+		manifest.Milestones[mi].ID = milestoneID
+		seen[milestoneID] = true
 		for ti, task := range milestone.Tasks {
-			if !validContractID(task.ID, "T") || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
-				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[task.ID] {
+			taskID, ok := canonicalContractID(task.ID, "T")
+			if !ok || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
+				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[taskID] {
 				return nil, fmt.Errorf("plan manifest contract: invalid task %d in %s", ti, milestone.ID)
 			}
-			seen[task.ID] = true
+			manifest.Milestones[mi].Tasks[ti].ID = taskID
+			seen[taskID] = true
 		}
 	}
 	return &manifest, nil

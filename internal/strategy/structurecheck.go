@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -320,10 +321,27 @@ func structureRepairInstruction(findings []string, sections []agent.Section) (st
 	b.WriteString("## Structure check — return a bounded JSON patch\n\n")
 	b.WriteString("ducklab has checkpointed the complete draft. Return ONLY one JSON object; do not repeat the document. Schema:\n\n")
 	b.WriteString("```json\n{\"sections\":[\"" + exampleID + "\"],\"operations\":[{\"op\":\"set_field\",\"target\":\"" + exampleID + "\",\"field\":\"Implements\",\"value\":\"REQ-001\"}]}\n```\n\n")
-	b.WriteString("Allowed operations are `set_field`, `remove_field`, `replace_text`, `replace_block`, `append_block`, and `delete_block`. " +
-		"A field operation changes one `**Field:**` line. `replace_block` may replace one existing H3 task only, with `markdown`; it may not replace an H2 milestone. " +
-		"`replace_text` replaces one exact `old` string inside its target with `new`. " +
-		"Every target must belong to the assigned H2 section. Assigned section: " + strings.Join(ids, ", ") + ".\n\n")
+	b.WriteString("Allowed operations are `set_field`, `remove_field`, `replace_block`, `append_block`, and `delete_block`. " +
+		"Prefer `set_field` for every `**Field:**` correction; it does not depend on reproducing old Markdown byte-for-byte. " +
+		"`replace_block` may replace one existing H3 task only, with `markdown`; `append_block` targets the assigned H2 and adds one H3 task. " +
+		"Every operation target must be listed below; an identifier merely mentioned in a finding is not necessarily writable.\n\n")
+	for _, sec := range sections {
+		if !slices.Contains(ids, sec.ID) {
+			continue
+		}
+		var targets []string
+		for _, block := range taskBlocks(sec.Body) {
+			if strings.HasPrefix(block.id, "T-") {
+				targets = append(targets, block.id)
+			}
+		}
+		b.WriteString("- Assigned H2 `" + sec.ID + "`; writable targets: `" + sec.ID + "`")
+		if len(targets) > 0 {
+			b.WriteString(", `" + strings.Join(targets, "`, `") + "`")
+		}
+		b.WriteString(".\n")
+	}
+	b.WriteString("\n")
 	b.WriteString("Fix these findings and nothing unrelated:\n\n")
 	for _, f := range batch {
 		b.WriteString("- " + f + "\n")
@@ -594,6 +612,128 @@ func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) 
 	}
 	sort.Strings(findings)
 	return findings
+}
+
+// reconcilePlanManifest compiles the rendered plan back onto the topology
+// that Ducklab already validated. The prose architect is free to explain a
+// task, but it is not free to rename, duplicate, move, drop, or rewire it.
+// Leaving that reconciliation to another model turn made small seats repair
+// dozens of mechanically knowable mismatches and, worse, invent new task IDs
+// while doing so (Neocapture corrida 20).
+func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest, contract string) (*agent.Outcome, int, error) {
+	if outcome == nil || manifest == nil || contract != "markdown_sections:M" {
+		return outcome, 0, nil
+	}
+	type renderedTask struct {
+		parent string
+		body   string
+	}
+	byID := map[string][]renderedTask{}
+	sectionByID := map[string]agent.Section{}
+	for _, sec := range sectionsOf(outcome) {
+		sectionByID[sec.ID] = sec
+		for _, block := range taskBlocks(sec.Body) {
+			if id, ok := canonicalPlanTaskID(block.id); ok {
+				byID[id] = append(byID[id], renderedTask{parent: sec.ID, body: block.body})
+			}
+		}
+	}
+
+	preamble := documentPreamble(outcome.Text)
+	var rendered []string
+	if preamble != "" {
+		rendered = append(rendered, preamble)
+	}
+	for _, milestone := range manifest.Milestones {
+		var part strings.Builder
+		part.WriteString("## " + milestone.ID + " — " + strings.TrimSpace(milestone.Title))
+		if sec, ok := sectionByID[milestone.ID]; ok {
+			if head := milestoneBodyPreamble(sec.Body); head != "" {
+				part.WriteString("\n\n" + head)
+			}
+		}
+		for _, task := range milestone.Tasks {
+			body := ""
+			for _, candidate := range byID[task.ID] {
+				if candidate.parent == milestone.ID {
+					body = candidate.body
+					break
+				}
+			}
+			if body == "" && len(byID[task.ID]) > 0 {
+				body = byID[task.ID][0].body
+			}
+			if strings.TrimSpace(body) == "" {
+				body = "Implement " + strings.TrimSpace(task.Title) + " according to the accepted specification.\n\n**Deliverables:**\n- The artifacts listed in **Produces:** below."
+			}
+			block := "### " + task.ID + " — " + strings.TrimSpace(task.Title) + "\n\n" + strings.TrimSpace(body)
+			fields := []struct{ name, value string }{
+				{"Implements", strings.Join(task.Implements, ", ")},
+				{"Produces", manifestItems(task.Produces)},
+				{"Consumes", manifestItems(task.Consumes)},
+				{"Verification", "`" + strings.Trim(strings.TrimSpace(task.Verification), "`") + "`"},
+			}
+			var err error
+			for _, field := range fields {
+				block, err = setMarkdownField(block, task.ID, field.name, field.value)
+				if err != nil {
+					return outcome, 0, err
+				}
+			}
+			if !itemsOverlap(task.Produces, taskFieldItems(block, "Exercises")) {
+				block, err = setMarkdownField(block, task.ID, "Exercises", manifestItems(task.Produces))
+				if err != nil {
+					return outcome, 0, err
+				}
+			}
+			part.WriteString("\n\n" + strings.TrimSpace(block))
+		}
+		rendered = append(rendered, part.String())
+	}
+	text := strings.Join(rendered, "\n\n")
+	if text == outcome.Text {
+		return outcome, 0, nil
+	}
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return outcome, 0, err
+	}
+	normalized := *outcome
+	normalized.Text, normalized.Parsed = text, parsed
+	return &normalized, 1, nil
+}
+
+func manifestItems(items []string) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ", ")
+}
+
+func canonicalPlanTaskID(id string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(id), "T-")
+	if !ok || rest == "" {
+		return "", false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 {
+		return "", false
+	}
+	return fmt.Sprintf("T-%03d", n), true
+}
+
+func milestoneBodyPreamble(body string) string {
+	if i := regexp.MustCompile(`(?m)^###\s+T-`).FindStringIndex(body); i != nil {
+		return strings.TrimSpace(body[:i[0]])
+	}
+	return strings.TrimSpace(body)
+}
+
+func documentPreamble(text string) string {
+	if i := regexp.MustCompile(`(?m)^##\s+M-\d+`).FindStringIndex(text); i != nil {
+		return strings.TrimSpace(text[:i[0]])
+	}
+	return ""
 }
 
 func sameStringSet(a, b []string) bool {

@@ -925,7 +925,7 @@ func runCmd(verb string, args []string, repo string) int {
 			return 1
 		}
 		fmt.Printf("answered; run %s resumed\n", runID)
-		return followRun(client, runID)
+		return followCurrentRun(client, runID)
 	case "watch":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab run watch <run-id>")
@@ -938,7 +938,7 @@ func runCmd(verb string, args []string, repo string) int {
 		}
 		// Attaching to a run started elsewhere is the same code path as
 		// waiting on one you started: the engine, not the CLI, owns the run.
-		return followRun(engineclt.New(info), args[0])
+		return followCurrentRun(engineclt.New(info), args[0])
 	case "resume":
 		if len(args) < 1 {
 			fmt.Fprintln(os.Stderr, "usage: ducklab run resume <run-id>")
@@ -956,7 +956,7 @@ func runCmd(verb string, args []string, repo string) int {
 			return 1
 		}
 		fmt.Printf("run %s resumed (status: %s)\n", run["id"], run["status"])
-		return followRun(client, args[0])
+		return followCurrentRun(client, args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown run command: %s\n", verb)
 		return 2
@@ -1056,15 +1056,52 @@ func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo stri
 // interrupting the CLI must never abort the work. Aborting is an explicit
 // `ducklab run abort`.
 func followRun(client *engineclt.Client, runID string) int {
+	return followRunFrom(client, runID, 0)
+}
+
+// followCurrentRun attaches at the current tail instead of replaying the
+// entire run. Keep one durable event of overlap so a gate or run_end that
+// raced the snapshot is still observed. Replaying from zero after answering a
+// question used to stop immediately on the superseded human_needed event.
+func followCurrentRun(client *engineclt.Client, runID string) int {
+	fromSeq := 0
+	if events, err := client.RunEvents(runID); err == nil {
+		fromSeq = latestRunEventSeq(events)
+		if fromSeq > 0 {
+			fromSeq--
+		}
+	}
+	return followRunFrom(client, runID, fromSeq)
+}
+
+func latestRunEventSeq(events []interface{}) int {
+	latest := 0
+	for _, raw := range events {
+		event, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if seq, ok := event["seq"].(float64); ok && int(seq) > latest {
+			latest = int(seq)
+		}
+	}
+	return latest
+}
+
+func followRunFrom(client *engineclt.Client, runID string, fromSeq int) int {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
-	return followRunWith(context.Background(), sigCh, client, runID)
+	return followRunWithFrom(context.Background(), sigCh, client, runID, fromSeq)
 }
 
 // followRunWith is followRun with the interrupt source injected, so the
 // detach path can be tested without sending real signals to the test binary.
 func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engineclt.Client, runID string) int {
+	return followRunWithFrom(parent, sigCh, client, runID, 0)
+}
+
+func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *engineclt.Client, runID string, fromSeq int) int {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -1088,7 +1125,7 @@ func followRunWith(parent context.Context, sigCh <-chan os.Signal, client *engin
 
 	verdict := ""
 	status := ""
-	err := client.StreamRunEvents(ctx, runID, 0, func(e engineclt.SSEEvent) bool {
+	err := client.StreamRunEvents(ctx, runID, fromSeq, func(e engineclt.SSEEvent) bool {
 		switch e.Type {
 		case "turn_start":
 			fmt.Printf("  → turn %v (%v)\n", e.Data["turn"], e.Data["role"])

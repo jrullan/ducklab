@@ -139,3 +139,14 @@ func TestFollowRunBudgetExceededExitsSix(t *testing.T) {
 		t.Errorf("exit code = %d, want 6", code)
 	}
 }
+
+func TestLatestRunEventSeqFindsTail(t *testing.T) {
+	events := []interface{}{
+		map[string]interface{}{"seq": float64(4)},
+		map[string]interface{}{"seq": float64(12)},
+		map[string]interface{}{"seq": float64(7)},
+	}
+	if got := latestRunEventSeq(events); got != 12 {
+		t.Fatalf("latest seq = %d, want 12", got)
+	}
+}

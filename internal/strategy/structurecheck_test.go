@@ -279,6 +279,41 @@ func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
 	}
 }
 
+func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
+	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{
+		{ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{
+			ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"},
+			Produces: []string{"file:meson.build"}, Verification: "meson setup build",
+		}}},
+		{ID: "M-02", Title: "UI", Tasks: []agent.ManifestTask{{
+			ID: "T-002", Title: "Window", Implements: []string{"SPEC-002"},
+			Produces: []string{"file:src/window.c"}, Consumes: []string{"file:meson.build"}, Verification: "meson compile -C build",
+		}}},
+	}}
+	raw := "# Plan\n\n## M-01 — Wrong title\n\n**Toolchain:** cmd:meson\n\n### T-002 — misplaced\n\nUseful UI prose.\n\n**Produces:** wrong\n\n### T-099 — invented\n\nDrop me.\n\n## M-02 — UI\n\n### T-001 — misplaced\n\nUseful build prose.\n\n**Produces:** also-wrong"
+	parsed, err := agent.ParseContract("markdown_sections:M", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, changes, err := reconcilePlanManifest(&agent.Outcome{Text: raw, Parsed: parsed}, manifest, "markdown_sections:M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes == 0 || strings.Contains(compiled.Text, "T-099") {
+		t.Fatalf("manifest was not compiled:\n%s", compiled.Text)
+	}
+	secs := sectionsOf(compiled)
+	if len(secs) != 2 || !strings.Contains(secs[0].Body, "### T-001") || strings.Contains(secs[0].Body, "### T-002") ||
+		!strings.Contains(secs[1].Body, "### T-002") || !strings.Contains(compiled.Text, "Useful build prose") ||
+		!strings.Contains(compiled.Text, "**Produces:** file:meson.build") || !strings.Contains(compiled.Text, "**Consumes:** none") ||
+		!strings.Contains(compiled.Text, "**Verification:** `meson compile -C build`") {
+		t.Fatalf("compiled plan did not preserve prose and enforce topology:\n%s", compiled.Text)
+	}
+	if findings := planManifestFindings(manifest, compiled); len(findings) != 0 {
+		t.Fatalf("compiled plan still drifted from manifest: %v\n%s", findings, compiled.Text)
+	}
+}
+
 func TestPartialCouncilRevisionIsMaterializedOverCompleteDraft(t *testing.T) {
 	baseText := "## SPEC-001 — Core\n\n**Implements:** REQ-001\n\nkeep core\n\n## SPEC-002 — UI\n\n**Implements:** REQ-002\n\nold ui"
 	base := sectioned(baseText,

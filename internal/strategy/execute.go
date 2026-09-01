@@ -566,15 +566,24 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					})
 				}
 			}
-			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
-				if normalized, changes, normalizeErr := normalizePlanGraph(outcome, documentContract); normalizeErr != nil {
+			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
+				normalized, manifestChanges, normalizeErr := reconcilePlanManifest(outcome, planManifest, documentContract)
+				if normalizeErr != nil {
 					err = normalizeErr
-				} else if changes > 0 {
+				} else {
 					outcome = normalized
-					emit(params, "structure_normalized", map[string]interface{}{
-						"round": round, "turn": i, "fields": changes,
-						"detail": "derived Owns and Depends on fields from the plan artifact graph",
-					})
+					graphNormalized, graphChanges, graphErr := normalizePlanGraph(outcome, documentContract)
+					if graphErr != nil {
+						err = graphErr
+					} else {
+						outcome = graphNormalized
+					}
+					if err == nil && manifestChanges+graphChanges > 0 {
+						emit(params, "structure_normalized", map[string]interface{}{
+							"round": round, "turn": i, "fields": manifestChanges + graphChanges,
+							"detail": "compiled the validated manifest and derived Owns and Depends on fields from the plan artifact graph",
+						})
+					}
 				}
 			}
 			if outcome != nil {

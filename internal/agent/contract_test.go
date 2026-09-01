@@ -225,6 +225,17 @@ func TestPlanManifestContractRejectsIncompleteTopology(t *testing.T) {
 	}
 }
 
+func TestPlanManifestCanonicalizesNumericPadding(t *testing.T) {
+	parsed, err := ParseContract("json:plan_manifest", `{"milestones":[{"id":"M-001","title":"Setup","tasks":[{"id":"T-0001","title":"Build","implements":["SPEC-001"],"produces":["build-target:app"],"consumes":[],"verification":"true"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := parsed.(*PlanManifest)
+	if manifest.Milestones[0].ID != "M-01" || manifest.Milestones[0].Tasks[0].ID != "T-001" {
+		t.Fatalf("manifest ids = %s/%s, want M-01/T-001", manifest.Milestones[0].ID, manifest.Milestones[0].Tasks[0].ID)
+	}
+}
+
 func TestMarkdownSectionsRejectsNoMatches(t *testing.T) {
 	if _, err := ParseContract("markdown_sections:REQ", "## Introduction\n\nNo ids here."); err == nil {
 		t.Error("accepted text with no matching sections")
