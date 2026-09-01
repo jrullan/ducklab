@@ -446,6 +446,10 @@ func TestRequirementsRejectGenericExclusionCatchAll(t *testing.T) {
 	if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, ""); slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "catch-all") }) {
 		t.Fatalf("specific requirement was treated as a catch-all: %v", findings)
 	}
+	cur[0].Title = "Explicitly Out of Scope"
+	if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, false, ""); !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "catch-all") }) {
+		t.Fatalf("qualified generic title escaped catch-all detection: %v", findings)
+	}
 }
 
 func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {

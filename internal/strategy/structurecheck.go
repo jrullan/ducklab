@@ -193,8 +193,12 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 
 func genericExclusionTitle(title string) bool {
 	title = strings.ToLower(strings.TrimSpace(title))
-	return title == "out of scope" || title == "exclusions" ||
-		strings.HasPrefix(title, "out of scope:") || strings.HasPrefix(title, "exclusions:")
+	if strings.Contains(title, ":") {
+		// A qualified title such as "Out of Scope: File Saving" names one
+		// behavior and is not a catch-all merely because its decision is wont.
+		return false
+	}
+	return strings.Contains(title, "out of scope") || strings.Contains(title, "exclusions")
 }
 
 func topLevelBulletCount(body string) int {
