@@ -109,6 +109,9 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 				shown := priority
 				out = append(out, fmt.Sprintf("%s has invalid **Priority:** %s — use exactly must, should, could, or wont", s.ID, shown))
 			}
+			if priority == "must" && permissiveOnlyRequirement(s.Body) {
+				out = append(out, fmt.Sprintf("%s says the capability is optional (`may` or `not required`) but retains **Priority:** must — make the body and Priority agree", s.ID))
+			}
 		}
 		// Every Implements: target must exist in the project's documents;
 		// an id that is not there is a dangling reference the spine will
@@ -173,6 +176,18 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+func permissiveOnlyRequirement(body string) bool {
+	prose := strings.ToLower(body)
+	prose = regexp.MustCompile(`(?im)^\s*\*\*priority:\*\*.*$`).ReplaceAllString(prose, "")
+	permissive := regexp.MustCompile(`\bmay\b|\bnot\s+required\b`).MatchString(prose)
+	if !permissive {
+		return false
+	}
+	// Do not count "not required" itself as a strong normative marker.
+	prose = regexp.MustCompile(`\bnot\s+required\b`).ReplaceAllString(prose, "")
+	return !regexp.MustCompile(`\bshall\b|\bmust\b|\brequired\b`).MatchString(prose)
 }
 
 func markdownFieldValue(body, name string) string {

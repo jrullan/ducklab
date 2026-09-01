@@ -125,6 +125,22 @@ func TestRequirementsPriorityUsesTheTraceabilityVocabulary(t *testing.T) {
 	}
 }
 
+func TestMustPriorityCannotDescribeAPermissiveOnlyRequirement(t *testing.T) {
+	cur := []agent.Section{{
+		ID:   "REQ-005",
+		Body: "The application may expose a keyboard shortcut. Keyboard-only operation is not required.\n\n**Priority:** must",
+	}}
+	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, "")
+	if len(findings) != 1 || !strings.Contains(findings[0], "body and Priority agree") {
+		t.Fatalf("permissive must findings = %v", findings)
+	}
+
+	cur[0].Body = "The application may expose a shortcut, but it shall always provide a pointer-accessible trigger.\n\n**Priority:** must"
+	if findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, ""); len(findings) != 0 {
+		t.Fatalf("mixed requirement with a mandatory clause was rejected: %v", findings)
+	}
+}
+
 func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	baseText := "# Plan\n\n## M-001 — Setup\n\n### T-001 — Build\n\nold setup\n\n## M-002 — UI\n\n### T-002 — Window\n\nkeep this exactly"
 	base := sectioned(baseText,
