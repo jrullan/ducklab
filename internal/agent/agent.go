@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1324,8 +1325,9 @@ var ErrThoughtOnly = errors.New("model returned only hidden reasoning")
 
 // TextToolCall is a parsed text-protocol tool call.
 type TextToolCall struct {
-	Name string
-	Args json.RawMessage
+	Name       string
+	Args       json.RawMessage
+	ParseError string
 }
 
 var ducklabBlockRe = regexp.MustCompile("(?s)```ducklab\\s*\\n(.*?)\\n```")
@@ -1367,13 +1369,22 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 		Args json.RawMessage `json:"args"`
 	}
 	if err := json.Unmarshal([]byte(block), &call); err != nil {
-		return nil, text
+		return &TextToolCall{Name: "ducklab_protocol", Args: json.RawMessage(`{}`), ParseError: fmt.Sprintf("malformed ducklab tool call JSON: %v", err)}, ""
+	}
+	if strings.TrimSpace(call.Tool) == "" {
+		return &TextToolCall{Name: "ducklab_protocol", Args: json.RawMessage(`{}`), ParseError: "malformed ducklab tool call: missing non-empty tool name"}, ""
+	}
+	// Zero-argument tools are a frequent small-model edge: omitting `args`
+	// carries the same meaning as an empty object. The registry remains the
+	// authority for tools that actually require parameters.
+	if len(bytes.TrimSpace(call.Args)) == 0 || string(bytes.TrimSpace(call.Args)) == "null" {
+		call.Args = json.RawMessage(`{}`)
 	}
 
 	// Handle payload substitution
 	var args map[string]interface{}
 	if err := json.Unmarshal(call.Args, &args); err != nil {
-		return nil, text
+		return &TextToolCall{Name: call.Tool, ParseError: fmt.Sprintf("malformed arguments for %s: %v", call.Tool, err)}, ""
 	}
 	for k, v := range args {
 		s, ok := v.(string)
@@ -1435,6 +1446,9 @@ func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, t
 
 // executeTextToolCall executes a text-protocol tool call.
 func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, tc *TextToolCall, turn *Turn) (*tools.Result, error) {
+	if tc.ParseError != "" {
+		return tools.ErrorResult("%s; return exactly one valid ```ducklab JSON envelope and try again", tc.ParseError), nil
+	}
 	allowed := false
 	for _, name := range turn.Toolbelt {
 		if name == tc.Name {

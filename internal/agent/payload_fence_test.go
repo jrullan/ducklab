@@ -93,3 +93,29 @@ func TestProseWithoutAnEnvelopeIsNotAToolCall(t *testing.T) {
 		t.Errorf("prose was altered: %q", remaining)
 	}
 }
+
+func TestTextToolCallDefaultsMissingArgsToEmptyObject(t *testing.T) {
+	tc, remaining := parseTextToolCall("```ducklab\n{\"tool\":\"verify_run\"}\n```")
+	if tc == nil || tc.ParseError != "" {
+		t.Fatalf("missing args was not accepted: %+v", tc)
+	}
+	if tc.Name != "verify_run" || string(tc.Args) != "{}" {
+		t.Fatalf("parsed call = %+v, want verify_run with empty args", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("remaining = %q, want empty", remaining)
+	}
+}
+
+func TestMalformedTextToolCallBecomesRepairableProtocolError(t *testing.T) {
+	tc, remaining := parseTextToolCall("```ducklab\n{\"tool\":\"fs_patch\", broken}\n```")
+	if tc == nil || !strings.Contains(tc.ParseError, "malformed ducklab tool call JSON") {
+		t.Fatalf("malformed envelope was silently treated as prose: %+v", tc)
+	}
+	if tc.Name != "ducklab_protocol" {
+		t.Fatalf("repair feedback would have an unnamed tool result: %+v", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("malformed envelope leaked into final prose: %q", remaining)
+	}
+}
