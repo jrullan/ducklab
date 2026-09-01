@@ -104,7 +104,7 @@ func TestFragmentCriticContextRemovesAuthorWireProtocol(t *testing.T) {
 			t.Errorf("critic prompt retained %q:\n%s", absent, got)
 		}
 	}
-	for _, present := range []string{"preamble", "Amendment under review", "Enable saving.", "The draft under review", "Draft follows."} {
+	for _, present := range []string{"preamble", "Amendment under review", "Enable saving.", "smallest semantic delta", "not required", "The draft under review", "Draft follows."} {
 		if !strings.Contains(got, present) {
 			t.Errorf("critic prompt lost %q:\n%s", present, got)
 		}

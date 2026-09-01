@@ -195,6 +195,10 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	fmt.Fprintf(&b, "## Rules\n\n"+
 		"- Read before you write: use artifact_read to see the full text of any section you "+
 		"consider changing — the outline above carries titles only.\n"+
+		"- Make the smallest semantic delta that satisfies the request. In particular, "+
+		"'not required' removes a mandatory constraint; it does NOT delete or prohibit the "+
+		"capability. Preserve it as optional and state the alternative path unless the human "+
+		"explicitly asks to remove/forbid it.\n"+
 		"- To CHANGE a section, emit it in full under its EXISTING id: ## %s-012 — Title.\n"+
 		"- To DELETE an existing section, emit only its existing H2 heading followed by "+
 		"**Delete:** yes. Omitting it does NOT delete it, and prose such as REMOVED has no effect.\n"+

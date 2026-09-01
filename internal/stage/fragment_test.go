@@ -35,6 +35,8 @@ func TestTheFragmentPromptIsAnOutline(t *testing.T) {
 		"Return ONLY the sections you add or change",
 		"artifact_read",
 		"EXISTING id",
+		"smallest semantic delta",
+		"'not required' removes a mandatory constraint",
 		"**Delete:** yes",
 		"REMOVED has no effect",
 		"SPEC-900",
