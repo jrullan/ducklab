@@ -208,6 +208,10 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 		"Everything else is handled elsewhere — this section is your whole world.\n\n", kind)
 	b.WriteString("## The request\n\n" + strings.TrimSpace(ask) + "\n\n")
 	fmt.Fprintf(&b, "## The section today\n\n## %s — %s\n\n%s\n\n", sec.ID, sec.Title, sec.Body)
+	b.WriteString("## Scope rule\n\nThe request may contain several independent changes assigned to other " +
+		"section passes. Apply ONLY the clauses whose subject belongs to this section's existing " +
+		"title and behavior. Do not copy, summarize, or mention clauses about another capability. " +
+		"If no clause belongs to this section, answer UNCHANGED.\n\n")
 	fmt.Fprintf(&b, "## Answer format\n\nEither the full replacement section — heading and body, "+
 		"under the SAME id:\n\n## %s — <title>\n<body>\n\nOr, if the request does not change this "+
 		"section, reply with exactly the single word UNCHANGED.\n", sec.ID)

@@ -38,6 +38,10 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 				if strings.Contains(prompt, "Original login.") {
 					t.Error("another section's body leaked into a section pass")
 				}
+				if !strings.Contains(prompt, "Apply ONLY the clauses whose subject belongs to this section") ||
+					!strings.Contains(prompt, "Do not copy, summarize, or mention clauses about another capability") {
+					t.Error("section pass lacks a semantic scope boundary")
+				}
 				return "## SPEC-002 — Profile, editable\n\nPer-field modals.\n", nil
 			default: // the new-section pass
 				return "## SPEC-900 — Exercise search\n\nSearch the catalog.\n", nil
