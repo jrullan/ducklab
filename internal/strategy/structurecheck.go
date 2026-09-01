@@ -22,6 +22,7 @@ const (
 	maxRepairFindings      = 12
 	maxStructureStagnation = 3
 	maxRepairSections      = 1
+	maxIndependentSections = 4
 )
 
 // A document council's last architect turn is the one nobody reviews: after
@@ -404,6 +405,71 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 		sort.Strings(parents)
 		return parents
 	}
+	// Independent instances of the same mechanical defect should travel in
+	// one transaction. A 17-section spec with one missing Implements field per
+	// section otherwise needs at least 17 model calls and is mathematically
+	// unable to converge under the 12-attempt cap. Keep graph findings on the
+	// single-hub path below; this batching is only for identical one-parent
+	// findings such as "SPEC-NNN has no **Implements:** line".
+	type independentGroup struct {
+		parents  map[string]bool
+		findings []string
+	}
+	groups := map[string]*independentGroup{}
+	for _, f := range findings {
+		parents := parentsOf(f)
+		if len(parents) != 1 {
+			continue
+		}
+		space := strings.IndexByte(f, ' ')
+		if space <= 0 {
+			continue
+		}
+		// The finding must be about the H2 itself. Task findings are already
+		// batched naturally by their common milestone checkpoint.
+		if f[:space] != parents[0] {
+			continue
+		}
+		signature := f[space+1:]
+		group := groups[signature]
+		if group == nil {
+			group = &independentGroup{parents: map[string]bool{}}
+			groups[signature] = group
+		}
+		group.parents[parents[0]] = true
+		group.findings = append(group.findings, f)
+	}
+	var independent *independentGroup
+	independentSignature := ""
+	for signature, group := range groups {
+		if len(group.parents) < 2 {
+			continue
+		}
+		if independent == nil || len(group.parents) > len(independent.parents) ||
+			(len(group.parents) == len(independent.parents) && signature < independentSignature) {
+			independent, independentSignature = group, signature
+		}
+	}
+	if independent != nil {
+		var targets []string
+		for parent := range independent.parents {
+			targets = append(targets, parent)
+		}
+		sort.Strings(targets)
+		targets = targets[:min(len(targets), maxIndependentSections)]
+		targetSet := map[string]bool{}
+		for _, target := range targets {
+			targetSet[target] = true
+		}
+		var batch []string
+		for _, f := range independent.findings {
+			parents := parentsOf(f)
+			if len(parents) == 1 && targetSet[parents[0]] {
+				batch = append(batch, f)
+			}
+		}
+		return batch, targets
+	}
 	// Repair the highest-leverage H2 first. The old first-finding policy chose
 	// M-01/M-09 while M-10's broad `src/` lane caused seven of ten findings in
 	// Neocapture corrida 12. Coverage makes one small patch remove the largest
@@ -481,9 +547,6 @@ func applyStructurePatch(base, patch *agent.Outcome, contract string, allowed []
 	var p structurePatch
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return base, fmt.Errorf("%w: decode patch: %v", ErrStructureRepairScope, err)
-	}
-	if !slices.Equal(sortedCopy(p.Sections), sortedCopy(allowed)) {
-		return base, fmt.Errorf("%w: patch sections %v; expected %v", ErrStructureRepairScope, p.Sections, allowed)
 	}
 	if len(p.Operations) == 0 || len(p.Operations) > 12 {
 		return base, fmt.Errorf("%w: patch must contain 1-12 operations", ErrStructureRepairScope)

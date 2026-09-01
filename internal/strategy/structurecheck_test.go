@@ -166,6 +166,27 @@ func TestStructureRepairTargetsHighestCoverageSideOfCrossMilestoneFindings(t *te
 	}
 }
 
+func TestStructureRepairBatchesIndependentMissingFields(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "SPEC-001", Body: "core"},
+		agent.Section{ID: "SPEC-002", Body: "ui"},
+		agent.Section{ID: "SPEC-003", Body: "storage"},
+		agent.Section{ID: "SPEC-004", Body: "platform"},
+		agent.Section{ID: "SPEC-005", Body: "extra"},
+	)
+	findings := []string{
+		"SPEC-001 has no **Implements:** line",
+		"SPEC-002 has no **Implements:** line",
+		"SPEC-003 has no **Implements:** line",
+		"SPEC-004 has no **Implements:** line",
+		"SPEC-005 has no **Implements:** line",
+	}
+	batch, ids := structureRepairBatch(findings, sectionsOf(base))
+	if !slices.Equal(ids, []string{"SPEC-001", "SPEC-002", "SPEC-003", "SPEC-004"}) || len(batch) != 4 {
+		t.Fatalf("independent batch = %v for %v, want four sections in one repair", batch, ids)
+	}
+}
+
 func TestStructureRepairChoosesTheHubOfAThreeSectionChain(t *testing.T) {
 	base := sectioned("",
 		agent.Section{ID: "M-001", Body: "### T-001 — A"},
@@ -256,6 +277,35 @@ func TestStructuredRepairChangesOnlyAssignedFields(t *testing.T) {
 	}
 	if !strings.Contains(merged.Text, "**Owns:** src/main.c") || !strings.Contains(merged.Text, "## M-02 — UI\n\n**Owns:** ui/\n\nkeep") {
 		t.Fatalf("structured patch escaped its field:\n%s", merged.Text)
+	}
+}
+
+func TestStructuredRepairTrustsOperationTargetsNotDeclaredSections(t *testing.T) {
+	baseText := "## SPEC-001 — Core\n\ncore\n\n## SPEC-002 — UI\n\nui"
+	base := sectioned(baseText,
+		agent.Section{ID: "SPEC-001", Title: "Core", Body: "core"},
+		agent.Section{ID: "SPEC-002", Title: "UI", Body: "ui"},
+	)
+	patch := &agent.Outcome{Parsed: map[string]interface{}{
+		"sections": []interface{}{},
+		"operations": []interface{}{map[string]interface{}{
+			"op": "set_field", "target": "SPEC-001", "field": "Implements", "value": "REQ-001",
+		}},
+	}}
+	merged, err := applyStructurePatch(base, patch, "markdown_sections:SPEC", []string{"SPEC-001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(merged.Text, "**Implements:** REQ-001") || !strings.Contains(merged.Text, "## SPEC-002 — UI\n\nui") {
+		t.Fatalf("safe operation was not applied atomically:\n%s", merged.Text)
+	}
+
+	patch.Parsed.(map[string]interface{})["sections"] = []interface{}{"SPEC-001", "SPEC-002"}
+	patch.Parsed.(map[string]interface{})["operations"] = []interface{}{map[string]interface{}{
+		"op": "set_field", "target": "SPEC-002", "field": "Implements", "value": "REQ-002",
+	}}
+	if _, err := applyStructurePatch(base, patch, "markdown_sections:SPEC", []string{"SPEC-001"}); !errors.Is(err, ErrStructureRepairScope) {
+		t.Fatalf("outside operation error = %v, want scope rejection", err)
 	}
 }
 
