@@ -452,6 +452,25 @@ func TestRequirementsRejectGenericExclusionCatchAll(t *testing.T) {
 	}
 }
 
+func TestRequirementPriorityNormalizationMovesInlineAndInfersMissing(t *testing.T) {
+	raw := "## REQ-001 — Capture\n\nThe app shall capture.\n\n## REQ-002 — Out of Scope: Saving\n\nSaving is excluded. **Priority:** wont."
+	parsed, err := agent.ParseContract("markdown_sections:REQ", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, changes, err := normalizeRequirementPriorities(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:REQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != 2 || strings.Count(normalized.Text, "**Priority:**") != 2 ||
+		!strings.Contains(normalized.Text, "**Priority:** must") || !strings.Contains(normalized.Text, "**Priority:** wont") {
+		t.Fatalf("changes=%d normalized:\n%s", changes, normalized.Text)
+	}
+	if findings := structureFindings(nil, sectionsOf(normalized), "markdown_sections:REQ", nil, false, normalized.Text); len(findings) != 0 {
+		t.Fatalf("normalized findings = %v", findings)
+	}
+}
+
 func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{
 		{ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{

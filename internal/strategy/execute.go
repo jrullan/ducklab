@@ -576,6 +576,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					})
 				}
 			}
+			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:REQ" {
+				normalized, priorityChanges, normalizeErr := normalizeRequirementPriorities(outcome, documentContract)
+				if normalizeErr != nil {
+					err = normalizeErr
+				} else {
+					outcome = normalized
+					if priorityChanges > 0 {
+						emit(params, "structure_normalized", map[string]interface{}{
+							"round": round, "turn": i, "fields": priorityChanges,
+							"detail": "canonicalized unambiguous requirement Priority fields",
+						})
+					}
+				}
+			}
 			enforcePlanManifest := documentContract == "markdown_sections:M" && round == 1 && verdictsThisRound == 0
 			if err == nil && turn.Role == config.RoleArchitect && enforcePlanManifest {
 				normalized, manifestChanges, normalizeErr := reconcilePlanManifest(outcome, planManifest, documentContract)

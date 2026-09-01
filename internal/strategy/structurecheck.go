@@ -25,6 +25,8 @@ const (
 	maxIndependentSections = 4
 )
 
+var requirementPriorityToken = regexp.MustCompile(`(?i)\*\*Priority:\*\*\s*(must|should|could|wont)\.?`)
+
 // A document council's last architect turn is the one nobody reviews: after
 // the critics speak, the revision goes straight to the gate. The plan that
 // reached Neocapture's gate on 2026-08-29 had lost every Implements: line
@@ -189,6 +191,75 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+// normalizeRequirementPriorities compiles a mechanically unambiguous Priority
+// into one canonical field. Small seats frequently put the marker at the end
+// of a prose line; set_field then added a second marker because Markdown fields
+// are line-oriented, turning a trivial formatting issue into a repair loop.
+func normalizeRequirementPriorities(outcome *agent.Outcome, contract string) (*agent.Outcome, int, error) {
+	if outcome == nil || contract != "markdown_sections:REQ" {
+		return outcome, 0, nil
+	}
+	sections := sectionsOf(outcome)
+	if len(sections) == 0 {
+		return outcome, 0, nil
+	}
+	changed := 0
+	parts := make([]string, 0, len(sections)+1)
+	if preamble := documentPreamble(outcome.Text); preamble != "" {
+		parts = append(parts, preamble)
+	}
+	for _, section := range sections {
+		body := strings.TrimSpace(section.Body)
+		matches := requirementPriorityToken.FindAllStringSubmatch(body, -1)
+		priority := ""
+		consistent := true
+		for _, match := range matches {
+			value := strings.ToLower(match[1])
+			if priority != "" && priority != value {
+				consistent = false
+			}
+			priority = value
+		}
+		withoutMarkers := strings.TrimSpace(requirementPriorityToken.ReplaceAllString(body, ""))
+		desired := inferredRequirementPriority(section.Title, withoutMarkers)
+		if desired == "" && consistent {
+			desired = priority
+		}
+		canonical := len(matches) == 1 && regexp.MustCompile(`(?im)^\*\*Priority:\*\*\s*`+regexp.QuoteMeta(priority)+`\s*$`).MatchString(body)
+		if desired != "" && consistent && (!canonical || priority != desired) {
+			body = "**Priority:** " + desired
+			if withoutMarkers != "" {
+				body += "\n" + strings.TrimSpace(withoutMarkers)
+			}
+			changed++
+		}
+		parts = append(parts, "## "+section.ID+" — "+strings.TrimSpace(section.Title)+"\n\n"+strings.TrimSpace(body))
+	}
+	if changed == 0 {
+		return outcome, 0, nil
+	}
+	text := strings.Join(parts, "\n\n")
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return outcome, 0, err
+	}
+	normalized := *outcome
+	normalized.Text, normalized.Parsed = text, parsed
+	return &normalized, changed, nil
+}
+
+func inferredRequirementPriority(title, body string) string {
+	if genericExclusionTitle(title) || strings.Contains(strings.ToLower(title), "out of scope:") {
+		return "wont"
+	}
+	prose := strings.ToLower(body)
+	prose = regexp.MustCompile(`\bnot\s+required\b`).ReplaceAllString(prose, "")
+	if regexp.MustCompile(`\bshall\b|\bmust\b|\brequired\b`).MatchString(prose) {
+		return "must"
+	}
+	return ""
 }
 
 func genericExclusionTitle(title string) bool {
