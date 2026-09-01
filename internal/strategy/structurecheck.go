@@ -104,6 +104,9 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 	seen := map[string]bool{}
 	for _, s := range cur {
 		if prefix == "REQ" {
+			if n := priorityMarkerCount(s.Body); n > 1 {
+				out = append(out, fmt.Sprintf("%s has %d **Priority:** markers — one requirement section represents one independently traceable decision and has exactly one Priority", s.ID, n))
+			}
 			priority := strings.ToLower(strings.TrimSpace(markdownFieldValue(s.Body, "Priority")))
 			if priority == "" {
 				out = append(out, fmt.Sprintf("%s has no **Priority:** line — use exactly must, should, could, or wont", s.ID))
@@ -210,6 +213,9 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 	}
 	var out []string
 	for _, sec := range doc.Sections {
+		if n := priorityMarkerCount(sec.Body); n > 1 {
+			out = append(out, fmt.Sprintf("%s has %d **Priority:** markers — one requirement section represents one independently traceable decision and has exactly one Priority", sec.ID, n))
+		}
 		priority := strings.ToLower(strings.TrimSpace(sec.Field("priority")))
 		if priority == "" {
 			out = append(out, fmt.Sprintf("%s has no **Priority:** line — use exactly must, should, could, or wont", sec.ID))
@@ -221,6 +227,10 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 		}
 	}
 	return out
+}
+
+func priorityMarkerCount(body string) int {
+	return len(regexp.MustCompile(`(?i)\*\*priority:\*\*`).FindAllStringIndex(body, -1))
 }
 
 func markdownFieldValue(body, name string) string {

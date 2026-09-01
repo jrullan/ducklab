@@ -169,6 +169,23 @@ func TestMaterializedRequirementsRequirePriority(t *testing.T) {
 	}
 }
 
+func TestRequirementCannotHideMultiplePrioritizedDecisions(t *testing.T) {
+	body := "**Priority:** wont\n\n- No saving. **Priority:** wont\n- No cloud. **Priority:** wont"
+	cur := []agent.Section{{ID: "REQ-005", Body: body}}
+	findings := structureFindings(nil, cur, "markdown_sections:REQ", nil, true, "")
+	if len(findings) != 1 || !strings.Contains(findings[0], "3 **Priority:** markers") {
+		t.Fatalf("multi-decision requirement findings = %v", findings)
+	}
+	doc, err := artifact.Parse("## REQ-005 — Out of scope\n\n"+body+"\n", artifact.KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings = ProposalStructureFindings(doc)
+	if len(findings) != 1 || !strings.Contains(findings[0], "one independently traceable decision") {
+		t.Fatalf("materialized multi-decision findings = %v", findings)
+	}
+}
+
 func TestStructureRepairTargetsOneMilestoneAndMergesItsSection(t *testing.T) {
 	baseText := "# Plan\n\n## M-001 — Setup\n\n### T-001 — Build\n\nold setup\n\n## M-002 — UI\n\n### T-002 — Window\n\nkeep this exactly"
 	base := sectioned(baseText,
