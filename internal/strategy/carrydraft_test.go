@@ -152,7 +152,9 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 					finalPrompt = prompt
 					return verdictOutcome("approve"), nil
 				}
-				return verdictOutcome("request-changes"), nil
+				return verdictOutcome("request-changes", agent.Finding{
+					Severity: "major", File: "requirements.md", Issue: "REQ-011 still contradicts saving", Fix: "delete REQ-011",
+				}), nil
 			}
 			architectTurns++
 			return &agent.Outcome{Text: "## REQ-001 — Candidate\n\nRevision " + string(rune('0'+architectTurns)) + ".", Parsed: []agent.Section{{ID: "REQ-001", Title: "Candidate"}}}, nil
@@ -168,6 +170,10 @@ func TestCouncilFinallyReviewsTheLastRevision(t *testing.T) {
 	}
 	if !strings.Contains(finalPrompt, "Revision 4.") || !strings.Contains(finalPrompt, "verification only") {
 		t.Errorf("final reviewer did not receive the closing revision:\n%s", finalPrompt)
+	}
+	if !strings.Contains(finalPrompt, "Open finding ledger") || !strings.Contains(finalPrompt, "REQ-011 still contradicts saving") ||
+		!strings.Contains(finalPrompt, "Re-check EACH ledger item") {
+		t.Errorf("final reviewer did not receive the open finding ledger:\n%s", finalPrompt)
 	}
 	if res.State.Verdict != "approve" {
 		t.Errorf("final verdict = %q, want approve", res.State.Verdict)

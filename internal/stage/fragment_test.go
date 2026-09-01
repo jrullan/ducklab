@@ -35,6 +35,8 @@ func TestTheFragmentPromptIsAnOutline(t *testing.T) {
 		"Return ONLY the sections you add or change",
 		"artifact_read",
 		"EXISTING id",
+		"**Delete:** yes",
+		"REMOVED has no effect",
 		"SPEC-900",
 		"return NO sections",
 	} {
@@ -44,6 +46,23 @@ func TestTheFragmentPromptIsAnOutline(t *testing.T) {
 	}
 	if len(prompt) > 4000 {
 		t.Errorf("prompt is %d bytes for a three-section doc; it must stay an outline", len(prompt))
+	}
+}
+
+func TestMergeFragmentConsumesExplicitSectionDeletion(t *testing.T) {
+	base := &artifact.Document{Sections: []artifact.Section{
+		{ID: "REQ-001", Title: "Capture", Body: "keep"},
+		{ID: "REQ-011", Title: "File saving excluded", Body: "old exclusion"},
+	}}
+	out := mergeFragment(base, []artifact.Section{
+		{ID: "REQ-011", Title: "File saving excluded", Body: "**Delete:** yes", Fields: map[string]string{"delete": "yes"}},
+		{ID: "REQ-999", Title: "Already absent", Body: "**Delete:** yes", Fields: map[string]string{"delete": "yes"}},
+	}, "REQ")
+	if len(out.Sections) != 1 || out.Sections[0].ID != "REQ-001" {
+		t.Fatalf("explicit deletion did not consume the tombstone: %+v", out.Sections)
+	}
+	if len(base.Sections) != 2 {
+		t.Fatal("mergeFragment mutated its input")
 	}
 }
 

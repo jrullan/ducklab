@@ -188,6 +188,8 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 		"- Read before you write: use artifact_read to see the full text of any section you "+
 		"consider changing — the outline above carries titles only.\n"+
 		"- To CHANGE a section, emit it in full under its EXISTING id: ## %s-012 — Title.\n"+
+		"- To DELETE an existing section, emit only its existing H2 heading followed by "+
+		"**Delete:** yes. Omitting it does NOT delete it, and prose such as REMOVED has no effect.\n"+
 		"- To ADD a section, use the literal id %s (repeat it for each new one) — real ids "+
 		"are assigned by the engine.\n"+
 		"- Emit nothing else: no unchanged sections, no prose between sections. A section "+
@@ -210,6 +212,11 @@ func mergeFragment(base *artifact.Document, produced []artifact.Section, prefix 
 		replaced := false
 		for i := range out.Sections {
 			if strings.EqualFold(out.Sections[i].ID, sec.ID) {
+				if deleteFragmentSection(sec) {
+					out.Sections = append(out.Sections[:i], out.Sections[i+1:]...)
+					replaced = true
+					break
+				}
 				// In place, id preserved: references to it stay true.
 				sec.ID = out.Sections[i].ID
 				out.Sections[i] = sec
@@ -220,10 +227,20 @@ func mergeFragment(base *artifact.Document, produced []artifact.Section, prefix 
 		if replaced {
 			continue
 		}
+		// A tombstone for an id not present in the approved base is already
+		// satisfied. It must never become a new section.
+		if deleteFragmentSection(sec) {
+			continue
+		}
 		sec.ID = fmt.Sprintf("%s-%03d", prefix, NextFree(out.Sections, prefix))
 		out.Sections = append(out.Sections, sec)
 	}
 	return &out
+}
+
+func deleteFragmentSection(sec artifact.Section) bool {
+	v := strings.ToLower(strings.TrimSpace(sec.Field("delete")))
+	return v == "yes" || v == "true"
 }
 
 // mergePlanFragment applies a plan fragment to a copy of the base. Task

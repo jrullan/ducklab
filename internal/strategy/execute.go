@@ -999,7 +999,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// what they are being asked to accept.
 	if script.RevisionOpensNextRound && result.Rounds == maxRounds &&
 		result.State.Verdict == "request-changes" && lastArchitect != nil {
-		if err := finalDocumentReview(ctx, script, params, runner, registry, lastArchitect, result); err != nil {
+		if err := finalDocumentReview(ctx, script, params, runner, registry, lastArchitect, findings, result); err != nil {
 			result.Error = err
 			return result, err
 		}
@@ -1014,7 +1014,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	return result, nil
 }
 
-func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, result *ExecuteResult) error {
+func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, openFindings []conv.Finding, result *ExecuteResult) error {
 	digest := documentCandidateDigest(candidate.Text)
 	result.CandidateDigest = digest
 	emit(params, "final_review_started", map[string]interface{}{
@@ -1044,6 +1044,11 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		}
 		prompt += "\n\n## Final candidate under review\n\n" + candidate.Text +
 			"\n\nThis is verification only. Return a verdict on this exact candidate; no architect turn follows automatically."
+		if rendered := conv.RenderFindings(openFindings); rendered != "" {
+			prompt += "\n\n## Open finding ledger from the preceding review\n\n" + rendered +
+				"\nRe-check EACH ledger item against the exact candidate above. Approve only if every item is now resolved. " +
+				"If any remains, return request-changes and repeat that unresolved item in findings; an approve must certify the whole ledger, not merely report that the latest revision changed text."
+		}
 		if params.ExecContext != nil {
 			if kind := kindOfContract(turn.Contract, script); kind != "" {
 				if params.ExecContext.DraftUnderReview == nil {
