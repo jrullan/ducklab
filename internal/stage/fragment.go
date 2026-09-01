@@ -196,7 +196,7 @@ func buildFragmentPrompt(projectRoot string, kind artifact.Kind, base *artifact.
 	b.WriteString("\n")
 
 	b.WriteString(coverageGapsHint(projectRoot, kind, base))
-	b.WriteString(planGapsHint(projectRoot, kind))
+	b.WriteString(planGapsHint(projectRoot, kind, base))
 	if kind == artifact.KindPlan {
 		b.WriteString("## Rules\n\n" +
 			"- Read before you write: use artifact_read to see the full text of anything you " +
@@ -452,7 +452,7 @@ func coverageGapsHint(projectRoot string, kind artifact.Kind, base *artifact.Doc
 // Without it a plan update opened on the generic "review the project" and a
 // small architect enumerated its own priorities with the real assignment
 // (four freshly accepted spec sections) nowhere in them.
-func planGapsHint(projectRoot string, kind artifact.Kind) string {
+func planGapsHint(projectRoot string, kind artifact.Kind, base *artifact.Document) string {
 	if kind != artifact.KindPlan {
 		return ""
 	}
@@ -460,9 +460,12 @@ func planGapsHint(projectRoot string, kind artifact.Kind) string {
 	if err != nil || spec == nil || len(spec.Sections) == 0 {
 		return ""
 	}
-	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
-	if err != nil || plan == nil {
-		return ""
+	plan := base
+	if plan == nil {
+		plan, err = artifact.Load(projectRoot, artifact.KindPlan)
+		if err != nil || plan == nil {
+			return ""
+		}
 	}
 	covered := map[string]bool{}
 	for _, m := range plan.Sections {

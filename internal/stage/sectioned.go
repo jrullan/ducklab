@@ -183,7 +183,7 @@ func buildTriagePassPrompt(projectRoot string, kind artifact.Kind, base *artifac
 		}
 	}
 	b.WriteString(coverageGapsHint(projectRoot, kind, base))
-	b.WriteString(planGapsHint(projectRoot, kind))
+	b.WriteString(planGapsHint(projectRoot, kind, base))
 	b.WriteString("\n## Answer format\n\n" +
 		"One line per item, nothing else:\n" +
 		"- an existing id to CHANGE, e.g. " + kind.Prefix() + "-012\n" +

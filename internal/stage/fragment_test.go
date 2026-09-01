@@ -356,7 +356,7 @@ func TestPlanUpdatesCarryTheirGaps(t *testing.T) {
 			"## SPEC-038 — Image selection\n\nAlso new.\n")
 	writeDoc(t, root, artifact.KindPlan,
 		"## M-001 — Core\n\n### T-001 — Images groundwork\n\n**Implements:** SPEC-038\n\nStarted.\n")
-	hint := planGapsHint(root, artifact.KindPlan)
+	hint := planGapsHint(root, artifact.KindPlan, nil)
 	if !strings.Contains(hint, "SPEC-037") {
 		t.Errorf("the undelivered open section is missing: %q", hint)
 	}
@@ -368,8 +368,25 @@ func TestPlanUpdatesCarryTheirGaps(t *testing.T) {
 	if !strings.Contains(hint, "WHOLE assignment") || !strings.Contains(hint, "one\nat a time") && !strings.Contains(hint, "one at a time") {
 		t.Errorf("the hint lost its prescription: %q", hint)
 	}
-	if planGapsHint(root, artifact.KindSpec) != "" {
+	if planGapsHint(root, artifact.KindSpec, nil) != "" {
 		t.Error("the plan hint leaked into other kinds")
+	}
+}
+
+func TestPlanRevisionGapsUseTheMaterializedBase(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec,
+		"## SPEC-001 — Architecture\n\nOpen.\n\n## SPEC-002 — Workflow\n\nOpen.\n")
+	// The approved plan is empty, but this pending/recovered candidate already
+	// covers both specs. Revision triage must not tell the model to recreate it.
+	base := &artifact.Document{Sections: []artifact.Section{{
+		ID: "M-01", Title: "Core", Children: []artifact.Section{
+			{ID: "T-001", Implements: []string{"SPEC-001"}},
+			{ID: "T-002", Implements: []string{"SPEC-002"}},
+		},
+	}}}
+	if hint := planGapsHint(root, artifact.KindPlan, base); hint != "" {
+		t.Fatalf("materialized plan candidate covers the spec but got gaps:\n%s", hint)
 	}
 }
 
