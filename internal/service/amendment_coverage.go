@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	numberedAmendmentMarker = regexp.MustCompile(`(?i)(?:^|\s)\d+[.)]\s*`)
-	coverageWord            = regexp.MustCompile(`[a-z0-9]+`)
+	numberedAmendmentMarker     = regexp.MustCompile(`(?i)(?:^|\s)\d+[.)]\s*`)
+	coverageWord                = regexp.MustCompile(`[a-z0-9]+`)
+	explicitRequirementOverride = regexp.MustCompile(`(?i)\boverrides?\s+(REQ-\d+)\b`)
 )
 
 // amendmentCoverageFindings catches a lossy post-merge amendment. Section-wise
@@ -29,6 +30,7 @@ func amendmentCoverageFindings(request string, doc *artifact.Document) []string 
 	}
 	documentWords := wordSet(artifact.RenderBody(doc))
 	var findings []string
+	coveredBySection := map[string][]int{}
 	for i, clause := range clauses {
 		anchors := coverageAnchors(clause)
 		if len(anchors) == 0 {
@@ -42,9 +44,45 @@ func amendmentCoverageFindings(request string, doc *artifact.Document) []string 
 		}
 		if len(missing) > 0 {
 			findings = append(findings, fmt.Sprintf("amendment clause %d left no explicit evidence for %s — preserve the requested behavior in the merged document", i+1, strings.Join(missing, ", ")))
+			continue
+		}
+		for _, section := range doc.Sections {
+			words := wordSet(section.Title + "\n" + section.Body)
+			matches := true
+			for _, anchor := range anchors {
+				if !words[anchor] {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				coveredBySection[section.ID] = append(coveredBySection[section.ID], i+1)
+			}
 		}
 	}
+	for id, covered := range coveredBySection {
+		if len(covered) > 1 {
+			findings = append(findings, fmt.Sprintf("%s combines amendment clauses %v — independently requested behaviors need independently traceable requirement sections", id, covered))
+		}
+	}
+	for _, section := range doc.Sections {
+		for _, match := range explicitRequirementOverride.FindAllStringSubmatch(section.Body, -1) {
+			if match[1] != section.ID && requirementSectionExists(doc, strings.ToUpper(match[1])) {
+				findings = append(findings, fmt.Sprintf("%s says it overrides %s while both requirements remain — transform the existing requirement instead of keeping conflicting sections", section.ID, strings.ToUpper(match[1])))
+			}
+		}
+	}
+	sort.Strings(findings)
 	return findings
+}
+
+func requirementSectionExists(doc *artifact.Document, id string) bool {
+	for _, section := range doc.Sections {
+		if section.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func numberedClauses(request string) []string {

@@ -29,3 +29,24 @@ func TestAmendmentCoverageIgnoresUnnumberedBrief(t *testing.T) {
 		t.Fatalf("brief findings = %v", findings)
 	}
 }
+
+func TestAmendmentCoverageRejectsPackedAndConflictingOverride(t *testing.T) {
+	request := "1) No keyboard-only operation is required 2) Saving functionality shall be implemented 3) Ubuntu newer versions use Wayland"
+	doc, err := artifact.Parse("## REQ-005 — Persistent File Storage\n\nSaving is out of scope.\n\n## REQ-008 — Amendment catch-all\n\nKeyboard-only operation is optional. Ubuntu uses Wayland. Saving shall be implemented; this overrides REQ-005.", artifact.KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := amendmentCoverageFindings(request, doc)
+	if !containsFinding(findings, "combines amendment clauses") || !containsFinding(findings, "both requirements remain") {
+		t.Fatalf("findings = %v, want packed-clause and override conflicts", findings)
+	}
+}
+
+func containsFinding(findings []string, needle string) bool {
+	for _, finding := range findings {
+		if strings.Contains(finding, needle) {
+			return true
+		}
+	}
+	return false
+}
