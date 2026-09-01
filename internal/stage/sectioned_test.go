@@ -80,11 +80,24 @@ func TestRequirementsSectionPassCarriesAmendmentInvariants(t *testing.T) {
 	})
 	for _, want := range []string{
 		"smallest semantic delta", "exactly one `**Priority:**` marker", "`must`, `should`, `could`, or `wont`",
-		"require `Priority: must`", "request did not name",
+		"require `Priority: must`", "never put a clause about another subject into `Assumption`", "request did not name",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("requirements section prompt lacks %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestSectionedTriageOutlineShowsHiddenCapabilities(t *testing.T) {
+	doc := &artifact.Document{Sections: []artifact.Section{{
+		ID: "REQ-002", Title: "Screen capture", Body: "**Priority:** must\nCapture starts from a keyboard shortcut or a UI trigger.",
+	}}}
+	prompt, err := buildTriagePassPrompt(t.TempDir(), artifact.KindRequirements, doc, "Keyboard-only is not required.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "REQ-002 — Screen capture ::") || !strings.Contains(prompt, "keyboard shortcut or a UI trigger") {
+		t.Fatalf("triage outline hid the section's secondary capability:\n%s", prompt)
 	}
 }
 

@@ -177,9 +177,9 @@ func buildTriagePassPrompt(projectRoot string, kind artifact.Kind, base *artifac
 	b.WriteString("## The request\n\n" + strings.TrimSpace(ask) + "\n\n")
 	b.WriteString("## The document (outline)\n\n")
 	for _, sec := range base.Sections {
-		fmt.Fprintf(&b, "- %s — %s\n", sec.ID, sec.Title)
+		fmt.Fprintf(&b, "- %s — %s%s\n", sec.ID, sec.Title, outlineSynopsis(sec.Body))
 		for _, c := range sec.Children {
-			fmt.Fprintf(&b, "  - %s — %s\n", c.ID, c.Title)
+			fmt.Fprintf(&b, "  - %s — %s%s\n", c.ID, c.Title, outlineSynopsis(c.Body))
 		}
 	}
 	b.WriteString(coverageGapsHint(projectRoot, kind, base))
@@ -229,12 +229,25 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 			"- Make the smallest semantic delta and preserve every unrelated constraint already in this section.\n" +
 			"- Keep exactly one `**Priority:**` marker, whose value is exactly `must`, `should`, `could`, or `wont`.\n" +
 			"- `shall`, `must`, and `required` are mandatory and require `Priority: must`; optional/`may` behavior is not mandatory.\n" +
+			"- Metadata belongs to this section: never put a clause about another subject into `Assumption` or another field.\n" +
 			"- Do not add a storage destination, integration, or behavior the request did not name.\n\n")
 	}
 	fmt.Fprintf(&b, "## Answer format\n\nEither the full replacement section — heading and body, "+
 		"under the SAME id:\n\n## %s — <title>\n<body>\n\nOr, if the request does not change this "+
 		"section, reply with exactly the single word UNCHANGED.\n", sec.ID)
 	return b.String()
+}
+
+func outlineSynopsis(body string) string {
+	text := strings.Join(strings.Fields(body), " ")
+	if text == "" {
+		return ""
+	}
+	const limit = 220
+	if len(text) > limit {
+		text = text[:limit] + "…"
+	}
+	return " :: " + text
 }
 
 func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Document, title, prefix string) string {
