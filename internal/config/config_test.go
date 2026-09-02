@@ -540,3 +540,29 @@ func TestSaveGlobalWritesNoSecretValues(t *testing.T) {
 		t.Error("the env var name should be written; only the value is secret")
 	}
 }
+
+func TestProjectCapabilitiesRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "project.toml")
+	p := DefaultProject("fixture", "Fixture")
+	p.Capabilities.Enabled = []string{"c-native"}
+	p.Capabilities.Disabled = []string{"unused-stack"}
+	p.Capabilities.Policy["c-native.warnings"] = "required"
+	if err := SaveProject(path, p); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadProject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Capabilities.Auto || loaded.Capabilities.Policy["c-native.warnings"] != "required" {
+		t.Fatalf("capabilities lost in round trip: %+v", loaded.Capabilities)
+	}
+}
+
+func TestProjectRejectsUnknownCapabilityPolicyLevel(t *testing.T) {
+	p := DefaultProject("fixture", "Fixture")
+	p.Capabilities.Policy["c-native.warnings"] = "sometimes"
+	if err := p.Validate("project.toml"); err == nil {
+		t.Fatal("invalid capability policy was accepted")
+	}
+}

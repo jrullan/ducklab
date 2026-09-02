@@ -6,10 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/jrullan/ducklab/internal/verify"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/verify"
 	"github.com/jrullan/ducklab/internal/xplat"
 )
 
@@ -182,48 +183,28 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		return "red", log, nil
 	}
 
-	// A bare C/C++ syntax check exits zero for type mismatches and other
-	// warnings that are defects at an API boundary. T-004 passed while giving
-	// XGetGeometry signed int pointers for unsigned outputs. Preserve the
-	// authored command as the contract, then add a deterministic strict pass
-	// for the simple compiler form we can recognize safely. Compound shell
-	// programs remain untouched rather than being rewritten ambiguously.
-	if strict := strictNativeSyntaxCommand(command); strict != "" {
+	checks, err := capability.DefaultRegistry().Resolve(capability.Context{
+		ProjectRoot:      ectx.ProjectRoot,
+		TaskVerification: command,
+		Policies:         ectx.Capabilities.Policy,
+	}, ectx.Capabilities.Auto, ectx.Capabilities.Enabled, ectx.Capabilities.Disabled)
+	if err != nil {
+		return "none", "", fmt.Errorf("resolve harness capabilities: %w", err)
+	}
+	for _, check := range checks {
 		strictRes, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
-			Mode: "custom", Custom: strict, TimeoutS: ectx.Verify.TimeoutS,
+			Mode: "custom", Custom: check.Command, TimeoutS: ectx.Verify.TimeoutS,
 		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
 		if err != nil {
 			return "none", "", err
 		}
-		log += "\nstrict native syntax verification:\n" + formatGateResult(strictRes)
-		if !verify.IsGreen(strictRes) {
+		log += fmt.Sprintf("\ncapability diagnostic [%s/%s, %s]:\n%s",
+			check.Capability, check.Name, check.Enforcement, formatGateResult(strictRes))
+		if check.Enforcement == capability.Required && !verify.IsGreen(strictRes) {
 			return "red", log, nil
 		}
 	}
 	return "green", log, nil
-}
-
-func strictNativeSyntaxCommand(command string) string {
-	if strings.ContainsAny(command, "\n;") || strings.Contains(command, "&&") || strings.Contains(command, "||") {
-		return ""
-	}
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return ""
-	}
-	compiler := strings.TrimPrefix(fields[0], "./")
-	if slash := strings.LastIndex(compiler, "/"); slash >= 0 {
-		compiler = compiler[slash+1:]
-	}
-	switch compiler {
-	case "cc", "gcc", "clang", "c++", "g++", "clang++":
-	default:
-		return ""
-	}
-	if !strings.Contains(command, "-fsyntax-only") || strings.Contains(command, "-Werror") {
-		return ""
-	}
-	return command + " -Wall -Wextra -Werror"
 }
 
 func formatGateResult(res *verify.Result) string {

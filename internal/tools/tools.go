@@ -156,6 +156,9 @@ type ExecContext struct {
 	// a tool that runs a different command from the gate that decides tells a
 	// model its work passes when it does not.
 	Verify config.Verify
+	// Capabilities selects stack-specific adapters without coupling tool
+	// execution to any language or project type.
+	Capabilities config.Capabilities
 	// TaskVerification is the task's explicit Verification field. Build runs
 	// execute it before Verify, so verify_run must do the same or it can show a
 	// green gate immediately before the round gate turns red.

@@ -344,6 +344,16 @@ type Verify struct {
 	TestGlobs []string `toml:"test_globs" json:"test_globs"`
 }
 
+// Capabilities controls composable, stack-specific harness adapters. Auto
+// enables deterministic detection; explicit lists override it without making
+// the core know what a language, framework, or build system is.
+type Capabilities struct {
+	Auto     bool              `toml:"auto" json:"auto"`
+	Enabled  []string          `toml:"enabled" json:"enabled"`
+	Disabled []string          `toml:"disabled" json:"disabled"`
+	Policy   map[string]string `toml:"policy" json:"policy"`
+}
+
 // Roster maps roles to ducklings.
 type Roster map[Role]DucklingID
 
@@ -384,13 +394,14 @@ type GitHub struct {
 
 // Project is the project configuration.
 type Project struct {
-	Schema   int      `toml:"schema" json:"schema"`
-	ID       string   `toml:"id" json:"id"`
-	Name     string   `toml:"name" json:"name"`
-	Describe string   `toml:"describe" json:"describe"`
-	Created  string   `toml:"created" json:"created"`
-	Autonomy Autonomy `toml:"autonomy" json:"autonomy"`
-	Verify   Verify   `toml:"verify" json:"verify"`
+	Schema       int          `toml:"schema" json:"schema"`
+	ID           string       `toml:"id" json:"id"`
+	Name         string       `toml:"name" json:"name"`
+	Describe     string       `toml:"describe" json:"describe"`
+	Created      string       `toml:"created" json:"created"`
+	Autonomy     Autonomy     `toml:"autonomy" json:"autonomy"`
+	Verify       Verify       `toml:"verify" json:"verify"`
+	Capabilities Capabilities `toml:"capabilities" json:"capabilities"`
 	// Install declares how this project's own executables and assets are
 	// rebuilt and installed, so a developer never has to leave ducklab to
 	// make accepted work runnable (the self-hosted case: T-075's avatar sat
@@ -797,6 +808,16 @@ func (p *Project) Validate(path string) error {
 			return &Error{File: path, Key: "verify.link_deps", Msg: fmt.Sprintf("must contain clean relative paths, got %q", dep)}
 		}
 	}
+	for key, policy := range p.Capabilities.Policy {
+		if strings.TrimSpace(key) == "" {
+			return &Error{File: path, Key: "capabilities.policy", Msg: "policy keys must not be empty"}
+		}
+		switch policy {
+		case "off", "diagnostic", "required":
+		default:
+			return &Error{File: path, Key: "capabilities.policy." + key, Msg: "must be off | diagnostic | required"}
+		}
+	}
 	for role, ducklingID := range p.Roster {
 		if err := ValidateRole(role); err != nil {
 			return &Error{File: path, Key: fmt.Sprintf("roster.%s", role), Msg: err.Error()}
@@ -835,8 +856,9 @@ func DefaultProject(id, name string) *Project {
 			Mode:     "auto",
 			TimeoutS: 900,
 		},
-		Roster: make(Roster),
-		Modes:  make(Modes),
+		Capabilities: Capabilities{Auto: true, Policy: make(map[string]string)},
+		Roster:       make(Roster),
+		Modes:        make(Modes),
 		Budget: Budget{
 			MaxUSD: 5.00,
 		},

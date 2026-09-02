@@ -1541,6 +1541,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		UnsafeWrites:     rs.run.UnsafeWrites,
 		ShellPolicy:      projCfg.Shell,
 		Verify:           projCfg.Verify,
+		Capabilities:     projCfg.Capabilities,
 		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
 		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
@@ -1770,6 +1771,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		UnsafeWrites:     rs.run.UnsafeWrites,
 		ShellPolicy:      projCfg.Shell,
 		Verify:           projCfg.Verify,
+		Capabilities:     projCfg.Capabilities,
 		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
 		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).

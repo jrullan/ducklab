@@ -147,6 +147,7 @@ internal/
   artifact/   Markdown artifacts, frontmatter, traceability checks
   vcs/        Git operations, worktrees, patch apply, file tree
   verify/     Gate detection and execution
+  capability/ Stack-specific adapters and their composable check registry
   skill/      Skill discovery, SKILL.md parsing, invocation
   mcpc/       MCP client manager
   report/     Metrics aggregation
@@ -170,6 +171,29 @@ internal/
 **Consequence to respect:** if a new feature can't be expressed as a `service`
 method, the design is wrong. Do not add a shortcut path from a client into a
 domain package.
+
+### 4.2 Stack capabilities are adapters, not core branches
+
+The core owns workflow, accepted contracts, isolation, evidence, and gate
+polarity. Knowledge of a language, framework, build system, package manager,
+runtime, project, task, or source file does not belong in that core.
+
+`internal/capability` is a microkernel-style registry of independent providers.
+Each provider recognizes one reusable stack capability and contributes checks
+through the same interface. Providers compose: a project may resolve to
+`c-native`, `meson`, `pkg-config`, and `desktop-linux` simultaneously; Ducklab
+must not force it into one project-type label.
+
+The task's accepted `Verification` and the project's configured gate remain
+authoritative. Capability checks are diagnostics by default. Project policy may
+disable one or promote it to `required`; an adapter may never silently weaken
+or strengthen an accepted contract. Provider implementations must not contain
+project names, task IDs, benchmark-run IDs, or project-specific paths.
+
+Adding support for another stack means implementing and registering another
+provider, not adding a language conditional to `tools`, `service`, or `verify`.
+The first provider, `c-native`, turns a simple C/C++ syntax command into an
+additional warning-strict diagnostic without changing the original command.
 
 ## 5. Core types
 
