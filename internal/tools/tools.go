@@ -143,6 +143,11 @@ type ExecContext struct {
 	// file mutation. Exact-call brakes cannot see a research loop made of
 	// slightly different grep/find/read queries that all pursue the same fact.
 	explorationCalls int
+	// ExplorationCallLimit overrides the ordinary per-turn research boundary.
+	// Zero uses the harness default. Strategy-level bounded retries use a
+	// smaller value because their current tree and failing evidence are already
+	// in the transcript; reopening a full research phase defeats the retry.
+	ExplorationCallLimit int
 	// DraftUnderReview holds, per artifact kind, the draft a document
 	// council is currently judging. It lives only in the conversation until
 	// a person accepts it; a seat that asks artifact_read for it is served
@@ -305,9 +310,10 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
-	if explorationTool[name] && ectx.explorationCalls >= ExplorationCallLimit {
+	explorationLimit := ectx.effectiveExplorationCallLimit()
+	if explorationTool[name] && ectx.explorationCalls >= explorationLimit {
 		ectx.ReadToolsClosed = true
-		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker.", ExplorationCallLimit), nil
+		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker.", explorationLimit), nil
 	}
 	if ectx.ReadToolsClosed && explorationTool[name] {
 		return ErrorResult("read-only tools are CLOSED for this reply: stop exploring and use what you already read; write, patch, verify, or answer"), nil
@@ -398,7 +404,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	res, err := t.Execute(ctx, ectx, args)
 	if explorationTool[name] {
 		ectx.explorationCalls++
-		if ectx.explorationCalls >= ExplorationCallLimit {
+		if ectx.explorationCalls >= explorationLimit {
 			ectx.ReadToolsClosed = true
 			if res != nil {
 				res.Content += "\n\n[research boundary reached: observational tools are now closed until you make a file change; synthesize and act]"
@@ -459,6 +465,13 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		res.Content = CapResult(res.Content, resultCapFor(ectx.SeatContextTokens))
 	}
 	return res, err
+}
+
+func (e *ExecContext) effectiveExplorationCallLimit() int {
+	if e != nil && e.ExplorationCallLimit > 0 {
+		return e.ExplorationCallLimit
+	}
+	return ExplorationCallLimit
 }
 
 // readOnlyTool names the tools whose identical call in one turn returns the

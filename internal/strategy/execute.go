@@ -567,6 +567,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				startData["repair_stagnation_limit"] = maxStructureStagnation
 			}
 			emit(params, "turn_start", startData)
+			if params.ExecContext != nil {
+				params.ExecContext.ExplorationCallLimit = 0
+				if turn.Role == config.RoleImplementer && reportRetries > 0 {
+					// A protocol retry continues on the same tree with the prior
+					// evidence in its transcript. Give it enough observation for a
+					// targeted re-read, not another full research phase.
+					params.ExecContext.ExplorationCallLimit = 4
+				}
+			}
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
 			turn.Contract = documentContract

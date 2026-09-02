@@ -137,14 +137,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 12 {
+	if len(profile.ReviewRules) != 13 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}

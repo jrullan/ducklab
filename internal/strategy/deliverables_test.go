@@ -247,6 +247,15 @@ func TestUnreportedDeliverablesRetryBeforeReview(t *testing.T) {
 	)
 	params.Deliverables = []string{"A", "B"}
 	params.Roster[config.RoleAdvisor] = "pato-duck"
+	params.ExecContext = &tools.ExecContext{}
+	originalRunner := params.Runner
+	var implementerLimits []int
+	params.Runner = func(ctx context.Context, turn *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleImplementer {
+			implementerLimits = append(implementerLimits, params.ExecContext.ExplorationCallLimit)
+		}
+		return originalRunner(ctx, turn, duckling, prompt, toolbelt, tc)
+	}
 	if _, err := ExecutePair(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
@@ -264,5 +273,8 @@ func TestUnreportedDeliverablesRetryBeforeReview(t *testing.T) {
 	}
 	if !strings.Contains(rec.prompts[1], "without the required deliverables JSON report") || !strings.Contains(rec.prompts[1], "do not restart research") {
 		t.Errorf("retry did not receive the deterministic protocol correction:\n%s", rec.prompts[1])
+	}
+	if len(implementerLimits) != 2 || implementerLimits[0] != 0 || implementerLimits[1] != 4 {
+		t.Errorf("implementer exploration limits = %v, want [0 4]", implementerLimits)
 	}
 }

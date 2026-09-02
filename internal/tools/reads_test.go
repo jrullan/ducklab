@@ -109,3 +109,26 @@ func TestResearchBudgetForcesActionAndReopensAfterWrite(t *testing.T) {
 		t.Fatalf("successful file progress did not reopen bounded research: %+v", written)
 	}
 }
+
+func TestResearchBudgetHonorsTurnOverride(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	for _, name := range []string{"one.txt", "two.txt", "three.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ectx := &ExecContext{ProjectRoot: dir, ExplorationCallLimit: 2}
+	ectx.BeginTurn()
+	for _, name := range []string{"one.txt", "two.txt"} {
+		res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(fmt.Sprintf(`{"path":%q}`, name)))
+		if res.IsError {
+			t.Fatalf("override refused %s early: %s", name, res.Content)
+		}
+	}
+	blocked, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"three.txt"}`))
+	if !blocked.IsError || !strings.Contains(blocked.Content, "2 observational calls") {
+		t.Fatalf("turn override was not enforced: %+v", blocked)
+	}
+}
