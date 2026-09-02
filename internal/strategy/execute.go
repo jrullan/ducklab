@@ -569,7 +569,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			emit(params, "turn_start", startData)
 			if params.ExecContext != nil {
 				params.ExecContext.ExplorationCallLimit = 0
-				if turn.Role == config.RoleImplementer && reportRetries > 0 {
+				if turn.Role == config.RoleImplementer && (reportRetries > 0 || consultRetries > 0) {
 					// A protocol retry continues on the same tree with the prior
 					// evidence in its transcript. Give it enough observation for a
 					// targeted re-read, not another full research phase.
@@ -937,6 +937,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					evidence.RedGateStreak = redGateStreak
 				}
 				if signals := measureDistressWithReport(outcome, lastReport); signals.Distressed() {
+					// A complete report backed by a green verify after the last
+					// mutation is ready for independent review. Tool friction from
+					// earlier in that turn must not let the advisor replace the
+					// reviewer with another open-ended implementation cycle.
+					if completedAndVerified(lastReport, outcome) {
+						emit(params, "advisor_skipped", map[string]interface{}{
+							"round": round, "reason": "completed deliverables have a current green verify; proceeding to independent review",
+						})
+						continue
+					}
 					if len(evidence.fired()) > 0 {
 						emitEscalationSuggestion(params, evidence, "distress_pause")
 					}
@@ -1110,6 +1120,26 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		result.Text = lastArchitect.Text
 	}
 	return result, nil
+}
+
+func completedAndVerified(report *DeliverablesReport, outcome *agent.Outcome) bool {
+	if report == nil || report.Unreported || len(report.Undelivered()) > 0 || outcome == nil {
+		return false
+	}
+	lastVerify, lastMutation := -1, -1
+	verifyGreen := false
+	for i, call := range outcome.ToolCalls {
+		switch call.Name {
+		case "fs_write", "fs_write_lines", "fs_patch", "fs_delete":
+			if call.Result != nil && !call.Result.IsError {
+				lastMutation = i
+			}
+		case "verify_run":
+			lastVerify = i
+			verifyGreen = call.Result != nil && !call.Result.IsError
+		}
+	}
+	return verifyGreen && lastVerify > lastMutation
 }
 
 func finalDocumentReview(ctx context.Context, script *Script, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, candidate *agent.Outcome, openFindings []conv.Finding, result *ExecuteResult) error {

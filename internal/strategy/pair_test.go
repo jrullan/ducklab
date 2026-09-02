@@ -422,6 +422,34 @@ func TestPairInnerLoopIsBounded(t *testing.T) {
 	}
 }
 
+func TestPairSendsCompletedGreenWorkStraightToReviewer(t *testing.T) {
+	rec := &recorder{}
+	implemented := &agent.Outcome{
+		Text: `Finished despite an earlier tool brake. {"deliverables":[{"id":1,"status":"done"}]}`,
+		ToolCalls: []agent.ToolCallRecord{
+			{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: patch brake"}},
+			{Name: "fs_write", Result: &tools.Result{Content: "wrote file"}},
+			{Name: "verify_run", Result: &tools.Result{Content: "gate: green"}},
+		},
+	}
+	params := pairParams(rec, "green", implemented, verdictOutcome("approve"))
+	params.Deliverables = []string{"A"}
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	var skipped bool
+	params.OnEvent = func(kind string, _ map[string]interface{}) { skipped = skipped || kind == "advisor_skipped" }
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range rec.roles {
+		if role == config.RoleAdvisor {
+			t.Fatalf("advisor ran before review of completed green work: %v", rec.roles)
+		}
+	}
+	if !skipped {
+		t.Fatal("completed green distress did not record why advisor was skipped")
+	}
+}
+
 // No advisor seated: the consult is skipped on the record and the run goes on
 // to the reviewer — a missing seat must never fail a run.
 func TestPairWithoutAnAdvisorSeatSkipsTheConsult(t *testing.T) {
