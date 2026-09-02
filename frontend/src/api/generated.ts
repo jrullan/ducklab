@@ -423,6 +423,13 @@ export interface RunlogEvent {
   type?: string;
 }
 
+export interface RunlogGateCoverageFinding {
+  capability?: string;
+  detail?: string;
+  files?: string[];
+  kind?: string;
+}
+
 export interface RunlogGateReproduction {
   command?: string;
   duration_s?: number;
@@ -473,6 +480,15 @@ export interface RunlogRedoNote {
   editable?: boolean;
 }
 
+export interface RunlogReviewEvidence {
+  findings?: number;
+  implementer?: string;
+  independence?: string;
+  reviewer?: string;
+  status?: string;
+  verdict?: string;
+}
+
 export interface RunlogRun {
   acceptance_gate?: RunlogGateReproduction;
   accepted?: boolean;
@@ -492,6 +508,7 @@ export interface RunlogRun {
   execution_root?: string;
   failure?: string;
   gate?: string;
+  gate_coverage?: RunlogGateCoverageFinding[];
   gate_root?: string;
   governance_modified?: boolean;
   harness_profile?: RunlogHarnessProfile;
@@ -514,6 +531,7 @@ export interface RunlogRun {
   remote_receipts?: Record<string, unknown>[];
   resolution?: string;
   revert_sha?: string;
+  review_evidence?: RunlogReviewEvidence;
   roster?: Record<string, string>;
   roster_sources?: Record<string, string>;
   spend?: Record<string, RunlogDucklingSpend>;

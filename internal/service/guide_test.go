@@ -420,11 +420,17 @@ func TestFinalDissentReadsTheLastVerdict(t *testing.T) {
 	if _, _, dissent := finalDissent(dir); dissent {
 		t.Error("an answered objection still reads as dissent")
 	}
+	if verdict, findings, present := finalReview(dir); !present || verdict != "approve" || findings != 0 {
+		t.Errorf("approved review evidence = %q %d %v", verdict, findings, present)
+	}
 
 	// No verdicts at all (solo run): nothing to dissent.
 	dir = write(t, []string{`{"type":"message","data":{"role":"implementer","content":"done"}}`})
 	if _, _, dissent := finalDissent(dir); dissent {
 		t.Error("a run with no reviewer invented a dissent")
+	}
+	if _, _, present := finalReview(dir); present {
+		t.Error("a solo run invented review evidence")
 	}
 }
 

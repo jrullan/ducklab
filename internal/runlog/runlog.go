@@ -37,9 +37,13 @@ type Run struct {
 	// HarnessProfile is the stack resolution used for this run. It is fixed at
 	// launch so a resume receives the same facts and does not re-probe the tree.
 	HarnessProfile *HarnessProfile `json:"harness_profile,omitempty"`
-	Status         string          `json:"status"` // running|paused|done|failed|queued
-	QueuedReason   string          `json:"queued_reason,omitempty"`
-	Verdict        string          `json:"verdict"`
+	// ReviewEvidence says whether a semantic reviewer actually judged this
+	// proposal. A green command and an absent reviewer are different evidence.
+	ReviewEvidence *ReviewEvidence       `json:"review_evidence,omitempty"`
+	GateCoverage   []GateCoverageFinding `json:"gate_coverage,omitempty"`
+	Status         string                `json:"status"` // running|paused|done|failed|queued
+	QueuedReason   string                `json:"queued_reason,omitempty"`
+	Verdict        string                `json:"verdict"`
 	// GateReproduced records acceptance-time clean-checkout verification.
 	GateReproduced *GateReproduction `json:"acceptance_gate,omitempty"`
 	Accepted       bool              `json:"accepted"`
@@ -211,6 +215,22 @@ type HarnessDiagnostic struct {
 	Name        string `json:"name"`
 	Command     string `json:"command"`
 	Enforcement string `json:"enforcement"`
+}
+
+type ReviewEvidence struct {
+	Status       string `json:"status"`       // not_seated|approved|dissent
+	Independence string `json:"independence"` // none|self|independent
+	Implementer  string `json:"implementer,omitempty"`
+	Reviewer     string `json:"reviewer,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	Findings     int    `json:"findings,omitempty"`
+}
+
+type GateCoverageFinding struct {
+	Capability string   `json:"capability"`
+	Kind       string   `json:"kind"`
+	Detail     string   `json:"detail"`
+	Files      []string `json:"files,omitempty"`
 }
 
 // InterruptedTurn is a durable checkpoint for resuming the same role.

@@ -26,6 +26,7 @@ import (
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/build"
 	"github.com/jrullan/ducklab/internal/bus"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/provider"
@@ -1997,7 +1998,31 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 
 	// Compute verdict
 	projectVerdict := verify.Verdict(gateResult)
-	reviewVerdict, reviewFindings, dissent := finalDissent(rs.runDir)
+	reviewVerdict, reviewFindings, reviewed := finalReview(rs.runDir)
+	_, _, dissent := finalDissent(rs.runDir)
+	reviewStatus := "not_seated"
+	if reviewed {
+		reviewStatus = "approved"
+		if dissent {
+			reviewStatus = "dissent"
+		}
+	}
+	independence := "none"
+	implementer, reviewer := rs.run.Roster["implementer"], rs.run.Roster["reviewer"]
+	if reviewed {
+		independence = "self"
+		if implementer != "" && reviewer != "" && implementer != reviewer {
+			independence = "independent"
+		}
+	}
+	rs.run.ReviewEvidence = &runlog.ReviewEvidence{
+		Status: reviewStatus, Independence: independence, Implementer: implementer,
+		Reviewer: reviewer, Verdict: reviewVerdict, Findings: reviewFindings,
+	}
+	rs.writer.AppendEvent("review_evidence", map[string]interface{}{
+		"status": reviewStatus, "independence": independence, "implementer": implementer,
+		"reviewer": reviewer, "verdict": reviewVerdict, "findings": reviewFindings,
+	})
 	verdict := adjudicateBuildVerdict(projectVerdict, taskGate, dissent)
 	if dissent {
 		detail := fmt.Sprintf("reviewer ended with %s (%d finding(s)); a green command cannot override contractual dissent", reviewVerdict, reviewFindings)
@@ -2013,6 +2038,24 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	git := vcs.New(ectx.ProjectRoot)
 	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
 	rs.writer.WriteDiff(diff)
+	if rs.run.HarnessProfile != nil {
+		var capabilityIDs []string
+		for _, detected := range rs.run.HarnessProfile.Capabilities {
+			capabilityIDs = append(capabilityIDs, detected.ID)
+		}
+		for _, finding := range capability.DefaultRegistry().ObserveGate(capability.GateObservation{
+			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: gateResult.Output,
+		}, capabilityIDs) {
+			recorded := runlog.GateCoverageFinding{
+				Capability: finding.Capability, Kind: finding.Kind, Detail: finding.Detail, Files: finding.Files,
+			}
+			rs.run.GateCoverage = append(rs.run.GateCoverage, recorded)
+			rs.writer.AppendEvent("gate_coverage_warning", map[string]interface{}{
+				"capability": finding.Capability, "kind": finding.Kind,
+				"detail": finding.Detail, "files": finding.Files,
+			})
+		}
+	}
 	if s.afterRunDiff != nil {
 		s.afterRunDiff(rs)
 	}

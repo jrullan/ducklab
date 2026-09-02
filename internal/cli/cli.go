@@ -669,7 +669,11 @@ func runCmd(verb string, args []string, repo string) int {
 			return 2
 		}
 		taskID := args[0]
-		mode := "solo"
+		// Empty means "resolve the configured build mode". Only --mode is an
+		// explicit request. Defaulting here to solo bypassed the engine's one
+		// resolution rule, so the CLI silently removed the reviewer from a
+		// project configured for pair.
+		mode := ""
 		dryRun := false
 		yes := false
 		noWait := false
@@ -1030,8 +1034,10 @@ func runStart(taskID, mode string, dryRun, yes, noWait, noStream bool, repo stri
 	}
 	req := map[string]interface{}{
 		"task_id": taskID,
-		"mode":    mode,
 		"dry_run": dryRun,
+	}
+	if mode != "" {
+		req["mode"] = mode
 	}
 	if noStream {
 		req["no_stream"] = true

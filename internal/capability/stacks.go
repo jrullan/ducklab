@@ -138,6 +138,44 @@ func (Meson) Detect(ctx Context) Contributions {
 	}
 }
 
+func (Meson) ObserveGate(observation GateObservation) []GateFinding {
+	if !strings.Contains(strings.ToLower(observation.Output), "no work to do") {
+		return nil
+	}
+	files := addedMesonSources(observation.Diff)
+	if len(files) == 0 {
+		return nil
+	}
+	return []GateFinding{{
+		Capability: "meson", Kind: "build-integration",
+		Detail: "Meson/Ninja reported no work while new source files were proposed; the project build does not prove those files are integrated",
+		Files:  files,
+	}}
+}
+
+func addedMesonSources(diff string) []string {
+	var files []string
+	var current string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "diff --git a/") {
+			fields := strings.Fields(line)
+			current = ""
+			if len(fields) >= 4 {
+				current = strings.TrimPrefix(fields[3], "b/")
+			}
+			continue
+		}
+		if line != "new file mode 100644" || current == "" {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(current)) {
+		case ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".vala", ".vapi", ".m", ".mm", ".rs", ".f", ".f90":
+			files = append(files, current)
+		}
+	}
+	return files
+}
+
 type TypeScript struct{}
 
 func (TypeScript) ID() string { return "typescript" }

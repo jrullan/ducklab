@@ -179,3 +179,20 @@ func TestPythonSourceFallsBackToAvailableInterpreterCompile(t *testing.T) {
 		t.Fatalf("Python fallback = %+v", profile.Gate)
 	}
 }
+
+func TestMesonWarnsWhenNinjaIgnoresNewSources(t *testing.T) {
+	diff := "diff --git a/src/backend/capture.c b/src/backend/capture.c\n" +
+		"new file mode 100644\n--- /dev/null\n+++ b/src/backend/capture.c\n"
+	findings := DefaultRegistry().ObserveGate(GateObservation{
+		Diff: diff, Output: "ninja: no work to do.\n",
+	}, []string{"meson"})
+	if len(findings) != 1 || findings[0].Kind != "build-integration" || len(findings[0].Files) != 1 || findings[0].Files[0] != "src/backend/capture.c" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	if got := DefaultRegistry().ObserveGate(GateObservation{Diff: diff, Output: "[1/1] Compiling C object"}, []string{"meson"}); len(got) != 0 {
+		t.Fatalf("a compiling gate was flagged: %+v", got)
+	}
+	if got := DefaultRegistry().ObserveGate(GateObservation{Diff: diff, Output: "ninja: no work to do."}, []string{"go"}); len(got) != 0 {
+		t.Fatalf("an unselected Meson adapter contributed: %+v", got)
+	}
+}

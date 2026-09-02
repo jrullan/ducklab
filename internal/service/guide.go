@@ -456,11 +456,10 @@ func (s *Service) ProjectNext(ctx context.Context, projectID string) ([]NextStep
 	return nextSteps(st), nil
 }
 
-// finalDissent reads a run's record for the last verdict any turn gave and
-// reports it when it is not an approval — the engine-side twin of the
-// desktop's reviewerDissent, because a check that only protects the person
-// watching protects nobody under auto.
-func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
+// finalReview reads the last semantic verdict from the durable record. Keeping
+// approval as evidence (rather than only dissent) lets the run distinguish a
+// green command from work a reviewer actually judged.
+func finalReview(runDir string) (verdict string, findings int, present bool) {
 	events, err := runlog.ReadEvents(runDir)
 	if err != nil {
 		return "", 0, false
@@ -480,6 +479,14 @@ func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
 		}
 	}
 	if verdict == "" {
+		return "", 0, false
+	}
+	return verdict, findings, true
+}
+
+func finalDissent(runDir string) (verdict string, findings int, dissent bool) {
+	verdict, findings, present := finalReview(runDir)
+	if !present {
 		return "", 0, false
 	}
 	norm := strings.ReplaceAll(strings.ToLower(verdict), "_", "-")

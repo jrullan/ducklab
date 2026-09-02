@@ -64,6 +64,15 @@ function traceHref(crumb: TraceCrumb): string {
   return routeHref({ name: "cycle", stage, section: crumb.id });
 }
 
+function evidencedVerdictLabel(run: Run): string {
+  const base = verdictLabel(run.verdict as Verdict);
+  if (run.verdict !== "PASSED" || !run.review_evidence) return base;
+  if (run.review_evidence.status === "not_seated") return "gates passed · no reviewer seated";
+  if (run.review_evidence.status === "approved" && run.review_evidence.independence === "self") return "gates passed · self-reviewed";
+  if (run.review_evidence.status === "approved" && run.review_evidence.independence === "independent") return "passed · independent review";
+  return base;
+}
+
 // The task endpoint returns the canonical section, including immutable fields.
 // The editor accepts prose only, so never feed those fields back into its PUT.
 function taskProse(body: string | undefined): string {
@@ -970,7 +979,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         ) : run.resolution === "landed" ? (
           <StatusChip role="good" label="landed" />
         ) : (
-          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${verdictLabel(run.verdict as Verdict)} · reproduced green at accept` : verdictLabel(run.verdict as Verdict)} />
+          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${evidencedVerdictLabel(run)} · reproduced green at accept` : evidencedVerdictLabel(run)} />
         )}
         <div className="ml-auto flex items-center gap-2">
           {/* A decision that has been made is not still open. These used to be
@@ -2240,6 +2249,35 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 </div>
               )}
               {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warn">{run.harness_profile.detection_error}</p>}
+            </section>
+          )}
+          {run.review_evidence && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-review-evidence">
+              <h2 className="text-sm font-medium text-ink">semantic review</h2>
+              {run.review_evidence.status === "not_seated" ? (
+                <p className="mt-1 text-xs text-warn">No reviewer was seated. A green gate proves only that the configured commands passed.</p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    {run.review_evidence.independence === "independent" ? "independent" : "self-consistency"} · {run.review_evidence.verdict || run.review_evidence.status}
+                    {run.review_evidence.findings ? ` · ${run.review_evidence.findings} finding(s)` : ""}
+                  </p>
+                  {run.review_evidence.implementer && run.review_evidence.reviewer && (
+                    <p className="mt-1 text-xs text-ink-muted">{run.review_evidence.implementer} → {run.review_evidence.reviewer}</p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+          {(run.gate_coverage?.length ?? 0) > 0 && (
+            <section className="rounded-card border border-warn p-3" data-testid="run-gate-coverage">
+              <h2 className="text-sm font-medium text-warn">gate coverage caveat</h2>
+              {run.gate_coverage!.map((finding) => (
+                <div className="mt-1 text-xs" key={`${finding.capability}:${finding.kind}`}>
+                  <p className="text-ink">{finding.detail}</p>
+                  {(finding.files?.length ?? 0) > 0 && <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink-muted">{finding.files!.join("\n")}</code>}
+                </div>
+              ))}
             </section>
           )}
           {budget && finished && (

@@ -161,6 +161,17 @@ describe("took and turns in the runs table", () => {
   });
 });
 
+describe("review evidence in the runs table", () => {
+  it("does not call a gate-only result reviewed", () => {
+    const unreviewed = mk({
+      id: "r-unreviewed", verdict: "PASSED",
+      review_evidence: { status: "not_seated", independence: "none" },
+    });
+    render(<Runs runs={[unreviewed]} />);
+    expect(screen.getByTestId("run-outcome")).toHaveTextContent("gates passed · no reviewer");
+  });
+});
+
 // "No encuentro ninguna tarea test fallida de la T-110" — and the record had
 // two. A test-first that concludes cleanly with verdict FAILED (its test
 // never landed red) wears status "done"; the failed filter went by status

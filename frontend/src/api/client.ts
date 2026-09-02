@@ -140,6 +140,15 @@ export interface HarnessProfile {
   detection_error?: string;
 }
 
+export interface ReviewEvidence {
+  status: "not_seated" | "approved" | "dissent";
+  independence: "none" | "self" | "independent";
+  implementer?: string;
+  reviewer?: string;
+  verdict?: string;
+  findings?: number;
+}
+
 // Desktop capability: "GET", `/v1/runs/${runId}/captures/${name}` (implemented as a blob URL).
 export async function runCaptureUrl(baseUrl: string, runId: string, name: string, token = ""): Promise<string> {
   const response = await fetch(`${baseUrl}/v1/runs/${encodeURIComponent(runId)}/captures/${encodeURIComponent(name)}`, {
@@ -163,6 +172,10 @@ export interface Run {
   verdict: string;
   /** Stack facts and verification contributions fixed at run launch. */
   harness_profile?: HarnessProfile;
+  /** Whether a semantic reviewer actually judged the proposal. */
+  review_evidence?: ReviewEvidence;
+  /** Stack-adapter findings about whether the project gate exercised changes. */
+  gate_coverage?: { capability: string; kind: string; detail: string; files?: string[] }[];
   /** Clean-checkout gate result recorded when the accepted commit was proven. */
   acceptance_gate?: GateResult;
   accepted?: boolean;

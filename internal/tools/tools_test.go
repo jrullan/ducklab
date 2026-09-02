@@ -568,6 +568,40 @@ func TestListingsShowDotGitignoreButNotDotGit(t *testing.T) {
 	}
 }
 
+// A nested listing used to spend its entire depth allowance reaching the
+// requested directory from the project root. fs_list("src/backend") then
+// returned only "src/backend/" and hid every interface the implementer was
+// supposed to reuse.
+func TestListingDepthStartsAtTheRequestedDirectory(t *testing.T) {
+	ectx := testExecContext(t)
+	for path, body := range map[string]string{
+		"src/backend/portal_capture.h":   "typedef struct ImageData ImageData;\n",
+		"src/backend/deep/worker.c":      "int worker(void);\n",
+		"src/backend/deep/more/hidden.c": "int hidden(void);\n",
+	} {
+		full := filepath.Join(ectx.ProjectRoot, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := (&FSList{}).Execute(context.Background(), ectx, json.RawMessage(`{"path":"src/backend","depth":2}`))
+	if err != nil || res.IsError {
+		t.Fatalf("list: %v %v", err, res)
+	}
+	for _, want := range []string{"src/backend/portal_capture.h", "src/backend/deep/", "src/backend/deep/worker.c"} {
+		if !strings.Contains(res.Content, want) {
+			t.Errorf("nested listing omitted %s:\n%s", want, res.Content)
+		}
+	}
+	if strings.Contains(res.Content, "hidden.c") {
+		t.Errorf("nested listing exceeded its requested depth:\n%s", res.Content)
+	}
+}
+
 // A flat 32KB cap handed a 32k-token model a quarter of its whole context in
 // ONE tool result — two verify_runs and the model had forgotten its task,
 // which is what a "loop" is. The bound scales to the seat reading it.

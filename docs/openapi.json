@@ -1447,6 +1447,31 @@
         ],
         "type": "object"
       },
+      "RunlogGateCoverageFinding": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "detail",
+          "kind"
+        ],
+        "type": "object"
+      },
       "RunlogGateReproduction": {
         "properties": {
           "command": {
@@ -1614,6 +1639,33 @@
         ],
         "type": "object"
       },
+      "RunlogReviewEvidence": {
+        "properties": {
+          "findings": {
+            "type": "integer"
+          },
+          "implementer": {
+            "type": "string"
+          },
+          "independence": {
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "independence",
+          "status"
+        ],
+        "type": "object"
+      },
       "RunlogRun": {
         "properties": {
           "acceptance_gate": {
@@ -1673,6 +1725,12 @@
           },
           "gate": {
             "type": "string"
+          },
+          "gate_coverage": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogGateCoverageFinding"
+            },
+            "type": "array"
           },
           "gate_root": {
             "type": "string"
@@ -1747,6 +1805,9 @@
           },
           "revert_sha": {
             "type": "string"
+          },
+          "review_evidence": {
+            "$ref": "#/components/schemas/RunlogReviewEvidence"
           },
           "roster": {
             "additionalProperties": {

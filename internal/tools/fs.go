@@ -73,8 +73,16 @@ func listDir(root string, depth int, projectRoot string) ([]string, error) {
 		if rel == "." {
 			return nil
 		}
-		// Check depth
-		parts := strings.Split(rel, string(filepath.Separator))
+		// Depth is relative to the directory the caller asked to list, not to
+		// the project root. With the old project-relative count,
+		// fs_list("src/backend") at depth 2 counted "src/backend" as both
+		// available levels and returned only the directory itself. The model
+		// then reasonably concluded that an existing backend was empty.
+		fromListedRoot, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(fromListedRoot, string(filepath.Separator))
 		if len(parts) > depth {
 			if info.IsDir() {
 				return filepath.SkipDir

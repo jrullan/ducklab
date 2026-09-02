@@ -65,6 +65,26 @@ describe("the run's budget while it is running", () => {
     expect(profile).toHaveTextContent("diagnostic");
   });
 
+  it("distinguishes green commands from semantic review evidence", async () => {
+    useRuns.setState({
+      runs: { "r-1": {
+        ...run,
+        status: "paused", verdict: "PASSED",
+        review_evidence: { status: "not_seated", independence: "none", implementer: "pato-local" },
+        gate_coverage: [{
+          capability: "meson", kind: "build-integration",
+          detail: "Meson/Ninja reported no work while new source files were proposed",
+          files: ["src/backend/x11_capture.c"],
+        }],
+      } },
+      spend: {}, events: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-1" client={client} />);
+    expect(await screen.findByTestId("run-review-evidence")).toHaveTextContent("No reviewer was seated");
+    expect(screen.getByTestId("run-gate-coverage")).toHaveTextContent("src/backend/x11_capture.c");
+    expect(screen.getByTestId("run-view")).toHaveTextContent("gates passed · no reviewer seated");
+  });
+
   // The limits were hardcoded, so a run started with a raised ceiling was drawn
   // against one it did not have: the bar looked full at a quarter spent.
   it("draws against the ceiling this run actually got", async () => {

@@ -28,8 +28,12 @@ const PAGE_SIZE = 25;
  * else the started→ended span, else started→now for one still going. */
 function verdictText(r: Run): string {
   if (r.resolution === "landed") return "landed";
-  if (r.verdict && r.acceptance_gate?.green) return `${verdictLabel(r.verdict as Verdict)} · reproduced green at accept`;
-  return r.verdict ? verdictLabel(r.verdict as Verdict) : "—";
+  let label = r.verdict ? verdictLabel(r.verdict as Verdict) : "—";
+  if (r.verdict === "PASSED" && r.review_evidence?.status === "not_seated") label = "gates passed · no reviewer";
+  if (r.verdict === "PASSED" && r.review_evidence?.status === "approved" && r.review_evidence.independence === "self") label = "gates passed · self-reviewed";
+  if (r.verdict === "PASSED" && r.review_evidence?.status === "approved" && r.review_evidence.independence === "independent") label = "passed · independent review";
+  if (r.verdict && r.acceptance_gate?.green) return `${label} · reproduced green at accept`;
+  return label;
 }
 
 function took(r: Run): string {
@@ -207,7 +211,7 @@ export function Runs({ runs }: { runs: Run[] }) {
                 </a>
               </td>
               <td className="border-b border-hairline py-1 pr-3 text-ink-secondary">{r.mode}</td>
-              <td className="border-b border-hairline py-1 pr-3">
+              <td className="border-b border-hairline py-1 pr-3" data-testid="run-outcome">
                 {/* A chip, not grey prose: done-with-FAILED-verdict rows read
                     as successes when the one word that says otherwise is the
                     quietest thing in the row. */}

@@ -52,6 +52,22 @@ type Check struct {
 	Enforcement Enforcement
 }
 
+// GateObservation is the stack-neutral evidence available after verification.
+// Providers interpret their own build tool's output; the core only records
+// the structured findings they contribute.
+type GateObservation struct {
+	ProjectRoot string
+	Diff        string
+	Output      string
+}
+
+type GateFinding struct {
+	Capability string
+	Kind       string
+	Detail     string
+	Files      []string
+}
+
 // Contributions are everything one provider knows how to add. The shape can
 // grow with setup or context facts without changing the core/provider boundary.
 type Contributions struct {
@@ -79,6 +95,11 @@ type Detector interface {
 type Checker interface {
 	Provider
 	Checks(Context) []Check
+}
+
+type GateObserver interface {
+	Provider
+	ObserveGate(GateObservation) []GateFinding
 }
 
 // Registry resolves independently useful providers into one harness profile.
@@ -146,6 +167,26 @@ func (r *Registry) ResolveChecks(ctx Context, auto bool, enabled, disabled []str
 		return checks[i].Capability < checks[j].Capability
 	})
 	return checks, nil
+}
+
+// ObserveGate asks only the capabilities fixed in the run profile to
+// interpret their own verifier output. It performs no stack detection.
+func (r *Registry) ObserveGate(observation GateObservation, capabilityIDs []string) []GateFinding {
+	var findings []GateFinding
+	for _, id := range capabilityIDs {
+		observer, ok := r.providers[id].(GateObserver)
+		if !ok {
+			continue
+		}
+		findings = append(findings, observer.ObserveGate(observation)...)
+	}
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].Capability == findings[j].Capability {
+			return findings[i].Kind < findings[j].Kind
+		}
+		return findings[i].Capability < findings[j].Capability
+	})
+	return findings
 }
 
 func (r *Registry) selected(auto bool, enabled, disabled []string) ([]string, error) {
