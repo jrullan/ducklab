@@ -306,6 +306,7 @@ export const KNOWN_EVENT_TYPES = [
   "proposal_identity_blocked",
   "proposal_structure_blocked",
   "pause_requested",
+  "pause_deferred",
   "dedupe",
   "no_gate",
   "toolchain_missing",

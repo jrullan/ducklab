@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -75,11 +76,42 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 }
 
 func TestSectionedPlanUpdateDoesNotRegenerateManifest(t *testing.T) {
-	script := sectionPass("M", 1, "council", nil)
+	script := sectionPass("M", 1, "council", nil, nil, false)
 	for _, turn := range script.Turns {
 		if turn.Persona == strategy.PersonaPlanManifest || turn.Contract == "json:plan_manifest" {
 			t.Fatalf("plan update retained first-draft manifest turn: %+v", turn)
 		}
+	}
+}
+
+func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
+	sec := &artifact.Section{ID: "T-008", Title: "Lifecycle"}
+	script := sectionPass("M", 2, "council", nil, sec, true)
+	if script.CriticScope == "" || !strings.Contains(script.CriticScope, "T-008") || !strings.Contains(script.CriticScope, "absence of every sibling") {
+		t.Fatalf("critic scope = %q", script.CriticScope)
+	}
+	for _, turn := range script.Turns {
+		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {
+			t.Fatalf("task architect contract = %q", turn.Contract)
+		}
+	}
+}
+
+func TestPlanTriagePrefersSelectedTasksOverTheirMilestone(t *testing.T) {
+	doc := &artifact.Document{Sections: []artifact.Section{{
+		ID: "M-006", Children: []artifact.Section{{ID: "T-008"}, {ID: "T-009"}},
+	}}}
+	got := preferPlanTaskPasses([]string{"M-006", "T-008", "T-009"}, doc)
+	if strings.Join(got, ",") != "T-008,T-009" {
+		t.Fatalf("narrow plan passes = %v", got)
+	}
+}
+
+func TestPlanSectionParserReturnsOnlyExpectedID(t *testing.T) {
+	reply := "## T-006 — Overlay\n\nright task\n\n## Scope rule\n\ninternal prompt leaked\n\n## T-007 — Selection\n\nwrong sibling"
+	got, ok := parseSectionReply(reply, artifact.KindPlan, "T-006")
+	if !ok || got.ID != "T-006" || !strings.Contains(got.Body, "right task") || strings.Contains(got.Body, "internal prompt") {
+		t.Fatalf("parsed section = %+v, ok=%v", got, ok)
 	}
 }
 

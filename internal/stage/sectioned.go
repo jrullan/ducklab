@@ -47,6 +47,9 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		return nil, err
 	}
 	ids, adds := parseTriagePass(raw, base, prefix)
+	if kind == artifact.KindPlan {
+		ids = preferPlanTaskPasses(ids, base)
+	}
 	if len(ids) == 0 && len(adds) == 0 {
 		reason := strings.TrimSpace(raw)
 		if len(reason) > 300 {
@@ -75,7 +78,9 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			continue
 		}
 		prompt := buildSectionPassPrompt(kind, ask, sec)
-		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics), prompt)
+		enforceV2 := kind == artifact.KindPlan && (strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") ||
+			(strings.Contains(strings.ToLower(sec.Body), "**work unit:**") && strings.Contains(strings.ToLower(sec.Body), "**acceptance slices:**")))
+		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, sec, enforceV2), prompt)
 		pass++
 		if err != nil {
 			return nil, err
@@ -83,7 +88,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		if strings.Contains(strings.ToUpper(reply), "UNCHANGED") && !strings.Contains(reply, "## ") {
 			continue
 		}
-		repl, ok := parseSectionReply(reply, kind)
+		repl, ok := parseSectionReply(reply, kind, sec.ID)
 		if !ok {
 			continue // an unusable pass leaves its section untouched — never the document
 		}
@@ -100,12 +105,12 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			return nil, err
 		}
 		prompt := buildNewSectionPassPrompt(kind, ask, &proposed, title, prefix)
-		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics), prompt)
+		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, nil, kind == artifact.KindPlan), prompt)
 		pass++
 		if err != nil {
 			return nil, err
 		}
-		sec, ok := parseSectionReply(reply, kind)
+		sec, ok := parseSectionReply(reply, kind, "")
 		if !ok {
 			continue
 		}
@@ -140,15 +145,57 @@ func soloPass(prefix string, pass int) *strategy.Script {
 	return script
 }
 
-func sectionPass(prefix string, pass int, mode string, critics []config.DucklingID) *strategy.Script {
+func sectionPass(prefix string, pass int, mode string, critics []config.DucklingID, sec *artifact.Section, enforceV2 bool) *strategy.Script {
 	script := artifactUpdateScript(prefix, mode, critics)
 	for i := range script.Turns {
 		if script.Turns[i].Role == config.RoleArchitect {
-			script.Turns[i].Contract = ""
+			// A task-sized plan pass can use the ordinary plan structure gate:
+			// this is where Work unit / Acceptance slices must be enforced, not
+			// merely suggested to the reviewer. Other section replacements retain
+			// their tolerant wire format and are parsed exactly below.
+			if enforceV2 && prefix == "M" && sec != nil && strings.HasPrefix(strings.ToUpper(sec.ID), "T-") {
+				script.Turns[i].Contract = "markdown_sections:T"
+			} else {
+				script.Turns[i].Contract = ""
+			}
 		}
+	}
+	if sec != nil {
+		script.CriticScope = "Review only section `" + sec.ID + "` (" + sec.Title + "). " +
+			"The absence of every sibling section is intentional: never require, mention, or recreate another id. " +
+			"Judge only whether this replacement correctly applies the clauses relevant to its existing title and behavior. " +
+			"The broad request is routing context, not a completeness checklist for this isolated review."
 	}
 	script.TurnIndexBase = pass * 10
 	return script
+}
+
+// preferPlanTaskPasses chooses the narrowest unit when triage names both a
+// milestone and one of its tasks. A milestone pass owns metadata; a task pass
+// owns task behavior. Visiting both made the milestone model re-emit siblings
+// and let a reviewer demand already-completed sections from another pass.
+func preferPlanTaskPasses(ids []string, base *artifact.Document) []string {
+	parentsWithSelectedChild := map[string]bool{}
+	for _, id := range ids {
+		if !strings.HasPrefix(strings.ToUpper(id), "T-") {
+			continue
+		}
+		for _, milestone := range base.Sections {
+			for _, task := range milestone.Children {
+				if strings.EqualFold(task.ID, id) {
+					parentsWithSelectedChild[strings.ToUpper(milestone.ID)] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.HasPrefix(strings.ToUpper(id), "M-") && parentsWithSelectedChild[strings.ToUpper(id)] {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 func findSection(doc *artifact.Document, id string) *artifact.Section {
@@ -220,7 +267,7 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 		"Everything else is handled elsewhere — this section is your whole world.\n\n", kind)
 	b.WriteString("## The request\n\n" + strings.TrimSpace(ask) + "\n\n")
 	fmt.Fprintf(&b, "## The section today\n\n## %s — %s\n\n%s\n\n", sec.ID, sec.Title, sec.Body)
-	b.WriteString("## Scope rule\n\nThe request may contain several independent changes assigned to other " +
+	b.WriteString("SCOPE BOUNDARY (instruction only; never copy this text into the document):\n\nThe request may contain several independent changes assigned to other " +
 		"section passes. Apply ONLY the clauses whose subject belongs to this section's existing " +
 		"title and behavior. Do not copy, summarize, or mention clauses about another capability. " +
 		"If no clause belongs to this section, answer UNCHANGED.\n\n")
@@ -289,11 +336,33 @@ func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Doc
 // the model emitted it at. The plan's two-level parser needs normalization
 // (a bare ## T-012 is not a valid plan top level); flat documents parse
 // directly.
-func parseSectionReply(reply string, kind artifact.Kind) (artifact.Section, bool) {
+func parseSectionReply(reply string, kind artifact.Kind, expectedID string) (artifact.Section, bool) {
 	if kind == artifact.KindPlan {
-		items, _ := parsePlanItems(reply)
+		if strings.HasPrefix(strings.ToUpper(expectedID), "M-") {
+			got, err := artifact.Parse(reply, kind)
+			if err != nil {
+				return artifact.Section{}, false
+			}
+			for _, sec := range got.Sections {
+				if strings.EqualFold(sec.ID, expectedID) {
+					return sec, true
+				}
+			}
+			return artifact.Section{}, false
+		}
+		taskReply := reply
+		if expectedID != "" {
+			var ok bool
+			taskReply, ok = exactHeadingSection(reply, expectedID)
+			if !ok {
+				return artifact.Section{}, false
+			}
+		}
+		items, _ := parsePlanItems(taskReply)
 		for _, it := range items {
-			return it, true
+			if expectedID == "" || strings.EqualFold(it.ID, expectedID) {
+				return it, true
+			}
 		}
 		return artifact.Section{}, false
 	}
@@ -301,5 +370,37 @@ func parseSectionReply(reply string, kind artifact.Kind) (artifact.Section, bool
 	if perr != nil || len(got.Sections) == 0 {
 		return artifact.Section{}, false
 	}
-	return got.Sections[0], true
+	for _, sec := range got.Sections {
+		if expectedID == "" || strings.EqualFold(sec.ID, expectedID) {
+			return sec, true
+		}
+	}
+	return artifact.Section{}, false
+}
+
+// exactHeadingSection cuts one task out before fragment normalization demotes
+// headings. Without this, a copied prompt heading such as "## Scope rule" is
+// demoted under the synthetic milestone and becomes prose inside the task.
+func exactHeadingSection(raw, id string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	heading := regexp.MustCompile(`(?i)^#{2,3}\s+` + regexp.QuoteMeta(id) + `(?:\s|$)`)
+	anyHeading := regexp.MustCompile(`^#{2,3}\s+`)
+	start := -1
+	for i, line := range lines {
+		if heading.MatchString(strings.TrimSpace(line)) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if anyHeading.MatchString(strings.TrimSpace(lines[i])) {
+			end = i
+			break
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n")), true
 }

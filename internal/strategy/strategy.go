@@ -120,6 +120,10 @@ type Script struct {
 	// stable ids and rewriting references. The final reviewer must see this
 	// exact candidate, not the model reply that will later be transformed.
 	MaterializeCandidate func(texts []string, candidate *agent.Outcome) (*agent.Outcome, error)
+	// CriticScope narrows a document critic to an isolated section pass. The
+	// broad amendment remains context, but omitted sibling sections are
+	// intentionally outside the review object and cannot be findings.
+	CriticScope string
 }
 
 // Turn is a script turn.
