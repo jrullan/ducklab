@@ -122,7 +122,7 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 7 {
+	if len(profile.ReviewRules) != 8 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
@@ -161,10 +161,10 @@ func TestGTK4ClipboardRulesReplaceLegacyAndInventedAPIs(t *testing.T) {
 			joined += rule.Guidance + "\n"
 		}
 	}
-	if gtkRules != 3 {
+	if gtkRules != 4 {
 		t.Fatalf("GTK4 clipboard rules = %+v", profile.ReviewRules)
 	}
-	for _, want := range []string{"gdk_display_get_clipboard", "gdk_content_provider_new_for_bytes", "gdk_clipboard_set_content", "gdk_clipboard_store_finish", "not GTK4 APIs"} {
+	for _, want := range []string{"gdk_display_get_clipboard", "gdk_content_provider_new_for_bytes", "gdk_clipboard_set_content", "gdk_clipboard_store_finish", "no request-paintable", "not GTK4 APIs", "worker"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("GTK4 clipboard guidance lacks %q:\n%s", want, joined)
 		}
@@ -180,6 +180,34 @@ func TestGTK4ClipboardRulesReplaceLegacyAndInventedAPIs(t *testing.T) {
 		if rule.Capability == "gtk4-clipboard" {
 			t.Fatalf("unrelated GTK4 task received clipboard rule: %+v", rule)
 		}
+	}
+}
+
+func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "clipboard.c", `
+void publish(void *clipboard, void *provider) {
+  gdk_clipboard_set_content(clipboard, provider);
+}
+`)
+	ctx := Context{ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gtk4) clipboard.c"}
+	findings, err := DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Capability != "gtk4-clipboard" || findings[0].Name != "publish-result" {
+		t.Fatalf("unchecked publish findings = %+v", findings)
+	}
+
+	writeFixture(t, root, "clipboard.c", `
+int publish(void *clipboard, void *provider) {
+  if (!gdk_clipboard_set_content(clipboard, provider)) return 0;
+  return 1;
+}
+`)
+	findings, err = DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("checked publish findings = %+v, err = %v", findings, err)
 	}
 }
 

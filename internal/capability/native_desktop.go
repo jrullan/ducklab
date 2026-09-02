@@ -24,10 +24,46 @@ func (GTK4Clipboard) Detect(ctx Context) Contributions {
 		Detection: Detection{Capability: "gtk4-clipboard", Evidence: []string{"task Verification compiles clipboard code against GTK4"}},
 		ReviewRules: []ReviewRule{
 			{Capability: "gtk4-clipboard", ID: "access", Guidance: "GTK4 obtains the system clipboard with gdk_display_get_clipboard(gdk_display_get_default()); GTK3 gtk_clipboard_* calls and the invented gdk_clipboard_get API are not GTK4 interfaces."},
-			{Capability: "gtk4-clipboard", ID: "publish-bytes", Guidance: "To publish serialized image/png bytes in GTK4, wrap the GBytes with gdk_content_provider_new_for_bytes(\"image/png\", bytes), pass that provider to gdk_clipboard_set_content, and balance the provider reference. gdk_clipboard_set_image and gdk_clipboard_set_request_callback are not GTK4 APIs."},
-			{Capability: "gtk4-clipboard", ID: "completion", Guidance: "When delivery needs an observable asynchronous completion, use a real callback path such as gdk_clipboard_store_async followed by gdk_clipboard_store_finish; a debug log or an idle callback with no caller-visible result is not an acknowledgement."},
+			{Capability: "gtk4-clipboard", ID: "publish-bytes", Guidance: "To publish serialized image/png bytes in GTK4, wrap the GBytes with gdk_content_provider_new_for_bytes(\"image/png\", bytes), pass that provider to gdk_clipboard_set_content, check its gboolean result, and balance the provider reference. gdk_clipboard_set_image, gdk_clipboard_set_request_callback, and gdk_content_provider_new_for_pixbuf are not GTK4 APIs."},
+			{Capability: "gtk4-clipboard", ID: "completion", Guidance: "GTK4 exposes no request-paintable acknowledgement callback. gdk_clipboard_set_content returning true confirms publication; gdk_clipboard_store_async followed by gdk_clipboard_store_finish confirms a persistence request, not that a compositor consumed the image. Do not invent a callback or use gdk_clipboard_read_async as consumption acknowledgement. Expose the chosen completion to the caller through its GTask/callback so Delivering -> Terminated is observable."},
+			{Capability: "gtk4-clipboard", ID: "main-context", Guidance: "PNG serialization may be expensive and belongs in a worker; marshal only GDK clipboard access and UI/state completion onto the main context. Putting serialization itself inside g_idle_add can block the GTK event loop."},
 		},
 	}
+}
+
+var uncheckedClipboardContent = regexp.MustCompile(`(?m)^\s*gdk_clipboard_set_content\s*\(`)
+
+func (GTK4Clipboard) Inspect(ctx Context) ([]Inspection, error) {
+	verification := strings.ToLower(ctx.TaskVerification)
+	if !strings.Contains(verification, "gtk4") || !strings.Contains(verification, "clipboard") {
+		return nil, nil
+	}
+	policy := ctx.Policies["gtk4-clipboard.publish-result"]
+	if policy == "off" {
+		return nil, nil
+	}
+	enforcement := Required
+	if policy == "diagnostic" {
+		enforcement = Diagnostic
+	}
+	path := verificationSource(ctx.ProjectRoot, ctx.TaskVerification)
+	if path == "" {
+		return nil, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if uncheckedClipboardContent.Match(body) {
+		return []Inspection{{
+			Capability: "gtk4-clipboard", Name: "publish-result", Enforcement: enforcement,
+			Detail: "gdk_clipboard_set_content returns gboolean but its result is ignored; branch on failure before reporting or scheduling successful delivery",
+		}}, nil
+	}
+	return nil, nil
 }
 
 // X11Image contributes the representation invariants needed when a task uses
@@ -131,6 +167,7 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 	return Contributions{
 		Detection: Detection{Capability: "glib-async", Evidence: []string{"task Verification uses GLib/GIO/GTK"}},
 		ReviewRules: []ReviewRule{
+			{Capability: "glib-async", ID: "allocation", Guidance: "g_new0(Type, 1) allocates exactly one zero-initialized Type; the second argument is the element count. Do not report it as allocating two objects or replace it merely with g_new."},
 			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
