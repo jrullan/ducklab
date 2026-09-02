@@ -622,7 +622,7 @@ func TestResumeRepeatsInterruptedRoleWithPartialNotes(t *testing.T) {
 	if len(resumedRoles) != 1 || resumedRoles[0] != config.RoleReviewer {
 		t.Fatalf("resumed roles = %v, want reviewer only", resumedRoles)
 	}
-	if !strings.Contains(prompt, "Resumed with partial notes") || !strings.Contains(prompt, "partial review notes") {
+	if !strings.Contains(prompt, "Resume checkpoint") || !strings.Contains(prompt, "continue, do not restart") || !strings.Contains(prompt, "partial review notes") {
 		t.Fatalf("resume prompt lost partial notes: %q", prompt)
 	}
 }

@@ -370,14 +370,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// implementer at TestFirstScript's hardcoded 24 while role_turns
 			// said 100 and the Settings fallback said 40. A strong seat died
 			// reading a 30-file project with every configured number decorative.
-			if turn.Persona == PersonaCritic {
+			if turn.Persona == PersonaCritic || turn.MaxTurnsCeiling > 0 {
 				// A document critic reads a draft that is in its prompt; the
-				// script's six calls are the design. The configured reviewer
-				// cap (for code reviews of large diffs) must not raise it: at
-				// 100, a critic re-read the same sections for 29 calls of 41 s
-				// (benchmark run 6). It may still lower it.
-				if c := CapFor(params.TurnCaps, turn.Role, turn.MaxTurns); c < turn.MaxTurns {
+				// script's six calls are the design. Other turns may declare the
+				// same invariant explicitly: pair's independent reviewer gets a
+				// fresh diff every round and is bounded at eight. The configured
+				// role cap may lower these safety ceilings, never raise them.
+				ceiling := turn.MaxTurns
+				if turn.MaxTurnsCeiling > 0 {
+					ceiling = turn.MaxTurnsCeiling
+				}
+				if c := CapFor(params.TurnCaps, turn.Role, turn.MaxTurns); c < ceiling {
 					turn.MaxTurns = c
+				} else {
+					turn.MaxTurns = ceiling
 				}
 			} else {
 				turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
@@ -510,7 +516,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
 			}
 			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
-				prompt += "\n\n## Resumed with partial notes\n\nThe " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from these notes:\n\n" + params.ResumeFrom.Notes
+				prompt += "\n\n## Resume checkpoint — continue, do not restart\n\nYour " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from the saved draft below. The reads listed in `What you already read` remain valid; do not repeat them unless the working tree invalidates one.\n\n" + resumeCheckpointNotes(params.ResumeFrom.Notes)
 			}
 			if err != nil {
 				result.Error = err
@@ -1493,6 +1499,35 @@ func SummariseToolResult(s string) string {
 		return s
 	}
 	return s[:maxToolResultBytes] + fmt.Sprintf("\n… %d bytes truncated", len(s)-maxToolResultBytes)
+}
+
+const maxResumeNoteRunes = 12000
+
+// resumeCheckpointNotes turns the loop's durable interruption envelope back
+// into material useful to the model. Providers persist a JSON object containing
+// the partial draft, reasoning and tool records; pasting that whole envelope
+// into the prompt exposed implementation detail, consumed context and invited
+// the resumed seat to replay its investigation. The partial draft is the
+// continuation point. Older/plain checkpoints remain supported.
+func resumeCheckpointNotes(raw string) string {
+	raw = strings.TrimSpace(raw)
+	var checkpoint struct {
+		Draft     string `json:"draft"`
+		Reasoning string `json:"reasoning"`
+	}
+	if json.Unmarshal([]byte(raw), &checkpoint) == nil {
+		switch {
+		case strings.TrimSpace(checkpoint.Draft) != "":
+			raw = strings.TrimSpace(checkpoint.Draft)
+		case strings.TrimSpace(checkpoint.Reasoning) != "":
+			raw = strings.TrimSpace(checkpoint.Reasoning)
+		}
+	}
+	runes := []rune(raw)
+	if len(runes) > maxResumeNoteRunes {
+		return string(runes[:maxResumeNoteRunes]) + fmt.Sprintf("\n… %d checkpoint characters omitted", len(runes)-maxResumeNoteRunes)
+	}
+	return raw
 }
 
 // CapFor returns the call cap for a role: the configured one, else the fallback

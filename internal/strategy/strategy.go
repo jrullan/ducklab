@@ -129,6 +129,12 @@ type Turn struct {
 	Toolbelt string // "full", "read-only", or a comma-separated list
 	Contract string
 	MaxTurns int
+	// MaxTurnsCeiling is a script invariant, not a preference. Role and
+	// per-run caps may make this turn smaller, but cannot make it larger.
+	// Most turns deliberately leave it unset: a large implementer or survey
+	// may need the configured room. Pair's independent review is short and
+	// repeated by round, so inflating it turns review into open-ended browsing.
+	MaxTurnsCeiling int
 	// Images are data URLs for a vision duckling — a bug's screenshots on a
 	// triage turn. Carried through to the agent turn untouched.
 	Images []string
@@ -180,6 +186,9 @@ func (s *Script) Validate(registry *tools.Registry) error {
 		}
 		if turn.MaxTurns <= 0 {
 			return fmt.Errorf("script %q turn %d (%s): MaxTurns must be > 0 (I3)", s.Name, i, turn.Role)
+		}
+		if turn.MaxTurnsCeiling < 0 || (turn.MaxTurnsCeiling > 0 && turn.MaxTurns > turn.MaxTurnsCeiling) {
+			return fmt.Errorf("script %q turn %d (%s): invalid MaxTurnsCeiling %d for MaxTurns %d", s.Name, i, turn.Role, turn.MaxTurnsCeiling, turn.MaxTurns)
 		}
 		if turn.Role == config.RoleHuman {
 			continue // a human turn runs no agent loop and needs no toolbelt

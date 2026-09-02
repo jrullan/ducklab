@@ -52,3 +52,26 @@ func TestAScriptCapStandsWhenNoRoleCapIsConfigured(t *testing.T) {
 		t.Fatalf("turn ran with MaxTurns=%d; with no configured cap the script's 24 stands", got)
 	}
 }
+
+func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
+	var got int
+	params := &ExecuteParams{
+		Roster:   map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "review"},
+		TurnCaps: map[config.Role]int{config.RoleReviewer: 100},
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				got = turn.MaxTurns
+				return verdictOutcome("approve"), nil
+			}
+			return &agent.Outcome{Text: "done"}, nil
+		},
+		Diff: func() (string, error) { return "diff", nil },
+		Gate: func(context.Context) (string, string, error) { return "green", "", nil },
+	}
+	if _, err := ExecuteScript(context.Background(), PairScript(), params); err != nil {
+		t.Fatal(err)
+	}
+	if got != 8 {
+		t.Fatalf("pair reviewer ran with MaxTurns=%d; configured 100 must not raise its ceiling 8", got)
+	}
+}

@@ -81,9 +81,22 @@ func TestAResumedArchitectIsHandedTheInterruptedTurnsReads(t *testing.T) {
 	if _, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), params); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"What you already read", "artifact_read kind=spec", "requirements.md", "Resumed with partial notes"} {
+	for _, want := range []string{"What you already read", "artifact_read kind=spec", "requirements.md", "Resume checkpoint", "continue, do not restart"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("the resumed architect prompt lacks %q:\n%s", want, first)
+		}
+	}
+}
+
+func TestAResumedTurnReceivesThePartialDraftNotTheInternalEnvelope(t *testing.T) {
+	raw := `{"draft":"review so far: alpha is wrong","reasoning":"private scratchpad","tool_calls":[{"name":"fs_read"}]}`
+	got := resumeCheckpointNotes(raw)
+	if got != "review so far: alpha is wrong" {
+		t.Fatalf("checkpoint notes = %q, want only the saved draft", got)
+	}
+	for _, leaked := range []string{"private scratchpad", "tool_calls", "fs_read"} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("checkpoint leaked %q: %s", leaked, got)
 		}
 	}
 }

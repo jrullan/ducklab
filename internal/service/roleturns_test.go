@@ -116,8 +116,27 @@ func TestThePerRunOverrideReachesScriptModes(t *testing.T) {
 		if turn.Role == config.RoleHuman {
 			continue
 		}
-		if turn.MaxTurns != 33 {
-			t.Errorf("pair %s = %d, want the run's own 33", turn.Role, turn.MaxTurns)
+		want := 33
+		if turn.Role == config.RoleReviewer {
+			want = 8
+		}
+		if turn.MaxTurns != want {
+			t.Errorf("pair %s = %d, want %d", turn.Role, turn.MaxTurns, want)
+		}
+	}
+}
+
+func TestRoleConfigurationCannotInflatePairReview(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pair := s.applyRoleTurns(strategy.PairScript(), 0)
+	for _, turn := range pair.Turns {
+		if turn.Role == config.RoleReviewer && turn.MaxTurns != 8 {
+			t.Fatalf("pair reviewer cap = %d, want its designed ceiling 8", turn.MaxTurns)
 		}
 	}
 }

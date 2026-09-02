@@ -21,11 +21,12 @@ func PairScript() *Script {
 				MaxTurns: 24,
 			},
 			{
-				Role:      config.RoleReviewer,
-				Toolbelt:  "full", // narrowed to the reviewer's read-only ceiling
-				Contract:  "verdict",
-				MaxTurns:  8,
-				Anonymize: true,
+				Role:            config.RoleReviewer,
+				Toolbelt:        "full", // narrowed to the reviewer's read-only ceiling
+				Contract:        "verdict",
+				MaxTurns:        8,
+				MaxTurnsCeiling: 8,
+				Anonymize:       true,
 				// The reviewer must not read the author's reasoning: a
 				// reviewer that does adopts it, and the second model stops
 				// being decorrelated.

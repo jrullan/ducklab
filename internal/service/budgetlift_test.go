@@ -182,13 +182,16 @@ func TestResumeReplaysBudgetInterruptedReviewerWithItsPartialWork(t *testing.T) 
 	var resumedPrompt string
 	for _, request := range fake.Requests() {
 		for _, message := range request.Messages {
-			if message.Role == "user" && strings.Contains(message.Content, "Resumed with partial notes") {
+			if message.Role == "user" && strings.Contains(message.Content, "Resume checkpoint") {
 				resumedPrompt = message.Content
 			}
 		}
 	}
-	if !strings.Contains(resumedPrompt, "Partial reviewer draft") || !strings.Contains(resumedPrompt, "fs_list") || !strings.Contains(resumedPrompt, "return a + b") {
+	if !strings.Contains(resumedPrompt, "Partial reviewer draft") || !strings.Contains(resumedPrompt, "return a + b") {
 		t.Fatalf("resumed reviewer prompt lost partial notes or prior work context: %q", resumedPrompt)
+	}
+	if strings.Contains(resumedPrompt, `"tool_calls"`) || strings.Contains(resumedPrompt, "private scratchpad") {
+		t.Fatalf("resumed reviewer prompt exposed the internal checkpoint envelope: %q", resumedPrompt)
 	}
 	changed, err = os.ReadFile(worktreeFile)
 	if err != nil || !strings.Contains(string(changed), "return a + b") {
