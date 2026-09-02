@@ -107,6 +107,18 @@ func TestPlanTriagePrefersSelectedTasksOverTheirMilestone(t *testing.T) {
 	}
 }
 
+func TestV2MigrationExpandsSelectedMilestoneIntoTaskPasses(t *testing.T) {
+	doc := &artifact.Document{Sections: []artifact.Section{{
+		ID: "M-005", Children: []artifact.Section{{ID: "T-006"}, {ID: "T-007"}},
+	}, {
+		ID: "M-006", Children: []artifact.Section{{ID: "T-008"}},
+	}}}
+	got := expandSelectedPlanMilestones([]string{"M-005", "T-007", "M-006"}, doc)
+	if strings.Join(got, ",") != "T-006,T-007,T-008" {
+		t.Fatalf("expanded v2 passes = %v", got)
+	}
+}
+
 func TestPlanSectionParserReturnsOnlyExpectedID(t *testing.T) {
 	reply := "## T-006 — Overlay\n\nright task\n\n## Scope rule\n\ninternal prompt leaked\n\n## T-007 — Selection\n\nwrong sibling"
 	got, ok := parseSectionReply(reply, artifact.KindPlan, "T-006")

@@ -48,7 +48,11 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 	}
 	ids, adds := parseTriagePass(raw, base, prefix)
 	if kind == artifact.KindPlan {
-		ids = preferPlanTaskPasses(ids, base)
+		if strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") {
+			ids = expandSelectedPlanMilestones(ids, base)
+		} else {
+			ids = preferPlanTaskPasses(ids, base)
+		}
 	}
 	if len(ids) == 0 && len(adds) == 0 {
 		reason := strings.TrimSpace(raw)
@@ -132,6 +136,36 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: &proposed, Raw: raw}, nil
+}
+
+// expandSelectedPlanMilestones turns a format migration into task passes even
+// when a small triager returns only the parent milestone. A task schema cannot
+// be validated on a milestone replacement, which is how legacy Work/Acceptance
+// labels survived the first v2 run. Explicit task ids remain deduplicated.
+func expandSelectedPlanMilestones(ids []string, base *artifact.Document) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(id string) {
+		key := strings.ToUpper(id)
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		if strings.HasPrefix(strings.ToUpper(id), "M-") {
+			for _, milestone := range base.Sections {
+				if strings.EqualFold(milestone.ID, id) {
+					for _, task := range milestone.Children {
+						add(task.ID)
+					}
+				}
+			}
+			continue
+		}
+		add(id)
+	}
+	return out
 }
 
 // soloPass is one fresh mini-conversation: solo, no document contract, its

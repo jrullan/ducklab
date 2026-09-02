@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -118,7 +119,19 @@ func capabilityStructureFindings(plan *artifact.Document) []string {
 	modules := installedPkgConfigModules()
 	var out []string
 	seen := map[string]bool{}
+	registry := capability.DefaultRegistry()
 	for _, sec := range plan.Sections {
+		tasks := sec.Children
+		if strings.HasPrefix(strings.ToUpper(sec.ID), "T-") {
+			tasks = []artifact.Section{sec}
+		}
+		for _, task := range tasks {
+			for _, finding := range registry.InspectPlanTask(capability.PlanTaskContext{
+				ID: task.ID, Body: task.Body, Verification: task.Field("verification"),
+			}) {
+				out = append(out, fmt.Sprintf("%s plan contract (%s/%s): %s", task.ID, finding.Capability, finding.Name, finding.Detail))
+			}
+		}
 		for _, item := range strings.Split(sec.Field("toolchain"), ",") {
 			item = strings.TrimSpace(strings.Trim(item, "`"))
 			m := pkgConfigCapability.FindStringSubmatch(item)

@@ -198,6 +198,38 @@ func TestGTK4ClipboardRulesReplaceLegacyAndInventedAPIs(t *testing.T) {
 	}
 }
 
+func TestGTK4UIContributesCurrentContractsAndRejectsLegacyPlanAPIs(t *testing.T) {
+	registry := DefaultRegistry()
+	profile, err := registry.ResolveProject(Context{TaskVerification: "cc -c ui.c $(pkg-config --cflags gtk4)"}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var guidance string
+	for _, rule := range profile.ReviewRules {
+		if rule.Capability == "gtk4-ui" {
+			guidance += rule.Guidance + "\n"
+		}
+	}
+	for _, want := range []string{"GtkGestureClick", "gtk_drawing_area_set_draw_func", "g_application_quit", "response_id == GTK_RESPONSE_ACCEPT", "g_file_replace_contents_bytes_async"} {
+		if !strings.Contains(guidance, want) {
+			t.Errorf("GTK4 UI guidance lacks %q:\n%s", want, guidance)
+		}
+	}
+	findings := registry.InspectPlanTask(PlanTaskContext{
+		ID: "T-006", Verification: "cc -c ui.c $(pkg-config --cflags gtk4)",
+		Body: "Use GDK_WINDOW_TYPE_HINT_UTILITY, gtk_window_set_keep_above, GtkEventControllerButton, the `accept` signal, then call gtk_main_quit. Do g_file_replace_contents() asynchronously.",
+	})
+	joined := ""
+	for _, finding := range findings {
+		joined += finding.Name + ": " + finding.Detail + "\n"
+	}
+	for _, want := range []string{"removed-window-api", "invented-controller", "invented-file-signal", "removed-main-loop", "sync-file-api"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("plan findings lack %q:\n%s", want, joined)
+		}
+	}
+}
+
 func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "clipboard.c", `

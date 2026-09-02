@@ -37,6 +37,16 @@ func TestDeclaredToolchainComesFromTheTasksMilestone(t *testing.T) {
 	}
 }
 
+func TestCapabilityStructureRejectsGTK3ContractsInGTK4PlanTask(t *testing.T) {
+	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-01", Children: []artifact.Section{{
+		ID: "T-006", Body: "**Verification:** `cc -c ui.c $(pkg-config --cflags gtk4)`\nUse gtk_window_set_keep_above and GtkEventControllerButton.",
+	}}}}}
+	joined := strings.Join(capabilityStructureFindings(plan), "\n")
+	if !strings.Contains(joined, "T-006") || !strings.Contains(joined, "removed-window-api") || !strings.Contains(joined, "invented-controller") {
+		t.Fatalf("GTK4 plan findings = %s", joined)
+	}
+}
+
 func TestToolchainCapabilitiesIncludePkgConfigModules(t *testing.T) {
 	declared := []string{
 		"cmd:sh",

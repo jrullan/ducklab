@@ -125,6 +125,20 @@ type Inspector interface {
 	Inspect(Context) ([]Inspection, error)
 }
 
+// PlanTaskContext is the planning-time surface stack providers may inspect.
+// It keeps framework knowledge out of document orchestration while allowing a
+// provider to reject obsolete or invented APIs before they become task law.
+type PlanTaskContext struct {
+	ID           string
+	Body         string
+	Verification string
+}
+
+type PlanInspector interface {
+	Provider
+	InspectPlanTask(PlanTaskContext) []Inspection
+}
+
 type GateObserver interface {
 	Provider
 	ObserveGate(GateObservation) []GateFinding
@@ -143,6 +157,24 @@ func NewRegistry(providers ...Provider) *Registry {
 		r.providers[provider.ID()] = provider
 	}
 	return r
+}
+
+// InspectPlanTask composes planning diagnostics from every applicable stack
+// provider. Providers self-filter from the task verification/body.
+func (r *Registry) InspectPlanTask(ctx PlanTaskContext) []Inspection {
+	var out []Inspection
+	for _, provider := range r.providers {
+		if inspector, ok := provider.(PlanInspector); ok {
+			out = append(out, inspector.InspectPlanTask(ctx)...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Capability == out[j].Capability {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Capability < out[j].Capability
+	})
+	return out
 }
 
 // ResolveProject detects and composes the project's stack and gate candidates.

@@ -8,6 +8,61 @@ import (
 	"strings"
 )
 
+// GTK4UI owns planning and review facts for GTK4 windows, input controllers,
+// application lifecycle, drawing, and native file dialogs. Clipboard remains
+// a separate capability because tasks should receive only relevant knowledge.
+type GTK4UI struct{}
+
+func (GTK4UI) ID() string { return "gtk4-ui" }
+
+func (GTK4UI) Detect(ctx Context) Contributions {
+	if !strings.Contains(strings.ToLower(ctx.TaskVerification), "gtk4") {
+		return Contributions{}
+	}
+	return Contributions{
+		Detection: Detection{Capability: "gtk4-ui", Evidence: []string{"task Verification compiles code against GTK4"}},
+		ReviewRules: []ReviewRule{
+			{Capability: "gtk4-ui", ID: "window", Guidance: "GTK4 application windows are GtkWindow widgets. Use gtk_window_fullscreen (or fullscreen_on_monitor where required). GTK3 GdkWindow type hints, gtk_window_set_keep_above, gtk_widget_add_events, gdk_window_set_events, and GDK_*_MASK event masks are not GTK4 APIs."},
+			{Capability: "gtk4-ui", ID: "input", Guidance: "GTK4 input uses controllers attached with gtk_widget_add_controller: GtkGestureClick for button press/release, GtkEventControllerMotion for motion, and GtkEventControllerKey for keys. GtkEventControllerButton and gtk_window_add_shortcut do not exist."},
+			{Capability: "gtk4-ui", ID: "drawing", Guidance: "Configure GtkDrawingArea rendering with gtk_drawing_area_set_draw_func; GTK4 removed the GtkWidget draw signal and gdk_window_begin_draw_frame workflow."},
+			{Capability: "gtk4-ui", ID: "lifecycle", Guidance: "Run a GtkApplication with g_application_run and quit it with g_application_quit. gtk_main, gtk_main_quit, and a standalone gtk_init-driven main loop are GTK3 contracts."},
+			{Capability: "gtk4-ui", ID: "native-dialog", Guidance: "GtkFileChooserNative inherits GtkNativeDialog's response signal; accept only when response_id == GTK_RESPONSE_ACCEPT. There is no accept or file-confirmed signal."},
+			{Capability: "gtk4-ui", ID: "async-file", Guidance: "g_file_replace_contents is synchronous. For a GBytes payload use g_file_replace_contents_bytes_async and complete with g_file_replace_contents_finish; MIME type is not an argument to this file-write API."},
+		},
+	}
+}
+
+func (GTK4UI) InspectPlanTask(ctx PlanTaskContext) []Inspection {
+	text := strings.ToLower(ctx.Body + "\n" + ctx.Verification)
+	if !strings.Contains(text, "gtk4") && !strings.Contains(strings.ToLower(ctx.Verification), "gtk4") {
+		return nil
+	}
+	invalid := []struct {
+		name    string
+		needles []string
+		detail  string
+	}{
+		{"removed-window-api", []string{"gdk_window_type_hint", "gtk_window_set_keep_above", "gtk_widget_add_events", "gdk_window_set_events", "gdk_pointer_motion_mask", "gdk_button_press_mask", "gdk_button_release_mask", "gdk_key_press_mask"}, "task specifies a GTK3 window/event API removed from GTK4; use GtkWindow fullscreen plus GtkGestureClick/GtkEventControllerMotion/GtkEventControllerKey attached with gtk_widget_add_controller"},
+		{"invented-controller", []string{"gtkeventcontrollerbutton", "gtk_window_add_shortcut"}, "task specifies a non-existent GTK4 controller/shortcut API; button gestures use GtkGestureClick and keyboard input uses GtkEventControllerKey"},
+		{"removed-drawing-api", []string{"gdk_window_begin_draw_frame", "`draw` signal", "\"draw\" signal"}, "task specifies GTK3 drawing; GTK4 GtkDrawingArea uses gtk_drawing_area_set_draw_func"},
+		{"removed-main-loop", []string{"gtk_main()", "gtk_main_quit", "gtk_init()"}, "task specifies GTK3 main-loop lifecycle; GTK4 applications use g_application_run and g_application_quit"},
+		{"invented-file-signal", []string{"\"accept\" signal", "`accept` signal", "file-confirmed"}, "GtkFileChooserNative reports GtkNativeDialog::response; check response_id == GTK_RESPONSE_ACCEPT"},
+	}
+	var out []Inspection
+	for _, rule := range invalid {
+		for _, needle := range rule.needles {
+			if strings.Contains(text, needle) {
+				out = append(out, Inspection{Capability: "gtk4-ui", Name: rule.name, Enforcement: Required, Detail: rule.detail})
+				break
+			}
+		}
+	}
+	if strings.Contains(text, "g_file_replace_contents()") && strings.Contains(text, "async") {
+		out = append(out, Inspection{Capability: "gtk4-ui", Name: "sync-file-api", Enforcement: Required, Detail: "task describes g_file_replace_contents as asynchronous; use g_file_replace_contents_bytes_async for GBytes and finish with g_file_replace_contents_finish"})
+	}
+	return out
+}
+
 // GTK4Clipboard contributes the GTK4 clipboard contract only when the task's
 // verification names both GTK4 and clipboard code. It deliberately does not
 // turn every GTK project into a clipboard project.
