@@ -269,6 +269,18 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			Model:    loop.Duckling.Model,
 			Messages: conversation,
 		}
+		// Native providers receive a freshly filtered function list below. Text
+		// protocol models otherwise keep seeing the original, static catalogue
+		// after a research brake closes observational tools, and small models can
+		// spend every remaining call requesting tools that are now refused. Give
+		// them the same live availability update as an immediate instruction.
+		if !useNative {
+			if update := textToolAvailabilityUpdate(turn, ectx); update != "" {
+				req.Messages = append(append([]provider.Message{}, conversation...), provider.Message{
+					Role: "user", Content: update,
+				})
+			}
+		}
 		// No tools once a result closed tool use for this reply: the seat
 		// answers in text with what it has (tools.Result.EndTurn).
 		if useNative && !(ectx != nil && ectx.ToolsClosed) {
@@ -850,6 +862,28 @@ func toolCatalogue(turn *Turn, ectx *tools.ExecContext) string {
 		}
 	}
 	return b.String()
+}
+
+func textToolAvailabilityUpdate(turn *Turn, ectx *tools.ExecContext) string {
+	if ectx == nil || (!ectx.ToolsClosed && !ectx.ReadToolsClosed) {
+		return ""
+	}
+	available := make([]string, 0, len(turn.Toolbelt))
+	closed := make([]string, 0, len(turn.Toolbelt))
+	for _, name := range turn.Toolbelt {
+		if ectx.ToolAvailable(name) {
+			available = append(available, name)
+		} else {
+			closed = append(closed, name)
+		}
+	}
+	if len(available) == 0 {
+		return "RUNTIME TOOL UPDATE (authoritative): all tools are now closed. Do not emit another tool call; answer the original task now from the evidence already gathered."
+	}
+	return "RUNTIME TOOL UPDATE (authoritative): the initial catalogue is no longer current. " +
+		"These tools are CLOSED and another call to them will be refused: " + strings.Join(closed, ", ") + ". " +
+		"Tools still AVAILABLE: " + strings.Join(available, ", ") + ". " +
+		"Your next response must use an available action tool or answer the original task; do not request a closed tool."
 }
 
 // substantiveAnswer distinguishes an answer from protocol debris. A local
