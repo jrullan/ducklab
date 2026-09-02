@@ -552,6 +552,23 @@ func TestPlanManifestPersonaAsksForTopologyNotMarkdown(t *testing.T) {
 	}
 }
 
+func TestCodingSeatsReceiveTheResolvedHarnessCapsule(t *testing.T) {
+	for _, role := range []config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleAdvisor} {
+		msgs := BuildMessages(&Turn{Role: role, Prompt: "work"}, &tools.ExecContext{
+			ProjectRoot: t.TempDir(), HarnessContext: "## Resolved project harness\n- Stack: c-native (meson.build)",
+		}, true)
+		if !strings.Contains(msgs[0].Content, "Resolved project harness") {
+			t.Errorf("%s did not receive harness capsule", role)
+		}
+	}
+	msgs := BuildMessages(&Turn{Role: config.RoleArchitect, Prompt: "draft"}, &tools.ExecContext{
+		ProjectRoot: t.TempDir(), HarnessContext: "## Resolved project harness\nsecret stack facts",
+	}, true)
+	if strings.Contains(msgs[0].Content, "secret stack facts") {
+		t.Fatal("a document architect received the coding harness capsule")
+	}
+}
+
 // A critic surveying a real codebase spent all its calls reading and
 // searching, legitimately, and ran out mid-verification — and the whole run
 // died with it, architect's draft included. Twice. A model out of looking is

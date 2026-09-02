@@ -2198,6 +2198,50 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
               })()}
             </section>
           )}
+          {run.harness_profile && (
+            <section className="rounded-card border border-hairline p-3" data-testid="run-harness-profile">
+              <h2 className="text-sm font-medium text-ink">project harness</h2>
+              {(run.harness_profile.capabilities?.length ?? 0) > 0 && (
+                <dl className="mt-2 space-y-1 text-xs">
+                  {run.harness_profile.capabilities!.map((capability) => (
+                    <div key={capability.id}>
+                      <dt className="font-medium text-ink">{capability.id}</dt>
+                      <dd className="break-words text-ink-muted">{capability.evidence?.join(", ") || "explicitly enabled"}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                <div className="text-ink-secondary">
+                  gate · {run.harness_profile.effective_gate.kind}
+                  {run.harness_profile.effective_gate.source ? ` (${run.harness_profile.effective_gate.source})` : ""}
+                </div>
+                {run.harness_profile.effective_gate.command ? (
+                  <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-gate">{run.harness_profile.effective_gate.command}</code>
+                ) : (
+                  <p className="mt-1 text-ink-muted">no executable project gate</p>
+                )}
+              </div>
+              {run.harness_profile.task_verification && (
+                <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                  <div className="text-ink-secondary">task verification · authoritative</div>
+                  <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-ink" data-testid="run-harness-task-gate">{run.harness_profile.task_verification}</code>
+                </div>
+              )}
+              {(run.harness_profile.diagnostics?.length ?? 0) > 0 && (
+                <div className="mt-2 border-t border-hairline pt-2 text-xs">
+                  <div className="text-ink-secondary">additional diagnostics</div>
+                  {run.harness_profile.diagnostics!.map((diagnostic) => (
+                    <div key={`${diagnostic.capability}:${diagnostic.name}`} className="mt-1">
+                      <span className="text-ink-muted">{diagnostic.capability} · {diagnostic.enforcement}</span>
+                      <code className="block whitespace-pre-wrap break-words font-mono text-ink">{diagnostic.command}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {run.harness_profile.detection_error && <p className="mt-2 text-xs text-warn">{run.harness_profile.detection_error}</p>}
+            </section>
+          )}
           {budget && finished && (
             /* A finished run's meters measure nothing any more; one line of
                what it actually spent, spenders beneath. */

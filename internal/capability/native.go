@@ -8,6 +8,15 @@ type Native struct{}
 
 func (Native) ID() string { return "c-native" }
 
+func (Native) Detect(ctx Context) Contributions {
+	if !nativeSyntaxCommand(ctx.TaskVerification) {
+		return Contributions{}
+	}
+	return Contributions{Detection: Detection{
+		Capability: "c-native", Evidence: []string{"task Verification invokes a native compiler"},
+	}}
+}
+
 func (Native) Checks(ctx Context) []Check {
 	command := strictSyntaxCommand(ctx.TaskVerification)
 	if command == "" {
@@ -30,12 +39,19 @@ func (Native) Checks(ctx Context) []Check {
 }
 
 func strictSyntaxCommand(command string) string {
-	if strings.ContainsAny(command, "\n;") || strings.Contains(command, "&&") || strings.Contains(command, "||") {
+	if !nativeSyntaxCommand(command) || strings.Contains(command, "-Werror") {
 		return ""
+	}
+	return command + " -Wall -Wextra -Werror"
+}
+
+func nativeSyntaxCommand(command string) bool {
+	if strings.ContainsAny(command, "\n;") || strings.Contains(command, "&&") || strings.Contains(command, "||") {
+		return false
 	}
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
-		return ""
+		return false
 	}
 	compiler := strings.TrimPrefix(fields[0], "./")
 	if slash := strings.LastIndex(compiler, "/"); slash >= 0 {
@@ -44,12 +60,9 @@ func strictSyntaxCommand(command string) string {
 	switch compiler {
 	case "cc", "gcc", "clang", "c++", "g++", "clang++":
 	default:
-		return ""
+		return false
 	}
-	if !strings.Contains(command, "-fsyntax-only") || strings.Contains(command, "-Werror") {
-		return ""
-	}
-	return command + " -Wall -Wextra -Werror"
+	return strings.Contains(command, "-fsyntax-only")
 }
 
 // DefaultRegistry is the built-in capability set. The execution core depends

@@ -34,9 +34,12 @@ type Run struct {
 	// RosterSources records whether each role came from the roster or a per-run pick.
 	RosterSources map[string]string `json:"roster_sources,omitempty"`
 	Gate          string            `json:"gate"`
-	Status        string            `json:"status"` // running|paused|done|failed|queued
-	QueuedReason  string            `json:"queued_reason,omitempty"`
-	Verdict       string            `json:"verdict"`
+	// HarnessProfile is the stack resolution used for this run. It is fixed at
+	// launch so a resume receives the same facts and does not re-probe the tree.
+	HarnessProfile *HarnessProfile `json:"harness_profile,omitempty"`
+	Status         string          `json:"status"` // running|paused|done|failed|queued
+	QueuedReason   string          `json:"queued_reason,omitempty"`
+	Verdict        string          `json:"verdict"`
 	// GateReproduced records acceptance-time clean-checkout verification.
 	GateReproduced *GateReproduction `json:"acceptance_gate,omitempty"`
 	Accepted       bool              `json:"accepted"`
@@ -179,6 +182,35 @@ type Run struct {
 	// commit is live on the remote (and, if not, the push door as the retry)
 	// without re-reading the audit file (B-266).
 	RemoteReceipts []map[string]interface{} `json:"remote_receipts,omitempty"`
+}
+
+// HarnessProfile is the project-specific composition produced by capability
+// adapters, without adapter implementation details leaking into run state.
+type HarnessProfile struct {
+	Capabilities     []HarnessCapability `json:"capabilities,omitempty"`
+	DetectedGate     *HarnessGate        `json:"detected_gate,omitempty"`
+	EffectiveGate    HarnessGate         `json:"effective_gate"`
+	TaskVerification string              `json:"task_verification,omitempty"`
+	Diagnostics      []HarnessDiagnostic `json:"diagnostics,omitempty"`
+	DetectionError   string              `json:"detection_error,omitempty"`
+}
+
+type HarnessCapability struct {
+	ID       string   `json:"id"`
+	Evidence []string `json:"evidence,omitempty"`
+}
+
+type HarnessGate struct {
+	Kind    string `json:"kind"`
+	Command string `json:"command,omitempty"`
+	Source  string `json:"source,omitempty"`
+}
+
+type HarnessDiagnostic struct {
+	Capability  string `json:"capability"`
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Enforcement string `json:"enforcement"`
 }
 
 // InterruptedTurn is a durable checkpoint for resuming the same role.

@@ -56,6 +56,13 @@ export interface ConfigBudget {
   wallclock_escalation_multiplier?: number;
 }
 
+export interface ConfigCapabilities {
+  auto?: boolean;
+  disabled?: string[];
+  enabled?: string[];
+  policy?: Record<string, string>;
+}
+
 export interface ConfigCaps {
   context_tokens?: number;
   json_mode?: boolean;
@@ -107,6 +114,7 @@ export interface ConfigInstall {
 export interface ConfigProject {
   autonomy?: string;
   budget?: ConfigBudget;
+  capabilities?: ConfigCapabilities;
   created?: string;
   describe?: string;
   git?: ConfigGit;
@@ -424,8 +432,36 @@ export interface RunlogGateReproduction {
   output?: string;
 }
 
+export interface RunlogHarnessCapability {
+  evidence?: string[];
+  id?: string;
+}
+
+export interface RunlogHarnessDiagnostic {
+  capability?: string;
+  command?: string;
+  enforcement?: string;
+  name?: string;
+}
+
+export interface RunlogHarnessGate {
+  command?: string;
+  kind?: string;
+  source?: string;
+}
+
+export interface RunlogHarnessProfile {
+  capabilities?: RunlogHarnessCapability[];
+  detected_gate?: RunlogHarnessGate;
+  detection_error?: string;
+  diagnostics?: RunlogHarnessDiagnostic[];
+  effective_gate?: RunlogHarnessGate;
+  task_verification?: string;
+}
+
 export interface RunlogInterruptedTurn {
   index?: number;
+  looked?: string[];
   notes?: string;
   role?: string;
   round?: number;
@@ -458,6 +494,7 @@ export interface RunlogRun {
   gate?: string;
   gate_root?: string;
   governance_modified?: boolean;
+  harness_profile?: RunlogHarnessProfile;
   id?: string;
   interrupted_turn?: RunlogInterruptedTurn;
   local_only?: boolean;

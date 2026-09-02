@@ -159,6 +159,9 @@ type ExecContext struct {
 	// Capabilities selects stack-specific adapters without coupling tool
 	// execution to any language or project type.
 	Capabilities config.Capabilities
+	// HarnessContext is the already-resolved, bounded stack capsule. Resolution
+	// belongs to the run, not to each model turn.
+	HarnessContext string
 	// TaskVerification is the task's explicit Verification field. Build runs
 	// execute it before Verify, so verify_run must do the same or it can show a
 	// green gate immediately before the round gate turns red.

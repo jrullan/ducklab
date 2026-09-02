@@ -131,6 +131,15 @@ export interface AppStatus {
 
 export interface LandingOffer { commit_sha: string; evidence: string }
 
+export interface HarnessProfile {
+  capabilities?: { id: string; evidence?: string[] }[];
+  detected_gate?: { kind: string; command?: string; source?: string };
+  effective_gate: { kind: string; command?: string; source?: string };
+  task_verification?: string;
+  diagnostics?: { capability: string; name: string; command: string; enforcement: string }[];
+  detection_error?: string;
+}
+
 // Desktop capability: "GET", `/v1/runs/${runId}/captures/${name}` (implemented as a blob URL).
 export async function runCaptureUrl(baseUrl: string, runId: string, name: string, token = ""): Promise<string> {
   const response = await fetch(`${baseUrl}/v1/runs/${encodeURIComponent(runId)}/captures/${encodeURIComponent(name)}`, {
@@ -152,6 +161,8 @@ export interface Run {
   /** Engine explanation for why a queued run has not been seated. */
   queued_reason?: string;
   verdict: string;
+  /** Stack facts and verification contributions fixed at run launch. */
+  harness_profile?: HarnessProfile;
   /** Clean-checkout gate result recorded when the accepted commit was proven. */
   acceptance_gate?: GateResult;
   accepted?: boolean;

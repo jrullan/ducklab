@@ -871,6 +871,9 @@ Ground rules, which you cannot change:
 	gateDesc := gateDescFor(turn)
 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
+	if ectx.HarnessContext != "" && (turn.Role == config.RoleImplementer || turn.Role == config.RoleReviewer || turn.Role == config.RoleAdvisor) {
+		system += "\n\n" + ectx.HarnessContext
+	}
 	// Dialect B: append fenced text protocol instructions
 	if !useNative {
 		system += `

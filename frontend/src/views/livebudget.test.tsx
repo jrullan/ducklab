@@ -43,6 +43,28 @@ describe("the run's budget while it is running", () => {
     );
   });
 
+  it("shows the exact harness profile supplied to the coding seats", async () => {
+    useRuns.setState({
+      runs: { "r-1": {
+        ...run,
+        harness_profile: {
+          capabilities: [{ id: "c-native", evidence: ["task Verification invokes a native compiler"] }, { id: "meson", evidence: ["meson.build"] }],
+          effective_gate: { kind: "build", command: "ninja -C build", source: "project" },
+          task_verification: "cc -fsyntax-only src/capture.c",
+          diagnostics: [{ capability: "c-native", name: "compiler warnings", command: "cc -fsyntax-only src/capture.c -Wall -Wextra -Werror", enforcement: "diagnostic" }],
+        },
+      } },
+      spend: {}, events: {}, deltas: {}, reasoning: {},
+    });
+    render(<RunView runId="r-1" client={client} />);
+    const profile = await screen.findByTestId("run-harness-profile");
+    expect(profile).toHaveTextContent("c-native");
+    expect(profile).toHaveTextContent("meson.build");
+    expect(screen.getByTestId("run-harness-gate")).toHaveTextContent("ninja -C build");
+    expect(screen.getByTestId("run-harness-task-gate")).toHaveTextContent("cc -fsyntax-only src/capture.c");
+    expect(profile).toHaveTextContent("diagnostic");
+  });
+
   // The limits were hardcoded, so a run started with a raised ceiling was drawn
   // against one it did not have: the bar looked full at a quarter spent.
   it("draws against the ceiling this run actually got", async () => {

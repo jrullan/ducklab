@@ -182,6 +182,38 @@
         ],
         "type": "object"
       },
+      "ConfigCapabilities": {
+        "properties": {
+          "auto": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "policy": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "auto",
+          "disabled",
+          "enabled",
+          "policy"
+        ],
+        "type": "object"
+      },
       "ConfigCaps": {
         "properties": {
           "context_tokens": {
@@ -347,6 +379,9 @@
           "budget": {
             "$ref": "#/components/schemas/ConfigBudget"
           },
+          "capabilities": {
+            "$ref": "#/components/schemas/ConfigCapabilities"
+          },
           "created": {
             "type": "string"
           },
@@ -426,6 +461,7 @@
         "required": [
           "autonomy",
           "budget",
+          "capabilities",
           "created",
           "describe",
           "git",
@@ -1442,10 +1478,105 @@
         ],
         "type": "object"
       },
+      "RunlogHarnessCapability": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "RunlogHarnessDiagnostic": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "enforcement": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "command",
+          "enforcement",
+          "name"
+        ],
+        "type": "object"
+      },
+      "RunlogHarnessGate": {
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "RunlogHarnessProfile": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogHarnessCapability"
+            },
+            "type": "array"
+          },
+          "detected_gate": {
+            "$ref": "#/components/schemas/RunlogHarnessGate"
+          },
+          "detection_error": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogHarnessDiagnostic"
+            },
+            "type": "array"
+          },
+          "effective_gate": {
+            "$ref": "#/components/schemas/RunlogHarnessGate"
+          },
+          "task_verification": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effective_gate"
+        ],
+        "type": "object"
+      },
       "RunlogInterruptedTurn": {
         "properties": {
           "index": {
             "type": "integer"
+          },
+          "looked": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "notes": {
             "type": "string"
@@ -1548,6 +1679,9 @@
           },
           "governance_modified": {
             "type": "boolean"
+          },
+          "harness_profile": {
+            "$ref": "#/components/schemas/RunlogHarnessProfile"
           },
           "id": {
             "type": "string"

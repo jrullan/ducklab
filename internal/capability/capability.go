@@ -119,7 +119,7 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 	}
 	resolveGate(&profile, gates)
 	if profile.Gate != nil && profile.Gate.Unavailable != nil {
-		return Profile{}, profile.Gate.Unavailable
+		return profile, profile.Gate.Unavailable
 	}
 	return profile, nil
 }

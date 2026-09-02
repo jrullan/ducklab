@@ -1533,6 +1533,11 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 
 	// Build exec context
 	root := runRoot(rs.run, entry.Path)
+	harnessContext, err := ensureHarnessProfile(rs, root, projCfg, taskVerificationCommand(entry.Path, req.TaskID))
+	if err != nil {
+		s.failRun(rs, err)
+		return
+	}
 	ectx := &tools.ExecContext{
 		ProjectRoot:      root,
 		DocsRoot:         entry.Path,
@@ -1542,6 +1547,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		ShellPolicy:      projCfg.Shell,
 		Verify:           projCfg.Verify,
 		Capabilities:     projCfg.Capabilities,
+		HarnessContext:   harnessContext,
 		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
 		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
@@ -1762,6 +1768,11 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	recordLimits(rs, &b)
 
 	root := runRoot(rs.run, entry.Path)
+	harnessContext, err := ensureHarnessProfile(rs, root, projCfg, taskVerificationCommand(entry.Path, req.TaskID))
+	if err != nil {
+		s.failRun(rs, err)
+		return
+	}
 	ectx := &tools.ExecContext{
 		ProjectRoot:      root,
 		DocsRoot:         entry.Path,
@@ -1772,6 +1783,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		ShellPolicy:      projCfg.Shell,
 		Verify:           projCfg.Verify,
 		Capabilities:     projCfg.Capabilities,
+		HarnessContext:   harnessContext,
 		TaskVerification: taskVerificationCommand(entry.Path, req.TaskID),
 		Answers:          rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
