@@ -399,6 +399,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			} else {
 				turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
 			}
+			if params.SmallSeat && script.Name == "pair" && turn.Role == config.RoleImplementer && turn.MaxTurns > 24 {
+				// Pair mode promises an independent reviewer. A small local seat
+				// can otherwise spend a configured high role cap on slow calls
+				// until the run wallclock expires before review begins. Large
+				// seats retain the explicit role-cap override contract.
+				turn.MaxTurns = 24
+			}
 
 			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {
 				continue
@@ -569,12 +576,25 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			emit(params, "turn_start", startData)
 			if params.ExecContext != nil {
 				params.ExecContext.ExplorationCallLimit = 0
+				if params.SmallSeat && turn.Role == config.RoleImplementer {
+					// Slow small seats pay heavily for every observational loop.
+					// Twelve calls still permit broad repository orientation, while
+					// leaving room in the turn to edit and verify. A successful write
+					// reopens another bounded inspect/act cycle.
+					params.ExecContext.ExplorationCallLimit = 12
+				}
 				if turn.Role == config.RoleImplementer && (reportRetries > 0 || consultRetries > 0) {
 					// A protocol retry continues on the same tree with the prior
 					// evidence in its transcript. Give it enough observation for a
 					// targeted re-read, not another full research phase.
 					params.ExecContext.ExplorationCallLimit = 4
 				}
+			}
+			if turn.Role == config.RoleImplementer && (reportRetries > 0 || consultRetries > 0) && turn.MaxTurns > 8 {
+				// A continuation has the current tree, prior evidence and one
+				// narrow correction. Bound its model-call loop so pair mode still
+				// reaches the mandatory reviewer within the run budget.
+				turn.MaxTurns = 8
 			}
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
