@@ -199,8 +199,8 @@ func TestSplitIntentIgnoresExplicitNegation(t *testing.T) {
 
 func TestSectionedTriageAcceptsChangeLabelsAndStripsNewIDs(t *testing.T) {
 	doc := &artifact.Document{Sections: []artifact.Section{{ID: "M-005", Children: []artifact.Section{{ID: "T-006"}, {ID: "T-007"}}}}}
-	ids, adds := parseTriagePass("- CHANGE: T-006 — Overlay\n- UPDATE: T-007 — Selection\n- NEW: T-900 — Parse CLI\n", doc, "M")
-	if strings.Join(ids, ",") != "T-006,T-007" || strings.Join(adds, ",") != "Parse CLI" {
+	ids, adds := parseTriagePass("- CHANGE: T-006 — Overlay\n- UPDATE: T-007 — Selection\n- NEW: T-900 — Parse CLI\n- NEW: T-901 Initialize app\n", doc, "M")
+	if strings.Join(ids, ",") != "T-006,T-007" || strings.Join(adds, ",") != "Parse CLI,Initialize app" {
 		t.Fatalf("triage ids=%v adds=%v", ids, adds)
 	}
 }

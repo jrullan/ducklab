@@ -32,7 +32,7 @@ const sectionedPassCap = 12
 
 var sectionIDRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?(?:(?:CHANGE|UPDATE):\s*)?([A-Z]+-\d+)\b`)
 var sectionNewRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?NEW:\s*(.+)$`)
-var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+\s+[—-]\s+`)
+var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+(?:\s+[—-])?\s+`)
 
 func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {
 	kind := p.Stage.Kind()
