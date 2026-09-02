@@ -66,6 +66,21 @@ func TestIsolatedArchitectOutcomeDropsSiblingTasks(t *testing.T) {
 	}
 }
 
+func TestIsolatedArchitectOutcomeRestoresEngineOwnedID(t *testing.T) {
+	raw := "## T-010 — Lifecycle\n\n**Implements:** SPEC-001\n\nrenumbered by bad review advice"
+	parsed, err := agent.ParseContract("markdown_sections:T", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sectionsOf(got)) != 1 || sectionsOf(got)[0].ID != "T-008" || strings.Contains(got.Text, "T-010") {
+		t.Fatalf("normalized outcome = %#v", got)
+	}
+}
+
 func TestTaskGraphRequiresDependencyAndVerificationCoverage(t *testing.T) {
 	blocks := []taskBlock{
 		{id: "T-001", body: "**Produces:** meson.build\n**Consumes:** src/main.c\n**Depends on:** none\n**Exercises:** meson.build\n"},

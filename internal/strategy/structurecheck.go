@@ -218,20 +218,32 @@ func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID string) 
 	if outcome == nil || !strings.HasPrefix(contract, "markdown_sections:") {
 		return outcome, nil
 	}
-	for _, sec := range sectionsOf(outcome) {
+	sections := sectionsOf(outcome)
+	for _, sec := range sections {
 		if !strings.EqualFold(sec.ID, expectedID) {
 			continue
 		}
-		text := "## " + sec.ID + " — " + strings.TrimSpace(sec.Title) + "\n\n" + strings.TrimSpace(sec.Body)
-		parsed, err := agent.ParseContract(contract, text)
-		if err != nil {
-			return nil, err
-		}
-		scoped := *outcome
-		scoped.Text, scoped.Parsed = text, parsed
-		return &scoped, nil
+		return rewriteScopedArchitectSection(outcome, contract, sec, expectedID)
+	}
+	if len(sections) == 1 {
+		// The section ID is an engine-owned routing coordinate. A reviewer may
+		// mistakenly ask the architect to renumber an existing task; preserve
+		// the one returned semantic replacement under its assigned ID instead
+		// of turning that recoverable protocol error into a failed run.
+		return rewriteScopedArchitectSection(outcome, contract, sections[0], expectedID)
 	}
 	return nil, fmt.Errorf("isolated architect pass returned no section %s", expectedID)
+}
+
+func rewriteScopedArchitectSection(outcome *agent.Outcome, contract string, sec agent.Section, expectedID string) (*agent.Outcome, error) {
+	text := "## " + expectedID + " — " + strings.TrimSpace(sec.Title) + "\n\n" + strings.TrimSpace(sec.Body)
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return nil, err
+	}
+	scoped := *outcome
+	scoped.Text, scoped.Parsed = text, parsed
+	return &scoped, nil
 }
 
 // normalizeRequirementPriorities compiles a mechanically unambiguous Priority
