@@ -4443,8 +4443,10 @@ func (s *Service) monitorWallclockEscalation(ctx context.Context, rs *runState) 
 }
 
 // checkWallclockEscalation emits the existing escalation card once a live run
-// exceeds the configured multiple of its mode/project history. Five completed
-// runs are required so a single outlier never becomes misleading advice.
+// exceeds the configured multiple of its stage/mode/project history. Five
+// completed runs are required so a single outlier never becomes misleading
+// advice. Short runs never interrupt a person merely because the historical
+// average is tiny: a pause and replay cost more than the anomaly at that scale.
 func (s *Service) checkWallclockEscalation(rs *runState) {
 	if rs == nil || rs.run == nil || rs.writer == nil || rs.run.Status != "running" || rs.historyEscalated.Load() {
 		return
@@ -4463,7 +4465,7 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 			continue
 		}
 		r := prior.run
-		if r.ProjectID == rs.run.ProjectID && r.Mode == rs.run.Mode && r.EndedAt != "" {
+		if r.ProjectID == rs.run.ProjectID && r.Stage == rs.run.Stage && r.Mode == rs.run.Mode && r.EndedAt != "" {
 			ms := r.ActiveWallclockMs
 			// Records written before active timing have no interval history.
 			if ms == 0 {
@@ -4481,8 +4483,12 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 	}
 	average := total / float64(count)
 	elapsed := activeWallclock(rs.run, time.Now()).Seconds()
+	threshold := multiplier * average
+	if floor := (5 * time.Minute).Seconds(); threshold < floor {
+		threshold = floor
+	}
 
-	if elapsed < multiplier*average || !rs.historyEscalated.CompareAndSwap(false, true) {
+	if elapsed < threshold || !rs.historyEscalated.CompareAndSwap(false, true) {
 		return
 	}
 	stage := rs.run.Stage

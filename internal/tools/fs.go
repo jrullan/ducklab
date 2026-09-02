@@ -341,6 +341,9 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
 	}
+	if line := sourceMarkdownFence(a.Path, a.Content); line > 0 {
+		return ErrorResult("refusing to write %s: line %d is a Markdown code fence inside a source file — send the raw file content without opening or closing ``` fences", a.Path, line), nil
+	}
 	// Write guard
 	if guard := WriteGuard(ectx, a.Path, []byte(a.Content), true); guard != nil {
 		return guard, nil
@@ -363,6 +366,21 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 		msg += "\n" + note
 	}
 	return SuccessResult("%s", msg), nil
+}
+
+func sourceMarkdownFence(path, content string) int {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".go", ".rs", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".kts", ".rb", ".php", ".swift", ".sh":
+	default:
+		return 0
+	}
+	for i, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") && strings.Trim(trimmed, "`") != trimmed {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // FSWriteLines replaces an exact line range — the middle ground B-059 named:

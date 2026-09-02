@@ -39,8 +39,8 @@ func TestLaunchEscalationWarnsAfterTwoTaskStageFailures(t *testing.T) {
 func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	s := newTestService(t)
 	dir := t.TempDir()
-	started := time.Now().Add(-130 * time.Second)
-	current := &runlog.Run{ID: "r-current", ProjectID: "p", Mode: "solo", Status: "running", StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano)}
+	started := time.Now().Add(-11 * time.Minute)
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Stage: "build", Mode: "solo", Status: "running", StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano)}
 	w, err := runlog.NewWriter(dir, current)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	s.runs = map[string]*runState{current.ID: rs}
 	for i := 0; i < 5; i++ {
 		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
-			ID: "history", ProjectID: "p", Mode: "solo", ActiveWallclockMs: 60_000,
+			ID: "history", ProjectID: "p", Stage: "build", Mode: "solo", ActiveWallclockMs: 5 * 60_000,
 			EndedAt: time.Now().UTC().Format(time.RFC3339),
 		}}
 	}
@@ -85,6 +85,39 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	}
 	// Idempotent: a second turn end does nothing.
 	s.pauseAtSafePoint(rs)
+}
+
+func TestWallclockEscalationIgnoresOtherStagesAndShortAnomalies(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		currentStage string
+		historyStage string
+		elapsed      time.Duration
+	}{
+		{"other stage", "build", "spec", 20 * time.Minute},
+		{"short anomaly", "build", "build", 130 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestService(t)
+			dir := t.TempDir()
+			started := time.Now().Add(-tc.elapsed)
+			current := &runlog.Run{ID: "r-current", ProjectID: "p", Stage: tc.currentStage, Mode: "solo", Status: "running", StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano)}
+			w, err := runlog.NewWriter(dir, current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			rs := &runState{run: current, writer: w, runDir: w.RunDir()}
+			s.runs = map[string]*runState{current.ID: rs}
+			for i := 0; i < 5; i++ {
+				s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{ID: "history", ProjectID: "p", Stage: tc.historyStage, Mode: "solo", ActiveWallclockMs: 60_000, EndedAt: time.Now().UTC().Format(time.RFC3339)}}
+			}
+			s.checkWallclockEscalation(rs)
+			if rs.pauseAfterTurn.Load() {
+				t.Fatal("irrelevant history requested an interruption")
+			}
+		})
+	}
 }
 
 func TestWallclockEscalationExcludesQueuedAndPausedTime(t *testing.T) {
