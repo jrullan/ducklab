@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -10,6 +11,33 @@ import (
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/tools"
 )
+
+func TestCancellationAtTurnEndDoesNotStartAGate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	gateStarted := false
+	params := &ExecuteParams{
+		Runner: func(context.Context, *Turn, config.DucklingID, string, []string, TurnContext) (*agent.Outcome, error) {
+			return &agent.Outcome{Text: "work is durable"}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "impl"},
+		Gate: func(context.Context) (string, string, error) {
+			gateStarted = true
+			return "green", "", nil
+		},
+		OnEvent: func(kind string, data map[string]interface{}) {
+			if kind == "turn_end" && data["incomplete"] != true {
+				cancel()
+			}
+		},
+	}
+	_, err := ExecuteScript(ctx, SoloScript(), params)
+	if err != context.Canceled {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if gateStarted {
+		t.Fatal("gate started after a safe-point pause cancelled the run")
+	}
+}
 
 // A run recorded turn_start and turn_end around a turn whose content was never
 // written down: eleven events and not one carrying what a model said. The text

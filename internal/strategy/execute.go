@@ -934,6 +934,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 		}
 
+		// An operator pause requested during a turn lands from the turn_end
+		// callback. That callback cancels this context only after the model's
+		// work and message are durable. Do not start a gate with the cancelled
+		// context: it would manufacture a red exit -1 and overwrite the real
+		// pause with an UNVERIFIED gate decision.
+		if err := ctx.Err(); err != nil {
+			result.Error = err
+			return result, err
+		}
+
 		// The gate runs after the round's turns, and it — not any model —
 		// decides whether the work is green (I2).
 		//
