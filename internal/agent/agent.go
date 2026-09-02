@@ -865,7 +865,7 @@ func toolCatalogue(turn *Turn, ectx *tools.ExecContext) string {
 }
 
 func textToolAvailabilityUpdate(turn *Turn, ectx *tools.ExecContext) string {
-	if ectx == nil || (!ectx.ToolsClosed && !ectx.ReadToolsClosed) {
+	if ectx == nil || (!ectx.ToolsClosed && !ectx.ReadToolsClosed && !ectx.ToolbeltReminder) {
 		return ""
 	}
 	available := make([]string, 0, len(turn.Toolbelt))
@@ -1539,7 +1539,13 @@ func executeToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContext, t
 		}
 	}
 	if !allowed {
-		return tools.ErrorResult("tool %q not in toolbelt", tc.Function.Name), nil
+		closed := ectx != nil && ectx.RecordToolbeltViolation()
+		result := tools.ErrorResult("tool %q is outside this role's toolbelt; use only the tools listed for this turn", tc.Function.Name)
+		if closed {
+			result.Content += "; this is the second role-boundary violation, so tool use is now CLOSED — answer the original task from the evidence already gathered"
+			result.EndTurn = true
+		}
+		return result, nil
 	}
 	if loop.OnToolStart != nil {
 		loop.OnToolStart(turn, string(loop.Duckling.ID), tc.Function.Name, json.RawMessage(tc.Function.Arguments))
@@ -1569,7 +1575,13 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 		}
 	}
 	if !allowed {
-		return tools.ErrorResult("tool %q not in toolbelt", tc.Name), nil
+		closed := ectx != nil && ectx.RecordToolbeltViolation()
+		result := tools.ErrorResult("tool %q is outside this role's toolbelt; use only the tools listed for this turn", tc.Name)
+		if closed {
+			result.Content += "; this is the second role-boundary violation, so tool use is now CLOSED — answer the original task from the evidence already gathered"
+			result.EndTurn = true
+		}
+		return result, nil
 	}
 	if loop.OnToolStart != nil {
 		loop.OnToolStart(turn, string(loop.Duckling.ID), tc.Name, tc.Args)

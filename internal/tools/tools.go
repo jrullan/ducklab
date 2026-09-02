@@ -139,6 +139,12 @@ type ExecContext struct {
 	// still need to turn that context into fs_patch/fs_write and verify_run.
 	// Closing every tool here stranded a fully constructed T-004 rewrite.
 	ReadToolsClosed bool
+	// ToolbeltReminder tells a text-protocol seat that it attempted a tool its
+	// role does not own. The catalogue at the start of a turn is easy for a
+	// small model to forget after several results; the next request repeats the
+	// authoritative boundary. A second violation closes tool use for the turn.
+	ToolbeltReminder   bool
+	toolbeltViolations int
 	// explorationCalls counts observational calls since the last successful
 	// file mutation. Exact-call brakes cannot see a research loop made of
 	// slightly different grep/find/read queries that all pursue the same fact.
@@ -511,8 +517,26 @@ func (e *ExecContext) BeginTurn() {
 	e.searchMisses = 0
 	e.ToolsClosed = false
 	e.ReadToolsClosed = false
+	e.ToolbeltReminder = false
+	e.toolbeltViolations = 0
 	e.explorationCalls = 0
 	e.lastFailSig, e.lastFailCount = "", 0
+}
+
+// RecordToolbeltViolation applies the role boundary as a two-step brake. The
+// first stale/out-of-role call earns a live reminder; repeating the mistake
+// closes tools so the seat must return its actual role output.
+func (e *ExecContext) RecordToolbeltViolation() bool {
+	if e == nil {
+		return false
+	}
+	e.toolbeltViolations++
+	e.ToolbeltReminder = true
+	if e.toolbeltViolations >= 2 {
+		e.ToolsClosed = true
+		return true
+	}
+	return false
 }
 
 // ToolAvailable reports whether the loop should advertise a tool on its next
