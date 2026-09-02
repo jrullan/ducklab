@@ -90,6 +90,9 @@ func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
 	if script.CriticScope == "" || !strings.Contains(script.CriticScope, "T-008") || !strings.Contains(script.CriticScope, "absence of every sibling") {
 		t.Fatalf("critic scope = %q", script.CriticScope)
 	}
+	if !strings.Contains(script.CriticScope, "narrowing its title and body to exactly one cohesive concern") || !strings.Contains(script.CriticScope, "routed to NEW passes") {
+		t.Fatalf("critic scope does not explain split semantics: %q", script.CriticScope)
+	}
 	if script.ArchitectScopeID != "T-008" {
 		t.Fatalf("architect scope = %q, want T-008", script.ArchitectScopeID)
 	}
@@ -214,6 +217,15 @@ func TestRequirementsSectionPassCarriesAmendmentInvariants(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("requirements section prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestExistingSectionPromptExplainsSplitNarrowing(t *testing.T) {
+	prompt := buildSectionPassPrompt(artifact.KindPlan, "Split this task into independent concerns", &artifact.Section{ID: "T-008", Title: "CLI, init, and lifecycle"})
+	for _, want := range []string{"keep exactly one cohesive concern here", "narrow the title/body", "assigned to NEW passes"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("split section prompt lacks %q:\n%s", want, prompt)
 		}
 	}
 }

@@ -245,6 +245,7 @@ func sectionPass(prefix string, pass int, mode string, critics []config.Duckling
 		script.CriticScope = "Review only section `" + sec.ID + "` (" + sec.Title + "). " +
 			"The absence of every sibling section is intentional: never require, mention, or recreate another id. " +
 			"Judge only whether this replacement correctly applies the clauses relevant to its existing title and behavior. " +
+			"When the request explicitly splits this section, narrowing its title and body to exactly one cohesive concern is required: do not demand preservation of concerns routed to NEW passes. " +
 			"The broad request is routing context, not a completeness checklist for this isolated review."
 	}
 	script.TurnIndexBase = pass * 10
@@ -354,6 +355,7 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 	b.WriteString("SCOPE BOUNDARY (instruction only; never copy this text into the document):\n\nThe request may contain several independent changes assigned to other " +
 		"section passes. Apply ONLY the clauses whose subject belongs to this section's existing " +
 		"title and behavior. Do not copy, summarize, or mention clauses about another capability. " +
+		"If the request explicitly splits this section, keep exactly one cohesive concern here and narrow the title/body accordingly; do not retain or describe concerns assigned to NEW passes. " +
 		"If no clause belongs to this section, answer UNCHANGED.\n\n")
 	if kind == artifact.KindRequirements {
 		b.WriteString("## Requirements invariants\n\n" +
