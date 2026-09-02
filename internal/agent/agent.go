@@ -199,8 +199,18 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// Determine dialect
 	useNative := loop.Duckling.Caps.NativeTools
 
-	// Build messages
-	messages := BuildMessages(turn, ectx, useNative)
+	// Build messages. Tool execution has always used loop.Registry, but the
+	// text-protocol catalogue read only ExecContext.Registry. Production run
+	// contexts do not populate that optional field, so local models were shown
+	// bare tool names without descriptions or schemas and had to guess their
+	// arguments. Keep execution state untouched and enrich only the prompt view.
+	messageContext := ectx
+	if ectx != nil && ectx.Registry == nil && loop.Registry != nil {
+		copy := *ectx
+		copy.Registry = loop.Registry
+		messageContext = &copy
+	}
+	messages := BuildMessages(turn, messageContext, useNative)
 
 	// Build tool definitions for native dialect
 	var nativeTools []provider.Tool
@@ -639,7 +649,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// final call, tools withheld, to answer from what it has seen — a
 	// reviewer's honest verdict at that point is request-changes naming what
 	// it could not verify, which the loop can act on, unlike a corpse.
-	if len(outcome.ToolCalls) > 0 && strings.TrimSpace(outcome.Text) == "" {
+	if len(outcome.ToolCalls) > 0 && !substantiveAnswer(outcome.Text) {
 		final := provider.ChatRequest{
 			Model: loop.Duckling.Model,
 			Messages: append(append([]provider.Message{}, conversation...), provider.Message{
@@ -669,12 +679,15 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			outcome.Text = answer
 		}
 	}
-	if len(outcome.ToolCalls) > 0 && strings.TrimSpace(outcome.Text) == "" {
+	if len(outcome.ToolCalls) > 0 && !substantiveAnswer(outcome.Text) {
 		return outcome, fmt.Errorf(
-			"%w: %s used all %d of its turns calling tools and never answered "+
-				"(%d tool calls, no text), even when asked to conclude without them. "+
+			"%w: %s used all %d of its turns calling tools and never gave a substantive answer "+
+				"(%d tool calls), even when asked to conclude without them. "+
 				"Raise the turn cap for this role, or the task needs narrowing",
 			ErrNoAnswer, turn.Role, maxTurns, len(outcome.ToolCalls))
+	}
+	if !substantiveAnswer(outcome.Text) {
+		return outcome, fmt.Errorf("%w: %s returned only whitespace or Markdown fences", ErrNoAnswer, turn.Role)
 	}
 
 	// Parse contract. The parsed value is kept: pair needs the reviewer's
@@ -832,8 +845,28 @@ func toolCatalogue(turn *Turn, ectx *tools.ExecContext) string {
 			continue
 		}
 		fmt.Fprintf(&b, "- `%s` — %s\n", name, t.Description())
+		if schema, err := json.Marshal(t.Schema()); err == nil {
+			fmt.Fprintf(&b, "  Arguments: `%s`\n", schema)
+		}
 	}
 	return b.String()
+}
+
+// substantiveAnswer distinguishes an answer from protocol debris. A local
+// implementer spent a full turn constructing a patch in hidden reasoning and
+// returned one bare closing fence; accepting it advanced an empty diff to the
+// reviewer. Fences surrounding actual content remain valid.
+func substantiveAnswer(text string) bool {
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		line = strings.TrimSpace(line)
+		fields := strings.Fields(line)
+		fenceOnly := len(fields) == 1 && (strings.HasPrefix(fields[0], "```") || strings.HasPrefix(fields[0], "~~~"))
+		if line == "" || fenceOnly {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // BuildMessages builds the message list for a turn.
@@ -1070,11 +1103,9 @@ If the gate result you were given is red, "approve" is not available to you.
 An empty findings list with "approve" is a legitimate answer.
 
 If the diff is empty because the work the task asks for is already in the tree,
-the task is satisfied and "approve" is the correct verdict. Say so, and record
-what you noticed as a finding with severity "minor" — that this task delivered
-nothing is worth a human knowing, but it is not a defect the implementer can
-fix by writing code, and "request-changes" only asks it to try again against
-the same empty diff.`
+the task is satisfied and "approve" with an empty findings list is the correct
+verdict. An empty diff is not itself an actionable defect; run history records
+that the turn delivered no change.`
 
 // consultantPrompt frames a chat turn: investigate and advise, change
 // nothing. The closing duty matters most — the person acts with the buttons

@@ -209,6 +209,12 @@ func parseVerdict(text string) (*Verdict, error) {
 		if strings.TrimSpace(f.Issue) == "" {
 			return nil, fmt.Errorf("verdict contract: finding %d has an empty issue", i)
 		}
+		if strings.TrimSpace(f.Fix) == "" {
+			// A real defect with an omitted remedy is incomplete, not a no-op.
+			// Calling it "no defect" sent the reviewer a false repair instruction
+			// on Neocapture T-004, so two otherwise useful findings were discarded.
+			return nil, fmt.Errorf("verdict contract: finding %d has no fix; add one actionable sentence in the fix field", i)
+		}
 		// A small self-reviewer twice padded an approval with "no defects" as a
 		// minor finding and "N/A" as its fix. Those are not observations: they
 		// corrupt convergence metrics and make later seats search for a defect
@@ -238,7 +244,7 @@ func noOpFinding(f Finding) bool {
 		strings.Contains(issue, "no issue") ||
 		strings.Contains(issue, "exactly what was asked") ||
 		strings.Contains(issue, "no change needed")
-	noFix := fix == "" || fix == "n/a" || fix == "none" ||
+	noFix := fix == "n/a" || fix == "none" ||
 		strings.Contains(fix, "no change needed") || strings.Contains(fix, "no change required")
 	return noIssue || noFix
 }

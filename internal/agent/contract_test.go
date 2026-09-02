@@ -93,6 +93,17 @@ func TestVerdictRejectsBadSeverity(t *testing.T) {
 	}
 }
 
+func TestVerdictNamesAMissingFixPrecisely(t *testing.T) {
+	_, err := ParseContract("verdict", `{"verdict":"request-changes","findings":[
+		{"severity":"critical","file":"x.c","issue":"required file does not exist"}]}`)
+	if err == nil || !strings.Contains(err.Error(), "has no fix") {
+		t.Fatalf("missing fix diagnosis = %v, want a precise repair instruction", err)
+	}
+	if strings.Contains(err.Error(), "no defect") {
+		t.Fatalf("a real defect was mislabeled as no defect: %v", err)
+	}
+}
+
 func TestVerdictRejectsUnknownVerdict(t *testing.T) {
 	if _, err := ParseContract("verdict", `{"verdict":"lgtm","findings":[]}`); err == nil {
 		t.Error(`accepted verdict "lgtm"`)

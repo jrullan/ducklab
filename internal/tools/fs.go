@@ -239,8 +239,9 @@ func (t *FSSearch) Mutating() bool { return false }
 
 // Description returns the tool description.
 func (t *FSSearch) Description() string {
-	return "Search file contents line by line with a regex pattern. Results are path:line: text " +
-		"— the path:line prefix is not file content."
+	return "Search file CONTENTS line by line with a regex pattern; it does not search file names. " +
+		"Use fs_list to discover files, or glob to limit which files' contents are searched. " +
+		"Results are path:line: text — the path:line prefix is not file content."
 }
 
 // Schema returns the argument schema.

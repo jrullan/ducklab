@@ -463,7 +463,7 @@ func TestTextProtocolIsToldWhichToolsItHas(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"Your tools", "fs_read", "fs_search"} {
+	for _, want := range []string{"Your tools", "fs_read", "fs_search", "Arguments:", "does not search file names"} {
 		if !strings.Contains(system, want) {
 			t.Errorf("the prompt never mentions %q", want)
 		}
@@ -472,6 +472,69 @@ func TestTextProtocolIsToldWhichToolsItHas(t *testing.T) {
 	// cannot use invites a refused call and a wasted turn.
 	if strings.Contains(system, "- `fs_write`") {
 		t.Error("a tool outside the belt was listed as available")
+	}
+}
+
+// Production ExecContexts do not carry a registry. RunTurn must still render
+// the loop's tool descriptions and schemas for a text-protocol model.
+func TestTextProtocolCatalogueFallsBackToLoopRegistry(t *testing.T) {
+	p := &countingProvider{fallback: "done"}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Toolbelt: []string{"fs_search"}, Contract: "freeform", MaxTurns: 1}
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) == 0 {
+		t.Fatal("no model request")
+	}
+	var system string
+	for _, msg := range p.requests[0].Messages {
+		if msg.Role == "system" {
+			system += msg.Content
+		}
+	}
+	if !strings.Contains(system, "does not search file names") || !strings.Contains(system, `"glob"`) {
+		t.Fatalf("text catalogue lacks description/schema: %s", system)
+	}
+}
+
+// A bare Markdown fence is protocol debris, not an implementation report.
+// After tool use it earns the existing tools-closed conclusion call instead
+// of silently advancing an empty diff to review.
+func TestFenceOnlyFinalAnswerIsRetriedBeforeTurnEnds(t *testing.T) {
+	p := &countingProvider{replies: []string{
+		"```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"add.go\"}}\n```",
+		"```",
+		"I could not complete the edit.",
+	}}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "add.go"), []byte("package fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleImplementer, Prompt: "fix it", Toolbelt: []string{"fs_read"}, Contract: "edits", MaxTurns: 2}
+	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Text != "I could not complete the edit." {
+		t.Fatalf("final text = %q", out.Text)
+	}
+	if p.calls() != 3 {
+		t.Fatalf("model calls = %d, want tool call + fence + forced conclusion", p.calls())
+	}
+}
+
+func TestSubstantiveAnswerKeepsOneLineFencedContent(t *testing.T) {
+	if !substantiveAnswer("```json {\"ok\":true}\n```") {
+		t.Fatal("content on the opening-fence line was discarded as protocol debris")
+	}
+	for _, text := range []string{"```", "```json\n```", "~~~c\n~~~"} {
+		if substantiveAnswer(text) {
+			t.Errorf("fence-only response %q was accepted", text)
+		}
 	}
 }
 
