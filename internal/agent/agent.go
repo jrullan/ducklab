@@ -1405,6 +1405,25 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 		blockRe = ducklabLooseBlockRe
 		matches = blockRe.FindAllStringSubmatch(envelope, -1)
 	}
+	if len(matches) == 0 {
+		// A small text-protocol implementer wrote a perfectly shaped tool call
+		// under ```duckdb. Treating that typo as its final answer advanced an
+		// empty diff to review. We do not guess and execute it; we return a tool
+		// result that teaches the exact envelope and lets the same turn recover.
+		if raw, err := extractJSONObject(envelope); err == nil {
+			var candidate struct {
+				Tool string          `json:"tool"`
+				Args json.RawMessage `json:"args"`
+			}
+			if json.Unmarshal([]byte(raw), &candidate) == nil && strings.TrimSpace(candidate.Tool) != "" && len(bytes.TrimSpace(candidate.Args)) > 0 {
+				return &TextToolCall{
+					Name:       "ducklab_protocol",
+					Args:       json.RawMessage(`{}`),
+					ParseError: fmt.Sprintf("tool call for %q used a missing or incorrect fence tag", candidate.Tool),
+				}, ""
+			}
+		}
+	}
 	if len(matches) != 1 {
 		// Zero envelopes: not a tool call. More than one: ambiguous — refuse
 		// rather than guess which the model meant.

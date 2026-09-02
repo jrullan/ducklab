@@ -81,6 +81,20 @@ func TestVerdictApproveWithBlockingFindingsIsRejected(t *testing.T) {
 	}
 }
 
+func TestVerdictRequestChangesRequiresABlockingFinding(t *testing.T) {
+	_, err := ParseContract("verdict", `{"verdict":"request-changes","findings":[
+		{"severity":"minor","file":"x.c","line":9,"issue":"optional cleanup","fix":"remove dead helper"}]}`)
+	if err == nil || !strings.Contains(err.Error(), "no critical or major") {
+		t.Fatalf("minor-only request-changes diagnosis = %v", err)
+	}
+
+	got, err := ParseContract("verdict", `{"verdict":"approve","findings":[
+		{"severity":"minor","file":"x.c","line":9,"issue":"optional cleanup","fix":"remove dead helper"}]}`)
+	if err != nil || !got.(*Verdict).Approved() {
+		t.Fatalf("approve with a preserved minor observation was rejected: %v", err)
+	}
+}
+
 func TestVerdictRejectsBadSeverity(t *testing.T) {
 	for _, body := range []string{
 		`{"verdict":"request-changes","findings":[{"file":"a.go","issue":"x","fix":"y"}]}`,
@@ -125,7 +139,7 @@ func TestContractToleratesFencesAndPreamble(t *testing.T) {
 }
 
 func TestExtractJSONHandlesBracesInStrings(t *testing.T) {
-	text := `{"verdict":"request-changes","findings":[{"severity":"minor","file":"a.go","line":1,"issue":"uses {placeholder} syntax","fix":"escape it"}]}`
+	text := `{"verdict":"request-changes","findings":[{"severity":"major","file":"a.go","line":1,"issue":"uses {placeholder} syntax","fix":"escape it"}]}`
 	got, err := ParseContract("verdict", text)
 	if err != nil {
 		t.Fatal(err)

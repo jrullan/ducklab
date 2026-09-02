@@ -120,6 +120,16 @@ func TestMalformedTextToolCallBecomesRepairableProtocolError(t *testing.T) {
 	}
 }
 
+func TestWrongFenceTagBecomesRepairableProtocolError(t *testing.T) {
+	tc, remaining := parseTextToolCall("```duckdb\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"x.c\"}}\n```")
+	if tc == nil || !strings.Contains(tc.ParseError, "incorrect fence tag") || !strings.Contains(tc.ParseError, "fs_read") {
+		t.Fatalf("wrong-tag tool call was accepted as final prose: %+v", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("wrong-tag tool call leaked into final prose: %q", remaining)
+	}
+}
+
 func TestTruncatedJSONBeforeFenceBecomesRepairableProtocolError(t *testing.T) {
 	text := "```ducklab\n" +
 		`{"tool":"fs_write","args":{"path":"x","content":"unterminated\n` +

@@ -234,6 +234,12 @@ func parseVerdict(text string) (*Verdict, error) {
 		return nil, fmt.Errorf("verdict contract: approved while reporting %d blocking finding(s); approve or request changes, not both",
 			len(v.Blocking()))
 	}
+	if !v.Approved() && len(v.Blocking()) == 0 {
+		// Severity is the review policy, not decoration. Neocapture T-004
+		// exhausted its rounds on one explicitly minor (and invalid) alpha note:
+		// request-changes made the non-blocking label block the entire run.
+		return nil, fmt.Errorf("verdict contract: request-changes has no critical or major finding; use approve to preserve minor observations, or raise the severity only if the defect truly blocks acceptance")
+	}
 	return &v, nil
 }
 
