@@ -162,7 +162,7 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 			out = append(out, fmt.Sprintf("%s appears twice", s.ID))
 		}
 		seen[s.ID] = true
-		if needsImplements && (strings.HasPrefix(s.ID, "SPEC-") || strings.HasPrefix(s.ID, "T-")) &&
+		if prefix != "T" && needsImplements && (strings.HasPrefix(s.ID, "SPEC-") || strings.HasPrefix(s.ID, "T-")) &&
 			!strings.Contains(strings.ToLower(s.Body), "**implements:**") {
 			out = append(out, fmt.Sprintf("%s has no **Implements:** line", s.ID))
 		}
@@ -620,6 +620,13 @@ func structureRepairInstruction(findings []string, sections []agent.Section) (st
 	b.WriteString("Fix these findings and nothing unrelated:\n\n")
 	for _, f := range batch {
 		b.WriteString("- " + f + "\n")
+	}
+	joinedFindings := strings.Join(batch, "\n")
+	if strings.Contains(joinedFindings, "**Verification:**") {
+		b.WriteString("\nVerification field repair: use `set_field` with field `Verification` and a value containing ONLY one executable shell command enclosed in Markdown backticks, for example `cc -fsyntax-only src/main.c`. Do not write instructions such as Run/inspect/verify and do not omit the backticks.\n")
+	}
+	if strings.Contains(joinedFindings, "**Exercises:**") {
+		b.WriteString("\nExercises field repair: use `set_field` with field `Exercises`; its comma-separated artifact values must literally overlap the paths or targets in `Produces` that the Verification command checks. Do not name prose activities.\n")
 	}
 	if len(findings) > len(batch) {
 		b.WriteString(fmt.Sprintf("\n%d additional findings remain checkpointed; they will be handled in later bounded repairs.\n", len(findings)-len(batch)))

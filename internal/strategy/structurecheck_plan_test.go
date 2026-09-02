@@ -58,6 +58,27 @@ func TestTopLevelTaskContractEnforcesAcceptanceSlicesV2(t *testing.T) {
 	}
 }
 
+func TestTopLevelTaskDoesNotDuplicateMissingImplementsFinding(t *testing.T) {
+	body := "**Work unit:** Save one file\n\n**Acceptance slices:**\n- File is saved"
+	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-900", Body: body}}, "markdown_sections:T", nil, true, ""), "\n")
+	if strings.Count(got, "T-900 has no **Implements:** line") != 1 {
+		t.Fatalf("missing Implements finding duplicated:\n%s", got)
+	}
+}
+
+func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *testing.T) {
+	findings := []string{
+		"T-900 **Verification:** must put the executable command in backticks; prose is never executed",
+		"T-900 **Exercises:** none of its **Produces:** artifacts",
+	}
+	note, _ := structureRepairInstruction(findings, []agent.Section{{ID: "T-900", Body: "**Produces:** src/main.c"}})
+	for _, want := range []string{"field `Verification`", "ONLY one executable shell command", "`cc -fsyntax-only src/main.c`", "field `Exercises`", "literally overlap"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("repair prompt lacks %q:\n%s", want, note)
+		}
+	}
+}
+
 func TestIsolatedArchitectOutcomeDropsSiblingTasks(t *testing.T) {
 	raw := "## T-008 — CLI\n\n**Implements:** SPEC-001\n\nright\n\n## T-009 — Lifecycle\n\n**Implements:** SPEC-001\n\nwrong sibling"
 	parsed, err := agent.ParseContract("markdown_sections:T", raw)
