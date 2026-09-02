@@ -1266,6 +1266,16 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString("\n\n## The change under review\n\n```diff\n")
 			b.WriteString(strings.TrimSpace(conv.CompactDiff(diff)))
 			b.WriteString("\n```\n")
+			if nativeCodeDiff(diff) {
+				b.WriteString("\n## Native-code review sweep — required before verdict\n\n" +
+					"Trace every changed success path and every early error/cleanup path. Explicitly verify: " +
+					"(1) every path completes or signals its waiter and cannot deadlock; " +
+					"(2) each allocation/handle uses the matching allocator-family release exactly once; " +
+					"(3) shared state, thread lifetime, joins/unrefs and blocking API semantics are safe; " +
+					"(4) external byte/pixel/wire representations are converted rather than assumed, including masks, channel widths, byte order, stride and alpha; " +
+					"and (5) null/failure cleanup never calls an API with an invalid handle. " +
+					"Do not approve until you have performed this sweep over the final diff, even when compilation is green.\n")
+			}
 		}
 		if rendered := tr.Render(turn.Anonymize, turn.OmitRole); rendered != "" {
 			b.WriteString("\n")
@@ -1273,6 +1283,23 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 		}
 	}
 	return b.String(), nil
+}
+
+func nativeCodeDiff(diff string) bool {
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "diff --git ") {
+			continue
+		}
+		for _, field := range strings.Fields(line)[2:] {
+			path := strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(field, "a/"), "b/"))
+			for _, suffix := range []string{".c", ".h", ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx", ".m", ".mm"} {
+				if strings.HasSuffix(path, suffix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // transcriptText renders a turn for the next reader.
