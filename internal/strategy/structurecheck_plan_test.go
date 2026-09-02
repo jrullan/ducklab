@@ -41,6 +41,13 @@ func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
 	}
 }
 
+func TestAcceptanceSlicesMayUseAnOrderedMarkdownList(t *testing.T) {
+	body := "**Acceptance slices:**\n1. Opens the dialog\n2. Writes the file\n3. Reports completion\n  1. nested explanation"
+	if got := topLevelChecklistItems(body, "Acceptance slices"); got != 3 {
+		t.Fatalf("ordered acceptance slices = %d, want 3", got)
+	}
+}
+
 func TestTopLevelTaskContractEnforcesAcceptanceSlicesV2(t *testing.T) {
 	body := "**Implements:** SPEC-001\n\nWork unit: unbolded and therefore not the contract\n\n**Produces:** src/main.c\n\n**Consumes:** none\n\n**Verification:** `cc -fsyntax-only src/main.c`\n\n**Exercises:** src/main.c"
 	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-009", Title: "Save", Body: body}}, "markdown_sections:T", nil, true, ""), "\n")

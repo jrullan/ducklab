@@ -497,8 +497,12 @@ func taskGraphFindings(blocks []taskBlock) []string {
 	return out
 }
 
-// topLevelChecklistItems counts un-indented bullets under a named bold
-// checklist heading, up to the next field or Markdown heading.
+var orderedChecklistItem = regexp.MustCompile(`^[0-9]+[.)]\s+`)
+
+// topLevelChecklistItems counts un-indented ordered or unordered items under
+// a named bold checklist heading, up to the next field or Markdown heading.
+// Numbering is presentation, not task complexity; rejecting `1.` while
+// accepting `-` caused valid atomic slices to loop without semantic change.
 func topLevelChecklistItems(body, label string) int {
 	n := 0
 	in := false
@@ -511,7 +515,7 @@ func topLevelChecklistItems(body, label string) int {
 		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
 			in = false
 		}
-		if in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")) {
+		if in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || orderedChecklistItem.MatchString(t)) {
 			n++
 		}
 	}
