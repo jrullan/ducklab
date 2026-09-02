@@ -119,6 +119,14 @@ func TestV2MigrationExpandsSelectedMilestoneIntoTaskPasses(t *testing.T) {
 	}
 }
 
+func TestSectionedTriageAcceptsChangeLabelsAndStripsNewIDs(t *testing.T) {
+	doc := &artifact.Document{Sections: []artifact.Section{{ID: "M-005", Children: []artifact.Section{{ID: "T-006"}, {ID: "T-007"}}}}}
+	ids, adds := parseTriagePass("- CHANGE: T-006 — Overlay\n- UPDATE: T-007 — Selection\n- NEW: T-900 — Parse CLI\n", doc, "M")
+	if strings.Join(ids, ",") != "T-006,T-007" || strings.Join(adds, ",") != "Parse CLI" {
+		t.Fatalf("triage ids=%v adds=%v", ids, adds)
+	}
+}
+
 func TestPlanSectionParserReturnsOnlyExpectedID(t *testing.T) {
 	reply := "## T-006 — Overlay\n\nright task\n\n## Scope rule\n\ninternal prompt leaked\n\n## T-007 — Selection\n\nwrong sibling"
 	got, ok := parseSectionReply(reply, artifact.KindPlan, "T-006")

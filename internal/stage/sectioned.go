@@ -30,8 +30,9 @@ import (
 // sections than this is redesign wearing an update's clothes.
 const sectionedPassCap = 12
 
-var sectionIDRe = regexp.MustCompile(`(?m)^\s*(?:-\s*)?([A-Z]+-\d+)\b`)
+var sectionIDRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?(?:(?:CHANGE|UPDATE):\s*)?([A-Z]+-\d+)\b`)
 var sectionNewRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?NEW:\s*(.+)$`)
+var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+\s+[—-]\s+`)
 
 func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {
 	kind := p.Stage.Kind()
@@ -287,7 +288,10 @@ func parseTriagePass(raw string, base *artifact.Document, prefix string) (ids []
 		ids = append(ids, id)
 	}
 	for _, m := range sectionNewRe.FindAllStringSubmatch(raw, -1) {
-		title := strings.TrimSpace(m[1])
+		// Small triagers often answer "NEW: T-900 — Title" even though the
+		// contract asks only for a title. IDs are assigned by the engine; keeping
+		// that decoration produced titles such as "T-009 — Initialize...".
+		title := strings.TrimSpace(titleIDPrefixRe.ReplaceAllString(strings.TrimSpace(m[1]), ""))
 		if title != "" {
 			adds = append(adds, title)
 		}
