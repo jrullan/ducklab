@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,6 +81,32 @@ func TestVerifyRunRunsTaskThenProjectWhenBothAreGreen(t *testing.T) {
 	res, _ := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
 	if res.IsError || !strings.Contains(res.Content, "task-gate-ran") || !strings.Contains(res.Content, "project-gate-ran") {
 		t.Fatalf("composite gate result = %s", res.Content)
+	}
+}
+
+func TestBareNativeSyntaxGateAlsoRejectsCompilerWarnings(t *testing.T) {
+	root := t.TempDir()
+	source := `void takes_unsigned(unsigned int *value); int main(void) { int value = 0; takes_unsigned(&value); return 0; }`
+	if err := os.WriteFile(filepath.Join(root, "warning.c"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx := &ExecContext{
+		ProjectRoot:      root,
+		TaskVerification: "cc -fsyntax-only warning.c",
+		Verify:           config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "strict native syntax verification") || !strings.Contains(res.Content, "-Werror") {
+		t.Fatalf("warning-only native compile was not a red gate:\n%s", res.Content)
+	}
+}
+
+func TestCompoundNativeVerificationIsNotRewritten(t *testing.T) {
+	if got := strictNativeSyntaxCommand("cc -fsyntax-only a.c && ./check"); got != "" {
+		t.Fatalf("compound command was rewritten: %q", got)
 	}
 }
 

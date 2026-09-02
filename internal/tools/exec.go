@@ -178,10 +178,52 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		return "none", "", err
 	}
 	log := "task verification:\n" + formatGateResult(res)
-	if verify.IsGreen(res) {
-		return "green", log, nil
+	if !verify.IsGreen(res) {
+		return "red", log, nil
 	}
-	return "red", log, nil
+
+	// A bare C/C++ syntax check exits zero for type mismatches and other
+	// warnings that are defects at an API boundary. T-004 passed while giving
+	// XGetGeometry signed int pointers for unsigned outputs. Preserve the
+	// authored command as the contract, then add a deterministic strict pass
+	// for the simple compiler form we can recognize safely. Compound shell
+	// programs remain untouched rather than being rewritten ambiguously.
+	if strict := strictNativeSyntaxCommand(command); strict != "" {
+		strictRes, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+			Mode: "custom", Custom: strict, TimeoutS: ectx.Verify.TimeoutS,
+		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
+		if err != nil {
+			return "none", "", err
+		}
+		log += "\nstrict native syntax verification:\n" + formatGateResult(strictRes)
+		if !verify.IsGreen(strictRes) {
+			return "red", log, nil
+		}
+	}
+	return "green", log, nil
+}
+
+func strictNativeSyntaxCommand(command string) string {
+	if strings.ContainsAny(command, "\n;") || strings.Contains(command, "&&") || strings.Contains(command, "||") {
+		return ""
+	}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+	compiler := strings.TrimPrefix(fields[0], "./")
+	if slash := strings.LastIndex(compiler, "/"); slash >= 0 {
+		compiler = compiler[slash+1:]
+	}
+	switch compiler {
+	case "cc", "gcc", "clang", "c++", "g++", "clang++":
+	default:
+		return ""
+	}
+	if !strings.Contains(command, "-fsyntax-only") || strings.Contains(command, "-Werror") {
+		return ""
+	}
+	return command + " -Wall -Wextra -Werror"
 }
 
 func formatGateResult(res *verify.Result) string {
