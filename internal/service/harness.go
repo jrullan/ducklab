@@ -57,6 +57,11 @@ func ensureHarnessProfile(rs *runState, root string, project *config.Project, ta
 			Enforcement: string(check.Enforcement),
 		})
 	}
+	for _, rule := range resolved.ReviewRules {
+		profile.ReviewRules = append(profile.ReviewRules, runlog.HarnessReviewRule{
+			Capability: rule.Capability, ID: rule.ID, Guidance: rule.Guidance,
+		})
+	}
 
 	rs.run.HarnessProfile = profile
 	if err := rs.writer.AppendEvent("capabilities_resolved", map[string]interface{}{"profile": profile}); err != nil {
@@ -98,6 +103,9 @@ func harnessCapsule(profile *runlog.HarnessProfile) string {
 	}
 	for _, diagnostic := range profile.Diagnostics {
 		fmt.Fprintf(&b, "- Diagnostic (%s, %s): `%s`\n", diagnostic.Capability, diagnostic.Enforcement, capsuleCommand(diagnostic.Command))
+	}
+	for _, rule := range profile.ReviewRules {
+		fmt.Fprintf(&b, "- Stack invariant (%s/%s): %s\n", rule.Capability, rule.ID, rule.Guidance)
 	}
 	if profile.DetectionError != "" {
 		fmt.Fprintf(&b, "- Stack detection warning: %s\n", profile.DetectionError)

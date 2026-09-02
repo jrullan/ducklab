@@ -68,5 +68,5 @@ func nativeSyntaxCommand(command string) bool {
 // DefaultRegistry is the built-in capability set. The execution core depends
 // only on Registry; adding another stack means registering another provider.
 func DefaultRegistry() *Registry {
-	return NewRegistry(Native{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
+	return NewRegistry(Native{}, X11Image{}, GLibAsync{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
 }

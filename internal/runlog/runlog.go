@@ -196,6 +196,7 @@ type HarnessProfile struct {
 	EffectiveGate    HarnessGate         `json:"effective_gate"`
 	TaskVerification string              `json:"task_verification,omitempty"`
 	Diagnostics      []HarnessDiagnostic `json:"diagnostics,omitempty"`
+	ReviewRules      []HarnessReviewRule `json:"review_rules,omitempty"`
 	DetectionError   string              `json:"detection_error,omitempty"`
 }
 
@@ -215,6 +216,12 @@ type HarnessDiagnostic struct {
 	Name        string `json:"name"`
 	Command     string `json:"command"`
 	Enforcement string `json:"enforcement"`
+}
+
+type HarnessReviewRule struct {
+	Capability string `json:"capability"`
+	ID         string `json:"id"`
+	Guidance   string `json:"guidance"`
 }
 
 type ReviewEvidence struct {

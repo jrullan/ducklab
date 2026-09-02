@@ -52,6 +52,15 @@ type Check struct {
 	Enforcement Enforcement
 }
 
+// ReviewRule is bounded stack knowledge supplied to coding seats after the
+// provider has been detected. The core transports these rules without knowing
+// what X11, GLib, a framework, or a language means.
+type ReviewRule struct {
+	Capability string
+	ID         string
+	Guidance   string
+}
+
 // GateObservation is the stack-neutral evidence available after verification.
 // Providers interpret their own build tool's output; the core only records
 // the structured findings they contribute.
@@ -71,14 +80,16 @@ type GateFinding struct {
 // Contributions are everything one provider knows how to add. The shape can
 // grow with setup or context facts without changing the core/provider boundary.
 type Contributions struct {
-	Detection Detection
-	Gates     []GateCandidate
+	Detection   Detection
+	Gates       []GateCandidate
+	ReviewRules []ReviewRule
 }
 
 // Profile is the deterministic composition of all matching providers.
 type Profile struct {
-	Detections []Detection
-	Gate       *GateCandidate
+	Detections  []Detection
+	Gate        *GateCandidate
+	ReviewRules []ReviewRule
 }
 
 // Provider names one reusable project or stack capability. Optional detector
@@ -135,10 +146,17 @@ func (r *Registry) ResolveProject(ctx Context, auto bool, enabled, disabled []st
 		contribution := detector.Detect(ctx)
 		if len(contribution.Detection.Evidence) > 0 {
 			profile.Detections = append(profile.Detections, contribution.Detection)
+			profile.ReviewRules = append(profile.ReviewRules, contribution.ReviewRules...)
 		}
 		gates = append(gates, contribution.Gates...)
 	}
 	resolveGate(&profile, gates)
+	sort.SliceStable(profile.ReviewRules, func(i, j int) bool {
+		if profile.ReviewRules[i].Capability == profile.ReviewRules[j].Capability {
+			return profile.ReviewRules[i].ID < profile.ReviewRules[j].ID
+		}
+		return profile.ReviewRules[i].Capability < profile.ReviewRules[j].Capability
+	})
 	if profile.Gate != nil && profile.Gate.Unavailable != nil {
 		return profile, profile.Gate.Unavailable
 	}

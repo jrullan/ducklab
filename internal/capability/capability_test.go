@@ -60,6 +60,48 @@ func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	}
 }
 
+func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
+	profile, err := DefaultRegistry().ResolveProject(Context{
+		TaskVerification: "cc -fsyntax-only $(pkg-config --cflags gio-2.0 x11 xfixes) src/backend/x11_capture.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCapabilities := map[string]bool{"c-native": false, "glib-async": false, "x11-image": false}
+	for _, detected := range profile.Detections {
+		if _, ok := wantCapabilities[detected.Capability]; ok {
+			wantCapabilities[detected.Capability] = true
+		}
+	}
+	for capability, found := range wantCapabilities {
+		if !found {
+			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
+		}
+	}
+	if len(profile.ReviewRules) != 6 {
+		t.Fatalf("review rules = %+v", profile.ReviewRules)
+	}
+	joined := ""
+	for _, rule := range profile.ReviewRules {
+		joined += rule.Guidance + "\n"
+	}
+	for _, want := range []string{"not powers of two", "bytes_per_line", "g_task_run_in_thread", "nested owned allocations"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("review guidance lacks %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestReviewRulesAreAbsentWithoutMatchingStackEvidence(t *testing.T) {
+	profile, err := DefaultRegistry().ResolveProject(Context{TaskVerification: "cc -fsyntax-only plain.c"}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.ReviewRules) != 0 {
+		t.Fatalf("unrelated native task received rules: %+v", profile.ReviewRules)
+	}
+}
+
 type testProvider struct{}
 
 func (testProvider) ID() string { return "test-stack" }

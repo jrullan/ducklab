@@ -52,3 +52,13 @@ func TestHarnessProfileIsResolvedPersistedAndEmittedOnce(t *testing.T) {
 		t.Fatalf("capability event count = %d, want 1:\n%s", got, events)
 	}
 }
+
+func TestHarnessCapsuleCarriesResolvedStackRules(t *testing.T) {
+	profile := &runlog.HarnessProfile{ReviewRules: []runlog.HarnessReviewRule{{
+		Capability: "x11-image", ID: "pixel-layout", Guidance: "Honor bytes_per_line.",
+	}}}
+	got := harnessCapsule(profile)
+	if !strings.Contains(got, "Stack invariant (x11-image/pixel-layout): Honor bytes_per_line.") {
+		t.Fatalf("capsule lacks stack rule:\n%s", got)
+	}
+}
