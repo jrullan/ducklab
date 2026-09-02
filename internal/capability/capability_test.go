@@ -230,6 +230,16 @@ func TestGTK4UIContributesCurrentContractsAndRejectsLegacyPlanAPIs(t *testing.T)
 	}
 }
 
+func TestGTK4PlanInspectionActivatesFromSymbolsWithoutVersionWord(t *testing.T) {
+	findings := DefaultRegistry().InspectPlanTask(PlanTaskContext{
+		ID: "T-007", Body: "Render with gdk_window_begin_draw_frame() and cairo.",
+		Verification: "cc -fsyntax-only src/ui/selection.c",
+	})
+	if len(findings) != 1 || findings[0].Name != "removed-drawing-api" {
+		t.Fatalf("symbol-grounded GTK finding = %+v", findings)
+	}
+}
+
 func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "clipboard.c", `

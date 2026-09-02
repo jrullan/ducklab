@@ -41,6 +41,31 @@ func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
 	}
 }
 
+func TestTopLevelTaskContractEnforcesAcceptanceSlicesV2(t *testing.T) {
+	body := "**Implements:** SPEC-001\n\nWork unit: unbolded and therefore not the contract\n\n**Produces:** src/main.c\n\n**Consumes:** none\n\n**Verification:** `cc -fsyntax-only src/main.c`\n\n**Exercises:** src/main.c"
+	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-009", Title: "Save", Body: body}}, "markdown_sections:T", nil, true, ""), "\n")
+	for _, want := range []string{"T-009 has no **Work unit:**", "T-009 has no top-level **Acceptance slices:**"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("top-level task findings lack %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestIsolatedArchitectOutcomeDropsSiblingTasks(t *testing.T) {
+	raw := "## T-008 — CLI\n\n**Implements:** SPEC-001\n\nright\n\n## T-009 — Lifecycle\n\n**Implements:** SPEC-001\n\nwrong sibling"
+	parsed, err := agent.ParseContract("markdown_sections:T", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Text, "T-009") || len(sectionsOf(got)) != 1 || sectionsOf(got)[0].ID != "T-008" {
+		t.Fatalf("scoped outcome = %#v", got)
+	}
+}
+
 func TestTaskGraphRequiresDependencyAndVerificationCoverage(t *testing.T) {
 	blocks := []taskBlock{
 		{id: "T-001", body: "**Produces:** meson.build\n**Consumes:** src/main.c\n**Depends on:** none\n**Exercises:** meson.build\n"},

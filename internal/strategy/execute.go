@@ -613,6 +613,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
 			turn.Contract = documentContract
+			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect && script.ArchitectScopeID != "" {
+				var scopeErr error
+				outcome, scopeErr = scopeArchitectSection(outcome, documentContract, script.ArchitectScopeID)
+				if scopeErr != nil {
+					err = scopeErr
+				}
+			}
 			repairScopeProblem := ""
 			if err == nil && repairBase != nil {
 				var merged *agent.Outcome

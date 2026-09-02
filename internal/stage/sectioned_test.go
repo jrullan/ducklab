@@ -90,9 +90,25 @@ func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
 	if script.CriticScope == "" || !strings.Contains(script.CriticScope, "T-008") || !strings.Contains(script.CriticScope, "absence of every sibling") {
 		t.Fatalf("critic scope = %q", script.CriticScope)
 	}
+	if script.ArchitectScopeID != "T-008" {
+		t.Fatalf("architect scope = %q, want T-008", script.ArchitectScopeID)
+	}
 	for _, turn := range script.Turns {
 		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {
 			t.Fatalf("task architect contract = %q", turn.Contract)
+		}
+	}
+}
+
+func TestNewPlanTaskUsesPlaceholderAsV2IsolationBoundary(t *testing.T) {
+	assigned := &artifact.Section{ID: "T-900", Title: "Lifecycle"}
+	script := sectionPass("M", 3, "council", nil, assigned, true)
+	if script.ArchitectScopeID != "T-900" || !strings.Contains(script.CriticScope, "T-900") {
+		t.Fatalf("new task boundaries = architect %q critic %q", script.ArchitectScopeID, script.CriticScope)
+	}
+	for _, turn := range script.Turns {
+		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {
+			t.Fatalf("new task architect contract = %q", turn.Contract)
 		}
 	}
 }
@@ -179,6 +195,13 @@ func TestNewRequirementSectionPassKeepsOneClauseAndPriority(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("new-section prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestNewSectionScopeBoundaryCannotLeakAsMarkdownSection(t *testing.T) {
+	prompt := buildNewSectionPassPrompt(artifact.KindPlan, "split lifecycle", &artifact.Document{}, "Lifecycle", "M")
+	if strings.Contains(prompt, "## Scope rule") || !strings.Contains(prompt, "SCOPE BOUNDARY (instruction only") {
+		t.Fatalf("new-section scope boundary is document-shaped:\n%s", prompt)
 	}
 }
 

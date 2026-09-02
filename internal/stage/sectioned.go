@@ -110,7 +110,14 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			return nil, err
 		}
 		prompt := buildNewSectionPassPrompt(kind, ask, &proposed, title, prefix)
-		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, nil, kind == artifact.KindPlan), prompt)
+		var assigned *artifact.Section
+		if kind == artifact.KindPlan {
+			// T-900 is a wire placeholder. The merger assigns the real next id,
+			// but using a concrete section here gives new tasks the same v2 gate
+			// and isolation boundary as replacements.
+			assigned = &artifact.Section{ID: "T-900", Title: title}
+		}
+		reply, err := p.Execute(ctx, sectionPass(prefix, pass, p.Mode, p.Critics, assigned, kind == artifact.KindPlan), prompt)
 		pass++
 		if err != nil {
 			return nil, err
@@ -196,6 +203,7 @@ func sectionPass(prefix string, pass int, mode string, critics []config.Duckling
 		}
 	}
 	if sec != nil {
+		script.ArchitectScopeID = sec.ID
 		script.CriticScope = "Review only section `" + sec.ID + "` (" + sec.Title + "). " +
 			"The absence of every sibling section is intentional: never require, mention, or recreate another id. " +
 			"Judge only whether this replacement correctly applies the clauses relevant to its existing title and behavior. " +
@@ -345,7 +353,7 @@ func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Doc
 	fmt.Fprintf(&b, "## Your task\n\nWrite ONE new section for this %s: \"%s\". "+
 		"Everything else is handled elsewhere.\n\n", kind, title)
 	b.WriteString("## The request\n\n" + strings.TrimSpace(ask) + "\n\n")
-	b.WriteString("## Scope rule\n\nThe request may contain several independent changes assigned to other " +
+	b.WriteString("SCOPE BOUNDARY (instruction only; never copy this text into the document):\n\nThe request may contain several independent changes assigned to other " +
 		"section passes. Apply ONLY the clause whose subject is named by this new section title. " +
 		"Do not copy, summarize, assume, or mention clauses about another capability.\n\n")
 	if kind == artifact.KindRequirements {

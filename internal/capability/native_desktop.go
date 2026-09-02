@@ -34,7 +34,12 @@ func (GTK4UI) Detect(ctx Context) Contributions {
 
 func (GTK4UI) InspectPlanTask(ctx PlanTaskContext) []Inspection {
 	text := strings.ToLower(ctx.Body + "\n" + ctx.Verification)
-	if !strings.Contains(text, "gtk4") && !strings.Contains(strings.ToLower(ctx.Verification), "gtk4") {
+	// Section-sized tasks sometimes omit the literal word GTK4 while naming
+	// its Gtk/Gdk symbols. Those symbols are enough stack evidence; requiring
+	// the version token let a removed drawing API pass planning unnoticed.
+	if !strings.Contains(text, "gtk4") && !strings.Contains(text, "gtk_") &&
+		!strings.Contains(text, "gtkw") && !strings.Contains(text, "gtkg") &&
+		!strings.Contains(text, "gdkw") && !strings.Contains(text, "gdk_") {
 		return nil
 	}
 	invalid := []struct {

@@ -51,6 +51,13 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		var blocks []taskBlock
 		for _, s := range cur {
 			sectionBlocks := taskBlocks(s.Body)
+			// A sectioned plan update uses markdown_sections:T, so its assigned
+			// task is itself the parsed top-level section rather than an H3 inside
+			// a milestone. Treat it as the task contract; otherwise Work unit and
+			// Acceptance slices silently escape every deterministic check.
+			if strings.HasPrefix(strings.ToUpper(s.ID), "T-") {
+				sectionBlocks = []taskBlock{{id: strings.ToUpper(s.ID), body: s.Body}}
+			}
 			blocks = append(blocks, sectionBlocks...)
 			for _, block := range sectionBlocks {
 				if !strings.HasPrefix(block.id, "T-") {
@@ -202,6 +209,29 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+// scopeArchitectSection discards sibling sections emitted during an isolated
+// section pass before they can enter structure repair or reviewer context.
+// The stage owns routing; a model reply cannot expand that assignment.
+func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID string) (*agent.Outcome, error) {
+	if outcome == nil || !strings.HasPrefix(contract, "markdown_sections:") {
+		return outcome, nil
+	}
+	for _, sec := range sectionsOf(outcome) {
+		if !strings.EqualFold(sec.ID, expectedID) {
+			continue
+		}
+		text := "## " + sec.ID + " — " + strings.TrimSpace(sec.Title) + "\n\n" + strings.TrimSpace(sec.Body)
+		parsed, err := agent.ParseContract(contract, text)
+		if err != nil {
+			return nil, err
+		}
+		scoped := *outcome
+		scoped.Text, scoped.Parsed = text, parsed
+		return &scoped, nil
+	}
+	return nil, fmt.Errorf("isolated architect pass returned no section %s", expectedID)
 }
 
 // normalizeRequirementPriorities compiles a mechanically unambiguous Priority

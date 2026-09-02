@@ -124,6 +124,11 @@ type Script struct {
 	// broad amendment remains context, but omitted sibling sections are
 	// intentionally outside the review object and cannot be findings.
 	CriticScope string
+	// ArchitectScopeID narrows an isolated document architect to one section
+	// before deterministic structure checks run. Small seats sometimes answer
+	// a task pass with helpful sibling tasks; those belong to their own passes
+	// and must not consume this pass's repair budget.
+	ArchitectScopeID string
 }
 
 // Turn is a script turn.
