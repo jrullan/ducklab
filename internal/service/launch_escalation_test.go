@@ -72,6 +72,10 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 		t.Fatalf("escalation must request a pause, not cancel mid-turn: suggestion=%v requested=%v human=%v status=%s", suggestion, requested, human, current.Status)
 	}
 	// The turn ends: now the pause lands with its card.
+	current.InterruptedTurn = &runlog.InterruptedTurn{
+		Round: 2, Index: 1, Role: "reviewer",
+		Findings: []runlog.ReviewFinding{{Severity: "critical", File: "worker.c", Line: 42, Issue: "completion lost", Fix: "signal it"}},
+	}
 	s.pauseAtSafePoint(rs)
 	events, err = runlog.ReadEvents(w.RunDir())
 	if err != nil {
@@ -82,6 +86,13 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	}
 	if !human || current.Status != "paused" || current.PendingKind != "history_duration" {
 		t.Fatalf("the pause did not land at the safe point: human=%v status=%s pending=%s", human, current.Status, current.PendingKind)
+	}
+	state, err := runlog.ReadState(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.InterruptedTurn == nil || len(state.InterruptedTurn.Findings) != 1 || state.InterruptedTurn.Findings[0].Issue != "completion lost" {
+		t.Fatalf("safe-point pause lost the durable review ledger: %#v", state.InterruptedTurn)
 	}
 	// Idempotent: a second turn end does nothing.
 	s.pauseAtSafePoint(rs)

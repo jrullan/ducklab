@@ -115,6 +115,10 @@ type ResumeTurn struct {
 	// Looked is what the interrupted turn had already read (tool + target),
 	// handed back to the resumed seat so it does not start over.
 	Looked []string
+	// Findings carries the blocking review ledger across a process-level
+	// pause. Resume skips earlier turns, so rebuilding this from the new empty
+	// transcript is impossible.
+	Findings []conv.Finding
 }
 
 // RoundRecord is what happened in one round.
@@ -284,6 +288,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	// findings carry the previous round's review into this round's implementer
 	// prompt; this is what makes pair an iteration rather than two monologues.
 	var findings []conv.Finding
+	if params.ResumeFrom != nil {
+		findings = append(findings, params.ResumeFrom.Findings...)
+	}
 	var correctiveNotes []string
 	// What the reviewer may remember of its own previous round (reviewmemory.go).
 	var lastReview *reviewMemory
@@ -644,7 +651,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if err != nil {
 				notes := partialTurnNotes(outcome)
 				emit(params, "turn_interrupted", map[string]interface{}{"round": round, "turn": i, "role": string(turn.Role), "notes": notes,
-					"looked": mergeLooked(seatLooked[turn.Role], lookedFrom(outcome))})
+					"looked": mergeLooked(seatLooked[turn.Role], lookedFrom(outcome)), "findings": findings})
 				// What it managed
 				// way out. This used to return first, so a turn that failed took
 				// its whole record with it: a run that patched a file seventeen
@@ -857,6 +864,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 			emit(params, "turn_end", map[string]interface{}{
 				"round": round, "turn": i, "role": string(turn.Role),
+				// If a history-duration pause is waiting for this safe point,
+				// the service persists this completed turn as a conservative
+				// replay checkpoint. Repeating one turn is cheaper than starting
+				// the whole strategy over and losing its review ledger.
+				"notes":    partialTurnNotes(outcome),
+				"looked":   seatLooked[turn.Role],
+				"findings": findings,
 			})
 
 			// The rubber duck: after the implementer's turn is closed on the
@@ -1238,15 +1252,21 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString("\n\n## Validated topology\n\nThe earlier JSON plan manifest is the structural source of truth. Render it as milestones and H3 tasks without changing task ownership, producers, consumers, or verification. Ducklab derives `Owns` and `Depends on` from that graph; do not invent broad aggregate lanes such as `src/`.")
 		}
 	case config.RoleImplementer:
-		if rendered := conv.RenderFindings(findings); rendered != "" {
-			b.WriteString("\n\n")
-			b.WriteString(rendered)
-		}
 		if len(correctiveNotes) > 0 {
 			b.WriteString("\n\n## Advisor corrective note\n\n" + strings.Join(correctiveNotes, "\n\n"))
 		}
 		if len(params.Deliverables) > 0 {
 			b.WriteString("\n\n" + deliverablesContract(params.Deliverables))
+		}
+		// Put review feedback LAST. On a long task prompt, placing it before
+		// the specification and deliverables made a small implementer read the
+		// files, run a green compiler gate, and declare success without changing
+		// any of the five defects the reviewer had just named. These findings
+		// are the active work queue, not historical conversation.
+		if rendered := conv.RenderFindings(findings); rendered != "" {
+			b.WriteString("\n\n## Blocking review ledger — dispose every item this turn\n\n")
+			b.WriteString("A green verification command does not resolve semantic review findings. For EACH numbered item below, either patch the code, or explicitly dispute it with concrete file-and-line evidence. Merely re-reading files or re-running the gate is not a disposition. Do not report the task complete while an item is unaddressed. In your final summary, list `Review dispositions: 1..N` and say `fixed` or `disputed` with the evidence for each.\n\n")
+			b.WriteString(rendered)
 		}
 	case config.RoleReviewer:
 		if len(params.InventoryUnaccounted) > 0 {

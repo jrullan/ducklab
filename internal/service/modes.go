@@ -16,6 +16,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/duckling"
 	"github.com/jrullan/ducklab/internal/registry"
 	"github.com/jrullan/ducklab/internal/report"
@@ -478,7 +479,19 @@ func resumeTurn(run *runlog.Run) *strategy.ResumeTurn {
 		return nil
 	}
 	t := run.InterruptedTurn
-	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes, Looked: t.Looked}
+	findings := make([]conv.Finding, 0, len(t.Findings))
+	for _, f := range t.Findings {
+		findings = append(findings, conv.Finding{Severity: f.Severity, File: f.File, Line: f.Line, Issue: f.Issue, Fix: f.Fix, Invariant: f.Invariant})
+	}
+	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes, Looked: t.Looked, Findings: findings}
+}
+
+func interruptedTurnFromEvent(data map[string]interface{}) *runlog.InterruptedTurn {
+	t := &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
+	if raw, err := json.Marshal(data["findings"]); err == nil {
+		_ = json.Unmarshal(raw, &t.Findings)
+	}
+	return t
 }
 
 func stringValueAny(v interface{}) string {
@@ -575,12 +588,16 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
 			if kind == "turn_interrupted" {
-				mc.rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
+				mc.rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
 				mc.rs.writer.WriteState()
 			} else if kind == "turn_end" && data["incomplete"] != true {
-				mc.rs.run.InterruptedTurn = nil
-				mc.rs.writer.WriteState()
-				s.pauseAtSafePoint(mc.rs)
+				// Keep a replayable checkpoint until a pending safe-point pause
+				// has either landed or been ruled out.
+				mc.rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
+				if !s.pauseAtSafePoint(mc.rs) {
+					mc.rs.run.InterruptedTurn = nil
+					mc.rs.writer.WriteState()
+				}
 			}
 		},
 	}

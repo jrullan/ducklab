@@ -251,6 +251,23 @@ type InterruptedTurn struct {
 	// it re-reads everything — an architect resumed twice re-explored the
 	// project twice, 17 tool calls and 22 minutes (Neocapture, 2026-08-29).
 	Looked []string `json:"looked,omitempty"`
+	// Findings are the unresolved reviewer findings in force when this turn
+	// stopped. A resumed strategy is a fresh in-memory execution; without this
+	// durable copy it skipped the earlier reviewer and sent the implementer
+	// back to work with an empty correction list.
+	Findings []ReviewFinding `json:"findings,omitempty"`
+}
+
+// ReviewFinding is the persistence-safe shape of a strategy review finding.
+// It deliberately lives in runlog so checkpoints do not depend on strategy's
+// in-memory conversation types.
+type ReviewFinding struct {
+	Severity  string `json:"severity"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Issue     string `json:"issue"`
+	Fix       string `json:"fix"`
+	Invariant string `json:"invariant,omitempty"`
 }
 
 // GateReproduction is the result of proving the accepted commit in a clean checkout.

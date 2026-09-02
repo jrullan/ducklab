@@ -4603,9 +4603,9 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 
 // pauseAtSafePoint lands a requested pause once the turn in flight has
 // ended: the run is marked paused with its card, and only then cancelled.
-func (s *Service) pauseAtSafePoint(rs *runState) {
+func (s *Service) pauseAtSafePoint(rs *runState) bool {
 	if rs == nil || rs.run == nil || rs.writer == nil || !rs.pauseAfterTurn.CompareAndSwap(true, false) {
-		return
+		return false
 	}
 	rs.wmu.Lock()
 	data := rs.pausePending
@@ -4622,6 +4622,7 @@ func (s *Service) pauseAtSafePoint(rs *runState) {
 	if rs.cancel != nil {
 		rs.cancel()
 	}
+	return true
 }
 
 func (s *Service) llmWriter(rs *runState, tracker *budget.Tracker) *runLogAdapter {

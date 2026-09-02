@@ -8,6 +8,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/conv"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -109,8 +110,45 @@ func TestPairUsesTwoDucklingsAndFeedsBackFindings(t *testing.T) {
 	if !strings.Contains(round2, "[major] auth.go:88") {
 		t.Errorf("round 2's prompt lost the finding's anchor:\n%s", round2)
 	}
+	if !strings.Contains(round2, "Blocking review ledger") || !strings.Contains(round2, "Merely re-reading files or re-running the gate is not a disposition") {
+		t.Errorf("round 2's findings were not presented as blocking work:\n%s", round2)
+	}
+	if strings.Index(round2, "Blocking review ledger") < strings.Index(round2, "Deliverables — your work contract") {
+		t.Errorf("blocking review ledger is not the final, salient contract:\n%s", round2)
+	}
 	if res.Rounds < 2 {
 		t.Errorf("Rounds = %d, want at least 2", res.Rounds)
+	}
+}
+
+// A process-level pause reconstructs ExecuteScript with a fresh transcript.
+// The checkpoint must therefore carry the open review ledger explicitly;
+// skipping round 1 cannot magically rebuild it.
+func TestResumedImplementerReceivesCheckpointedFindings(t *testing.T) {
+	rec := &recorder{}
+	finding := conv.Finding{
+		Severity: "critical", File: "worker.c", Line: 42,
+		Issue: "completion is never signalled", Fix: "complete the caller-visible task",
+	}
+	params := pairParams(rec, "green",
+		editsOutcome("completed the task"),
+		verdictOutcome("approve"),
+	)
+	params.ResumeFrom = &ResumeTurn{
+		Round: 2, Index: 0, Role: config.RoleImplementer,
+		Findings: []conv.Finding{finding},
+	}
+
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.prompts) == 0 {
+		t.Fatal("resumed implementer did not run")
+	}
+	for _, want := range []string{"[critical] worker.c:42", "completion is never signalled", "complete the caller-visible task"} {
+		if !strings.Contains(rec.prompts[0], want) {
+			t.Errorf("resumed implementer prompt lost %q:\n%s", want, rec.prompts[0])
+		}
 	}
 }
 

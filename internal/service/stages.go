@@ -714,12 +714,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 						finalReviewFindings = intValue(data["findings"])
 					}
 					if kind == "turn_interrupted" {
-						rs.run.InterruptedTurn = &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
+						rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
 						rs.writer.WriteState()
 					} else if kind == "turn_end" && data["incomplete"] != true {
-						rs.run.InterruptedTurn = nil
-						rs.writer.WriteState()
-						s.pauseAtSafePoint(rs)
+						rs.run.InterruptedTurn = interruptedTurnFromEvent(data)
+						if !s.pauseAtSafePoint(rs) {
+							rs.run.InterruptedTurn = nil
+							rs.writer.WriteState()
+						}
 					}
 				},
 			})
