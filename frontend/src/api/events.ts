@@ -298,6 +298,7 @@ export const KNOWN_EVENT_TYPES = [
   "revision_skipped",
   "final_review_started",
   "final_review_completed",
+  "reviewer_dissent",
   "proposal_review_blocked",
   "proposal_identity_blocked",
   "proposal_structure_blocked",

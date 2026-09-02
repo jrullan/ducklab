@@ -1906,12 +1906,21 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	rs.gateRoot = gateRoot
 	rs.run.GateRoot = gateRoot
 	rs.writer.WriteState()
+	taskGate, taskGateLog, err := tools.RunTaskVerificationGate(ctx, ectx)
+	if err != nil {
+		s.failRun(rs, fmt.Errorf("verify task: %w", err))
+		return
+	}
 	gateResult, err := verify.Run(ctx, gateRoot, projCfg.Verify, verify.Identity{RunID: rs.run.ID, ProjectID: rs.run.ProjectID})
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("verify: %w", err))
 		return
 	}
-	rs.writer.WriteVerify(gateResult.Output)
+	verificationOutput := gateResult.Output
+	if taskGateLog != "" {
+		verificationOutput = taskGateLog + "\nproject verification:\n" + verificationOutput
+	}
+	rs.writer.WriteVerify(verificationOutput)
 	// Rendering is optional evidence and a failure is only a caveat.
 	render := projCfg.Render
 	if projCfg.RenderConfigured {
@@ -1941,15 +1950,23 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// The output rides the event, bounded: a FAILED run whose gate event
 	// said only exit:1 sent the person re-running the whole suite by hand
 	// to learn which test broke (B-122).
+	effectiveGate := string(gateResult.Gate)
+	effectiveExit := gateResult.ExitCode
+	if taskGate == "red" {
+		effectiveGate = "red"
+		if effectiveExit == 0 {
+			effectiveExit = 1
+		}
+	}
 	rs.writer.AppendEvent("gate", map[string]interface{}{
-		"gate":       string(gateResult.Gate),
+		"gate":       effectiveGate,
 		"command":    gateResult.Command,
-		"exit_code":  gateResult.ExitCode,
-		"output":     tailOf(gateResult.Output, 4000),
+		"exit_code":  effectiveExit,
+		"output":     tailOf(verificationOutput, 4000),
 		"duration_s": gateResult.Duration,
 	})
-	if gateResult.ExitCode != 0 {
-		rs.run.Failure = "gate failed (exit " + strconv.Itoa(gateResult.ExitCode) + "):\n" + tailOf(gateResult.Output, 1500)
+	if effectiveExit != 0 {
+		rs.run.Failure = "gate failed (exit " + strconv.Itoa(effectiveExit) + "):\n" + tailOf(verificationOutput, 1500)
 	}
 
 	// A run with no gate ends UNVERIFIED, which is honest and easy to miss.
@@ -1965,7 +1982,16 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	}
 
 	// Compute verdict
-	verdict := verify.Verdict(gateResult)
+	projectVerdict := verify.Verdict(gateResult)
+	reviewVerdict, reviewFindings, dissent := finalDissent(rs.runDir)
+	verdict := adjudicateBuildVerdict(projectVerdict, taskGate, dissent)
+	if dissent {
+		detail := fmt.Sprintf("reviewer ended with %s (%d finding(s)); a green command cannot override contractual dissent", reviewVerdict, reviewFindings)
+		rs.writer.AppendEvent("reviewer_dissent", map[string]interface{}{"verdict": reviewVerdict, "findings": reviewFindings, "detail": detail})
+		if rs.run.Failure == "" {
+			rs.run.Failure = detail
+		}
+	}
 	rs.run.Verdict = verdict
 	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
 

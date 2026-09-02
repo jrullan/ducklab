@@ -135,21 +135,15 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 // verify_run and the automatic end-of-round gate. TaskVerification goes first:
 // a task-local contract is part of the decision, not an optional hint.
 func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string, error) {
-	identity := verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID}
-	var taskLog string
-	if command := strings.TrimSpace(ectx.TaskVerification); command != "" {
-		res, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
-			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
-		}, identity)
-		if err != nil {
-			return "none", "", err
-		}
-		taskLog = "task verification:\n" + formatGateResult(res)
-		if !verify.IsGreen(res) {
-			return "red", taskLog, nil
-		}
+	taskGate, taskLog, err := RunTaskVerificationGate(ctx, ectx)
+	if err != nil {
+		return "none", "", err
+	}
+	if taskGate == "red" {
+		return "red", taskLog, nil
 	}
 
+	identity := verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID}
 	res, err := verify.Run(ctx, ectx.ProjectRoot, ectx.Verify, identity)
 	if err != nil {
 		return "none", "", err
@@ -166,6 +160,28 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 	default:
 		return "none", projectLog, nil
 	}
+}
+
+// RunTaskVerificationGate executes the task-local Verification contract, when
+// present. The build worker uses it again at the final gate so a green project
+// build cannot overwrite a red task gate after the strategy exhausts its
+// rounds.
+func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, string, error) {
+	command := strings.TrimSpace(ectx.TaskVerification)
+	if command == "" {
+		return "none", "", nil
+	}
+	res, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+		Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
+	}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
+	if err != nil {
+		return "none", "", err
+	}
+	log := "task verification:\n" + formatGateResult(res)
+	if verify.IsGreen(res) {
+		return "green", log, nil
+	}
+	return "red", log, nil
 }
 
 func formatGateResult(res *verify.Result) string {

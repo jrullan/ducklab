@@ -132,3 +132,16 @@ func TestTruncatedJSONBeforeFenceBecomesRepairableProtocolError(t *testing.T) {
 		t.Fatalf("truncated envelope leaked into final prose: %q", remaining)
 	}
 }
+
+func TestMissingReferencedPayloadBecomesRepairableProtocolError(t *testing.T) {
+	text := "```ducklab\n" +
+		`{"tool":"fs_write","args":{"path":"main.c","content":"@payload:1"}}` +
+		"\n```"
+	tc, remaining := parseTextToolCall(text)
+	if tc == nil || tc.Name != "ducklab_protocol" || !strings.Contains(tc.ParseError, "@payload:1") || !strings.Contains(tc.ParseError, "block is missing") {
+		t.Fatalf("missing payload was silently treated as a final answer: %+v", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("incomplete tool envelope leaked into final prose: %q", remaining)
+	}
+}

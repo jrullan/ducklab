@@ -1408,7 +1408,11 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 		payloadRe := regexp.MustCompile("(?s)```payload:" + id + "\\s*\\n(.*?)\\n```payload:" + id + ":end")
 		payloadMatch := payloadRe.FindStringSubmatch(text)
 		if len(payloadMatch) < 2 {
-			return nil, text
+			return &TextToolCall{
+				Name:       "ducklab_protocol",
+				Args:       json.RawMessage(`{}`),
+				ParseError: fmt.Sprintf("tool %s references @payload:%s but the matching ```payload:%s ... ```payload:%s:end block is missing", call.Tool, payloadID, payloadID, payloadID),
+			}, ""
 		}
 		args[k] = payloadMatch[1]
 	}
