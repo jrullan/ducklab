@@ -1,6 +1,12 @@
 package capability
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
 
 // X11Image contributes the representation invariants needed when a task uses
 // XImage. It is deliberately independent from any project or task name.
@@ -22,6 +28,71 @@ func (X11Image) Detect(ctx Context) Contributions {
 			{Capability: "x11-image", ID: "alpha", Guidance: "Treat root-window captures as opaque unless the source format explicitly supplies a valid alpha channel."},
 		},
 	}
+}
+
+var lowBitCounter = regexp.MustCompile(`(?s)while\s*\(\s*mask\s*&\s*1\s*\).*?mask\s*>>=`)
+
+// Inspect catches a recurrent semantic error that syntax checks cannot: a
+// helper that counts consecutive low one-bits is called with an unshifted X11
+// channel mask such as 0xff0000, producing a width of zero. This is deliberately
+// narrow; unfamiliar conversion strategies remain the reviewer's domain.
+func (X11Image) Inspect(ctx Context) ([]Inspection, error) {
+	if !x11Verification(ctx.TaskVerification) {
+		return nil, nil
+	}
+	policy := ctx.Policies["x11-image.channel-mask-flow"]
+	if policy == "off" {
+		return nil, nil
+	}
+	enforcement := Required
+	if policy == "diagnostic" {
+		enforcement = Diagnostic
+	}
+	path := verificationSource(ctx.ProjectRoot, ctx.TaskVerification)
+	if path == "" {
+		return nil, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	text := string(body)
+	if !lowBitCounter.MatchString(text) {
+		return nil, nil
+	}
+	for _, channel := range []string{"red", "green", "blue"} {
+		if strings.Contains(text, "count_one_bits("+channel+"_mask)") &&
+			strings.Contains(text, "count_trailing_zeroes("+channel+"_mask)") {
+			return []Inspection{{
+				Capability: "x11-image", Name: "channel-mask-flow", Enforcement: enforcement,
+				Detail: fmt.Sprintf("%s channel width is counted from the unshifted mask; a low-bit counter returns zero for shifted fields such as 0xff0000. Count width from (%s_mask >> %s_shift) or from the mask after removing trailing zeroes", channel, channel, channel),
+			}}, nil
+		}
+	}
+	return nil, nil
+}
+
+func x11Verification(command string) bool {
+	lower := strings.ToLower(command)
+	return strings.Contains(lower, "x11") || strings.Contains(lower, "xfixes")
+}
+
+func verificationSource(root, command string) string {
+	for _, field := range strings.Fields(command) {
+		field = strings.Trim(field, "'\"")
+		if strings.ToLower(filepath.Ext(field)) != ".c" {
+			continue
+		}
+		clean := filepath.Clean(field)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return filepath.Join(root, clean)
+	}
+	return ""
 }
 
 // GLibAsync contributes ownership and completion invariants for asynchronous

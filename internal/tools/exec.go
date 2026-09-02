@@ -204,6 +204,21 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 			return "red", log, nil
 		}
 	}
+	inspections, err := capability.DefaultRegistry().ResolveInspections(capability.Context{
+		ProjectRoot:      ectx.ProjectRoot,
+		TaskVerification: command,
+		Policies:         ectx.Capabilities.Policy,
+	}, ectx.Capabilities.Auto, ectx.Capabilities.Enabled, ectx.Capabilities.Disabled)
+	if err != nil {
+		return "none", "", fmt.Errorf("run harness capability inspections: %w", err)
+	}
+	for _, finding := range inspections {
+		log += fmt.Sprintf("\ncapability diagnostic [%s/%s, %s]:\ngate: red\n%s",
+			finding.Capability, finding.Name, finding.Enforcement, finding.Detail)
+		if finding.Enforcement == capability.Required {
+			return "red", log, nil
+		}
+	}
 	return "green", log, nil
 }
 

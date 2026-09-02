@@ -61,6 +61,16 @@ type ReviewRule struct {
 	Guidance   string
 }
 
+// Inspection is a deterministic, in-process diagnostic contributed by a
+// capability. It complements executable commands when the invariant is about
+// source semantics rather than whether a compiler accepts the file.
+type Inspection struct {
+	Capability  string
+	Name        string
+	Detail      string
+	Enforcement Enforcement
+}
+
 // GateObservation is the stack-neutral evidence available after verification.
 // Providers interpret their own build tool's output; the core only records
 // the structured findings they contribute.
@@ -106,6 +116,11 @@ type Detector interface {
 type Checker interface {
 	Provider
 	Checks(Context) []Check
+}
+
+type Inspector interface {
+	Provider
+	Inspect(Context) ([]Inspection, error)
 }
 
 type GateObserver interface {
@@ -185,6 +200,35 @@ func (r *Registry) ResolveChecks(ctx Context, auto bool, enabled, disabled []str
 		return checks[i].Capability < checks[j].Capability
 	})
 	return checks, nil
+}
+
+// ResolveInspections runs only the selected providers' deterministic source
+// inspectors. The execution core receives ordinary findings and remains
+// unaware of the stack-specific rules that produced them.
+func (r *Registry) ResolveInspections(ctx Context, auto bool, enabled, disabled []string) ([]Inspection, error) {
+	ids, err := r.selected(auto, enabled, disabled)
+	if err != nil {
+		return nil, err
+	}
+	var findings []Inspection
+	for _, id := range ids {
+		inspector, ok := r.providers[id].(Inspector)
+		if !ok {
+			continue
+		}
+		items, err := inspector.Inspect(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("inspect capability %s: %w", id, err)
+		}
+		findings = append(findings, items...)
+	}
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].Capability == findings[j].Capability {
+			return findings[i].Name < findings[j].Name
+		}
+		return findings[i].Capability < findings[j].Capability
+	})
+	return findings, nil
 }
 
 // ObserveGate asks only the capabilities fixed in the run profile to

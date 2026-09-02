@@ -125,6 +125,31 @@ func TestNativeWarningsCanBeADeclaredRequiredCapability(t *testing.T) {
 	}
 }
 
+func TestVerifyRunIncludesRequiredSourceInspection(t *testing.T) {
+	root := t.TempDir()
+	source := `
+int count_trailing_zeroes(unsigned long mask) { int n = 0; while (mask != 0 && (mask & 1) == 0) { n++; mask >>= 1; } return n; }
+int count_one_bits(unsigned long mask) { int n = 0; while (mask & 1) { n++; mask >>= 1; } return n; }
+int red_width(unsigned long red_mask) { int red_shift = count_trailing_zeroes(red_mask); return red_shift + count_one_bits(red_mask); }
+`
+	if err := os.WriteFile(filepath.Join(root, "capture.c"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx := &ExecContext{
+		ProjectRoot:      root,
+		TaskVerification: "cc -fsyntax-only $(pkg-config --cflags x11) capture.c",
+		Verify:           config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30},
+		Capabilities:     config.Capabilities{Auto: true},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "x11-image/channel-mask-flow, required") || !strings.Contains(res.Content, "unshifted mask") {
+		t.Fatalf("required source inspection did not make verify_run red:\n%s", res.Content)
+	}
+}
+
 // The description is where a model decides whether a tool is for it. The old
 // one-liner — "this pauses the run until answered" — read as a deterrent, and
 // the tool went unused while a model deliberated a question only the person

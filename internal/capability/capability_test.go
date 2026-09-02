@@ -102,6 +102,75 @@ func TestReviewRulesAreAbsentWithoutMatchingStackEvidence(t *testing.T) {
 	}
 }
 
+func TestX11InspectionRejectsWidthCountedFromUnshiftedMask(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "capture.c", `
+static int count_one_bits(unsigned long mask) {
+  int count = 0;
+  while (mask & 1) { count++; mask >>= 1; }
+  return count;
+}
+void convert(unsigned long red_mask) {
+  int red_shift = count_trailing_zeroes(red_mask);
+  int red_width = count_one_bits(red_mask);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags x11) capture.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Capability != "x11-image" || findings[0].Enforcement != Required || !strings.Contains(findings[0].Detail, "unshifted mask") {
+		t.Fatalf("inspection findings = %+v", findings)
+	}
+}
+
+func TestX11InspectionAcceptsWidthCountedAfterShift(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "capture.c", `
+static int count_one_bits(unsigned long mask) {
+  int count = 0;
+  while (mask & 1) { count++; mask >>= 1; }
+  return count;
+}
+void convert(unsigned long red_mask) {
+  int red_shift = count_trailing_zeroes(red_mask);
+  int red_width = count_one_bits(red_mask >> red_shift);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags x11) capture.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("correct shifted-mask flow was rejected: %+v", findings)
+	}
+}
+
+func TestX11InspectionPolicyCanDowngradeOrDisableFinding(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "capture.c", `
+static int count_one_bits(unsigned long mask) { while (mask & 1) { mask >>= 1; } return 0; }
+void convert(unsigned long red_mask) { int red_shift = count_trailing_zeroes(red_mask); int red_width = count_one_bits(red_mask); }
+`)
+	ctx := Context{ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags x11) capture.c", Policies: map[string]string{"x11-image.channel-mask-flow": "diagnostic"}}
+	findings, err := DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Enforcement != Diagnostic {
+		t.Fatalf("diagnostic policy findings = %+v", findings)
+	}
+	ctx.Policies["x11-image.channel-mask-flow"] = "off"
+	findings, err = DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("off policy findings = %+v, err = %v", findings, err)
+	}
+}
+
 type testProvider struct{}
 
 func (testProvider) ID() string { return "test-stack" }
