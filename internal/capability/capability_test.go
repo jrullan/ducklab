@@ -171,6 +171,46 @@ void convert(unsigned long red_mask) { int red_shift = count_trailing_zeroes(red
 	}
 }
 
+func TestGLibInspectionRequiresExplicitThreadWorkerReturn(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static void *capture_worker(void *data) {
+  if (!data) return NULL;
+  do_capture(data);
+}
+void start(void *ctx) { g_thread_new("capture", capture_worker, ctx); }
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Capability != "glib-async" || findings[0].Name != "thread-return" || !strings.Contains(findings[0].Detail, "return NULL") {
+		t.Fatalf("thread return findings = %+v", findings)
+	}
+}
+
+func TestGLibInspectionAcceptsExplicitThreadWorkerReturn(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static gpointer capture_worker(gpointer data) {
+  if (data) { do_capture(data); }
+  return NULL;
+}
+void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags glib-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("explicit worker return was rejected: %+v", findings)
+	}
+}
+
 type testProvider struct{}
 
 func (testProvider) ID() string { return "test-stack" }

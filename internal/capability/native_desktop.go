@@ -115,3 +115,75 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 		},
 	}
 }
+
+var threadWorkerArgument = regexp.MustCompile(`g_thread_new\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
+
+// Inspect verifies the C-level return contract of functions actually passed
+// to g_thread_new. GCC accepts a gpointer worker that falls off its success
+// path even under -Wall/-Wextra/-Werror, while GLib's trampoline consumes the
+// function's return value.
+func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
+	verification := strings.ToLower(ctx.TaskVerification)
+	if !strings.Contains(verification, "glib-2.0") && !strings.Contains(verification, "gio-2.0") && !strings.Contains(verification, "gtk") {
+		return nil, nil
+	}
+	policy := ctx.Policies["glib-async.thread-return"]
+	if policy == "off" {
+		return nil, nil
+	}
+	enforcement := Required
+	if policy == "diagnostic" {
+		enforcement = Diagnostic
+	}
+	path := verificationSource(ctx.ProjectRoot, ctx.TaskVerification)
+	if path == "" {
+		return nil, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	text := string(body)
+	for _, match := range threadWorkerArgument.FindAllStringSubmatch(text, -1) {
+		worker := match[1]
+		functionBody := cFunctionBody(text, worker)
+		if functionBody == "" || workerReturnsValue(functionBody) {
+			continue
+		}
+		return []Inspection{{
+			Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
+			Detail: fmt.Sprintf("g_thread_new worker %s can reach the closing brace without returning a gpointer; end its fallthrough path with return NULL (or another explicit gpointer)", worker),
+		}}, nil
+	}
+	return nil, nil
+}
+
+func cFunctionBody(source, name string) string {
+	definition := regexp.MustCompile(`(?m)(?:^|\n)\s*(?:static\s+)?(?:gpointer\s+|void\s*\*\s*)` + regexp.QuoteMeta(name) + `\s*\([^)]*\)\s*\{`)
+	location := definition.FindStringIndex(source)
+	if location == nil {
+		return ""
+	}
+	open := location[1] - 1
+	depth := 0
+	for i := open; i < len(source); i++ {
+		switch source[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return source[open+1 : i]
+			}
+		}
+	}
+	return ""
+}
+
+func workerReturnsValue(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	return regexp.MustCompile(`(?s)(?:return\s+[^;]+;|g_thread_exit\s*\([^;]*\)\s*;)\s*$`).MatchString(trimmed)
+}
