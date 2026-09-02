@@ -25,24 +25,53 @@ func TestNativeCapabilityIsDiagnosticByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(checks) != 1 || checks[0].Enforcement != Diagnostic {
+	if len(checks) != 2 || checks[0].Enforcement != Required || checks[1].Enforcement != Diagnostic {
 		t.Fatalf("checks = %+v", checks)
 	}
-	if checks[0].Command != "cc -fsyntax-only src/backend/capture.c -Wall -Wextra -Werror" {
-		t.Fatalf("command = %q", checks[0].Command)
+	if !strings.Contains(checks[0].Command, "-Werror=implicit-function-declaration") || checks[1].Command != "cc -fsyntax-only src/backend/capture.c -Wall -Wextra -Werror" {
+		t.Fatalf("checks = %+v", checks)
 	}
 }
 
 func TestNativePolicyCanRequireOrDisableWarnings(t *testing.T) {
 	ctx := Context{TaskVerification: "clang -fsyntax-only app.c", Policies: map[string]string{"c-native.warnings": "required"}}
 	checks, _ := DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
-	if len(checks) != 1 || checks[0].Enforcement != Required {
+	if len(checks) != 2 || checks[1].Enforcement != Required {
 		t.Fatalf("required checks = %+v", checks)
 	}
 	ctx.Policies["c-native.warnings"] = "off"
 	checks, _ = DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
-	if len(checks) != 0 {
+	if len(checks) != 1 || checks[0].Name != "API and type safety" {
 		t.Fatalf("disabled checks = %+v", checks)
+	}
+}
+
+func TestNativeAPISafetyIsRequiredForCompileOnlyTasks(t *testing.T) {
+	ctx := Context{TaskVerification: "gcc -c widget.c -o /dev/null"}
+	checks, err := DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checks) != 2 || checks[0].Name != "API and type safety" || checks[0].Enforcement != Required {
+		t.Fatalf("compile-only checks = %+v", checks)
+	}
+	for _, flag := range []string{"-Werror=implicit-function-declaration", "-Werror=incompatible-pointer-types", "-Werror=int-conversion"} {
+		if !strings.Contains(checks[0].Command, flag) {
+			t.Errorf("API safety command lacks %q: %s", flag, checks[0].Command)
+		}
+	}
+}
+
+func TestNativeAPISafetyPolicyCanDowngradeOrDisable(t *testing.T) {
+	ctx := Context{TaskVerification: "cc -c app.c", Policies: map[string]string{"c-native.api-contract": "diagnostic", "c-native.warnings": "off"}}
+	checks, _ := DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
+	if len(checks) != 1 || checks[0].Enforcement != Diagnostic {
+		t.Fatalf("diagnostic API checks = %+v", checks)
+	}
+	ctx.Policies["c-native.api-contract"] = "off"
+	checks, _ = DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
+	if len(checks) != 0 {
+		t.Fatalf("disabled API checks = %+v", checks)
 	}
 }
 
@@ -55,7 +84,7 @@ func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(checks) != 2 || checks[0].Capability != "c-native" || checks[1].Capability != "test-stack" {
+	if len(checks) != 3 || checks[0].Capability != "c-native" || checks[1].Capability != "c-native" || checks[2].Capability != "test-stack" {
 		t.Fatalf("composed checks = %+v", checks)
 	}
 }
@@ -99,6 +128,43 @@ func TestReviewRulesAreAbsentWithoutMatchingStackEvidence(t *testing.T) {
 	}
 	if len(profile.ReviewRules) != 0 {
 		t.Fatalf("unrelated native task received rules: %+v", profile.ReviewRules)
+	}
+}
+
+func TestGTK4ClipboardRulesReplaceLegacyAndInventedAPIs(t *testing.T) {
+	profile, err := DefaultRegistry().ResolveProject(Context{
+		TaskVerification: "gcc -c src/delivery/clipboard/clipboard_handler.c $(pkg-config --cflags gtk4) -o /dev/null",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	gtkRules := 0
+	for _, rule := range profile.ReviewRules {
+		if rule.Capability == "gtk4-clipboard" {
+			gtkRules++
+			joined += rule.Guidance + "\n"
+		}
+	}
+	if gtkRules != 3 {
+		t.Fatalf("GTK4 clipboard rules = %+v", profile.ReviewRules)
+	}
+	for _, want := range []string{"gdk_display_get_clipboard", "gdk_content_provider_new_for_bytes", "gdk_clipboard_set_content", "gdk_clipboard_store_finish", "not GTK4 APIs"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("GTK4 clipboard guidance lacks %q:\n%s", want, joined)
+		}
+	}
+
+	plain, err := DefaultRegistry().ResolveProject(Context{
+		TaskVerification: "gcc -c src/ui/window.c $(pkg-config --cflags gtk4) -o /dev/null",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range plain.ReviewRules {
+		if rule.Capability == "gtk4-clipboard" {
+			t.Fatalf("unrelated GTK4 task received clipboard rule: %+v", rule)
+		}
 	}
 }
 

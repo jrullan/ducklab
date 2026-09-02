@@ -8,6 +8,28 @@ import (
 	"strings"
 )
 
+// GTK4Clipboard contributes the GTK4 clipboard contract only when the task's
+// verification names both GTK4 and clipboard code. It deliberately does not
+// turn every GTK project into a clipboard project.
+type GTK4Clipboard struct{}
+
+func (GTK4Clipboard) ID() string { return "gtk4-clipboard" }
+
+func (GTK4Clipboard) Detect(ctx Context) Contributions {
+	verification := strings.ToLower(ctx.TaskVerification)
+	if !strings.Contains(verification, "gtk4") || !strings.Contains(verification, "clipboard") {
+		return Contributions{}
+	}
+	return Contributions{
+		Detection: Detection{Capability: "gtk4-clipboard", Evidence: []string{"task Verification compiles clipboard code against GTK4"}},
+		ReviewRules: []ReviewRule{
+			{Capability: "gtk4-clipboard", ID: "access", Guidance: "GTK4 obtains the system clipboard with gdk_display_get_clipboard(gdk_display_get_default()); GTK3 gtk_clipboard_* calls and the invented gdk_clipboard_get API are not GTK4 interfaces."},
+			{Capability: "gtk4-clipboard", ID: "publish-bytes", Guidance: "To publish serialized image/png bytes in GTK4, wrap the GBytes with gdk_content_provider_new_for_bytes(\"image/png\", bytes), pass that provider to gdk_clipboard_set_content, and balance the provider reference. gdk_clipboard_set_image and gdk_clipboard_set_request_callback are not GTK4 APIs."},
+			{Capability: "gtk4-clipboard", ID: "completion", Guidance: "When delivery needs an observable asynchronous completion, use a real callback path such as gdk_clipboard_store_async followed by gdk_clipboard_store_finish; a debug log or an idle callback with no caller-visible result is not an acknowledgement."},
+		},
+	}
+}
+
 // X11Image contributes the representation invariants needed when a task uses
 // XImage. It is deliberately independent from any project or task name.
 type X11Image struct{}

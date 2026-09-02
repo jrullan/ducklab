@@ -9,7 +9,7 @@ type Native struct{}
 func (Native) ID() string { return "c-native" }
 
 func (Native) Detect(ctx Context) Contributions {
-	if !nativeSyntaxCommand(ctx.TaskVerification) {
+	if !nativeCompileCommand(ctx.TaskVerification) {
 		return Contributions{}
 	}
 	return Contributions{Detection: Detection{
@@ -18,34 +18,58 @@ func (Native) Detect(ctx Context) Contributions {
 }
 
 func (Native) Checks(ctx Context) []Check {
-	command := strictSyntaxCommand(ctx.TaskVerification)
-	if command == "" {
+	if !nativeCompileCommand(ctx.TaskVerification) {
 		return nil
 	}
-	policy := ctx.Policies["c-native.warnings"]
-	if policy == "off" {
-		return nil
+	var checks []Check
+	if command := apiSafetyCommand(ctx.TaskVerification); command != "" {
+		policy := ctx.Policies["c-native.api-contract"]
+		if policy != "off" {
+			enforcement := Required
+			if policy == "diagnostic" {
+				enforcement = Diagnostic
+			}
+			checks = append(checks, Check{
+				Capability:  "c-native",
+				Name:        "API and type safety",
+				Command:     command,
+				Enforcement: enforcement,
+			})
+		}
 	}
-	enforcement := Diagnostic
-	if policy == "required" {
-		enforcement = Required
+	if command := strictSyntaxCommand(ctx.TaskVerification); command != "" {
+		policy := ctx.Policies["c-native.warnings"]
+		if policy != "off" {
+			enforcement := Diagnostic
+			if policy == "required" {
+				enforcement = Required
+			}
+			checks = append(checks, Check{
+				Capability:  "c-native",
+				Name:        "compiler warnings",
+				Command:     command,
+				Enforcement: enforcement,
+			})
+		}
 	}
-	return []Check{{
-		Capability:  "c-native",
-		Name:        "compiler warnings",
-		Command:     command,
-		Enforcement: enforcement,
-	}}
+	return checks
+}
+
+func apiSafetyCommand(command string) string {
+	if !nativeCompileCommand(command) || strings.Contains(command, "-Werror") {
+		return ""
+	}
+	return command + " -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=int-conversion"
 }
 
 func strictSyntaxCommand(command string) string {
-	if !nativeSyntaxCommand(command) || strings.Contains(command, "-Werror") {
+	if !nativeCompileCommand(command) || strings.Contains(command, "-Werror") {
 		return ""
 	}
 	return command + " -Wall -Wextra -Werror"
 }
 
-func nativeSyntaxCommand(command string) bool {
+func nativeCompileCommand(command string) bool {
 	if strings.ContainsAny(command, "\n;") || strings.Contains(command, "&&") || strings.Contains(command, "||") {
 		return false
 	}
@@ -62,11 +86,20 @@ func nativeSyntaxCommand(command string) bool {
 	default:
 		return false
 	}
-	return strings.Contains(command, "-fsyntax-only")
+	return strings.Contains(command, "-fsyntax-only") || fieldsContain(fields, "-c")
+}
+
+func fieldsContain(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultRegistry is the built-in capability set. The execution core depends
 // only on Registry; adding another stack means registering another provider.
 func DefaultRegistry() *Registry {
-	return NewRegistry(Native{}, X11Image{}, GLibAsync{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
+	return NewRegistry(Native{}, GTK4Clipboard{}, X11Image{}, GLibAsync{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
 }
