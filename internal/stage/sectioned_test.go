@@ -135,6 +135,59 @@ func TestV2MigrationExpandsSelectedMilestoneIntoTaskPasses(t *testing.T) {
 	}
 }
 
+func TestExplicitSplitRetriesTriageWhenItSchedulesNoAddition(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindPlan, "## M-001 — App\n\n### T-008 — Lifecycle\n\nold body\n")
+	base, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := 0
+	var retried bool
+	res, err := runSectioned(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-split", Mode: "council",
+		OnEvent: func(kind string, data map[string]interface{}) {
+			if kind == "triage_retry" {
+				retried = true
+			}
+		},
+		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			call++
+			switch call {
+			case 1:
+				return "T-008", nil
+			case 2:
+				if !strings.Contains(prompt, "Required correction") {
+					t.Fatal("split triage retry lacked corrective protocol")
+				}
+				return "T-008\nNEW: Initialization", nil
+			case 3:
+				return "## T-008 — Lifecycle\n\n**Implements:** SPEC-001\n\nkept concern", nil
+			default:
+				if script.ArchitectScopeID != "T-900" {
+					t.Fatalf("new split unit scope = %q", script.ArchitectScopeID)
+				}
+				return "## T-900 — Initialization\n\n**Milestone:** M-001\n\n**Implements:** SPEC-001\n\nnew concern", nil
+			}
+		},
+	}, base, "Split the old lifecycle task into lifecycle and initialization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retried || call != 4 {
+		t.Fatalf("retried=%v calls=%d", retried, call)
+	}
+	if findSection(res.Proposed, "T-009") == nil {
+		t.Fatalf("split addition missing: %+v", res.Proposed.Sections)
+	}
+}
+
+func TestSplitIntentIgnoresExplicitNegation(t *testing.T) {
+	if !requestsSectionSplit("Dividir la tarea en dos") || requestsSectionSplit("Do not split this task") {
+		t.Fatal("split intent detection mishandled positive or negated request")
+	}
+}
+
 func TestSectionedTriageAcceptsChangeLabelsAndStripsNewIDs(t *testing.T) {
 	doc := &artifact.Document{Sections: []artifact.Section{{ID: "M-005", Children: []artifact.Section{{ID: "T-006"}, {ID: "T-007"}}}}}
 	ids, adds := parseTriagePass("- CHANGE: T-006 — Overlay\n- UPDATE: T-007 — Selection\n- NEW: T-900 — Parse CLI\n", doc, "M")

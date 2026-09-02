@@ -48,6 +48,29 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		return nil, err
 	}
 	ids, adds := parseTriagePass(raw, base, prefix)
+	if requestsSectionSplit(ask) && len(adds) == 0 {
+		// A split cannot be represented only by revisiting existing sections:
+		// at least one additional independent unit must be scheduled. Small
+		// triagers sometimes list the parent milestone and silently lose the
+		// requested additions. Retry triage once, before spending any drafting
+		// calls or producing a deceptively complete proposal.
+		if p.OnEvent != nil {
+			p.OnEvent("triage_retry", map[string]interface{}{
+				"reason": "explicit split requested but triage scheduled no new section",
+			})
+		}
+		retryPrompt := triagePrompt + "\n\n## Required correction\n\n" +
+			"The request explicitly splits an existing section into independent units, but your first answer scheduled no `NEW:` item. " +
+			"Keep the existing id for one cohesive concern and emit one `NEW: <title>` line for every additional concern. Return the complete corrected triage list, nothing else.\n"
+		raw, err = p.Execute(ctx, soloPass(prefix, sectionedPassCap+1), retryPrompt)
+		if err != nil {
+			return nil, err
+		}
+		ids, adds = parseTriagePass(raw, base, prefix)
+		if len(adds) == 0 {
+			return nil, fmt.Errorf("triage omitted NEW sections after an explicit split request")
+		}
+	}
 	if kind == artifact.KindPlan {
 		if strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") {
 			ids = expandSelectedPlanMilestones(ids, base)
@@ -144,6 +167,21 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: &proposed, Raw: raw}, nil
+}
+
+func requestsSectionSplit(ask string) bool {
+	lower := strings.ToLower(ask)
+	for _, negated := range []string{"do not split", "don't split", "without splitting", "no split", "no dividir", "sin dividir"} {
+		if strings.Contains(lower, negated) {
+			return false
+		}
+	}
+	for _, marker := range []string{"split ", "split the ", "split into", "separate into", "divide into", "dividir ", "separar ", "descomponer "} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // expandSelectedPlanMilestones turns a format migration into task passes even
