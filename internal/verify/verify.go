@@ -6,11 +6,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/xplat"
 )
@@ -35,87 +35,31 @@ type Result struct {
 	Duration float64
 }
 
-// Detect auto-detects the verification gate for a project.
-// Returns the gate and the command to run.
-// MissingToolchain says a build-system marker is in the tree but the tool
-// that runs it is not on the machine.
-type MissingToolchain struct {
-	Tool   string
-	Marker string
-}
+// MissingToolchain remains an alias for callers that classify detection
+// failures. Stack knowledge and the concrete error now live with the adapter.
+type MissingToolchain = capability.MissingToolchain
 
-func (e *MissingToolchain) Error() string {
-	return fmt.Sprintf("the tree has %s but %s is not installed on this machine", e.Marker, e.Tool)
-}
-
+// Detect is the compatibility facade for project-gate resolution. The
+// verifier knows only the resolved kind and command; stack detection belongs
+// to capability providers.
 func Detect(root string) (Gate, string, error) {
-	// Rung 1: Go tests
-	if fileExists(filepath.Join(root, "go.mod")) {
-		if commandSucceeds(root, "go test ./... -run XXX -count=1") {
-			cmd := "go test ./..."
-			// A repository may contain more than one independently runnable
-			// suite. Do not let the first language found become the whole gate:
-			// the frontend is part of this project when it has its own package,
-			// typecheck and Vitest suite.
-			if frontendGate(root) != "" {
-				cmd += " && " + frontendGate(root)
-			}
-			return GateTests, cmd, nil
-		}
-		// Fall through to build
+	return DetectWith(root, config.Capabilities{Auto: true})
+}
+
+// DetectWith applies the project's adapter selection while resolving a gate.
+// An already configured gate is never rewritten; this governs discovery and
+// explicit adoption only.
+func DetectWith(root string, selection config.Capabilities) (Gate, string, error) {
+	profile, err := capability.DefaultRegistry().ResolveProject(capability.Context{
+		ProjectRoot: root, Policies: selection.Policy,
+	}, selection.Auto, selection.Enabled, selection.Disabled)
+	if err != nil {
+		return GateNone, "", err
 	}
-	// Rung 2: Python pytest
-	if fileExists(filepath.Join(root, "pytest.ini")) ||
-		fileExists(filepath.Join(root, "pyproject.toml")) ||
-		dirExists(filepath.Join(root, "tests")) {
-		if commandSucceeds(root, "pytest -q --collect-only") {
-			return GateTests, "pytest -q", nil
-		}
+	if profile.Gate == nil {
+		return GateNone, "", nil
 	}
-	// Rung 3: npm test
-	if fileExists(filepath.Join(root, "package.json")) {
-		if hasTestScript(filepath.Join(root, "package.json")) {
-			return GateTests, "npm test --silent", nil
-		}
-	}
-	// Rung 4: Cargo
-	if fileExists(filepath.Join(root, "Cargo.toml")) {
-		return GateTests, "cargo test", nil
-	}
-	// Rung 4b: Meson. A GTK project's first task wrote meson.build and the
-	// gate stayed "none" for the rest of the run (T-001, benchmark run 5).
-	// A marker without its tool is not "no gate": it is a toolchain the
-	// person has not installed yet, said so by name.
-	if fileExists(filepath.Join(root, "meson.build")) {
-		if !commandSucceeds(root, "meson --version") {
-			return GateNone, "", &MissingToolchain{Tool: "meson", Marker: "meson.build"}
-		}
-		// Meson creates build/ before configuration has succeeded. Testing only
-		// the directory stranded Neocapture's first small-model build in a loop:
-		// every later gate skipped setup and ninja could not find build.ninja.
-		// The generated manifest is the configuration checkpoint; an incomplete
-		// tree is disposable and must be rebuilt by the gate that created it.
-		return GateBuild, "test -f build/build.ninja || (rm -rf build && meson setup build); ninja -C build", nil
-	}
-	// Rung 5: Go build
-	if fileExists(filepath.Join(root, "go.mod")) {
-		return GateBuild, "go build ./...", nil
-	}
-	// Rung 6: TypeScript
-	if fileExists(filepath.Join(root, "tsconfig.json")) {
-		return GateBuild, "npx tsc --noEmit", nil
-	}
-	// Rung 7: Python compile. Modern Debian/Ubuntu ship only `python3`
-	// unless python-is-python3 is installed — a gate spelled `python`
-	// fails every clean-checkout accept with "python: not found" (B-085).
-	if hasPythonFiles(root) {
-		return GateBuild, pythonInterpreter() + " -m compileall -q .", nil
-	}
-	// Rung 8: golangci-lint
-	if fileExists(filepath.Join(root, ".golangci.yml")) {
-		return GateLint, "golangci-lint run", nil
-	}
-	return GateNone, "", nil
+	return Gate(profile.Gate.Kind), profile.Gate.Command, nil
 }
 
 // Identity names the run and project whose process tree is being executed.
@@ -362,66 +306,4 @@ func isolatedStateEnvironment(identities ...Identity) ([]string, func(), error) 
 		env = append(env, key+"="+value)
 	}
 	return env, func() { _ = os.RemoveAll(stateRoot) }, nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
-func commandSucceeds(root, cmd string) bool {
-	shellCmd := xplat.Shell(root, nil, cmd)
-	err := shellCmd.Run()
-	return err == nil
-}
-
-func frontendGate(root string) string {
-	frontend := filepath.Join(root, "frontend")
-	packageJSON := filepath.Join(frontend, "package.json")
-	if !fileExists(packageJSON) || !hasTestScript(packageJSON) {
-		return ""
-	}
-	if !fileExists(filepath.Join(frontend, "tsconfig.json")) {
-		return "cd frontend && npx vitest run"
-	}
-	return "cd frontend && npx tsc --noEmit && npx vitest run"
-}
-
-func hasTestScript(packageJSONPath string) bool {
-	data, err := os.ReadFile(packageJSONPath)
-	if err != nil {
-		return false
-	}
-	content := string(data)
-	// Simplified check: has a "test" script that's not the default stub
-	return strings.Contains(content, `"test"`) &&
-		!strings.Contains(content, `"test": "echo \"Error: no test specified\" && exit 1"`)
-}
-
-// pythonInterpreter names the interpreter actually on PATH.
-func pythonInterpreter() string {
-	if _, err := exec.LookPath("python"); err == nil {
-		return "python"
-	}
-	return "python3"
-}
-
-func hasPythonFiles(root string) bool {
-	found := false
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if strings.HasSuffix(path, ".py") {
-			found = true
-			return fmt.Errorf("found")
-		}
-		return nil
-	})
-	return found
 }

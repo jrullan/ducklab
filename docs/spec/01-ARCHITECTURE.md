@@ -195,6 +195,13 @@ provider, not adding a language conditional to `tools`, `service`, or `verify`.
 The first provider, `c-native`, turns a simple C/C++ syntax command into an
 additional warning-strict diagnostic without changing the original command.
 
+Providers implement only the ports they need. A `Detector` contributes
+evidence and prioritized project-gate candidates; a `Checker` contributes
+task diagnostics. Project discovery may probe a collector or toolchain, so it
+runs separately from per-task check resolution and must never be repeated by
+every `verify_run`. Gate priority is candidate data resolved by the registry,
+not provider registration order or a language switch in `verify`.
+
 ## 5. Core types
 
 Types from `spec-1.0` stand unchanged except where noted here.

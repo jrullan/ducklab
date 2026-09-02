@@ -183,7 +183,7 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		return "red", log, nil
 	}
 
-	checks, err := capability.DefaultRegistry().Resolve(capability.Context{
+	checks, err := capability.DefaultRegistry().ResolveChecks(capability.Context{
 		ProjectRoot:      ectx.ProjectRoot,
 		TaskVerification: command,
 		Policies:         ectx.Capabilities.Policy,

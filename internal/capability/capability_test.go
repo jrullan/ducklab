@@ -1,9 +1,25 @@
 package capability
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func writeFixture(t *testing.T, root, relative, body string) {
+	t.Helper()
+	path := filepath.Join(root, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNativeCapabilityIsDiagnosticByDefault(t *testing.T) {
-	checks, err := DefaultRegistry().Resolve(Context{
+	checks, err := DefaultRegistry().ResolveChecks(Context{
 		TaskVerification: "cc -fsyntax-only src/backend/capture.c",
 	}, true, nil, nil)
 	if err != nil {
@@ -19,12 +35,12 @@ func TestNativeCapabilityIsDiagnosticByDefault(t *testing.T) {
 
 func TestNativePolicyCanRequireOrDisableWarnings(t *testing.T) {
 	ctx := Context{TaskVerification: "clang -fsyntax-only app.c", Policies: map[string]string{"c-native.warnings": "required"}}
-	checks, _ := DefaultRegistry().Resolve(ctx, true, nil, nil)
+	checks, _ := DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
 	if len(checks) != 1 || checks[0].Enforcement != Required {
 		t.Fatalf("required checks = %+v", checks)
 	}
 	ctx.Policies["c-native.warnings"] = "off"
-	checks, _ = DefaultRegistry().Resolve(ctx, true, nil, nil)
+	checks, _ = DefaultRegistry().ResolveChecks(ctx, true, nil, nil)
 	if len(checks) != 0 {
 		t.Fatalf("disabled checks = %+v", checks)
 	}
@@ -35,7 +51,7 @@ func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	// core does not need a switch for every language or stack.
 	var _ Provider = testProvider{}
 	r := NewRegistry(Native{}, testProvider{})
-	checks, err := r.Resolve(Context{TaskVerification: "cc -fsyntax-only app.c"}, true, nil, nil)
+	checks, err := r.ResolveChecks(Context{TaskVerification: "cc -fsyntax-only app.c"}, true, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +68,114 @@ func (testProvider) Checks(Context) []Check {
 }
 
 func TestCompoundCommandIsNotRewritten(t *testing.T) {
-	checks, _ := DefaultRegistry().Resolve(Context{TaskVerification: "cc -fsyntax-only a.c && ./check"}, true, nil, nil)
+	checks, _ := DefaultRegistry().ResolveChecks(Context{TaskVerification: "cc -fsyntax-only a.c && ./check"}, true, nil, nil)
 	if len(checks) != 0 {
 		t.Fatalf("compound command contributed checks: %+v", checks)
+	}
+}
+
+func TestProjectCapabilitiesComposeGoAndFrontendFromEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "go.mod", "module example.com/fixture\n\ngo 1.24\n")
+	writeFixture(t, root, "main.go", "package main\nfunc main() {}\n")
+	writeFixture(t, root, "frontend/package.json", `{"scripts":{"test":"vitest run"}}`)
+	writeFixture(t, root, "frontend/tsconfig.json", `{}`)
+
+	profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Gate == nil || profile.Gate.Kind != "tests" {
+		t.Fatalf("gate = %+v", profile.Gate)
+	}
+	for _, want := range []string{"go test ./...", "cd frontend", "tsc --noEmit", "vitest run"} {
+		if !strings.Contains(profile.Gate.Command, want) {
+			t.Errorf("composed command %q lacks %q", profile.Gate.Command, want)
+		}
+	}
+	gotEvidence := make(map[string]bool)
+	for _, detection := range profile.Detections {
+		for _, evidence := range detection.Evidence {
+			gotEvidence[evidence] = true
+		}
+	}
+	for _, want := range []string{"go.mod", "frontend/package.json", "frontend/tsconfig.json"} {
+		if !gotEvidence[want] {
+			t.Errorf("resolved profile lacks evidence %q: %+v", want, profile.Detections)
+		}
+	}
+}
+
+func TestProjectGatePriorityIsDataNotRegistryOrder(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "Cargo.toml", "[package]\nname='fixture'\nversion='0.1.0'\n")
+	writeFixture(t, root, "tsconfig.json", `{}`)
+	// Reverse provider registration to prove selection follows candidate
+	// priority rather than a hardcoded if/else or registry order.
+	profile, err := NewRegistry(TypeScript{}, Rust{}).ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Gate == nil || profile.Gate.Capability != "rust" || profile.Gate.Command != "cargo test" {
+		t.Fatalf("resolved gate = %+v", profile.Gate)
+	}
+}
+
+func TestDisabledCapabilityDoesNotContribute(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "Cargo.toml", "[package]\nname='fixture'\nversion='0.1.0'\n")
+	profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, []string{"rust"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Gate != nil {
+		t.Fatalf("disabled Rust contributed gate %+v", profile.Gate)
+	}
+}
+
+func TestStandaloneGolangCILintMarkerPreservesFallbackGate(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, ".golangci.yml", "run:\n  timeout: 5m\n")
+	profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Gate == nil || profile.Gate.Kind != "lint" || profile.Gate.Command != "golangci-lint run" {
+		t.Fatalf("lint fallback = %+v", profile.Gate)
+	}
+}
+
+func TestBuiltInStackGateCandidates(t *testing.T) {
+	tests := []struct {
+		name, marker, body, capability, kind, command string
+	}{
+		{"node tests", "package.json", `{"scripts":{"test":"vitest run"}}`, "node", "tests", "npm test --silent"},
+		{"rust tests", "Cargo.toml", "[package]\nname='fixture'\nversion='0.1.0'\n", "rust", "tests", "cargo test"},
+		{"typescript build", "tsconfig.json", `{}`, "typescript", "build", "npx tsc --noEmit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFixture(t, root, test.marker, test.body)
+			profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile.Gate == nil || profile.Gate.Capability != test.capability || profile.Gate.Kind != test.kind || profile.Gate.Command != test.command {
+				t.Fatalf("resolved gate = %+v", profile.Gate)
+			}
+		})
+	}
+}
+
+func TestPythonSourceFallsBackToAvailableInterpreterCompile(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "app.py", "print('ok')\n")
+	profile, err := DefaultRegistry().ResolveProject(Context{ProjectRoot: root}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Gate == nil || profile.Gate.Capability != "python" || profile.Gate.Kind != "build" || !strings.Contains(profile.Gate.Command, "-m compileall -q .") {
+		t.Fatalf("Python fallback = %+v", profile.Gate)
 	}
 }

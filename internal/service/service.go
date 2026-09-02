@@ -630,7 +630,7 @@ func (s *Service) ProjectInit(ctx context.Context, req InitRequest) (*Project, e
 	cfg.Created = time.Now().UTC().Format(time.RFC3339)
 	cfg.Describe = req.Describe
 	// Auto-detect gate
-	gate, gateCmd, err := verify.Detect(absPath)
+	gate, gateCmd, err := verify.DetectWith(absPath, cfg.Capabilities)
 	if err == nil {
 		cfg.Verify.Mode = string(gate)
 		if gate == verify.GateTests {
@@ -1974,7 +1974,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	// A run with no gate ends UNVERIFIED, which is honest and easy to miss.
 	// Said here, once, with the fix — rather than leaving someone to wonder on
 	// the third run why nothing ever passes.
-	if advice := gateAdvice(entry.Path, projCfg.Verify); advice != "" {
+	if advice := gateAdvice(entry.Path, projCfg.Verify, projCfg.Capabilities); advice != "" {
 		if rs.run.Warning != "" {
 			rs.run.Warning += "; " + advice
 		} else {

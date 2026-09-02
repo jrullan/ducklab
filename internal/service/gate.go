@@ -51,7 +51,7 @@ func (s *Service) ProjectGate(ctx context.Context, projectID string) (*GateStatu
 	}
 
 	current := verify.Gate(projCfg.Verify.Mode)
-	detected, detectedCmd, derr := verify.Detect(entry.Path)
+	detected, detectedCmd, derr := verify.DetectWith(entry.Path, projCfg.Capabilities)
 	if derr != nil {
 		detected = verify.GateNone
 	}
@@ -85,7 +85,7 @@ func (s *Service) ProjectGateAdopt(ctx context.Context, projectID string) (*Gate
 	if err != nil {
 		return nil, err
 	}
-	detected, cmd, err := verify.Detect(entry.Path)
+	detected, cmd, err := verify.DetectWith(entry.Path, projCfg.Capabilities)
 	if err != nil || detected == verify.GateNone {
 		return nil, fmt.Errorf(
 			"nothing runnable was found in %s. Set a gate by hand:\n"+
@@ -128,11 +128,15 @@ func gateCommandFor(v config.Verify) string {
 // Returned rather than acted on. A run that quietly adopted a gate would
 // change what its own verdict means halfway through, and the person reading it
 // would have no way to know which rules applied.
-func gateAdvice(projectRoot string, v config.Verify) string {
+func gateAdvice(projectRoot string, v config.Verify, selections ...config.Capabilities) string {
 	if verify.Gate(v.Mode) != verify.GateNone {
 		return ""
 	}
-	detected, cmd, err := verify.Detect(projectRoot)
+	selection := config.Capabilities{Auto: true}
+	if len(selections) > 0 {
+		selection = selections[0]
+	}
+	detected, cmd, err := verify.DetectWith(projectRoot, selection)
 	if err != nil || detected == verify.GateNone {
 		return "this project has no gate, so no run can do better than UNVERIFIED"
 	}
