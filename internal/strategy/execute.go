@@ -258,6 +258,16 @@ func ExecutePair(ctx context.Context, params *ExecuteParams) (*ExecuteResult, er
 // maxConsultRetries bounds the [implementer ↔ advisor] inner loop per round.
 const maxConsultRetries = 2
 
+func consultRetryLimit(params *ExecuteParams) int {
+	if params != nil && params.SmallSeat {
+		// On slow local seats, repeated self-consultation consumes the wallclock
+		// reserved for the independent reviewer. One applied note is a useful
+		// rescue; after that, review findings are the next repair input.
+		return 1
+	}
+	return maxConsultRetries
+}
+
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{Transcript: &conv.Transcript{}}
 
@@ -359,6 +369,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// round. Bounded: the duck is a counselor, not a judge, and only the
 		// reviewer and the gate are the independent check.
 		consultRetries := 0
+		consultLimit := consultRetryLimit(params)
 		// A missing deliverables report is a protocol-level incomplete ending,
 		// not something worth spending an independent reviewer on. One bounded
 		// same-seat retry lets the implementer finish from the current tree.
@@ -989,10 +1000,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						// turn; sending wounded work to the reviewer costs a
 						// reviewer turn AND the next round. Bounded, and the
 						// note also stays for later rounds.
-						if consultRetries < maxConsultRetries {
+						if consultRetries < consultLimit {
 							consultRetries++
 							emit(params, "advisor_retry", map[string]interface{}{
-								"round": round, "retry": consultRetries, "of": maxConsultRetries,
+								"round": round, "retry": consultRetries, "of": consultLimit,
 							})
 							i-- // run the implementer turn again, note in hand
 							continue

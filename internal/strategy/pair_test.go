@@ -422,6 +422,42 @@ func TestPairInnerLoopIsBounded(t *testing.T) {
 	}
 }
 
+func TestSmallSeatGetsOneAdvisorRetryBeforeIndependentReview(t *testing.T) {
+	rec := &recorder{}
+	distressed := func() *agent.Outcome {
+		return &agent.Outcome{Text: "still stuck", ToolCalls: []agent.ToolCallRecord{
+			{Name: "fs_patch", Result: &tools.Result{IsError: true, Content: "REFUSED: brake"}},
+		}}
+	}
+	note := func() *agent.Outcome {
+		return &agent.Outcome{Parsed: map[string]interface{}{"action": "note", "note": "try one targeted repair"}}
+	}
+	params := pairParams(rec, "green",
+		distressed(), note(), // consult 1 → one retry
+		distressed(), note(), // consult 2 → reviewer, not another retry
+		verdictOutcome("approve"),
+	)
+	params.SmallSeat = true
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	impl, adv, rev := 0, 0, 0
+	for _, role := range rec.roles {
+		switch role {
+		case config.RoleImplementer:
+			impl++
+		case config.RoleAdvisor:
+			adv++
+		case config.RoleReviewer:
+			rev++
+		}
+	}
+	if impl != 2 || adv != 2 || rev != 1 {
+		t.Errorf("small-seat routing = implementer:%d advisor:%d reviewer:%d, want 2/2/1: %v", impl, adv, rev, rec.roles)
+	}
+}
+
 func TestPairSendsCompletedGreenWorkStraightToReviewer(t *testing.T) {
 	rec := &recorder{}
 	implemented := &agent.Outcome{
