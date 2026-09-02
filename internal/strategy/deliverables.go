@@ -27,15 +27,18 @@ var (
 	headingRe    = regexp.MustCompile(`^\s*#{1,6}\s+`)
 )
 
-// ExtractDeliverables numbers the task body's top-level bullets, stopping at
-// an out-of-scope marker. A body with no bullets yields the title as the one
-// deliverable — a task is always at least itself.
+// ExtractDeliverables numbers the task body's acceptance slices. The legacy
+// Deliverables block remains readable so already accepted plans keep working
+// while newly generated plans use the explicit v2 work-unit contract.
 func ExtractDeliverables(title, body string) []string {
 	// A body that carries the contract's own label is read by the label:
 	// only the bullets in that block are the contract. Without this, a
 	// promoted bug whose REPORT happened to contain bullets handed the
 	// implementer the reporter's prose as numbered work items.
-	if block := deliverablesBlock(body); block != nil {
+	if block := checklistBlock(body, "acceptance slices"); block != nil {
+		return block
+	}
+	if block := checklistBlock(body, "deliverables"); block != nil {
 		return block
 	}
 	var out []string
@@ -249,13 +252,13 @@ func deliverablesForReviewer(items []string, rep *DeliverablesReport) string {
 	return b.String()
 }
 
-// deliverablesBlock returns the top-level bullets under a
-// "**Deliverables:**" label, or nil when the body has no such label.
-func deliverablesBlock(body string) []string {
+// checklistBlock returns the top-level bullets under a bold field-like label,
+// or nil when the body has no such non-empty block.
+func checklistBlock(body, label string) []string {
 	lines := strings.Split(body, "\n")
 	start := -1
 	for i, line := range lines {
-		if strings.EqualFold(strings.TrimSpace(line), "**deliverables:**") {
+		if strings.EqualFold(strings.TrimSpace(line), "**"+label+":**") {
 			start = i + 1
 			break
 		}

@@ -12,16 +12,16 @@ import (
 // top-level bullets become the implementer's numbered contract. T-136 was
 // born as one paragraph from plan-amend — one deliverable, itself.
 func TestEveryTaskWritingPromptDictatesTheBodyContract(t *testing.T) {
-	if !strings.Contains(planInstruction, "**Deliverables:**") {
-		t.Error("the plan stage instruction does not dictate Deliverables")
+	if !strings.Contains(planInstruction, "**Work unit:**") || !strings.Contains(planInstruction, "**Acceptance slices:**") {
+		t.Error("the plan stage instruction does not dictate the v2 task contract")
 	}
 	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-001", Title: "Core"}}}
 	extend, err := buildExtendPrompt(t.TempDir(), plan, "add camera capture", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(extend, "**Deliverables:**") {
-		t.Errorf("plan-extend prompt does not dictate Deliverables:\n%s", extend)
+	if !strings.Contains(extend, "**Work unit:**") || !strings.Contains(extend, "**Acceptance slices:**") {
+		t.Errorf("plan-extend prompt does not dictate the v2 task contract:\n%s", extend)
 	}
 }
 
@@ -29,7 +29,8 @@ func TestEveryTaskWritingPromptDictatesTheBodyContract(t *testing.T) {
 // otherwise the model is taught a shape the harness cannot read.
 func TestTheContractExampleParsesAsDeliverables(t *testing.T) {
 	body := "Achieves X because Y.\n\n" +
-		"**Deliverables:**\n" +
+		"**Work unit:** Upload one exercise image\n\n" +
+		"**Acceptance slices:**\n" +
 		"- Add the file input to MeasurementConfigModal\n" +
 		"  - accept=\"image/*\", capture for mobile camera\n" +
 		"- Post the file as multipart/form-data to POST /api/user-exercises/:id/image\n" +

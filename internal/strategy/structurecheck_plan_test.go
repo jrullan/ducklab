@@ -20,7 +20,7 @@ func TestPlanStructureIsCheckedPerTask(t *testing.T) {
 	}
 	findings := structureFindings(nil, cur, "markdown_sections:M", map[string]bool{"SPEC-001": true}, true, raw)
 	joined := strings.Join(findings, "\n")
-	for _, want := range []string{"T-002 has no **Implements:** line", "T-001 has 4 top-level **Deliverables:** bullets", "T-001 has no **Verification:** line", "lane collision"} {
+	for _, want := range []string{"T-002 has no **Implements:** line", "T-001 uses legacy **Deliverables:**", "T-001 has no top-level **Acceptance slices:**", "T-001 has no **Verification:** line", "lane collision"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("findings lack %q:\n%s", want, joined)
 		}
@@ -29,6 +29,15 @@ func TestPlanStructureIsCheckedPerTask(t *testing.T) {
 	big := structureFindings(nil, cur, "markdown_sections:M", map[string]bool{"SPEC-001": true}, false, raw)
 	if strings.Contains(strings.Join(big, "\n"), "top-level **Deliverables:**") {
 		t.Fatalf("a full seat's plan was portioned: %v", big)
+	}
+}
+
+func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
+	body := "### T-001 — Save capture\n\n**Implements:** SPEC-001\n\n**Work unit:** Persist one completed capture\n\n**Acceptance slices:**\n- Opens a save destination\n- Writes a valid PNG\n- Reports success\n- Reports failure\n\n**Produces:** src/save.c\n\n**Consumes:** none\n\n**Verification:** `cc -fsyntax-only src/save.c`\n\n**Exercises:** src/save.c"
+	cur := []agent.Section{{ID: "M-01", Title: "Save", Body: body}}
+	joined := strings.Join(structureFindings(nil, cur, "markdown_sections:M", map[string]bool{"SPEC-001": true}, true, "## M-01 — Save\n\n"+body), "\n")
+	if !strings.Contains(joined, "4 top-level **Acceptance slices:**") {
+		t.Fatalf("findings = %s", joined)
 	}
 }
 

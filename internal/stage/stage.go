@@ -480,11 +480,10 @@ func BuildPrompt(projectRoot string, name Name, seed string, current *artifact.D
 			// went to a local 35B implementer (Neocapture, 2026-08-29); a
 			// small seat lands one thing at a time.
 			b.WriteString("## Portion the tasks for a small implementer\n\n" +
-				"The implementer of this project is a small local model. This rule overrides the " +
-				"general '3-8 top-level bullets' below: each task has ONE primary deliverable and " +
-				"AT MOST THREE top-level **Deliverables:** bullets, each verifiable by a command or a " +
+				"The implementer of this project is a small local model. Each task has exactly ONE " +
+				"**Work unit:** and AT MOST THREE top-level **Acceptance slices:** bullets, each verifiable by a command or a " +
 				"test. Prefer more, smaller tasks with **Depends on:** lines over fewer large ones. A " +
-				"task whose deliverables span several files or concerns is two tasks. ducklab checks " +
+				"task whose work unit spans independent concerns is two tasks. ducklab checks " +
 				"the count and returns a draft that exceeds it.\n\n")
 		}
 		if hasAsBuilt(spec) {
@@ -598,30 +597,28 @@ func approvedSections(doc *artifact.Document) []artifact.Section {
 }
 
 // TaskBodyContract is the shape every task body must take, told to every
-// architect that writes tasks (plan, extend/amend, gap-fill). The top-level
-// bullets under **Deliverables:** become the implementer's numbered work
-// contract (strategy/deliverables.go): it reports on each by number, the
-// reviewer verifies each against the diff, and an item the implementer
-// cannot deliver summons the advisor. A body written as one paragraph gives
-// the implementer a single deliverable — the task itself — and loses all of
-// that; T-136 was born that way, which is why this is dictated rather than
-// hoped for.
+// architect that writes tasks (plan, extend/amend, gap-fill). It makes the
+// unit of work explicit instead of asking the harness to infer "concerns"
+// from a bullet count. Acceptance slices become the implementer's numbered
+// checklist; indented explanation is context, never another obligation.
 const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"<one or two sentences: what the task achieves and why>\n\n" +
-	"**Deliverables:**\n" +
-	"- <one concrete, verifiable outcome — WHAT is delivered, in the words a reviewer can check against the diff>\n" +
-	"  - <indented sub-bullets carry the how: files, conventions, edge cases; they are not deliverables>\n" +
-	"- <the next outcome; 3-8 top-level bullets, each independently checkable>\n" +
-	"- <tests are a deliverable when the task needs them: name what they must assert>\n\n" +
+	"**Work unit:** <exactly one cohesive capability or concern; if you need 'and' to join independent behaviors, split the task>\n\n" +
+	"**Acceptance slices:**\n" +
+	"- <one concrete observable outcome of that work unit, in words a reviewer can check against the diff>\n" +
+	"  - <indented sub-bullets are evidence guidance, files, conventions, or edge cases; they are explanations, not slices>\n" +
+	"- <the next independently checkable outcome of the SAME work unit>\n" +
+	"- <tests may be a slice: name the behavior they must prove, not merely that tests exist>\n\n" +
 	"**Produces:** <comma-separated repository paths, build-target:NAME, or capability:NAME this task creates>\n\n" +
 	"**Consumes:** <optional comma-separated artifacts from earlier tasks or external capability:NAME values>\n\n" +
 	"**Verification:** <the command or deterministic check that exercises THIS task's changed artifacts; a project build that does not consume them is not verification>\n\n" +
 	"**Exercises:** <comma-separated Produced artifacts that the verification actually loads, compiles, tests, or validates>\n\n" +
 	"**Out of scope:** <what a diligent implementer might reasonably do and must not>\n\n" +
 	"**Assumption:** <optional — what you took as given>\n\n" +
-	"Top-level bullets are the implementer's numbered contract; it reports on each by number when it " +
-	"finishes, and anything it cannot deliver brings it help. Keep each bullet one outcome, not a " +
-	"paragraph; put detail in the sub-bullets.\n\n"
+	"Top-level Acceptance slices are the implementer's numbered contract; it reports on each by number " +
+	"when it finishes, and anything it cannot deliver brings it help. Work unit says WHAT cohesive concern " +
+	"the task owns; Acceptance slices say HOW SUCCESS IS OBSERVED. Never use **Deliverables:** in a v2 task. " +
+	"Keep each slice one outcome, not a paragraph; put explanation in indented sub-bullets.\n\n"
 
 // planInstruction is what the architect is told at the plan stage.
 //

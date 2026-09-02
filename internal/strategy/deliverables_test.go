@@ -42,6 +42,14 @@ func TestExtractDeliverablesFromATaskBody(t *testing.T) {
 	}
 }
 
+func TestExtractDeliverablesPrefersAcceptanceSlicesV2(t *testing.T) {
+	body := "**Work unit:** Save one capture\n\n**Acceptance slices:**\n- Writes the selected PNG\n  - filename details\n- Reports write failure\n\n**Deliverables:**\n- legacy text must not win\n"
+	got := ExtractDeliverables("Save", body)
+	if len(got) != 2 || got[0] != "Writes the selected PNG" || got[1] != "Reports write failure" {
+		t.Fatalf("v2 checklist = %q", got)
+	}
+}
+
 // The report is parsed tolerantly: fenced, trailing, odd ids and statuses.
 func TestParseDeliverablesReportIsTolerant(t *testing.T) {
 	text := "Changed two files.\n\n```json\n{\"deliverables\":[{\"id\":1,\"status\":\"done\"},{\"id\":\"2\",\"status\":\"Not Done\",\"note\":\"blocked on migration\"},{\"id\":9,\"status\":\"done\"},{\"id\":3,\"status\":\"maybe\"}]}\n```"

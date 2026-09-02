@@ -63,8 +63,17 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					out = append(out, fmt.Sprintf("%s **Implements:** cannot be none — every task must deliver at least one accepted specification section", block.id))
 				}
 				if small {
-					if n := topLevelDeliverables(block.body); n > 3 {
-						out = append(out, fmt.Sprintf("%s has %d top-level **Deliverables:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
+					if strings.TrimSpace(markdownFieldValue(block.body, "Work unit")) == "" {
+						out = append(out, fmt.Sprintf("%s has no **Work unit:** — name exactly one cohesive capability or concern; split independent concerns into separate tasks", block.id))
+					}
+					if strings.Contains(strings.ToLower(block.body), "**deliverables:**") {
+						out = append(out, fmt.Sprintf("%s uses legacy **Deliverables:** — regenerate it with **Work unit:** and **Acceptance slices:** so outcomes are distinct from explanation", block.id))
+					}
+					n := topLevelChecklistItems(block.body, "Acceptance slices")
+					if n == 0 {
+						out = append(out, fmt.Sprintf("%s has no top-level **Acceptance slices:** bullets — name observable outcomes of its single Work unit", block.id))
+					} else if n > 3 {
+						out = append(out, fmt.Sprintf("%s has %d top-level **Acceptance slices:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
 					}
 					if !strings.Contains(strings.ToLower(block.body), "**verification:**") {
 						out = append(out, fmt.Sprintf("%s has no **Verification:** line — name the command or deterministic check that exercises this task's changed artifacts; a green project build that ignores them is not verification", block.id))
@@ -446,15 +455,15 @@ func taskGraphFindings(blocks []taskBlock) []string {
 	return out
 }
 
-// topLevelDeliverables counts the un-indented bullets under a task's
-// **Deliverables:** heading, up to the next field or heading.
-func topLevelDeliverables(body string) int {
+// topLevelChecklistItems counts un-indented bullets under a named bold
+// checklist heading, up to the next field or Markdown heading.
+func topLevelChecklistItems(body, label string) int {
 	n := 0
 	in := false
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimRight(line, " \t")
 		switch {
-		case strings.HasPrefix(strings.TrimSpace(t), "**Deliverables:**"):
+		case strings.EqualFold(strings.TrimSpace(t), "**"+label+":**"):
 			in = true
 			continue
 		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
