@@ -98,6 +98,41 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	s.pauseAtSafePoint(rs)
 }
 
+func TestWallclockEscalationDoesNotPauseDocumentTransaction(t *testing.T) {
+	s := newTestService(t)
+	dir := t.TempDir()
+	started := time.Now().Add(-11 * time.Minute)
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", Stage: "plan", Mode: "council", Status: "running", StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano)}
+	w, err := runlog.NewWriter(dir, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: current, writer: w, runDir: w.RunDir()}
+	s.runs = map[string]*runState{current.ID: rs}
+	for i := 0; i < 5; i++ {
+		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
+			ID: "history", ProjectID: "p", Stage: "plan", Mode: "council", ActiveWallclockMs: 5 * 60_000,
+			EndedAt: time.Now().UTC().Format(time.RFC3339),
+		}}
+	}
+
+	s.checkWallclockEscalation(rs)
+	events, err := runlog.ReadEvents(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var suggestion, deferred, requested bool
+	for _, event := range events {
+		suggestion = suggestion || event.Type == "escalation_suggestion"
+		deferred = deferred || event.Type == "pause_deferred"
+		requested = requested || event.Type == "pause_requested"
+	}
+	if !suggestion || !deferred || requested || rs.pauseAfterTurn.Load() {
+		t.Fatalf("document escalation must advise without interrupting its transaction: suggestion=%v deferred=%v requested=%v pending=%v", suggestion, deferred, requested, rs.pauseAfterTurn.Load())
+	}
+}
+
 func TestWallclockEscalationIgnoresOtherStagesAndShortAnomalies(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

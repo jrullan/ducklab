@@ -4591,6 +4591,20 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 		"actions":   []string{"relaunch_with_stronger_seat", "improve_task_body", "continue_as-is"},
 	}
 	rs.writer.AppendEvent("escalation_suggestion", data)
+	// Section-wise document updates are transactions held by the stage
+	// orchestrator: triage selects sections, then independent councils replace
+	// them in an in-memory candidate. A turn checkpoint can preserve one
+	// council conversation, but not that outer replacement ledger. Pausing a
+	// plan/spec/intake at a turn boundary therefore resumes into the wrong pass
+	// and can report "architect changed no sections" after approved work. Keep
+	// the advisory card, but let document transactions reach their human gate.
+	// Build/test work lives in a durable worktree and remains safely pausable.
+	if rs.run.Stage == "intake" || rs.run.Stage == "spec" || rs.run.Stage == "plan" {
+		rs.writer.AppendEvent("pause_deferred", map[string]interface{}{
+			"kind": "history_duration", "detail": "document transaction continues to its human gate",
+		})
+		return
+	}
 	// Pause at the next safe point, not now: the turn in flight finishes
 	// and its work lands on the record before the run stops (I9). The
 	// turn_end hook files the card and cancels.
