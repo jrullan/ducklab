@@ -66,6 +66,14 @@ func TestTopLevelTaskDoesNotDuplicateMissingImplementsFinding(t *testing.T) {
 	}
 }
 
+func TestPlanTaskMustImplementASpecificationSection(t *testing.T) {
+	body := "**Implements:** REQ-001\n\n**Work unit:** Save one file\n\n**Acceptance slices:**\n- File is saved\n\n**Produces:** src/save.c\n\n**Consumes:** none\n\n**Verification:** `cc -fsyntax-only src/save.c`\n\n**Exercises:** src/save.c"
+	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-010", Body: body}}, "markdown_sections:T", map[string]bool{"REQ-001": true}, true, ""), "\n")
+	if !strings.Contains(got, "names no SPEC-NNN section") {
+		t.Fatalf("requirements-only Implements passed a plan task:\n%s", got)
+	}
+}
+
 func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *testing.T) {
 	findings := []string{
 		"T-900 **Verification:** must put the executable command in backticks; prose is never executed",

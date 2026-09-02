@@ -26,6 +26,7 @@ const (
 )
 
 var requirementPriorityToken = regexp.MustCompile(`(?i)\*\*Priority:\*\*\s*(must|should|could|wont)\.?`)
+var planSpecToken = regexp.MustCompile(`(?i)\bSPEC-\d+\b`)
 
 // A document council's last architect turn is the one nobody reviews: after
 // the critics speak, the revision goes straight to the gate. The plan that
@@ -68,6 +69,8 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					out = append(out, fmt.Sprintf("%s has no **Implements:** line", block.id))
 				} else if strings.EqualFold(implementsValue, "none") {
 					out = append(out, fmt.Sprintf("%s **Implements:** cannot be none — every task must deliver at least one accepted specification section", block.id))
+				} else if !planSpecToken.MatchString(implementsValue) {
+					out = append(out, fmt.Sprintf("%s **Implements:** names no SPEC-NNN section — plan tasks implement accepted specification contracts, not requirements or milestones", block.id))
 				}
 				if small {
 					if strings.TrimSpace(markdownFieldValue(block.body, "Work unit")) == "" {
