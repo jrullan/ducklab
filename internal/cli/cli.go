@@ -646,6 +646,7 @@ func resolveProjectID(client *engineclt.Client, repo string) (string, int) {
 var runVerbs = map[string]bool{
 	"list": true, "show": true, "watch": true, "diff": true, "accept": true,
 	"reject": true, "answer": true, "abort": true, "gc": true, "resume": true,
+	"lift": true,
 }
 
 // taskIDRe is the shape of an ID on the traceability spine (02 §3).

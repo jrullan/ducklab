@@ -204,7 +204,7 @@ func TestAnUnknownRunSubcommandDoesNotStartARun(t *testing.T) {
 			t.Errorf("%q is a task ID and must still run", id)
 		}
 	}
-	for _, v := range []string{"diff", "accept", "show", "list", "watch", "resume", "abort", "reject", "answer", "gc"} {
+	for _, v := range []string{"diff", "accept", "show", "list", "watch", "resume", "lift", "abort", "reject", "answer", "gc"} {
 		if !runVerbs[v] {
 			t.Errorf("%q is a documented subcommand but is not dispatched", v)
 		}
