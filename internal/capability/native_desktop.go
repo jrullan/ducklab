@@ -25,7 +25,7 @@ func (GTK4Clipboard) Detect(ctx Context) Contributions {
 		ReviewRules: []ReviewRule{
 			{Capability: "gtk4-clipboard", ID: "access", Guidance: "GTK4 obtains the system clipboard with gdk_display_get_clipboard(gdk_display_get_default()); GTK3 gtk_clipboard_* calls and the invented gdk_clipboard_get API are not GTK4 interfaces."},
 			{Capability: "gtk4-clipboard", ID: "publish-bytes", Guidance: "To publish serialized image/png bytes in GTK4, wrap the GBytes with gdk_content_provider_new_for_bytes(\"image/png\", bytes), pass that provider to gdk_clipboard_set_content, check its gboolean result, and balance the provider reference. gdk_clipboard_set_image, gdk_clipboard_set_request_callback, and gdk_content_provider_new_for_pixbuf are not GTK4 APIs."},
-			{Capability: "gtk4-clipboard", ID: "completion", Guidance: "GTK4 exposes no request-paintable acknowledgement callback. gdk_clipboard_set_content returning true confirms publication; gdk_clipboard_store_async followed by gdk_clipboard_store_finish confirms a persistence request, not that a compositor consumed the image. Do not invent a callback or use gdk_clipboard_read_async as consumption acknowledgement. Expose the chosen completion to the caller through its GTask/callback so Delivering -> Terminated is observable."},
+			{Capability: "gtk4-clipboard", ID: "completion", Guidance: "GTK4 exposes no request-paintable acknowledgement callback. gdk_clipboard_set_content returning true confirms publication; gdk_clipboard_store_async followed by gdk_clipboard_store_finish confirms a persistence request, not that a compositor consumed the image. Do not invent a callback or use gdk_clipboard_read_async as consumption acknowledgement. Expose the chosen completion to the caller through its GTask/callback, including a boolean/result/error that distinguishes publication success from failure; merely invoking a void callback on both paths makes Delivering -> Terminated observable but hides whether delivery succeeded."},
 			{Capability: "gtk4-clipboard", ID: "main-context", Guidance: "PNG serialization may be expensive and belongs in a worker; marshal only GDK clipboard access and UI/state completion onto the main context. Putting serialization itself inside g_idle_add can block the GTK event loop."},
 		},
 	}
@@ -183,6 +183,7 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "deferred-input-lifetime", Guidance: "A pointer retained for g_idle_add, an async callback, a worker, or a queue outlives the initiating call. Copy its data, take a reference, or make ownership transfer explicit; merely storing a borrowed input in a context struct can become a use-after-free."},
 			{Capability: "glib-async", ID: "callback-context", Guidance: "If a public async API accepts callback user_data, its callback signature and every completion path must pass that exact user_data back. Storing it without delivering it is a broken API contract even when compilation succeeds."},
+			{Capability: "glib-async", ID: "idle-source-id", Guidance: "g_idle_add returns a source ID guaranteed to be greater than zero. Do not invent a g_idle_add()==0 allocation-failure branch or run its main-context callback synchronously from a worker; use g_idle_add_full with a destroy notify when source-data cleanup needs an explicit ownership contract."},
 			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
 			{Capability: "glib-async", ID: "task-validation", Guidance: "g_task_is_valid(result, source_object) is valid when both the GTask and the check use a NULL source_object; NULL does not make the check always false. Report a mismatch only when the task was created with a different source object."},
@@ -190,7 +191,10 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 	}
 }
 
-var threadWorkerArgument = regexp.MustCompile(`g_thread_new\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
+var (
+	threadWorkerArgument = regexp.MustCompile(`g_thread_new\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
+	ignoredThreadHandle  = regexp.MustCompile(`(?m)(?:^|[;{}])\s*g_thread_new\s*\([^;\n]*\)\s*;`)
+)
 
 // Inspect verifies the C-level return contract of functions actually passed
 // to g_thread_new. GCC accepts a gpointer worker that falls off its success
@@ -221,6 +225,12 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 		return nil, err
 	}
 	text := string(body)
+	if ignoredThreadHandle.MatchString(text) {
+		return []Inspection{{
+			Capability: "glib-async", Name: "thread-handle", Enforcement: enforcement,
+			Detail: "g_thread_new returns an owned GThread handle but this call discards it; assign the result and unref it for detached execution (or join it when the design requires joining)",
+		}}, nil
+	}
 	for _, match := range threadWorkerArgument.FindAllStringSubmatch(text, -1) {
 		worker := match[1]
 		functionBody, pointerReturn, found := cThreadFunction(text, worker)

@@ -137,14 +137,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 11 {
+	if len(profile.ReviewRules) != 12 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -179,7 +179,7 @@ func TestGTK4ClipboardRulesReplaceLegacyAndInventedAPIs(t *testing.T) {
 	if gtkRules != 4 {
 		t.Fatalf("GTK4 clipboard rules = %+v", profile.ReviewRules)
 	}
-	for _, want := range []string{"gdk_display_get_clipboard", "gdk_content_provider_new_for_bytes", "gdk_clipboard_set_content", "gdk_clipboard_store_finish", "no request-paintable", "not GTK4 APIs", "worker"} {
+	for _, want := range []string{"gdk_display_get_clipboard", "gdk_content_provider_new_for_bytes", "gdk_clipboard_set_content", "gdk_clipboard_store_finish", "no request-paintable", "not GTK4 APIs", "worker", "distinguishes publication success from failure"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("GTK4 clipboard guidance lacks %q:\n%s", want, joined)
 		}
@@ -321,7 +321,7 @@ static void *capture_worker(void *data) {
   if (!data) return NULL;
   do_capture(data);
 }
-void start(void *ctx) { g_thread_new("capture", capture_worker, ctx); }
+void start(void *ctx) { GThread *thread = g_thread_new("capture", capture_worker, ctx); g_thread_unref(thread); }
 `)
 	findings, err := DefaultRegistry().ResolveInspections(Context{
 		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags gio-2.0) worker.c",
@@ -341,7 +341,7 @@ static gpointer capture_worker(gpointer data) {
   if (data) { do_capture(data); }
   return NULL;
 }
-void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
+void start(gpointer ctx) { GThread *thread = g_thread_new("capture", capture_worker, ctx); g_thread_unref(thread); }
 `)
 	findings, err := DefaultRegistry().ResolveInspections(Context{
 		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags glib-2.0) worker.c",
@@ -360,7 +360,7 @@ func TestGLibInspectionRejectsVoidThreadWorkerSignature(t *testing.T) {
 static void capture_worker(gpointer data) {
   do_capture(data);
 }
-void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
+void start(gpointer ctx) { GThread *thread = g_thread_new("capture", capture_worker, ctx); g_thread_unref(thread); }
 `)
 	findings, err := DefaultRegistry().ResolveInspections(Context{
 		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags glib-2.0) worker.c",
@@ -370,6 +370,23 @@ void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
 	}
 	if len(findings) != 1 || !strings.Contains(findings[0].Detail, "declared void") {
 		t.Fatalf("void worker signature findings = %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsDiscardedThreadHandle(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static gpointer worker(gpointer data) { return data; }
+void start(gpointer data) { g_thread_new("worker", worker, data); }
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags glib-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Capability != "glib-async" || findings[0].Name != "thread-handle" {
+		t.Fatalf("discarded thread handle findings = %+v", findings)
 	}
 }
 
