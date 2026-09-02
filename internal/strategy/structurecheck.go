@@ -214,7 +214,7 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 // scopeArchitectSection discards sibling sections emitted during an isolated
 // section pass before they can enter structure repair or reviewer context.
 // The stage owns routing; a model reply cannot expand that assignment.
-func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID string) (*agent.Outcome, error) {
+func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID, expectedTitle string) (*agent.Outcome, error) {
 	if outcome == nil || !strings.HasPrefix(contract, "markdown_sections:") {
 		return outcome, nil
 	}
@@ -225,6 +225,21 @@ func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID string) 
 		}
 		return rewriteScopedArchitectSection(outcome, contract, sec, expectedID)
 	}
+	if wanted := normalizedSectionTitle(expectedTitle); wanted != "" {
+		var matched *agent.Section
+		for i := range sections {
+			if normalizedSectionTitle(sections[i].Title) != wanted {
+				continue
+			}
+			if matched != nil {
+				return nil, fmt.Errorf("isolated architect pass returned multiple sections titled %q", expectedTitle)
+			}
+			matched = &sections[i]
+		}
+		if matched != nil {
+			return rewriteScopedArchitectSection(outcome, contract, *matched, expectedID)
+		}
+	}
 	if len(sections) == 1 {
 		// The section ID is an engine-owned routing coordinate. A reviewer may
 		// mistakenly ask the architect to renumber an existing task; preserve
@@ -233,6 +248,10 @@ func scopeArchitectSection(outcome *agent.Outcome, contract, expectedID string) 
 		return rewriteScopedArchitectSection(outcome, contract, sections[0], expectedID)
 	}
 	return nil, fmt.Errorf("isolated architect pass returned no section %s", expectedID)
+}
+
+func normalizedSectionTitle(title string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.NewReplacer("&", " and ", "-", " ", "_", " ").Replace(title))), " ")
 }
 
 func rewriteScopedArchitectSection(outcome *agent.Outcome, contract string, sec agent.Section, expectedID string) (*agent.Outcome, error) {

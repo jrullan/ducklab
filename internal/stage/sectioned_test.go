@@ -96,6 +96,9 @@ func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
 	if script.ArchitectScopeID != "T-008" {
 		t.Fatalf("architect scope = %q, want T-008", script.ArchitectScopeID)
 	}
+	if script.ArchitectScopeTitle != "Lifecycle" {
+		t.Fatalf("architect scope title = %q", script.ArchitectScopeTitle)
+	}
 	for _, turn := range script.Turns {
 		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {
 			t.Fatalf("task architect contract = %q", turn.Contract)
@@ -108,6 +111,9 @@ func TestNewPlanTaskUsesPlaceholderAsV2IsolationBoundary(t *testing.T) {
 	script := sectionPass("M", 3, "council", nil, assigned, true)
 	if script.ArchitectScopeID != "T-900" || !strings.Contains(script.CriticScope, "T-900") {
 		t.Fatalf("new task boundaries = architect %q critic %q", script.ArchitectScopeID, script.CriticScope)
+	}
+	if script.ArchitectScopeTitle != "Lifecycle" {
+		t.Fatalf("new task scope title = %q", script.ArchitectScopeTitle)
 	}
 	for _, turn := range script.Turns {
 		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {

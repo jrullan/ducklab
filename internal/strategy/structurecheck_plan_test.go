@@ -85,7 +85,7 @@ func TestIsolatedArchitectOutcomeDropsSiblingTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008")
+	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008", "CLI")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +100,27 @@ func TestIsolatedArchitectOutcomeRestoresEngineOwnedID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008")
+	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-008", "Lifecycle")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sectionsOf(got)) != 1 || sectionsOf(got)[0].ID != "T-008" || strings.Contains(got.Text, "T-010") {
 		t.Fatalf("normalized outcome = %#v", got)
+	}
+}
+
+func TestIsolatedNewTaskFallsBackToItsUniqueAssignedTitle(t *testing.T) {
+	raw := "## T-006 — GtkApplication Initialization\n\n**Implements:** SPEC-001\n\nright\n\n## T-007 — CLI Parsing\n\n**Implements:** SPEC-001\n\nwrong"
+	parsed, err := agent.ParseContract("markdown_sections:T", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := scopeArchitectSection(&agent.Outcome{Text: raw, Parsed: parsed}, "markdown_sections:T", "T-900", "GtkApplication Initialization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sectionsOf(got)) != 1 || sectionsOf(got)[0].ID != "T-900" || !strings.Contains(got.Text, "right") || strings.Contains(got.Text, "wrong") {
+		t.Fatalf("title-scoped new task = %#v", got)
 	}
 }
 

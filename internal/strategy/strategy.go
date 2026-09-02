@@ -129,6 +129,10 @@ type Script struct {
 	// a task pass with helpful sibling tasks; those belong to their own passes
 	// and must not consume this pass's repair budget.
 	ArchitectScopeID string
+	// ArchitectScopeTitle is the semantic fallback for a new-section
+	// placeholder. A small architect may ignore T-900 and emit several proposed
+	// ids; one unambiguous assigned title can still be isolated safely.
+	ArchitectScopeTitle string
 }
 
 // Turn is a script turn.

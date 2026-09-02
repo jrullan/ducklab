@@ -242,6 +242,7 @@ func sectionPass(prefix string, pass int, mode string, critics []config.Duckling
 	}
 	if sec != nil {
 		script.ArchitectScopeID = sec.ID
+		script.ArchitectScopeTitle = sec.Title
 		script.CriticScope = "Review only section `" + sec.ID + "` (" + sec.Title + "). " +
 			"The absence of every sibling section is intentional: never require, mention, or recreate another id. " +
 			"Judge only whether this replacement correctly applies the clauses relevant to its existing title and behavior. " +

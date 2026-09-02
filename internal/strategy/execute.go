@@ -615,7 +615,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			turn.Contract = documentContract
 			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect && script.ArchitectScopeID != "" {
 				var scopeErr error
-				outcome, scopeErr = scopeArchitectSection(outcome, documentContract, script.ArchitectScopeID)
+				outcome, scopeErr = scopeArchitectSection(outcome, documentContract, script.ArchitectScopeID, script.ArchitectScopeTitle)
 				if scopeErr != nil {
 					err = scopeErr
 				}
