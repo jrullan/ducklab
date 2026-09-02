@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jrullan/ducklab/internal/agent"
+	"github.com/jrullan/ducklab/internal/artifact"
 )
 
 // Plan rules are checked at task granularity: every task names what it
@@ -42,5 +43,31 @@ func TestTaskGraphRequiresDependencyAndVerificationCoverage(t *testing.T) {
 	}
 	if itemsOverlap(taskFieldItems(blocks[1].body, "Produces"), taskFieldItems(blocks[1].body, "Exercises")) {
 		t.Fatal("unrelated Exercises artifact was treated as coverage")
+	}
+}
+
+func TestPlanRejectsSingleOutputCompileWithMultipleInputs(t *testing.T) {
+	bad := "gcc -c src/backend/x11_capture.c src/backend/capture_backend.h -o /dev/null"
+	if !invalidSingleOutputCompile(bad) {
+		t.Fatal("known-invalid gcc command was accepted")
+	}
+	for _, good := range []string{
+		"gcc -c src/backend/x11_capture.c -o /dev/null",
+		"gcc -c src/backend/x11_capture.c src/backend/other.c",
+		"cc -fsyntax-only src/backend/x11_capture.c",
+	} {
+		if invalidSingleOutputCompile(good) {
+			t.Errorf("valid command was rejected: %s", good)
+		}
+	}
+
+	doc := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}, Sections: []artifact.Section{{
+		ID: "M-001", Children: []artifact.Section{{
+			ID: "T-004", Body: "**Verification:** `" + bad + "`",
+		}},
+	}}}
+	joined := strings.Join(ProposalStructureFindings(doc), "\n")
+	if !strings.Contains(joined, "T-004") || !strings.Contains(joined, "multiple input files") {
+		t.Fatalf("materialized proposal did not block invalid verification: %s", joined)
 	}
 }

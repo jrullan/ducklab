@@ -70,6 +70,8 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 						out = append(out, fmt.Sprintf("%s has no **Verification:** line — name the command or deterministic check that exercises this task's changed artifacts; a green project build that ignores them is not verification", block.id))
 					} else if taskVerificationCommand(block.body) == "" {
 						out = append(out, fmt.Sprintf("%s **Verification:** must put the executable command in backticks; prose is never executed", block.id))
+					} else if invalidSingleOutputCompile(taskVerificationCommand(block.body)) {
+						out = append(out, fmt.Sprintf("%s **Verification:** uses `-c` with multiple input files and one `-o`; GCC/Clang reject that command before compiling — compile one translation unit or omit the single output", block.id))
 					}
 					if !taskHasField(block.body, "Consumes") {
 						out = append(out, fmt.Sprintf("%s has no **Consumes:** line — name prerequisite artifacts/capabilities, or write none", block.id))
@@ -308,6 +310,17 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 		isRequirements = strings.HasPrefix(doc.Sections[0].ID, "REQ-")
 	}
 	if !isRequirements {
+		if doc.Front.Kind == artifact.KindPlan || (doc.Front.Kind == "" && len(doc.Sections) > 0 && strings.HasPrefix(doc.Sections[0].ID, "M-")) {
+			var out []string
+			for _, milestone := range doc.Sections {
+				for _, task := range milestone.Children {
+					if command := taskVerificationCommand(task.Body); invalidSingleOutputCompile(command) {
+						out = append(out, fmt.Sprintf("%s **Verification:** uses `-c` with multiple input files and one `-o`; GCC/Clang reject that command before compiling — compile one translation unit or omit the single output", task.ID))
+					}
+				}
+			}
+			return out
+		}
 		return nil
 	}
 	var out []string
@@ -369,6 +382,23 @@ func taskVerificationCommand(body string) string {
 		return ""
 	}
 	return strings.TrimSpace(m[1])
+}
+
+func invalidSingleOutputCompile(command string) bool {
+	fields := strings.Fields(command)
+	hasCompile, hasOutput, inputs := false, false, 0
+	for i, field := range fields {
+		field = strings.Trim(field, "'\"")
+		switch {
+		case field == "-c":
+			hasCompile = true
+		case field == "-o" || strings.HasPrefix(field, "-o") && len(field) > 2:
+			hasOutput = true
+		case i > 0 && (strings.HasSuffix(field, ".c") || strings.HasSuffix(field, ".cc") || strings.HasSuffix(field, ".cpp") || strings.HasSuffix(field, ".h") || strings.HasSuffix(field, ".hpp")):
+			inputs++
+		}
+	}
+	return hasCompile && hasOutput && inputs > 1
 }
 
 func itemsOverlap(a, b []string) bool {
