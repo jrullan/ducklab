@@ -276,3 +276,18 @@ func taskVerificationCommand(projectRoot, taskID string) string {
 	}
 	return ""
 }
+
+func taskArtifactFiles(projectRoot, taskID, field string) []string {
+	value := taskField(projectRoot, taskID, field)
+	var files []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if !strings.HasPrefix(strings.ToLower(item), "file:") {
+			continue
+		}
+		if path := strings.TrimSpace(item[len("file:"):]); path != "" {
+			files = append(files, path)
+		}
+	}
+	return files
+}

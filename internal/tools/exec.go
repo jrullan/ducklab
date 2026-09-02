@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/capability"
@@ -172,6 +174,9 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	if command == "" {
 		return "none", "", nil
 	}
+	if missing := missingProducedFiles(ectx.ProjectRoot, ectx.TaskProducedFiles); len(missing) > 0 {
+		return "red", "task artifact contract:\ngate: red\nmissing declared Produces files: " + strings.Join(missing, ", "), nil
+	}
 	res, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
 		Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
 	}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
@@ -186,6 +191,8 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	checks, err := capability.DefaultRegistry().ResolveChecks(capability.Context{
 		ProjectRoot:      ectx.ProjectRoot,
 		TaskVerification: command,
+		ProducedFiles:    ectx.TaskProducedFiles,
+		ConsumedFiles:    ectx.TaskConsumedFiles,
 		Policies:         ectx.Capabilities.Policy,
 	}, ectx.Capabilities.Auto, ectx.Capabilities.Enabled, ectx.Capabilities.Disabled)
 	if err != nil {
@@ -207,6 +214,8 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	inspections, err := capability.DefaultRegistry().ResolveInspections(capability.Context{
 		ProjectRoot:      ectx.ProjectRoot,
 		TaskVerification: command,
+		ProducedFiles:    ectx.TaskProducedFiles,
+		ConsumedFiles:    ectx.TaskConsumedFiles,
 		Policies:         ectx.Capabilities.Policy,
 	}, ectx.Capabilities.Auto, ectx.Capabilities.Enabled, ectx.Capabilities.Disabled)
 	if err != nil {
@@ -220,6 +229,22 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		}
 	}
 	return "green", log, nil
+}
+
+func missingProducedFiles(root string, files []string) []string {
+	var missing []string
+	for _, relative := range files {
+		clean := filepath.Clean(relative)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			missing = append(missing, relative+" (invalid path)")
+			continue
+		}
+		info, err := os.Stat(filepath.Join(root, clean))
+		if err != nil || info.IsDir() {
+			missing = append(missing, relative)
+		}
+	}
+	return missing
 }
 
 func formatGateResult(res *verify.Result) string {

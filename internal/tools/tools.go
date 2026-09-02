@@ -166,6 +166,11 @@ type ExecContext struct {
 	// execute it before Verify, so verify_run must do the same or it can show a
 	// green gate immediately before the round gate turns red.
 	TaskVerification string
+	// TaskProducedFiles and TaskConsumedFiles are exact repository-relative
+	// file contracts parsed from the accepted plan. They let the core enforce
+	// existence and capability providers inspect cross-file contracts.
+	TaskProducedFiles []string
+	TaskConsumedFiles []string
 	// ShellEnv is the environment for shell and skill commands. Nil means the
 	// engine's own, which is the default.
 	ShellEnv []string

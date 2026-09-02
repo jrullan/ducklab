@@ -19,6 +19,8 @@ const (
 type Context struct {
 	ProjectRoot      string
 	TaskVerification string
+	ProducedFiles    []string
+	ConsumedFiles    []string
 	Policies         map[string]string
 }
 

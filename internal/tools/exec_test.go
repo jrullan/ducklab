@@ -84,9 +84,28 @@ func TestVerifyRunRunsTaskThenProjectWhenBothAreGreen(t *testing.T) {
 	}
 }
 
+func TestVerifyRunRejectsMissingDeclaredProducedFileBeforeCommands(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:       t.TempDir(),
+		TaskVerification:  "echo task-command-must-not-run",
+		TaskProducedFiles: []string{"src/backend/required.h"},
+		Verify:            config.Verify{Mode: "custom", Custom: "echo project-command-must-not-run", TimeoutS: 30},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "missing declared Produces files: src/backend/required.h") {
+		t.Fatalf("missing produced file did not make the gate red: %s", res.Content)
+	}
+	if strings.Contains(res.Content, "must-not-run") {
+		t.Fatalf("commands ran despite a broken artifact contract: %s", res.Content)
+	}
+}
+
 func TestBareNativeSyntaxGateReportsCompilerWarningsWithoutChangingTheContract(t *testing.T) {
 	root := t.TempDir()
-	source := `void takes_unsigned(unsigned int *value); int main(void) { int value = 0; takes_unsigned(&value); return 0; }`
+	source := `int main(void) { int unused = 0; return 0; }`
 	if err := os.WriteFile(filepath.Join(root, "warning.c"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +126,7 @@ func TestBareNativeSyntaxGateReportsCompilerWarningsWithoutChangingTheContract(t
 
 func TestNativeWarningsCanBeADeclaredRequiredCapability(t *testing.T) {
 	root := t.TempDir()
-	source := `void takes_unsigned(unsigned int *value); int main(void) { int value = 0; takes_unsigned(&value); return 0; }`
+	source := `int main(void) { int unused = 0; return 0; }`
 	if err := os.WriteFile(filepath.Join(root, "warning.c"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}

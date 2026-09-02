@@ -130,4 +130,14 @@ func TestTaskVerificationCommandIsTheBacktickedCommandOnly(t *testing.T) {
 	if got := taskVerificationCommand(dir, "T-001"); got != "cc -fsyntax-only src/app.h" {
 		t.Fatalf("task verification command = %q", got)
 	}
+	plan = "## M-01 — Core\n\n### T-001 — Header\n\n**Produces:** file:src/app.h, build-target:app, file:include/app.h\n**Consumes:** file:src/base.h, capability:gtk4\n**Verification:** `true`\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ducklab", "docs", "plan.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(taskArtifactFiles(dir, "T-001", "produces"), ","); got != "src/app.h,include/app.h" {
+		t.Fatalf("produced files = %q", got)
+	}
+	if got := strings.Join(taskArtifactFiles(dir, "T-001", "consumes"), ","); got != "src/base.h" {
+		t.Fatalf("consumed files = %q", got)
+	}
 }

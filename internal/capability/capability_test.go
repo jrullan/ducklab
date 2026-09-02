@@ -75,6 +75,21 @@ func TestNativeAPISafetyPolicyCanDowngradeOrDisable(t *testing.T) {
 	}
 }
 
+func TestNativeInspectionRejectsDuplicateCompleteTypedefsAcrossTaskHeaders(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "src/producer.h", `typedef struct { unsigned width; } ImageData;`)
+	writeFixture(t, root, "src/consumer.h", `typedef struct { int width; } ImageData;`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c src/app.c", ProducedFiles: []string{"src/producer.h"}, ConsumedFiles: []string{"src/consumer.h"},
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Name != "header contract" || !strings.Contains(findings[0].Detail, "ImageData") {
+		t.Fatalf("duplicate typedef findings = %+v", findings)
+	}
+}
+
 func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	// A local adapter is enough to prove the registry composes providers; the
 	// core does not need a switch for every language or stack.

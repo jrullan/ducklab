@@ -1,6 +1,13 @@
 package capability
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
 
 // Native is the C/C++ toolchain capability. It contains no project names,
 // task IDs, file paths, or framework assumptions.
@@ -53,6 +60,54 @@ func (Native) Checks(ctx Context) []Check {
 		}
 	}
 	return checks
+}
+
+var completeTypedef = regexp.MustCompile(`(?s)\btypedef\s+(?:struct|union|enum)\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\{.*?\}\s*([A-Za-z_][A-Za-z0-9_]*)\s*;`)
+
+// Inspect compiles a stack-neutral view of the task's header contract. A
+// translation unit can include multiple task headers, so defining the same
+// complete typedef independently in two of them is an integration failure
+// even when the task's one source file compiles in isolation.
+func (Native) Inspect(ctx Context) ([]Inspection, error) {
+	if !nativeCompileCommand(ctx.TaskVerification) {
+		return nil, nil
+	}
+	policy := ctx.Policies["c-native.header-contract"]
+	if policy == "off" {
+		return nil, nil
+	}
+	enforcement := Required
+	if policy == "diagnostic" {
+		enforcement = Diagnostic
+	}
+	files := append(append([]string{}, ctx.ProducedFiles...), ctx.ConsumedFiles...)
+	sort.Strings(files)
+	definitions := map[string]string{}
+	seenFiles := map[string]bool{}
+	for _, relative := range files {
+		if filepath.Ext(relative) != ".h" || seenFiles[relative] {
+			continue
+		}
+		seenFiles[relative] = true
+		body, err := os.ReadFile(filepath.Join(ctx.ProjectRoot, filepath.Clean(relative)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, match := range completeTypedef.FindAllStringSubmatch(string(body), -1) {
+			name := match[1]
+			if first, duplicate := definitions[name]; duplicate && first != relative {
+				return []Inspection{{
+					Capability: "c-native", Name: "header contract", Enforcement: enforcement,
+					Detail: fmt.Sprintf("complete typedef %s is independently defined in both %s and %s; keep one canonical definition and include its owning header", name, first, relative),
+				}}, nil
+			}
+			definitions[name] = relative
+		}
+	}
+	return nil, nil
 }
 
 func apiSafetyCommand(command string) string {
