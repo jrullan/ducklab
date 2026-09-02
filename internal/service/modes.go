@@ -543,6 +543,10 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		ResumeFrom:           resumeTurn(mc.rs.run),
 		ProjectRoot:          root,
 		TaskID:               mc.req.TaskID,
+		// Task execution must carry the same resolved seat class as document
+		// stages. Without this, small-seat strategy guards existed but build
+		// pair runs silently received the large-seat behavior.
+		SmallSeat: s.smallImplementerSeat(mc.rs.run.ProjectID),
 		// Answers the person already gave ride ON the prompt: a resumed run
 		// replays from scratch, and a model that cannot see the decisions
 		// re-asks them in new words forever.

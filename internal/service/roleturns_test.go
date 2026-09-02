@@ -141,6 +141,20 @@ func TestRoleConfigurationCannotInflatePairReview(t *testing.T) {
 	}
 }
 
+func TestTaskSeatClassificationRecognizesLocalBuildImplementer(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-local")
+	s.cfgMu.Lock()
+	provider := s.cfg.Providers["fake"]
+	provider.BaseURL = "http://127.0.0.1:1234/v1"
+	s.cfg.Providers["fake"] = provider
+	s.cfgMu.Unlock()
+
+	projectID, _ := projectWithConfig(t, s, "local-seat")
+	if !s.smallImplementerSeat(projectID) {
+		t.Fatal("local provider selected by the build roster was not classified as a small implementer seat")
+	}
+}
+
 // Neocapture's fragment reviewer inherited the configured generic reviewer
 // cap of 100 and exposed that service-side script rewriting happened before
 // ExecuteScript's critic guard. Document critics carry their draft in the
