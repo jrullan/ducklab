@@ -359,6 +359,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// round. Bounded: the duck is a counselor, not a judge, and only the
 		// reviewer and the gate are the independent check.
 		consultRetries := 0
+		// A missing deliverables report is a protocol-level incomplete ending,
+		// not something worth spending an independent reviewer on. One bounded
+		// same-seat retry lets the implementer finish from the current tree.
+		reportRetries := 0
 		// The implementer's latest deliverables report this round: data for
 		// the reviewer, evidence for the duck, a gap to flag on approve.
 		var lastReport *DeliverablesReport
@@ -891,6 +895,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 					reportData["missing"] = lastReport.Undelivered()
 					emit(params, "deliverables_report", reportData)
+					if lastReport.Unreported && reportRetries == 0 {
+						reportRetries++
+						correctiveNotes = append(correctiveNotes,
+							"Your previous implementer turn ended without the required deliverables JSON report. Continue from the CURRENT tree; do not restart research. Finish any work still pending, run verify_run, and end with one status entry for every numbered deliverable.")
+						emit(params, "deliverables_retry", map[string]interface{}{
+							"round": round, "retry": reportRetries, "of": 1,
+							"detail": "the implementer omitted its completion report; retrying before review",
+						})
+						i--
+						continue
+					}
 					missing := map[int]bool{}
 					for _, id := range lastReport.Undelivered() {
 						missing[id] = true

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,5 +77,35 @@ func TestARepeatedReadInOneTurnIsRefused(t *testing.T) {
 	third, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
 	if third.IsError {
 		t.Fatalf("a new turn's read was refused: %s", third.Content)
+	}
+}
+
+func TestResearchBudgetForcesActionAndReopensAfterWrite(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(&FSRead{})
+	reg.Register(&FSWrite{})
+	ectx := &ExecContext{ProjectRoot: dir}
+	ectx.BeginTurn()
+	for i := 0; i < ExplorationCallLimit; i++ {
+		name := fmt.Sprintf("read-%02d.txt", i)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		res, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(fmt.Sprintf(`{"path":%q}`, name)))
+		if res.IsError {
+			t.Fatalf("research call %d was refused early: %s", i+1, res.Content)
+		}
+	}
+	if ectx.ToolAvailable("fs_read") || ectx.ToolAvailable("shell") || !ectx.ToolAvailable("fs_write") || !ectx.ToolAvailable("verify_run") {
+		t.Fatal("research boundary did not close exploration while preserving action tools")
+	}
+	blocked, _ := reg.Execute(context.Background(), ectx, "fs_read", json.RawMessage(`{"path":"read-00.txt"}`))
+	if !blocked.IsError || !strings.Contains(blocked.Content, "RESEARCH BUDGET EXHAUSTED") {
+		t.Fatalf("post-budget research was not refused with an action boundary: %+v", blocked)
+	}
+	written, _ := reg.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"new.txt","content":"progress"}`))
+	if written.IsError || !ectx.ToolAvailable("fs_read") || !ectx.ToolAvailable("shell") {
+		t.Fatalf("successful file progress did not reopen bounded research: %+v", written)
 	}
 }

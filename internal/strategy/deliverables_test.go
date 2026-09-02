@@ -238,10 +238,11 @@ func TestNoStrongerCandidateEmitsNoEscalationSuggestion(t *testing.T) {
 	}
 }
 
-func TestUnreportedDeliverablesDoNotSummonTheDuck(t *testing.T) {
+func TestUnreportedDeliverablesRetryBeforeReview(t *testing.T) {
 	rec := &recorder{}
 	params := pairParams(rec, "green",
 		&agent.Outcome{Text: "Did it all.", ToolCalls: []agent.ToolCallRecord{{Name: "fs_write", Result: &tools.Result{Content: "ok"}}}},
+		&agent.Outcome{Text: `Finished. {"deliverables":[{"id":1,"status":"done"},{"id":2,"status":"done"}]}`},
 		verdictOutcome("approve"),
 	)
 	params.Deliverables = []string{"A", "B"}
@@ -249,12 +250,19 @@ func TestUnreportedDeliverablesDoNotSummonTheDuck(t *testing.T) {
 	if _, err := ExecutePair(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
+	implementers, reviewerAt := 0, -1
 	for i, role := range rec.roles {
-		if role == config.RoleAdvisor {
-			t.Fatal("the duck was summoned for a missing report")
+		if role == config.RoleImplementer {
+			implementers++
 		}
-		if role == config.RoleReviewer && !strings.Contains(rec.prompts[i], "filed no report") {
-			t.Errorf("reviewer not told the report is missing:\n%s", rec.prompts[i])
+		if role == config.RoleReviewer {
+			reviewerAt = i
 		}
+	}
+	if implementers != 2 || reviewerAt != 2 {
+		t.Fatalf("missing report did not retry the implementer before review: roles=%v", rec.roles)
+	}
+	if !strings.Contains(rec.prompts[1], "without the required deliverables JSON report") || !strings.Contains(rec.prompts[1], "do not restart research") {
+		t.Errorf("retry did not receive the deterministic protocol correction:\n%s", rec.prompts[1])
 	}
 }

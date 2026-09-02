@@ -139,6 +139,10 @@ type ExecContext struct {
 	// still need to turn that context into fs_patch/fs_write and verify_run.
 	// Closing every tool here stranded a fully constructed T-004 rewrite.
 	ReadToolsClosed bool
+	// explorationCalls counts observational calls since the last successful
+	// file mutation. Exact-call brakes cannot see a research loop made of
+	// slightly different grep/find/read queries that all pursue the same fact.
+	explorationCalls int
 	// DraftUnderReview holds, per artifact kind, the draft a document
 	// council is currently judging. It lives only in the conversation until
 	// a person accepts it; a seat that asks artifact_read for it is served
@@ -301,7 +305,11 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
-	if ectx.ReadToolsClosed && readOnlyTool[name] {
+	if explorationTool[name] && ectx.explorationCalls >= ExplorationCallLimit {
+		ectx.ReadToolsClosed = true
+		return ErrorResult("RESEARCH BUDGET EXHAUSTED: %d observational calls without a file change are enough. Stop varying searches and shell probes. Synthesize what you learned, then write/patch, verify, ask one concrete question, or report a blocker.", ExplorationCallLimit), nil
+	}
+	if ectx.ReadToolsClosed && explorationTool[name] {
 		return ErrorResult("read-only tools are CLOSED for this reply: stop exploring and use what you already read; write, patch, verify, or answer"), nil
 	}
 	sig := name + "\x00" + string(args)
@@ -388,6 +396,20 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 			"(sub-numbered ids like REQ-003.1 never are). Use what is in your prompt and reply.", SearchMissLimit), nil
 	}
 	res, err := t.Execute(ctx, ectx, args)
+	if explorationTool[name] {
+		ectx.explorationCalls++
+		if ectx.explorationCalls >= ExplorationCallLimit {
+			ectx.ReadToolsClosed = true
+			if res != nil {
+				res.Content += "\n\n[research boundary reached: observational tools are now closed until you make a file change; synthesize and act]"
+			}
+		}
+	} else if deliveryMutationTool[name] && res != nil && !res.IsError {
+		// A real file change starts a new inspect/act cycle. Re-open bounded
+		// reads so the model can inspect the result before verification.
+		ectx.explorationCalls = 0
+		ectx.ReadToolsClosed = false
+	}
 	if res != nil && res.EndTurn {
 		ectx.ToolsClosed = true
 	}
@@ -446,6 +468,20 @@ var readOnlyTool = map[string]bool{
 	"skill_list": true, "skill_read": true, "ref_read": true, "git_log": true, "git_diff": true, "git_status": true,
 }
 
+// Shell is observational under the model shell policy: file mutations are
+// rejected and project verification has its own verify_run tool. Counting it
+// closes the loophole where distinct grep/find/cat commands evade the exact
+// repeated-read brake.
+var explorationTool = map[string]bool{
+	"fs_read": true, "fs_list": true, "fs_search": true, "artifact_read": true, "task_read": true,
+	"skill_list": true, "skill_read": true, "ref_read": true, "git_log": true, "git_diff": true, "git_status": true,
+	"shell": true,
+}
+
+var deliveryMutationTool = map[string]bool{
+	"fs_write": true, "fs_write_lines": true, "fs_patch": true, "fs_delete": true,
+}
+
 // Docs returns the root that holds .ducklab/docs for this run.
 func (e *ExecContext) Docs() string {
 	if e.DocsRoot != "" {
@@ -462,6 +498,7 @@ func (e *ExecContext) BeginTurn() {
 	e.searchMisses = 0
 	e.ToolsClosed = false
 	e.ReadToolsClosed = false
+	e.explorationCalls = 0
 	e.lastFailSig, e.lastFailCount = "", 0
 }
 
@@ -476,8 +513,13 @@ func (e *ExecContext) ToolAvailable(name string) bool {
 	if e.ToolsClosed {
 		return false
 	}
-	return !(e.ReadToolsClosed && readOnlyTool[name])
+	return !(e.ReadToolsClosed && explorationTool[name])
 }
+
+// ExplorationCallLimit bounds a read-only research phase before the model
+// must turn gathered evidence into code, verification, a question or a clear
+// blocker. A successful file mutation starts a fresh bounded phase.
+const ExplorationCallLimit = 20
 
 // SearchMissLimit is how many fs_search calls may find nothing in a row
 // before the next one is refused with directions.

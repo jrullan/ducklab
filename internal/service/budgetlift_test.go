@@ -122,7 +122,7 @@ func TestResumeReplaysBudgetInterruptedReviewerWithItsPartialWork(t *testing.T) 
 		if !hasToolResult {
 			return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", ToolCalls: []provider.ToolCall{toolCall("fs_patch", `{"path":"add.go","edits":[{"search":"return a - b // BUG: should be a + b","replace":"return a + b"}]}`)}}, FinishReason: provider.FinishToolCalls}}, Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 10}}
 		}
-		return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: "Implemented the addition fix."}, FinishReason: provider.FinishStop}}, Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 10}}
+		return &provider.ChatResponse{Choices: []provider.Choice{{Message: provider.Message{Role: "assistant", Content: `Implemented the addition fix. {"deliverables":[{"id":1,"status":"done"}]}`}, FinishReason: provider.FinishStop}}, Usage: provider.Usage{PromptTokens: 10, CompletionTokens: 10}}
 	}
 
 	run, err := s.RunStart(context.Background(), projectID, RunRequest{TaskID: "T-001", Mode: "pair", Budget: &budget.Budget{MaxTokens: 50}})

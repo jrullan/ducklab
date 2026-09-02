@@ -63,12 +63,13 @@ const (
 // Distressed is the trigger. Conservative on purpose: the duck must not cost
 // a turn on a run that is merely working.
 func (d distressSignals) Distressed() bool {
-	return d.Refusals > 0 || d.Streak >= distressStreak || d.GateReds >= distressGateReds || len(d.Undelivered) > 0
+	return d.Refusals > 0 || d.Streak >= distressStreak || d.GateReds >= distressGateReds || len(d.Undelivered) > 0 || d.Unreported
 }
 
 // measureDistressWithReport folds the implementer's own report into the
-// telemetry. Absence of a report is recorded, not treated as distress: a
-// seat learning the contract must not summon the duck on every turn.
+// telemetry. Absence of a requested report is distress: it often means the
+// turn ended at its call cap while still promising future work. Letting the
+// reviewer start then spends an independent turn proving known incompleteness.
 func measureDistressWithReport(outcome *agent.Outcome, rep *DeliverablesReport) distressSignals {
 	d := measureDistress(outcome)
 	if rep != nil {

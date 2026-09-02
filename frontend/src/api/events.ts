@@ -334,6 +334,7 @@ export const KNOWN_EVENT_TYPES = [
   // The deliverables checklist: the implementer's report, and an approve
   // over items it reported undelivered.
   "deliverables_report",
+  "deliverables_retry",
   "deliverables_gap",
   "skill_problems",
   "release_drafted",
