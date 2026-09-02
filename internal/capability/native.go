@@ -2,6 +2,7 @@ package capability
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,6 +64,7 @@ func (Native) Checks(ctx Context) []Check {
 }
 
 var completeTypedef = regexp.MustCompile(`(?s)\btypedef\s+(?:struct|union|enum)\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\{.*?\}\s*([A-Za-z_][A-Za-z0-9_]*)\s*;`)
+var headerGuard = regexp.MustCompile(`(?m)^\s*#ifndef\s+([A-Za-z_][A-Za-z0-9_]*)\s*$`)
 
 // Inspect compiles a stack-neutral view of the task's header contract. A
 // translation unit can include multiple task headers, so defining the same
@@ -84,6 +86,7 @@ func (Native) Inspect(ctx Context) ([]Inspection, error) {
 	sort.Strings(files)
 	definitions := map[string]string{}
 	seenFiles := map[string]bool{}
+	taskHeaderGuards := map[string]map[string]string{}
 	for _, relative := range files {
 		if filepath.Ext(relative) != ".h" || seenFiles[relative] {
 			continue
@@ -96,6 +99,13 @@ func (Native) Inspect(ctx Context) ([]Inspection, error) {
 			}
 			return nil, err
 		}
+		if match := headerGuard.FindSubmatch(body); match != nil {
+			base := filepath.Base(relative)
+			if taskHeaderGuards[base] == nil {
+				taskHeaderGuards[base] = map[string]string{}
+			}
+			taskHeaderGuards[base][string(match[1])] = relative
+		}
 		for _, match := range completeTypedef.FindAllStringSubmatch(string(body), -1) {
 			name := match[1]
 			if first, duplicate := definitions[name]; duplicate && first != relative {
@@ -107,7 +117,70 @@ func (Native) Inspect(ctx Context) ([]Inspection, error) {
 			definitions[name] = relative
 		}
 	}
+	if finding, err := inspectShadowedTaskHeaders(ctx.ProjectRoot, taskHeaderGuards, seenFiles, enforcement); err != nil || finding != nil {
+		if finding == nil {
+			return nil, err
+		}
+		return []Inspection{*finding}, err
+	}
 	return nil, nil
+}
+
+// inspectShadowedTaskHeaders catches a subtle integration failure that an
+// isolated compiler command cannot: two headers with the same basename and
+// include guard resolve differently as -I ordering changes. Restricting the
+// scan to basenames and guards already present in the task contract avoids
+// treating unrelated, intentionally duplicated names as task failures.
+func inspectShadowedTaskHeaders(root string, task map[string]map[string]string, taskFiles map[string]bool, enforcement Enforcement) (*Inspection, error) {
+	if root == "" || len(task) == 0 {
+		return nil, nil
+	}
+	var finding *Inspection
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".ducklab", "build", "node_modules", "vendor":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		base := entry.Name()
+		guards, relevant := task[base]
+		if !relevant || strings.ToLower(filepath.Ext(base)) != ".h" {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if taskFiles[relative] {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		match := headerGuard.FindSubmatch(body)
+		if match == nil {
+			return nil
+		}
+		canonical, duplicate := guards[string(match[1])]
+		if !duplicate {
+			return nil
+		}
+		finding = &Inspection{
+			Capability: "c-native", Name: "header shadowing", Enforcement: enforcement,
+			Detail: fmt.Sprintf("%s and %s share basename %s and include guard %s; include-path order can silently select the wrong API. Keep one canonical owning header", canonical, relative, base, match[1]),
+		}
+		return fs.SkipAll
+	})
+	return finding, err
 }
 
 func apiSafetyCommand(command string) string {

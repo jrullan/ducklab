@@ -90,6 +90,21 @@ func TestNativeInspectionRejectsDuplicateCompleteTypedefsAcrossTaskHeaders(t *te
 	}
 }
 
+func TestNativeInspectionRejectsShadowedTaskHeader(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "src/backend/portal_capture.h", "#ifndef PORTAL_CAPTURE_H\n#define PORTAL_CAPTURE_H\nvoid capture(void);\n#endif\n")
+	writeFixture(t, root, "include/portal_capture.h", "#ifndef PORTAL_CAPTURE_H\n#define PORTAL_CAPTURE_H\ntypedef int ImageData;\n#endif\n")
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c src/app.c", ProducedFiles: []string{"src/backend/portal_capture.h"},
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Name != "header shadowing" || !strings.Contains(findings[0].Detail, "include/portal_capture.h") {
+		t.Fatalf("header shadowing findings = %+v", findings)
+	}
+}
+
 func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	// A local adapter is enough to prove the registry composes providers; the
 	// core does not need a switch for every language or stack.
@@ -122,14 +137,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 9 {
+	if len(profile.ReviewRules) != 11 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}

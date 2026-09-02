@@ -30,7 +30,7 @@ func TestNativeDiffRequiresAResourceConcurrencyAndRepresentationSweep(t *testing
 	if _, err := ExecuteScript(context.Background(), PairScript(), params); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Native-code review sweep", "every early error/cleanup path", "signals its waiter", "allocator-family", "thread lifetime", "masks", "byte order", "alpha", "invalid handle"} {
+	for _, want := range []string{"Native-code review sweep", "every early error/cleanup path", "signals its waiter", "allocator-family", "thread lifetime", "masks", "byte order", "alpha", "invalid handle", "callback user_data", "retained past the public call", "documented results match", "comments do not claim"} {
 		if !strings.Contains(reviewerPrompt, want) {
 			t.Errorf("native reviewer prompt lacks %q:\n%s", want, reviewerPrompt)
 		}

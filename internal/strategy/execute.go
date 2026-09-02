@@ -1336,7 +1336,10 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 					"(2) each allocation/handle uses the matching allocator-family release exactly once; " +
 					"(3) shared state, thread lifetime, joins/unrefs and blocking API semantics are safe; " +
 					"(4) external byte/pixel/wire representations are converted rather than assumed, including masks, channel widths, byte order, stride and alpha; " +
-					"and (5) null/failure cleanup never calls an API with an invalid handle. " +
+					"(5) null/failure cleanup never calls an API with an invalid handle; " +
+					"(6) every public API parameter has observable semantics: callback user_data reaches that callback and documented results match the implementation; " +
+					"(7) any pointer retained past the public call (idle source, callback, worker or queue) has an explicit safe lifetime through copying, ref-counting or documented ownership transfer; " +
+					"and (8) comments do not claim work, persistence or acknowledgements the implementation does not perform. " +
 					"Do not approve until you have performed this sweep over the final diff, even when compilation is green.\n")
 			}
 		}
