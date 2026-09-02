@@ -113,6 +113,13 @@ If it describes fighting a tool, prefer the tool that re-types the least
 (fs_write_lines over fs_patch, fs_read of the exact range first). Cite the
 project's own documents when they decide the matter.
 
+You advise within the active task. Never tell the implementer to edit the
+accepted plan/task metadata, weaken or bypass verification, append "|| true",
+skip a gate, install host packages, or write outside its task lanes. Diagnose
+the exact error first; a missing header can be a wrong include path rather than
+a missing package. If the environment truly cannot satisfy the unchanged gate,
+say to report that blocker — do not manufacture green.
+
 Reply with ONLY the advice, 2-8 sentences, imperative voice. No preamble.`
 
 // adviseInline answers an implementer's ask_advisor call. Same seat, same
@@ -128,10 +135,33 @@ func (s *Service) adviseInline(ctx context.Context, rs *runState, question strin
 		})
 		return "", err
 	}
+	if violation := inlineAdviceViolation(answer); violation != "" {
+		rs.writer.AppendEvent("advice_rejected", map[string]interface{}{
+			"question_id": tools.QuestionID(question), "advisor": advisor, "kind": "inline",
+			"reason": violation, "answer": firstN(answer, 4000),
+		})
+		return "Discard the advisor's suggestion: it tried to " + violation + ". Keep the accepted task and its verification unchanged. Read the exact failing output, correct the implementation, command usage, API or include path within the task lane, and rerun verify_run. If the unchanged gate truly cannot run in this environment, report that blocker plainly instead of manufacturing green.", nil
+	}
 	rs.writer.AppendEvent("advice", map[string]interface{}{
 		"question_id": tools.QuestionID(question), "advisor": advisor, "kind": "inline", "question": firstN(question, 2000), "answer": firstN(answer, 4000),
 	})
 	return answer, nil
+}
+
+func inlineAdviceViolation(answer string) string {
+	lower := strings.ToLower(answer)
+	if strings.Contains(lower, "|| true") || strings.Contains(lower, "--no-verify") ||
+		strings.Contains(lower, "skip the gate") || strings.Contains(lower, "bypass the gate") {
+		return "weaken or bypass the verification gate"
+	}
+	metadataTarget := strings.Contains(lower, "plan.md") || strings.Contains(lower, ".ducklab/docs") ||
+		strings.Contains(lower, "task metadata") || strings.Contains(lower, "verification command")
+	metadataMutation := strings.Contains(lower, "fs_write") || strings.Contains(lower, "replace") ||
+		strings.Contains(lower, "edit ") || strings.Contains(lower, "change ") || strings.Contains(lower, "modify ")
+	if metadataTarget && metadataMutation {
+		return "modify accepted plan or task metadata from a build"
+	}
+	return ""
 }
 
 func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, header string, q *tools.PendingQuestion) (string, string, error) {

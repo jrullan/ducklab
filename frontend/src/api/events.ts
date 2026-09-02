@@ -321,6 +321,7 @@ export const KNOWN_EVENT_TYPES = [
   "task_body_amendment",
   "advice_started",
   "advice",
+  "advice_rejected",
   "advice_taken",
   "advice_failed",
   // The rubber duck: the positioned advisor consult and its stop verdict.
