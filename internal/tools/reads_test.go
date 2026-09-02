@@ -59,13 +59,20 @@ func TestARepeatedReadInOneTurnIsRefused(t *testing.T) {
 	if again.IsError || !strings.Contains(again.Content, "served again") || !strings.Contains(again.Content, "package main") {
 		t.Fatalf("the third read was not served with a reminder: err=%v %.200s", again.IsError, again.Content)
 	}
-	// A fourth identical read is reading as a way of thinking: the reply
-	// closes (25 re-reads at 41 s each on a spec review, benchmark run 6).
+	// A fourth identical read is reading as a way of thinking: exploration
+	// closes, but a build turn must still be able to deliver and verify work
+	// it has already constructed.
 	fourth, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
-	if !fourth.IsError || !fourth.EndTurn || !ectx.ToolsClosed {
-		t.Fatalf("the fourth identical read did not close the reply: %+v", fourth)
+	if !fourth.IsError || fourth.EndTurn || !ectx.ReadToolsClosed || ectx.ToolsClosed {
+		t.Fatalf("the fourth identical read did not close only exploration: %+v", fourth)
+	}
+	if ectx.ToolAvailable("fs_read") || !ectx.ToolAvailable("fs_write") || !ectx.ToolAvailable("verify_run") {
+		t.Fatal("the read brake did not preserve delivery and verification tools")
 	}
 	ectx.BeginTurn()
+	if ectx.ReadToolsClosed {
+		t.Fatal("BeginTurn did not reopen read-only tools")
+	}
 	third, _ := reg.Execute(context.Background(), ectx, "fs_read", args)
 	if third.IsError {
 		t.Fatalf("a new turn's read was refused: %s", third.Content)

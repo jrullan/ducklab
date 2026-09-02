@@ -134,6 +134,11 @@ type ExecContext struct {
 	// ToolsClosed is set once a tool result asked to end the reply: the
 	// loop offers no tools on the next call and refuses any further call.
 	ToolsClosed bool
+	// ReadToolsClosed stops exploration without stopping delivery. A model
+	// that has read the same target four times has enough context, but may
+	// still need to turn that context into fs_patch/fs_write and verify_run.
+	// Closing every tool here stranded a fully constructed T-004 rewrite.
+	ReadToolsClosed bool
 	// DraftUnderReview holds, per artifact kind, the draft a document
 	// council is currently judging. It lives only in the conversation until
 	// a person accepts it; a seat that asks artifact_read for it is served
@@ -285,6 +290,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if ectx.ToolsClosed {
 		return &Result{IsError: true, EndTurn: true, Content: "tool use is CLOSED for this reply: answer now, in text, with what you have."}, nil
 	}
+	if ectx.ReadToolsClosed && readOnlyTool[name] {
+		return ErrorResult("read-only tools are CLOSED for this reply: stop exploring and use what you already read; write, patch, verify, or answer"), nil
+	}
 	sig := name + "\x00" + string(args)
 	if name == "fs_patch" {
 		if path := fsPatchPath(ectx.ProjectRoot, args); path != "" && ectx.fsPatchFailStreak != nil && ectx.fsPatchFailStreak[path] >= FSPatchFailLimit {
@@ -337,11 +345,11 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		default:
 			// A third identical read is reading as a way of thinking: a spec
 			// critic re-read the same sections 25 times at 41 s each
-			// (benchmark run 6). The reply closes; the seat answers.
-			ectx.ToolsClosed = true
-			return &Result{IsError: true, EndTurn: true, Content: fmt.Sprintf(
-				"REFUSED, and tool use is now CLOSED for this reply: %s with these arguments has been served twice "+
-					"already in this turn. You have everything; your next message must be your final reply.", name)}, nil
+			// (benchmark run 6). Exploration closes, but delivery stays open:
+			// a build implementer hit this brake, then had its complete repair
+			// rejected by fs_write and could not verify it (T-004, run 53).
+			ectx.ReadToolsClosed = true
+			return ErrorResult("REFUSED, and read-only tools are now CLOSED for this reply: %s with these arguments has been served twice already in this turn. You have everything; stop exploring. You may still write, patch, verify, or answer.", name), nil
 		}
 	}
 	if ectx.lastFailCount >= RepeatFailLimit && ectx.lastFailSig == sig {
@@ -442,7 +450,22 @@ func (e *ExecContext) BeginTurn() {
 	e.turnReads = map[string]int{}
 	e.searchMisses = 0
 	e.ToolsClosed = false
+	e.ReadToolsClosed = false
 	e.lastFailSig, e.lastFailCount = "", 0
+}
+
+// ToolAvailable reports whether the loop should advertise a tool on its next
+// provider call. Registry.Execute enforces the same decision for textual or
+// stale calls; this method keeps a native model from seeing tools it can no
+// longer use while preserving mutation and verification after a read brake.
+func (e *ExecContext) ToolAvailable(name string) bool {
+	if e == nil {
+		return true
+	}
+	if e.ToolsClosed {
+		return false
+	}
+	return !(e.ReadToolsClosed && readOnlyTool[name])
 }
 
 // SearchMissLimit is how many fs_search calls may find nothing in a row

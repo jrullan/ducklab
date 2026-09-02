@@ -262,7 +262,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		// No tools once a result closed tool use for this reply: the seat
 		// answers in text with what it has (tools.Result.EndTurn).
 		if useNative && !(ectx != nil && ectx.ToolsClosed) {
-			req.Tools = nativeTools
+			for _, tool := range nativeTools {
+				if ectx == nil || ectx.ToolAvailable(tool.Function.Name) {
+					req.Tools = append(req.Tools, tool)
+				}
+			}
 		}
 		if loop.Duckling.Params.Temperature != nil {
 			req.Temperature = loop.Duckling.Params.Temperature
