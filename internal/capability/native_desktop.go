@@ -31,20 +31,15 @@ func (GTK4Clipboard) Detect(ctx Context) Contributions {
 	}
 }
 
-var uncheckedClipboardContent = regexp.MustCompile(`(?m)^\s*gdk_clipboard_set_content\s*\(`)
+var (
+	uncheckedClipboardContent = regexp.MustCompile(`(?m)^\s*gdk_clipboard_set_content\s*\(`)
+	inventedClipboardReady    = regexp.MustCompile(`(?i)(?:notify::ready|g_signal_connect(?:_object)?\s*\([^;]*clipboard[^;]*,\s*"ready")`)
+)
 
 func (GTK4Clipboard) Inspect(ctx Context) ([]Inspection, error) {
 	verification := strings.ToLower(ctx.TaskVerification)
 	if !strings.Contains(verification, "gtk4") || !strings.Contains(verification, "clipboard") {
 		return nil, nil
-	}
-	policy := ctx.Policies["gtk4-clipboard.publish-result"]
-	if policy == "off" {
-		return nil, nil
-	}
-	enforcement := Required
-	if policy == "diagnostic" {
-		enforcement = Diagnostic
 	}
 	path := verificationSource(ctx.ProjectRoot, ctx.TaskVerification)
 	if path == "" {
@@ -57,13 +52,30 @@ func (GTK4Clipboard) Inspect(ctx Context) ([]Inspection, error) {
 		}
 		return nil, err
 	}
-	if uncheckedClipboardContent.Match(body) {
-		return []Inspection{{
+	var out []Inspection
+	publishPolicy := ctx.Policies["gtk4-clipboard.publish-result"]
+	if publishPolicy != "off" && uncheckedClipboardContent.Match(body) {
+		enforcement := Required
+		if publishPolicy == "diagnostic" {
+			enforcement = Diagnostic
+		}
+		out = append(out, Inspection{
 			Capability: "gtk4-clipboard", Name: "publish-result", Enforcement: enforcement,
 			Detail: "gdk_clipboard_set_content returns gboolean but its result is ignored; branch on failure before reporting or scheduling successful delivery",
-		}}, nil
+		})
 	}
-	return nil, nil
+	completionPolicy := ctx.Policies["gtk4-clipboard.completion-signal"]
+	if completionPolicy != "off" && inventedClipboardReady.Match(body) {
+		enforcement := Required
+		if completionPolicy == "diagnostic" {
+			enforcement = Diagnostic
+		}
+		out = append(out, Inspection{
+			Capability: "gtk4-clipboard", Name: "completion-signal", Enforcement: enforcement,
+			Detail: "GdkClipboard has no ready/notify::ready acknowledgement signal; use checked set_content for publication or store_async/store_finish for persistence, then expose that chosen completion through the caller's GTask/callback",
+		})
+	}
+	return out, nil
 }
 
 // X11Image contributes the representation invariants needed when a task uses
@@ -171,6 +183,7 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
+			{Capability: "glib-async", ID: "task-validation", Guidance: "g_task_is_valid(result, source_object) is valid when both the GTask and the check use a NULL source_object; NULL does not make the check always false. Report a mismatch only when the task was created with a different source object."},
 		},
 	}
 }

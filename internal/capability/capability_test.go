@@ -122,14 +122,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 8 {
+	if len(profile.ReviewRules) != 9 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -208,6 +208,25 @@ int publish(void *clipboard, void *provider) {
 	findings, err = DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
 	if err != nil || len(findings) != 0 {
 		t.Fatalf("checked publish findings = %+v, err = %v", findings, err)
+	}
+}
+
+func TestGTK4ClipboardInspectionRejectsInventedReadySignal(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "clipboard.c", `
+int publish(void *clipboard, void *provider) {
+  if (!gdk_clipboard_set_content(clipboard, provider)) return 0;
+  g_signal_connect(clipboard, "notify::ready", G_CALLBACK(done), NULL);
+  return 1;
+}
+`)
+	ctx := Context{ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gtk4) clipboard.c"}
+	findings, err := DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Capability != "gtk4-clipboard" || findings[0].Name != "completion-signal" {
+		t.Fatalf("invented clipboard signal findings = %+v", findings)
 	}
 }
 

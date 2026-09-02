@@ -231,7 +231,8 @@ func TestAdvisorPromptIncludesProjectDocumentContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir}
+	rs := &runState{run: run, writer: w, runDir: w.RunDir(), projectPath: dir,
+		execCtx: &tools.ExecContext{HarnessContext: "Stack invariant (gtk4-clipboard/completion): GdkClipboard has no ready signal; use store_async/store_finish for persistence."}}
 	if _, _, err := s.advise(context.Background(), rs, &tools.PendingQuestion{ID: "q", Question: "Which project decision applies?"}); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +243,7 @@ func TestAdvisorPromptIncludesProjectDocumentContext(t *testing.T) {
 		t.Fatal("advisor made no provider call")
 	}
 	prompt := p.calls[0].Messages[len(p.calls[0].Messages)-1].Content
-	for _, want := range []string{"SPEC-ADVISOR", "FAST_PATH", "REQ-ADVISOR"} {
+	for _, want := range []string{"SPEC-ADVISOR", "FAST_PATH", "REQ-ADVISOR", "Active harness/stack invariants", "GdkClipboard has no ready signal", "authoritative"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("advisor prompt lacks project document context %q: %s", want, prompt)
 		}

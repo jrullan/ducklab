@@ -120,6 +120,10 @@ the exact error first; a missing header can be a wrong include path rather than
 a missing package. If the environment truly cannot satisfy the unchanged gate,
 say to report that blocker — do not manufacture green.
 
+The active harness/stack invariants in your prompt are authoritative environment
+facts. Never contradict them from memory. If they answer the question, repeat
+their exact API or lifecycle rule; do not invent a substitute.
+
 Reply with ONLY the advice, 2-8 sentences, imperative voice. No preamble.`
 
 // adviseInline answers an implementer's ask_advisor call. Same seat, same
@@ -202,6 +206,14 @@ func (s *Service) adviseWith(ctx context.Context, rs *runState, systemPrompt, he
 			}
 			b.WriteString("## Project " + string(kind) + " document\n\n" + raw + "\n\n")
 		}
+	}
+	// The asking implementer received this resolved stack capsule in its system
+	// prompt. The advisor used to receive only task/docs and confidently
+	// contradicted it, sending the implementer into a compiler-driven detour.
+	// Put the same bounded facts immediately before the question.
+	if rs.execCtx != nil && strings.TrimSpace(rs.execCtx.HarnessContext) != "" {
+		b.WriteString("## Active harness/stack invariants — authoritative\n\n" + strings.TrimSpace(rs.execCtx.HarnessContext) +
+			"\n\nResolve any conflict between memory, task prose and these detected environment facts in favor of these invariants.\n\n")
 	}
 	b.WriteString(header + "\n\n" + q.Question + "\n")
 	if len(q.Options) > 0 {
