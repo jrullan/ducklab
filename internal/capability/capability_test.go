@@ -211,6 +211,25 @@ void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
 	}
 }
 
+func TestGLibInspectionRejectsVoidThreadWorkerSignature(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static void capture_worker(gpointer data) {
+  do_capture(data);
+}
+void start(gpointer ctx) { g_thread_new("capture", capture_worker, ctx); }
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags glib-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0].Detail, "declared void") {
+		t.Fatalf("void worker signature findings = %+v", findings)
+	}
+}
+
 type testProvider struct{}
 
 func (testProvider) ID() string { return "test-stack" }

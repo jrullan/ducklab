@@ -149,8 +149,17 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	text := string(body)
 	for _, match := range threadWorkerArgument.FindAllStringSubmatch(text, -1) {
 		worker := match[1]
-		functionBody := cFunctionBody(text, worker)
-		if functionBody == "" || workerReturnsValue(functionBody) {
+		functionBody, pointerReturn, found := cThreadFunction(text, worker)
+		if !found {
+			continue
+		}
+		if !pointerReturn {
+			return []Inspection{{
+				Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
+				Detail: fmt.Sprintf("g_thread_new worker %s is declared void; declare it with the GThreadFunc-compatible gpointer return type and return NULL (or another explicit gpointer)", worker),
+			}}, nil
+		}
+		if workerReturnsValue(functionBody) {
 			continue
 		}
 		return []Inspection{{
@@ -161,12 +170,13 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	return nil, nil
 }
 
-func cFunctionBody(source, name string) string {
-	definition := regexp.MustCompile(`(?m)(?:^|\n)\s*(?:static\s+)?(?:gpointer\s+|void\s*\*\s*)` + regexp.QuoteMeta(name) + `\s*\([^)]*\)\s*\{`)
-	location := definition.FindStringIndex(source)
+func cThreadFunction(source, name string) (body string, pointerReturn bool, found bool) {
+	definition := regexp.MustCompile(`(?m)(?:^|\n)\s*(?:static\s+)?(gpointer\s+|void\s*\*\s*|void\s+)` + regexp.QuoteMeta(name) + `\s*\([^)]*\)\s*\{`)
+	location := definition.FindStringSubmatchIndex(source)
 	if location == nil {
-		return ""
+		return "", false, false
 	}
+	returnType := strings.TrimSpace(source[location[2]:location[3]])
 	open := location[1] - 1
 	depth := 0
 	for i := open; i < len(source); i++ {
@@ -176,11 +186,11 @@ func cFunctionBody(source, name string) string {
 		case '}':
 			depth--
 			if depth == 0 {
-				return source[open+1 : i]
+				return source[open+1 : i], returnType != "void", true
 			}
 		}
 	}
-	return ""
+	return "", returnType != "void", true
 }
 
 func workerReturnsValue(body string) bool {
