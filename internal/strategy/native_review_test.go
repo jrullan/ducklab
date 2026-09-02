@@ -11,10 +11,12 @@ import (
 
 func TestNativeDiffRequiresAResourceConcurrencyAndRepresentationSweep(t *testing.T) {
 	var reviewerPrompt string
+	var reviewerContract string
 	params := &ExecuteParams{
 		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, _ TurnContext) (*agent.Outcome, error) {
 			if turn.Role == config.RoleReviewer {
 				reviewerPrompt = prompt
+				reviewerContract = turn.Contract
 				return verdictOutcome("approve"), nil
 			}
 			return &agent.Outcome{Text: "implemented"}, nil
@@ -32,6 +34,9 @@ func TestNativeDiffRequiresAResourceConcurrencyAndRepresentationSweep(t *testing
 		if !strings.Contains(reviewerPrompt, want) {
 			t.Errorf("native reviewer prompt lacks %q:\n%s", want, reviewerPrompt)
 		}
+	}
+	if reviewerContract != "verdict:native" {
+		t.Fatalf("native reviewer contract = %q, want verdict:native", reviewerContract)
 	}
 }
 

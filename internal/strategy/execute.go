@@ -452,7 +452,26 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// hides fellow reviewers for decorrelation.
 				promptTranscript = transcriptWithoutRole(result.Transcript, config.RoleArchitect)
 			}
-			prompt, err := buildPrompt(&turn, params, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			documentContract := turn.Contract
+			promptParams := params
+			if turn.Role == config.RoleReviewer && turn.Contract == "verdict" && params.Diff != nil {
+				if diff, diffErr := params.Diff(); diffErr != nil {
+					result.Error = diffErr
+					return result, diffErr
+				} else {
+					// Contract selection and prompt construction must judge the exact
+					// same snapshot. Calling Diff twice consumed two versions in a live
+					// provider and made review memory describe the wrong hunks.
+					frozen := diff
+					copy := *params
+					copy.Diff = func() (string, error) { return frozen, nil }
+					promptParams = &copy
+					if nativeCodeDiff(diff) {
+						turn.Contract = "verdict:native"
+					}
+				}
+			}
+			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
 			if turn.Role == config.RoleArchitect && turn.Contract == "markdown_sections:M" && verdictsThisRound > 0 {
 				prompt += "\n\n## Reviewed topology amendments\n\nThe manifest constrained the initial render, but the reviewer has now checked its semantics. Apply supported reviewer corrections even when they change a manifest-derived Implements, Produces, Consumes, Verification, Owns, or Depends on field. Preserve all unrelated topology. The revised, deterministically validated plan becomes authoritative."
 			}
@@ -493,7 +512,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			var repairBase *agent.Outcome
 			var repairSections []string
-			documentContract := turn.Contract
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
 				prompt += "\n\n" + pendingStructureNote
 				pendingStructureNote = ""

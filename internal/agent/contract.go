@@ -43,8 +43,21 @@ func (f Finding) ClassLevel() bool {
 
 // Verdict is the reviewer contract's parsed value.
 type Verdict struct {
-	Verdict  string    `json:"verdict"` // approve | request-changes
-	Findings []Finding `json:"findings"`
+	Verdict      string              `json:"verdict"` // approve | request-changes
+	Findings     []Finding           `json:"findings"`
+	NativeChecks *NativeReviewChecks `json:"native_checks,omitempty"`
+}
+
+// NativeReviewChecks makes the native sweep accountable. A prose checklist
+// was present on every Neocapture T-004 review, yet the final reviewer emitted
+// approve without checking a borrowed GTask, a leaked GThread or wrong mask
+// shifts. Each field must name the concrete evidence inspected.
+type NativeReviewChecks struct {
+	Completion     string `json:"completion"`
+	Resources      string `json:"resources"`
+	Threads        string `json:"threads"`
+	Representation string `json:"representation"`
+	Cleanup        string `json:"cleanup"`
 }
 
 // Approved reports whether the reviewer approved.
@@ -89,7 +102,9 @@ func ParseContract(contract, text string) (interface{}, error) {
 	case contract == "" || contract == "freeform" || contract == "edits":
 		return nil, nil
 	case contract == "verdict":
-		return parseVerdict(text)
+		return parseVerdict(text, false)
+	case contract == "verdict:native":
+		return parseVerdict(text, true)
 	case contract == "choice":
 		return parseChoice(text)
 	case contract == "json:decomposition":
@@ -185,7 +200,7 @@ func validContractID(id, prefix string) bool {
 	return true
 }
 
-func parseVerdict(text string) (*Verdict, error) {
+func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 	raw, err := extractJSONObject(text)
 	if err != nil {
 		return nil, fmt.Errorf("verdict contract: %w", err)
@@ -239,6 +254,28 @@ func parseVerdict(text string) (*Verdict, error) {
 		// exhausted its rounds on one explicitly minor (and invalid) alpha note:
 		// request-changes made the non-blocking label block the entire run.
 		return nil, fmt.Errorf("verdict contract: request-changes has no critical or major finding; use approve to preserve minor observations, or raise the severity only if the defect truly blocks acceptance")
+	}
+	if requireNativeChecks {
+		if v.NativeChecks == nil {
+			return nil, fmt.Errorf("verdict contract: native_checks is required for a native-code review")
+		}
+		checks := []struct {
+			name  string
+			value string
+		}{
+			{"completion", v.NativeChecks.Completion},
+			{"resources", v.NativeChecks.Resources},
+			{"threads", v.NativeChecks.Threads},
+			{"representation", v.NativeChecks.Representation},
+			{"cleanup", v.NativeChecks.Cleanup},
+		}
+		for _, check := range checks {
+			value := strings.TrimSpace(check.value)
+			generic := strings.ToLower(strings.Trim(value, "."))
+			if value == "" || generic == "ok" || generic == "pass" || generic == "verified" || generic == "none" || generic == "n/a" {
+				return nil, fmt.Errorf("verdict contract: native_checks.%s must name concrete code evidence, not %q", check.name, value)
+			}
+		}
 	}
 	return &v, nil
 }

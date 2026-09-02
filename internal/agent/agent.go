@@ -892,6 +892,13 @@ Ground rules, which you cannot change:
 - Be terse. Prose is not the deliverable.`
 
 	rolePrompt := getRolePrompt(turn.Role)
+	if turn.Contract == "verdict:native" && turn.Role == config.RoleReviewer {
+		rolePrompt += `
+
+For a native-code diff, your JSON object MUST also contain:
+"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}
+Each value names what you inspected in the final code. Bare words such as "ok", "pass", "verified", "none", or "n/a" are invalid. Findings still go in findings; native_checks records the sweep that supports either verdict.`
+	}
 	if turn.Persona == "critic" && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
 	}

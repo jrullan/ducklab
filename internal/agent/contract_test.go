@@ -95,6 +95,24 @@ func TestVerdictRequestChangesRequiresABlockingFinding(t *testing.T) {
 	}
 }
 
+func TestNativeVerdictRequiresConcreteSweepEvidence(t *testing.T) {
+	base := `{"verdict":"approve","findings":[]}`
+	if _, err := ParseContract("verdict:native", base); err == nil || !strings.Contains(err.Error(), "native_checks is required") {
+		t.Fatalf("native approval without sweep evidence was accepted: %v", err)
+	}
+
+	generic := `{"verdict":"approve","findings":[],"native_checks":{"completion":"ok","resources":"x.c: allocations paired","threads":"x.c: thread unreffed","representation":"x.c: masks normalized","cleanup":"x.c: error paths release handles"}}`
+	if _, err := ParseContract("verdict:native", generic); err == nil || !strings.Contains(err.Error(), "native_checks.completion") {
+		t.Fatalf("generic native evidence was accepted: %v", err)
+	}
+
+	concrete := `{"verdict":"approve","findings":[],"native_checks":{"completion":"worker() returns the GTask on both success and error","resources":"image_destroy() frees pixels and ImageData","threads":"capture() refs task and unrefs the GThread handle","representation":"convert() uses ctz(mask), mask widths and XGetPixel","cleanup":"worker() closes Display and destroys XImage on every exit"}}`
+	got, err := ParseContract("verdict:native", concrete)
+	if err != nil || !got.(*Verdict).Approved() {
+		t.Fatalf("concrete native sweep was rejected: %v", err)
+	}
+}
+
 func TestVerdictRejectsBadSeverity(t *testing.T) {
 	for _, body := range []string{
 		`{"verdict":"request-changes","findings":[{"file":"a.go","issue":"x","fix":"y"}]}`,
