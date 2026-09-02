@@ -137,14 +137,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 13 {
+	if len(profile.ReviewRules) != 15 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -387,6 +387,85 @@ void start(gpointer data) { g_thread_new("worker", worker, data); }
 	}
 	if len(findings) != 1 || findings[0].Capability != "glib-async" || findings[0].Name != "thread-handle" {
 		t.Fatalf("discarded thread handle findings = %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsBrokenTaskContextOwnership(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+typedef struct { GTask *task; GBytes *png_bytes; } Work;
+static gboolean publish(gpointer data) {
+  Work *ctx = data;
+  g_task_return_boolean(ctx->task, TRUE);
+  return G_SOURCE_REMOVE;
+}
+static void destroy(gpointer data) {
+  Work *ctx = data;
+  g_clear_object(&ctx->png_bytes);
+  g_free(ctx);
+}
+static void worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel) {
+  g_idle_add(publish, data);
+}
+void start(void) {
+  Work *ctx = g_new0(Work, 1);
+  GTask *task = g_task_new(NULL, NULL, NULL, NULL);
+  g_task_set_task_data(task, ctx, destroy);
+  g_task_run_in_thread(task, worker);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, finding := range findings {
+		names[finding.Name] = true
+	}
+	for _, want := range []string{"boxed-release", "context-initialization", "task-owner"} {
+		if !names[want] {
+			t.Errorf("missing %s finding: %+v", want, findings)
+		}
+	}
+}
+
+func TestGLibInspectionAcceptsExplicitTaskContextOwnership(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+typedef struct { GTask *task; GBytes *png_bytes; } Work;
+static gboolean publish(gpointer data) {
+  Work *ctx = data;
+  g_task_return_boolean(ctx->task, TRUE);
+  return G_SOURCE_REMOVE;
+}
+static void destroy(gpointer data) {
+  Work *ctx = data;
+  g_clear_pointer(&ctx->png_bytes, g_bytes_unref);
+  g_clear_object(&ctx->task);
+  g_free(ctx);
+}
+static void worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel) {
+  g_idle_add(publish, data);
+}
+void start(void) {
+  Work *ctx = g_new0(Work, 1);
+  GTask *task = g_task_new(NULL, NULL, NULL, NULL);
+  ctx->task = g_object_ref(task);
+  g_task_set_task_data(task, ctx, destroy);
+  g_task_run_in_thread(task, worker);
+  g_object_unref(task);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("explicit ownership was rejected: %+v", findings)
 	}
 }
 

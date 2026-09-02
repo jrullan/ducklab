@@ -180,13 +180,15 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 		Detection: Detection{Capability: "glib-async", Evidence: []string{"task Verification uses GLib/GIO/GTK"}},
 		ReviewRules: []ReviewRule{
 			{Capability: "glib-async", ID: "allocation", Guidance: "g_new0(Type, 1) allocates exactly one zero-initialized Type; the second argument is the element count. Do not report it as allocating two objects or replace it merely with g_new."},
-			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
+			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference, but the initiating function must still g_object_unref its own GTask reference after scheduling. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "deferred-input-lifetime", Guidance: "A pointer retained for g_idle_add, an async callback, a worker, or a queue outlives the initiating call. Copy its data, take a reference, or make ownership transfer explicit; merely storing a borrowed input in a context struct can become a use-after-free."},
 			{Capability: "glib-async", ID: "callback-context", Guidance: "If a public async API accepts callback user_data, its callback signature and every completion path must pass that exact user_data back. Storing it without delivering it is a broken API contract even when compilation succeeds."},
 			{Capability: "glib-async", ID: "idle-source-id", Guidance: "g_idle_add returns a source ID guaranteed to be greater than zero. Do not invent a g_idle_add()==0 allocation-failure branch or run its main-context callback synchronously from a worker; use g_idle_add_full with a destroy notify when source-data cleanup needs an explicit ownership contract."},
 			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data); GTaskThreadFunc is void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable); return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). There are no g_task_propose_pointer or g_task_propose_error APIs."},
 			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
+			{Capability: "glib-async", ID: "boxed-release", Guidance: "GBytes is a ref-counted boxed type, not a GObject. Release a GBytes* with g_bytes_unref (for example g_clear_pointer(&bytes, g_bytes_unref)), never g_clear_object or g_object_unref."},
+			{Capability: "glib-async", ID: "context-initialization", Guidance: "Every field read by a deferred callback must be initialized before scheduling it. Passing ctx as GTask task_data does not initialize a separate ctx->task back-reference; either assign an explicitly owned reference or have the callback receive the task through its actual API contract."},
 			{Capability: "glib-async", ID: "task-validation", Guidance: "g_task_is_valid(result, source_object) is valid when both the GTask and the check use a NULL source_object; NULL does not make the check always false. Report a mismatch only when the task was created with a different source object."},
 		},
 	}
@@ -195,6 +197,9 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 var (
 	threadWorkerArgument = regexp.MustCompile(`g_thread_new\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
 	ignoredThreadHandle  = regexp.MustCompile(`(?m)(?:^|[;{}])\s*g_thread_new\s*\([^;\n]*\)\s*;`)
+	gbytesDeclaration    = regexp.MustCompile(`\bGBytes\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)`)
+	gTaskCreation        = regexp.MustCompile(`(?:\bGTask\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*g_task_new\s*\(`)
+	uninitializedCtxTask = regexp.MustCompile(`g_task_set_task_data\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,[^;]*\)`)
 )
 
 // Inspect verifies the C-level return contract of functions actually passed
@@ -205,14 +210,6 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	verification := strings.ToLower(ctx.TaskVerification)
 	if !strings.Contains(verification, "glib-2.0") && !strings.Contains(verification, "gio-2.0") && !strings.Contains(verification, "gtk") {
 		return nil, nil
-	}
-	policy := ctx.Policies["glib-async.thread-return"]
-	if policy == "off" {
-		return nil, nil
-	}
-	enforcement := Required
-	if policy == "diagnostic" {
-		enforcement = Diagnostic
 	}
 	path := verificationSource(ctx.ProjectRoot, ctx.TaskVerification)
 	if path == "" {
@@ -226,33 +223,96 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 		return nil, err
 	}
 	text := string(body)
-	if ignoredThreadHandle.MatchString(text) {
-		return []Inspection{{
-			Capability: "glib-async", Name: "thread-handle", Enforcement: enforcement,
-			Detail: "g_thread_new returns an owned GThread handle but this call discards it; assign the result and unref it for detached execution (or join it when the design requires joining)",
-		}}, nil
+	var out []Inspection
+	threadPolicy := ctx.Policies["glib-async.thread-return"]
+	if threadPolicy != "off" {
+		enforcement := policyEnforcement(threadPolicy)
+		if ignoredThreadHandle.MatchString(text) {
+			out = append(out, Inspection{
+				Capability: "glib-async", Name: "thread-handle", Enforcement: enforcement,
+				Detail: "g_thread_new returns an owned GThread handle but this call discards it; assign the result and unref it for detached execution (or join it when the design requires joining)",
+			})
+		} else {
+			for _, match := range threadWorkerArgument.FindAllStringSubmatch(text, -1) {
+				worker := match[1]
+				functionBody, pointerReturn, found := cThreadFunction(text, worker)
+				if !found {
+					continue
+				}
+				if !pointerReturn {
+					out = append(out, Inspection{
+						Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
+						Detail: fmt.Sprintf("g_thread_new worker %s is declared void; declare it with the GThreadFunc-compatible gpointer return type and return NULL (or another explicit gpointer)", worker),
+					})
+					break
+				}
+				if !workerReturnsValue(functionBody) {
+					out = append(out, Inspection{
+						Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
+						Detail: fmt.Sprintf("g_thread_new worker %s can reach the closing brace without returning a gpointer; end its fallthrough path with return NULL (or another explicit gpointer)", worker),
+					})
+					break
+				}
+			}
+		}
 	}
-	for _, match := range threadWorkerArgument.FindAllStringSubmatch(text, -1) {
-		worker := match[1]
-		functionBody, pointerReturn, found := cThreadFunction(text, worker)
-		if !found {
-			continue
+
+	boxedPolicy := ctx.Policies["glib-async.boxed-release"]
+	if boxedPolicy != "off" {
+		for _, match := range gbytesDeclaration.FindAllStringSubmatch(text, -1) {
+			name := match[1]
+			member := `(?:[A-Za-z_][A-Za-z0-9_]*\s*->\s*)?` + regexp.QuoteMeta(name)
+			wrongClear := regexp.MustCompile(`g_clear_object\s*\(\s*&\s*` + member + `\s*\)`)
+			wrongUnref := regexp.MustCompile(`g_object_unref\s*\(\s*` + member + `\s*\)`)
+			if wrongClear.MatchString(text) || wrongUnref.MatchString(text) {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "boxed-release", Enforcement: policyEnforcement(boxedPolicy),
+					Detail: fmt.Sprintf("%s is declared GBytes* but is released with GObject semantics; use g_bytes_unref (or g_clear_pointer(&%s, g_bytes_unref))", name, name),
+				})
+				break
+			}
 		}
-		if !pointerReturn {
-			return []Inspection{{
-				Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
-				Detail: fmt.Sprintf("g_thread_new worker %s is declared void; declare it with the GThreadFunc-compatible gpointer return type and return NULL (or another explicit gpointer)", worker),
-			}}, nil
-		}
-		if workerReturnsValue(functionBody) {
-			continue
-		}
-		return []Inspection{{
-			Capability: "glib-async", Name: "thread-return", Enforcement: enforcement,
-			Detail: fmt.Sprintf("g_thread_new worker %s can reach the closing brace without returning a gpointer; end its fallthrough path with return NULL (or another explicit gpointer)", worker),
-		}}, nil
 	}
-	return nil, nil
+
+	contextPolicy := ctx.Policies["glib-async.context-initialization"]
+	if contextPolicy != "off" {
+		for _, match := range uninitializedCtxTask.FindAllStringSubmatch(text, -1) {
+			task, contextName := match[1], match[2]
+			usesBackref := regexp.MustCompile(`g_task_return_[A-Za-z0-9_]+\s*\(\s*` + regexp.QuoteMeta(contextName) + `\s*->\s*task\b`)
+			assignsBackref := regexp.MustCompile(`\b` + regexp.QuoteMeta(contextName) + `\s*->\s*task\s*=`)
+			if usesBackref.MatchString(text) && !assignsBackref.MatchString(text) {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "context-initialization", Enforcement: policyEnforcement(contextPolicy),
+					Detail: fmt.Sprintf("%s is passed as task_data for %s, but a deferred callback completes %s->task and that field is never assigned", contextName, task, contextName),
+				})
+				break
+			}
+		}
+	}
+
+	ownerPolicy := ctx.Policies["glib-async.task-owner"]
+	if ownerPolicy != "off" {
+		for _, match := range gTaskCreation.FindAllStringSubmatch(text, -1) {
+			task := match[1]
+			runs := regexp.MustCompile(`g_task_run_in_thread\s*\(\s*` + regexp.QuoteMeta(task) + `\s*,`)
+			releases := regexp.MustCompile(`(?:g_object_unref\s*\(\s*` + regexp.QuoteMeta(task) + `\s*\)|g_clear_object\s*\(\s*&\s*` + regexp.QuoteMeta(task) + `\s*\))`)
+			if runs.MatchString(text) && !releases.MatchString(text) {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "task-owner", Enforcement: policyEnforcement(ownerPolicy),
+					Detail: fmt.Sprintf("%s is created with g_task_new and scheduled with g_task_run_in_thread, but the initiating reference is never released with g_object_unref", task),
+				})
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func policyEnforcement(policy string) Enforcement {
+	if policy == "diagnostic" {
+		return Diagnostic
+	}
+	return Required
 }
 
 func cThreadFunction(source, name string) (body string, pointerReturn bool, found bool) {
