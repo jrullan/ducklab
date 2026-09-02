@@ -1331,6 +1331,7 @@ type TextToolCall struct {
 }
 
 var ducklabBlockRe = regexp.MustCompile("(?s)```ducklab\\s*\\n(.*?)\\n```")
+var ducklabLooseBlockRe = regexp.MustCompile("(?s)```ducklab\\s*\\n(.*?)```")
 
 // A payload block opens with ```payload:N and closes with an explicit,
 // id-bearing terminator ```payload:N:end on its own line — NOT a bare ```.
@@ -1356,7 +1357,16 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 	// values are still read from the ORIGINAL text, by id, below.
 	envelope := payloadBlockRe.ReplaceAllString(text, "")
 
-	matches := ducklabBlockRe.FindAllStringSubmatch(envelope, -1)
+	blockRe := ducklabBlockRe
+	matches := blockRe.FindAllStringSubmatch(envelope, -1)
+	if len(matches) == 0 {
+		// Small models sometimes leave the JSON string unterminated, so the
+		// final fence follows a literal `\\n` escape instead of a real newline.
+		// It is still visibly a tool envelope. Capture it as a malformed call and
+		// return repair feedback instead of treating the whole turn as finished.
+		blockRe = ducklabLooseBlockRe
+		matches = blockRe.FindAllStringSubmatch(envelope, -1)
+	}
 	if len(matches) != 1 {
 		// Zero envelopes: not a tool call. More than one: ambiguous — refuse
 		// rather than guess which the model meant.
@@ -1410,7 +1420,7 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 	// Strip the payload blocks first, then the envelope, so payload content that
 	// contains a ```ducklab fence isn't left behind as stray prose.
 	remaining := payloadBlockRe.ReplaceAllString(text, "")
-	remaining = ducklabBlockRe.ReplaceAllString(remaining, "")
+	remaining = blockRe.ReplaceAllString(remaining, "")
 	remaining = strings.TrimSpace(remaining)
 
 	return &TextToolCall{Name: call.Tool, Args: newArgs}, remaining

@@ -119,3 +119,16 @@ func TestMalformedTextToolCallBecomesRepairableProtocolError(t *testing.T) {
 		t.Fatalf("malformed envelope leaked into final prose: %q", remaining)
 	}
 }
+
+func TestTruncatedJSONBeforeFenceBecomesRepairableProtocolError(t *testing.T) {
+	text := "```ducklab\n" +
+		`{"tool":"fs_write","args":{"path":"x","content":"unterminated\n` +
+		"```"
+	tc, remaining := parseTextToolCall(text)
+	if tc == nil || !strings.Contains(tc.ParseError, "malformed ducklab tool call JSON") {
+		t.Fatalf("truncated envelope was silently treated as a final answer: %+v", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("truncated envelope leaked into final prose: %q", remaining)
+	}
+}
