@@ -616,6 +616,34 @@ func TestCouncilUsesStructuredPatchContractForBoundedRepair(t *testing.T) {
 	}
 }
 
+func TestSetMarkdownFieldReplacesTheWholeBlockValue(t *testing.T) {
+	base := "### T-006 — Overlay\n\n**Acceptance slices:**\n- old one\n- old two\n- old three\n- old four\n\n**Produces:** file:src/ui.c"
+	got, err := setMarkdownField(base, "T-006", "Acceptance slices", "- new one\n- new two\n- new three")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "old one") || strings.Count(got, "- new") != 3 {
+		t.Fatalf("block field was appended instead of replaced:\n%s", got)
+	}
+	if !strings.Contains(got, "**Produces:** file:src/ui.c") {
+		t.Fatalf("replacement consumed the following field:\n%s", got)
+	}
+}
+
+func TestRemoveMarkdownFieldRemovesTheWholeBlockValue(t *testing.T) {
+	base := "### T-006 — Overlay\n\n**Acceptance slices:**\n- old one\n- old two\n\n**Produces:** file:src/ui.c"
+	got, err := removeMarkdownField(base, "T-006", "Acceptance slices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "old one") || strings.Contains(got, "Acceptance slices") {
+		t.Fatalf("block field content survived removal:\n%s", got)
+	}
+	if !strings.Contains(got, "**Produces:** file:src/ui.c") {
+		t.Fatalf("removal consumed the following field:\n%s", got)
+	}
+}
+
 func TestStructureRepairStopsAfterThreeNonImprovingPatches(t *testing.T) {
 	architectTurns := 0
 	params := &ExecuteParams{

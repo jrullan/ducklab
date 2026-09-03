@@ -1348,7 +1348,14 @@ func setMarkdownField(text, id, field, value string) (string, error) {
 	}
 	for i := start + 1; i < searchEnd; i++ {
 		if fieldRE.MatchString(lines[i]) {
-			lines[i] = line
+			fieldEnd := markdownFieldEnd(lines, i, searchEnd, fieldRE)
+			replacement := strings.Split(line, "\n")
+			if strings.Contains(line, "\n") && fieldEnd < len(lines) && strings.TrimSpace(lines[fieldEnd]) != "" {
+				replacement = append(replacement, "")
+			}
+			updated := append([]string{}, lines[:i]...)
+			updated = append(updated, replacement...)
+			lines = append(updated, lines[fieldEnd:]...)
 			return strings.Join(lines, "\n"), nil
 		}
 	}
@@ -1368,11 +1375,34 @@ func removeMarkdownField(text, id, field string) (string, error) {
 			break
 		}
 		if fieldRE.MatchString(lines[i]) {
-			lines = append(lines[:i], lines[i+1:]...)
+			fieldEnd := markdownFieldEnd(lines, i, end, fieldRE)
+			lines = append(lines[:i], lines[fieldEnd:]...)
 			return strings.Join(lines, "\n"), nil
 		}
 	}
 	return text, fmt.Errorf("%w: %s has no %s field", ErrStructureRepairScope, id, field)
+}
+
+// markdownFieldEnd returns the exclusive end of a Markdown field. Scalar
+// fields keep their value on the marker line and end there. Block fields put
+// list items below an otherwise empty marker; replacing only that marker left
+// the old list in place, so every repair appended another copy of the
+// Acceptance slices it was meant to bound.
+func markdownFieldEnd(lines []string, start, limit int, fieldRE *regexp.Regexp) int {
+	match := fieldRE.FindStringIndex(lines[start])
+	if match == nil || strings.TrimSpace(lines[start][match[1]:]) != "" {
+		return start + 1
+	}
+	anyField := regexp.MustCompile(`^\s*\*\*[^*\n]+:\*\*`)
+	end := start + 1
+	for end < limit {
+		trimmed := strings.TrimSpace(lines[end])
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") || anyField.MatchString(lines[end]) {
+			break
+		}
+		end++
+	}
+	return end
 }
 
 func replaceMarkdownBlock(text, id, markdown string) (string, error) {
