@@ -41,6 +41,14 @@ func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
 	}
 }
 
+func TestPlanFieldNamesMentionedInlineAreNotParsedAsFields(t *testing.T) {
+	body := "**Implements:** SPEC-001\n\n**Work unit:** Migrate one task format\n\n**Acceptance slices:**\n- The text `**Deliverables:**` is absent as a field marker\n\n**Produces:** plan.md\n\n**Consumes:** none\n\n**Verification:** `grep -q 'Work unit' plan.md`\n\n**Exercises:** plan.md"
+	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-900", Body: body}}, "markdown_sections:T", map[string]bool{"SPEC-001": true}, true, ""), "\n")
+	if strings.Contains(got, "uses legacy **Deliverables:**") {
+		t.Fatalf("inline documentation was mistaken for a structural field:\n%s", got)
+	}
+}
+
 func TestAcceptanceSlicesMayUseAnOrderedMarkdownList(t *testing.T) {
 	body := "**Acceptance slices:**\n1. Opens the dialog\n2. Writes the file\n3. Reports completion\n  1. nested explanation"
 	if got := topLevelChecklistItems(body, "Acceptance slices"); got != 3 {

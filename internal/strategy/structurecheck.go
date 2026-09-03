@@ -98,7 +98,7 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					if strings.TrimSpace(markdownFieldValue(block.body, "Work unit")) == "" {
 						out = append(out, fmt.Sprintf("%s has no **Work unit:** — name exactly one cohesive capability or concern; split independent concerns into separate tasks", block.id))
 					}
-					if strings.Contains(strings.ToLower(block.body), "**deliverables:**") {
+					if taskHasField(block.body, "Deliverables") {
 						out = append(out, fmt.Sprintf("%s uses legacy **Deliverables:** — regenerate it with **Work unit:** and **Acceptance slices:** so outcomes are distinct from explanation", block.id))
 					}
 					n := topLevelChecklistItems(block.body, "Acceptance slices")
@@ -196,7 +196,7 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		// per milestone, every plan was a false positive and the architect
 		// was sent back four times for nothing (benchmark run 2).
 		for _, block := range taskBlocks(s.Body) {
-			if n := strings.Count(block.body, "**Deliverables:**"); n > 1 {
+			if n := markdownFieldCount(block.body, "Deliverables"); n > 1 {
 				out = append(out, fmt.Sprintf("%s has %d **Deliverables:** headings; one per task", block.id, n))
 			}
 		}
@@ -468,6 +468,11 @@ func taskFieldItems(body, name string) []string {
 func taskHasField(body, name string) bool {
 	re := regexp.MustCompile(`(?im)^\*\*` + regexp.QuoteMeta(name) + `:\*\*`)
 	return re.MatchString(body)
+}
+
+func markdownFieldCount(body, name string) int {
+	re := regexp.MustCompile(`(?im)^\s*\*\*` + regexp.QuoteMeta(name) + `:\*\*`)
+	return len(re.FindAllStringIndex(body, -1))
 }
 
 func taskVerificationCommand(body string) string {
