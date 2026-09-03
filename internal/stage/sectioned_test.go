@@ -166,6 +166,9 @@ func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
 	if !strings.Contains(script.CriticScope, "narrowing its title and body to exactly one cohesive concern") || !strings.Contains(script.CriticScope, "routed to NEW passes") {
 		t.Fatalf("critic scope does not explain split semantics: %q", script.CriticScope)
 	}
+	if !strings.Contains(script.CriticScope, "It does NOT mean those are the task's only fields") || !strings.Contains(script.CriticScope, "remain mandatory mechanical metadata") {
+		t.Fatalf("critic scope can mistake v2 portion fields for the whole schema: %q", script.CriticScope)
+	}
 	if script.ArchitectScopeID != "T-008" {
 		t.Fatalf("architect scope = %q, want T-008", script.ArchitectScopeID)
 	}
@@ -175,6 +178,19 @@ func TestPlanTaskPassEnforcesV2AndNarrowsCritic(t *testing.T) {
 	for _, turn := range script.Turns {
 		if turn.Role == config.RoleArchitect && turn.Contract != "markdown_sections:T" {
 			t.Fatalf("task architect contract = %q", turn.Contract)
+		}
+	}
+}
+
+func TestSectionedPlanPromptsDisambiguatePortionFieldsFromMetadata(t *testing.T) {
+	doc := &artifact.Document{Sections: []artifact.Section{{ID: "M-006", Title: "Lifecycle"}}}
+	existing := buildSectionPassPrompt(artifact.KindPlan, "use exactly Work unit plus Acceptance slices", &artifact.Section{ID: "T-008", Title: "CLI"})
+	added := buildNewSectionPassPrompt(artifact.KindPlan, "use exactly Work unit plus Acceptance slices", doc, "Lifecycle", "M")
+	for name, prompt := range map[string]string{"existing": existing, "new": added} {
+		for _, want := range []string{"It does NOT mean those are the task's only fields", "**Implements:**", "**Produces:**", "Only `**Deliverables:**"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("%s plan task prompt lacks %q:\n%s", name, want, prompt)
+			}
 		}
 	}
 }

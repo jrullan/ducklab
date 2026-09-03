@@ -35,6 +35,11 @@ var sectionIDRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?(?:(?:CHANGE|UPDATE):\s*
 var sectionNewRe = regexp.MustCompile(`(?mi)^\s*(?:-\s*)?NEW:\s*(.+)$`)
 var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+(?:\s+[—-])?\s+`)
 
+const sectionedPlanTaskContract = "## Plan task v2 grammar — authoritative\n\n" +
+	"`exactly Work unit plus Acceptance slices` means exactly one `**Work unit:**` field and one `**Acceptance slices:**` block with 1-3 top-level bullets. It does NOT mean those are the task's only fields. " +
+	"`**Implements:**`, `**Produces:**`, `**Consumes:**`, `**Verification:**`, and `**Exercises:**` remain mandatory mechanical metadata; `**Milestone:**`, `**Depends on:**`, `**Out of scope:**`, and `**Assumption:**` remain valid when applicable. " +
+	"Only `**Deliverables:**` (and Work/Acceptance aliases) is legacy. Never ask to remove mandatory metadata in order to satisfy v2.\n\n"
+
 func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {
 	kind := p.Stage.Kind()
 	prefix := kind.Prefix()
@@ -431,6 +436,9 @@ func sectionPass(prefix string, pass int, mode string, critics []config.Duckling
 			"Judge only whether this replacement correctly applies the clauses relevant to its existing title and behavior. " +
 			"When the request explicitly splits this section, narrowing its title and body to exactly one cohesive concern is required: do not demand preservation of concerns routed to NEW passes. " +
 			"The broad request is routing context, not a completeness checklist for this isolated review."
+		if enforceV2 && prefix == "M" && strings.HasPrefix(strings.ToUpper(sec.ID), "T-") {
+			script.CriticScope += " " + strings.TrimSpace(sectionedPlanTaskContract)
+		}
 	}
 	script.TurnIndexBase = pass * 10
 	return script
@@ -549,6 +557,9 @@ func buildSectionPassPrompt(kind artifact.Kind, ask string, sec *artifact.Sectio
 			"- Metadata belongs to this section: never put a clause about another subject into `Assumption` or another field.\n" +
 			"- Do not add a storage destination, integration, or behavior the request did not name.\n\n")
 	}
+	if kind == artifact.KindPlan && strings.HasPrefix(strings.ToUpper(sec.ID), "T-") {
+		b.WriteString(sectionedPlanTaskContract)
+	}
 	fmt.Fprintf(&b, "## Answer format\n\nEither the full replacement section — heading and body, "+
 		"under the SAME id:\n\n## %s — <title>\n<body>\n\nOr, if the request does not change this "+
 		"section, reply with exactly the single word UNCHANGED.\n", sec.ID)
@@ -586,6 +597,9 @@ func buildNewSectionPassPrompt(kind artifact.Kind, ask string, doc *artifact.Doc
 			"- Include exactly one `**Priority:**` marker, whose value is exactly `must`, `should`, `could`, or `wont`.\n" +
 			"- `shall`, `must`, and `required` are mandatory and require `Priority: must`.\n" +
 			"- Do not add a storage destination, integration, input constraint, or platform behavior the assigned clause did not name.\n\n")
+	}
+	if kind == artifact.KindPlan {
+		b.WriteString(sectionedPlanTaskContract)
 	}
 	b.WriteString("## The document (outline, for fit)\n\n")
 	for _, sec := range doc.Sections {
