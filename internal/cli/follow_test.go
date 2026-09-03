@@ -140,6 +140,20 @@ func TestFollowRunBudgetExceededExitsSix(t *testing.T) {
 	}
 }
 
+func TestBindingBudgetCapNamesTheCapThatActuallyStoppedTheRun(t *testing.T) {
+	cases := map[string]string{
+		"budget exceeded: turn budget exceeded: 40 >= 40":            "turns",
+		"budget exceeded: token budget exceeded: 500 >= 500":         "tokens",
+		"budget exceeded: wallclock budget exceeded: 1800s >= 1800s": "wallclock",
+		"budget exceeded: $5.0000 >= $5.0000":                        "usd",
+	}
+	for detail, want := range cases {
+		if got := bindingBudgetCap(detail); got != want {
+			t.Errorf("bindingBudgetCap(%q) = %q, want %q", detail, got, want)
+		}
+	}
+}
+
 func TestLatestRunEventSeqFindsTail(t *testing.T) {
 	events := []interface{}{
 		map[string]interface{}{"seq": float64(4)},

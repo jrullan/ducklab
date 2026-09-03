@@ -1185,7 +1185,8 @@ func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *e
 			case "gate":
 				fmt.Printf("  ⏸ waiting for you (gate) — ducklab run accept %s\n", runID)
 			case "budget":
-				fmt.Printf("  ⏸ waiting for you (budget) — lift the binding cap, then resume; for example: ducklab run lift %s wallclock\n", runID)
+				cap := bindingBudgetCap(fmt.Sprint(e.Data["detail"]))
+				fmt.Printf("  ⏸ waiting for you (budget) — lift the binding cap, then resume: ducklab run lift %s %s\n", runID, cap)
 			case "question":
 				fmt.Printf("  ⏸ waiting for you (question) — ducklab run answer %s --answer \"...\"\n", runID)
 			default:
@@ -1228,6 +1229,25 @@ func followRunWithFrom(parent context.Context, sigCh <-chan os.Signal, client *e
 		return 7
 	}
 	return 0
+}
+
+// bindingBudgetCap translates the engine's stable budget errors into the
+// operator vocabulary accepted by `run lift`. The old fixed wallclock example
+// sent a Neocapture run in exactly the wrong direction when turns were 40/40.
+func bindingBudgetCap(detail string) string {
+	lower := strings.ToLower(detail)
+	switch {
+	case strings.Contains(lower, "turn budget exceeded"):
+		return "turns"
+	case strings.Contains(lower, "token budget exceeded"):
+		return "tokens"
+	case strings.Contains(lower, "wallclock budget exceeded"):
+		return "wallclock"
+	case strings.Contains(lower, "budget exceeded: $"):
+		return "usd"
+	default:
+		return "wallclock"
+	}
 }
 
 // renderReport formats the engine's report JSON.
