@@ -87,11 +87,43 @@ func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *te
 		"T-900 **Verification:** must put the executable command in backticks; prose is never executed",
 		"T-900 **Exercises:** none of its **Produces:** artifacts",
 	}
-	note, _ := structureRepairInstruction(findings, []agent.Section{{ID: "T-900", Body: "**Produces:** src/main.c"}})
-	for _, want := range []string{"field `Verification`", "ONLY one executable shell command", "`cc -fsyntax-only src/main.c`", "field `Exercises`", "literally overlap"} {
+	note, _ := structureRepairInstruction(findings, []agent.Section{{ID: "T-900", Body: "**Produces:** src/main.c, capability:main-loop"}})
+	for _, want := range []string{"field `Verification`", "ONLY one executable shell command", "`cc -fsyntax-only src/main.c`", "field Exercises", "copied exactly from allowed_values", `"src/main.c"`, `"capability:main-loop"`} {
 		if !strings.Contains(note, want) {
 			t.Errorf("repair prompt lacks %q:\n%s", want, note)
 		}
+	}
+}
+
+// Neocapture corrida r-20260903-205418-nlqc reached task 6/6, but four
+// structure attempts kept replacing Exercises with plausible filenames that
+// did not literally occur in Produces. Exercise membership is closed-world,
+// so its exact set must travel with the tool-less repair contract.
+func TestNestedPlanExercisesRepairCarriesExactProducedValues(t *testing.T) {
+	sections := []agent.Section{{
+		ID:   "M-06",
+		Body: "### T-009 — Lifecycle\n\n**Produces:** capability:managed-main-loop, file:src/app/lifecycle.c\n\n**Exercises:** lifecycle_handler.c",
+	}}
+	note, ids := structureRepairInstruction(
+		[]string{"T-009 **Exercises:** none of its **Produces:** artifacts"},
+		sections,
+	)
+	if len(ids) != 1 || ids[0] != "M-06" {
+		t.Fatalf("repair assignment = %v, want [M-06]", ids)
+	}
+	for _, want := range []string{
+		`"field":"Exercises","value":"capability:managed-main-loop"`,
+		`"allowed_values"`,
+		`"capability:managed-main-loop"`,
+		`"file:src/app/lifecycle.c"`,
+		"do not invent aliases",
+	} {
+		if !strings.Contains(note, want) {
+			t.Errorf("repair prompt lacks %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, `"lifecycle_handler.c"`) {
+		t.Fatalf("invalid current Exercises value was advertised as admissible:\n%s", note)
 	}
 }
 

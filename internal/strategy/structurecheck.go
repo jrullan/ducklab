@@ -642,6 +642,15 @@ func structureRepairInstruction(findings []string, sections []agent.Section, con
 		ctx = contexts[0]
 	}
 	descriptors := describeStructureRepairFindings(batch, ctx)
+	for i := range descriptors {
+		if descriptors[i].Code != "invalid_exercises" {
+			continue
+		}
+		descriptors[i].AllowedValues = producedValuesForRepairTarget(sections, descriptors[i].Target)
+		if len(descriptors[i].AllowedValues) > 0 {
+			descriptors[i].Recipe = "Use set_field with field Exercises and one or more comma-separated values copied exactly from allowed_values. These are the current Produces values; choose the values the Verification command actually checks and do not invent aliases."
+		}
+	}
 	var b strings.Builder
 	exampleID := "SECTION-ID"
 	if len(ids) > 0 {
@@ -809,6 +818,25 @@ func allowedRepairReferences(contract string, known map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// producedValuesForRepairTarget closes the membership contract for an
+// Exercises repair. Bounded repair turns have no tools, so telling them to
+// overlap Produces without supplying its exact members leaves a small seat to
+// invent a plausible alias. A target may be either the assigned H2 itself or
+// an H3 task nested inside an assigned milestone.
+func producedValuesForRepairTarget(sections []agent.Section, target string) []string {
+	for _, sec := range sections {
+		if sec.ID == target {
+			return taskFieldItems(sec.Body, "Produces")
+		}
+		for _, block := range taskBlocks(sec.Body) {
+			if block.id == target {
+				return taskFieldItems(block.body, "Produces")
+			}
+		}
+	}
+	return nil
 }
 
 func structureRepairBatch(findings []string, sections []agent.Section) ([]string, []string) {
