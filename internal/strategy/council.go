@@ -59,6 +59,28 @@ func InventoryScript() *Script {
 	}
 }
 
+// CompositionReviewScript is one bounded semantic reading of a document that
+// has already been assembled from isolated section passes. Local reviewers can
+// prove each section is coherent in isolation; only this pass can see that two
+// sections own the same concern, or that the composition omitted one entirely.
+// It never repairs the document and has no tools: its verdict is evidence for
+// the human gate, kept distinct from deterministic graph checks.
+func CompositionReviewScript() *Script {
+	return &Script{
+		Name: "composition-review",
+		Turns: []Turn{{
+			Role:            config.RoleReviewer,
+			Toolbelt:        "none",
+			Contract:        "verdict",
+			MaxTurns:        4,
+			MaxTurnsCeiling: 4,
+			Persona:         PersonaCritic,
+		}},
+		Until:     "round == 1",
+		MaxRounds: 1,
+	}
+}
+
 // ArtifactScript returns the script a stage should run for a mode.
 //
 // Unknown modes fall back to council rather than failing: the default is the

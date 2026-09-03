@@ -146,6 +146,7 @@ func TestV2MigrationExpandsSelectedMilestoneIntoTaskPasses(t *testing.T) {
 
 func TestExplicitSplitRetriesTriageWhenItSchedulesNoAddition(t *testing.T) {
 	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Lifecycle\n\nContract.\n")
 	writeDoc(t, root, artifact.KindPlan, "## M-001 — App\n\n### T-008 — Lifecycle\n\nold body\n")
 	base, err := artifact.Load(root, artifact.KindPlan)
 	if err != nil {
@@ -172,18 +173,23 @@ func TestExplicitSplitRetriesTriageWhenItSchedulesNoAddition(t *testing.T) {
 				return "T-008\nNEW: Initialization", nil
 			case 3:
 				return "## T-008 — Lifecycle\n\n**Implements:** SPEC-001\n\nkept concern", nil
-			default:
+			case 4:
 				if script.ArchitectScopeID != "T-900" {
 					t.Fatalf("new split unit scope = %q", script.ArchitectScopeID)
 				}
 				return "## T-900 — Initialization\n\n**Milestone:** M-001\n\n**Implements:** SPEC-001\n\nnew concern", nil
+			default:
+				if script.Name != "composition-review" || !strings.Contains(prompt, "Global semantic index") {
+					t.Fatalf("last pass is not the composition review: %s", script.Name)
+				}
+				return `{"verdict":"approve","findings":[]}`, nil
 			}
 		},
 	}, base, "Split the old lifecycle task into lifecycle and initialization")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !retried || call != 4 {
+	if !retried || call != 5 {
 		t.Fatalf("retried=%v calls=%d", retried, call)
 	}
 	if findSection(res.Proposed, "T-009") == nil {
@@ -334,6 +340,7 @@ func TestSectionedRefusesARedesign(t *testing.T) {
 // milestones, each visited in its own fresh conversation.
 func TestSectionedPlanVisitsTasks(t *testing.T) {
 	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Boundary\n\nContract.\n")
 	writeDoc(t, root, artifact.KindPlan,
 		"## M-001 — Core\n\nFoundation.\n\n### T-001 — Schema\n\nOriginal schema.\n\n### T-002 — Boundary\n\nOriginal boundary.\n")
 	base, _ := artifact.Load(root, artifact.KindPlan)
@@ -344,6 +351,12 @@ func TestSectionedPlanVisitsTasks(t *testing.T) {
 			call++
 			if call == 1 {
 				return "T-002\n", nil
+			}
+			if call == 3 {
+				if script.Name != "composition-review" || !strings.Contains(prompt, "New boundary body.") {
+					t.Fatalf("composition review did not receive the materialized plan: %s", script.Name)
+				}
+				return `{"verdict":"approve","findings":[]}`, nil
 			}
 			if !strings.Contains(prompt, "Original boundary.") {
 				t.Error("the task pass did not carry the task's body")
@@ -360,5 +373,63 @@ func TestSectionedPlanVisitsTasks(t *testing.T) {
 	}
 	if got.Sections[0].Children[0].Body != "Original schema." {
 		t.Error("an unvisited task changed")
+	}
+}
+
+func TestCompositionReviewPromptSeparatesSemanticFromMechanicalJudgment(t *testing.T) {
+	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-01", Title: "Core", Children: []artifact.Section{{ID: "T-001", Title: "Save", Body: "**Work unit:** Save one capture"}}}}}
+	prompt := buildCompositionReviewPrompt("Split saving from capture", &artifact.Document{}, plan)
+	for _, want := range []string{"exactly one Work unit", "Do not repeat formatting or mechanical findings", "T-001", "no repair follows automatically"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("composition prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestPlanCompositionFindingsReportsOnlyNewBreaks(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Capture\n\nContract.\n")
+	base, _ := artifact.Parse("## M-01 — Core\n\n### T-001 — Capture\n\n**Implements:** SPEC-001\n**Produces:** image:data\n\n### T-002 — Historical overlap\n\n**Implements:** SPEC-001\n**Produces:** image:data\n", artifact.KindPlan)
+	if got := planCompositionFindings(root, base, base); len(got) != 0 {
+		t.Fatalf("unchanged historical debt became a proposal blocker: %v", got)
+	}
+	proposed, _ := artifact.Parse("## M-01 — Core\n\n### T-001 — Capture\n\n**Implements:** SPEC-999\n**Produces:** image:data\n\n### T-002 — Historical overlap\n\n**Implements:** SPEC-001\n**Produces:** image:data\n", artifact.KindPlan)
+	got := strings.Join(planCompositionFindings(root, base, proposed), "\n")
+	if !strings.Contains(got, "SPEC-999") {
+		t.Fatalf("new composition break escaped: %s", got)
+	}
+}
+
+func TestSectionedPlanReturnsSemanticDissentSeparately(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Capture\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan, "## M-01 — Core\n\n### T-001 — Capture\n\n**Implements:** SPEC-001\n\nOld.\n")
+	base, _ := artifact.Load(root, artifact.KindPlan)
+	call := 0
+	res, err := runSectioned(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-dissent",
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			call++
+			switch call {
+			case 1:
+				return "T-001", nil
+			case 2:
+				return "## T-001 — Capture\n\n**Implements:** SPEC-001\n\nNew.", nil
+			default:
+				if script.Name != "composition-review" {
+					t.Fatalf("review script = %s", script.Name)
+				}
+				return `{"verdict":"request-changes","findings":[{"severity":"major","file":"*","line":0,"issue":"T-001 duplicates T-002","fix":"give the concern one owner","invariant":"one concern has one owner"}]}`, nil
+			}
+		},
+	}, base, "clarify capture ownership")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CompositionReview == nil || res.CompositionReview.Verdict != "request-changes" || len(res.CompositionReview.Findings) != 1 {
+		t.Fatalf("semantic dissent was lost: %+v", res.CompositionReview)
+	}
+	if len(res.CompositionMechanical) != 0 {
+		t.Fatalf("semantic dissent leaked into mechanical findings: %v", res.CompositionMechanical)
 	}
 }

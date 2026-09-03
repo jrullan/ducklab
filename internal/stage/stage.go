@@ -121,6 +121,12 @@ type Result struct {
 	Remapped map[string]string
 	// Raw is the model's text, kept for the transcript.
 	Raw string
+	// CompositionMechanical records deterministic whole-document plan
+	// invariants separately from model judgment.
+	CompositionMechanical []string
+	// CompositionReview is the bounded semantic verdict over the fully
+	// composed candidate. Empty means this stage path did not require it.
+	CompositionReview *agent.Verdict
 }
 
 // Run executes a stage and writes a proposal.

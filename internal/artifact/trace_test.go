@@ -440,3 +440,31 @@ func TestAnAsBuiltSectionNeedsNoTask(t *testing.T) {
 		t.Error("an unmarked section without a task escaped the check")
 	}
 }
+
+func TestCheckPlanReportsWholeCompositionInvariants(t *testing.T) {
+	spec, _ := Parse("## SPEC-001 — Capture\n\nContract.\n\n## SPEC-002 — Save\n\nContract.\n", KindSpec)
+	plan, _ := Parse("## M-01 — Core\n\n"+
+		"### T-001 — Capture\n\n**Implements:** SPEC-001\n**Produces:** image:data\n\n"+
+		"### T-001 — Duplicate id\n\n**Implements:** SPEC-999\n**Produces:** image:other\n\n"+
+		"### T-002 — Duplicate producer\n\n**Implements:** SPEC-001\n**Produces:** image:data\n\n"+
+		"### T-003 — Save\n\n**Implements:** SPEC-001\n**Consumes:** image:data\n", KindPlan)
+	errText := ""
+	for _, err := range CheckPlan(spec, plan) {
+		errText += err.String() + "\n"
+	}
+	for _, want := range []string{"duplicate_id", "duplicate_producer", "SPEC-999", "SPEC-002", "missing_producer_dependency"} {
+		if !strings.Contains(errText, want) {
+			t.Errorf("whole-plan findings lack %q:\n%s", want, errText)
+		}
+	}
+}
+
+func TestCheckPlanAcceptsACompleteAcyclicComposition(t *testing.T) {
+	spec, _ := Parse("## SPEC-001 — Capture\n\nContract.\n\n## SPEC-002 — Save\n\nContract.\n", KindSpec)
+	plan, _ := Parse("## M-01 — Core\n\n"+
+		"### T-001 — Capture\n\n**Implements:** SPEC-001\n**Produces:** image:data\n\n"+
+		"### T-002 — Save\n\n**Implements:** SPEC-002\n**Consumes:** image:data\n**Depends on:** T-001\n", KindPlan)
+	if errs := CheckPlan(spec, plan); len(errs) != 0 {
+		t.Fatalf("valid composition findings: %+v", errs)
+	}
+}

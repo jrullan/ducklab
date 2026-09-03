@@ -32,6 +32,9 @@ const (
 	DependencyCycle   TraceErrorKind = "dependency_cycle"
 	ForwardDependency TraceErrorKind = "forward_dependency"
 	LaneCollision     TraceErrorKind = "lane_collision"
+	DuplicateID       TraceErrorKind = "duplicate_id"
+	DuplicateProducer TraceErrorKind = "duplicate_producer"
+	MissingDependency TraceErrorKind = "missing_producer_dependency"
 )
 
 // TraceError is one break, with enough detail to act on.
@@ -190,66 +193,7 @@ func (s *Spine) Check() []TraceError {
 		})
 	}
 
-	// spec → task
-	coveredSpecs := map[string]bool{}
-	for _, m := range s.Plan.Sections {
-		for _, task := range m.Children {
-			if len(task.Implements) == 0 {
-				// A promoted bug task is justified by the report it fixes,
-				// not by a spec section — that is its whole nature: the spec
-				// described the intent, the bug describes the miss. Flagging
-				// every "Fixes B-007" as unjustified taught people to ignore
-				// the spine, which is the one thing a check must never teach.
-				if fixesBug(task.Body) {
-					continue
-				}
-				errs = append(errs, TraceError{
-					Kind: UnjustifiedTask, ID: task.ID,
-					Detail: "task implements no spec section",
-				})
-				continue
-			}
-			for _, sp := range task.Implements {
-				if _, ok := specIDs[sp]; !ok {
-					errs = append(errs, TraceError{
-						Kind: DanglingReference, ID: task.ID,
-						Detail: "implements a spec section that does not exist", Missing: sp,
-					})
-					continue
-				}
-				coveredSpecs[sp] = true
-			}
-		}
-	}
-
-	// A section that records what will NOT be built has nothing for a task to
-	// implement, and demanding one turns the check into noise the reader
-	// learns to skip — the same reasoning that exempts a `wont` requirement
-	// above. It is keyed on the marker, never on the title: guessing that a
-	// section headed "Out of Scope" is non-normative would make the spine
-	// depend on prose a model happened to write.
-	for _, sp := range s.Spec.Sections {
-		if coveredSpecs[sp.ID] || len(sp.Implements) == 0 {
-			continue
-		}
-		if nonNormative(sp) {
-			continue
-		}
-		// A section the existing tree already satisfies needs no task: an
-		// adopted project's spec describes code that was built before ducklab
-		// arrived, and demanding tasks to build it again would invent work.
-		// Keyed on the marker the spec stage teaches and a person approved.
-		if asBuilt(sp) {
-			continue
-		}
-		errs = append(errs, TraceError{
-			Kind: UnimplementedSpec, ID: sp.ID,
-			Detail: "no task implements this spec section",
-		})
-	}
-
-	errs = append(errs, checkDependencies(s.Plan)...)
-	errs = append(errs, checkLaneCollisions(s.Plan)...)
+	errs = append(errs, CheckPlan(s.Spec, s.Plan)...)
 
 	sort.Slice(errs, func(i, j int) bool {
 		if errs[i].Kind != errs[j].Kind {
@@ -258,6 +202,97 @@ func (s *Spine) Check() []TraceError {
 		return errs[i].ID < errs[j].ID
 	})
 	return errs
+}
+
+// CheckPlan validates the complete plan as a graph, independently of model
+// judgment. It is exported so a newly composed proposal can be checked before
+// it reaches the human gate; Check historically saw only approved artifacts.
+func CheckPlan(spec, plan *Document) []TraceError {
+	if spec == nil || plan == nil {
+		return nil
+	}
+	var errs []TraceError
+	specIDs := map[string]Section{}
+	for _, section := range spec.Sections {
+		specIDs[section.ID] = section
+	}
+
+	seenIDs := map[string]bool{}
+	coveredSpecs := map[string]bool{}
+	producers := map[string]string{}
+	tasks := make([]Section, 0)
+	for _, milestone := range plan.Sections {
+		if seenIDs[milestone.ID] {
+			errs = append(errs, TraceError{Kind: DuplicateID, ID: milestone.ID, Detail: "section id appears more than once"})
+		}
+		seenIDs[milestone.ID] = true
+		for _, task := range milestone.Children {
+			tasks = append(tasks, task)
+			if seenIDs[task.ID] {
+				errs = append(errs, TraceError{Kind: DuplicateID, ID: task.ID, Detail: "section id appears more than once"})
+			}
+			seenIDs[task.ID] = true
+			if len(task.Implements) == 0 {
+				if !fixesBug(task.Body) {
+					errs = append(errs, TraceError{Kind: UnjustifiedTask, ID: task.ID, Detail: "task implements no spec section"})
+				}
+			} else {
+				for _, target := range task.Implements {
+					if _, ok := specIDs[target]; !ok {
+						errs = append(errs, TraceError{Kind: DanglingReference, ID: task.ID, Detail: "implements a spec section that does not exist", Missing: target})
+						continue
+					}
+					coveredSpecs[target] = true
+				}
+			}
+			for _, item := range fieldItems(task.Field("produces")) {
+				if prior := producers[item]; prior != "" && prior != task.ID {
+					errs = append(errs, TraceError{Kind: DuplicateProducer, ID: task.ID, Detail: fmt.Sprintf("artifact %q is also produced by %s", item, prior), Missing: prior})
+				} else {
+					producers[item] = task.ID
+				}
+			}
+		}
+	}
+
+	for _, section := range spec.Sections {
+		if coveredSpecs[section.ID] || nonNormative(section) || asBuilt(section) {
+			continue
+		}
+		errs = append(errs, TraceError{Kind: UnimplementedSpec, ID: section.ID, Detail: "no task implements this spec section"})
+	}
+	for _, task := range tasks {
+		deps := map[string]bool{}
+		for _, dep := range fieldItems(task.Field("depends on")) {
+			deps[dep] = true
+		}
+		for _, item := range fieldItems(task.Field("consumes")) {
+			if producer := producers[item]; producer != "" && producer != task.ID && !deps[producer] {
+				errs = append(errs, TraceError{Kind: MissingDependency, ID: task.ID, Detail: fmt.Sprintf("consumes %q produced by %s without depending on it", item, producer), Missing: producer})
+			}
+		}
+	}
+
+	errs = append(errs, checkDependencies(plan)...)
+	errs = append(errs, checkLaneCollisions(plan)...)
+	sort.Slice(errs, func(i, j int) bool {
+		if errs[i].Kind != errs[j].Kind {
+			return errs[i].Kind < errs[j].Kind
+		}
+		return errs[i].ID < errs[j].ID
+	})
+	return errs
+}
+
+func fieldItems(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(strings.Trim(item, "`"))
+		if item != "" && !strings.EqualFold(item, "none") && item != "-" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // checkLaneCollisions validates plan section lanes. A path and any of its

@@ -897,6 +897,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	proposalBlockers := duplicateSemanticSections(result.Proposed.Sections)
 	proposalBlockers = append(proposalBlockers, strategy.ProposalStructureFindings(result.Proposed)...)
+	if len(result.CompositionMechanical) > 0 {
+		proposalBlockers = append(proposalBlockers, result.CompositionMechanical...)
+		rs.run.PendingData["composition_mechanical_findings"] = result.CompositionMechanical
+		rs.writer.AppendEvent("proposal_composition_mechanical_blocked", map[string]interface{}{
+			"findings": result.CompositionMechanical,
+			"detail":   "the fully composed plan violates deterministic whole-document invariants",
+		})
+	}
 	if req.Stage == "intake" {
 		proposalBlockers = append(proposalBlockers, amendmentCoverageFindings(req.From, result.Proposed)...)
 	}
@@ -918,6 +926,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	// last reviewer look decorative. Keep the proposal so the person can send
 	// it back with a note, but do not offer or permit acceptance while dissent
 	// stands.
+	compositionReviewBlocked := result.CompositionReview != nil && result.CompositionReview.Verdict != "approve"
+	if result.CompositionReview != nil {
+		rs.run.PendingData["composition_review_verdict"] = result.CompositionReview.Verdict
+		rs.run.PendingData["composition_review_findings"] = result.CompositionReview.Findings
+	}
+	if compositionReviewBlocked {
+		detail := fmt.Sprintf("post-composition reviewer requested changes with %d finding(s); revise or discard this proposal", len(result.CompositionReview.Findings))
+		if rs.run.Warning != "" {
+			rs.run.Warning += " · " + detail
+		} else {
+			rs.run.Warning = detail
+		}
+		rs.writer.AppendEvent("proposal_composition_review_blocked", map[string]interface{}{
+			"verdict": result.CompositionReview.Verdict, "findings": result.CompositionReview.Findings, "detail": detail,
+		})
+	}
 	finalReviewBlocked := finalReviewVerdict != "" && finalReviewVerdict != "approve"
 	if finalReviewBlocked {
 		rs.run.PendingData["review_verdict"] = finalReviewVerdict
@@ -932,7 +956,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			"verdict": finalReviewVerdict, "findings": finalReviewFindings, "detail": detail,
 		})
 	}
-	if identityMismatch || finalReviewBlocked || len(proposalBlockers) > 0 {
+	if identityMismatch || finalReviewBlocked || compositionReviewBlocked || len(proposalBlockers) > 0 {
 		rs.run.Verdict = "FAILED"
 	} else {
 		// No executable gate exists for a document, so an approved or

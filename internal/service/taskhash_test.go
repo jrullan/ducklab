@@ -30,6 +30,7 @@ func TestPlanProposalWarnsWhenItWouldOrphanAcceptedTaskHistory(t *testing.T) {
 	oldBody := "**Implements:** SPEC-001\n\nKeep a durable audit record."
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
 		artifact.KindPlan: "## M-001 — Core\n\n### T-001 — Audit\n\n" + oldBody + "\n",
+		artifact.KindSpec: "## SPEC-001 — Legacy audit\n\n**As-built:** yes\n\nLegacy contract.\n\n## SPEC-002 — Audit\n\n**As-built:** yes\n\nAudit contract.\n",
 	})
 
 	accepted := &runlog.Run{
@@ -60,6 +61,10 @@ func TestPlanProposalWarnsWhenItWouldOrphanAcceptedTaskHistory(t *testing.T) {
 		fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
 			text := "T-001\n"
 			for _, message := range req.Messages {
+				if strings.Contains(message.Content, "fully composed plan below") {
+					text = `{"verdict":"approve","findings":[]}`
+					break
+				}
 				if strings.Contains(message.Content, "Update ONE section") {
 					text = "## T-001 — Audit\n\n" + body + "\n"
 					break

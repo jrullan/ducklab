@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -163,10 +164,112 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 	proposed.Front.Kind = kind
 	proposed.Front.Project = base.Front.Project
 	proposed.Front.Origin = base.Front.Origin
+	var mechanical []string
+	var semantic *agent.Verdict
+	if kind == artifact.KindPlan {
+		mechanical = planCompositionFindings(p.ProjectRoot, base, &proposed)
+		if p.OnEvent != nil {
+			p.OnEvent("composition_mechanical_check", map[string]interface{}{
+				"findings": mechanical, "count": len(mechanical),
+			})
+			p.OnEvent("composition_review_started", map[string]interface{}{
+				"detail": "one bounded reviewer is judging cross-section semantics on the fully composed plan",
+			})
+		}
+		reviewRaw, reviewErr := p.Execute(ctx, strategy.CompositionReviewScript(), buildCompositionReviewPrompt(ask, base, &proposed))
+		if reviewErr != nil {
+			return nil, reviewErr
+		}
+		parsed, parseErr := agent.ParseContract("verdict", reviewRaw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("composition reviewer: %w", parseErr)
+		}
+		semantic = parsed.(*agent.Verdict)
+		if p.OnEvent != nil {
+			p.OnEvent("composition_review_completed", map[string]interface{}{
+				"verdict": semantic.Verdict, "findings": semantic.Findings, "count": len(semantic.Findings),
+			})
+		}
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, &proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
-	return &Result{Kind: kind, Proposed: &proposed, Raw: raw}, nil
+	return &Result{Kind: kind, Proposed: &proposed, Raw: raw,
+		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
+}
+
+func planCompositionFindings(projectRoot string, base, proposed *artifact.Document) []string {
+	spec, err := artifact.Load(projectRoot, artifact.KindSpec)
+	if err != nil || spec == nil || len(spec.Sections) == 0 {
+		return []string{"the approved specification could not be loaded, so plan coverage and references cannot be verified"}
+	}
+	baseline := map[string]bool{}
+	for _, finding := range artifact.CheckPlan(spec, base) {
+		baseline[finding.String()] = true
+	}
+	var out []string
+	for _, finding := range artifact.CheckPlan(spec, proposed) {
+		if !baseline[finding.String()] {
+			out = append(out, finding.String())
+		}
+	}
+	return out
+}
+
+func buildCompositionReviewPrompt(ask string, base, proposed *artifact.Document) string {
+	var index, changed strings.Builder
+	changedIDs := changedPlanTaskIDs(base, proposed)
+	for _, milestone := range proposed.Sections {
+		for _, task := range milestone.Children {
+			work := strings.TrimSpace(task.Field("work unit"))
+			if work == "" {
+				work = outlineSynopsis(task.Body)
+				work = strings.TrimPrefix(work, " :: ")
+			}
+			if len(work) > 300 {
+				work = work[:300] + "…"
+			}
+			fmt.Fprintf(&index, "- %s — %s | Work unit: %s | Implements: %s | Produces: %s\n",
+				task.ID, task.Title, work, strings.Join(task.Implements, ", "), task.Field("produces"))
+			if changedIDs[task.ID] {
+				fmt.Fprintf(&changed, "### %s — %s\n\n%s\n\n", task.ID, task.Title, task.Body)
+			}
+		}
+	}
+	return "## Assignment\n\nReview the fully composed plan below as one semantic object. " +
+		"Its individual sections were already reviewed in isolation and deterministic syntax, IDs, references, coverage, and dependency checks run separately. " +
+		"Do not repeat formatting or mechanical findings. Do not inspect the repository and do not propose implementation details.\n\n" +
+		"Judge only these cross-section invariants:\n\n" +
+		"- Every distinct concern requested by the amendment is owned by exactly one Work unit.\n" +
+		"- No two tasks claim the same behavior or artifact responsibility under different wording.\n" +
+		"- A deliverable and its explanation or verification are not mistaken for independent concerns.\n" +
+		"- A requested split neither retains the split-away concern in its original task nor loses it from the composed plan.\n" +
+		"- Unchanged tasks are context; do not object to unrelated historical wording or scope.\n\n" +
+		"Return `approve` only when all of those invariants hold. Findings must identify the conflicting or missing task IDs and the violated invariant. This is a single read-only review; no repair follows automatically.\n\n" +
+		"## Human amendment request\n\n" + strings.TrimSpace(ask) +
+		"\n\n## Global semantic index — every task\n\n" + index.String() +
+		"\n## Changed tasks — complete authoritative bodies\n\n" + changed.String()
+}
+
+func changedPlanTaskIDs(base, proposed *artifact.Document) map[string]bool {
+	before := map[string]artifact.Section{}
+	if base != nil {
+		for _, milestone := range base.Sections {
+			for _, task := range milestone.Children {
+				before[task.ID] = task
+			}
+		}
+	}
+	changed := map[string]bool{}
+	for _, milestone := range proposed.Sections {
+		for _, task := range milestone.Children {
+			old, ok := before[task.ID]
+			if !ok || old.Title != task.Title || old.Body != task.Body {
+				changed[task.ID] = true
+			}
+		}
+	}
+	return changed
 }
 
 func requestsSectionSplit(ask string) bool {
