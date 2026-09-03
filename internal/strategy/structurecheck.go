@@ -28,6 +28,28 @@ const (
 var requirementPriorityToken = regexp.MustCompile(`(?i)\*\*Priority:\*\*\s*(must|should|could|wont)\.?`)
 var planSpecToken = regexp.MustCompile(`(?i)\bSPEC-\d+\b`)
 
+// structureRepairContext supplies the closed-world facts a bounded repair
+// cannot discover for itself. The repair turn deliberately has no tools, so a
+// membership invariant is incomplete unless its allowed values travel with
+// the finding (Neocapture frozen transfer attempts 2/3 and 3/3).
+type structureRepairContext struct {
+	Contract string
+	KnownIDs map[string]bool
+}
+
+// structureRepairFinding is the machine-readable side of a human-readable
+// structure finding. Validators may keep their stable prose for events and
+// tests, while the repair prompt receives the field, constraint and an
+// executable recipe instead of having to infer them from that prose.
+type structureRepairFinding struct {
+	Code          string   `json:"code"`
+	Target        string   `json:"target,omitempty"`
+	Field         string   `json:"field,omitempty"`
+	Message       string   `json:"message"`
+	AllowedValues []string `json:"allowed_values,omitempty"`
+	Recipe        string   `json:"recipe"`
+}
+
 // A document council's last architect turn is the one nobody reviews: after
 // the critics speak, the revision goes straight to the gate. The plan that
 // reached Neocapture's gate on 2026-08-29 had lost every Implements: line
@@ -608,16 +630,43 @@ func structureRepairNote(findings []string, sections []agent.Section) string {
 	return note
 }
 
-func structureRepairInstruction(findings []string, sections []agent.Section) (string, []string) {
+func structureRepairInstruction(findings []string, sections []agent.Section, contexts ...structureRepairContext) (string, []string) {
 	batch, ids := structureRepairBatch(findings, sections)
+	ctx := structureRepairContext{}
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	descriptors := describeStructureRepairFindings(batch, ctx)
 	var b strings.Builder
 	exampleID := "SECTION-ID"
 	if len(ids) > 0 {
 		exampleID = ids[0]
 	}
+	exampleTarget, exampleField, exampleValue := exampleID, "FIELD_NAME", "VALID_VALUE_FROM_REPAIR_CONTRACT"
+	if len(descriptors) > 0 {
+		if descriptors[0].Target != "" {
+			exampleTarget = descriptors[0].Target
+		}
+		if descriptors[0].Field != "" {
+			exampleField = descriptors[0].Field
+		}
+		if len(descriptors[0].AllowedValues) > 0 {
+			// When a field is a closed set, demonstrate one real admissible
+			// value. The old fixed REQ-001 example contradicted plan validation
+			// and the small seat copied it seven times in frozen attempt 3/3.
+			exampleValue = descriptors[0].AllowedValues[0]
+		}
+	}
+	example, _ := json.Marshal(structurePatch{
+		Sections: []string{exampleID},
+		Operations: []structureOperation{{
+			Op: "set_field", Target: exampleTarget, Field: exampleField, Value: exampleValue,
+		}},
+	})
 	b.WriteString("## Structure check — return a bounded JSON patch\n\n")
 	b.WriteString("ducklab has checkpointed the complete draft. Return ONLY one JSON object; do not repeat the document. Schema:\n\n")
-	b.WriteString("```json\n{\"sections\":[\"" + exampleID + "\"],\"operations\":[{\"op\":\"set_field\",\"target\":\"" + exampleID + "\",\"field\":\"Implements\",\"value\":\"REQ-001\"}]}\n```\n\n")
+	b.WriteString("```json\n" + string(example) + "\n```\n\n")
+	b.WriteString("The schema values `FIELD_NAME` and `VALID_VALUE_FROM_REPAIR_CONTRACT` are placeholders, never literal values to copy.\n\n")
 	b.WriteString("Allowed operations are `set_field`, `remove_field`, `replace_block`, `append_block`, and `delete_block`. " +
 		"Prefer `set_field` for every `**Field:**` correction; it does not depend on reproducing old Markdown byte-for-byte. " +
 		"`replace_block` may replace an assigned H2 requirement/spec section or one existing H3 task, with `markdown` beginning with that same heading; plan milestones themselves are not replaceable. `append_block` targets the assigned H2 and adds one H3 task. " +
@@ -639,16 +688,12 @@ func structureRepairInstruction(findings []string, sections []agent.Section) (st
 		b.WriteString(".\n")
 	}
 	b.WriteString("\n")
-	b.WriteString("Fix these findings and nothing unrelated:\n\n")
-	for _, f := range batch {
-		b.WriteString("- " + f + "\n")
-	}
-	joinedFindings := strings.Join(batch, "\n")
-	if strings.Contains(joinedFindings, "**Verification:**") {
-		b.WriteString("\nVerification field repair: use `set_field` with field `Verification` and a value containing ONLY one executable shell command enclosed in Markdown backticks, for example `cc -fsyntax-only src/main.c`. Do not write instructions such as Run/inspect/verify and do not omit the backticks.\n")
-	}
-	if strings.Contains(joinedFindings, "**Exercises:**") {
-		b.WriteString("\nExercises field repair: use `set_field` with field `Exercises`; its comma-separated artifact values must literally overlap the paths or targets in `Produces` that the Verification command checks. Do not name prose activities.\n")
+	b.WriteString("Fix these structured findings and nothing unrelated. Every entry includes a repair recipe that is complete without tools:\n\n```json\n")
+	encoded, _ := json.MarshalIndent(descriptors, "", "  ")
+	b.Write(encoded)
+	b.WriteString("\n```\n")
+	for _, descriptor := range descriptors {
+		b.WriteString("\n- " + descriptor.Message + "\n  Recipe: " + descriptor.Recipe + "\n")
 	}
 	if len(findings) > len(batch) {
 		b.WriteString(fmt.Sprintf("\n%d additional findings remain checkpointed; they will be handled in later bounded repairs.\n", len(findings)-len(batch)))
@@ -663,6 +708,102 @@ func structureRepairInstruction(findings []string, sections []agent.Section) (st
 		}
 	}
 	return b.String(), ids
+}
+
+func describeStructureRepairFindings(findings []string, ctx structureRepairContext) []structureRepairFinding {
+	out := make([]structureRepairFinding, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, describeStructureRepairFinding(finding, ctx))
+	}
+	return out
+}
+
+func describeStructureRepairFinding(message string, ctx structureRepairContext) structureRepairFinding {
+	target := ""
+	if match := regexp.MustCompile(`\b[A-Z]+-\d+\b`).FindString(message); match != "" {
+		target = strings.ToUpper(match)
+	}
+	field := ""
+	if match := regexp.MustCompile(`\*\*([^*:]+):\*\*`).FindStringSubmatch(message); len(match) == 2 {
+		field = strings.TrimSpace(match[1])
+	}
+	d := structureRepairFinding{
+		Code:    "replace_invalid_structure",
+		Target:  target,
+		Field:   field,
+		Message: message,
+		Recipe:  "Use replace_block on the writable target to correct this finding while preserving every unrelated valid field and statement.",
+	}
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(message, "**Implements:**") || strings.Contains(message, "**Implement:**"):
+		d.Code, d.Field = "invalid_implements_reference", "Implements"
+		d.AllowedValues = allowedRepairReferences(ctx.Contract, ctx.KnownIDs)
+		if len(d.AllowedValues) > 0 {
+			d.Recipe = "Use set_field with field Implements and one or more IDs copied exactly from allowed_values; do not use a REQ or milestone ID for a plan task and do not invent an ID."
+		} else {
+			d.Recipe = "Use set_field with field Implements and an existing upstream contract ID of the kind required by this document; never invent an ID."
+		}
+	case strings.Contains(message, "**Deliverables:**"):
+		d.Code, d.Field = "legacy_deliverables", "Deliverables"
+		d.Recipe = "Use remove_field for `Deliverables`, then set fields `Work unit` and `Acceptance slices` in the same patch without changing the task's assigned concern."
+	case strings.Contains(message, "**Work unit:**"):
+		d.Code, d.Field = "invalid_work_unit", "Work unit"
+		d.Recipe = "Use set_field with field `Work unit` and one concise sentence naming exactly one cohesive capability or concern already assigned to this task."
+	case strings.Contains(message, "**Acceptance slices:**"):
+		d.Code, d.Field = "invalid_acceptance_slices", "Acceptance slices"
+		d.Recipe = "Use set_field with field `Acceptance slices` and a JSON string containing 1-3 top-level Markdown list items separated by newlines; each item must be an observable outcome of the single Work unit."
+	case strings.Contains(message, "**Verification:**"):
+		d.Code, d.Field = "invalid_verification", "Verification"
+		d.Recipe = "Use set_field with field `Verification` and ONLY one executable shell command enclosed in Markdown backticks, for example `cc -fsyntax-only src/main.c`; do not write prose instructions."
+	case strings.Contains(message, "**Exercises:**"):
+		d.Code, d.Field = "invalid_exercises", "Exercises"
+		d.Recipe = "Use set_field with field `Exercises`; its comma-separated values must literally overlap the paths, targets, or capabilities from Produces that the Verification command checks."
+	case strings.Contains(message, "**Produces:**"):
+		d.Code, d.Field = "invalid_produces", "Produces"
+		d.Recipe = "Use set_field with field Produces and the concrete paths, build targets, or capabilities this task alone creates; preserve single ownership."
+	case strings.Contains(message, "**Consumes:**"):
+		d.Code, d.Field = "invalid_consumes", "Consumes"
+		d.Recipe = "Use set_field with field Consumes and concrete prerequisite artifacts or capabilities, or the literal value none when there are no prerequisites."
+	case strings.Contains(message, "**Depends on:**"):
+		d.Code, d.Field = "invalid_dependency", "Depends on"
+		d.Recipe = "Use set_field with field Depends on and the producer task IDs named by the finding; preserve existing real dependencies and do not add unrelated edges."
+	case strings.Contains(message, "**Owns:**") || strings.Contains(lower, "lane collision"):
+		d.Code, d.Field = "invalid_ownership_lane", "Owns"
+		d.Recipe = "Use set_field with field Owns so lanes are disjoint, or remove only the overlapping lane claim when this section does not own it."
+	case strings.Contains(message, "**Priority:**"):
+		d.Code, d.Field = "invalid_priority", "Priority"
+		d.AllowedValues = []string{"must", "should", "could", "wont"}
+		d.Recipe = "Use set_field with field Priority and exactly one value from allowed_values that agrees with the section body."
+	case strings.Contains(lower, "is missing") || strings.Contains(lower, "was in your previous draft and is gone"):
+		d.Code = "missing_block"
+		d.Recipe = "Use append_block for a missing H3 task or replace_block for the assigned H2 section, restoring the named block from the checkpoint without rewriting unrelated blocks."
+	case strings.Contains(lower, "appears twice") || strings.Contains(lower, "declared more than once"):
+		d.Code = "duplicate_block"
+		d.Recipe = "Use delete_block on only the duplicate H3 task, preserving the canonical occurrence and all unrelated tasks."
+	}
+	return d
+}
+
+func allowedRepairReferences(contract string, known map[string]bool) []string {
+	prefix := ""
+	switch strings.TrimPrefix(contract, "markdown_sections:") {
+	case "SPEC":
+		prefix = "REQ-"
+	case "M", "T":
+		prefix = "SPEC-"
+	}
+	if prefix == "" {
+		return nil
+	}
+	var out []string
+	for id, exists := range known {
+		if exists && strings.HasPrefix(strings.ToUpper(id), prefix) {
+			out = append(out, strings.ToUpper(id))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func structureRepairBatch(findings []string, sections []agent.Section) ([]string, []string) {
@@ -1197,7 +1338,14 @@ func setMarkdownField(text, id, field, value string) (string, error) {
 			}
 		}
 	}
-	line := "**" + strings.TrimSpace(field) + ":** " + strings.TrimSpace(value)
+	trimmedValue := strings.TrimSpace(value)
+	line := "**" + strings.TrimSpace(field) + ":** " + trimmedValue
+	if strings.Contains(trimmedValue, "\n") {
+		// Block-valued fields such as Acceptance slices need their first list
+		// item below the marker. Flattening it onto the marker made a valid
+		// two-item repair look like a one-item field on the next check.
+		line = "**" + strings.TrimSpace(field) + ":**\n" + trimmedValue
+	}
 	for i := start + 1; i < searchEnd; i++ {
 		if fieldRE.MatchString(lines[i]) {
 			lines[i] = line

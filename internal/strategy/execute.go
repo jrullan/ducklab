@@ -784,7 +784,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 							"round": round, "turn": i, "findings": problems, "attempt": structureAttempts, "max_attempts": maxStructureAttempts,
 						})
 						if structureAttempts < maxStructureAttempts && signature != previousStructureSignature && structureStagnation < maxStructureStagnation {
-							pendingStructureNote, pendingRepairSections = structureRepairInstruction(bestStructureFindings, sectionsOf(bestArchitect))
+							pendingStructureNote, pendingRepairSections = structureRepairInstruction(bestStructureFindings, sectionsOf(bestArchitect), structureRepairContext{
+								Contract: turn.Contract,
+								KnownIDs: params.KnownIDs,
+							})
 							if len(pendingRepairSections) == 0 {
 								// An empty allowlist must never mean unrestricted repair.
 								// If a finding cannot be mapped to an H2 checkpoint,

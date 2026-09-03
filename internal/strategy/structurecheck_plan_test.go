@@ -87,6 +87,87 @@ func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *te
 	}
 }
 
+// Frozen Neocapture attempts 2/3 and 3/3 taught the bounded repair to copy
+// REQ-001 from its schema example even though plan tasks may only implement
+// accepted SPEC sections. A tool-less repair must receive the closed set.
+func TestPlanRepairCarriesAllowedSpecificationIDs(t *testing.T) {
+	findings := []string{"T-900 **Implements:** names no SPEC-NNN section — plan tasks implement accepted specification contracts, not requirements or milestones"}
+	note, _ := structureRepairInstruction(findings, []agent.Section{{ID: "T-900", Body: "**Implements:** REQ-001"}}, structureRepairContext{
+		Contract: "markdown_sections:T",
+		KnownIDs: map[string]bool{
+			"REQ-001":  true,
+			"SPEC-001": true,
+			"SPEC-005": true,
+			"SPEC-006": false,
+		},
+	})
+	for _, want := range []string{`"field":"Implements","value":"SPEC-001"`, `"code": "invalid_implements_reference"`, `"allowed_values"`, `"SPEC-001"`, `"SPEC-005"`, "do not invent an ID"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("repair prompt lacks %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, `"value":"REQ-001"`) || strings.Contains(note, `"SPEC-006"`) {
+		t.Fatalf("repair prompt teaches a forbidden or nonexistent reference:\n%s", note)
+	}
+}
+
+// Frozen attempt 1/3 stalled because these v2 fields had findings but no
+// operation-level recipe. Both are expressible as bounded set_field patches.
+func TestPlanRepairExplainsAcceptanceSliceV2Fields(t *testing.T) {
+	findings := []string{
+		"T-008 has no **Work unit:** — name exactly one cohesive capability or concern; split independent concerns into separate tasks",
+		"T-008 has no top-level **Acceptance slices:** bullets — name observable outcomes of its single Work unit",
+	}
+	note, _ := structureRepairInstruction(findings, []agent.Section{{ID: "T-008", Body: "**Implements:** SPEC-001"}}, structureRepairContext{
+		Contract: "markdown_sections:T",
+		KnownIDs: map[string]bool{"SPEC-001": true},
+	})
+	for _, want := range []string{"invalid_work_unit", "field `Work unit`", "invalid_acceptance_slices", "field `Acceptance slices`", "1-3 top-level Markdown list items"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("repair prompt lacks %q:\n%s", want, note)
+		}
+	}
+}
+
+func TestEveryStructureFindingHasAToollessRecipe(t *testing.T) {
+	findings := []string{
+		"T-001 has no **Produces:** artifacts",
+		"T-001 consumes file:x produced by T-002 but has no **Depends on:** T-002",
+		"M-01: lane collision — src overlaps src/ui",
+		"T-003 appears twice",
+		"SPEC-002 was in your previous draft and is gone",
+		"custom project inspector finding",
+	}
+	for _, finding := range findings {
+		descriptor := describeStructureRepairFinding(finding, structureRepairContext{})
+		if descriptor.Code == "" || descriptor.Recipe == "" {
+			t.Errorf("finding has no repair contract: %+v", descriptor)
+		}
+	}
+}
+
+func TestAcceptanceSlicesCanBeSetWithOnePatchOperation(t *testing.T) {
+	baseText := "## T-008 — Overlay\n\n**Implements:** SPEC-001"
+	baseParsed, err := agent.ParseContract("markdown_sections:T", baseText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &agent.Outcome{Text: baseText, Parsed: baseParsed}
+	patch := &agent.Outcome{Parsed: map[string]interface{}{
+		"sections": []interface{}{"T-008"},
+		"operations": []interface{}{map[string]interface{}{
+			"op": "set_field", "target": "T-008", "field": "Acceptance slices", "value": "\n- Overlay opens\n- Escape closes it",
+		}},
+	}}
+	merged, err := applyStructurePatch(base, patch, "markdown_sections:T", []string{"T-008"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := topLevelChecklistItems(sectionsOf(merged)[0].Body, "Acceptance slices"); got != 2 {
+		t.Fatalf("patched acceptance slices = %d, want 2:\n%s", got, merged.Text)
+	}
+}
+
 func TestIsolatedArchitectOutcomeDropsSiblingTasks(t *testing.T) {
 	raw := "## T-008 — CLI\n\n**Implements:** SPEC-001\n\nright\n\n## T-009 — Lifecycle\n\n**Implements:** SPEC-001\n\nwrong sibling"
 	parsed, err := agent.ParseContract("markdown_sections:T", raw)
