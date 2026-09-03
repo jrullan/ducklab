@@ -415,6 +415,12 @@ func soloPass(prefix string, pass int) *strategy.Script {
 
 func sectionPass(prefix string, pass int, mode string, critics []config.DucklingID, sec *artifact.Section, enforceV2 bool) *strategy.Script {
 	script := artifactUpdateScript(prefix, mode, critics)
+	for _, turn := range script.Turns {
+		if turn.Persona == strategy.PersonaCritic {
+			script.RequireApproval = true
+			break
+		}
+	}
 	for i := range script.Turns {
 		if script.Turns[i].Role == config.RoleArchitect {
 			// A task-sized plan pass can use the ordinary plan structure gate:

@@ -16,6 +16,7 @@ import (
 
 var ErrStructureFailed = errors.New("document structure did not converge")
 var ErrStructureRepairScope = errors.New("structure repair changed sections outside its assignment")
+var ErrReviewNotConverged = errors.New("document review did not converge")
 
 const (
 	maxStructureAttempts   = 12

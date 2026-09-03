@@ -1156,6 +1156,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			return result, err
 		}
 	}
+	if script.RequireApproval && result.State.Verdict != "approve" {
+		result.Error = ErrReviewNotConverged
+		return result, ErrReviewNotConverged
+	}
 
 	// The stage merger must receive the same cumulative candidate the critic
 	// judged, not merely the final one-section patch emitted by the architect.

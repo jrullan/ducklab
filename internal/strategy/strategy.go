@@ -115,6 +115,11 @@ type Script struct {
 	// first: the previous round's closing revision is the draft the next
 	// round's critics judge (council).
 	RevisionOpensNextRound bool
+	// RequireApproval makes a bounded council fail instead of returning a
+	// candidate while reviewer findings remain open. Section-wise composition
+	// relies on this: an unusable isolated pass must not be checkpointed as if
+	// its reviewer had accepted it.
+	RequireApproval bool
 	// MaterializeCandidate performs the stage-owned deterministic operations
 	// that happen before proposal storage: folding partial passes, assigning
 	// stable ids and rewriting references. The final reviewer must see this

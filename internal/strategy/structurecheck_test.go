@@ -699,3 +699,22 @@ func TestAnIdenticalRevisionEndsTheCouncil(t *testing.T) {
 		t.Fatalf("no revision_identical event; events = %v", events)
 	}
 }
+
+func TestRequiredApprovalRejectsAnIdenticalRevisionWithOpenFindings(t *testing.T) {
+	draft := agent.Section{ID: "REQ-001", Title: "Capture", Body: "The app captures the screen.\n\n**Priority:** must"}
+	script := CouncilScript("REQ", nil)
+	script.RequireApproval = true
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+			if turn.Role == config.RoleReviewer {
+				return verdictOutcome("request-changes"), nil
+			}
+			return sectioned("## REQ-001 — Capture\n\nThe app captures the screen.", draft), nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	_, err := ExecuteScript(context.Background(), script, params)
+	if !errors.Is(err, ErrReviewNotConverged) {
+		t.Fatalf("error = %v, want ErrReviewNotConverged", err)
+	}
+}
