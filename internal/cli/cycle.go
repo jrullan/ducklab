@@ -152,7 +152,7 @@ func stageCmd(stage string, args []string, repo string) int {
 		return code
 	}
 	proposal, ok := got["proposal"].(map[string]interface{})
-	if !ok {
+	if !ok || !proposalBelongsToRun(proposal, runID) {
 		return code
 	}
 	fmt.Printf("\n%s\n", strings.TrimRight(str(proposal["diff"]), "\n"))
@@ -161,6 +161,10 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 	fmt.Printf("\naccept with:  ducklab %s accept\nrevise with:  ducklab %s revise \"what to change\"\nreject with:  ducklab %s reject\n", stage, stage, stage)
 	return code
+}
+
+func proposalBelongsToRun(proposal map[string]interface{}, runID string) bool {
+	return strings.TrimSpace(str(proposal["run_id"])) != "" && str(proposal["run_id"]) == runID
 }
 
 // proposalCmd acts on the proposal a stage already produced, without running a

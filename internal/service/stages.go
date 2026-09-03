@@ -24,6 +24,7 @@ import (
 	"github.com/jrullan/ducklab/internal/stage"
 	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
+	"github.com/jrullan/ducklab/internal/xplat"
 )
 
 // StageRequest starts an artifact stage.
@@ -382,6 +383,7 @@ func liveRequirementCount(doc *artifact.Document) int {
 
 // stageRequestFile persists what a stage run was asked, beside its record.
 const stageRequestFile = "stage_request.json"
+const sectionedCheckpointFile = "sectioned_checkpoint.json"
 
 func writeStageRequest(runDir string, req StageRequest) {
 	if data, err := json.Marshal(req); err == nil {
@@ -399,6 +401,31 @@ func loadStageRequest(runDir string) (StageRequest, bool) {
 		return req, false
 	}
 	return req, true
+}
+
+func loadSectionedCheckpoint(runDir string) *stage.SectionedCheckpoint {
+	var checkpoint stage.SectionedCheckpoint
+	data, err := os.ReadFile(filepath.Join(runDir, sectionedCheckpointFile))
+	if err != nil || json.Unmarshal(data, &checkpoint) != nil {
+		return nil
+	}
+	return &checkpoint
+}
+
+func writeSectionedCheckpoint(runDir string, checkpoint *stage.SectionedCheckpoint) error {
+	data, err := json.Marshal(checkpoint)
+	if err != nil {
+		return err
+	}
+	return xplat.AtomicWrite(filepath.Join(runDir, sectionedCheckpointFile), data, 0o600)
+}
+
+func clearSectionedCheckpoint(runDir string) error {
+	err := os.Remove(filepath.Join(runDir, sectionedCheckpointFile))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot string, req StageRequest) {
@@ -578,15 +605,37 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		}
 	}
 	result, err := stage.Run(ctx, stage.Params{
-		ProjectRoot: projectRoot,
-		Stage:       stage.Name(req.Stage),
-		RunID:       rs.run.ID,
-		Seed:        seed,
-		Mode:        req.Mode,
-		Rounds:      s.roundsFor(rs.run.Mode, req.Rounds),
-		Revision:    req.Revise,
-		SmallSeat:   s.smallImplementerSeat(rs.run.ProjectID),
-		OnEvent:     func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		ProjectRoot:         projectRoot,
+		Stage:               stage.Name(req.Stage),
+		RunID:               rs.run.ID,
+		SectionedCheckpoint: loadSectionedCheckpoint(rs.runDir),
+		SaveSectionedCheckpoint: func(checkpoint *stage.SectionedCheckpoint) error {
+			if err := writeSectionedCheckpoint(rs.runDir, checkpoint); err != nil {
+				return err
+			}
+			rs.writer.AppendEvent("sectioned_checkpoint", map[string]interface{}{
+				"completed": checkpoint.Completed,
+				"total":     len(checkpoint.IDs) + len(checkpoint.Adds),
+			})
+			return nil
+		},
+		ClearSectionedCheckpoint: func() error { return clearSectionedCheckpoint(rs.runDir) },
+		RestartInterruptedSection: func() {
+			if rs.run.InterruptedTurn == nil {
+				return
+			}
+			rs.writer.AppendEvent("sectioned_pass_restarted", map[string]interface{}{
+				"detail": "the interrupted section council will replay from its start; completed section passes remain checkpointed",
+			})
+			rs.run.InterruptedTurn = nil
+			rs.writer.WriteState()
+		},
+		Seed:      seed,
+		Mode:      req.Mode,
+		Rounds:    s.roundsFor(rs.run.Mode, req.Rounds),
+		Revision:  req.Revise,
+		SmallSeat: s.smallImplementerSeat(rs.run.ProjectID),
+		OnEvent:   func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 		// An amendment revision edits its own pending fragment, not the
 		// approved plan it originally extended.
 		PriorFragment: func() string {

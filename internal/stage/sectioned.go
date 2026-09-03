@@ -38,72 +38,110 @@ var titleIDPrefixRe = regexp.MustCompile(`(?i)^[A-Z]+-\d+(?:\s+[—-])?\s+`)
 func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask string) (*Result, error) {
 	kind := p.Stage.Kind()
 	prefix := kind.Prefix()
-
-	// Pass 0: triage. Outline in, a LIST out — the smallest possible answer.
-	triagePrompt, err := buildTriagePassPrompt(p.ProjectRoot, kind, base, ask)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := p.Execute(ctx, soloPass(prefix, 0), triagePrompt)
-	if err != nil {
-		return nil, err
-	}
-	ids, adds := parseTriagePass(raw, base, prefix)
-	if requestsSectionSplit(ask) && len(adds) == 0 {
-		// A split cannot be represented only by revisiting existing sections:
-		// at least one additional independent unit must be scheduled. Small
-		// triagers sometimes list the parent milestone and silently lose the
-		// requested additions. Retry triage once, before spending any drafting
-		// calls or producing a deceptively complete proposal.
+	baseHash := artifact.ContentHash(artifact.RenderBody(base))
+	askHash := artifact.ContentHash(strings.TrimSpace(ask))
+	var ids, adds []string
+	completed := 0
+	proposed := *base
+	proposed.Sections = make([]artifact.Section, len(base.Sections))
+	copy(proposed.Sections, base.Sections)
+	restored := p.SectionedCheckpoint != nil &&
+		p.SectionedCheckpoint.RunID == p.RunID &&
+		p.SectionedCheckpoint.Kind == kind &&
+		p.SectionedCheckpoint.BaseHash == baseHash &&
+		p.SectionedCheckpoint.AskHash == askHash &&
+		p.SectionedCheckpoint.Proposed != nil
+	if restored {
+		ids = append([]string(nil), p.SectionedCheckpoint.IDs...)
+		adds = append([]string(nil), p.SectionedCheckpoint.Adds...)
+		completed = p.SectionedCheckpoint.Completed
+		proposed = *p.SectionedCheckpoint.Proposed
+		if completed < len(ids)+len(adds) && p.RestartInterruptedSection != nil {
+			// A section only enters Proposed after its whole council returns. An
+			// interrupted reviewer therefore has no durable candidate to review;
+			// replay this one section, not triage and not every completed pass.
+			p.RestartInterruptedSection()
+		}
 		if p.OnEvent != nil {
-			p.OnEvent("triage_retry", map[string]interface{}{
-				"reason": "explicit split requested but triage scheduled no new section",
+			p.OnEvent("sectioned_checkpoint_restored", map[string]interface{}{
+				"completed": completed, "total": len(ids) + len(adds),
 			})
 		}
-		retryPrompt := triagePrompt + "\n\n## Required correction\n\n" +
-			"The request explicitly splits an existing section into independent units, but your first answer scheduled no `NEW:` item. " +
-			"Keep the existing id for one cohesive concern and emit one `NEW: <title>` line for every additional concern. Return the complete corrected triage list, nothing else.\n"
-		raw, err = p.Execute(ctx, soloPass(prefix, sectionedPassCap+1), retryPrompt)
+	}
+
+	// Pass 0: triage. Outline in, a LIST out — the smallest possible answer.
+	raw := ""
+	if !restored {
+		triagePrompt, err := buildTriagePassPrompt(p.ProjectRoot, kind, base, ask)
+		if err != nil {
+			return nil, err
+		}
+		raw, err = p.Execute(ctx, soloPass(prefix, 0), triagePrompt)
 		if err != nil {
 			return nil, err
 		}
 		ids, adds = parseTriagePass(raw, base, prefix)
-		if len(adds) == 0 {
-			return nil, fmt.Errorf("triage omitted NEW sections after an explicit split request")
+		if requestsSectionSplit(ask) && len(adds) == 0 {
+			// A split cannot be represented only by revisiting existing sections:
+			// at least one additional independent unit must be scheduled. Small
+			// triagers sometimes list the parent milestone and silently lose the
+			// requested additions. Retry triage once, before spending any drafting
+			// calls or producing a deceptively complete proposal.
+			if p.OnEvent != nil {
+				p.OnEvent("triage_retry", map[string]interface{}{
+					"reason": "explicit split requested but triage scheduled no new section",
+				})
+			}
+			retryPrompt := triagePrompt + "\n\n## Required correction\n\n" +
+				"The request explicitly splits an existing section into independent units, but your first answer scheduled no `NEW:` item. " +
+				"Keep the existing id for one cohesive concern and emit one `NEW: <title>` line for every additional concern. Return the complete corrected triage list, nothing else.\n"
+			raw, err = p.Execute(ctx, soloPass(prefix, sectionedPassCap+1), retryPrompt)
+			if err != nil {
+				return nil, err
+			}
+			ids, adds = parseTriagePass(raw, base, prefix)
+			if len(adds) == 0 {
+				return nil, fmt.Errorf("triage omitted NEW sections after an explicit split request")
+			}
+		}
+		if kind == artifact.KindPlan {
+			if strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") {
+				ids = expandSelectedPlanMilestones(ids, base)
+			} else {
+				ids = preferPlanTaskPasses(ids, base)
+			}
+		}
+		if len(ids) == 0 && len(adds) == 0 {
+			reason := strings.TrimSpace(raw)
+			if len(reason) > 300 {
+				reason = reason[:300] + "…"
+			}
+			return nil, fmt.Errorf("the architect changed no sections: %s", reason)
+		}
+		if len(ids)+len(adds) > sectionedPassCap {
+			return nil, fmt.Errorf("the update names %d sections — more than an update should touch "+
+				"(%d). This is a redesign wearing an update's clothes; run it with a larger seat, or "+
+				"split the request", len(ids)+len(adds), sectionedPassCap)
+		}
+		if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, 0, &proposed); err != nil {
+			return nil, err
 		}
 	}
-	if kind == artifact.KindPlan {
-		if strings.Contains(strings.ToLower(ask), "acceptance-slices-v2") {
-			ids = expandSelectedPlanMilestones(ids, base)
-		} else {
-			ids = preferPlanTaskPasses(ids, base)
-		}
-	}
-	if len(ids) == 0 && len(adds) == 0 {
-		reason := strings.TrimSpace(raw)
-		if len(reason) > 300 {
-			reason = reason[:300] + "…"
-		}
-		return nil, fmt.Errorf("the architect changed no sections: %s", reason)
-	}
-	if len(ids)+len(adds) > sectionedPassCap {
-		return nil, fmt.Errorf("the update names %d sections — more than an update should touch "+
-			"(%d). This is a redesign wearing an update's clothes; run it with a larger seat, or "+
-			"split the request", len(ids)+len(adds), sectionedPassCap)
-	}
-
-	proposed := *base
-	proposed.Sections = make([]artifact.Section, len(base.Sections))
-	copy(proposed.Sections, base.Sections)
-	pass := 1
+	pass := completed + 1
 
 	// One section, one fresh conversation.
-	for _, id := range ids {
+	for index, id := range ids {
+		if index < completed {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		sec := findSection(&proposed, id)
 		if sec == nil {
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, index+1, &proposed); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		prompt := buildSectionPassPrompt(kind, ask, sec)
@@ -115,10 +153,16 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			return nil, err
 		}
 		if strings.Contains(strings.ToUpper(reply), "UNCHANGED") && !strings.Contains(reply, "## ") {
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, index+1, &proposed); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		repl, ok := parseSectionReply(reply, kind, sec.ID)
 		if !ok {
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, index+1, &proposed); err != nil {
+				return nil, err
+			}
 			continue // an unusable pass leaves its section untouched — never the document
 		}
 		repl.ID = sec.ID // the id is not the model's to change
@@ -127,9 +171,16 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			repl.Children = sec.Children // a milestone edit never claims custody of its tasks
 		}
 		*sec = repl
+		if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, index+1, &proposed); err != nil {
+			return nil, err
+		}
 	}
 
-	for _, title := range adds {
+	for addIndex, title := range adds {
+		ordinal := len(ids) + addIndex
+		if ordinal < completed {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -148,6 +199,9 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 		}
 		sec, ok := parseSectionReply(reply, kind, "")
 		if !ok {
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, ordinal+1, &proposed); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if kind == artifact.KindPlan {
@@ -155,10 +209,16 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 			// owns milestones, aliases and real ids.
 			merged := mergeExtension(&proposed, []artifact.Section{sec})
 			proposed = *merged
+			if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, ordinal+1, &proposed); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		sec.ID = fmt.Sprintf("%s-%03d", prefix, NextFree(proposed.Sections, prefix))
 		proposed.Sections = append(proposed.Sections, sec)
+		if err := saveSectionedCheckpoint(p, kind, baseHash, askHash, ids, adds, ordinal+1, &proposed); err != nil {
+			return nil, err
+		}
 	}
 
 	proposed.Front.Kind = kind
@@ -194,8 +254,28 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, &proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
+	if p.ClearSectionedCheckpoint != nil {
+		if err := p.ClearSectionedCheckpoint(); err != nil {
+			return nil, fmt.Errorf("clear completed sectioned checkpoint: %w", err)
+		}
+	}
 	return &Result{Kind: kind, Proposed: &proposed, Raw: raw,
 		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
+}
+
+func saveSectionedCheckpoint(p Params, kind artifact.Kind, baseHash, askHash string, ids, adds []string, completed int, proposed *artifact.Document) error {
+	if p.SaveSectionedCheckpoint == nil {
+		return nil
+	}
+	checkpoint := &SectionedCheckpoint{
+		RunID: p.RunID, Kind: kind, BaseHash: baseHash, AskHash: askHash,
+		IDs: append([]string(nil), ids...), Adds: append([]string(nil), adds...),
+		Completed: completed, Proposed: proposed,
+	}
+	if err := p.SaveSectionedCheckpoint(checkpoint); err != nil {
+		return fmt.Errorf("save sectioned checkpoint: %w", err)
+	}
+	return nil
 }
 
 func planCompositionFindings(projectRoot string, base, proposed *artifact.Document) []string {

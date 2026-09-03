@@ -75,6 +75,79 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	}
 }
 
+// A section-wise update is an outer transaction around several independent
+// councils. A turn checkpoint alone cannot remember the triage list or the
+// sections already folded. Resume therefore restarts only the incomplete
+// section from the durable outer checkpoint.
+func TestSectionedResumeKeepsCompletedPassesAndSkipsTriage(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec,
+		"## SPEC-001 — Login\n\nOriginal login.\n\n"+
+			"## SPEC-002 — Profile\n\nOriginal profile.\n")
+	base, _ := artifact.Load(root, artifact.KindSpec)
+	interrupted := fmt.Errorf("reviewer budget interrupted")
+	var saved *SectionedCheckpoint
+	firstCalls := 0
+	_, err := runSectioned(context.Background(), Params{
+		ProjectRoot: root, Stage: Spec, RunID: "r-resume", Mode: "council",
+		SaveSectionedCheckpoint: func(checkpoint *SectionedCheckpoint) error {
+			saved = checkpoint
+			return nil
+		},
+		Execute: func(_ context.Context, _ *strategy.Script, prompt string) (string, error) {
+			firstCalls++
+			switch firstCalls {
+			case 1:
+				return "SPEC-001\nSPEC-002\n", nil
+			case 2:
+				return "## SPEC-001 — Login\n\nChanged login.\n", nil
+			default:
+				if !strings.Contains(prompt, "Original profile.") {
+					t.Fatalf("interrupted pass prompt = %q", prompt)
+				}
+				return "", interrupted
+			}
+		},
+	}, base, "update login and profile")
+	if err != interrupted {
+		t.Fatalf("first run error = %v, want interruption", err)
+	}
+	if saved == nil || saved.Completed != 1 || !strings.Contains(saved.Proposed.Sections[0].Body, "Changed login") {
+		t.Fatalf("outer checkpoint = %#v", saved)
+	}
+
+	restarted, cleared, secondCalls := false, false, 0
+	res, err := runSectioned(context.Background(), Params{
+		ProjectRoot: root, Stage: Spec, RunID: "r-resume", Mode: "council",
+		SectionedCheckpoint:       saved,
+		RestartInterruptedSection: func() { restarted = true },
+		SaveSectionedCheckpoint: func(checkpoint *SectionedCheckpoint) error {
+			saved = checkpoint
+			return nil
+		},
+		ClearSectionedCheckpoint: func() error { cleared = true; return nil },
+		Execute: func(_ context.Context, _ *strategy.Script, prompt string) (string, error) {
+			secondCalls++
+			if strings.Contains(prompt, "Return one id per line") || strings.Contains(prompt, "Original login.") {
+				t.Fatalf("resume replayed triage or a completed section:\n%s", prompt)
+			}
+			if !strings.Contains(prompt, "Original profile.") {
+				t.Fatalf("resume did not restart the incomplete section:\n%s", prompt)
+			}
+			return "## SPEC-002 — Profile\n\nChanged profile.\n", nil
+		},
+	}, base, "update login and profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restarted || !cleared || secondCalls != 1 {
+		t.Fatalf("resume restarted=%v cleared=%v calls=%d", restarted, cleared, secondCalls)
+	}
+	if !strings.Contains(res.Proposed.Sections[0].Body, "Changed login") || !strings.Contains(res.Proposed.Sections[1].Body, "Changed profile") {
+		t.Fatalf("resumed proposal lost its fold: %+v", res.Proposed.Sections)
+	}
+}
+
 func TestSectionedPlanUpdateDoesNotRegenerateManifest(t *testing.T) {
 	script := sectionPass("M", 1, "council", nil, nil, false)
 	for _, turn := range script.Turns {

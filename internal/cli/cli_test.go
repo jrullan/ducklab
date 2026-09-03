@@ -287,3 +287,17 @@ func TestReviseTakesTheRestOfTheLineAsANote(t *testing.T) {
 		t.Errorf("note = %q", got)
 	}
 }
+
+// A failed/paused stage must not print the last proposal merely because one
+// exists in the project. Neocapture's regression run displayed the rejected
+// proposal from the previous day, complete with accept instructions.
+func TestStageOnlyShowsTheProposalProducedByItsOwnRun(t *testing.T) {
+	proposal := map[string]interface{}{"run_id": "r-old", "diff": "stale"}
+	if proposalBelongsToRun(proposal, "r-new") {
+		t.Fatal("a stale proposal was attributed to the current stage run")
+	}
+	proposal["run_id"] = "r-new"
+	if !proposalBelongsToRun(proposal, "r-new") {
+		t.Fatal("the current run's proposal was hidden")
+	}
+}

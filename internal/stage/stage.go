@@ -110,6 +110,30 @@ type Params struct {
 	// failing the run for work the model refused to re-type. Optional; nil
 	// means no fallback.
 	Drafts func() []string
+	// SectionedCheckpoint is the durable outer transaction restored on resume.
+	// ExecuteScript can resume one council turn, but only this ledger knows
+	// which independent sections already landed in the composed candidate.
+	SectionedCheckpoint      *SectionedCheckpoint
+	SaveSectionedCheckpoint  func(*SectionedCheckpoint) error
+	ClearSectionedCheckpoint func() error
+	// RestartInterruptedSection discards a turn-level checkpoint when resume
+	// must replay the currently incomplete section. Completed sections remain
+	// in SectionedCheckpoint; the interrupted section has not landed there yet.
+	RestartInterruptedSection func()
+}
+
+// SectionedCheckpoint is the durable fold of a section-wise document update.
+// Completed counts section passes already incorporated into Proposed; the
+// next pass is replayed from its beginning after an interruption.
+type SectionedCheckpoint struct {
+	RunID     string             `json:"run_id"`
+	Kind      artifact.Kind      `json:"kind"`
+	BaseHash  string             `json:"base_hash"`
+	AskHash   string             `json:"ask_hash"`
+	IDs       []string           `json:"ids"`
+	Adds      []string           `json:"adds"`
+	Completed int                `json:"completed"`
+	Proposed  *artifact.Document `json:"proposed"`
 }
 
 // Result is what a stage produced.
