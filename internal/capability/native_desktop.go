@@ -135,6 +135,9 @@ func (GTK4Clipboard) Detect(ctx Context) Contributions {
 var (
 	uncheckedClipboardContent = regexp.MustCompile(`(?m)^\s*gdk_clipboard_set_content\s*\(`)
 	inventedClipboardReady    = regexp.MustCompile(`(?i)(?:notify::ready|g_signal_connect(?:_object)?\s*\([^;]*clipboard[^;]*,\s*"ready")`)
+	idleCallback              = regexp.MustCompile(`g_idle_add\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
+	idleFullCallback          = regexp.MustCompile(`g_idle_add_full\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
+	pixbufSerialization       = regexp.MustCompile(`\bgdk_pixbuf_save_to_buffer(?:v)?\s*\(`)
 )
 
 func (GTK4Clipboard) Inspect(ctx Context) ([]Inspection, error) {
@@ -175,6 +178,28 @@ func (GTK4Clipboard) Inspect(ctx Context) ([]Inspection, error) {
 			Capability: "gtk4-clipboard", Name: "completion-signal", Enforcement: enforcement,
 			Detail: "GdkClipboard has no ready/notify::ready acknowledgement signal; use checked set_content for publication or store_async/store_finish for persistence, then expose that chosen completion through the caller's GTask/callback",
 		})
+	}
+	mainContextPolicy := ctx.Policies["gtk4-clipboard.main-context-work"]
+	if mainContextPolicy != "off" {
+		text := string(body)
+		var callbacks []string
+		for _, match := range idleCallback.FindAllStringSubmatch(text, -1) {
+			callbacks = append(callbacks, match[1])
+		}
+		for _, match := range idleFullCallback.FindAllStringSubmatch(text, -1) {
+			callbacks = append(callbacks, match[1])
+		}
+		for _, callback := range callbacks {
+			functionBody, found := cNamedFunctionBody(text, callback)
+			if !found || !pixbufSerialization.MatchString(functionBody) {
+				continue
+			}
+			out = append(out, Inspection{
+				Capability: "gtk4-clipboard", Name: "main-context-work", Enforcement: policyEnforcement(mainContextPolicy),
+				Detail: fmt.Sprintf("idle callback %s serializes a GdkPixbuf before publishing it; perform PNG serialization in worker context and marshal only clipboard access and completion onto the main context", callback),
+			})
+			break
+		}
 	}
 	return out, nil
 }
@@ -302,6 +327,7 @@ var (
 	gTaskCreation        = regexp.MustCompile(`(?:\bGTask\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*g_task_new\s*\(`)
 	gTaskReadyCallback   = regexp.MustCompile(`g_task_new\s*\(\s*[^,]*,\s*[^,]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
 	uninitializedCtxTask = regexp.MustCompile(`g_task_set_task_data\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,[^;]*\)`)
+	zeroIdleSource       = regexp.MustCompile(`(?s)g_idle_add(?:_full)?\s*\([^;]*?\)\s*==\s*0`)
 )
 
 // InspectReviewFindings rejects remedies that contradict GIO's declared
@@ -369,6 +395,13 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	}
 	text := string(body)
 	var out []Inspection
+	idlePolicy := ctx.Policies["glib-async.idle-source-id"]
+	if idlePolicy != "off" && zeroIdleSource.MatchString(text) {
+		out = append(out, Inspection{
+			Capability: "glib-async", Name: "idle-source-id", Enforcement: policyEnforcement(idlePolicy),
+			Detail: "g_idle_add/g_idle_add_full is compared with zero as though scheduling could fail; GLib guarantees a source ID greater than zero, so this branch is unreachable and must not be used as an error or synchronous fallback path",
+		})
+	}
 	threadPolicy := ctx.Policies["glib-async.thread-return"]
 	if threadPolicy != "off" {
 		enforcement := policyEnforcement(threadPolicy)

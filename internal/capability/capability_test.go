@@ -369,6 +369,54 @@ int publish(void *clipboard, void *provider) {
 	}
 }
 
+func TestGTK4ClipboardInspectionRejectsSerializationInsideIdleCallback(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "clipboard.c", `
+static gboolean publish(gpointer data) {
+  gchar *png = NULL;
+  gdk_pixbuf_save_to_bufferv(data, &png, NULL, "png", NULL, NULL, NULL);
+  return G_SOURCE_REMOVE;
+}
+void start(gpointer image) { g_idle_add(publish, image); }
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gtk4) clipboard.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		found = found || finding.Capability == "gtk4-clipboard" && finding.Name == "main-context-work"
+	}
+	if !found {
+		t.Fatalf("missing main-context serialization finding: %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsImpossibleZeroIdleSource(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static gboolean publish(gpointer data) { return G_SOURCE_REMOVE; }
+void start(gpointer data) {
+  if (g_idle_add(publish, data) == 0) publish(data);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		found = found || finding.Capability == "glib-async" && finding.Name == "idle-source-id"
+	}
+	if !found {
+		t.Fatalf("missing impossible idle-source finding: %+v", findings)
+	}
+}
+
 func TestX11InspectionRejectsWidthCountedFromUnshiftedMask(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "capture.c", `
@@ -796,8 +844,8 @@ func TestMesonWarnsWhenNinjaIgnoresNewSources(t *testing.T) {
 func TestMesonUsesCompilationDatabaseToProveNewSourcesAreIntegrated(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "build/compile_commands.json", `[
-  {"directory":"`+root+`","file":"src/backend/included.c","command":"cc -c src/backend/included.c"}
-]`)
+	  {"directory":"`+filepath.Join(root, "build")+`","file":"../src/backend/included.c","command":"cc -c ../src/backend/included.c"}
+	]`)
 	diff := "diff --git a/src/backend/included.c b/src/backend/included.c\n" +
 		"new file mode 100644\n--- /dev/null\n+++ b/src/backend/included.c\n" +
 		"diff --git a/src/backend/ignored.c b/src/backend/ignored.c\n" +
@@ -809,5 +857,13 @@ func TestMesonUsesCompilationDatabaseToProveNewSourcesAreIntegrated(t *testing.T
 	}, []string{"meson"})
 	if len(findings) != 1 || len(findings[0].Files) != 1 || findings[0].Files[0] != "src/backend/ignored.c" {
 		t.Fatalf("compilation coverage findings = %+v", findings)
+	}
+	if got := DefaultRegistry().ObserveGate(GateObservation{
+		ProjectRoot: root,
+		Diff: "diff --git a/src/backend/included.c b/src/backend/included.c\n" +
+			"new file mode 100644\n--- /dev/null\n+++ b/src/backend/included.c\n",
+		Output: "ninja: no work to do.\n",
+	}, []string{"meson"}); len(got) != 0 {
+		t.Fatalf("a source present in the compilation database was flagged after a no-op rebuild: %+v", got)
 	}
 }

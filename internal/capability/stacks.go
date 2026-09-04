@@ -215,7 +215,11 @@ func mesonUncoveredSources(root string, files []string) []string {
 		}
 		compiled[filepath.Clean(path)] = true
 	}
-	var uncovered []string
+	// Preserve the distinction between an unavailable compilation database
+	// (nil) and an available database that covers every proposed source
+	// (non-nil, empty). ObserveGate uses that distinction before falling back
+	// to interpreting the textual Ninja output.
+	uncovered := make([]string, 0)
 	for _, file := range files {
 		if !compiled[filepath.Clean(filepath.Join(root, file))] {
 			uncovered = append(uncovered, file)
