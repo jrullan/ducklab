@@ -2270,8 +2270,10 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </section>
           )}
           {(run.gate_coverage?.length ?? 0) > 0 && (
-            <section className="rounded-card border border-warn p-3" data-testid="run-gate-coverage">
-              <h2 className="text-sm font-medium text-warn">gate coverage caveat</h2>
+            <section className={`rounded-card border p-3 ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "border-critical" : "border-warn"}`} data-testid="run-gate-coverage">
+              <h2 className={`text-sm font-medium ${run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "text-critical" : "text-warn"}`}>
+                {run.gate_coverage!.some((finding) => finding.enforcement === "required") ? "gate coverage failure" : "gate coverage caveat"}
+              </h2>
               {run.gate_coverage!.map((finding) => (
                 <div className="mt-1 text-xs" key={`${finding.capability}:${finding.kind}`}>
                   <p className="text-ink">{finding.detail}</p>

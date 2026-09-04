@@ -186,6 +186,13 @@ type ExecContext struct {
 	// existence and capability providers inspect cross-file contracts.
 	TaskProducedFiles []string
 	TaskConsumedFiles []string
+	// ActiveCapabilities is the capability set frozen onto the run. Gate
+	// observers use this exact set rather than re-detecting a changing tree.
+	ActiveCapabilities []string
+	// WorkspaceDiff supplies the candidate diff without coupling tools to the
+	// VCS package. Verification uses it to prove that the selected build gate
+	// actually exercises newly added production sources.
+	WorkspaceDiff func() (string, error)
 	// ShellEnv is the environment for shell and skill commands. Nil means the
 	// engine's own, which is the default.
 	ShellEnv []string

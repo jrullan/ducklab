@@ -234,10 +234,11 @@ type ReviewEvidence struct {
 }
 
 type GateCoverageFinding struct {
-	Capability string   `json:"capability"`
-	Kind       string   `json:"kind"`
-	Detail     string   `json:"detail"`
-	Files      []string `json:"files,omitempty"`
+	Capability  string   `json:"capability"`
+	Kind        string   `json:"kind"`
+	Detail      string   `json:"detail"`
+	Files       []string `json:"files,omitempty"`
+	Enforcement string   `json:"enforcement,omitempty"`
 }
 
 // InterruptedTurn is a durable checkpoint for resuming the same role.

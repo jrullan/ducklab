@@ -1539,20 +1539,28 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		s.failRun(rs, err)
 		return
 	}
+	activeCapabilities := make([]string, 0, len(rs.run.HarnessProfile.Capabilities))
+	for _, detected := range rs.run.HarnessProfile.Capabilities {
+		activeCapabilities = append(activeCapabilities, detected.ID)
+	}
 	ectx := &tools.ExecContext{
-		ProjectRoot:       root,
-		DocsRoot:          entry.Path,
-		RunID:             rs.run.ID,
-		Autonomy:          config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites:      rs.run.UnsafeWrites,
-		ShellPolicy:       projCfg.Shell,
-		Verify:            projCfg.Verify,
-		Capabilities:      projCfg.Capabilities,
-		HarnessContext:    harnessContext,
-		TaskVerification:  taskVerificationCommand(entry.Path, req.TaskID),
-		TaskProducedFiles: taskArtifactFiles(entry.Path, req.TaskID, "produces"),
-		TaskConsumedFiles: taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
-		Answers:           rs.answers(),
+		ProjectRoot:        root,
+		DocsRoot:           entry.Path,
+		RunID:              rs.run.ID,
+		Autonomy:           config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:       rs.run.UnsafeWrites,
+		ShellPolicy:        projCfg.Shell,
+		Verify:             projCfg.Verify,
+		Capabilities:       projCfg.Capabilities,
+		HarnessContext:     harnessContext,
+		TaskVerification:   taskVerificationCommand(entry.Path, req.TaskID),
+		TaskProducedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskConsumedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
+		ActiveCapabilities: activeCapabilities,
+		WorkspaceDiff: func() (string, error) {
+			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
+		},
+		Answers: rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
@@ -1776,21 +1784,29 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		s.failRun(rs, err)
 		return
 	}
+	activeCapabilities := make([]string, 0, len(rs.run.HarnessProfile.Capabilities))
+	for _, detected := range rs.run.HarnessProfile.Capabilities {
+		activeCapabilities = append(activeCapabilities, detected.ID)
+	}
 	ectx := &tools.ExecContext{
-		ProjectRoot:       root,
-		DocsRoot:          entry.Path,
-		RunID:             rs.run.ID,
-		ProjectID:         rs.run.ProjectID,
-		Autonomy:          config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites:      rs.run.UnsafeWrites,
-		ShellPolicy:       projCfg.Shell,
-		Verify:            projCfg.Verify,
-		Capabilities:      projCfg.Capabilities,
-		HarnessContext:    harnessContext,
-		TaskVerification:  taskVerificationCommand(entry.Path, req.TaskID),
-		TaskProducedFiles: taskArtifactFiles(entry.Path, req.TaskID, "produces"),
-		TaskConsumedFiles: taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
-		Answers:           rs.answers(),
+		ProjectRoot:        root,
+		DocsRoot:           entry.Path,
+		RunID:              rs.run.ID,
+		ProjectID:          rs.run.ProjectID,
+		Autonomy:           config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:       rs.run.UnsafeWrites,
+		ShellPolicy:        projCfg.Shell,
+		Verify:             projCfg.Verify,
+		Capabilities:       projCfg.Capabilities,
+		HarnessContext:     harnessContext,
+		TaskVerification:   taskVerificationCommand(entry.Path, req.TaskID),
+		TaskProducedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskConsumedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
+		ActiveCapabilities: activeCapabilities,
+		WorkspaceDiff: func() (string, error) {
+			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
+		},
+		Answers: rs.answers(),
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
@@ -2035,9 +2051,6 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			rs.run.Failure = detail
 		}
 	}
-	rs.run.Verdict = verdict
-	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
-
 	// Get diff
 	git := vcs.New(ectx.ProjectRoot)
 	diff, _ := git.DiffExcluding(rs.run.LinkedDeps...)
@@ -2051,15 +2064,25 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: gateResult.Output,
 		}, capabilityIDs) {
 			recorded := runlog.GateCoverageFinding{
-				Capability: finding.Capability, Kind: finding.Kind, Detail: finding.Detail, Files: finding.Files,
+				Capability: finding.Capability, Kind: finding.Kind, Detail: finding.Detail,
+				Files: finding.Files, Enforcement: string(finding.Enforcement),
 			}
 			rs.run.GateCoverage = append(rs.run.GateCoverage, recorded)
 			rs.writer.AppendEvent("gate_coverage_warning", map[string]interface{}{
 				"capability": finding.Capability, "kind": finding.Kind,
 				"detail": finding.Detail, "files": finding.Files,
+				"enforcement": finding.Enforcement,
 			})
+			if finding.Enforcement == capability.Required {
+				verdict = "FAILED"
+				if rs.run.Failure == "" {
+					rs.run.Failure = finding.Detail + ": " + strings.Join(finding.Files, ", ")
+				}
+			}
 		}
 	}
+	rs.run.Verdict = verdict
+	rs.writer.AppendEvent("verdict", map[string]interface{}{"verdict": verdict})
 	if s.afterRunDiff != nil {
 		s.afterRunDiff(rs)
 	}

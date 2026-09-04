@@ -155,6 +155,27 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 	if taskLog != "" {
 		projectLog = taskLog + "\nproject verification:\n" + projectLog
 	}
+	if verify.IsGreen(res) && ectx.WorkspaceDiff != nil && len(ectx.ActiveCapabilities) > 0 {
+		diff, err := ectx.WorkspaceDiff()
+		if err != nil {
+			return "none", projectLog, fmt.Errorf("read candidate diff for gate coverage: %w", err)
+		}
+		findings := capability.DefaultRegistry().ObserveGate(capability.GateObservation{
+			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: res.Output,
+		}, ectx.ActiveCapabilities)
+		blocking := false
+		for _, finding := range findings {
+			projectLog += fmt.Sprintf("\ncapability coverage [%s/%s, %s]:\n%s",
+				finding.Capability, finding.Kind, finding.Enforcement, finding.Detail)
+			if len(finding.Files) > 0 {
+				projectLog += "\nfiles: " + strings.Join(finding.Files, ", ")
+			}
+			blocking = blocking || finding.Enforcement == capability.Required
+		}
+		if blocking {
+			return "red", projectLog, nil
+		}
+	}
 	switch {
 	case verify.IsGreen(res):
 		return "green", projectLog, nil

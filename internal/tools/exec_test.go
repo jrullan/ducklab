@@ -84,6 +84,24 @@ func TestVerifyRunRunsTaskThenProjectWhenBothAreGreen(t *testing.T) {
 	}
 }
 
+func TestVerifyRunRejectsAGreenBuildThatDoesNotExerciseNewProductionSources(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:        t.TempDir(),
+		Verify:             config.Verify{Mode: "custom", Custom: "echo 'ninja: no work to do.'", TimeoutS: 30},
+		ActiveCapabilities: []string{"meson"},
+		WorkspaceDiff: func() (string, error) {
+			return "diff --git a/src/ui/overlay.c b/src/ui/overlay.c\nnew file mode 100644\n--- /dev/null\n+++ b/src/ui/overlay.c\n", nil
+		},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "capability coverage [meson/build-integration, required]") || !strings.Contains(res.Content, "src/ui/overlay.c") {
+		t.Fatalf("unintegrated production source survived verify_run:\n%s", res.Content)
+	}
+}
+
 func TestVerifyRunRejectsMissingDeclaredProducedFileBeforeCommands(t *testing.T) {
 	ectx := &ExecContext{
 		ProjectRoot:       t.TempDir(),

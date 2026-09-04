@@ -1455,6 +1455,9 @@
           "detail": {
             "type": "string"
           },
+          "enforcement": {
+            "type": "string"
+          },
           "files": {
             "items": {
               "type": "string"
@@ -1583,6 +1586,12 @@
           "effective_gate": {
             "$ref": "#/components/schemas/RunlogHarnessGate"
           },
+          "review_rules": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogHarnessReviewRule"
+            },
+            "type": "array"
+          },
           "task_verification": {
             "type": "string"
           }
@@ -1592,8 +1601,33 @@
         ],
         "type": "object"
       },
+      "RunlogHarnessReviewRule": {
+        "properties": {
+          "capability": {
+            "type": "string"
+          },
+          "guidance": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability",
+          "guidance",
+          "id"
+        ],
+        "type": "object"
+      },
       "RunlogInterruptedTurn": {
         "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/RunlogReviewFinding"
+            },
+            "type": "array"
+          },
           "index": {
             "type": "integer"
           },
@@ -1663,6 +1697,36 @@
         "required": [
           "independence",
           "status"
+        ],
+        "type": "object"
+      },
+      "RunlogReviewFinding": {
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "string"
+          },
+          "invariant": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "severity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "fix",
+          "issue",
+          "line",
+          "severity"
         ],
         "type": "object"
       },

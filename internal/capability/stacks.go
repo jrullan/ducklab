@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -139,17 +140,27 @@ func (Meson) Detect(ctx Context) Contributions {
 }
 
 func (Meson) ObserveGate(observation GateObservation) []GateFinding {
-	if !strings.Contains(strings.ToLower(observation.Output), "no work to do") {
-		return nil
-	}
 	files := addedMesonSources(observation.Diff)
 	if len(files) == 0 {
 		return nil
 	}
+	uncovered := mesonUncoveredSources(observation.ProjectRoot, files)
+	if uncovered == nil {
+		// Older or custom Meson gates may not leave a compilation database.
+		// "no work" is still sufficient evidence that newly added production
+		// sources were not exercised by this gate.
+		if !strings.Contains(strings.ToLower(observation.Output), "no work to do") {
+			return nil
+		}
+		uncovered = files
+	}
+	if len(uncovered) == 0 {
+		return nil
+	}
 	return []GateFinding{{
-		Capability: "meson", Kind: "build-integration",
-		Detail: "Meson/Ninja reported no work while new source files were proposed; the project build does not prove those files are integrated",
-		Files:  files,
+		Capability: "meson", Kind: "build-integration", Enforcement: Required,
+		Detail: "new production source files are absent from Meson's compilation database; the project build does not exercise them",
+		Files:  uncovered,
 	}}
 }
 
@@ -169,11 +180,48 @@ func addedMesonSources(diff string) []string {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(current)) {
-		case ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".vala", ".vapi", ".m", ".mm", ".rs", ".f", ".f90":
+		case ".c", ".cc", ".cpp", ".cxx", ".vala", ".m", ".mm", ".rs", ".f", ".f90":
 			files = append(files, current)
 		}
 	}
 	return files
+}
+
+// mesonUncoveredSources returns nil when no compilation database is
+// available, otherwise the proposed compilation units the build did not see.
+// Paths in compile_commands may be absolute or relative to each entry's
+// directory, so both are normalized before comparison.
+func mesonUncoveredSources(root string, files []string) []string {
+	raw, err := os.ReadFile(filepath.Join(root, "build", "compile_commands.json"))
+	if err != nil {
+		return nil
+	}
+	var entries []struct {
+		Directory string `json:"directory"`
+		File      string `json:"file"`
+	}
+	if json.Unmarshal(raw, &entries) != nil {
+		return nil
+	}
+	compiled := map[string]bool{}
+	for _, entry := range entries {
+		path := entry.File
+		if !filepath.IsAbs(path) {
+			base := entry.Directory
+			if base == "" {
+				base = root
+			}
+			path = filepath.Join(base, path)
+		}
+		compiled[filepath.Clean(path)] = true
+	}
+	var uncovered []string
+	for _, file := range files {
+		if !compiled[filepath.Clean(filepath.Join(root, file))] {
+			uncovered = append(uncovered, file)
+		}
+	}
+	return uncovered
 }
 
 type TypeScript struct{}

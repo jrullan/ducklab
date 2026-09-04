@@ -637,7 +637,7 @@ func TestMesonWarnsWhenNinjaIgnoresNewSources(t *testing.T) {
 	findings := DefaultRegistry().ObserveGate(GateObservation{
 		Diff: diff, Output: "ninja: no work to do.\n",
 	}, []string{"meson"})
-	if len(findings) != 1 || findings[0].Kind != "build-integration" || len(findings[0].Files) != 1 || findings[0].Files[0] != "src/backend/capture.c" {
+	if len(findings) != 1 || findings[0].Kind != "build-integration" || findings[0].Enforcement != Required || len(findings[0].Files) != 1 || findings[0].Files[0] != "src/backend/capture.c" {
 		t.Fatalf("findings = %+v", findings)
 	}
 	if got := DefaultRegistry().ObserveGate(GateObservation{Diff: diff, Output: "[1/1] Compiling C object"}, []string{"meson"}); len(got) != 0 {
@@ -645,5 +645,24 @@ func TestMesonWarnsWhenNinjaIgnoresNewSources(t *testing.T) {
 	}
 	if got := DefaultRegistry().ObserveGate(GateObservation{Diff: diff, Output: "ninja: no work to do."}, []string{"go"}); len(got) != 0 {
 		t.Fatalf("an unselected Meson adapter contributed: %+v", got)
+	}
+}
+
+func TestMesonUsesCompilationDatabaseToProveNewSourcesAreIntegrated(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "build/compile_commands.json", `[
+  {"directory":"`+root+`","file":"src/backend/included.c","command":"cc -c src/backend/included.c"}
+]`)
+	diff := "diff --git a/src/backend/included.c b/src/backend/included.c\n" +
+		"new file mode 100644\n--- /dev/null\n+++ b/src/backend/included.c\n" +
+		"diff --git a/src/backend/ignored.c b/src/backend/ignored.c\n" +
+		"new file mode 100644\n--- /dev/null\n+++ b/src/backend/ignored.c\n" +
+		"diff --git a/src/backend/ignored.h b/src/backend/ignored.h\n" +
+		"new file mode 100644\n--- /dev/null\n+++ b/src/backend/ignored.h\n"
+	findings := DefaultRegistry().ObserveGate(GateObservation{
+		ProjectRoot: root, Diff: diff, Output: "[1/1] Compiling C object included.c.o\n",
+	}, []string{"meson"})
+	if len(findings) != 1 || len(findings[0].Files) != 1 || findings[0].Files[0] != "src/backend/ignored.c" {
+		t.Fatalf("compilation coverage findings = %+v", findings)
 	}
 }

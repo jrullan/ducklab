@@ -83,10 +83,11 @@ type GateObservation struct {
 }
 
 type GateFinding struct {
-	Capability string
-	Kind       string
-	Detail     string
-	Files      []string
+	Capability  string
+	Kind        string
+	Detail      string
+	Files       []string
+	Enforcement Enforcement
 }
 
 // Contributions are everything one provider knows how to add. The shape can

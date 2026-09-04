@@ -126,6 +126,28 @@ func (r *DeliverablesReport) Missing(n int) []int {
 	return ids
 }
 
+// incompleteDeliverables is the work still open whether the author named it
+// partial/blocked or silently left its id out of an otherwise parseable
+// report. Both are incompatible with a finding-free approval.
+func incompleteDeliverables(r *DeliverablesReport, n int) []int {
+	if r == nil {
+		return nil
+	}
+	set := map[int]bool{}
+	for _, id := range r.Undelivered() {
+		set[id] = true
+	}
+	for _, id := range r.Missing(n) {
+		set[id] = true
+	}
+	ids := make([]int, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
 // ParseDeliverablesReport finds the report object in the implementer's
 // reply. Tolerant by design: fenced or bare, anywhere in the text; unknown
 // ids and statuses are dropped rather than refused. No report at all is

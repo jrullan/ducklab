@@ -75,6 +75,7 @@ describe("the run's budget while it is running", () => {
           capability: "meson", kind: "build-integration",
           detail: "Meson/Ninja reported no work while new source files were proposed",
           files: ["src/backend/x11_capture.c"],
+          enforcement: "required",
         }],
       } },
       spend: {}, events: {}, deltas: {}, reasoning: {},
@@ -82,6 +83,7 @@ describe("the run's budget while it is running", () => {
     render(<RunView runId="r-1" client={client} />);
     expect(await screen.findByTestId("run-review-evidence")).toHaveTextContent("No reviewer was seated");
     expect(screen.getByTestId("run-gate-coverage")).toHaveTextContent("src/backend/x11_capture.c");
+    expect(screen.getByTestId("run-gate-coverage")).toHaveTextContent("gate coverage failure");
     expect(screen.getByTestId("run-view")).toHaveTextContent("gates passed · no reviewer seated");
   });
 

@@ -867,6 +867,37 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				Duckling: duckling, Text: transcriptText(outcome),
 			})
 
+			// An author reporting a work-contract item as partial, blocked, or
+			// omitted is stronger evidence than a bare reviewer approval. T-006
+			// produced exactly that contradiction: the reviewer approved while
+			// acceptance slice 1 was explicitly partial, and auto mode committed
+			// it. Convert the contradiction into a normal review ledger item so
+			// it receives the same bounded repair loop as any other finding.
+			if turn.Role == config.RoleReviewer && lastReport != nil {
+				if v, ok := outcome.Parsed.(*agent.Verdict); ok && v != nil && v.Verdict == "approve" {
+					if gap := incompleteDeliverables(lastReport, len(params.Deliverables)); len(gap) > 0 {
+						v.Verdict = "request-changes"
+						for _, id := range gap {
+							item := fmt.Sprintf("acceptance slice %d", id)
+							if id > 0 && id <= len(params.Deliverables) {
+								item += ": " + params.Deliverables[id-1]
+							}
+							v.Findings = append(v.Findings, agent.Finding{
+								Severity: "major", File: "*",
+								Invariant: "Every numbered acceptance slice is complete before approval",
+								Issue:     item + " remains undelivered in the implementer's completion report",
+								Fix:       "complete the slice and report it done, or return concrete evidence that the report was wrong",
+							})
+						}
+						emit(params, "deliverables_gap", map[string]interface{}{
+							"round": round, "undelivered": gap, "original_verdict": "approve",
+							"effective_verdict": "request-changes",
+							"detail":            "reviewer approval was converted to request-changes because the work contract remains incomplete",
+						})
+					}
+				}
+			}
+
 			if turn.Role == config.RoleReviewer && params.Diff != nil {
 				if diff, derr := params.Diff(); derr == nil {
 					lastReview = rememberReview(diff, outcome)
@@ -887,17 +918,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// Fold the turn's parsed contract value into the round state.
 			switch v := outcome.Parsed.(type) {
 			case *agent.Verdict:
-				// An approve over items the implementer itself reports
-				// undelivered is a contradiction the record must show — the
-				// T-119 ambiguity ("all already in the tree"?) made visible.
-				if v.Verdict == "approve" && lastReport != nil {
-					if gap := lastReport.Undelivered(); len(gap) > 0 {
-						emit(params, "deliverables_gap", map[string]interface{}{
-							"round": round, "undelivered": gap,
-							"detail": "the reviewer approved while the implementer reports these deliverables undelivered",
-						})
-					}
-				}
 				// The WORST verdict of the round, not the last: a council seats
 				// several critics now, and one request-changes among approvals
 				// is a request for changes. Overwriting meant the last critic

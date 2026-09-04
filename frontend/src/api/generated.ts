@@ -426,6 +426,7 @@ export interface RunlogEvent {
 export interface RunlogGateCoverageFinding {
   capability?: string;
   detail?: string;
+  enforcement?: string;
   files?: string[];
   kind?: string;
 }
@@ -463,10 +464,18 @@ export interface RunlogHarnessProfile {
   detection_error?: string;
   diagnostics?: RunlogHarnessDiagnostic[];
   effective_gate?: RunlogHarnessGate;
+  review_rules?: RunlogHarnessReviewRule[];
   task_verification?: string;
 }
 
+export interface RunlogHarnessReviewRule {
+  capability?: string;
+  guidance?: string;
+  id?: string;
+}
+
 export interface RunlogInterruptedTurn {
+  findings?: RunlogReviewFinding[];
   index?: number;
   looked?: string[];
   notes?: string;
@@ -487,6 +496,15 @@ export interface RunlogReviewEvidence {
   reviewer?: string;
   status?: string;
   verdict?: string;
+}
+
+export interface RunlogReviewFinding {
+  file?: string;
+  fix?: string;
+  invariant?: string;
+  issue?: string;
+  line?: number;
+  severity?: string;
 }
 
 export interface RunlogRun {

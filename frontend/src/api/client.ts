@@ -175,7 +175,7 @@ export interface Run {
   /** Whether a semantic reviewer actually judged the proposal. */
   review_evidence?: ReviewEvidence;
   /** Stack-adapter findings about whether the project gate exercised changes. */
-  gate_coverage?: { capability: string; kind: string; detail: string; files?: string[] }[];
+  gate_coverage?: { capability: string; kind: string; detail: string; files?: string[]; enforcement?: "required" | "diagnostic" }[];
   /** Clean-checkout gate result recorded when the accepted commit was proven. */
   acceptance_gate?: GateResult;
   accepted?: boolean;

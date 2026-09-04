@@ -83,6 +83,7 @@ func TestUndeliveredReportSummonsTheDuckAndInformsTheReviewerAsData(t *testing.T
 		verdictOutcome("approve"),
 	)
 	params.Deliverables = []string{"Add columns", "Keep rows valid", "Update seed data", "Serialize image_url in the catalog API"}
+	params.Rounds = 1
 	params.Roster[config.RoleAdvisor] = "pato-duck"
 	var reportEvents, gapEvents []map[string]interface{}
 	params.OnEvent = func(kind string, data map[string]interface{}) {
@@ -93,7 +94,8 @@ func TestUndeliveredReportSummonsTheDuckAndInformsTheReviewerAsData(t *testing.T
 			gapEvents = append(gapEvents, data)
 		}
 	}
-	if _, err := ExecutePair(context.Background(), params); err != nil {
+	result, err := ExecutePair(context.Background(), params)
+	if err != nil {
 		t.Fatal(err)
 	}
 	advisorAt, reviewerAt, implAt := -1, -1, -1
@@ -130,6 +132,33 @@ func TestUndeliveredReportSummonsTheDuckAndInformsTheReviewerAsData(t *testing.T
 	}
 	if len(gapEvents) != 1 {
 		t.Errorf("approve over an undelivered item must record deliverables_gap: %v", gapEvents)
+	}
+	if result.State.Verdict != "request-changes" || result.State.NoFindings {
+		t.Errorf("contradictory approval survived as %+v", result.State)
+	}
+	if gapEvents[0]["effective_verdict"] != "request-changes" {
+		t.Errorf("gap did not record the enforced verdict: %v", gapEvents[0])
+	}
+}
+
+func TestApprovalCannotExcuseAnOmittedDeliverableStatus(t *testing.T) {
+	rec := &recorder{}
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: `{"deliverables":[{"id":1,"status":"done"}]}`},
+		verdictOutcome("approve"),
+	)
+	params.Deliverables = []string{"first slice", "second slice"}
+	params.Rounds = 1
+	result, err := ExecutePair(context.Background(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := result.Outcome.Parsed.(*agent.Verdict)
+	if result.State.Verdict != "request-changes" || !ok || len(v.Findings) != 1 {
+		t.Fatalf("omitted status did not block approval: %+v", result.State)
+	}
+	if !strings.Contains(v.Findings[0].Issue, "acceptance slice 2") {
+		t.Errorf("synthetic finding = %+v", v.Findings[0])
 	}
 }
 
