@@ -705,8 +705,16 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// Parse contract. The parsed value is kept: pair needs the reviewer's
 	// findings and tournament needs the judge's choice.
 	parsed, err := ParseContract(turn.Contract, outcome.Text)
-	if err == nil && ectx != nil && ectx.ValidateContract != nil {
-		err = ectx.ValidateContract(turn.Role, turn.Contract, parsed)
+	if err == nil && ectx != nil && ectx.NormalizeContract != nil {
+		var changed bool
+		changed, err = ectx.NormalizeContract(turn.Role, turn.Contract, parsed)
+		if err == nil && changed {
+			if normalized, marshalErr := json.Marshal(parsed); marshalErr == nil {
+				outcome.Text = string(normalized)
+			} else {
+				err = fmt.Errorf("marshal normalized contract: %w", marshalErr)
+			}
+		}
 	}
 	if err != nil {
 		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx)
@@ -1647,8 +1655,16 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 		}
 		newText := resp.Choices[0].Message.Content
 		val, perr := ParseContract(turn.Contract, newText)
-		if perr == nil && ectx != nil && ectx.ValidateContract != nil {
-			perr = ectx.ValidateContract(turn.Role, turn.Contract, val)
+		if perr == nil && ectx != nil && ectx.NormalizeContract != nil {
+			var changed bool
+			changed, perr = ectx.NormalizeContract(turn.Role, turn.Contract, val)
+			if perr == nil && changed {
+				if normalized, marshalErr := json.Marshal(val); marshalErr == nil {
+					newText = string(normalized)
+				} else {
+					perr = fmt.Errorf("marshal normalized contract: %w", marshalErr)
+				}
+			}
 		}
 		if perr == nil {
 			return newText, val, attempts, nil

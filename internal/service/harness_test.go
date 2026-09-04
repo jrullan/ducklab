@@ -6,9 +6,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/tools"
 )
+
+func TestReviewerRemediesContradictingActiveCapabilitiesAreNormalized(t *testing.T) {
+	ectx := &tools.ExecContext{ActiveCapabilities: []string{"gtk4-ui"}}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{{
+		Severity: "major", File: "ui.c", Issue: "overlay is not always above", Fix: "Add gtk_window_set_keep_above(window, TRUE).",
+	}}}
+	changed, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:native", verdict)
+	if err != nil || !changed {
+		t.Fatalf("normalize = %v, %v", changed, err)
+	}
+	if !verdict.Approved() || len(verdict.Findings) != 0 {
+		t.Fatalf("normalized verdict = %+v", verdict)
+	}
+}
 
 func TestHarnessProfileIsResolvedPersistedAndEmittedOnce(t *testing.T) {
 	root := t.TempDir()

@@ -147,13 +147,13 @@ func TestParsedContractPolicyUsesOrdinaryRepairPath(t *testing.T) {
 	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 2}
 	validations := 0
 	ectx := &tools.ExecContext{ProjectRoot: t.TempDir()}
-	ectx.ValidateContract = func(role config.Role, contract string, parsed interface{}) error {
+	ectx.NormalizeContract = func(role config.Role, contract string, parsed interface{}) (bool, error) {
 		validations++
 		v := parsed.(*Verdict)
 		if len(v.Findings) > 0 && v.Findings[0].Fix == "forbidden remedy" {
-			return errors.New("remedy conflicts with active capability")
+			return false, errors.New("remedy conflicts with active capability")
 		}
-		return nil
+		return false, nil
 	}
 
 	out, err := RunTurn(context.Background(), loop, turn, ectx)
@@ -165,6 +165,32 @@ func TestParsedContractPolicyUsesOrdinaryRepairPath(t *testing.T) {
 	}
 	if got := p.requests[1].Messages[len(p.requests[1].Messages)-1].Content; !strings.Contains(got, "remedy conflicts with active capability") {
 		t.Fatalf("repair prompt omitted policy failure: %s", got)
+	}
+}
+
+func TestParsedContractNormalizationRewritesRecordedReplyWithoutRepair(t *testing.T) {
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"app.c","line":1,"issue":"x","fix":"inadmissible"}]}`,
+	}}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 2}
+	ectx := &tools.ExecContext{ProjectRoot: t.TempDir()}
+	ectx.NormalizeContract = func(role config.Role, contract string, parsed interface{}) (bool, error) {
+		v := parsed.(*Verdict)
+		v.Findings = nil
+		v.Verdict = "approve"
+		return true, nil
+	}
+
+	out, err := RunTurn(context.Background(), loop, turn, ectx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Repairs != 0 || p.calls() != 1 || !out.Parsed.(*Verdict).Approved() {
+		t.Fatalf("outcome = %+v, calls = %d", out, p.calls())
+	}
+	if !strings.Contains(out.Text, `"verdict":"approve"`) || strings.Contains(out.Text, "inadmissible") {
+		t.Fatalf("recorded reply was not canonicalized: %s", out.Text)
 	}
 }
 

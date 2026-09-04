@@ -74,18 +74,18 @@ func (GTK4UI) InspectPlanTask(ctx PlanTaskContext) []Inspection {
 	return out
 }
 
-func (GTK4UI) InspectReviewFindings(findings []ReviewFinding) []Inspection {
-	var out []Inspection
+func (GTK4UI) InspectReviewFindings(findings []ReviewFinding) []ReviewFindingInspection {
+	var out []ReviewFindingInspection
 	for i, finding := range findings {
 		fix := strings.ToLower(strings.TrimSpace(finding.Fix))
 		for _, api := range gtk4RemovedWindowAPIs {
 			if !strings.Contains(fix, api) || remedyRejectsAPI(fix, api) {
 				continue
 			}
-			out = append(out, Inspection{
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
 				Capability: "gtk4-ui", Name: "invalid-review-remedy", Enforcement: Required,
-				Detail: fmt.Sprintf("finding %d is inadmissible and MUST be deleted: its fix proposes %s, a GTK3 API removed from GTK4. Do not repeat or defend this finding. Replace it only if a different defect has a GTK4-valid remedy; if no other valid finding remains, approve", i, api),
-			})
+				Detail: fmt.Sprintf("finding %d is inadmissible: its fix proposes %s, a GTK3 API removed from GTK4", i, api),
+			}})
 			break
 		}
 	}

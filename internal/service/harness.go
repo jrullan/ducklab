@@ -20,24 +20,45 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 		return
 	}
 	active := append([]string(nil), ectx.ActiveCapabilities...)
-	ectx.ValidateContract = func(role config.Role, contract string, parsed interface{}) error {
+	ectx.NormalizeContract = func(role config.Role, contract string, parsed interface{}) (bool, error) {
 		if role != config.RoleReviewer || (contract != "verdict" && contract != "verdict:native") {
-			return nil
+			return false, nil
 		}
 		verdict, ok := parsed.(*agent.Verdict)
 		if !ok || verdict == nil {
-			return nil
+			return false, nil
 		}
 		findings := make([]capability.ReviewFinding, 0, len(verdict.Findings))
 		for _, finding := range verdict.Findings {
 			findings = append(findings, capability.ReviewFinding{Issue: finding.Issue, Fix: finding.Fix, Invariant: finding.Invariant})
 		}
+		rejected := map[int]capability.ReviewFindingInspection{}
 		for _, finding := range capability.DefaultRegistry().InspectReviewFindings(findings, active) {
 			if finding.Enforcement == capability.Required {
-				return fmt.Errorf("review finding conflicts with active capability %s/%s: %s", finding.Capability, finding.Name, finding.Detail)
+				rejected[finding.Index] = finding
 			}
 		}
-		return nil
+		if len(rejected) == 0 {
+			return false, nil
+		}
+		kept := verdict.Findings[:0]
+		for index, finding := range verdict.Findings {
+			if rejectedFinding, found := rejected[index]; found {
+				if ectx.OnDistress != nil {
+					ectx.OnDistress("review_finding_rejected", map[string]interface{}{
+						"index": index, "capability": rejectedFinding.Capability,
+						"rule": rejectedFinding.Name, "detail": rejectedFinding.Detail,
+					})
+				}
+				continue
+			}
+			kept = append(kept, finding)
+		}
+		verdict.Findings = kept
+		if verdict.Verdict == "request-changes" && len(kept) == 0 {
+			verdict.Verdict = "approve"
+		}
+		return true, nil
 	}
 }
 

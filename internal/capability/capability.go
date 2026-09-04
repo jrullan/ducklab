@@ -99,6 +99,11 @@ type ReviewFinding struct {
 	Invariant string
 }
 
+type ReviewFindingInspection struct {
+	Index int
+	Inspection
+}
+
 // Contributions are everything one provider knows how to add. The shape can
 // grow with setup or context facts without changing the core/provider boundary.
 type Contributions struct {
@@ -158,7 +163,7 @@ type GateObserver interface {
 // verdict can steer another implementation round.
 type ReviewFindingInspector interface {
 	Provider
-	InspectReviewFindings([]ReviewFinding) []Inspection
+	InspectReviewFindings([]ReviewFinding) []ReviewFindingInspection
 }
 
 // Registry resolves independently useful providers into one harness profile.
@@ -305,8 +310,8 @@ func (r *Registry) ObserveGate(observation GateObservation, capabilityIDs []stri
 // InspectReviewFindings asks only capabilities frozen onto the run to check
 // proposed remedies. Unlike project detection, this is deterministic and
 // side-effect free, so it is safe inside contract repair.
-func (r *Registry) InspectReviewFindings(findings []ReviewFinding, capabilityIDs []string) []Inspection {
-	var out []Inspection
+func (r *Registry) InspectReviewFindings(findings []ReviewFinding, capabilityIDs []string) []ReviewFindingInspection {
+	var out []ReviewFindingInspection
 	for _, id := range capabilityIDs {
 		inspector, ok := r.providers[id].(ReviewFindingInspector)
 		if !ok {
@@ -316,6 +321,9 @@ func (r *Registry) InspectReviewFindings(findings []ReviewFinding, capabilityIDs
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Capability == out[j].Capability {
+			if out[i].Name == out[j].Name {
+				return out[i].Index < out[j].Index
+			}
 			return out[i].Name < out[j].Name
 		}
 		return out[i].Capability < out[j].Capability
