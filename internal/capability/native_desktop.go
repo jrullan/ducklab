@@ -285,8 +285,8 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 			{Capability: "glib-async", ID: "deferred-input-lifetime", Guidance: "A pointer retained for g_idle_add, an async callback, a worker, or a queue outlives the initiating call. Copy its data, take a reference, or make ownership transfer explicit; merely storing a borrowed input in a context struct can become a use-after-free."},
 			{Capability: "glib-async", ID: "callback-context", Guidance: "If a public async API accepts callback user_data, its callback signature and every completion path must pass that exact user_data back. Storing it without delivering it is a broken API contract even when compilation succeeds."},
 			{Capability: "glib-async", ID: "idle-source-id", Guidance: "g_idle_add returns a source ID guaranteed to be greater than zero. Do not invent a g_idle_add()==0 allocation-failure branch or run its main-context callback synchronously from a worker; use g_idle_add_full with a destroy notify when source-data cleanup needs an explicit ownership contract."},
-			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data); GTaskThreadFunc is void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable); return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). There are no g_task_propose_pointer or g_task_propose_error APIs."},
-			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker."},
+			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data). GAsyncReadyCallback is exactly void callback(GObject *source_object, GAsyncResult *result, gpointer user_data). GTaskThreadFunc is exactly void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable). Return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). There are no g_task_propose_pointer or g_task_propose_error APIs."},
+			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker. A worker completes its GTask with one g_task_return_* call; the resulting GAsyncReadyCallback consumes that completed result with the corresponding g_task_propagate_* call and must not call g_task_return_* on G_TASK(result) again."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
 			{Capability: "glib-async", ID: "boxed-release", Guidance: "GBytes is a ref-counted boxed type, not a GObject. Release a GBytes* with g_bytes_unref (for example g_clear_pointer(&bytes, g_bytes_unref)), never g_clear_object or g_object_unref."},
 			{Capability: "glib-async", ID: "context-initialization", Guidance: "Every field read by a deferred callback must be initialized before scheduling it. Passing ctx as GTask task_data does not initialize a separate ctx->task back-reference; either assign an explicitly owned reference or have the callback receive the task through its actual API contract."},
@@ -300,8 +300,33 @@ var (
 	ignoredThreadHandle  = regexp.MustCompile(`(?m)(?:^|[;{}])\s*g_thread_new\s*\([^;\n]*\)\s*;`)
 	gbytesDeclaration    = regexp.MustCompile(`\bGBytes\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)`)
 	gTaskCreation        = regexp.MustCompile(`(?:\bGTask\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*g_task_new\s*\(`)
+	gTaskReadyCallback   = regexp.MustCompile(`g_task_new\s*\(\s*[^,]*,\s*[^,]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
 	uninitializedCtxTask = regexp.MustCompile(`g_task_set_task_data\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,[^;]*\)`)
 )
+
+// InspectReviewFindings rejects remedies that contradict GIO's declared
+// callback ABI. The check is deliberately about the proposed fix, not the
+// reviewer's prose: a mistaken issue can still prescribe a valid remedy.
+func (GLibAsync) InspectReviewFindings(findings []ReviewFinding) []ReviewFindingInspection {
+	var out []ReviewFindingInspection
+	for i, finding := range findings {
+		fix := strings.ToLower(strings.TrimSpace(finding.Fix))
+		mentionsReadyCallback := strings.Contains(fix, "gasyncreadycallback") ||
+			(strings.Contains(fix, "gasyncresult") && strings.Contains(fix, "gpointer"))
+		prescribesTwoArguments := strings.Contains(fix, "exactly two") ||
+			strings.Contains(fix, "two parameter") || strings.Contains(fix, "two-parameter") ||
+			strings.Contains(fix, "no source_object") || strings.Contains(fix, "remove source_object") ||
+			(strings.Contains(fix, "signature") && strings.Contains(fix, "gasyncresult") &&
+				strings.Contains(fix, "gpointer") && !strings.Contains(fix, "gobject"))
+		if mentionsReadyCallback && prescribesTwoArguments {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-ready-callback-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: its fix prescribes a two-argument GAsyncReadyCallback, but GIO declares (GObject *source_object, GAsyncResult *result, gpointer user_data)", i),
+			}})
+		}
+	}
+	return out
+}
 
 // Inspect verifies the C-level return contract of functions actually passed
 // to g_thread_new. GCC accepts a gpointer worker that falls off its success
@@ -406,6 +431,22 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 			}
 		}
 	}
+
+	completionPolicy := ctx.Policies["glib-async.ready-callback-completion"]
+	if completionPolicy != "off" {
+		for _, match := range gTaskReadyCallback.FindAllStringSubmatch(text, -1) {
+			callback := match[1]
+			functionBody, found := cNamedFunctionBody(text, callback)
+			if !found || !readyCallbackRecompletesResult(functionBody) {
+				continue
+			}
+			out = append(out, Inspection{
+				Capability: "glib-async", Name: "ready-callback-completion", Enforcement: policyEnforcement(completionPolicy),
+				Detail: fmt.Sprintf("GAsyncReadyCallback %s calls g_task_return_* on the GTask obtained from its result; the worker has already completed that result, so consume it with g_task_propagate_* instead of completing it again", callback),
+			})
+			break
+		}
+	}
 	return out, nil
 }
 
@@ -437,6 +478,46 @@ func cThreadFunction(source, name string) (body string, pointerReturn bool, foun
 		}
 	}
 	return "", returnType != "void", true
+}
+
+func cNamedFunctionBody(source, name string) (string, bool) {
+	definition := regexp.MustCompile(`(?m)(?:^|\n)\s*(?:static\s+)?[A-Za-z_][A-Za-z0-9_\s*]*\s+` + regexp.QuoteMeta(name) + `\s*\([^;]*?\)\s*\{`)
+	location := definition.FindStringIndex(source)
+	if location == nil {
+		return "", false
+	}
+	openOffset := strings.LastIndex(source[location[0]:location[1]], "{")
+	if openOffset < 0 {
+		return "", false
+	}
+	open := location[0] + openOffset
+	depth := 0
+	for i := open; i < len(source); i++ {
+		switch source[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return source[open+1 : i], true
+			}
+		}
+	}
+	return "", false
+}
+
+func readyCallbackRecompletesResult(body string) bool {
+	direct := regexp.MustCompile(`g_task_return_[A-Za-z0-9_]+\s*\(\s*G_TASK\s*\(`)
+	if direct.MatchString(body) {
+		return true
+	}
+	for _, match := range regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*G_TASK\s*\(`).FindAllStringSubmatch(body, -1) {
+		returnsAlias := regexp.MustCompile(`g_task_return_[A-Za-z0-9_]+\s*\(\s*` + regexp.QuoteMeta(match[1]) + `\b`)
+		if returnsAlias.MatchString(body) {
+			return true
+		}
+	}
+	return false
 }
 
 func workerReturnsValue(body string) bool {

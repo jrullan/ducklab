@@ -263,6 +263,36 @@ func TestGTK4ReviewInspectionRejectsRemovedAPIRemedy(t *testing.T) {
 	}
 }
 
+func TestGLibReviewInspectionRejectsTwoArgumentReadyCallbackRemedy(t *testing.T) {
+	findings := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "callback has the wrong signature",
+		Fix:   "Change it to exactly two parameters: (GAsyncResult *result, gpointer user_data); remove source_object.",
+	}}, []string{"glib-async"})
+	if len(findings) != 1 || findings[0].Name != "invalid-ready-callback-remedy" || findings[0].Enforcement != Required {
+		t.Fatalf("review findings = %+v", findings)
+	}
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Change signature to static void async_complete_cb(GAsyncResult *result, gpointer user_data) and retrieve context via G_TASK(result).",
+	}}, []string{"glib-async"})
+	if len(findings) != 1 || findings[0].Name != "invalid-ready-callback-remedy" {
+		t.Fatalf("concrete two-argument signature was not rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Use the GAsyncReadyCallback signature (GObject *source_object, GAsyncResult *result, gpointer user_data).",
+	}}, []string{"glib-async"})
+	if len(findings) != 0 {
+		t.Fatalf("correct three-argument remedy was rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Change it to exactly two parameters: (GAsyncResult *result, gpointer user_data).",
+	}}, []string{"go"})
+	if len(findings) != 0 {
+		t.Fatalf("an inactive GLib adapter contributed: %+v", findings)
+	}
+}
+
 func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "clipboard.c", `
@@ -531,6 +561,69 @@ void start(void) {
 	}
 	if len(findings) != 0 {
 		t.Fatalf("explicit ownership was rejected: %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsReadyCallbackCompletingResultAgain(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static void worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel) {
+  g_task_return_pointer(task, data, NULL);
+}
+static void ready(GObject *source, GAsyncResult *result, gpointer data) {
+  GTask *task = G_TASK(result);
+  gpointer value = g_task_propagate_pointer(task, NULL);
+  if (value != NULL) g_task_return_boolean(task, TRUE);
+}
+void start(gpointer data) {
+  GTask *task = g_task_new(NULL, NULL, ready, data);
+  g_task_run_in_thread(task, worker);
+  g_object_unref(task);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range findings {
+		if finding.Name == "ready-callback-completion" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing double-completion finding: %+v", findings)
+	}
+}
+
+func TestGLibInspectionAcceptsReadyCallbackPropagatingResult(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static void worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel) {
+  g_task_return_pointer(task, data, NULL);
+}
+static void ready(GObject *source, GAsyncResult *result, gpointer data) {
+  gpointer value = g_task_propagate_pointer(G_TASK(result), NULL);
+  consume(value, data);
+}
+void start(gpointer data) {
+  GTask *task = g_task_new(NULL, NULL, ready, data);
+  g_task_run_in_thread(task, worker);
+  g_object_unref(task);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range findings {
+		if finding.Name == "ready-callback-completion" {
+			t.Fatalf("propagate-only callback was rejected: %+v", findings)
+		}
 	}
 }
 
