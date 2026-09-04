@@ -96,11 +96,16 @@ type Run struct {
 	PendingSince      string                 `json:"pending_since,omitempty"`
 	PendingKind       string                 `json:"pending_kind,omitempty"` // gate|question
 	PendingData       map[string]interface{} `json:"pending_data,omitempty"`
-	Captures          []string               `json:"captures,omitempty"`
-	UnsafeWrites      bool                   `json:"unsafe_writes"`
-	Stream            bool                   `json:"stream"`
-	DryRun            bool                   `json:"dry_run"`
-	Autonomy          string                 `json:"autonomy"`
+	// HistoryDurationEscalated persists acknowledgement of the one-shot
+	// historical-duration warning. Without a durable bit, restarting the
+	// engine for each resume recreated runState with its atomic guard clear and
+	// paused the same long build after every subsequent turn.
+	HistoryDurationEscalated bool     `json:"history_duration_escalated,omitempty"`
+	Captures                 []string `json:"captures,omitempty"`
+	UnsafeWrites             bool     `json:"unsafe_writes"`
+	Stream                   bool     `json:"stream"`
+	DryRun                   bool     `json:"dry_run"`
+	Autonomy                 string   `json:"autonomy"`
 	// Origin says who started the run when it was not a person at a button:
 	// "autopilot" today. Empty means human-initiated.
 	Origin             string      `json:"origin,omitempty"`

@@ -32,11 +32,35 @@ func TestVerifyRunUsesTheProjectsOwnGate(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("verify_run failed: %s", res.Content)
 	}
+	if !res.EndTurn || !strings.Contains(res.Content, "implementation tools are now closed") {
+		t.Fatalf("a green gate did not close the implementation turn: %+v", res)
+	}
 	if !strings.Contains(res.Content, "ran-the-real-gate") {
 		t.Errorf("verify_run did not run the project's gate: %q", res.Content)
 	}
 	if strings.Contains(res.Content, "go test ./...") {
 		t.Errorf("verify_run still runs its hardcoded command: %q", res.Content)
+	}
+}
+
+func TestGreenVerifyClosesMutationsForTheRestOfTheReply(t *testing.T) {
+	root := t.TempDir()
+	ectx := &ExecContext{
+		ProjectRoot: root,
+		ShellPolicy: config.ShellPolicy{Mode: "free", TimeoutS: 30},
+		Verify:      config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30},
+	}
+	registry := NewRegistry()
+	verified, err := registry.Execute(context.Background(), ectx, "verify_run", json.RawMessage(`{}`))
+	if err != nil || verified.IsError || !verified.EndTurn || !ectx.ToolsClosed {
+		t.Fatalf("green verify did not close tools: result=%+v err=%v closed=%v", verified, err, ectx.ToolsClosed)
+	}
+	written, err := registry.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"after-green.txt","content":"regression"}`))
+	if err != nil || !written.IsError || !written.EndTurn {
+		t.Fatalf("post-green mutation was not refused: result=%+v err=%v", written, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "after-green.txt")); !os.IsNotExist(err) {
+		t.Fatalf("post-green mutation changed the tree: stat err=%v", err)
 	}
 }
 

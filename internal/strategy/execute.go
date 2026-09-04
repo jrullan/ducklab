@@ -370,6 +370,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// reviewer and the gate are the independent check.
 		consultRetries := 0
 		consultLimit := consultRetryLimit(params)
+		consultRetryNeedsWork := false
 		// A missing deliverables report is a protocol-level incomplete ending,
 		// not something worth spending an independent reviewer on. One bounded
 		// same-seat retry lets the implementer finish from the current tree.
@@ -605,7 +606,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					params.ExecContext.ExplorationCallLimit = 4
 				}
 			}
-			narrowContinuation := consultRetries > 0 || (reportRetries > 0 && !reportRetryNeedsWork)
+			narrowContinuation := (consultRetries > 0 && !consultRetryNeedsWork) ||
+				(reportRetries > 0 && !reportRetryNeedsWork)
 			if turn.Role == config.RoleImplementer && narrowContinuation && turn.MaxTurns > 8 {
 				// A continuation has the current tree, prior evidence and one
 				// narrow correction. An omitted report after a red gate is not
@@ -1040,6 +1042,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						// reviewer turn AND the next round. Bounded, and the
 						// note also stays for later rounds.
 						if consultRetries < consultLimit {
+							consultRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)
 							consultRetries++
 							emit(params, "advisor_retry", map[string]interface{}{
 								"round": round, "retry": consultRetries, "of": consultLimit,

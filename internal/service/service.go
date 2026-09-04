@@ -4600,9 +4600,13 @@ func (s *Service) checkWallclockEscalation(rs *runState) {
 		threshold = floor
 	}
 
-	if elapsed < threshold || !rs.historyEscalated.CompareAndSwap(false, true) {
+	if elapsed < threshold || rs.run.HistoryDurationEscalated || !rs.historyEscalated.CompareAndSwap(false, true) {
 		return
 	}
+	// The in-memory atomic prevents duplicate callbacks in this process; the
+	// run field prevents the same one-shot warning from rearming after an
+	// engine restart and resume.
+	rs.run.HistoryDurationEscalated = true
 	stage := rs.run.Stage
 	if rs.run.InterruptedTurn != nil {
 		stage = fmt.Sprintf("%s, round %d", rs.run.InterruptedTurn.Role, rs.run.InterruptedTurn.Round)

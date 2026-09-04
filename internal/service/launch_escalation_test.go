@@ -56,6 +56,9 @@ func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
 	}
 
 	s.checkWallclockEscalation(rs)
+	if !current.HistoryDurationEscalated {
+		t.Fatal("history-duration acknowledgement was not persisted on the run")
+	}
 	events, err := runlog.ReadEvents(w.RunDir())
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +133,44 @@ func TestWallclockEscalationDoesNotPauseDocumentTransaction(t *testing.T) {
 	}
 	if !suggestion || !deferred || requested || rs.pauseAfterTurn.Load() {
 		t.Fatalf("document escalation must advise without interrupting its transaction: suggestion=%v deferred=%v requested=%v pending=%v", suggestion, deferred, requested, rs.pauseAfterTurn.Load())
+	}
+}
+
+func TestWallclockEscalationAcknowledgementSurvivesEngineRestart(t *testing.T) {
+	s := newTestService(t)
+	dir := t.TempDir()
+	started := time.Now().Add(-11 * time.Minute)
+	current := &runlog.Run{
+		ID: "r-current", ProjectID: "p", Stage: "build", Mode: "solo", Status: "running",
+		StartedAt: started.UTC().Format(time.RFC3339), ActiveSince: started.UTC().Format(time.RFC3339Nano),
+		HistoryDurationEscalated: true,
+	}
+	w, err := runlog.NewWriter(dir, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: current, writer: w, runDir: w.RunDir()}
+	s.runs = map[string]*runState{current.ID: rs}
+	for i := 0; i < 5; i++ {
+		s.runs["history-"+string(rune('a'+i))] = &runState{run: &runlog.Run{
+			ID: "history", ProjectID: "p", Stage: "build", Mode: "solo", ActiveWallclockMs: 5 * 60_000,
+			EndedAt: time.Now().UTC().Format(time.RFC3339),
+		}}
+	}
+
+	s.checkWallclockEscalation(rs)
+	if rs.pauseAfterTurn.Load() {
+		t.Fatal("a persisted history-duration acknowledgement rearmed after restart")
+	}
+	events, err := runlog.ReadEvents(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == "escalation_suggestion" || event.Type == "pause_requested" {
+			t.Fatalf("acknowledged duration warning emitted again: %+v", event)
+		}
 	}
 }
 

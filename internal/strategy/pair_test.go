@@ -439,6 +439,14 @@ func TestSmallSeatGetsOneAdvisorRetryBeforeIndependentReview(t *testing.T) {
 	)
 	params.SmallSeat = true
 	params.Roster[config.RoleAdvisor] = "pato-duck"
+	originalRunner := params.Runner
+	var implementerCaps []int
+	params.Runner = func(ctx context.Context, turn *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleImplementer {
+			implementerCaps = append(implementerCaps, turn.MaxTurns)
+		}
+		return originalRunner(ctx, turn, duckling, prompt, toolbelt, tc)
+	}
 	if _, err := ExecutePair(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
@@ -455,6 +463,9 @@ func TestSmallSeatGetsOneAdvisorRetryBeforeIndependentReview(t *testing.T) {
 	}
 	if impl != 2 || adv != 2 || rev != 1 {
 		t.Errorf("small-seat routing = implementer:%d advisor:%d reviewer:%d, want 2/2/1: %v", impl, adv, rev, rec.roles)
+	}
+	if len(implementerCaps) != 2 || implementerCaps[0] != 24 || implementerCaps[1] != 24 {
+		t.Errorf("advisor repair caps = %v, want [24 24]: work without a current green verify is not a narrow continuation", implementerCaps)
 	}
 }
 

@@ -131,7 +131,15 @@ func (t *VerifyRun) Execute(ctx context.Context, ectx *ExecContext, args json.Ra
 		return &Result{Content: result, IsError: true}, nil
 	}
 	ectx.ConsecGateFails = 0
-	return SuccessResult("%s", result), nil
+	// A green deterministic gate is the implementation turn's terminal state.
+	// Continuing to mutate after it repeatedly destroyed verified repairs in a
+	// small-seat build. Close tools and spend the conclusion call on the
+	// required completion report; semantic objections still belong to the
+	// independent reviewer and open the next implementation round normally.
+	return &Result{
+		Content: result + "\n\n[gate green: implementation tools are now closed for this reply; do not edit again. End with the required completion report.]",
+		EndTurn: true,
+	}, nil
 }
 
 // RunVerificationGate is the single verification path used by both
