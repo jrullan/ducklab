@@ -1823,7 +1823,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		for key, value := range data {
 			payload[key] = value
 		}
-		if reason == "governance_write_refused" {
+		if reason == "governance_write_refused" || reason == "review_finding_rejected" {
 			rs.writer.AppendEvent(reason, payload)
 		}
 		s.publishTransition(rs, "distress", payload)
