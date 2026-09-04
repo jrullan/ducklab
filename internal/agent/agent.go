@@ -705,8 +705,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// Parse contract. The parsed value is kept: pair needs the reviewer's
 	// findings and tournament needs the judge's choice.
 	parsed, err := ParseContract(turn.Contract, outcome.Text)
+	if err == nil && ectx != nil && ectx.ValidateContract != nil {
+		err = ectx.ValidateContract(turn.Role, turn.Contract, parsed)
+	}
 	if err != nil {
-		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err)
+		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx)
 		outcome.Repairs = attempts
 		if rerr != nil {
 			// Name the contract and the original parse failure: "contract
@@ -1597,7 +1600,7 @@ func executeTextToolCall(ctx context.Context, loop *Loop, ectx *tools.ExecContex
 }
 
 // repairContract attempts to repair a contract violation.
-func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, text string, parseErr error) (string, interface{}, int, error) {
+func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, text string, parseErr error, ectx *tools.ExecContext) (string, interface{}, int, error) {
 	repairs := loop.RepairAttempts
 	if repairs <= 0 {
 		repairs = 2
@@ -1638,17 +1641,31 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 			continue
 		}
 		newText := resp.Choices[0].Message.Content
-		if val, perr := ParseContract(turn.Contract, newText); perr == nil {
-			return newText, val, attempts, nil
-		} else {
-			parseErr = perr
-			text = newText
+		val, perr := ParseContract(turn.Contract, newText)
+		if perr == nil && ectx != nil && ectx.ValidateContract != nil {
+			perr = ectx.ValidateContract(turn.Role, turn.Contract, val)
 		}
+		if perr == nil {
+			return newText, val, attempts, nil
+		}
+		parseErr = perr
+		text = newText
 	}
 	return "", nil, attempts, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, attempts, parseErr)
 }
 
 func repairInstruction(contract string, parseErr error) string {
+	if contract == "verdict:native" {
+		return fmt.Sprintf(`Your reply did not satisfy the required output format or an active deterministic capability rule.
+
+Contract: %s
+What was wrong: %v
+
+Reply again with ONLY one JSON object, with no prose or Markdown fences, in exactly this shape:
+{"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"path or *","line":0,"issue":"what is wrong","fix":"valid concrete remedy","invariant":"rule when class-level"}],"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}}
+
+All five native_checks values are required and must name concrete final-code evidence. Retract or replace any finding whose proposed fix conflicts with an active capability rule. Use an empty findings array when approving.`, contract, parseErr)
+	}
 	return fmt.Sprintf(`Your reply did not satisfy the required output format.
 
 Contract: %s

@@ -193,6 +193,11 @@ type ExecContext struct {
 	// VCS package. Verification uses it to prove that the selected build gate
 	// actually exercises newly added production sources.
 	WorkspaceDiff func() (string, error)
+	// ValidateContract lets the service compose run-specific, deterministic
+	// policy checks after the agent package has parsed a structured reply. The
+	// callback boundary keeps stack knowledge out of the agent loop while still
+	// allowing a rejected value to use the loop's ordinary contract-repair path.
+	ValidateContract func(role config.Role, contract string, parsed interface{}) error
 	// ShellEnv is the environment for shell and skill commands. Nil means the
 	// engine's own, which is the default.
 	ShellEnv []string

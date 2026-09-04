@@ -138,6 +138,45 @@ func TestRepairSucceedsAndReturnsTheParsedValue(t *testing.T) {
 	}
 }
 
+func TestParsedContractPolicyUsesOrdinaryRepairPath(t *testing.T) {
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"app.c","line":1,"issue":"x","fix":"forbidden remedy"}]}`,
+		`{"verdict":"approve","findings":[]}`,
+	}}
+	loop := testLoop(p, 2)
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "review", Contract: "verdict", MaxTurns: 2}
+	validations := 0
+	ectx := &tools.ExecContext{ProjectRoot: t.TempDir()}
+	ectx.ValidateContract = func(role config.Role, contract string, parsed interface{}) error {
+		validations++
+		v := parsed.(*Verdict)
+		if len(v.Findings) > 0 && v.Findings[0].Fix == "forbidden remedy" {
+			return errors.New("remedy conflicts with active capability")
+		}
+		return nil
+	}
+
+	out, err := RunTurn(context.Background(), loop, turn, ectx)
+	if err != nil {
+		t.Fatalf("policy repair failed: %v", err)
+	}
+	if out.Repairs != 1 || validations != 2 || !out.Parsed.(*Verdict).Approved() {
+		t.Fatalf("outcome = %+v, validations = %d", out, validations)
+	}
+	if got := p.requests[1].Messages[len(p.requests[1].Messages)-1].Content; !strings.Contains(got, "remedy conflicts with active capability") {
+		t.Fatalf("repair prompt omitted policy failure: %s", got)
+	}
+}
+
+func TestNativeVerdictRepairInstructionIncludesCompleteSchema(t *testing.T) {
+	got := repairInstruction("verdict:native", errors.New("native_checks is required"))
+	for _, want := range []string{"native_checks", "completion", "resources", "threads", "representation", "cleanup", "Retract or replace"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("native repair instruction lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 // Contract repair requests must use the same bounded output budget as the
 // original structured turn, rather than the duckling's large declared cap.
 func TestJSONTriageRepairUsesTheContractOutputCap(t *testing.T) {

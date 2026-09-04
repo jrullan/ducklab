@@ -240,6 +240,29 @@ func TestGTK4PlanInspectionActivatesFromSymbolsWithoutVersionWord(t *testing.T) 
 	}
 }
 
+func TestGTK4ReviewInspectionRejectsRemovedAPIRemedy(t *testing.T) {
+	findings := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "window may be covered", Fix: "Add gtk_window_set_keep_above(window, TRUE).",
+	}}, []string{"gtk4-ui"})
+	if len(findings) != 1 || findings[0].Name != "invalid-review-remedy" || findings[0].Enforcement != Required {
+		t.Fatalf("review findings = %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "legacy API remains", Fix: "Remove gtk_window_set_keep_above and use the accepted GTK4 window contract.",
+	}}, []string{"gtk4-ui"})
+	if len(findings) != 0 {
+		t.Fatalf("a remedy removing the invalid API was rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Add gtk_window_set_keep_above(window, TRUE).",
+	}}, []string{"go"})
+	if len(findings) != 0 {
+		t.Fatalf("an inactive GTK4 adapter contributed: %+v", findings)
+	}
+}
+
 func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "clipboard.c", `

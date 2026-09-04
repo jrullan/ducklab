@@ -90,6 +90,15 @@ type GateFinding struct {
 	Enforcement Enforcement
 }
 
+// ReviewFinding is the stack-neutral portion of a parsed reviewer finding
+// that capability providers may validate. It deliberately mirrors no agent
+// contract type, preserving the package boundary.
+type ReviewFinding struct {
+	Issue     string
+	Fix       string
+	Invariant string
+}
+
 // Contributions are everything one provider knows how to add. The shape can
 // grow with setup or context facts without changing the core/provider boundary.
 type Contributions struct {
@@ -143,6 +152,13 @@ type PlanInspector interface {
 type GateObserver interface {
 	Provider
 	ObserveGate(GateObservation) []GateFinding
+}
+
+// ReviewFindingInspector rejects stack-invalid remedies before a reviewer
+// verdict can steer another implementation round.
+type ReviewFindingInspector interface {
+	Provider
+	InspectReviewFindings([]ReviewFinding) []Inspection
 }
 
 // Registry resolves independently useful providers into one harness profile.
@@ -284,6 +300,27 @@ func (r *Registry) ObserveGate(observation GateObservation, capabilityIDs []stri
 		return findings[i].Capability < findings[j].Capability
 	})
 	return findings
+}
+
+// InspectReviewFindings asks only capabilities frozen onto the run to check
+// proposed remedies. Unlike project detection, this is deterministic and
+// side-effect free, so it is safe inside contract repair.
+func (r *Registry) InspectReviewFindings(findings []ReviewFinding, capabilityIDs []string) []Inspection {
+	var out []Inspection
+	for _, id := range capabilityIDs {
+		inspector, ok := r.providers[id].(ReviewFindingInspector)
+		if !ok {
+			continue
+		}
+		out = append(out, inspector.InspectReviewFindings(findings)...)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Capability == out[j].Capability {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Capability < out[j].Capability
+	})
+	return out
 }
 
 func (r *Registry) selected(auto bool, enabled, disabled []string) ([]string, error) {

@@ -4,10 +4,42 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/tools"
 )
+
+// attachReviewContractValidator composes stack-specific reviewer checks onto
+// the generic agent contract-repair mechanism. Only capabilities frozen onto
+// this run participate; resumption therefore cannot silently re-detect a new
+// policy from a changing worktree.
+func attachReviewContractValidator(ectx *tools.ExecContext) {
+	if ectx == nil {
+		return
+	}
+	active := append([]string(nil), ectx.ActiveCapabilities...)
+	ectx.ValidateContract = func(role config.Role, contract string, parsed interface{}) error {
+		if role != config.RoleReviewer || (contract != "verdict" && contract != "verdict:native") {
+			return nil
+		}
+		verdict, ok := parsed.(*agent.Verdict)
+		if !ok || verdict == nil {
+			return nil
+		}
+		findings := make([]capability.ReviewFinding, 0, len(verdict.Findings))
+		for _, finding := range verdict.Findings {
+			findings = append(findings, capability.ReviewFinding{Issue: finding.Issue, Fix: finding.Fix, Invariant: finding.Invariant})
+		}
+		for _, finding := range capability.DefaultRegistry().InspectReviewFindings(findings, active) {
+			if finding.Enforcement == capability.Required {
+				return fmt.Errorf("review finding conflicts with active capability %s/%s: %s", finding.Capability, finding.Name, finding.Detail)
+			}
+		}
+		return nil
+	}
+}
 
 // ensureHarnessProfile resolves once and persists before any coding seat is
 // called. A resumed run reuses the record: stack probes are launch work, not a

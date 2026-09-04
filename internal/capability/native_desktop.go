@@ -13,6 +13,12 @@ import (
 // a separate capability because tasks should receive only relevant knowledge.
 type GTK4UI struct{}
 
+var gtk4RemovedWindowAPIs = []string{
+	"gdk_window_type_hint", "gtk_window_set_keep_above", "gtk_widget_add_events",
+	"gdk_window_set_events", "gdk_pointer_motion_mask", "gdk_button_press_mask",
+	"gdk_button_release_mask", "gdk_key_press_mask",
+}
+
 func (GTK4UI) ID() string { return "gtk4-ui" }
 
 func (GTK4UI) Detect(ctx Context) Contributions {
@@ -47,7 +53,7 @@ func (GTK4UI) InspectPlanTask(ctx PlanTaskContext) []Inspection {
 		needles []string
 		detail  string
 	}{
-		{"removed-window-api", []string{"gdk_window_type_hint", "gtk_window_set_keep_above", "gtk_widget_add_events", "gdk_window_set_events", "gdk_pointer_motion_mask", "gdk_button_press_mask", "gdk_button_release_mask", "gdk_key_press_mask"}, "task specifies a GTK3 window/event API removed from GTK4; use GtkWindow fullscreen plus GtkGestureClick/GtkEventControllerMotion/GtkEventControllerKey attached with gtk_widget_add_controller"},
+		{"removed-window-api", gtk4RemovedWindowAPIs, "task specifies a GTK3 window/event API removed from GTK4; use GtkWindow fullscreen plus GtkGestureClick/GtkEventControllerMotion/GtkEventControllerKey attached with gtk_widget_add_controller"},
 		{"invented-controller", []string{"gtkeventcontrollerbutton", "gtk_window_add_shortcut"}, "task specifies a non-existent GTK4 controller/shortcut API; button gestures use GtkGestureClick and keyboard input uses GtkEventControllerKey"},
 		{"removed-drawing-api", []string{"gdk_window_begin_draw_frame", "`draw` signal", "\"draw\" signal"}, "task specifies GTK3 drawing; GTK4 GtkDrawingArea uses gtk_drawing_area_set_draw_func"},
 		{"removed-main-loop", []string{"gtk_main()", "gtk_main_quit", "gtk_init()"}, "task specifies GTK3 main-loop lifecycle; GTK4 applications use g_application_run and g_application_quit"},
@@ -66,6 +72,41 @@ func (GTK4UI) InspectPlanTask(ctx PlanTaskContext) []Inspection {
 		out = append(out, Inspection{Capability: "gtk4-ui", Name: "sync-file-api", Enforcement: Required, Detail: "task describes g_file_replace_contents as asynchronous; use g_file_replace_contents_bytes_async for GBytes and finish with g_file_replace_contents_finish"})
 	}
 	return out
+}
+
+func (GTK4UI) InspectReviewFindings(findings []ReviewFinding) []Inspection {
+	var out []Inspection
+	for i, finding := range findings {
+		fix := strings.ToLower(strings.TrimSpace(finding.Fix))
+		for _, api := range gtk4RemovedWindowAPIs {
+			if !strings.Contains(fix, api) || remedyRejectsAPI(fix, api) {
+				continue
+			}
+			out = append(out, Inspection{
+				Capability: "gtk4-ui", Name: "invalid-review-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d proposes %s, a GTK3 API removed from GTK4; retract the finding or replace its fix with a GTK4-valid contract", i, api),
+			})
+			break
+		}
+	}
+	return out
+}
+
+func remedyRejectsAPI(fix, api string) bool {
+	idx := strings.Index(fix, api)
+	if idx < 0 {
+		return false
+	}
+	prefix := fix[:idx]
+	if len(prefix) > 80 {
+		prefix = prefix[len(prefix)-80:]
+	}
+	for _, rejection := range []string{"remove ", "delete ", "avoid ", "do not use ", "don't use ", "must not use ", "replace ", "instead of "} {
+		if strings.Contains(prefix, rejection) {
+			return true
+		}
+	}
+	return false
 }
 
 // GTK4Clipboard contributes the GTK4 clipboard contract only when the task's

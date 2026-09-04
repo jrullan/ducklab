@@ -1564,6 +1564,7 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	attachReviewContractValidator(ectx)
 	rs.execCtx = ectx
 
 	// Build the turn that would be sent
@@ -1810,6 +1811,7 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		// A project skill shadows a global one of the same name (05 §7).
 		GlobalSkillsDir: globalSkillsDir(),
 	}
+	attachReviewContractValidator(ectx)
 	rs.execCtx = ectx
 	rs.run.ExecutionRoot = root
 	rs.writer.WriteState()
