@@ -24,7 +24,7 @@ import { loadTheme, type Theme } from "./theme";
 
 /** Must match internal/build.Version: the engine rejects a client whose
  * major version differs. */
-const VERSION = "0.4.0";
+const VERSION = "0.9.3";
 
 type EngineConnection = { baseUrl: string; token: string };
 
@@ -229,7 +229,9 @@ export function App() {
     const c = new EngineClient({
       baseUrl: cfg.baseUrl,
       token: cfg.token,
-      version: VERSION,
+      // A packaged desktop knows its stamped build. Prefer it to the browser
+      // fallback so a desktop and engine built together identify alike.
+      version: window.ducklab?.version ?? VERSION,
       onStale: (kind, detail) => {
         setStale((cur) => cur || kind);
         setStaleDetail(detail ?? null);

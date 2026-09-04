@@ -979,8 +979,8 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			// Tags carry a v; semver comparison does not. Trim BOTH sides:
 			// a stamped "v0.5.0" once locked every client out with
 			// "0" != "v0" — a letter, not a version, deciding compatibility.
-			clientMajor := strings.Split(strings.TrimPrefix(clientVersion, "v"), ".")[0]
-			serverMajor := strings.Split(strings.TrimPrefix(s.version, "v"), ".")[0]
+			clientMajor := compatibilityMajor(clientVersion)
+			serverMajor := compatibilityMajor(s.version)
 			if clientMajor != serverMajor {
 				s.error(w, http.StatusConflict, "version_skew", fmt.Sprintf("client major version %s != server major version %s", clientMajor, serverMajor))
 				return
@@ -988,6 +988,24 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// compatibilityMajor extracts a release major while treating development
+// stamps as major zero. git describe may select a nearby experiment tag such
+// as "neocapture-t006-freeze-..." instead of a vN.N.N release; comparing that
+// whole tag with the browser fallback "0.4.0" locked the UI out even though
+// both binaries came from the same checkout.
+func compatibilityMajor(version string) string {
+	major := strings.Split(strings.TrimPrefix(strings.TrimSpace(version), "v"), ".")[0]
+	if major == "" {
+		return "0"
+	}
+	for _, r := range major {
+		if r < '0' || r > '9' {
+			return "0"
+		}
+	}
+	return major
 }
 
 func (s *Server) error(w http.ResponseWriter, status int, code, message string) {

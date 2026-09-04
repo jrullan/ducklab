@@ -18,7 +18,11 @@ TARGETS  = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 # code differs from HEAD, and stamping every dev desktop build -dirty for it
 # taught the person to ignore the stamp.
 SRCDIRTY = $$(git diff-index --quiet HEAD -- . ':(exclude).ducklab' ':(exclude)cmd/ducklab-desktop/frontend/dist' 2>/dev/null || echo -dirty)
-STAMPVER = $$(git describe --tags --always 2>/dev/null || echo unknown)$(SRCDIRTY)
+# Only release tags define the protocol version. Experiment/checkpoint tags
+# are provenance labels, not semver; letting git describe choose one made the
+# engine compare client major 0 against "neocapture-t006-freeze-..." and lock
+# the entire desktop before it could render the project selector.
+STAMPVER = $$(git describe --tags --match 'v[0-9]*' --always 2>/dev/null || echo unknown)$(SRCDIRTY)
 STAMPSHA = $$(git rev-parse HEAD 2>/dev/null || echo unknown)$(SRCDIRTY)
 
 .PHONY: all build test test-race vet api api-check e2e mcpb frontend desktop cross clean dev-install
