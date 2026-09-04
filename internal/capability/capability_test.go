@@ -152,14 +152,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 15 {
+	if len(profile.ReviewRules) != 16 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "local array", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -322,6 +322,34 @@ func TestGLibReviewInspectionRejectsTwoArgumentReadyCallbackRemedy(t *testing.T)
 	}
 }
 
+func TestGLibReviewInspectionRejectsNullSourceFalsePositive(t *testing.T) {
+	findings := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "g_task_new uses source_object=NULL",
+		Fix:   "Do not call g_task_is_valid(result, NULL); require a non-NULL source object.",
+	}}, []string{"glib-async"})
+	if len(findings) != 1 || findings[0].Name != "invalid-null-source-remedy" || findings[0].Enforcement != Required {
+		t.Fatalf("null-source false positive was not rejected: %+v", findings)
+	}
+}
+
+func TestGTK4ClipboardReviewInspectionAllowsPaddedRowstride(t *testing.T) {
+	findings := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "GdkPixbuf pixels may be padded",
+		Fix:   "Require stride == width * 4 before publishing.",
+	}}, []string{"gtk4-clipboard"})
+	if len(findings) != 1 || findings[0].Name != "invalid-rowstride-remedy" || findings[0].Enforcement != Required {
+		t.Fatalf("exact-rowstride false positive was not rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "Validate the GdkPixbuf rowstride",
+		Fix:   "Require a stride of at least width * 4 bytes for RGBA data.",
+	}}, []string{"gtk4-clipboard"})
+	if len(findings) != 0 {
+		t.Fatalf("valid minimum-rowstride remedy was rejected: %+v", findings)
+	}
+}
+
 func TestGTK4ClipboardInspectionRequiresPublishResultHandling(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "clipboard.c", `
@@ -415,6 +443,67 @@ void start(gpointer data) {
 	if !found {
 		t.Fatalf("missing impossible idle-source finding: %+v", findings)
 	}
+}
+
+func TestGLibInspectionRejectsStackStorageRetainedByIdleSource(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static gboolean publish(gpointer data) { return G_SOURCE_REMOVE; }
+void start(GTask *task, GBytes *bytes) {
+  gpointer args[] = { task, bytes };
+  g_idle_add_full(G_PRIORITY_DEFAULT, publish, args, NULL);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasInspection(findings, "glib-async", "deferred-stack-storage") {
+		t.Fatalf("missing deferred stack-storage finding: %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsIdleCallbackAndDestroyDoubleCleanup(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static gboolean publish(gpointer data) {
+  gpointer *args = data;
+  GTask *task = G_TASK(args[0]);
+  GBytes *bytes = args[1];
+  g_object_unref(task);
+  g_bytes_unref(bytes);
+  return G_SOURCE_REMOVE;
+}
+static void destroy(gpointer data) {
+  gpointer *args = data;
+  g_object_unref(args[0]);
+  g_bytes_unref(args[1]);
+  g_free(args);
+}
+void start(gpointer *args) {
+  g_idle_add_full(G_PRIORITY_DEFAULT, publish, args, destroy);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasInspection(findings, "glib-async", "idle-double-cleanup") {
+		t.Fatalf("missing idle double-cleanup finding: %+v", findings)
+	}
+}
+
+func hasInspection(findings []Inspection, capabilityID, name string) bool {
+	for _, finding := range findings {
+		if finding.Capability == capabilityID && finding.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestX11InspectionRejectsWidthCountedFromUnshiftedMask(t *testing.T) {

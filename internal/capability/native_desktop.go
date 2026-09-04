@@ -116,6 +116,29 @@ type GTK4Clipboard struct{}
 
 func (GTK4Clipboard) ID() string { return "gtk4-clipboard" }
 
+// InspectReviewFindings rejects remedies that narrow GdkPixbuf's valid
+// representation contract. RGBA rows may contain padding; rowstride must be
+// sufficient for a row, but need not equal width*4.
+func (GTK4Clipboard) InspectReviewFindings(findings []ReviewFinding) []ReviewFindingInspection {
+	var out []ReviewFindingInspection
+	for i, finding := range findings {
+		claim := strings.ToLower(finding.Issue + " " + finding.Fix)
+		requiresExactStride := strings.Contains(claim, "stride == width * 4") ||
+			strings.Contains(claim, "stride == width*4") ||
+			strings.Contains(claim, "stride must equal width * 4") ||
+			strings.Contains(claim, "expects stride == width * 4")
+		if strings.Contains(claim, "gdkpixbuf") || strings.Contains(claim, "gdk_pixbuf") {
+			if requiresExactStride {
+				out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+					Capability: "gtk4-clipboard", Name: "invalid-rowstride-remedy", Enforcement: Required,
+					Detail: fmt.Sprintf("finding %d is inadmissible: GdkPixbuf rowstride may include padding; validate a sufficient stride for the declared format instead of requiring exact equality with width*4", i),
+				}})
+			}
+		}
+	}
+	return out
+}
+
 func (GTK4Clipboard) Detect(ctx Context) Contributions {
 	verification := strings.ToLower(ctx.TaskVerification)
 	if !strings.Contains(verification, "gtk4") || !strings.Contains(verification, "clipboard") {
@@ -308,6 +331,7 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 			{Capability: "glib-async", ID: "allocation", Guidance: "g_new0(Type, 1) allocates exactly one zero-initialized Type; the second argument is the element count. Do not report it as allocating two objects or replace it merely with g_new."},
 			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference, but the initiating function must still g_object_unref its own GTask reference after scheduling. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "deferred-input-lifetime", Guidance: "A pointer retained for g_idle_add, an async callback, a worker, or a queue outlives the initiating call. Copy its data, take a reference, or make ownership transfer explicit; merely storing a borrowed input in a context struct can become a use-after-free."},
+			{Capability: "glib-async", ID: "deferred-storage", Guidance: "Never pass the address of a local variable or local array as g_idle_add/g_idle_add_full user_data: the callback runs after that stack frame returns. Allocate a heap context and give one destroy notify sole ownership of its references."},
 			{Capability: "glib-async", ID: "callback-context", Guidance: "If a public async API accepts callback user_data, its callback signature and every completion path must pass that exact user_data back. Storing it without delivering it is a broken API contract even when compilation succeeds."},
 			{Capability: "glib-async", ID: "idle-source-id", Guidance: "g_idle_add returns a source ID guaranteed to be greater than zero. Do not invent a g_idle_add()==0 allocation-failure branch or run its main-context callback synchronously from a worker; use g_idle_add_full with a destroy notify when source-data cleanup needs an explicit ownership contract."},
 			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data). GAsyncReadyCallback is exactly void callback(GObject *source_object, GAsyncResult *result, gpointer user_data). GTaskThreadFunc is exactly void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable). Return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). There are no g_task_propose_pointer or g_task_propose_error APIs."},
@@ -328,6 +352,8 @@ var (
 	gTaskReadyCallback   = regexp.MustCompile(`g_task_new\s*\(\s*[^,]*,\s*[^,]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,`)
 	uninitializedCtxTask = regexp.MustCompile(`g_task_set_task_data\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,[^;]*\)`)
 	zeroIdleSource       = regexp.MustCompile(`(?s)g_idle_add(?:_full)?\s*\([^;]*?\)\s*==\s*0`)
+	stackPointerArray    = regexp.MustCompile(`(?m)^\s*gpointer\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[[^]]*\]\s*=`)
+	idleFullContract     = regexp.MustCompile(`(?s)g_idle_add_full\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
 )
 
 // InspectReviewFindings rejects remedies that contradict GIO's declared
@@ -337,6 +363,15 @@ func (GLibAsync) InspectReviewFindings(findings []ReviewFinding) []ReviewFinding
 	var out []ReviewFindingInspection
 	for i, finding := range findings {
 		fix := strings.ToLower(strings.TrimSpace(finding.Fix))
+		claim := strings.ToLower(finding.Issue + " " + finding.Fix)
+		if strings.Contains(claim, "g_task_new") && strings.Contains(claim, "source_object=null") &&
+			strings.Contains(claim, "g_task_is_valid") && strings.Contains(claim, "null") {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-null-source-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: a GTask created with NULL source_object is correctly validated with g_task_is_valid(result, NULL); callers do not supply a separate source object to the finish function", i),
+			}})
+			continue
+		}
 		mentionsReadyCallback := strings.Contains(fix, "gasyncreadycallback") ||
 			(strings.Contains(fix, "gasyncresult") && strings.Contains(fix, "gpointer"))
 		prescribesTwoArguments := strings.Contains(fix, "exactly two") ||
@@ -395,6 +430,37 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	}
 	text := string(body)
 	var out []Inspection
+	storagePolicy := ctx.Policies["glib-async.deferred-storage"]
+	if storagePolicy != "off" {
+		for _, match := range stackPointerArray.FindAllStringSubmatch(text, -1) {
+			name := match[1]
+			retained := regexp.MustCompile(`(?s)g_idle_add(?:_full)?\s*\([^;]*\b` + regexp.QuoteMeta(name) + `\b[^;]*\)`)
+			if retained.MatchString(text) {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "deferred-stack-storage", Enforcement: policyEnforcement(storagePolicy),
+					Detail: fmt.Sprintf("local array %s is passed as g_idle_add/g_idle_add_full user_data; allocate a heap context because the callback can run after this stack frame returns", name),
+				})
+				break
+			}
+		}
+	}
+	idleCleanupPolicy := ctx.Policies["glib-async.idle-cleanup"]
+	if idleCleanupPolicy != "off" {
+		for _, match := range idleFullContract.FindAllStringSubmatch(text, -1) {
+			callbackBody, callbackFound := cNamedFunctionBody(text, match[1])
+			destroyBody, destroyFound := cNamedFunctionBody(text, match[3])
+			if !callbackFound || !destroyFound {
+				continue
+			}
+			if shared := sharedIndexedCleanup(callbackBody, destroyBody, match[2]); shared != "" {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "idle-double-cleanup", Enforcement: policyEnforcement(idleCleanupPolicy),
+					Detail: fmt.Sprintf("idle callback %s and destroy notify %s both release %s from %s; the destroy notify runs after G_SOURCE_REMOVE, so assign each owned reference one cleanup path", match[1], match[3], shared, match[2]),
+				})
+				break
+			}
+		}
+	}
 	idlePolicy := ctx.Policies["glib-async.idle-source-id"]
 	if idlePolicy != "off" && zeroIdleSource.MatchString(text) {
 		out = append(out, Inspection{
@@ -570,6 +636,35 @@ func readyCallbackRecompletesResult(body string) bool {
 		}
 	}
 	return false
+}
+
+func sharedIndexedCleanup(callbackBody, destroyBody, dataName string) string {
+	callback := indexedCleanup(callbackBody, dataName)
+	destroy := indexedCleanup(destroyBody, dataName)
+	for key := range callback {
+		if destroy[key] {
+			return key
+		}
+	}
+	return ""
+}
+
+func indexedCleanup(body, dataName string) map[string]bool {
+	out := map[string]bool{}
+	direct := regexp.MustCompile(`\b(g_object_unref|g_bytes_unref)\s*\(\s*` + regexp.QuoteMeta(dataName) + `\s*\[\s*([0-9]+)\s*\]\s*\)`)
+	for _, match := range direct.FindAllStringSubmatch(body, -1) {
+		out[match[1]+"("+dataName+"["+match[2]+"])"] = true
+	}
+	alias := regexp.MustCompile(`(?m)\b(?:GTask|GBytes)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:G_TASK\s*\(\s*)?` + regexp.QuoteMeta(dataName) + `\s*\[\s*([0-9]+)\s*\]\s*\)?\s*;`)
+	for _, match := range alias.FindAllStringSubmatch(body, -1) {
+		for _, cleanup := range []string{"g_object_unref", "g_bytes_unref"} {
+			uses := regexp.MustCompile(`\b` + cleanup + `\s*\(\s*` + regexp.QuoteMeta(match[1]) + `\s*\)`)
+			if uses.MatchString(body) {
+				out[cleanup+"("+dataName+"["+match[2]+"])"] = true
+			}
+		}
+	}
+	return out
 }
 
 func workerReturnsValue(body string) bool {

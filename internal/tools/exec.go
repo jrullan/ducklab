@@ -234,11 +234,12 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		if err != nil {
 			return "none", "", err
 		}
-		log += fmt.Sprintf("\ncapability diagnostic [%s/%s, %s]:\n%s",
+		diagnostic := fmt.Sprintf("capability diagnostic [%s/%s, %s]:\n%s",
 			check.Capability, check.Name, check.Enforcement, formatGateResult(strictRes))
 		if check.Enforcement == capability.Required && !verify.IsGreen(strictRes) {
-			return "red", log, nil
+			return "red", "blocking " + diagnostic + "\n\nprior successful evidence:\n" + log, nil
 		}
+		log += "\n" + diagnostic
 	}
 	inspections, err := capability.DefaultRegistry().ResolveInspections(capability.Context{
 		ProjectRoot:      ectx.ProjectRoot,
@@ -251,11 +252,12 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 		return "none", "", fmt.Errorf("run harness capability inspections: %w", err)
 	}
 	for _, finding := range inspections {
-		log += fmt.Sprintf("\ncapability diagnostic [%s/%s, %s]:\ngate: red\n%s",
+		diagnostic := fmt.Sprintf("capability diagnostic [%s/%s, %s]:\ngate: red\n%s",
 			finding.Capability, finding.Name, finding.Enforcement, finding.Detail)
 		if finding.Enforcement == capability.Required {
-			return "red", log, nil
+			return "red", "blocking " + diagnostic + "\n\nprior successful evidence:\n" + log, nil
 		}
+		log += "\n" + diagnostic
 	}
 	return "green", log, nil
 }
