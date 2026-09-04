@@ -1644,6 +1644,9 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 		if lane := s.taskLane(projectRoot, taskID); len(lane) > 0 {
 			b.WriteString("\n## Lane notice\n\nThis task owns: " + strings.Join(lane, ", ") + ". Concurrent runs own other lanes; do not modify paths outside this lane unless strictly required.\n")
 		}
+		if inputs := taskArtifactFiles(projectRoot, taskID, "consumes"); len(inputs) > 0 {
+			b.WriteString("\nRead-only inputs: " + strings.Join(inputs, ", ") + ". Consuming an artifact authorizes reading and using its public contract, not redefining or modifying its owner.\n")
+		}
 		if strings.TrimSpace(task.Body) != "" {
 			b.WriteString("\n" + strings.TrimSpace(task.Body) + "\n")
 		}
@@ -1773,6 +1776,14 @@ func (s *Service) taskLane(projectRoot, taskID string) []string {
 			if strings.EqualFold(task.ID, taskID) {
 				if len(task.Owns) > 0 {
 					return append([]string(nil), task.Owns...)
+				}
+				// A task's concrete outputs are a narrower and more truthful
+				// write lane than a milestone inherited from an older plan. T-010
+				// produced src/cli/parser.c but inherited src/main.c and
+				// src/delivery/save/: all three cold attempts were consequently
+				// told to work outside their actual contract.
+				if files := taskArtifactFiles(projectRoot, taskID, "produces"); len(files) > 0 {
+					return files
 				}
 				return append([]string(nil), m.Owns...)
 			}

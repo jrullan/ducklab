@@ -177,6 +177,7 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 		}
 		findings := capability.DefaultRegistry().ObserveGate(capability.GateObservation{
 			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: res.Output,
+			BuildGraphFiles: ectx.BuildGraphFiles,
 		}, ectx.ActiveCapabilities)
 		blocking := false
 		var coverageLog strings.Builder
@@ -225,6 +226,19 @@ func RunTaskVerificationGate(ctx context.Context, ectx *ExecContext) (string, st
 	log := "task verification:\n" + formatGateResult(res)
 	if !verify.IsGreen(res) {
 		return "red", log, nil
+	}
+	for index, command := range ectx.TaskAcceptanceProbes {
+		probe, err := verify.Run(ctx, ectx.ProjectRoot, config.Verify{
+			Mode: "custom", Custom: command, TimeoutS: ectx.Verify.TimeoutS,
+		}, verify.Identity{RunID: ectx.RunID, ProjectID: ectx.ProjectID})
+		if err != nil {
+			return "none", "", fmt.Errorf("run acceptance probe %d: %w", index+1, err)
+		}
+		diagnostic := fmt.Sprintf("acceptance probe %d:\n%s", index+1, formatGateResult(probe))
+		if !verify.IsGreen(probe) {
+			return "red", "blocking " + diagnostic + "\n\nprior successful task evidence:\n" + log, nil
+		}
+		log += "\n" + diagnostic
 	}
 
 	checks, err := capability.DefaultRegistry().ResolveChecks(capability.Context{

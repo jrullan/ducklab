@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/xplat"
@@ -141,6 +142,16 @@ func (Meson) Detect(ctx Context) Contributions {
 
 func (Meson) ObserveGate(observation GateObservation) []GateFinding {
 	files := addedMesonSources(observation.Diff)
+	dependency := map[string]bool{}
+	for _, file := range observation.BuildGraphFiles {
+		if !isMesonSource(file) {
+			continue
+		}
+		dependency[file] = true
+		if !slices.Contains(files, file) {
+			files = append(files, file)
+		}
+	}
 	if len(files) == 0 {
 		return nil
 	}
@@ -157,9 +168,13 @@ func (Meson) ObserveGate(observation GateObservation) []GateFinding {
 	if len(uncovered) == 0 {
 		return nil
 	}
+	detail := "new production source files are absent from Meson's compilation database; the project build does not exercise them"
+	if slices.ContainsFunc(uncovered, func(file string) bool { return dependency[file] }) {
+		detail = "accepted dependency source files are absent from Meson's compilation database; the project build does not exercise the contracts this task consumes"
+	}
 	return []GateFinding{{
 		Capability: "meson", Kind: "build-integration", Enforcement: Required,
-		Detail: "new production source files are absent from Meson's compilation database; the project build does not exercise them",
+		Detail: detail,
 		Files:  uncovered,
 	}}
 }
@@ -179,12 +194,19 @@ func addedMesonSources(diff string) []string {
 		if line != "new file mode 100644" || current == "" {
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(current)) {
-		case ".c", ".cc", ".cpp", ".cxx", ".vala", ".m", ".mm", ".rs", ".f", ".f90":
+		if isMesonSource(current) {
 			files = append(files, current)
 		}
 	}
 	return files
+}
+
+func isMesonSource(file string) bool {
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".c", ".cc", ".cpp", ".cxx", ".vala", ".m", ".mm", ".rs", ".f", ".f90":
+		return true
+	}
+	return false
 }
 
 // mesonUncoveredSources returns nil when no compilation database is

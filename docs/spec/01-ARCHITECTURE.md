@@ -202,6 +202,14 @@ runs separately from per-task check resolution and must never be repeated by
 every `verify_run`. Gate priority is candidate data resolved by the registry,
 not provider registration order or a language switch in `verify`.
 
+Task topology remains stack-neutral. A build run derives its writable lane from
+the task's explicit `Owns`, then its concrete `Produces`, and only falls back to
+an inherited milestone lane when neither exists. `Consumes` are named
+separately as read-only inputs; consuming an artifact never transfers its
+ownership. The accepted dependency closure supplies build-graph evidence to
+adapters: for example, Meson may require an accepted dependency's C source to
+appear in `compile_commands.json`, while the core knows neither C nor Meson.
+
 ## 5. Core types
 
 Types from `spec-1.0` stand unchanged except where noted here.

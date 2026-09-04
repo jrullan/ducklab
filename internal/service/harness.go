@@ -83,7 +83,7 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 // ensureHarnessProfile resolves once and persists before any coding seat is
 // called. A resumed run reuses the record: stack probes are launch work, not a
 // tax paid by every turn or verify_run.
-func ensureHarnessProfile(rs *runState, root string, project *config.Project, taskVerification string) (string, error) {
+func ensureHarnessProfile(rs *runState, root string, project *config.Project, taskVerification string, acceptanceProbes, buildGraphFiles []string) (string, error) {
 	if rs.run.HarnessProfile != nil {
 		return harnessCapsule(rs.run.HarnessProfile), nil
 	}
@@ -98,7 +98,11 @@ func ensureHarnessProfile(rs *runState, root string, project *config.Project, ta
 		return "", fmt.Errorf("resolve harness checks: %w", err)
 	}
 
-	profile := &runlog.HarnessProfile{TaskVerification: taskVerification}
+	profile := &runlog.HarnessProfile{
+		TaskVerification: taskVerification,
+		AcceptanceProbes: append([]string(nil), acceptanceProbes...),
+		BuildGraphFiles:  append([]string(nil), buildGraphFiles...),
+	}
 	for _, detected := range resolved.Detections {
 		profile.Capabilities = append(profile.Capabilities, runlog.HarnessCapability{
 			ID: detected.Capability, Evidence: detected.Evidence,
@@ -165,6 +169,12 @@ func harnessCapsule(profile *runlog.HarnessProfile) string {
 	}
 	if profile.TaskVerification != "" {
 		fmt.Fprintf(&b, "- Task verification (authoritative): `%s`\n", capsuleCommand(profile.TaskVerification))
+	}
+	for index, probe := range profile.AcceptanceProbes {
+		fmt.Fprintf(&b, "- Acceptance probe %d (authoritative): `%s`\n", index+1, capsuleCommand(probe))
+	}
+	if len(profile.BuildGraphFiles) > 0 {
+		fmt.Fprintf(&b, "- Accepted dependency sources required in the build graph: %s\n", strings.Join(profile.BuildGraphFiles, ", "))
 	}
 	gate := profile.EffectiveGate
 	if gate.Command != "" {

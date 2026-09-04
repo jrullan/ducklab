@@ -304,3 +304,108 @@ func taskArtifactFiles(projectRoot, taskID, field string) []string {
 	}
 	return files
 }
+
+// taskDependencyProducedFiles returns the concrete files supplied by the
+// accepted dependency closure. RunStart already refuses unmet dependencies,
+// so this is build evidence, not speculative future work. Keeping these files
+// in the gate context lets a stack adapter notice an accepted implementation
+// that silently disappeared from the build graph.
+func taskDependencyProducedFiles(projectRoot, taskID string) []string {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return nil
+	}
+	tasks := map[string]artifact.Section{}
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			tasks[strings.ToUpper(task.ID)] = task
+		}
+	}
+	seenTasks, seenFiles := map[string]bool{}, map[string]bool{}
+	var files []string
+	var visit func(string)
+	visit = func(id string) {
+		id = strings.ToUpper(strings.TrimSpace(id))
+		if id == "" || seenTasks[id] {
+			return
+		}
+		seenTasks[id] = true
+		task, ok := tasks[id]
+		if !ok {
+			return
+		}
+		for _, dep := range splitList(task.Field("depends on")) {
+			visit(dep)
+		}
+		for _, file := range artifactFiles(task.Field("produces")) {
+			if !seenFiles[file] {
+				seenFiles[file] = true
+				files = append(files, file)
+			}
+		}
+	}
+	root, ok := tasks[strings.ToUpper(taskID)]
+	if !ok {
+		return nil
+	}
+	for _, dep := range splitList(root.Field("depends on")) {
+		visit(dep)
+	}
+	sort.Strings(files)
+	return files
+}
+
+func artifactFiles(value string) []string {
+	var files []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(strings.Trim(item, "`"))
+		if strings.HasPrefix(strings.ToLower(item), "file:") {
+			if file := strings.TrimSpace(item[len("file:"):]); file != "" {
+				files = append(files, file)
+			}
+		}
+	}
+	return files
+}
+
+var acceptanceProbeLine = regexp.MustCompile("^(?:[-*]\\s+|[0-9]+[.)]\\s+)(?:[^`]*)`([^`]+)`\\s*$")
+
+// taskAcceptanceProbes reads the optional one-command-per-slice executable
+// examples from the accepted plan. They travel through the same human gate as
+// Verification and run in the same bounded verifier, rather than becoming
+// ad-hoc shell suggestions in a model prompt.
+func taskAcceptanceProbes(projectRoot, taskID string) []string {
+	plan, err := artifact.Load(projectRoot, artifact.KindPlan)
+	if err != nil {
+		return nil
+	}
+	var body string
+	for _, milestone := range plan.Sections {
+		for _, task := range milestone.Children {
+			if strings.EqualFold(task.ID, taskID) {
+				body = task.Body
+			}
+		}
+	}
+	if body == "" {
+		return nil
+	}
+	in := false
+	var probes []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimRight(line, " \t")
+		switch {
+		case strings.EqualFold(strings.TrimSpace(trimmed), "**Acceptance probes:**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(trimmed), "**") || strings.HasPrefix(trimmed, "#")):
+			in = false
+		}
+		if in {
+			if match := acceptanceProbeLine.FindStringSubmatch(trimmed); match != nil {
+				probes = append(probes, strings.TrimSpace(match[1]))
+			}
+		}
+	}
+	return probes
+}

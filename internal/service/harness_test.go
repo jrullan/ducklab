@@ -88,15 +88,16 @@ func TestHarnessProfileIsResolvedPersistedAndEmittedOnce(t *testing.T) {
 	project.Verify.Mode = "custom"
 	project.Verify.Custom = "cargo test"
 
-	first, err := ensureHarnessProfile(rs, root, project, "cc -fsyntax-only capture.c")
+	first, err := ensureHarnessProfile(rs, root, project, "cc -fsyntax-only capture.c", []string{"./capture --help"}, []string{"src/base.c"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ensureHarnessProfile(rs, root, project, "this changed but a resume must not re-resolve")
+	second, err := ensureHarnessProfile(rs, root, project, "this changed but a resume must not re-resolve", []string{"false"}, []string{"src/changed.c"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first != second || !strings.Contains(first, "rust (Cargo.toml)") || !strings.Contains(first, "cc -fsyntax-only capture.c") {
+	if first != second || !strings.Contains(first, "rust (Cargo.toml)") || !strings.Contains(first, "cc -fsyntax-only capture.c") ||
+		!strings.Contains(first, "./capture --help") || !strings.Contains(first, "src/base.c") || strings.Contains(first, "src/changed.c") {
 		t.Fatalf("capsule was not stable or complete:\n%s", first)
 	}
 	state, err := os.ReadFile(filepath.Join(root, ".ducklab", "runs", run.ID, "state.json"))

@@ -639,6 +639,10 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"  - <indented sub-bullets are evidence guidance, files, conventions, or edge cases; they are explanations, not slices>\n" +
 	"- <the next independently checkable outcome of the SAME work unit>\n" +
 	"- <tests may be a slice: name the behavior they must prove, not merely that tests exist>\n\n" +
+	"**Acceptance probes:**\n" +
+	"1. `<optional executable command proving Acceptance slice 1>`\n" +
+	"2. `<one command for slice 2, when present>`\n" +
+	"3. `<one command for slice 3, when present>`\n\n" +
 	"**Produces:** <comma-separated repository paths, build-target:NAME, or capability:NAME this task creates>\n\n" +
 	"**Consumes:** <optional comma-separated artifacts from earlier tasks or external capability:NAME values>\n\n" +
 	"**Verification:** <the command or deterministic check that exercises THIS task's changed artifacts; a project build that does not consume them is not verification>\n\n" +
@@ -648,7 +652,9 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"Top-level Acceptance slices are the implementer's numbered contract; it reports on each by number " +
 	"when it finishes, and anything it cannot deliver brings it help. Work unit says WHAT cohesive concern " +
 	"the task owns; Acceptance slices say HOW SUCCESS IS OBSERVED. Never use **Deliverables:** in a v2 task. " +
-	"Keep each slice one outcome, not a paragraph; put explanation in indented sub-bullets.\n\n"
+	"Keep each slice one outcome, not a paragraph; put explanation in indented sub-bullets. Acceptance probes " +
+	"are optional, but when behavior can be exercised they map one command to each slice in the same order; " +
+	"Ducklab executes them after Verification and before the project gate.\n\n"
 
 // planInstruction is what the architect is told at the plan stage.
 //

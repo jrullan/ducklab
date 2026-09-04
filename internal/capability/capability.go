@@ -80,6 +80,10 @@ type GateObservation struct {
 	ProjectRoot string
 	Diff        string
 	Output      string
+	// BuildGraphFiles are established source artifacts from the accepted
+	// dependency closure. A build adapter checks them in addition to new files
+	// from the candidate diff.
+	BuildGraphFiles []string
 }
 
 type GateFinding struct {

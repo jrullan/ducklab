@@ -421,6 +421,20 @@ is printed before every run and stored in the run record.
   failures are listed"`. The verdict compares against the baseline failure set,
   never against zero.
 
+The task contract may include an optional `**Acceptance probes:**` block. It
+contains exactly one numbered, backtick-delimited command for each top-level
+Acceptance slice, in the same order. These commands are part of the accepted
+document, execute after the task's `Verification` command and before the
+project gate, stop at the first non-zero exit, and are persisted in the run's
+harness profile. They turn observable behavior such as CLI output and exit
+status into gate evidence without teaching the core about a project type.
+
+After the project gate, resolved build-system adapters may inspect their own
+evidence. An adapter may block when a new production source or a source
+provided by the task's accepted dependency closure is absent from the build
+graph. The run profile freezes both the probe commands and dependency source
+set so a resume cannot silently change the contract.
+
 ### 5.3 Test-tampering guard
 
 After a run, Ducklab compares the diff against the test files (any path matching

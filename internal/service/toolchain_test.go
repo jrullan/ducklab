@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -149,5 +150,31 @@ func TestTaskVerificationCommandIsTheBacktickedCommandOnly(t *testing.T) {
 	}
 	if got := strings.Join(taskArtifactFiles(dir, "T-001", "consumes"), ","); got != "src/base.h" {
 		t.Fatalf("consumed files = %q", got)
+	}
+}
+
+func TestTaskDependencyProducedFilesWalksContractGraph(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Core\n\n" +
+			"### T-001 — Base\n\n**Produces:** file:src/base.c, file:src/base.h\n\n" +
+			"### T-002 — Middle\n\n**Depends on:** T-001\n\n**Produces:** file:src/middle.c\n\n" +
+			"### T-003 — CLI\n\n**Depends on:** T-002\n\n**Produces:** file:src/cli.c\n",
+	})
+	got := taskDependencyProducedFiles(dir, "T-003")
+	want := []string{"src/base.c", "src/base.h", "src/middle.c"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("dependency produced files = %v, want %v", got, want)
+	}
+}
+
+func TestTaskAcceptanceProbesReadsNumberedCommands(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — CLI\n\n### T-010 — Parse\n\n" +
+			"**Acceptance probes:**\n1. `./app --help`\n2. `! ./app --save`\n\n**Produces:** file:src/cli.c\n",
+	})
+	if got := taskAcceptanceProbes(dir, "T-010"); !slices.Equal(got, []string{"./app --help", "! ./app --save"}) {
+		t.Fatalf("acceptance probes = %v", got)
 	}
 }

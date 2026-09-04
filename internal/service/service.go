@@ -1534,7 +1534,10 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 
 	// Build exec context
 	root := runRoot(rs.run, entry.Path)
-	harnessContext, err := ensureHarnessProfile(rs, root, projCfg, taskVerificationCommand(entry.Path, req.TaskID))
+	harnessContext, err := ensureHarnessProfile(rs, root, projCfg,
+		taskVerificationCommand(entry.Path, req.TaskID),
+		taskAcceptanceProbes(entry.Path, req.TaskID),
+		taskDependencyProducedFiles(entry.Path, req.TaskID))
 	if err != nil {
 		s.failRun(rs, err)
 		return
@@ -1544,19 +1547,21 @@ func (s *Service) executeDryRun(rs *runState, entry *registry.ProjectEntry, req 
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
 	ectx := &tools.ExecContext{
-		ProjectRoot:        root,
-		DocsRoot:           entry.Path,
-		RunID:              rs.run.ID,
-		Autonomy:           config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites:       rs.run.UnsafeWrites,
-		ShellPolicy:        projCfg.Shell,
-		Verify:             projCfg.Verify,
-		Capabilities:       projCfg.Capabilities,
-		HarnessContext:     harnessContext,
-		TaskVerification:   taskVerificationCommand(entry.Path, req.TaskID),
-		TaskProducedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "produces"),
-		TaskConsumedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
-		ActiveCapabilities: activeCapabilities,
+		ProjectRoot:          root,
+		DocsRoot:             entry.Path,
+		RunID:                rs.run.ID,
+		Autonomy:             config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:         rs.run.UnsafeWrites,
+		ShellPolicy:          projCfg.Shell,
+		Verify:               projCfg.Verify,
+		Capabilities:         projCfg.Capabilities,
+		HarnessContext:       harnessContext,
+		TaskVerification:     rs.run.HarnessProfile.TaskVerification,
+		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
+		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
+		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
+		ActiveCapabilities:   activeCapabilities,
 		WorkspaceDiff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
 		},
@@ -1780,7 +1785,10 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 	recordLimits(rs, &b)
 
 	root := runRoot(rs.run, entry.Path)
-	harnessContext, err := ensureHarnessProfile(rs, root, projCfg, taskVerificationCommand(entry.Path, req.TaskID))
+	harnessContext, err := ensureHarnessProfile(rs, root, projCfg,
+		taskVerificationCommand(entry.Path, req.TaskID),
+		taskAcceptanceProbes(entry.Path, req.TaskID),
+		taskDependencyProducedFiles(entry.Path, req.TaskID))
 	if err != nil {
 		s.failRun(rs, err)
 		return
@@ -1790,20 +1798,22 @@ func (s *Service) executeRun(ctx context.Context, rs *runState, entry *registry.
 		activeCapabilities = append(activeCapabilities, detected.ID)
 	}
 	ectx := &tools.ExecContext{
-		ProjectRoot:        root,
-		DocsRoot:           entry.Path,
-		RunID:              rs.run.ID,
-		ProjectID:          rs.run.ProjectID,
-		Autonomy:           config.Autonomy(rs.run.Autonomy),
-		UnsafeWrites:       rs.run.UnsafeWrites,
-		ShellPolicy:        projCfg.Shell,
-		Verify:             projCfg.Verify,
-		Capabilities:       projCfg.Capabilities,
-		HarnessContext:     harnessContext,
-		TaskVerification:   taskVerificationCommand(entry.Path, req.TaskID),
-		TaskProducedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "produces"),
-		TaskConsumedFiles:  taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
-		ActiveCapabilities: activeCapabilities,
+		ProjectRoot:          root,
+		DocsRoot:             entry.Path,
+		RunID:                rs.run.ID,
+		ProjectID:            rs.run.ProjectID,
+		Autonomy:             config.Autonomy(rs.run.Autonomy),
+		UnsafeWrites:         rs.run.UnsafeWrites,
+		ShellPolicy:          projCfg.Shell,
+		Verify:               projCfg.Verify,
+		Capabilities:         projCfg.Capabilities,
+		HarnessContext:       harnessContext,
+		TaskVerification:     rs.run.HarnessProfile.TaskVerification,
+		TaskProducedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "produces"),
+		TaskConsumedFiles:    taskArtifactFiles(entry.Path, req.TaskID, "consumes"),
+		TaskAcceptanceProbes: append([]string(nil), rs.run.HarnessProfile.AcceptanceProbes...),
+		BuildGraphFiles:      append([]string(nil), rs.run.HarnessProfile.BuildGraphFiles...),
+		ActiveCapabilities:   activeCapabilities,
 		WorkspaceDiff: func() (string, error) {
 			return vcs.New(root).DiffExcluding(rs.run.LinkedDeps...)
 		},

@@ -186,6 +186,12 @@ type ExecContext struct {
 	// existence and capability providers inspect cross-file contracts.
 	TaskProducedFiles []string
 	TaskConsumedFiles []string
+	// TaskAcceptanceProbes are human-approved, one-command-per-slice
+	// behavioural checks from the plan. BuildGraphFiles are concrete sources
+	// supplied by the accepted dependency closure that the selected build
+	// system must compile, even when they are not new in this run's diff.
+	TaskAcceptanceProbes []string
+	BuildGraphFiles      []string
 	// ActiveCapabilities is the capability set frozen onto the run. Gate
 	// observers use this exact set rather than re-detecting a changing tree.
 	ActiveCapabilities []string

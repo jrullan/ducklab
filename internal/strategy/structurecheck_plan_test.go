@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +39,25 @@ func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
 	joined := strings.Join(structureFindings(nil, cur, "markdown_sections:M", map[string]bool{"SPEC-001": true}, true, "## M-01 — Save\n\n"+body), "\n")
 	if !strings.Contains(joined, "4 top-level **Acceptance slices:**") {
 		t.Fatalf("findings = %s", joined)
+	}
+}
+
+func TestAcceptanceProbesMapOneCommandToEachSlice(t *testing.T) {
+	body := "**Implements:** SPEC-001\n\n**Work unit:** Parse CLI options\n\n" +
+		"**Acceptance slices:**\n- --help exits zero\n- --save without a path fails\n\n" +
+		"**Acceptance probes:**\n1. `./app --help`\n2. prose without a command\n\n" +
+		"**Produces:** file:src/cli/parser.c\n\n**Consumes:** none\n\n" +
+		"**Verification:** `cc -fsyntax-only src/cli/parser.c`\n\n**Exercises:** file:src/cli/parser.c"
+	findings := structureFindings(nil, []agent.Section{{ID: "T-010", Body: body}}, "markdown_sections:T", map[string]bool{"SPEC-001": true}, true, body)
+	joined := strings.Join(findings, "\n")
+	if !strings.Contains(joined, "Acceptance probes") || !strings.Contains(joined, "one backtick command") {
+		t.Fatalf("invalid probe mapping was accepted: %v", findings)
+	}
+
+	valid := strings.Replace(body, "2. prose without a command", "2. `! ./app --save`", 1)
+	findings = structureFindings(nil, []agent.Section{{ID: "T-010", Body: valid}}, "markdown_sections:T", map[string]bool{"SPEC-001": true}, true, valid)
+	if slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "Acceptance probes") }) {
+		t.Fatalf("valid probe mapping was rejected: %v", findings)
 	}
 }
 

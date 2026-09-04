@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -282,6 +283,23 @@ func TestTaskLanePrefersExplicitTaskLane(t *testing.T) {
 	got := s.taskLane(dir, "T-001")
 	if len(got) != 1 || got[0] != "internal/artifact" {
 		t.Errorf("task lane = %v", got)
+	}
+}
+
+func TestTaskLaneUsesProducedFilesBeforeInheritedMilestoneLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — CLI\n\n**Owns:** src/main.c, src/delivery/save/\n\n" +
+			"### T-010 — Parser\n\n**Produces:** file:src/cli/parser.c\n\n" +
+			"**Consumes:** file:src/core/capture_config.h\n",
+	})
+	if got := s.taskLane(dir, "T-010"); !slices.Equal(got, []string{"src/cli/parser.c"}) {
+		t.Fatalf("task lane = %v, want its Produced file rather than inherited milestone paths", got)
+	}
+	prompt := s.buildTaskPrompt(context.Background(), id, dir, "T-010")
+	if !strings.Contains(prompt, "This task owns: src/cli/parser.c") ||
+		!strings.Contains(prompt, "Read-only inputs: src/core/capture_config.h") {
+		t.Fatalf("prompt does not distinguish write lane from consumed inputs:\n%s", prompt)
 	}
 }
 

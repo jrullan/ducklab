@@ -200,6 +200,8 @@ type HarnessProfile struct {
 	DetectedGate     *HarnessGate        `json:"detected_gate,omitempty"`
 	EffectiveGate    HarnessGate         `json:"effective_gate"`
 	TaskVerification string              `json:"task_verification,omitempty"`
+	AcceptanceProbes []string            `json:"acceptance_probes,omitempty"`
+	BuildGraphFiles  []string            `json:"build_graph_files,omitempty"`
 	Diagnostics      []HarnessDiagnostic `json:"diagnostics,omitempty"`
 	ReviewRules      []HarnessReviewRule `json:"review_rules,omitempty"`
 	DetectionError   string              `json:"detection_error,omitempty"`

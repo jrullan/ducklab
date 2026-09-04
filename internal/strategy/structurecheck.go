@@ -108,6 +108,12 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					} else if n > 3 {
 						out = append(out, fmt.Sprintf("%s has %d top-level **Acceptance slices:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
 					}
+					if taskHasField(block.body, "Acceptance probes") {
+						probeItems, probeCommands := checklistCommandCounts(block.body, "Acceptance probes")
+						if probeItems != n || probeCommands != probeItems {
+							out = append(out, fmt.Sprintf("%s **Acceptance probes:** must have exactly one backtick command for each of its %d Acceptance slices, in the same order", block.id, n))
+						}
+					}
 					if !strings.Contains(strings.ToLower(block.body), "**verification:**") {
 						out = append(out, fmt.Sprintf("%s has no **Verification:** line — name the command or deterministic check that exercises this task's changed artifacts; a green project build that ignores them is not verification", block.id))
 					} else if taskVerificationCommand(block.body) == "" {
@@ -413,6 +419,13 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 					if command := taskVerificationCommand(task.Body); invalidSingleOutputCompile(command) {
 						out = append(out, fmt.Sprintf("%s **Verification:** uses `-c` with multiple input files and one `-o`; GCC/Clang reject that command before compiling — compile one translation unit or omit the single output", task.ID))
 					}
+					if taskHasField(task.Body, "Acceptance probes") {
+						slices := topLevelChecklistItems(task.Body, "Acceptance slices")
+						probeItems, probeCommands := checklistCommandCounts(task.Body, "Acceptance probes")
+						if probeItems != slices || probeCommands != probeItems {
+							out = append(out, fmt.Sprintf("%s **Acceptance probes:** must have exactly one backtick command for each of its %d Acceptance slices, in the same order", task.ID, slices))
+						}
+					}
 				}
 			}
 			return out
@@ -548,6 +561,7 @@ func taskGraphFindings(blocks []taskBlock) []string {
 }
 
 var orderedChecklistItem = regexp.MustCompile(`^[0-9]+[.)]\s+`)
+var checklistBacktickCommand = regexp.MustCompile("`[^`]+`")
 
 // topLevelChecklistItems counts un-indented ordered or unordered items under
 // a named bold checklist heading, up to the next field or Markdown heading.
@@ -570,6 +584,28 @@ func topLevelChecklistItems(body, label string) int {
 		}
 	}
 	return n
+}
+
+func checklistCommandCounts(body, label string) (items, commands int) {
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimRight(line, " \t")
+		switch {
+		case strings.EqualFold(strings.TrimSpace(t), "**"+label+":**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
+			in = false
+		}
+		if !in || !(strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || orderedChecklistItem.MatchString(t)) {
+			continue
+		}
+		items++
+		if len(checklistBacktickCommand.FindAllString(t, -1)) == 1 {
+			commands++
+		}
+	}
+	return items, commands
 }
 
 type taskBlock struct {
@@ -768,6 +804,9 @@ func describeStructureRepairFinding(message string, ctx structureRepairContext) 
 	case strings.Contains(message, "**Acceptance slices:**"):
 		d.Code, d.Field = "invalid_acceptance_slices", "Acceptance slices"
 		d.Recipe = "Use set_field with field `Acceptance slices` and a JSON string containing 1-3 top-level Markdown list items separated by newlines; each item must be an observable outcome of the single Work unit."
+	case strings.Contains(message, "**Acceptance probes:**"):
+		d.Code, d.Field = "invalid_acceptance_probes", "Acceptance probes"
+		d.Recipe = "Use set_field with field `Acceptance probes` and a JSON string containing one numbered Markdown item per Acceptance slice; each item contains exactly one executable command in backticks and keeps the same order as the slices."
 	case strings.Contains(message, "**Verification:**"):
 		d.Code, d.Field = "invalid_verification", "Verification"
 		d.Recipe = "Use set_field with field `Verification` and ONLY one executable shell command enclosed in Markdown backticks, for example `cc -fsyntax-only src/main.c`; do not write prose instructions."

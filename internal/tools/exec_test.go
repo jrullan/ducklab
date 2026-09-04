@@ -163,6 +163,50 @@ func TestVerifyRunRejectsAGreenBuildThatDoesNotExerciseNewProductionSources(t *t
 	}
 }
 
+func TestVerifyRunRejectsAcceptedDependencySourceMissingFromMesonGraph(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "build", "compile_commands.json"), []byte(`[]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ectx := &ExecContext{
+		ProjectRoot:        root,
+		TaskVerification:   "true",
+		Verify:             config.Verify{Mode: "custom", Custom: "true", TimeoutS: 30},
+		ActiveCapabilities: []string{"meson"},
+		BuildGraphFiles:    []string{"src/core/capture_core.c"},
+		WorkspaceDiff:      func() (string, error) { return "", nil },
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "src/core/capture_core.c") ||
+		!strings.Contains(res.Content, "accepted dependency source files") {
+		t.Fatalf("missing accepted dependency source survived verify_run:\n%s", res.Content)
+	}
+}
+
+func TestVerifyRunExecutesAcceptanceProbesInOrder(t *testing.T) {
+	root := t.TempDir()
+	ectx := &ExecContext{
+		ProjectRoot:          root,
+		TaskVerification:     "true",
+		TaskAcceptanceProbes: []string{"printf slice-one", "printf slice-two; exit 7", "printf must-not-run"},
+		Verify:               config.Verify{Mode: "custom", Custom: "printf project-must-not-run", TimeoutS: 30},
+	}
+	res, err := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "acceptance probe 2") ||
+		!strings.Contains(res.Content, "slice-two") || strings.Contains(res.Content, "must-not-run") {
+		t.Fatalf("acceptance probes did not block at the first red slice:\n%s", res.Content)
+	}
+}
+
 func TestVerifyRunRejectsMissingDeclaredProducedFileBeforeCommands(t *testing.T) {
 	ectx := &ExecContext{
 		ProjectRoot:       t.TempDir(),
