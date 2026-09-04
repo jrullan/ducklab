@@ -707,6 +707,28 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 			outcome.CostUSD += cost
 			answer, _ := splitThinking(resp.Choices[0].Message.Content)
 			outcome.Text = answer
+			// Some small text-protocol models reproduce the now-inert tool
+			// envelope even after the grammar is removed. Give that protocol
+			// debris one bounded reformulation call; never execute it.
+			if !useNative {
+				if toolCall, _ := parseTextToolCall(answer); toolCall != nil {
+					retry := final
+					retry.Messages = append(append([]provider.Message{}, final.Messages...), provider.Message{
+						Role: "user",
+						Content: "Your previous response was rejected because it was still a tool-call envelope. " +
+							"Rewrite the intended result as ordinary prose or the requested JSON contract only. " +
+							"Do not mention or spell any tool name, arguments, fence, or call syntax.",
+					})
+					if second, secondErr := loop.Provider.Chat(ctx, retry); secondErr == nil && len(second.Choices) > 0 {
+						secondCost := calc.Cost(second.Usage)
+						loop.Budget.Record(second.Usage.PromptTokens, second.Usage.CompletionTokens, secondCost)
+						outcome.TokensIn += second.Usage.PromptTokens
+						outcome.TokensOut += second.Usage.CompletionTokens
+						outcome.CostUSD += secondCost
+						outcome.Text, _ = splitThinking(second.Choices[0].Message.Content)
+					}
+				}
+			}
 		}
 	}
 	if len(outcome.ToolCalls) > 0 && !substantiveAnswer(outcome.Text) {
@@ -908,6 +930,12 @@ func textToolAvailabilityUpdate(turn *Turn, ectx *tools.ExecContext) string {
 	}
 	if len(available) == 0 {
 		return "RUNTIME TOOL UPDATE (authoritative): all tools are now closed. Do not emit another tool call; answer the original task now from the evidence already gathered."
+	}
+	if ectx.ReadToolsClosed {
+		return "RUNTIME TOOL UPDATE (authoritative): ONLY observation tools are closed: " +
+			strings.Join(closed, ", ") + ". Mutation and verification remain open. " +
+			"Call one of these NOW: " + strings.Join(available, ", ") +
+			". Do not stop merely because reading closed, and do not request another observation."
 	}
 	return "RUNTIME TOOL UPDATE (authoritative): the initial catalogue is no longer current. " +
 		"These tools are CLOSED and another call to them will be refused: " + strings.Join(closed, ", ") + ". " +

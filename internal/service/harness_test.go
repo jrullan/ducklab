@@ -43,6 +43,19 @@ func TestSelfNegatingReviewerFindingIsNormalized(t *testing.T) {
 	}
 }
 
+func TestSpeculativeReviewerFindingCannotDelegateVerification(t *testing.T) {
+	ectx := &tools.ExecContext{}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{{
+		Severity: "minor", File: "meson.build", Issue: "The source might be missing from the build target.",
+		Fix: "Verify the source list and include directories.",
+	}}}
+	changed, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:native", verdict)
+	if err != nil || !changed || !verdict.Approved() || len(verdict.Findings) != 0 {
+		t.Fatalf("speculative finding survived: changed=%v err=%v verdict=%+v", changed, err, verdict)
+	}
+}
+
 func TestGLibNormalizerDropsInvalidRemedyButKeepsValidDissent(t *testing.T) {
 	ectx := &tools.ExecContext{ActiveCapabilities: []string{"glib-async"}}
 	attachReviewContractValidator(ectx)

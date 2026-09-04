@@ -123,6 +123,14 @@ func (GTK4Clipboard) InspectReviewFindings(findings []ReviewFinding) []ReviewFin
 	var out []ReviewFindingInspection
 	for i, finding := range findings {
 		claim := strings.ToLower(finding.Issue + " " + finding.Fix)
+		if strings.Contains(claim, "gdk_pixbuf_save_to_bufferv") &&
+			(strings.Contains(claim, "va_list") || strings.Contains(claim, "variadic argument")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "gtk4-clipboard", Name: "invalid-pixbuf-bufferv-signature", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: gdk_pixbuf_save_to_bufferv takes option_keys and option_values string arrays, not a va_list; NULL arrays are the valid no-options form", i),
+			}})
+			continue
+		}
 		requiresExactStride := strings.Contains(claim, "stride == width * 4") ||
 			strings.Contains(claim, "stride == width*4") ||
 			strings.Contains(claim, "stride must equal width * 4") ||
@@ -399,11 +407,24 @@ func (GLibAsync) InspectReviewFindings(findings []ReviewFinding) []ReviewFinding
 			}})
 			continue
 		}
-		if strings.Contains(claim, "g_task_new") && strings.Contains(claim, "source_object=null") &&
-			strings.Contains(claim, "g_task_is_valid") && strings.Contains(claim, "null") {
+		nullSourceClaim := strings.Contains(claim, "g_task_new") &&
+			(strings.Contains(claim, "source_object=null") || strings.Contains(claim, "source_object = null") ||
+				(strings.Contains(claim, "source_object") && strings.Contains(claim, "passes") && strings.Contains(claim, "null")))
+		demandsNonNullSource := strings.Contains(fix, "non-null source") || strings.Contains(fix, "actual source object") ||
+			strings.Contains(fix, "valid source") || strings.Contains(fix, "source object (e.g.")
+		if nullSourceClaim && (demandsNonNullSource || strings.Contains(claim, "g_task_is_valid")) {
 			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
 				Capability: "glib-async", Name: "invalid-null-source-remedy", Enforcement: Required,
-				Detail: fmt.Sprintf("finding %d is inadmissible: a GTask created with NULL source_object is correctly validated with g_task_is_valid(result, NULL); callers do not supply a separate source object to the finish function", i),
+				Detail: fmt.Sprintf("finding %d is inadmissible: GLib explicitly permits g_task_new with a NULL source_object; require a non-NULL object only when the public API actually owns one", i),
+			}})
+			continue
+		}
+		if strings.Contains(claim, "g_task_run_in_thread") &&
+			(strings.Contains(claim, "gthreadpool") || strings.Contains(claim, "thread pool")) &&
+			(strings.Contains(claim, "main context") || strings.Contains(fix, "initialize") || strings.Contains(fix, "pass")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-task-pool-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: g_task_run_in_thread schedules through GTask's managed worker pool; it neither accepts a caller-provided GThreadPool nor falls back to running the worker on the main context", i),
 			}})
 			continue
 		}

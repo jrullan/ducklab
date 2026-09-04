@@ -332,6 +332,38 @@ func TestGLibReviewInspectionRejectsNullSourceFalsePositive(t *testing.T) {
 	}
 }
 
+func TestGLibReviewInspectionRejectsNullSourceAndPoolClaimsFromFieldRun(t *testing.T) {
+	tests := []struct {
+		finding ReviewFinding
+		name    string
+	}{
+		{ReviewFinding{
+			Issue: "g_task_new(NULL, NULL, ...) passes NULL as source_object.",
+			Fix:   "Pass the actual source object (e.g., a singleton) or document why NULL is safe.",
+		}, "invalid-null-source-remedy"},
+		{ReviewFinding{
+			Issue: "g_task_run_in_thread expects a GThreadPool; without one it falls back to the main context.",
+			Fix:   "Ensure a GThreadPool is initialized and passed to g_task_run_in_thread.",
+		}, "invalid-task-pool-remedy"},
+	}
+	for _, test := range tests {
+		got := DefaultRegistry().InspectReviewFindings([]ReviewFinding{test.finding}, []string{"glib-async"})
+		if len(got) != 1 || got[0].Name != test.name || got[0].Enforcement != Required {
+			t.Errorf("%s inspection = %+v", test.name, got)
+		}
+	}
+}
+
+func TestGTK4ClipboardReviewInspectionRejectsInventedBuffervSignature(t *testing.T) {
+	got := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Issue: "gdk_pixbuf_save_to_bufferv is called with NULL for the va_list args parameter.",
+		Fix:   "Pass a properly constructed va_list.",
+	}}, []string{"gtk4-clipboard"})
+	if len(got) != 1 || got[0].Name != "invalid-pixbuf-bufferv-signature" || got[0].Enforcement != Required {
+		t.Fatalf("invented bufferv signature survived: %+v", got)
+	}
+}
+
 func TestGLibReviewInspectionRejectsInventedTaskLifecycleRemedies(t *testing.T) {
 	tests := []struct {
 		finding ReviewFinding

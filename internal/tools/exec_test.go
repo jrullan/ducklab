@@ -108,6 +108,21 @@ func TestVerifyRunRunsTaskThenProjectWhenBothAreGreen(t *testing.T) {
 	}
 }
 
+func TestVerifyRunPutsBlockingProjectFailureBeforeSuccessfulTaskEvidence(t *testing.T) {
+	ectx := &ExecContext{
+		ProjectRoot:      t.TempDir(),
+		TaskVerification: "echo task-success-marker",
+		Verify:           config.Verify{Mode: "custom", Custom: "echo project-failure-marker; exit 2", TimeoutS: 30},
+	}
+	res, _ := (&VerifyRun{}).Execute(context.Background(), ectx, json.RawMessage(`{}`))
+	if !res.IsError || !strings.HasPrefix(res.Content, "blocking project verification:") {
+		t.Fatalf("project failure was not prefixed:\n%s", res.Content)
+	}
+	if strings.Index(res.Content, "project-failure-marker") > strings.Index(res.Content, "task-success-marker") {
+		t.Fatalf("successful task evidence still precedes the blocker:\n%s", res.Content)
+	}
+}
+
 func TestVerifyRunRejectsAGreenBuildThatDoesNotExerciseNewProductionSources(t *testing.T) {
 	ectx := &ExecContext{
 		ProjectRoot:        t.TempDir(),
@@ -123,6 +138,9 @@ func TestVerifyRunRejectsAGreenBuildThatDoesNotExerciseNewProductionSources(t *t
 	}
 	if !res.IsError || !strings.Contains(res.Content, "capability coverage [meson/build-integration, required]") || !strings.Contains(res.Content, "src/ui/overlay.c") {
 		t.Fatalf("unintegrated production source survived verify_run:\n%s", res.Content)
+	}
+	if !strings.HasPrefix(res.Content, "blocking capability coverage:") {
+		t.Fatalf("blocking coverage did not lead the result:\n%s", res.Content)
 	}
 }
 

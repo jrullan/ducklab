@@ -742,6 +742,35 @@ func TestTurnExhaustionForcesAConclusionInsteadOfFailing(t *testing.T) {
 	}
 }
 
+func TestForcedConclusionReformatsResidualToolEnvelopeOnce(t *testing.T) {
+	reg := tools.NewRegistry()
+	toolCall := "```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.go\"}}\n```"
+	p := &countingProvider{replies: []string{
+		toolCall,
+		toolCall,
+		toolCall,
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"a.go","issue":"not verified","fix":"inspect next round"}]}`,
+	}}
+	loop := testLoop(p, 0)
+	loop.Registry = reg
+	turn := &Turn{Role: config.RoleReviewer, Prompt: "critique", Contract: "verdict",
+		MaxTurns: 2, Toolbelt: []string{"fs_read"}}
+	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.calls() != 4 {
+		t.Fatalf("calls = %d, want two tools, conclusion, and one reformulation", p.calls())
+	}
+	if verdict, ok := out.Parsed.(*Verdict); !ok || verdict.Verdict != "request-changes" {
+		t.Fatalf("reformatted verdict = %+v", out.Parsed)
+	}
+	last := p.requests[len(p.requests)-1]
+	if !strings.Contains(last.Messages[len(last.Messages)-1].Content, "previous response was rejected") || len(last.Tools) != 0 {
+		t.Fatalf("reformulation request was not tool-free and explicit: %+v", last)
+	}
+}
+
 // And a model with genuinely nothing to say still fails, with the same words.
 func TestTurnExhaustionStillFailsWhenTheConclusionIsEmpty(t *testing.T) {
 	reg := tools.NewRegistry()

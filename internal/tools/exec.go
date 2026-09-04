@@ -160,6 +160,13 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 		return "none", "", err
 	}
 	projectLog := formatGateResult(res)
+	if verify.IsRed(res) {
+		if taskLog != "" {
+			projectLog = "blocking project verification:\n" + projectLog +
+				"\n\nprior successful task evidence:\n" + taskLog
+		}
+		return "red", projectLog, nil
+	}
 	if taskLog != "" {
 		projectLog = taskLog + "\nproject verification:\n" + projectLog
 	}
@@ -172,17 +179,20 @@ func RunVerificationGate(ctx context.Context, ectx *ExecContext) (string, string
 			ProjectRoot: ectx.ProjectRoot, Diff: diff, Output: res.Output,
 		}, ectx.ActiveCapabilities)
 		blocking := false
+		var coverageLog strings.Builder
 		for _, finding := range findings {
-			projectLog += fmt.Sprintf("\ncapability coverage [%s/%s, %s]:\n%s",
+			fmt.Fprintf(&coverageLog, "\ncapability coverage [%s/%s, %s]:\n%s",
 				finding.Capability, finding.Kind, finding.Enforcement, finding.Detail)
 			if len(finding.Files) > 0 {
-				projectLog += "\nfiles: " + strings.Join(finding.Files, ", ")
+				coverageLog.WriteString("\nfiles: " + strings.Join(finding.Files, ", "))
 			}
 			blocking = blocking || finding.Enforcement == capability.Required
 		}
 		if blocking {
-			return "red", projectLog, nil
+			return "red", "blocking capability coverage:" + coverageLog.String() +
+				"\n\nprior successful verification evidence:\n" + projectLog, nil
 		}
+		projectLog += coverageLog.String()
 	}
 	switch {
 	case verify.IsGreen(res):

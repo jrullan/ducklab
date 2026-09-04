@@ -23,7 +23,7 @@ func TestTextProtocolReceivesLiveToolAvailabilityAfterResearchCloses(t *testing.
 		content := "```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"fact.txt\"}}\n```"
 		if call == 2 {
 			last := req.Messages[len(req.Messages)-1].Content
-			for _, want := range []string{"RUNTIME TOOL UPDATE", "fs_read", "CLOSED", "fs_write", "AVAILABLE"} {
+			for _, want := range []string{"RUNTIME TOOL UPDATE", "ONLY observation tools", "fs_read", "closed", "fs_write", "Call one of these NOW"} {
 				if !strings.Contains(last, want) {
 					t.Errorf("live update lacks %q:\n%s", want, last)
 				}
