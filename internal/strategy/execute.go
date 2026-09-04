@@ -374,6 +374,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 		// not something worth spending an independent reviewer on. One bounded
 		// same-seat retry lets the implementer finish from the current tree.
 		reportRetries := 0
+		reportRetryNeedsWork := false
 		// The implementer's latest deliverables report this round: data for
 		// the reviewer, evidence for the duck, a gap to flag on approve.
 		var lastReport *DeliverablesReport
@@ -604,9 +605,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					params.ExecContext.ExplorationCallLimit = 4
 				}
 			}
-			if turn.Role == config.RoleImplementer && (reportRetries > 0 || consultRetries > 0) && turn.MaxTurns > 8 {
+			narrowContinuation := consultRetries > 0 || (reportRetries > 0 && !reportRetryNeedsWork)
+			if turn.Role == config.RoleImplementer && narrowContinuation && turn.MaxTurns > 8 {
 				// A continuation has the current tree, prior evidence and one
-				// narrow correction. Bound its model-call loop so pair mode still
+				// narrow correction. An omitted report after a red gate is not
+				// narrow: the seat is still fixing implementation evidence, so it
+				// retains the normal implementer budget.
+				// Bound only genuinely narrow continuations so pair mode still
 				// reaches the mandatory reviewer within the run budget.
 				turn.MaxTurns = 8
 			}
@@ -970,6 +975,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					emit(params, "deliverables_report", reportData)
 					if lastReport.Unreported && reportRetries == 0 {
 						reportRetries++
+						reportRetryNeedsWork = !outcomeVerifiedAfterMutation(outcome)
 						correctiveNotes = append(correctiveNotes,
 							"Your previous implementer turn ended without the required deliverables JSON report. Continue from the CURRENT tree; do not restart research. Finish any work still pending, run verify_run, and end with one status entry for every numbered deliverable.")
 						emit(params, "deliverables_retry", map[string]interface{}{
@@ -1192,6 +1198,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 func completedAndVerified(report *DeliverablesReport, outcome *agent.Outcome) bool {
 	if report == nil || report.Unreported || len(report.Undelivered()) > 0 || outcome == nil {
+		return false
+	}
+	return outcomeVerifiedAfterMutation(outcome)
+}
+
+func outcomeVerifiedAfterMutation(outcome *agent.Outcome) bool {
+	if outcome == nil {
 		return false
 	}
 	lastVerify, lastMutation := -1, -1

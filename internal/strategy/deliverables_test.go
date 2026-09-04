@@ -317,7 +317,37 @@ func TestUnreportedDeliverablesRetryBeforeReview(t *testing.T) {
 	if len(implementerLimits) != 2 || implementerLimits[0] != 12 || implementerLimits[1] != 4 {
 		t.Errorf("implementer exploration limits = %v, want [12 4]", implementerLimits)
 	}
-	if len(implementerTurns) != 2 || implementerTurns[0] != 24 || implementerTurns[1] != 8 {
-		t.Errorf("implementer turn limits = %v, want [24 8]", implementerTurns)
+	if len(implementerTurns) != 2 || implementerTurns[0] != 24 || implementerTurns[1] != 24 {
+		t.Errorf("implementer turn limits = %v, want [24 24]: a red or absent verify means the retry still has implementation work", implementerTurns)
+	}
+}
+
+func TestUnreportedDeliverablesAfterGreenVerifyGetsNarrowRetry(t *testing.T) {
+	rec := &recorder{}
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: "Did it all.", ToolCalls: []agent.ToolCallRecord{
+			{Name: "fs_write", Result: &tools.Result{Content: "ok"}},
+			{Name: "verify_run", Result: &tools.Result{Content: "gate: green"}},
+		}},
+		&agent.Outcome{Text: `Finished. {"deliverables":[{"id":1,"status":"done"}]}`},
+		verdictOutcome("approve"),
+	)
+	params.Deliverables = []string{"A"}
+	params.SmallSeat = true
+	params.Roster[config.RoleAdvisor] = "pato-duck"
+	params.ExecContext = &tools.ExecContext{}
+	originalRunner := params.Runner
+	var limits []int
+	params.Runner = func(ctx context.Context, turn *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Role == config.RoleImplementer {
+			limits = append(limits, turn.MaxTurns)
+		}
+		return originalRunner(ctx, turn, duckling, prompt, toolbelt, tc)
+	}
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(limits) != 2 || limits[0] != 24 || limits[1] != 8 {
+		t.Fatalf("implementer turn limits = %v, want [24 8] after a current green verify", limits)
 	}
 }
