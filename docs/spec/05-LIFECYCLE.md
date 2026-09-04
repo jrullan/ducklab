@@ -428,6 +428,10 @@ document, execute after the task's `Verification` command and before the
 project gate, stop at the first non-zero exit, and are persisted in the run's
 harness profile. They turn observable behavior such as CLI output and exit
 status into gate evidence without teaching the core about a project type.
+When probes exist, the reviewer verdict must contain one concrete
+`acceptance_evidence` entry per slice/probe. Missing or duplicate slice numbers,
+generic evidence, and an approval whose evidence contains a failed slice are
+contract errors repaired before the verdict can steer the run.
 
 After the project gate, resolved build-system adapters may inspect their own
 evidence. An adapter may block when a new production source or a source

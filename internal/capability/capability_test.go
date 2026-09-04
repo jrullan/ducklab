@@ -3,6 +3,7 @@ package capability
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -141,7 +142,7 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCapabilities := map[string]bool{"c-native": false, "glib-async": false, "x11-image": false}
+	wantCapabilities := map[string]bool{"c-native": false, "glib-async": false, "glib-options": false, "x11-image": false}
 	for _, detected := range profile.Detections {
 		if _, ok := wantCapabilities[detected.Capability]; ok {
 			wantCapabilities[detected.Capability] = true
@@ -152,14 +153,14 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 			t.Errorf("capability %q was not detected: %+v", capability, profile.Detections)
 		}
 	}
-	if len(profile.ReviewRules) != 16 {
+	if len(profile.ReviewRules) != 17 {
 		t.Fatalf("review rules = %+v", profile.ReviewRules)
 	}
 	joined := ""
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "local array", "callback user_data", "greater than zero", "g_task_propagate_pointer", "g_task_propose_pointer", "g_task_run_in_thread_async", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "local array", "callback user_data", "greater than zero", "g_task_propagate_pointer", "g_task_propose_pointer", "g_task_run_in_thread_async", "GBytes is a ref-counted boxed type", "ctx->task back-reference", "GOptionArgFunc"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -173,6 +174,38 @@ func TestReviewRulesAreAbsentWithoutMatchingStackEvidence(t *testing.T) {
 	}
 	if len(profile.ReviewRules) != 0 {
 		t.Fatalf("unrelated native task received rules: %+v", profile.ReviewRules)
+	}
+}
+
+func TestGLibOptionCallbackABIIsInspectedBehindGPointer(t *testing.T) {
+	root := t.TempDir()
+	bad := `#include <glib.h>
+static void help_callback(GOptionContext *context, GOptionGroup *group, gpointer data, GError **error) {}
+static GOptionEntry entries[] = {{"help", 'h', 0, G_OPTION_ARG_CALLBACK, help_callback, "help", NULL}};`
+	if err := os.WriteFile(filepath.Join(root, "parser.c"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := Context{ProjectRoot: root, TaskVerification: "cc -fsyntax-only $(pkg-config --cflags glib-2.0) parser.c", ProducedFiles: []string{"parser.c"}}
+	checks, err := DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(checks, func(check Inspection) bool {
+		return check.Capability == "glib-options" && check.Name == "callback-abi" && check.Enforcement == Required
+	}) {
+		t.Fatalf("hidden callback ABI mismatch was not rejected: %+v", checks)
+	}
+
+	good := strings.Replace(bad, "static void help_callback(GOptionContext *context, GOptionGroup *group, gpointer data, GError **error)", "static gboolean help_callback(const gchar *option_name, const gchar *value, gpointer data, GError **error)", 1)
+	if err := os.WriteFile(filepath.Join(root, "parser.c"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checks, err = DefaultRegistry().ResolveInspections(ctx, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(checks, func(check Inspection) bool { return check.Capability == "glib-options" }) {
+		t.Fatalf("valid GOptionArgFunc was rejected: %+v", checks)
 	}
 }
 

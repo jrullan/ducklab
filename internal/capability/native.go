@@ -236,5 +236,5 @@ func fieldsContain(fields []string, want string) bool {
 // DefaultRegistry is the built-in capability set. The execution core depends
 // only on Registry; adding another stack means registering another provider.
 func DefaultRegistry() *Registry {
-	return NewRegistry(Native{}, GTK4UI{}, GTK4Clipboard{}, X11Image{}, GLibAsync{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
+	return NewRegistry(Native{}, GTK4UI{}, GTK4Clipboard{}, X11Image{}, GLibAsync{}, GLibOptions{}, Go{}, Python{}, Node{}, Rust{}, Meson{}, TypeScript{})
 }

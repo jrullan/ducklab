@@ -322,6 +322,82 @@ func verificationSource(root, command string) string {
 	return ""
 }
 
+// GLibOptions owns the ABI hidden by GOptionEntry.arg_data. The compiler sees
+// that field as gpointer, so an incompatible callback can survive ordinary
+// pointer warnings and only fail when GLib calls it. This adapter makes the
+// erased callback contract visible without teaching the execution core GLib.
+type GLibOptions struct{}
+
+func (GLibOptions) ID() string { return "glib-options" }
+
+func (GLibOptions) Detect(ctx Context) Contributions {
+	verification := strings.ToLower(ctx.TaskVerification)
+	if !strings.Contains(verification, "glib-2.0") && !strings.Contains(verification, "gio-2.0") && !strings.Contains(verification, "gtk") {
+		return Contributions{}
+	}
+	return Contributions{
+		Detection:   Detection{Capability: "glib-options", Evidence: []string{"task Verification compiles against GLib option APIs"}},
+		ReviewRules: []ReviewRule{{Capability: "glib-options", ID: "callback-abi", Guidance: "G_OPTION_ARG_CALLBACK stores a GOptionArgFunc behind gpointer. Its callback must return gboolean and accept (const gchar *option_name, const gchar *value, gpointer data, GError **error); a GOptionContext/GOptionGroup callback shape is a different ABI even when a cast compiles."}},
+	}
+}
+
+var gOptionCallbackEntry = regexp.MustCompile(`(?s)G_OPTION_ARG_CALLBACK\s*,\s*(?:\(\s*gpointer\s*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+func (GLibOptions) Inspect(ctx Context) ([]Inspection, error) {
+	if (GLibOptions{}).Detect(ctx).Detection.Capability == "" {
+		return nil, nil
+	}
+	files := append([]string(nil), ctx.ProducedFiles...)
+	if source := verificationSource(ctx.ProjectRoot, ctx.TaskVerification); source != "" {
+		if relative, err := filepath.Rel(ctx.ProjectRoot, source); err == nil {
+			files = append(files, filepath.ToSlash(relative))
+		}
+	}
+	seen := map[string]bool{}
+	for _, relative := range files {
+		if seen[relative] || strings.ToLower(filepath.Ext(relative)) != ".c" {
+			continue
+		}
+		seen[relative] = true
+		body, err := os.ReadFile(filepath.Join(ctx.ProjectRoot, filepath.Clean(relative)))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		text := string(body)
+		for _, match := range gOptionCallbackEntry.FindAllStringSubmatch(text, -1) {
+			name := match[1]
+			if gOptionCallbackSignatureValid(text, name) {
+				continue
+			}
+			return []Inspection{{
+				Capability: "glib-options", Name: "callback-abi", Enforcement: Required,
+				Detail: fmt.Sprintf("%s assigns %s to G_OPTION_ARG_CALLBACK, but its definition does not match gboolean (const gchar *, const gchar *, gpointer, GError **); arg_data erases this type and ordinary compiler pointer warnings cannot validate it", relative, name),
+			}}, nil
+		}
+	}
+	return nil, nil
+}
+
+func gOptionCallbackSignatureValid(text, name string) bool {
+	definition := regexp.MustCompile(`(?s)\b(gboolean|void|int)\s+` + regexp.QuoteMeta(name) + `\s*\(([^)]*)\)\s*\{`)
+	match := definition.FindStringSubmatch(text)
+	if match == nil || match[1] != "gboolean" {
+		return false
+	}
+	params := strings.Split(match[2], ",")
+	if len(params) != 4 {
+		return false
+	}
+	normalize := func(value string) string { return strings.ToLower(strings.Join(strings.Fields(value), "")) }
+	p0, p1, p2, p3 := normalize(params[0]), normalize(params[1]), normalize(params[2]), normalize(params[3])
+	charPointer := func(value string) bool { return strings.Contains(value, "char") && strings.Contains(value, "*") }
+	dataPointer := strings.Contains(p2, "gpointer") || (strings.Contains(p2, "void") && strings.Contains(p2, "*"))
+	return charPointer(p0) && charPointer(p1) && dataPointer && strings.Contains(p3, "gerror") && strings.Count(p3, "*") >= 2
+}
+
 // GLibAsync contributes ownership and completion invariants for asynchronous
 // GLib work. The rules compose with X11Image when a task uses both stacks.
 type GLibAsync struct{}

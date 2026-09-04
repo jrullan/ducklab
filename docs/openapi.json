@@ -1565,6 +1565,18 @@
       },
       "RunlogHarnessProfile": {
         "properties": {
+          "acceptance_probes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "build_graph_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "capabilities": {
             "items": {
               "$ref": "#/components/schemas/RunlogHarnessCapability"
@@ -1645,6 +1657,9 @@
           },
           "round": {
             "type": "integer"
+          },
+          "verified_after_mutation": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1804,6 +1819,9 @@
           },
           "harness_profile": {
             "$ref": "#/components/schemas/RunlogHarnessProfile"
+          },
+          "history_duration_escalated": {
+            "type": "boolean"
           },
           "id": {
             "type": "string"
@@ -6637,7 +6655,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Amend one task's body in the approved plan; task lanes and neighbouring sections remain unchanged"
+        "summary": "Amend one existing task in the approved plan; neighbouring sections remain unchanged"
       }
     },
     "/v1/projects/{id}/tasks/{task}/retire-test": {

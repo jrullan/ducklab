@@ -56,6 +56,25 @@ func TestSpeculativeReviewerFindingCannotDelegateVerification(t *testing.T) {
 	}
 }
 
+func TestReviewerMustAccountForEveryAcceptanceProbe(t *testing.T) {
+	ectx := &tools.ExecContext{TaskAcceptanceProbes: []string{"./app --help", "! ./app --save"}}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "approve", Findings: []agent.Finding{}, AcceptanceEvidence: []agent.AcceptanceEvidence{
+		{Slice: 1, Status: "pass", Evidence: "stdout contains Usage and process exits 0"},
+	}}
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err == nil || !strings.Contains(err.Error(), "exactly 2 entries") {
+		t.Fatalf("partial acceptance evidence was accepted: %v", err)
+	}
+	verdict.AcceptanceEvidence = append(verdict.AcceptanceEvidence, agent.AcceptanceEvidence{Slice: 2, Status: "fail", Evidence: "process exits 0 without a save path"})
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err == nil || !strings.Contains(err.Error(), "approval requires") {
+		t.Fatalf("approval with a failed slice was accepted: %v", err)
+	}
+	verdict.Verdict = "request-changes"
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err != nil {
+		t.Fatalf("dissent with complete probe evidence was rejected: %v", err)
+	}
+}
+
 func TestGLibNormalizerDropsInvalidRemedyButKeepsValidDissent(t *testing.T) {
 	ectx := &tools.ExecContext{ActiveCapabilities: []string{"glib-async"}}
 	attachReviewContractValidator(ectx)

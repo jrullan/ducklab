@@ -28,6 +28,29 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 		if !ok || verdict == nil {
 			return false, nil
 		}
+		if count := len(ectx.TaskAcceptanceProbes); count > 0 {
+			if len(verdict.AcceptanceEvidence) != count {
+				return false, fmt.Errorf("verdict contract: acceptance_evidence must contain exactly %d entries, one for each accepted slice/probe", count)
+			}
+			seen := make(map[int]bool, count)
+			for _, evidence := range verdict.AcceptanceEvidence {
+				if evidence.Slice < 1 || evidence.Slice > count || seen[evidence.Slice] {
+					return false, fmt.Errorf("verdict contract: acceptance_evidence must identify each slice 1..%d exactly once", count)
+				}
+				seen[evidence.Slice] = true
+				status := strings.ToLower(strings.TrimSpace(evidence.Status))
+				if status != "pass" && status != "fail" {
+					return false, fmt.Errorf("verdict contract: acceptance_evidence slice %d status must be pass or fail", evidence.Slice)
+				}
+				detail := strings.ToLower(strings.Trim(strings.TrimSpace(evidence.Evidence), "."))
+				if detail == "" || detail == "ok" || detail == "verified" || detail == "green" || detail == "pass" || detail == "fail" {
+					return false, fmt.Errorf("verdict contract: acceptance_evidence slice %d must name concrete observed output or behavior", evidence.Slice)
+				}
+				if verdict.Approved() && status != "pass" {
+					return false, fmt.Errorf("verdict contract: approval requires acceptance_evidence slice %d to pass", evidence.Slice)
+				}
+			}
+		}
 		findings := make([]capability.ReviewFinding, 0, len(verdict.Findings))
 		for _, finding := range verdict.Findings {
 			findings = append(findings, capability.ReviewFinding{Issue: finding.Issue, Fix: finding.Fix, Invariant: finding.Invariant})

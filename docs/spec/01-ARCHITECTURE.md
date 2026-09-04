@@ -194,6 +194,11 @@ Adding support for another stack means implementing and registering another
 provider, not adding a language conditional to `tools`, `service`, or `verify`.
 The first provider, `c-native`, turns a simple C/C++ syntax command into an
 additional warning-strict diagnostic without changing the original command.
+Framework adapters may expose contracts erased by a language's type system.
+For example, `glib-options` validates the `GOptionArgFunc` signature stored in
+`GOptionEntry.arg_data`: because that slot is `gpointer`, ordinary compiler
+pointer warnings cannot prove the callback ABI. This rule belongs to the GLib
+adapter, not to a stricter global C mode.
 
 Providers implement only the ports they need. A `Detector` contributes
 evidence and prioritized project-gate candidates; a `Checker` contributes
@@ -209,6 +214,11 @@ separately as read-only inputs; consuming an artifact never transfers its
 ownership. The accepted dependency closure supplies build-graph evidence to
 adapters: for example, Meson may require an accepted dependency's C source to
 appear in `compile_commands.json`, while the core knows neither C nor Meson.
+
+A focused task amendment is another core boundary: it can replace the complete
+body and parsed fields of one existing task, but cannot add a sibling, retain a
+second generated version, or alter a neighbouring section. Like every document
+change it remains a proposal until the human gate promotes it.
 
 ## 5. Core types
 

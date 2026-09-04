@@ -43,9 +43,19 @@ func (f Finding) ClassLevel() bool {
 
 // Verdict is the reviewer contract's parsed value.
 type Verdict struct {
-	Verdict      string              `json:"verdict"` // approve | request-changes
-	Findings     []Finding           `json:"findings"`
-	NativeChecks *NativeReviewChecks `json:"native_checks,omitempty"`
+	Verdict            string               `json:"verdict"` // approve | request-changes
+	Findings           []Finding            `json:"findings"`
+	NativeChecks       *NativeReviewChecks  `json:"native_checks,omitempty"`
+	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
+}
+
+// AcceptanceEvidence binds one reviewer judgment to one human-approved
+// acceptance probe. The run gate executes the probes; this record prevents a
+// reviewer approval that never accounts for one observable outcome.
+type AcceptanceEvidence struct {
+	Slice    int    `json:"slice"`
+	Status   string `json:"status"` // pass | fail
+	Evidence string `json:"evidence"`
 }
 
 // NativeReviewChecks makes the native sweep accountable. A prose checklist

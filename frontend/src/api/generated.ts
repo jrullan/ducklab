@@ -459,6 +459,8 @@ export interface RunlogHarnessGate {
 }
 
 export interface RunlogHarnessProfile {
+  acceptance_probes?: string[];
+  build_graph_files?: string[];
   capabilities?: RunlogHarnessCapability[];
   detected_gate?: RunlogHarnessGate;
   detection_error?: string;
@@ -481,6 +483,7 @@ export interface RunlogInterruptedTurn {
   notes?: string;
   role?: string;
   round?: number;
+  verified_after_mutation?: boolean;
 }
 
 export interface RunlogRedoNote {
@@ -530,6 +533,7 @@ export interface RunlogRun {
   gate_root?: string;
   governance_modified?: boolean;
   harness_profile?: RunlogHarnessProfile;
+  history_duration_escalated?: boolean;
   id?: string;
   interrupted_turn?: RunlogInterruptedTurn;
   local_only?: boolean;

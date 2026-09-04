@@ -472,7 +472,7 @@ func routeTable() []Route {
 			ClientMethod: "BugEdit",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleBugEdit }},
 		{Method: "PUT", Path: "/v1/projects/{id}/tasks/{task}", Auth: true,
-			Response: service.TaskView{}, Summary: "Amend one task's body in the approved plan; task lanes and neighbouring sections remain unchanged", ClientMethod: "TaskBodyUpdate",
+			Response: service.TaskView{}, Summary: "Amend one existing task in the approved plan; neighbouring sections remain unchanged", ClientMethod: "TaskBodyUpdate",
 			handler: func(s *Server) http.HandlerFunc { return s.handleTaskBodyUpdate }},
 		{Method: "DELETE", Path: "/v1/projects/{id}/tasks/{task}", Auth: true,
 			Summary:      "Remove a task from the plan. Refused once a run has named it.",

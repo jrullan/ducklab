@@ -1325,9 +1325,11 @@ type TaskView struct {
 	SpecDebt bool `json:"spec_debt,omitempty"`
 }
 
-// TaskBodyUpdate proposes a prose-only plan amendment. The approved plan is
-// deliberately untouched here: artifact.Promote supplies the human approval,
-// stale-document check, and durable attribution boundary.
+// TaskBodyUpdate proposes an amendment scoped to one existing task. Plain
+// prose preserves the task's parsed fields for backwards compatibility; a
+// body containing fields replaces that task body in full. The approved plan
+// is deliberately untouched here: artifact.Promote supplies the human
+// approval, stale-document check, and durable attribution boundary.
 func (s *Service) TaskBodyUpdate(ctx context.Context, projectID, taskID, body string) (*TaskView, error) {
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
@@ -1349,10 +1351,22 @@ func (s *Service) TaskBodyUpdate(ctx context.Context, projectID, taskID, body st
 				return nil, fmt.Errorf("a plan amendment is already awaiting approval")
 			}
 			if taskBodyHasFields(body) {
-				return nil, fmt.Errorf("task-body amendments contain prose only; task metadata and Owns lanes are immutable")
+				parsed, err := artifact.Parse("## M-000 — Focused amendment\n\n### "+task.ID+" — "+task.Title+"\n\n"+strings.TrimSpace(body), artifact.KindPlan)
+				if err != nil {
+					return nil, fmt.Errorf("parse structured task amendment: %w", err)
+				}
+				if len(parsed.Sections) != 1 || len(parsed.Sections[0].Children) != 1 {
+					return nil, fmt.Errorf("structured task amendment did not produce exactly one task body")
+				}
+				replacement := parsed.Sections[0].Children[0]
+				task.Body = replacement.Body
+				task.Fields = replacement.Fields
+				task.Implements = replacement.Implements
+				task.Owns = replacement.Owns
+			} else {
+				prose := strings.TrimSpace(body)
+				task.Body = canonicalTaskFields(task.Fields) + prose
 			}
-			prose := strings.TrimSpace(body)
-			task.Body = canonicalTaskFields(task.Fields) + prose
 			run := &runlog.Run{ID: runlog.GenerateRunID(), ProjectID: projectID, Stage: "plan", Mode: "human", Status: "paused", StartedAt: time.Now().UTC().Format(time.RFC3339), Gate: "none", Verdict: "UNVERIFIED", PendingKind: "gate"}
 			writer, err := runlog.NewWriter(entry.Path, run)
 			if err != nil {
@@ -1367,7 +1381,7 @@ func (s *Service) TaskBodyUpdate(ctx context.Context, projectID, taskID, body st
 				_ = writer.Close()
 				return nil, err
 			}
-			writer.AppendEvent("task_body_amendment", map[string]interface{}{"task": taskID, "by": "human", "detail": "proposed prose-only scope refinement; approval is required before relaunch"})
+			writer.AppendEvent("task_body_amendment", map[string]interface{}{"task": taskID, "by": "human", "detail": "proposed focused task amendment; approval is required before relaunch"})
 			writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "artifact": "plan", "verdict": "UNVERIFIED"})
 			writer.WriteState()
 			// Return the exact effective section that was persisted in the proposal.
@@ -1389,7 +1403,7 @@ func taskBodyHasFields(body string) bool {
 		key := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "**"), "**"))
 		if key, _, ok := strings.Cut(key, ":"); ok {
 			switch strings.ToLower(strings.TrimSpace(key)) {
-			case "implements", "priority", "status", "complexity", "depends on", "role hint", "acceptance", "owns", "milestone":
+			case "implements", "priority", "status", "complexity", "depends on", "dependencies", "role hint", "acceptance", "acceptance slices", "acceptance probes", "work unit", "owns", "milestone", "toolchain", "produces", "consumes", "verification", "exercises":
 				return true
 			}
 		}

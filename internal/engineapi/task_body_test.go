@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -107,10 +108,26 @@ This body must not change.
 		t.Errorf("amendment changed more than T-001's body: %s", proposed)
 	}
 
-	resp, _ = put("T-001", `{"body":"**Owns:** elsewhere"}`)
+	// A complete structured body may update the named task's contract without
+	// retaining a duplicate task or touching its neighbour.
+	if err := os.Remove(artifact.ProposedPath(project, artifact.KindPlan)); err != nil {
+		t.Fatal(err)
+	}
+	structured := "**Implements:** SPEC-009\n\n**Owns:** src/parser.c\n\n**Work unit:** Parse one header\n\n**Acceptance slices:**\n- Rejects invalid bounds\n\n**Acceptance probes:**\n1. `go test ./parser`\n\n**Produces:** file:src/parser.c\n\n**Consumes:** none\n\n**Verification:** `go test ./parser`"
+	resp, got = put("T-001", `{"body":`+strconv.Quote(structured)+`}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("metadata-bearing PUT status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("structured PUT status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got.Implements[0] != "SPEC-009" || !strings.Contains(got.Body, "Acceptance probes") || strings.Contains(got.Body, "internal/parser") {
+		t.Errorf("structured amendment did not replace T-001 contract: %+v", got)
+	}
+	proposal, err = os.ReadFile(artifact.ProposedPath(project, artifact.KindPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(proposal), "### T-001") != 1 || !strings.Contains(string(proposal), "### T-002 — Keep this task") {
+		t.Errorf("structured amendment duplicated or changed task neighbourhood: %s", proposal)
 	}
 
 	resp, _ = put("T-404", `{"body":"must not create a task"}`)

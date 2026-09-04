@@ -1010,6 +1010,16 @@ For a native-code diff, your JSON object MUST also contain:
 "native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}
 Each value names what you inspected in the final code. Bare words such as "ok", "pass", "verified", "none", or "n/a" are invalid. Findings still go in findings; native_checks records the sweep that supports either verdict.`
 	}
+	if turn.Role == config.RoleReviewer && len(ectx.TaskAcceptanceProbes) > 0 {
+		rolePrompt += fmt.Sprintf(`
+
+The accepted task has %d executable acceptance slices. Your JSON object MUST
+also contain "acceptance_evidence", with exactly one entry for every slice in
+order: [{"slice":1,"status":"pass|fail","evidence":"concrete observed probe output or behavior"}].
+Run or inspect the authoritative probes and account for every slice. An
+approval requires every entry to pass; bare words such as "ok", "verified",
+or "green" are not concrete evidence.`, len(ectx.TaskAcceptanceProbes))
+	}
 	if turn.Persona == "critic" && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
 	}
