@@ -120,6 +120,18 @@ func TestMalformedTextToolCallBecomesRepairableProtocolError(t *testing.T) {
 	}
 }
 
+func TestMultipleTextToolCallsBecomeRepairableProtocolError(t *testing.T) {
+	text := "```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.c\"}}\n```\n" +
+		"```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"b.c\"}}\n```"
+	tc, remaining := parseTextToolCall(text)
+	if tc == nil || tc.Name != "ducklab_protocol" || !strings.Contains(tc.ParseError, "2 ducklab tool envelopes") {
+		t.Fatalf("multiple envelopes were accepted as prose: %+v", tc)
+	}
+	if remaining != "" {
+		t.Fatalf("multiple envelopes leaked into final prose: %q", remaining)
+	}
+}
+
 func TestWrongFenceTagBecomesRepairableProtocolError(t *testing.T) {
 	tc, remaining := parseTextToolCall("```duckdb\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"x.c\"}}\n```")
 	if tc == nil || !strings.Contains(tc.ParseError, "incorrect fence tag") || !strings.Contains(tc.ParseError, "fs_read") {

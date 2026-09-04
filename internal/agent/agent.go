@@ -636,6 +636,14 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				}
 				continue
 			}
+			// A coding seat cannot turn an unverified mutation into a completion
+			// report merely by stopping early. Give it the remaining calls to run
+			// the same deterministic gate that will decide the round.
+			if needsImplementationVerification(turn, ectx) && turnNum < maxTurns {
+				conversation = append(conversation, provider.Message{Role: "assistant", Content: remainingText})
+				conversation = append(conversation, provider.Message{Role: "user", Content: "COMPLETION REJECTED: you changed files after the last green gate. Call verify_run now. If it is red, repair the exact blocker; only report completion after it is green."})
+				continue
+			}
 			// No tool call; this is the final answer
 			outcome.Text = remainingText
 			break
@@ -941,6 +949,18 @@ func textToolAvailabilityUpdate(turn *Turn, ectx *tools.ExecContext) string {
 		"These tools are CLOSED and another call to them will be refused: " + strings.Join(closed, ", ") + ". " +
 		"Tools still AVAILABLE: " + strings.Join(available, ", ") + ". " +
 		"Your next response must use an available action tool or answer the original task; do not request a closed tool."
+}
+
+func needsImplementationVerification(turn *Turn, ectx *tools.ExecContext) bool {
+	if turn == nil || ectx == nil || turn.Role != config.RoleImplementer || !ectx.MutationUnverified {
+		return false
+	}
+	for _, name := range turn.Toolbelt {
+		if name == "verify_run" {
+			return true
+		}
+	}
+	return false
 }
 
 // substantiveAnswer distinguishes an answer from protocol debris. A local
@@ -1527,9 +1547,15 @@ func parseTextToolCall(text string) (*TextToolCall, string) {
 			}
 		}
 	}
-	if len(matches) != 1 {
-		// Zero envelopes: not a tool call. More than one: ambiguous — refuse
-		// rather than guess which the model meant.
+	if len(matches) > 1 {
+		return &TextToolCall{
+			Name:       "ducklab_protocol",
+			Args:       json.RawMessage(`{}`),
+			ParseError: fmt.Sprintf("received %d ducklab tool envelopes in one response; send exactly one envelope per response so calls execute in order", len(matches)),
+		}, ""
+	}
+	if len(matches) == 0 {
+		// Ordinary prose is not a tool call.
 		return nil, text
 	}
 

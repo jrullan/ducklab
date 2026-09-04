@@ -193,6 +193,10 @@ type ExecContext struct {
 	// VCS package. Verification uses it to prove that the selected build gate
 	// actually exercises newly added production sources.
 	WorkspaceDiff func() (string, error)
+	// MutationUnverified is true after a successful file mutation until a
+	// complete verify_run is green. The agent loop uses it to refuse a
+	// premature implementation report while calls remain.
+	MutationUnverified bool
 	// NormalizeContract lets the service compose run-specific, deterministic
 	// policy after the agent package has parsed a structured reply. A callback
 	// may normalize inadmissible claims or reject a value into ordinary repair;
@@ -433,6 +437,7 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 		// reads so the model can inspect the result before verification.
 		ectx.explorationCalls = 0
 		ectx.ReadToolsClosed = false
+		ectx.MutationUnverified = true
 	}
 	if res != nil && res.EndTurn {
 		ectx.ToolsClosed = true
@@ -443,6 +448,9 @@ func (r *Registry) Execute(ctx context.Context, ectx *ExecContext, name string, 
 	if name == "verify_run" && res != nil && !res.IsError && (strings.HasPrefix(strings.TrimSpace(res.Content), "gate: none") || strings.Contains(res.Content, "no command configured for gate")) {
 		res = ErrorResult("no verification gate is configured for this project, so verify_run has nothing to run — " +
 			"it will answer this every time. Do not call it again in this reply; finish your work and report on your deliverables.")
+	}
+	if name == "verify_run" && res != nil && !res.IsError {
+		ectx.MutationUnverified = false
 	}
 	if name == "fs_search" && res != nil {
 		if !res.IsError && strings.TrimSpace(res.Content) == "no matches" {

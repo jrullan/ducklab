@@ -771,6 +771,34 @@ func TestForcedConclusionReformatsResidualToolEnvelopeOnce(t *testing.T) {
 	}
 }
 
+func TestImplementerCannotReportAfterMutationWithoutVerifyRun(t *testing.T) {
+	dir := t.TempDir()
+	p := &countingProvider{replies: []string{
+		"```ducklab\n{\"tool\":\"fs_write\",\"args\":{\"path\":\"result.txt\",\"content\":\"done\"}}\n```",
+		"Implemented successfully.",
+		"```ducklab\n{\"tool\":\"verify_run\",\"args\":{}}\n```",
+		"Changed result.txt, because requested; nothing else changed.",
+	}}
+	loop := testLoop(p, 0)
+	loop.Registry = tools.NewRegistry()
+	turn := &Turn{Role: config.RoleImplementer, Prompt: "write result", Contract: "freeform",
+		MaxTurns: 5, Toolbelt: []string{"fs_write", "verify_run"}}
+	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{
+		ProjectRoot: dir,
+		Verify:      config.Verify{Mode: "custom", Custom: "test -f result.txt", TimeoutS: 30},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.calls() != 4 || len(out.ToolCalls) != 2 || out.ToolCalls[1].Name != "verify_run" {
+		t.Fatalf("premature report was not redirected to verification: calls=%d tools=%+v", p.calls(), out.ToolCalls)
+	}
+	request := p.requests[2]
+	if !strings.Contains(request.Messages[len(request.Messages)-1].Content, "COMPLETION REJECTED") {
+		t.Fatalf("verification correction was not explicit: %+v", request.Messages)
+	}
+}
+
 // And a model with genuinely nothing to say still fails, with the same words.
 func TestTurnExhaustionStillFailsWhenTheConclusionIsEmpty(t *testing.T) {
 	reg := tools.NewRegistry()

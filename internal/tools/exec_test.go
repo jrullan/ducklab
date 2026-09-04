@@ -64,6 +64,25 @@ func TestGreenVerifyClosesMutationsForTheRestOfTheReply(t *testing.T) {
 	}
 }
 
+func TestMutationRemainsUnverifiedUntilACompleteGreenGate(t *testing.T) {
+	root := t.TempDir()
+	ectx := &ExecContext{
+		ProjectRoot: root,
+		Verify:      config.Verify{Mode: "custom", Custom: "test -f changed.txt", TimeoutS: 30},
+	}
+	registry := NewRegistry()
+	if _, err := registry.Execute(context.Background(), ectx, "fs_write", json.RawMessage(`{"path":"changed.txt","content":"x"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !ectx.MutationUnverified {
+		t.Fatal("successful mutation did not require verification")
+	}
+	verified, err := registry.Execute(context.Background(), ectx, "verify_run", json.RawMessage(`{}`))
+	if err != nil || verified.IsError || ectx.MutationUnverified {
+		t.Fatalf("green verification did not clear mutation state: result=%+v err=%v pending=%v", verified, err, ectx.MutationUnverified)
+	}
+}
+
 // A failing gate must come back as an error result, or a model reads a red
 // gate as a green one.
 func TestVerifyRunReportsAFailingGateAsAnError(t *testing.T) {
