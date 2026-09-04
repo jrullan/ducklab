@@ -108,10 +108,11 @@ type ExecuteParams struct {
 
 // ResumeTurn is the durable checkpoint for an interrupted turn.
 type ResumeTurn struct {
-	Round int
-	Index int
-	Role  config.Role
-	Notes string
+	Round                 int
+	Index                 int
+	Role                  config.Role
+	Notes                 string
+	VerifiedAfterMutation bool
 	// Looked is what the interrupted turn had already read (tool + target),
 	// handed back to the resumed seat so it does not start over.
 	Looked []string
@@ -567,8 +568,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if turn.Role == config.RoleArchitect && params.ProjectRoot != "" {
 				prompt += "\n\n## Deterministic workspace facts\n\n- Tool project root: `.`\n- Absolute project root: `" + params.ProjectRoot + "`\n\nThese are harness facts, not user decisions. Use `.` for tool paths and never call `ask_human` to discover the project root."
 			}
-			if params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index && params.ResumeFrom.Notes != "" {
+			resumedTurn := params.ResumeFrom != nil && round == params.ResumeFrom.Round && i == params.ResumeFrom.Index
+			if resumedTurn && params.ResumeFrom.Notes != "" {
 				prompt += "\n\n## Resume checkpoint — continue, do not restart\n\nYour " + string(params.ResumeFrom.Role) + " turn was interrupted. Continue from the saved draft below. The reads listed in `What you already read` remain valid; do not repeat them unless the working tree invalidates one.\n\n" + resumeCheckpointNotes(params.ResumeFrom.Notes)
+			}
+			if resumedTurn && turn.Role == config.RoleImplementer && params.ResumeFrom.VerifiedAfterMutation {
+				// The safe-point pause happened after a completed green turn. Reopening
+				// write tools made the replay invalidate its own known-good tree before
+				// independent review. The only unfinished protocol work is narration.
+				toolbelt = nil
+				prompt += "\n\n## Verified resume — report only\n\nThe deterministic gate already passed after the last tree mutation. Tools are intentionally unavailable for this replay. Do not inspect or modify the tree and do not rerun verification; emit only the required completion/deliverables report from the saved checkpoint."
 			}
 			if err != nil {
 				result.Error = err
@@ -952,9 +961,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// the service persists this completed turn as a conservative
 				// replay checkpoint. Repeating one turn is cheaper than starting
 				// the whole strategy over and losing its review ledger.
-				"notes":    partialTurnNotes(outcome),
-				"looked":   seatLooked[turn.Role],
-				"findings": findings,
+				"notes":                   partialTurnNotes(outcome),
+				"looked":                  seatLooked[turn.Role],
+				"findings":                findings,
+				"verified_after_mutation": turn.Role == config.RoleImplementer && outcomeVerifiedAfterMutation(outcome),
 			})
 
 			// The rubber duck: after the implementer's turn is closed on the

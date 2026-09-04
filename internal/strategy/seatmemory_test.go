@@ -88,6 +88,33 @@ func TestAResumedArchitectIsHandedTheInterruptedTurnsReads(t *testing.T) {
 	}
 }
 
+func TestAResumedVerifiedImplementerCanOnlyReport(t *testing.T) {
+	var gotPrompt string
+	var gotToolbelt []string
+	params := &ExecuteParams{
+		ResumeFrom: &ResumeTurn{Round: 1, Index: 0, Role: config.RoleImplementer,
+			Notes: `{"draft":"implementation complete"}`, VerifiedAfterMutation: true},
+		Runner: func(_ context.Context, _ *Turn, _ config.DucklingID, prompt string, toolbelt []string, _ TurnContext) (*agent.Outcome, error) {
+			gotPrompt = prompt
+			gotToolbelt = append([]string{}, toolbelt...)
+			return &agent.Outcome{Text: "implementation complete"}, nil
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleImplementer: "impl"},
+		Gate:   func(context.Context) (string, string, error) { return "green", "ok", nil },
+	}
+	if _, err := ExecuteScript(context.Background(), SoloScript(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotToolbelt) != 0 {
+		t.Fatalf("verified resumed implementer toolbelt = %v, want none", gotToolbelt)
+	}
+	for _, want := range []string{"Verified resume", "report only", "Do not inspect or modify"} {
+		if !strings.Contains(gotPrompt, want) {
+			t.Errorf("verified resume prompt lacks %q:\n%s", want, gotPrompt)
+		}
+	}
+}
+
 func TestAResumedTurnReceivesThePartialDraftNotTheInternalEnvelope(t *testing.T) {
 	raw := `{"draft":"review so far: alpha is wrong","reasoning":"private scratchpad","tool_calls":[{"name":"fs_read"}]}`
 	got := resumeCheckpointNotes(raw)

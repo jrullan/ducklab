@@ -252,6 +252,11 @@ type InterruptedTurn struct {
 	Index int    `json:"index"`
 	Role  string `json:"role"`
 	Notes string `json:"notes,omitempty"`
+	// VerifiedAfterMutation records that the completed implementer turn reached
+	// a green verification after its final write. If a safe-point pause lands
+	// immediately afterward, replay may ask for a report but must not reopen
+	// mutation tools and invalidate that checkpoint.
+	VerifiedAfterMutation bool `json:"verified_after_mutation,omitempty"`
 	// Looked is what the interrupted turn had already read or searched
 	// (tool + target). A resumed seat is a fresh conversation; without this
 	// it re-reads everything — an architect resumed twice re-explored the

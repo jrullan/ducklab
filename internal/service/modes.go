@@ -483,11 +483,12 @@ func resumeTurn(run *runlog.Run) *strategy.ResumeTurn {
 	for _, f := range t.Findings {
 		findings = append(findings, conv.Finding{Severity: f.Severity, File: f.File, Line: f.Line, Issue: f.Issue, Fix: f.Fix, Invariant: f.Invariant})
 	}
-	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes, Looked: t.Looked, Findings: findings}
+	return &strategy.ResumeTurn{Round: t.Round, Index: t.Index, Role: config.Role(t.Role), Notes: t.Notes, VerifiedAfterMutation: t.VerifiedAfterMutation, Looked: t.Looked, Findings: findings}
 }
 
 func interruptedTurnFromEvent(data map[string]interface{}) *runlog.InterruptedTurn {
-	t := &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), Looked: stringSliceAny(data["looked"])}
+	verified, _ := data["verified_after_mutation"].(bool)
+	t := &runlog.InterruptedTurn{Round: intValue(data["round"]), Index: intValue(data["turn"]), Role: stringValueAny(data["role"]), Notes: stringValueAny(data["notes"]), VerifiedAfterMutation: verified, Looked: stringSliceAny(data["looked"])}
 	if raw, err := json.Marshal(data["findings"]); err == nil {
 		_ = json.Unmarshal(raw, &t.Findings)
 	}
