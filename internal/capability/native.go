@@ -127,10 +127,12 @@ func (Native) Inspect(ctx Context) ([]Inspection, error) {
 }
 
 // inspectShadowedTaskHeaders catches a subtle integration failure that an
-// isolated compiler command cannot: two headers with the same basename and
-// include guard resolve differently as -I ordering changes. Restricting the
-// scan to basenames and guards already present in the task contract avoids
-// treating unrelated, intentionally duplicated names as task failures.
+// isolated compiler command cannot: two different headers with a task-owned
+// basename resolve differently as -I ordering changes. Different include
+// guards do not make that lookup deterministic; they only allow both APIs to
+// enter one translation unit. Restricting the scan to basenames already in the
+// task contract avoids treating unrelated, intentionally duplicated names as
+// task failures.
 func inspectShadowedTaskHeaders(root string, task map[string]map[string]string, taskFiles map[string]bool, enforcement Enforcement) (*Inspection, error) {
 	if root == "" || len(task) == 0 {
 		return nil, nil
@@ -166,17 +168,22 @@ func inspectShadowedTaskHeaders(root string, task map[string]map[string]string, 
 		if err != nil {
 			return err
 		}
-		match := headerGuard.FindSubmatch(body)
-		if match == nil {
-			return nil
+		var canonical string
+		for _, candidate := range guards {
+			if canonical == "" || candidate < canonical {
+				canonical = candidate
+			}
 		}
-		canonical, duplicate := guards[string(match[1])]
-		if !duplicate {
+		canonicalBody, err := os.ReadFile(filepath.Join(root, filepath.Clean(canonical)))
+		if err != nil {
+			return err
+		}
+		if string(canonicalBody) == string(body) {
 			return nil
 		}
 		finding = &Inspection{
 			Capability: "c-native", Name: "header shadowing", Enforcement: enforcement,
-			Detail: fmt.Sprintf("%s and %s share basename %s and include guard %s; include-path order can silently select the wrong API. Keep one canonical owning header", canonical, relative, base, match[1]),
+			Detail: fmt.Sprintf("%s and %s are different headers with basename %s; include-path order can silently select the wrong API even when their include guards differ. Keep one canonical owning header", canonical, relative, base),
 		}
 		return fs.SkipAll
 	})

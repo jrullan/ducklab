@@ -128,7 +128,7 @@ func (Meson) Detect(ctx Context) Contributions {
 		// Meson leaves build/ behind after a failed setup. build.ninja is the
 		// configuration checkpoint; the adapter repairs partial state before
 		// compiling instead of stranding every subsequent gate.
-		Command: "test -f build/build.ninja || (rm -rf build && meson setup build); ninja -C build",
+		Command: "if test -f build/build.ninja; then meson setup --reconfigure build; else rm -rf build && meson setup build; fi && ninja -C build",
 	}
 	if !commandSucceeds(ctx.ProjectRoot, "meson --version") {
 		candidate.Unavailable = &MissingToolchain{Tool: "meson", Marker: "meson.build"}

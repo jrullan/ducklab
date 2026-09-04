@@ -105,6 +105,21 @@ func TestNativeInspectionRejectsShadowedTaskHeader(t *testing.T) {
 	}
 }
 
+func TestNativeInspectionRejectsDifferentShadowWithDifferentGuard(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "src/clipboard.h", "#ifndef SRC_CLIPBOARD_H\n#define SRC_CLIPBOARD_H\nvoid deliver(void);\n#endif\n")
+	writeFixture(t, root, "include/clipboard.h", "#ifndef PUBLIC_CLIPBOARD_H\n#define PUBLIC_CLIPBOARD_H\nvoid publish(void);\n#endif\n")
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c src/app.c", ProducedFiles: []string{"src/clipboard.h"},
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Name != "header shadowing" || !strings.Contains(findings[0].Detail, "even when their include guards differ") {
+		t.Fatalf("different-guard shadowing findings = %+v", findings)
+	}
+}
+
 func TestCapabilitiesComposeWithoutProjectTypeLabels(t *testing.T) {
 	// A local adapter is enough to prove the registry composes providers; the
 	// core does not need a switch for every language or stack.
@@ -283,6 +298,20 @@ func TestGLibReviewInspectionRejectsTwoArgumentReadyCallbackRemedy(t *testing.T)
 	}}, []string{"glib-async"})
 	if len(findings) != 0 {
 		t.Fatalf("correct three-argument remedy was rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Check the return value of g_idle_add(); if it returns 0, complete the GTask with an error.",
+	}}, []string{"glib-async"})
+	if len(findings) != 1 || findings[0].Name != "invalid-idle-source-remedy" {
+		t.Fatalf("invented idle failure remedy was not rejected: %+v", findings)
+	}
+
+	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
+		Fix: "Remove g_clear_pointer(&ctx->task, g_object_unref), since g_task_return_pointer already handles task completion.",
+	}}, []string{"glib-async"})
+	if len(findings) != 1 || findings[0].Name != "invalid-task-reference-remedy" {
+		t.Fatalf("task-reference leak remedy was not rejected: %+v", findings)
 	}
 
 	findings = DefaultRegistry().InspectReviewFindings([]ReviewFinding{{

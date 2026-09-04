@@ -27,6 +27,38 @@ func TestReviewerRemediesContradictingActiveCapabilitiesAreNormalized(t *testing
 	}
 }
 
+func TestSelfNegatingReviewerFindingIsNormalized(t *testing.T) {
+	ectx := &tools.ExecContext{}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{{
+		Severity: "major", File: "worker.c", Issue: "field may be uninitialized",
+		Fix: "Initialize it with init_result(), which already does this; verify it is called.",
+	}}}
+	changed, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:native", verdict)
+	if err != nil || !changed {
+		t.Fatalf("normalize = %v, %v", changed, err)
+	}
+	if !verdict.Approved() || len(verdict.Findings) != 0 {
+		t.Fatalf("self-negating finding survived: %+v", verdict)
+	}
+}
+
+func TestGLibNormalizerDropsInvalidRemedyButKeepsValidDissent(t *testing.T) {
+	ectx := &tools.ExecContext{ActiveCapabilities: []string{"glib-async"}}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{
+		{Severity: "major", File: "worker.c", Issue: "idle source may fail", Fix: "Check the return value of g_idle_add; if it returns 0, complete the task with an error."},
+		{Severity: "major", File: "worker.c", Issue: "serialization blocks the main context", Fix: "Move PNG serialization to the worker."},
+	}}
+	changed, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:native", verdict)
+	if err != nil || !changed {
+		t.Fatalf("normalize = %v, %v", changed, err)
+	}
+	if verdict.Approved() || len(verdict.Findings) != 1 || !strings.Contains(verdict.Findings[0].Issue, "serialization") {
+		t.Fatalf("valid dissent was not preserved: %+v", verdict)
+	}
+}
+
 func TestHarnessProfileIsResolvedPersistedAndEmittedOnce(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "Cargo.toml"), []byte("[package]\nname='fixture'\nversion='0.1.0'\n"), 0o644); err != nil {

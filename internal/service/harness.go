@@ -33,6 +33,15 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 			findings = append(findings, capability.ReviewFinding{Issue: finding.Issue, Fix: finding.Fix, Invariant: finding.Invariant})
 		}
 		rejected := map[int]capability.ReviewFindingInspection{}
+		for index, finding := range verdict.Findings {
+			fix := strings.ToLower(strings.TrimSpace(finding.Fix))
+			if strings.Contains(fix, "no change required") || strings.Contains(fix, "already does this") {
+				rejected[index] = capability.ReviewFindingInspection{Index: index, Inspection: capability.Inspection{
+					Capability: "review-contract", Name: "self-negating-finding", Enforcement: capability.Required,
+					Detail: fmt.Sprintf("finding %d is inadmissible: its own remedy says the current code requires no change or already performs the requested action", index),
+				}}
+			}
+		}
 		for _, finding := range capability.DefaultRegistry().InspectReviewFindings(findings, active) {
 			if finding.Enforcement == capability.Required {
 				rejected[finding.Index] = finding

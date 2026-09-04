@@ -85,7 +85,7 @@ func TestDetectMesonGateUsesTheConfigurationArtifact(t *testing.T) {
 	if gate != GateBuild {
 		t.Fatalf("gate = %q, want build", gate)
 	}
-	if !strings.Contains(cmd, "build/build.ninja") || !strings.Contains(cmd, "rm -rf build") {
+	if !strings.Contains(cmd, "build/build.ninja") || !strings.Contains(cmd, "rm -rf build") || !strings.Contains(cmd, "meson setup --reconfigure build") {
 		t.Fatalf("meson gate %q does not recover an incomplete configuration", cmd)
 	}
 

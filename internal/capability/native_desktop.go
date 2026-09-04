@@ -323,6 +323,25 @@ func (GLibAsync) InspectReviewFindings(findings []ReviewFinding) []ReviewFinding
 				Capability: "glib-async", Name: "invalid-ready-callback-remedy", Enforcement: Required,
 				Detail: fmt.Sprintf("finding %d is inadmissible: its fix prescribes a two-argument GAsyncReadyCallback, but GIO declares (GObject *source_object, GAsyncResult *result, gpointer user_data)", i),
 			}})
+			continue
+		}
+		if strings.Contains(fix, "g_idle_add") &&
+			(strings.Contains(fix, "returns 0") || strings.Contains(fix, "return value") || strings.Contains(fix, "if 0")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-idle-source-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: its fix treats g_idle_add returning 0 as a failure path, but GLib guarantees a source ID greater than zero", i),
+			}})
+			continue
+		}
+		claimsReturnOwnsTask := strings.Contains(fix, "g_task_return_") &&
+			(strings.Contains(fix, "handles task") || strings.Contains(fix, "takes ownership") || strings.Contains(fix, "already handles"))
+		removesOwnedUnref := strings.Contains(fix, "remove") &&
+			(strings.Contains(fix, "g_object_unref") || strings.Contains(fix, "g_clear_pointer"))
+		if claimsReturnOwnsTask && (removesOwnedUnref || strings.Contains(fix, "set ctx->task = null")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-task-reference-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: g_task_return_* completes a result but does not consume the caller's owned GTask reference; an explicit g_object_ref still requires a matching unref", i),
+			}})
 		}
 	}
 	return out
