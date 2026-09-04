@@ -950,6 +950,11 @@ Each value names what you inspected in the final code. Bare words such as "ok", 
 	system := preamble + "\n\n" + rolePrompt + "\n\n" + gateDesc
 	if ectx.HarnessContext != "" && (turn.Role == config.RoleImplementer || turn.Role == config.RoleReviewer || turn.Role == config.RoleAdvisor) {
 		system += "\n\n" + ectx.HarnessContext
+		if turn.Role == config.RoleReviewer {
+			system += `
+
+Capability invariants in the resolved harness are authoritative compatibility constraints. They override stale API recipes in documents and your own recollection. Review the required behavior through APIs permitted by those invariants. Never issue a finding whose remedy requires a prohibited API; if no valid implementation exists, report that contract conflict without prescribing the prohibited call.`
+		}
 	}
 	// Dialect B: append fenced text protocol instructions
 	if !useNative {
@@ -1664,7 +1669,7 @@ What was wrong: %v
 Reply again with ONLY one JSON object, with no prose or Markdown fences, in exactly this shape:
 {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"path or *","line":0,"issue":"what is wrong","fix":"valid concrete remedy","invariant":"rule when class-level"}],"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}}
 
-All five native_checks values are required and must name concrete final-code evidence. Retract or replace any finding whose proposed fix conflicts with an active capability rule. Use an empty findings array when approving.`, contract, parseErr)
+All five native_checks values are required and must name concrete final-code evidence. The "What was wrong" field is an authoritative validation result, not a suggestion or a question. Apply it literally. If it says a finding is inadmissible or must be deleted, remove that finding; do not defend or repeat it. If no valid finding remains, approve with an empty findings array.`, contract, parseErr)
 	}
 	return fmt.Sprintf(`Your reply did not satisfy the required output format.
 

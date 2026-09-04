@@ -84,7 +84,7 @@ func (GTK4UI) InspectReviewFindings(findings []ReviewFinding) []Inspection {
 			}
 			out = append(out, Inspection{
 				Capability: "gtk4-ui", Name: "invalid-review-remedy", Enforcement: Required,
-				Detail: fmt.Sprintf("finding %d proposes %s, a GTK3 API removed from GTK4; retract the finding or replace its fix with a GTK4-valid contract", i, api),
+				Detail: fmt.Sprintf("finding %d is inadmissible and MUST be deleted: its fix proposes %s, a GTK3 API removed from GTK4. Do not repeat or defend this finding. Replace it only if a different defect has a GTK4-valid remedy; if no other valid finding remains, approve", i, api),
 			})
 			break
 		}

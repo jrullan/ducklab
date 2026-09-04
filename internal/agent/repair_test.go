@@ -170,7 +170,7 @@ func TestParsedContractPolicyUsesOrdinaryRepairPath(t *testing.T) {
 
 func TestNativeVerdictRepairInstructionIncludesCompleteSchema(t *testing.T) {
 	got := repairInstruction("verdict:native", errors.New("native_checks is required"))
-	for _, want := range []string{"native_checks", "completion", "resources", "threads", "representation", "cleanup", "Retract or replace"} {
+	for _, want := range []string{"native_checks", "completion", "resources", "threads", "representation", "cleanup", "authoritative validation result", "remove that finding", "approve with an empty findings array"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("native repair instruction lacks %q:\n%s", want, got)
 		}
@@ -661,6 +661,9 @@ func TestCodingSeatsReceiveTheResolvedHarnessCapsule(t *testing.T) {
 		}, true)
 		if !strings.Contains(msgs[0].Content, "Resolved project harness") {
 			t.Errorf("%s did not receive harness capsule", role)
+		}
+		if role == config.RoleReviewer && !strings.Contains(msgs[0].Content, "authoritative compatibility constraints") {
+			t.Error("reviewer was not told capability invariants outrank stale API recipes")
 		}
 	}
 	msgs := BuildMessages(&Turn{Role: config.RoleArchitect, Prompt: "draft"}, &tools.ExecContext{
