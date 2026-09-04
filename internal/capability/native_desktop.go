@@ -329,12 +329,12 @@ func (GLibAsync) Detect(ctx Context) Contributions {
 		Detection: Detection{Capability: "glib-async", Evidence: []string{"task Verification uses GLib/GIO/GTK"}},
 		ReviewRules: []ReviewRule{
 			{Capability: "glib-async", ID: "allocation", Guidance: "g_new0(Type, 1) allocates exactly one zero-initialized Type; the second argument is the element count. Do not report it as allocating two objects or replace it merely with g_new."},
-			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference, but the initiating function must still g_object_unref its own GTask reference after scheduling. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
+			{Capability: "glib-async", ID: "task-lifetime", Guidance: "g_task_run_in_thread manages its worker reference, but the initiating function must still g_object_unref its own GTask reference after scheduling. Passing g_object_ref(task) as deferred user_data keeps the task alive until its matching callback or destroy notify releases that reference. With a manual g_thread_new, pass g_object_ref(task) to the worker, g_object_unref it when the worker finishes, and immediately g_thread_unref the returned handle for detached execution; do not join from the caller's main context or treat a borrowed task pointer as owned."},
 			{Capability: "glib-async", ID: "deferred-input-lifetime", Guidance: "A pointer retained for g_idle_add, an async callback, a worker, or a queue outlives the initiating call. Copy its data, take a reference, or make ownership transfer explicit; merely storing a borrowed input in a context struct can become a use-after-free."},
 			{Capability: "glib-async", ID: "deferred-storage", Guidance: "Never pass the address of a local variable or local array as g_idle_add/g_idle_add_full user_data: the callback runs after that stack frame returns. Allocate a heap context and give one destroy notify sole ownership of its references."},
 			{Capability: "glib-async", ID: "callback-context", Guidance: "If a public async API accepts callback user_data, its callback signature and every completion path must pass that exact user_data back. Storing it without delivering it is a broken API contract even when compilation succeeds."},
 			{Capability: "glib-async", ID: "idle-source-id", Guidance: "g_idle_add returns a source ID guaranteed to be greater than zero. Do not invent a g_idle_add()==0 allocation-failure branch or run its main-context callback synchronously from a worker; use g_idle_add_full with a destroy notify when source-data cleanup needs an explicit ownership contract."},
-			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data). GAsyncReadyCallback is exactly void callback(GObject *source_object, GAsyncResult *result, gpointer user_data). GTaskThreadFunc is exactly void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable). Return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). There are no g_task_propose_pointer or g_task_propose_error APIs."},
+			{Capability: "glib-async", ID: "g-task-api", Guidance: "For GTask, g_task_new takes (source_object, cancellable, GAsyncReadyCallback, callback_data); g_task_set_task_data stores independent worker data and does not overwrite callback_data. GAsyncReadyCallback is exactly void callback(GObject *source_object, GAsyncResult *result, gpointer user_data). GTaskThreadFunc is exactly void worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable). Return a pointer with g_task_return_pointer and receive it only with g_task_propagate_pointer(G_TASK(result), &error). A documented non-NULL sentinel such as GINT_TO_POINTER(1) is valid for a boolean finish wrapper. There are no g_task_run_in_thread_async, g_task_complete, g_task_propose_pointer or g_task_propose_error APIs."},
 			{Capability: "glib-async", ID: "completion", Guidance: "Every success and error path must complete the async result exactly once, without making the caller's main context wait for the worker. A worker completes its GTask with one g_task_return_* call; the resulting GAsyncReadyCallback consumes that completed result with the corresponding g_task_propagate_* call and must not call g_task_return_* on G_TASK(result) again."},
 			{Capability: "glib-async", ID: "nested-destroy", Guidance: "A GTask result destroy-notify must release nested owned allocations as well as the outer result object."},
 			{Capability: "glib-async", ID: "boxed-release", Guidance: "GBytes is a ref-counted boxed type, not a GObject. Release a GBytes* with g_bytes_unref (for example g_clear_pointer(&bytes, g_bytes_unref)), never g_clear_object or g_object_unref."},
@@ -354,6 +354,8 @@ var (
 	zeroIdleSource       = regexp.MustCompile(`(?s)g_idle_add(?:_full)?\s*\([^;]*?\)\s*==\s*0`)
 	stackPointerArray    = regexp.MustCompile(`(?m)^\s*gpointer\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[[^]]*\]\s*=`)
 	idleFullContract     = regexp.MustCompile(`(?s)g_idle_add_full\s*\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
+	taskDataOwner        = regexp.MustCompile(`g_task_set_task_data\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(?:\(\s*GDestroyNotify\s*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
+	directNullAsyncReply = regexp.MustCompile(`\b(?:[A-Za-z_][A-Za-z0-9_]*_)?callback\s*\(\s*NULL\s*,\s*NULL\s*,`)
 )
 
 // InspectReviewFindings rejects remedies that contradict GIO's declared
@@ -364,6 +366,39 @@ func (GLibAsync) InspectReviewFindings(findings []ReviewFinding) []ReviewFinding
 	for i, finding := range findings {
 		fix := strings.ToLower(strings.TrimSpace(finding.Fix))
 		claim := strings.ToLower(finding.Issue + " " + finding.Fix)
+		invalidTaskAPI := strings.Contains(claim, "g_task_run_in_thread_async") ||
+			strings.Contains(claim, "g_task_complete(") || strings.Contains(claim, "g_task_complete (")
+		if invalidTaskAPI {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invented-task-api-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: its remedy relies on a GTask API that does not exist; use g_task_run_in_thread and one g_task_return_* completion path", i),
+			}})
+			continue
+		}
+		if strings.Contains(claim, "g_object_ref(task)") &&
+			(strings.Contains(claim, "may be freed") || strings.Contains(claim, "use-after-free") || strings.Contains(claim, "does not keep") || strings.Contains(claim, "not keep")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-task-ref-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: g_object_ref(task) explicitly keeps the task alive across the deferred callback; inspect the matching unref path instead", i),
+			}})
+			continue
+		}
+		if strings.Contains(claim, "g_task_set_task_data") && strings.Contains(claim, "overwrite") &&
+			(strings.Contains(claim, "callback") || strings.Contains(claim, "user_data")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-task-data-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: GTask task_data is independent of the callback and callback_data supplied to g_task_new", i),
+			}})
+			continue
+		}
+		if strings.Contains(claim, "gint_to_pointer(1)") &&
+			(strings.Contains(claim, "meaningless") || strings.Contains(fix, "return null")) {
+			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
+				Capability: "glib-async", Name: "invalid-success-sentinel-remedy", Enforcement: Required,
+				Detail: fmt.Sprintf("finding %d is inadmissible: a documented non-NULL sentinel is a valid boolean success result for g_task_propagate_pointer; replacing it with NULL would make a != NULL finish wrapper report failure", i),
+			}})
+			continue
+		}
 		if strings.Contains(claim, "g_task_new") && strings.Contains(claim, "source_object=null") &&
 			strings.Contains(claim, "g_task_is_valid") && strings.Contains(claim, "null") {
 			out = append(out, ReviewFindingInspection{Index: i, Inspection: Inspection{
@@ -430,6 +465,26 @@ func (GLibAsync) Inspect(ctx Context) ([]Inspection, error) {
 	}
 	text := string(body)
 	var out []Inspection
+	directCompletionPolicy := ctx.Policies["glib-async.completion"]
+	if directCompletionPolicy != "off" && directNullAsyncReply.MatchString(text) {
+		out = append(out, Inspection{
+			Capability: "glib-async", Name: "invalid-direct-async-callback", Enforcement: policyEnforcement(directCompletionPolicy),
+			Detail: "an async entry point invokes its callback directly with a NULL GAsyncResult; when a callback exists, return early errors through a GTask so the corresponding finish function receives a valid result (a NULL callback needs no fabricated completion)",
+		})
+	}
+	resultOwnerPolicy := ctx.Policies["glib-async.result-ownership"]
+	if resultOwnerPolicy != "off" {
+		for _, match := range taskDataOwner.FindAllStringSubmatch(text, -1) {
+			duplicate := regexp.MustCompile(`g_task_return_pointer\s*\(\s*` + regexp.QuoteMeta(match[1]) + `\s*,\s*` + regexp.QuoteMeta(match[2]) + `\s*,\s*(?:\(\s*GDestroyNotify\s*\)\s*)?` + regexp.QuoteMeta(match[3]) + `\s*\)`)
+			if duplicate.MatchString(text) {
+				out = append(out, Inspection{
+					Capability: "glib-async", Name: "duplicate-result-owner", Enforcement: policyEnforcement(resultOwnerPolicy),
+					Detail: fmt.Sprintf("%s is owned by %s task_data with destroy notify %s and is also returned with the same destroy notify; assign the allocation exactly one owner to avoid double destruction", match[2], match[1], match[3]),
+				})
+				break
+			}
+		}
+	}
 	storagePolicy := ctx.Policies["glib-async.deferred-storage"]
 	if storagePolicy != "off" {
 		for _, match := range stackPointerArray.FindAllStringSubmatch(text, -1) {

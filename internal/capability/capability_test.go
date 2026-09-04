@@ -159,7 +159,7 @@ func TestNativeDesktopReviewRulesComposeFromVerificationEvidence(t *testing.T) {
 	for _, rule := range profile.ReviewRules {
 		joined += rule.Guidance + "\n"
 	}
-	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "local array", "callback user_data", "greater than zero", "g_task_propagate_pointer", "no g_task_propose_pointer", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
+	for _, want := range []string{"not powers of two", "trailing zeroes", "width*4", "zero does not mean", "g_object_ref(task)", "g_thread_unref", "nested owned allocations", "NULL source_object", "retained for g_idle_add", "local array", "callback user_data", "greater than zero", "g_task_propagate_pointer", "g_task_propose_pointer", "g_task_run_in_thread_async", "GBytes is a ref-counted boxed type", "ctx->task back-reference"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("review guidance lacks %q:\n%s", want, joined)
 		}
@@ -332,6 +332,24 @@ func TestGLibReviewInspectionRejectsNullSourceFalsePositive(t *testing.T) {
 	}
 }
 
+func TestGLibReviewInspectionRejectsInventedTaskLifecycleRemedies(t *testing.T) {
+	tests := []struct {
+		finding ReviewFinding
+		name    string
+	}{
+		{ReviewFinding{Issue: "task may be freed despite g_object_ref(task), causing use-after-free", Fix: "Use g_task_run_in_thread_async instead."}, "invented-task-api-remedy"},
+		{ReviewFinding{Issue: "g_object_ref(task) may be freed before the idle callback", Fix: "Restructure the worker."}, "invalid-task-ref-remedy"},
+		{ReviewFinding{Issue: "g_task_set_task_data overwrites callback user_data", Fix: "Store and invoke the callback manually."}, "invalid-task-data-remedy"},
+		{ReviewFinding{Issue: "GINT_TO_POINTER(1) is a meaningless success sentinel", Fix: "Return NULL on success instead."}, "invalid-success-sentinel-remedy"},
+	}
+	for _, test := range tests {
+		got := DefaultRegistry().InspectReviewFindings([]ReviewFinding{test.finding}, []string{"glib-async"})
+		if len(got) != 1 || got[0].Name != test.name || got[0].Enforcement != Required {
+			t.Errorf("%s inspection = %+v", test.name, got)
+		}
+	}
+}
+
 func TestGTK4ClipboardReviewInspectionAllowsPaddedRowstride(t *testing.T) {
 	findings := DefaultRegistry().InspectReviewFindings([]ReviewFinding{{
 		Issue: "GdkPixbuf pixels may be padded",
@@ -462,6 +480,51 @@ void start(GTask *task, GBytes *bytes) {
 	}
 	if !hasInspection(findings, "glib-async", "deferred-stack-storage") {
 		t.Fatalf("missing deferred stack-storage finding: %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsDirectNullResultCallback(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+void start(GAsyncReadyCallback callback, gpointer user_data) {
+  callback(NULL, NULL, user_data);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasInspection(findings, "glib-async", "invalid-direct-async-callback") {
+		t.Fatalf("missing direct async callback finding: %+v", findings)
+	}
+}
+
+func TestGLibInspectionRejectsDuplicateTaskDataResultOwner(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "worker.c", `
+static void context_destroy(gpointer data) { g_free(data); }
+static void worker(GTask *task, gpointer source, gpointer task_data, GCancellable *cancellable) {
+  gpointer ctx = task_data;
+  g_task_return_pointer(task, ctx, (GDestroyNotify)context_destroy);
+}
+void start(void) {
+  GTask *task = g_task_new(NULL, NULL, NULL, NULL);
+  gpointer ctx = g_malloc0(8);
+  g_task_set_task_data(task, ctx, (GDestroyNotify)context_destroy);
+  g_task_run_in_thread(task, worker);
+  g_object_unref(task);
+}
+`)
+	findings, err := DefaultRegistry().ResolveInspections(Context{
+		ProjectRoot: root, TaskVerification: "cc -c $(pkg-config --cflags gio-2.0) worker.c",
+	}, true, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasInspection(findings, "glib-async", "duplicate-result-owner") {
+		t.Fatalf("missing duplicate task-data owner finding: %+v", findings)
 	}
 }
 

@@ -662,12 +662,30 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	// reviewer's honest verdict at that point is request-changes naming what
 	// it could not verify, which the loop can act on, unlike a corpse.
 	if len(outcome.ToolCalls) > 0 && !substantiveAnswer(outcome.Text) {
+		finalMessages := append([]provider.Message{}, conversation...)
+		// Text-protocol seats were still shown the initial tool catalogue in
+		// their system message. Merely saying "no more tools" at the end lost
+		// that instruction conflict: at the cap, Qwen repeatedly emitted one
+		// more perfectly valid ducklab envelope as its inert final answer. Strip
+		// the catalogue and protocol grammar from the forced conclusion request.
+		if !useNative {
+			for i := range finalMessages {
+				if finalMessages[i].Role != "system" {
+					continue
+				}
+				if marker := strings.Index(finalMessages[i].Content, "\n\n## How to use tools"); marker >= 0 {
+					finalMessages[i].Content = finalMessages[i].Content[:marker] +
+						"\n\nAll tools and tool-call syntax are unavailable for the remainder of this turn."
+				}
+			}
+		}
 		final := provider.ChatRequest{
 			Model: loop.Duckling.Model,
-			Messages: append(append([]provider.Message{}, conversation...), provider.Message{
+			Messages: append(finalMessages, provider.Message{
 				Role: "user",
 				Content: "You are out of tool calls. Answer the original task NOW from " +
 					"what you have already gathered — no more tools will be executed. " +
+					"Do not emit a ducklab fence, a tool name, or a proposed tool call. " +
 					"If your answer follows a contract (a verdict, a choice), emit it " +
 					"now. Anything you could not verify, state as such inside the " +
 					"answer rather than refusing to answer.",

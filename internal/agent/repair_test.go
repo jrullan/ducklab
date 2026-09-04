@@ -734,6 +734,12 @@ func TestTurnExhaustionForcesAConclusionInsteadOfFailing(t *testing.T) {
 	if len(last.Tools) != 0 {
 		t.Error("the conclusion call still offered tools")
 	}
+	if strings.Contains(last.Messages[0].Content, "## How to use tools") || strings.Contains(last.Messages[0].Content, "## Your tools") {
+		t.Error("the text-protocol conclusion still carried the stale tool grammar/catalogue")
+	}
+	if !strings.Contains(last.Messages[0].Content, "tool-call syntax are unavailable") || !strings.Contains(lastMsg.Content, "Do not emit a ducklab fence") {
+		t.Error("the text-protocol conclusion does not close tool syntax explicitly")
+	}
 }
 
 // And a model with genuinely nothing to say still fails, with the same words.
