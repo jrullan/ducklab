@@ -30,13 +30,28 @@ const PersonaPlanManifest = "plan_manifest"
 const planCoverageReview = `## Plan obligation audit — required
 
 An **Implements:** id is an index pointer, never evidence that the task delivers
-the section. Before your verdict, read every accepted SPEC section the plan
-claims and audit its obligations against the tasks' **Work unit:** and top-level
-**Acceptance slices:**.
+the section. Before your verdict, read every accepted, in-scope SPEC section —
+including sections absent from all Implements lines — and audit its obligations
+against the tasks' **Work unit:** and top-level **Acceptance slices:**.
 
 - Account for independently testable behavior, authority/boundary rules, and
   named error or exclusion cases. A title, explanatory paragraph, Produces,
   Exercises, or a broad project gate does not count as an accepted outcome.
+- Respect each section's explicit priority. ` + "`must`" + ` and in-scope ` + "`should`" + `
+  obligations need coverage. A ` + "`could`" + ` section needs work only when the accepted
+  scope explicitly selects it. A ` + "`wont`" + ` section is a boundary to preserve, not a
+  task that must be implemented merely to prove absence.
+- A mandatory obligation is not implemented when its behavior appears only in
+  an Assumption, Out of scope clause, title, explanatory prose, or as input
+  injected by an unnamed upstream actor. Require an in-scope Work unit and a
+  top-level Acceptance slice that observes the promised behavior.
+- Preserve named authority boundaries as actor/action/object relations. A task
+  that validates or returns evidence must not silently become the actor that
+  decides, installs, activates, executes, or otherwise owns an action reserved
+  by the specification to somebody else.
+- A milestone's Owns lane is the permitted aggregate boundary for its child
+  tasks' Produces entries. Do not report that parent/child containment as a
+  second owner; report collisions only between competing tasks or milestones.
 - A specification may be covered by several tasks and one task may cover
   several related specifications; do not demand a syntactic one-to-one split.
 - If an obligation has no acceptance slice, request changes. Name the exact

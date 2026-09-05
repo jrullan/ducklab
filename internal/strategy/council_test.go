@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -245,12 +246,76 @@ func TestPlanCriticAuditsObligationsNotJustImplementsIDs(t *testing.T) {
 	for _, want := range []string{
 		"Plan obligation audit — required",
 		"An **Implements:** id is an index pointer, never evidence",
+		"including sections absent from all Implements lines",
 		"authority/boundary rules",
+		"A `could` section needs work only when the accepted",
+		"A `wont` section is a boundary to preserve",
+		"an Assumption, Out of scope clause",
+		"actor/action/object relations",
+		"permitted aggregate boundary for its child",
 		"Name the exact\n  SPEC id and omitted obligation",
 		"Do not infer coverage merely",
 	} {
 		if !strings.Contains(critic, want) {
 			t.Errorf("plan critic prompt lacks %q:\n%s", want, critic)
+		}
+	}
+}
+
+// H1e's final plan reviewer approved a candidate after the ordinary reviewer
+// had found — and the architect had merely reworded — a missing mandatory
+// behavior. The final route must receive the exact same obligation policy as
+// every critic in the repair loop, not just the preceding finding ledger.
+func TestPlanFinalReviewReceivesTheSameObligationPolicy(t *testing.T) {
+	script := CouncilScript("M", nil)
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"produces":["file:Cargo.toml"],"consumes":[],"verification":"cargo check"}]}]}`
+	manifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planForRevision := func(revision int) *agent.Outcome {
+		planText := fmt.Sprintf("## M-01 — Setup\n\n### T-001 — Build\n\nRevision %d.\n\n**Implements:** SPEC-001\n\n**Work unit:** Build the package\n\n**Acceptance slices:**\n- The package builds.\n\n**Produces:** file:Cargo.toml\n\n**Consumes:** none\n\n**Verification:** `cargo check`\n\n**Exercises:** file:Cargo.toml\n\n**Out of scope:** Publishing.\n\n**Assumption:** Cargo is installed.", revision)
+		return &agent.Outcome{Text: planText, Parsed: []agent.Section{{ID: "M-01", Title: "Setup", Body: strings.SplitN(planText, "\n\n", 2)[1]}}}
+	}
+
+	reviewerTurns, architectTurns := 0, 0
+	var finalPrompt string
+	params := &ExecuteParams{
+		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, prompt string, _ []string, tc TurnContext) (*agent.Outcome, error) {
+			switch {
+			case turn.Persona == PersonaPlanManifest:
+				return &agent.Outcome{Text: manifestText, Parsed: manifest}, nil
+			case turn.Role == config.RoleReviewer:
+				reviewerTurns++
+				if tc.Index >= len(script.Turns) {
+					finalPrompt = prompt
+					return verdictOutcome("approve"), nil
+				}
+				return verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "draft", Issue: "missing obligation", Fix: "add a slice"}), nil
+			default:
+				architectTurns++
+				return planForRevision(architectTurns), nil
+			}
+		},
+		Roster: map[config.Role]config.DucklingID{config.RoleArchitect: "arch", config.RoleReviewer: "crit"},
+	}
+	if _, err := ExecuteScript(context.Background(), script, params); err != nil {
+		t.Fatal(err)
+	}
+	if reviewerTurns != 5 {
+		t.Fatalf("reviewer turns = %d, want four round reviews plus final verification", reviewerTurns)
+	}
+	for _, want := range []string{
+		"Final candidate under review",
+		"Plan obligation audit — required",
+		"including sections absent from all Implements lines",
+		"A `could` section needs work only when the accepted",
+		"an Assumption, Out of scope clause",
+		"actor/action/object relations",
+		"permitted aggregate boundary for its child",
+	} {
+		if !strings.Contains(finalPrompt, want) {
+			t.Errorf("final plan critic prompt lacks %q:\n%s", want, finalPrompt)
 		}
 	}
 }
