@@ -260,6 +260,9 @@ func TestPlanCriticAuditsObligationsNotJustImplementsIDs(t *testing.T) {
 			t.Errorf("plan critic prompt lacks %q:\n%s", want, critic)
 		}
 	}
+	if !strings.HasSuffix(critic, planCoverageReview) {
+		t.Errorf("plan critic policy is not the final prompt section:\n%s", critic)
+	}
 }
 
 // H1e's final plan reviewer approved a candidate after the ordinary reviewer
@@ -317,6 +320,11 @@ func TestPlanFinalReviewReceivesTheSameObligationPolicy(t *testing.T) {
 		if !strings.Contains(finalPrompt, want) {
 			t.Errorf("final plan critic prompt lacks %q:\n%s", want, finalPrompt)
 		}
+	}
+	policyAt := strings.LastIndex(finalPrompt, "Plan obligation audit — required")
+	if policyAt < strings.LastIndex(finalPrompt, "Final candidate under review") ||
+		policyAt < strings.LastIndex(finalPrompt, "Open finding ledger") {
+		t.Errorf("final plan critic policy is buried before candidate or ledger:\n%s", finalPrompt)
 	}
 }
 
@@ -519,6 +527,15 @@ func TestOnlyCouncilCritiquesCarryTheCriticPersona(t *testing.T) {
 	for _, turn := range CouncilScript("REQ", []config.DucklingID{"a", "b"}).Turns {
 		if turn.Role == config.RoleReviewer && turn.Persona != PersonaCritic {
 			t.Errorf("council critique turn without the critic persona: %+v", turn)
+		}
+		if turn.Role == config.RoleReviewer {
+			belt, err := turn.ResolveToolbelt(testRegistry(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(belt) != 0 {
+				t.Errorf("closed document critic received workspace tools: %v", belt)
+			}
 		}
 	}
 	for _, turn := range PairScript().Turns {

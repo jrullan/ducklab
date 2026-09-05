@@ -167,7 +167,11 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 		turns = append(turns, Turn{
 			Role:     config.RoleReviewer,
 			Duckling: c,
-			Toolbelt: "document", // read-only, minus the gate and the diff: a draft lives in the conversation
+			// A document council is a closed review. Ducklab supplies the
+			// candidate, accepted lifecycle documents and explicit references in
+			// the prompt; workspace tools let a small critic spend its whole turn
+			// rediscovering that same input instead of returning a verdict.
+			Toolbelt: "none",
 			Contract: "verdict",
 			MaxTurns: 6,
 			Persona:  PersonaCritic,

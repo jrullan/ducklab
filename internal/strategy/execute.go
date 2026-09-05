@@ -507,7 +507,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if turn.Role == config.RoleArchitect && turn.Contract == "markdown_sections:M" && verdictsThisRound > 0 {
 				prompt += "\n\n## Reviewed topology amendments\n\nThe manifest constrained the initial render, but the reviewer has now checked its semantics. Apply supported reviewer corrections even when they change a manifest-derived Implements, Produces, Consumes, Verification, Owns, or Depends on field. Preserve all unrelated topology. The revised, deterministically validated plan becomes authoritative."
 			}
-			prompt = appendArtifactCriticPolicy(prompt, &turn, script)
 			if turn.Persona == PersonaCritic && script.CriticScope != "" {
 				prompt += "\n\n## Isolated review boundary — authoritative\n\n" + script.CriticScope
 			}
@@ -543,6 +542,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					params.ExecContext.DraftUnderReview[kind] = lastArchitect.Text
 				}
 			}
+			// Keep non-negotiable review invariants adjacent to the requested
+			// verdict. When placed before a long candidate, a small critic
+			// reproduced the exact parent/child ownership finding the policy
+			// prohibited.
+			prompt = appendArtifactCriticPolicy(prompt, &turn, script)
 			var repairBase *agent.Outcome
 			var repairSections []string
 			if turn.Role == config.RoleArchitect && pendingStructureNote != "" {
@@ -1262,7 +1266,6 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if err != nil {
 			return err
 		}
-		prompt = appendArtifactCriticPolicy(prompt, &turn, script)
 		if script.FragmentPrefix != "" {
 			prompt = fragmentCriticContext(prompt)
 		}
@@ -1276,6 +1279,7 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 				"\nRe-check EACH ledger item against the exact candidate above. Approve only if every item is now resolved. " +
 				"If any remains, return request-changes and repeat that unresolved item in findings; an approve must certify the whole ledger, not merely report that the latest revision changed text."
 		}
+		prompt = appendArtifactCriticPolicy(prompt, &turn, script)
 		if params.ExecContext != nil {
 			if kind := kindOfContract(turn.Contract, script); kind != "" {
 				if params.ExecContext.DraftUnderReview == nil {
