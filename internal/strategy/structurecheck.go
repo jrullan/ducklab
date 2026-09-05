@@ -23,6 +23,7 @@ const (
 	maxRepairFindings      = 12
 	maxStructureStagnation = 3
 	maxRepairSections      = 1
+	maxGraphRepairSections = 2
 	maxIndependentSections = 4
 )
 
@@ -1003,6 +1004,22 @@ func structureRepairBatch(findings []string, sections []agent.Section) ([]string
 		return ranked[i] < ranked[j]
 	})
 	targets := ranked[:min(len(ranked), maxRepairSections)]
+	// A single edge with equally ranked endpoints has no one-sided repair in
+	// general. In Fledge H1d, two milestones both owned the same artifact; the
+	// checker selected one milestone, then rejected every attempt to remove the
+	// other owner as out of scope. Give a tied, isolated graph edge both of its
+	// endpoints. True hubs still win alone (coverage > 1), keeping large graph
+	// repairs bounded.
+	if len(ranked) > 1 && coverage[ranked[0]] == 1 && coverage[ranked[1]] == 1 {
+		for _, f := range findings {
+			parents := parentsOf(f)
+			if len(parents) < 2 {
+				continue
+			}
+			targets = append([]string(nil), parents[:min(len(parents), maxGraphRepairSections)]...)
+			break
+		}
+	}
 	targetSet := map[string]bool{}
 	for _, target := range targets {
 		targetSet[target] = true

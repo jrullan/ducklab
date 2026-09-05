@@ -287,8 +287,20 @@ func TestStructureRepairFindsEveryParentOfADuplicatedTaskID(t *testing.T) {
 		agent.Section{ID: "M-002", Body: "### T-004 — Portal duplicate"},
 	)
 	_, ids := structureRepairInstruction([]string{"T-004 is declared more than once"}, sectionsOf(base))
-	if !slices.Equal(ids, []string{"M-001"}) {
-		t.Fatalf("duplicate task repair = %v, want deterministic first owner", ids)
+	if !slices.Equal(ids, []string{"M-001", "M-002"}) {
+		t.Fatalf("duplicate task repair = %v, want both owners writable", ids)
+	}
+}
+
+func TestStructureRepairMakesBothSidesOfIsolatedOwnershipCollisionWritable(t *testing.T) {
+	base := sectioned("",
+		agent.Section{ID: "M-02", Body: "### T-006 — Runner"},
+		agent.Section{ID: "M-03", Body: "### T-007 — Duplicate runner"},
+	)
+	finding := "T-006 and T-007 both **Produce:** src/conformance/runner.rs — one artifact needs one owner"
+	batch, ids := structureRepairBatch([]string{finding}, sectionsOf(base))
+	if !slices.Equal(ids, []string{"M-02", "M-03"}) || !slices.Equal(batch, []string{finding}) {
+		t.Fatalf("ownership collision repair = %v for %v, want both endpoints", batch, ids)
 	}
 }
 
