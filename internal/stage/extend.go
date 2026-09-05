@@ -116,7 +116,7 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if err != nil {
 		return nil, err
 	}
-	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
+	if err := writeProposal(p, kind, proposed); err != nil {
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: proposed, Raw: raw,

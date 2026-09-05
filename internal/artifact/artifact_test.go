@@ -12,6 +12,7 @@ version: 3
 updated_at: 2026-07-27T10:00:00Z
 run_id: r-20260727-100000-ab12
 ducklings: [pato-atom, pato-local]
+configured_ducklings: [pato-atom, pato-local, pato-idle]
 approved_by: human
 ---
 
@@ -48,6 +49,9 @@ func TestParseFrontmatter(t *testing.T) {
 	}
 	if len(f.Ducklings) != 2 {
 		t.Errorf("ducklings = %v", f.Ducklings)
+	}
+	if len(f.ConfiguredDucklings) != 3 || f.ConfiguredDucklings[2] != "pato-idle" {
+		t.Errorf("configured_ducklings = %v", f.ConfiguredDucklings)
 	}
 	if !f.Approved() {
 		t.Error("approved_by was set but Approved() is false")

@@ -52,13 +52,17 @@ func ValidKind(s string) bool {
 
 // Frontmatter is the machine-readable header every artifact carries.
 type Frontmatter struct {
-	Kind       Kind
-	Project    string
-	Version    int
-	UpdatedAt  string
-	RunID      string
-	Ducklings  []string
-	ApprovedBy string
+	Kind      Kind
+	Project   string
+	Version   int
+	UpdatedAt string
+	RunID     string
+	Ducklings []string
+	// ConfiguredDucklings is the available roster at launch. Ducklings names
+	// only models with actual LLM calls, so provenance cannot imply that an
+	// unused configured seat participated.
+	ConfiguredDucklings []string
+	ApprovedBy          string
 	// Origin records how the document came to be when that is not the normal
 	// way. "adopted" marks a survey: sections DERIVED from the tree by a
 	// model rather than decided by a person. The approval gate is the same;
@@ -454,6 +458,8 @@ func parseFrontmatter(fm string) Frontmatter {
 			f.ApprovedBy = val
 		case "ducklings":
 			f.Ducklings = parseList(val)
+		case "configured_ducklings":
+			f.ConfiguredDucklings = parseList(val)
 		case "based_on":
 			f.BasedOn = val
 		case "origin":
@@ -494,6 +500,9 @@ func Render(doc *Document) string {
 	}
 	if len(doc.Front.Ducklings) > 0 {
 		fmt.Fprintf(&b, "ducklings: [%s]\n", strings.Join(doc.Front.Ducklings, ", "))
+	}
+	if len(doc.Front.ConfiguredDucklings) > 0 {
+		fmt.Fprintf(&b, "configured_ducklings: [%s]\n", strings.Join(doc.Front.ConfiguredDucklings, ", "))
 	}
 	if doc.Front.BasedOn != "" {
 		fmt.Fprintf(&b, "based_on: %s\n", doc.Front.BasedOn)

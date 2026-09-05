@@ -534,7 +534,8 @@ project: miempresa
 version: 3                 # bumped on every write
 updated_at: 2026-07-25T15:30:12Z
 run_id: r-20260725-153012-k7q2   # run that produced this version
-ducklings: [pato-nube, pato-local]
+ducklings: [pato-local]       # actual LLM call participants, stable order
+configured_ducklings: [pato-local, pato-nube] # available roster at launch
 based_on: 1f4a9c2d8e0b6a31   # hash of the approved doc a proposal was drafted
                              # against; promote refuses on drift (05 §1.1)
 origin: adopted              # only when the document was surveyed from the

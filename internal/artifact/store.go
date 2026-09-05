@@ -61,6 +61,13 @@ func LoadProposed(projectRoot string, kind Kind) (*Document, error) {
 // WriteProposal stores a stage's output next to the artifact without replacing
 // it. The human sees a diff and decides.
 func WriteProposal(projectRoot string, kind Kind, doc *Document, runID string, ducklings []string) error {
+	return WriteProposalProvenance(projectRoot, kind, doc, runID, ducklings, ducklings)
+}
+
+// WriteProposalProvenance separates the models that actually made calls from
+// the roster that was merely available. The legacy wrapper records its input
+// in both fields for callers that do not own a run-call ledger.
+func WriteProposalProvenance(projectRoot string, kind Kind, doc *Document, runID string, participating, configured []string) error {
 	current, err := Load(projectRoot, kind)
 	if err != nil {
 		return err
@@ -69,7 +76,8 @@ func WriteProposal(projectRoot string, kind Kind, doc *Document, runID string, d
 	doc.Front.Version = current.Front.Version + 1
 	doc.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	doc.Front.RunID = runID
-	doc.Front.Ducklings = ducklings
+	doc.Front.Ducklings = stableNames(participating)
+	doc.Front.ConfiguredDucklings = stableNames(configured)
 	// The photograph is stamped with what it is a photograph OF, so promotion
 	// can tell whether the approved document moved while the proposal waited.
 	doc.Front.BasedOn = ContentHash(current.Raw)
@@ -80,6 +88,20 @@ func WriteProposal(projectRoot string, kind Kind, doc *Document, runID string, d
 		return err
 	}
 	return xplat.AtomicWrite(ProposedPath(projectRoot, kind), []byte(Render(doc)), 0o644)
+}
+
+func stableNames(names []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ErrProposalStale marks a promotion refused because the approved document

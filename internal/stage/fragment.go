@@ -144,7 +144,7 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	if err != nil {
 		return nil, err
 	}
-	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
+	if err := writeProposal(p, kind, proposed); err != nil {
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: proposed, Raw: raw,

@@ -45,6 +45,29 @@ func TestProposalDoesNotTouchTheArtifact(t *testing.T) {
 	}
 }
 
+func TestProposalSeparatesParticipantsFromConfiguredRoster(t *testing.T) {
+	root := emptyProject(t)
+	err := WriteProposalProvenance(root, KindSpec, doc(Section{ID: "SPEC-001", Title: "Audit"}), "r-p",
+		[]string{"pato-used", "pato-used"}, []string{"pato-unused", "pato-used"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := LoadProposed(root, KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(proposed.Front.Ducklings, ",") != "pato-used" {
+		t.Errorf("participants = %v", proposed.Front.Ducklings)
+	}
+	if strings.Join(proposed.Front.ConfiguredDucklings, ",") != "pato-unused,pato-used" {
+		t.Errorf("configured roster = %v", proposed.Front.ConfiguredDucklings)
+	}
+	if !strings.Contains(proposed.Raw, "ducklings: [pato-used]") ||
+		!strings.Contains(proposed.Raw, "configured_ducklings: [pato-unused, pato-used]") {
+		t.Errorf("frontmatter does not preserve both provenance sets:\n%s", proposed.Raw)
+	}
+}
+
 func TestPromoteReplacesAndRecordsApproval(t *testing.T) {
 	root := emptyProject(t)
 	os.WriteFile(Path(root, KindSpec), []byte("## SPEC-001 — Original\n"), 0o644)

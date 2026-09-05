@@ -68,8 +68,12 @@ type Params struct {
 	SmallSeat bool
 	// OnEvent, if set, receives the stage's own record events (dedupe).
 	OnEvent func(kind string, data map[string]interface{})
-	// Ducklings that took part, recorded in the artifact's frontmatter.
+	// Ducklings is the configured roster, recorded separately from actual
+	// participants in the artifact's frontmatter.
 	Ducklings []string
+	// ParticipatingDucklings reads the run's actual call ledger at proposal
+	// time. Ducklings above remains the configured roster for audit context.
+	ParticipatingDucklings func() []string
 	// PriorFragment is this amendment's earlier task fragment. Unlike the
 	// approved plan outline, it contains the unapproved tasks being revised.
 	PriorFragment string
@@ -126,6 +130,14 @@ type Params struct {
 	// must replay the currently incomplete section. Completed sections remain
 	// in SectionedCheckpoint; the interrupted section has not landed there yet.
 	RestartInterruptedSection func()
+}
+
+func writeProposal(p Params, kind artifact.Kind, doc *artifact.Document) error {
+	participating := p.Ducklings
+	if p.ParticipatingDucklings != nil {
+		participating = p.ParticipatingDucklings()
+	}
+	return artifact.WriteProposalProvenance(p.ProjectRoot, kind, doc, p.RunID, participating, p.Ducklings)
 }
 
 // SectionedCheckpoint is the durable fold of a section-wise document update.
@@ -342,7 +354,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			})
 		}
 	}
-	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {
+	if err := writeProposal(p, kind, produced); err != nil {
 		return nil, err
 	}
 	return &Result{Kind: kind, Proposed: produced, Remapped: remap, Raw: raw,

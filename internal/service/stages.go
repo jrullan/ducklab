@@ -685,7 +685,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			return derr == nil && d.Caps.ContextTokens > 0 && d.Caps.ContextTokens < 65536
 		}(),
 		Ducklings: ducklingList(roster),
-		Critics:   critics,
+		ParticipatingDucklings: func() []string {
+			return participatingDucklings(rs.snapshotRun())
+		},
+		Critics: critics,
 		// Critics receive the recorded survey surfaces as named targets; the
 		// final lexical coverage result is persisted after the proposal lands.
 		// The architect's earlier replies from the latest Execute, newest
@@ -1637,7 +1640,22 @@ func ducklingList(roster map[config.Role]config.DucklingID) []string {
 			out = append(out, string(id))
 		}
 	}
+	sort.Strings(out)
 	return out
+}
+
+func participatingDucklings(run *runlog.Run) []string {
+	if run == nil {
+		return nil
+	}
+	participants := make([]string, 0, len(run.Spend))
+	for id, spend := range run.Spend {
+		if spend.Calls > 0 {
+			participants = append(participants, id)
+		}
+	}
+	sort.Strings(participants)
+	return participants
 }
 
 func orDefault(v, def string) string {

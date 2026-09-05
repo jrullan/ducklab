@@ -238,7 +238,7 @@ func runSectioned(ctx context.Context, p Params, base *artifact.Document, ask st
 	if err != nil {
 		return nil, err
 	}
-	if err := artifact.WriteProposal(p.ProjectRoot, kind, &proposed, p.RunID, p.Ducklings); err != nil {
+	if err := writeProposal(p, kind, &proposed); err != nil {
 		return nil, err
 	}
 	if p.ClearSectionedCheckpoint != nil {
