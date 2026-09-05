@@ -124,7 +124,7 @@ func TestStructuredJSONReferencesLoadAsExecutableContracts(t *testing.T) {
 		t.Fatalf("loaded contracts = %+v", contracts)
 	}
 	instructions := renderReferenceContractInstructions(contracts)
-	for _, want := range []string{"Executable reference contracts", "`observe_gate`", "`findings`", contractPath, "sha256:"} {
+	for _, want := range []string{"Executable reference contracts", "```ducklab-reference-contracts", `"observe_gate": [`, `"findings"`, contractPath, "sha256:"} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("contract instructions lack %q:\n%s", want, instructions)
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,19 +122,21 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 		operations = append(operations, operation)
 	}
 	sort.Strings(operations)
-	var b strings.Builder
-	b.WriteString("\n\n## Executable reference contracts\n\nThese shapes were declared by structured references and are checked mechanically before semantic review. In the specification, declare each exactly once using this grammar (the backticks are literal); do not add plausible fields.\n\n```text\n- `operation`: `field`, `field`\n```\n\n")
+	declarations := make(map[string][]string, len(operations))
 	for _, operation := range operations {
 		contract := byOperation[operation]
 		fields := append(append([]string(nil), contract.RequiredOutputFields...), contract.OptionalOutputFields...)
-		fmt.Fprintf(&b, "- `%s`: ", operation)
-		for i, field := range fields {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			fmt.Fprintf(&b, "`%s`", field)
-		}
-		fmt.Fprintf(&b, " (source `%s`, %s)\n", contract.Source, contract.Digest)
+		sort.Strings(fields)
+		declarations[operation] = fields
+	}
+	encoded, _ := json.MarshalIndent(declarations, "", "  ")
+	var b strings.Builder
+	b.WriteString("\n\n## Executable reference contracts\n\nThese shapes were declared by structured references and are checked mechanically before semantic review. Copy the following fenced block into the specification exactly once. It is the only machine-readable declaration: narrative examples and typed field descriptions outside it are documentation only. Do not add types or plausible fields inside the arrays.\n\n```ducklab-reference-contracts\n")
+	b.Write(encoded)
+	b.WriteString("\n```\n\nProvenance for the declarations above:\n\n")
+	for _, operation := range operations {
+		contract := byOperation[operation]
+		fmt.Fprintf(&b, "- `%s`: source `%s`, %s\n", operation, contract.Source, contract.Digest)
 	}
 	return b.String()
 }

@@ -3,7 +3,9 @@ package stage
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"sort"
 	"strings"
@@ -79,6 +81,16 @@ func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, 
 		return nil
 	}
 	body := artifact.RenderBody(proposed)
+	declared, blocks, err := declaredReferenceContractOutputs(body)
+	if blocks == 0 {
+		return []string{"specification has no ducklab-reference-contracts block; exactly one is required"}
+	}
+	if blocks > 1 {
+		return []string{fmt.Sprintf("specification has %d ducklab-reference-contracts blocks; exactly one is required", blocks)}
+	}
+	if err != nil {
+		return []string{fmt.Sprintf("invalid ducklab-reference-contracts JSON: %v", err)}
+	}
 	seen := map[string]capability.ReferenceContract{}
 	for _, contract := range contracts {
 		if _, exists := seen[contract.Operation]; !exists {
@@ -93,35 +105,68 @@ func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, 
 	var findings []string
 	for _, operation := range operations {
 		contract := seen[operation]
-		fields, declarations := declaredOperationOutputFields(body, operation)
 		identity := fmt.Sprintf("%s (%s, %s)", operation, contract.Source, contract.Digest)
-		if declarations == 0 {
-			findings = append(findings, fmt.Sprintf("reference contract %s has no mechanically readable output declaration in the specification", identity))
-			continue
-		}
-		if declarations > 1 {
-			findings = append(findings, fmt.Sprintf("reference contract %s has %d output declarations; exactly one is required", identity, declarations))
+		fields, exists := declared[operation]
+		if !exists {
+			findings = append(findings, fmt.Sprintf("reference contract %s is missing from the ducklab-reference-contracts block", identity))
 			continue
 		}
 		for _, violation := range contract.ValidateOutputFields(fields) {
 			findings = append(findings, fmt.Sprintf("reference contract %s: %s", identity, violation))
 		}
 	}
+	for operation := range declared {
+		if _, exists := seen[operation]; !exists {
+			findings = append(findings, fmt.Sprintf("ducklab-reference-contracts block declares unknown operation %q", operation))
+		}
+	}
+	sort.Strings(findings)
 	return findings
 }
 
-func declaredOperationOutputFields(body, operation string) ([]string, int) {
-	lineRE := regexp.MustCompile(`(?m)^\s*(?:[-*]\s*)?` + "`" + regexp.QuoteMeta(operation) + "`" + `\s*(?:output\s*)?:\s*([^\n]+)$`)
-	matches := lineRE.FindAllStringSubmatch(body, -1)
+var referenceContractBlockRE = regexp.MustCompile("(?ms)```ducklab-reference-contracts[ \\t]*\\r?\\n(.*?)\\r?\\n```")
+
+func declaredReferenceContractOutputs(body string) (map[string][]string, int, error) {
+	matches := referenceContractBlockRE.FindAllStringSubmatch(body, -1)
 	if len(matches) != 1 {
-		return nil, len(matches)
+		return nil, len(matches), nil
 	}
-	fieldRE := regexp.MustCompile("`([^`]+)`")
-	var fields []string
-	for _, match := range fieldRE.FindAllStringSubmatch(matches[0][1], -1) {
-		fields = append(fields, match[1])
+	decoder := json.NewDecoder(strings.NewReader(matches[0][1]))
+	opening, err := decoder.Token()
+	if err != nil || opening != json.Delim('{') {
+		return nil, 1, fmt.Errorf("top-level value must be an object")
 	}
-	return fields, 1
+	outputs := map[string][]string{}
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, 1, err
+		}
+		operation, ok := key.(string)
+		if !ok {
+			return nil, 1, fmt.Errorf("operation key must be a string")
+		}
+		if _, duplicate := outputs[operation]; duplicate {
+			return nil, 1, fmt.Errorf("operation %q is duplicated", operation)
+		}
+		var fields []string
+		if err := decoder.Decode(&fields); err != nil {
+			return nil, 1, fmt.Errorf("operation %q fields: %w", operation, err)
+		}
+		outputs[operation] = fields
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		return nil, 1, fmt.Errorf("top-level object is not closed")
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, 1, fmt.Errorf("unexpected content after top-level object")
+		}
+		return nil, 1, err
+	}
+	return outputs, 1, nil
 }
 
 func copyEventFields(in map[string]interface{}) map[string]interface{} {

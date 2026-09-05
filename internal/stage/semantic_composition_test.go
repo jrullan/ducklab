@@ -221,8 +221,8 @@ func TestStructuredReferenceViolationStopsBeforeSemanticReview(t *testing.T) {
 		RequiredOutputFields: []string{"findings"}, Source: "observe_gate.json",
 		Digest: "sha256:0123456789abcdef", AdditionalProperties: false,
 	}
-	base, _ := artifact.Parse("## SPEC-001 — Gate\n\n- `observe_gate`: `findings`\n", artifact.KindSpec)
-	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\n- `observe_gate`: `findings`, `error`\n", artifact.KindSpec)
+	base, _ := artifact.Parse("## SPEC-001 — Gate\n\nOld contract.\n", artifact.KindSpec)
+	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":[\"findings\",\"error\"]}\n```\n", artifact.KindSpec)
 	called := false
 	mechanical, semantic, err := reviewComposition(context.Background(), Params{
 		ReferenceContracts: []capability.ReferenceContract{contract},
@@ -260,7 +260,7 @@ func TestInitialSpecChecksStructuredReferencesWithoutDuplicateSemanticReview(t *
 			if script.Name == "composition-review" {
 				t.Fatal("a first draft already reviewed by its council received a duplicate semantic pass")
 			}
-			return "## SPEC-001 — Findings\n\n- `inspect_review_findings`: `inspections`, `error`\n", nil
+			return "## SPEC-001 — Findings\n\n```ducklab-reference-contracts\n{\"inspect_review_findings\":[\"inspections\",\"error\"]}\n```\n", nil
 		},
 	})
 	if err != nil {
@@ -268,6 +268,53 @@ func TestInitialSpecChecksStructuredReferencesWithoutDuplicateSemanticReview(t *
 	}
 	if calls != 1 || len(res.CompositionMechanical) != 1 || !strings.Contains(res.CompositionMechanical[0], `forbidden field "error"`) {
 		t.Fatalf("initial contract result calls=%d findings=%v", calls, res.CompositionMechanical)
+	}
+}
+
+func TestReferenceContractBlockIgnoresTypedNarrativeMentions(t *testing.T) {
+	contracts := []capability.ReferenceContract{
+		{Operation: "inspect_plan_task", RequiredOutputFields: []string{"error", "inspections"}, Source: "plan.json", Digest: "sha256:plan"},
+		{Operation: "observe_gate", RequiredOutputFields: []string{"findings"}, Source: "gate.json", Digest: "sha256:gate"},
+	}
+	candidate, err := artifact.Parse("## SPEC-001 — Operation outputs\n\n"+
+		"- `inspect_plan_task`: `inspections: [Inspection]`, `error: String`\n"+
+		"- `observe_gate`: `findings: [Finding]`\n\n"+
+		"The narrative mentions `inspect_plan_task` again without creating another declaration.\n\n"+
+		"```ducklab-reference-contracts\n"+
+		"{\"inspect_plan_task\":[\"error\",\"inspections\"],\"observe_gate\":[\"findings\"]}\n"+
+		"```\n", artifact.KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := referenceContractFindings(artifact.KindSpec, candidate, contracts); len(got) != 0 {
+		t.Fatalf("typed narrative contaminated the authoritative block: %v", got)
+	}
+}
+
+func TestReferenceContractBlockIsUniqueAndValidJSON(t *testing.T) {
+	contract := []capability.ReferenceContract{{
+		Operation: "observe_gate", RequiredOutputFields: []string{"findings"},
+		Source: "gate.json", Digest: "sha256:gate",
+	}}
+	cases := []struct {
+		name, body, want string
+	}{
+		{name: "missing", body: "## SPEC-001 — Gate\n\n`observe_gate`: `findings`\n", want: "no ducklab-reference-contracts block"},
+		{name: "duplicate", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{}\n```\n```ducklab-reference-contracts\n{}\n```\n", want: "has 2 ducklab-reference-contracts blocks"},
+		{name: "invalid JSON", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{no}\n```\n", want: "invalid ducklab-reference-contracts JSON"},
+		{name: "duplicate operation", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":[\"findings\"],\"observe_gate\":[\"findings\"]}\n```\n", want: `operation "observe_gate" is duplicated`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate, err := artifact.Parse(tc.body, artifact.KindSpec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Join(referenceContractFindings(artifact.KindSpec, candidate, contract), "\n")
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("finding = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

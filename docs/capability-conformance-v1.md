@@ -64,6 +64,15 @@ silently inheriting an earlier trust decision. Parsing and fixture validation
 do not activate the contract: the engine remains responsible for deciding
 which explicitly supplied structured references may block an artifact gate.
 
+When these contracts constrain a specification, Ducklab renders one exact
+`ducklab-reference-contracts` fenced JSON block into the architect's prompt.
+The candidate must contain that block exactly once. Only its operation keys and
+arrays of bare field names are mechanically authoritative; typed examples and
+other narrative mentions remain ordinary documentation. This prevents prose
+such as `findings: [Finding]` from turning the type annotation into a field
+name, or a second discussion of an operation from becoming a duplicate
+declaration.
+
 Unknown schema versions or operations are failures, not invitations to guess.
 Case IDs and provider IDs are unique within their respective scopes. Duplicate
 provider identity is an invalid Feather installation even though the embedded
