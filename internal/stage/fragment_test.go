@@ -161,6 +161,9 @@ func TestRunFragmentWritesAMergedProposal(t *testing.T) {
 	res, err := runFragment(context.Background(), Params{
 		ProjectRoot: root, Stage: Spec, RunID: "r-frag", Mode: "solo",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			for _, turn := range script.Turns {
 				if turn.Contract != "" {
 					t.Errorf("turn %s still carries contract %q — the amendment's double-contract trap", turn.Role, turn.Contract)
@@ -194,6 +197,9 @@ func TestFragmentCouncilRelaxesOnlyArchitectDocumentContracts(t *testing.T) {
 	_, err := runFragment(context.Background(), Params{
 		ProjectRoot: root, Stage: Intake, RunID: "r-contract", Mode: "council",
 		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			if script.MaterializeCandidate == nil {
 				t.Fatal("fragment council has no pre-review materializer")
 			}
@@ -257,6 +263,9 @@ func TestPlanFragmentEditsInPlace(t *testing.T) {
 	res, err := runFragment(context.Background(), Params{
 		ProjectRoot: root, Stage: Plan, RunID: "r-pf", Mode: "solo",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			if !strings.Contains(prompt, "T-012 — Title") && !strings.Contains(prompt, "EXISTING id") {
 				t.Error("the plan rules did not reach the prompt")
 			}
@@ -402,6 +411,9 @@ func TestAStandPatReviseKeepsTheDraft(t *testing.T) {
 	res, err := runFragment(context.Background(), Params{
 		ProjectRoot: root, Stage: Spec, RunID: "r-sp", Mode: "council",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			// What Execute returns is the FINAL turn: prose.
 			return "Verified: all three sections are real shipped capabilities. No changes needed.", nil
 		},

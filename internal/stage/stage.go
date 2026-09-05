@@ -314,10 +314,23 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 		}
 	}
+	var mechanical []string
+	var semantic *agent.Verdict
+	if base != nil && len(base.Sections) > 0 {
+		ask := strings.TrimSpace(p.Revision)
+		if ask == "" {
+			ask = strings.TrimSpace(p.Seed)
+		}
+		mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, produced)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
-	return &Result{Kind: kind, Proposed: produced, Remapped: remap, Raw: raw}, nil
+	return &Result{Kind: kind, Proposed: produced, Remapped: remap, Raw: raw,
+		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
 // BuildPrompt assembles what the architect is asked (04 §1.2).

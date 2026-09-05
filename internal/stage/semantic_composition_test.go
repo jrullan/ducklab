@@ -109,7 +109,7 @@ func TestAmendmentRoutesRecordPostCompositionSemanticReview(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
 				var prompt string
-				var mechanical, completed map[string]interface{}
+				var mechanical, started, completed map[string]interface{}
 				execute := func(_ context.Context, script *strategy.Script, got string) (string, error) {
 					if script.Name == "survey-inventory" {
 						return `{"items":[]}`, nil
@@ -131,6 +131,8 @@ func TestAmendmentRoutesRecordPostCompositionSemanticReview(t *testing.T) {
 					switch kind {
 					case "composition_mechanical_check":
 						mechanical = data
+					case "composition_review_started":
+						started = data
 					case "composition_review_completed":
 						completed = data
 					}
@@ -154,6 +156,12 @@ func TestAmendmentRoutesRecordPostCompositionSemanticReview(t *testing.T) {
 				if mechanical == nil {
 					t.Error("no deterministic composition_mechanical_check event")
 				}
+				if _, ok := mechanical["findings"]; !ok {
+					t.Errorf("mechanical event has no explicit findings payload: %#v", mechanical)
+				}
+				if started == nil {
+					t.Fatal("no post-composition semantic start event")
+				}
 				if completed == nil {
 					t.Fatal("no post-composition semantic completion event")
 				}
@@ -166,6 +174,11 @@ func TestAmendmentRoutesRecordPostCompositionSemanticReview(t *testing.T) {
 				if got, want := completed["candidate_digest"], sha256Digest(candidateBody); got != want {
 					t.Errorf("candidate_digest = %#v, want SHA-256 of exact candidate", got)
 				}
+				for _, key := range []string{"base_digest", "delta_digest", "candidate_digest"} {
+					if started[key] != completed[key] {
+						t.Errorf("%s changed between start and completion: start=%#v complete=%#v", key, started[key], completed[key])
+					}
+				}
 				if tc.verdict == "request-changes" {
 					if findings, ok := completed["findings"].([]agent.Finding); !ok || len(findings) != 1 || findings[0].Issue != tc.issue {
 						t.Errorf("semantic completion findings = %#v", completed["findings"])
@@ -176,6 +189,28 @@ func TestAmendmentRoutesRecordPostCompositionSemanticReview(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCompositionReviewBoundsNormativeReferences(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec,
+		"## SPEC-001 — Relevant contract\n\nRELEVANT-MARKER\n\n"+
+			"## SPEC-999 — Unrelated contract\n\nUNRELATED-MARKER\n")
+	base, err := artifact.Parse(planWithTransport("Old behavior."), artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := artifact.Parse(planWithTransport("New behavior."), artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := buildArtifactCompositionReviewPrompt(root, artifact.KindPlan, "amend transport", base, proposed)
+	if !strings.Contains(prompt, "RELEVANT-MARKER") {
+		t.Fatalf("review omitted the candidate's referenced normative section:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "UNRELATED-MARKER") {
+		t.Fatalf("review leaked an unrelated normative section:\n%s", prompt)
 	}
 }
 

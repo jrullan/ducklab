@@ -169,6 +169,9 @@ func TestRunExtendWritesAMergedProposal(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-amend", Mode: "solo",
 		Extend: "recolor the header",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			for _, turn := range script.Turns {
 				if turn.Persona == strategy.PersonaPlanManifest || turn.Contract == "json:plan_manifest" {
 					t.Fatalf("plan amendment retained first-draft manifest turn: %+v", turn)
@@ -217,6 +220,9 @@ func TestAMilestoneDeclarationNeverBecomesATask(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-a", Mode: "solo",
 		Extend: "streak card first",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			return fragment, nil
 		},
 	}, current)
@@ -287,6 +293,9 @@ func TestWorkWearingAMilestoneIdIsStillWork(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-f", Mode: "solo",
 		Extend: "streak card first",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			return fragment, nil
 		},
 	}, current)
@@ -336,6 +345,9 @@ func TestAmendmentImagesRideTheArchitectsTurn(t *testing.T) {
 		Extend: "match this mock",
 		Images: []string{"data:image/png;base64,aGk="},
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			for _, turn := range script.Turns {
 				seen = append(seen, turn.Images...)
 			}
@@ -364,6 +376,9 @@ func TestTheAmendmentTurnCarriesNoDocumentContract(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-c", Mode: "solo",
 		Extend: "small thing",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			for _, turn := range script.Turns {
 				if turn.Contract != "" {
 					t.Errorf("turn %s still carries contract %q", turn.Role, turn.Contract)

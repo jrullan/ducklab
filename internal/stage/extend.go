@@ -112,10 +112,15 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
 		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 	}
+	mechanical, semantic, err := reviewComposition(ctx, p, kind, extendChange(p), current, proposed)
+	if err != nil {
+		return nil, err
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
-	return &Result{Kind: kind, Proposed: proposed, Raw: raw}, nil
+	return &Result{Kind: kind, Proposed: proposed, Raw: raw,
+		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
 func extensionRewritesExistingTask(current *artifact.Document, tasks []artifact.Section) string {

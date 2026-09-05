@@ -31,6 +31,9 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
 			prompts = append(prompts, prompt)
 			scriptNames = append(scriptNames, script.Name)
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			switch len(prompts) {
 			case 1: // triage: touch SPEC-002, add one
 				return "SPEC-002\nNEW: Exercise search\n", nil
@@ -54,11 +57,11 @@ func TestSectionedUpdateVisitsOneSectionPerCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prompts) != 3 {
-		t.Fatalf("calls = %d, want triage + one per section", len(prompts))
+	if len(prompts) != 4 {
+		t.Fatalf("calls = %d, want triage + one per section + composition review", len(prompts))
 	}
-	if strings.Join(scriptNames, ",") != "solo,council,council" {
-		t.Fatalf("sectioned modes = %v, want solo triage then reviewed section passes", scriptNames)
+	if strings.Join(scriptNames, ",") != "solo,council,council,composition-review" {
+		t.Fatalf("sectioned modes = %v, want triage, reviewed section passes, then composition review", scriptNames)
 	}
 	got := res.Proposed
 	if len(got.Sections) != 4 {
@@ -126,8 +129,11 @@ func TestSectionedResumeKeepsCompletedPassesAndSkipsTriage(t *testing.T) {
 			return nil
 		},
 		ClearSectionedCheckpoint: func() error { cleared = true; return nil },
-		Execute: func(_ context.Context, _ *strategy.Script, prompt string) (string, error) {
+		Execute: func(_ context.Context, script *strategy.Script, prompt string) (string, error) {
 			secondCalls++
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			if strings.Contains(prompt, "Return one id per line") || strings.Contains(prompt, "Original login.") {
 				t.Fatalf("resume replayed triage or a completed section:\n%s", prompt)
 			}
@@ -140,7 +146,7 @@ func TestSectionedResumeKeepsCompletedPassesAndSkipsTriage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !restarted || !cleared || secondCalls != 1 {
+	if !restarted || !cleared || secondCalls != 2 {
 		t.Fatalf("resume restarted=%v cleared=%v calls=%d", restarted, cleared, secondCalls)
 	}
 	if !strings.Contains(res.Proposed.Sections[0].Body, "Changed login") || !strings.Contains(res.Proposed.Sections[1].Body, "Changed profile") {
@@ -268,7 +274,7 @@ func TestExplicitSplitRetriesTriageWhenItSchedulesNoAddition(t *testing.T) {
 				}
 				return "## T-900 — Initialization\n\n**Milestone:** M-001\n\n**Implements:** SPEC-001\n\nnew concern", nil
 			default:
-				if script.Name != "composition-review" || !strings.Contains(prompt, "Global semantic index") {
+				if script.Name != "composition-review" || !strings.Contains(prompt, "Final candidate") {
 					t.Fatalf("last pass is not the composition review: %s", script.Name)
 				}
 				return `{"verdict":"approve","findings":[]}`, nil
@@ -383,6 +389,9 @@ func TestSectionedRespectsUnchangedAndSurvivesBadPasses(t *testing.T) {
 		ProjectRoot: root, Stage: Spec, RunID: "r-u",
 		Execute: func(ctx context.Context, script *strategy.Script, prompt string) (string, error) {
 			call++
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			switch call {
 			case 1:
 				return "SPEC-001\nSPEC-002\n", nil

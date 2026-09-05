@@ -24,7 +24,12 @@ func projectWith(t *testing.T, files map[artifact.Kind]string) string {
 }
 
 func replay(text string) func(context.Context, *strategy.Script, string) (string, error) {
-	return func(context.Context, *strategy.Script, string) (string, error) { return text, nil }
+	return func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+		if script.Name == "composition-review" {
+			return `{"verdict":"approve","findings":[]}`, nil
+		}
+		return text, nil
+	}
 }
 
 // AC-37: intake produces requirements with REQ ids and frontmatter naming the

@@ -27,7 +27,10 @@ func TestRevisingAnAmendmentPromptCarriesTheNoteAndPriorFragment(t *testing.T) {
 		ProjectRoot: root, Stage: Plan, RunID: "r-revision", Mode: "solo",
 		Extend: "add the small flow", Revision: note,
 		Drafts: func() []string { return []string{fragment} },
-		Execute: func(_ context.Context, _ *strategy.Script, got string) (string, error) {
+		Execute: func(_ context.Context, script *strategy.Script, got string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
 			prompt = got
 			return fragment, nil
 		},

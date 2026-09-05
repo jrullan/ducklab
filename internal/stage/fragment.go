@@ -140,10 +140,15 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 	// A surveyed origin survives an update: the document still describes a
 	// built system.
 	proposed.Front.Origin = base.Front.Origin
+	mechanical, semantic, err := reviewComposition(ctx, p, kind, ask, base, proposed)
+	if err != nil {
+		return nil, err
+	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, proposed, p.RunID, p.Ducklings); err != nil {
 		return nil, err
 	}
-	return &Result{Kind: kind, Proposed: proposed, Raw: raw}, nil
+	return &Result{Kind: kind, Proposed: proposed, Raw: raw,
+		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
 // artifactUpdateScript removes plan's topology-manifest turn from updates.

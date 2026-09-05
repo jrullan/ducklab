@@ -61,7 +61,7 @@ func TestPlanProposalWarnsWhenItWouldOrphanAcceptedTaskHistory(t *testing.T) {
 		fake.ScriptFunc = func(req provider.ChatRequest, _ int) *provider.ChatResponse {
 			text := "T-001\n"
 			for _, message := range req.Messages {
-				if strings.Contains(message.Content, "fully composed plan below") {
+				if strings.Contains(message.Content, "Final candidate — exact") {
 					text = `{"verdict":"approve","findings":[]}`
 					break
 				}
