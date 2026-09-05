@@ -9,6 +9,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -211,6 +212,62 @@ func TestCompositionReviewBoundsNormativeReferences(t *testing.T) {
 	}
 	if strings.Contains(prompt, "UNRELATED-MARKER") {
 		t.Fatalf("review leaked an unrelated normative section:\n%s", prompt)
+	}
+}
+
+func TestStructuredReferenceViolationStopsBeforeSemanticReview(t *testing.T) {
+	contract := capability.ReferenceContract{
+		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",
+		RequiredOutputFields: []string{"findings"}, Source: "observe_gate.json",
+		Digest: "sha256:0123456789abcdef", AdditionalProperties: false,
+	}
+	base, _ := artifact.Parse("## SPEC-001 — Gate\n\n- `observe_gate`: `findings`\n", artifact.KindSpec)
+	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\n- `observe_gate`: `findings`, `error`\n", artifact.KindSpec)
+	called := false
+	mechanical, semantic, err := reviewComposition(context.Background(), Params{
+		ReferenceContracts: []capability.ReferenceContract{contract},
+		Execute: func(context.Context, *strategy.Script, string) (string, error) {
+			called = true
+			return `{"verdict":"approve","findings":[]}`, nil
+		},
+	}, artifact.KindSpec, "clarify gate output", base, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || semantic != nil {
+		t.Fatalf("semantic review ran after deterministic contract failure: called=%v verdict=%+v", called, semantic)
+	}
+	got := strings.Join(mechanical, "\n")
+	for _, want := range []string{"observe_gate", "observe_gate.json", "sha256:0123456789abcdef", `forbidden field "error"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("contract finding lacks %q: %s", want, got)
+		}
+	}
+}
+
+func TestInitialSpecChecksStructuredReferencesWithoutDuplicateSemanticReview(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindRequirements, "## REQ-001 — Findings\n\n**Priority:** must\n")
+	contract := capability.ReferenceContract{
+		SchemaVersion: capability.CapabilityConformanceV1, Operation: "inspect_review_findings",
+		RequiredOutputFields: []string{"inspections"}, Source: "review.json", Digest: "sha256:abc",
+	}
+	calls := 0
+	res, err := Run(context.Background(), Params{
+		ProjectRoot: root, Stage: Spec, RunID: "r-contract", ReferenceContracts: []capability.ReferenceContract{contract},
+		Execute: func(_ context.Context, script *strategy.Script, _ string) (string, error) {
+			calls++
+			if script.Name == "composition-review" {
+				t.Fatal("a first draft already reviewed by its council received a duplicate semantic pass")
+			}
+			return "## SPEC-001 — Findings\n\n- `inspect_review_findings`: `inspections`, `error`\n", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(res.CompositionMechanical) != 1 || !strings.Contains(res.CompositionMechanical[0], `forbidden field "error"`) {
+		t.Fatalf("initial contract result calls=%d findings=%v", calls, res.CompositionMechanical)
 	}
 }
 

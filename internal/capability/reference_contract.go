@@ -48,6 +48,19 @@ type declaredContract struct {
 	} `json:"output"`
 }
 
+// DeclaresReferenceContract distinguishes an ordinary JSON reference from a
+// document that asks to participate in the mechanical artifact gate. Invalid
+// declared documents are still declarations and therefore fail normalization
+// instead of silently degrading to advisory prose.
+func DeclaresReferenceContract(raw []byte) bool {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil {
+		return false
+	}
+	_, declared := envelope["contract"]
+	return declared
+}
+
 // NormalizeReferenceContracts parses declared conformance contracts, proves
 // their own fixtures obey the declaration, and returns one stable invariant
 // per operation. Conflicting declarations are rejected rather than resolved

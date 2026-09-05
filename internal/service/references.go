@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 )
 
@@ -77,7 +78,7 @@ func collectRefFiles(paths []string) ([]string, error) {
 				return werr
 			}
 			switch strings.ToLower(filepath.Ext(path)) {
-			case ".md", ".txt":
+			case ".md", ".txt", ".json":
 				files = append(files, path)
 			}
 			return nil
@@ -88,6 +89,53 @@ func collectRefFiles(paths []string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func loadReferenceContracts(files []string) ([]capability.ReferenceContract, error) {
+	var refs []capability.StructuredReference
+	for _, path := range files {
+		if strings.ToLower(filepath.Ext(path)) != ".json" {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("structured reference %q: %w", path, err)
+		}
+		if capability.DeclaresReferenceContract(raw) {
+			refs = append(refs, capability.StructuredReference{Source: path, Content: raw})
+		}
+	}
+	return capability.NormalizeReferenceContracts(refs)
+}
+
+func renderReferenceContractInstructions(contracts []capability.ReferenceContract) string {
+	if len(contracts) == 0 {
+		return ""
+	}
+	byOperation := map[string]capability.ReferenceContract{}
+	for _, contract := range contracts {
+		byOperation[contract.Operation] = contract
+	}
+	operations := make([]string, 0, len(byOperation))
+	for operation := range byOperation {
+		operations = append(operations, operation)
+	}
+	sort.Strings(operations)
+	var b strings.Builder
+	b.WriteString("\n\n## Executable reference contracts\n\nThese shapes were declared by structured references and are checked mechanically before semantic review. In the specification, declare each exactly once using this grammar (the backticks are literal); do not add plausible fields.\n\n```text\n- `operation`: `field`, `field`\n```\n\n")
+	for _, operation := range operations {
+		contract := byOperation[operation]
+		fields := append(append([]string(nil), contract.RequiredOutputFields...), contract.OptionalOutputFields...)
+		fmt.Fprintf(&b, "- `%s`: ", operation)
+		for i, field := range fields {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "`%s`", field)
+		}
+		fmt.Fprintf(&b, " (source `%s`, %s)\n", contract.Source, contract.Digest)
+	}
+	return b.String()
 }
 
 func loadReferences(paths []string, caps config.References, stageName string) (rendered string, loaded []refFile, dropped []string, err error) {

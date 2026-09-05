@@ -96,3 +96,37 @@ func TestReferenceGuidanceIsStageShaped(t *testing.T) {
 		}
 	}
 }
+
+func TestStructuredJSONReferencesLoadAsExecutableContracts(t *testing.T) {
+	dir := t.TempDir()
+	contractPath := filepath.Join(dir, "observe_gate.json")
+	contract := `{
+  "schema_version":"fledge.capability-conformance/v1",
+  "operation":"observe_gate",
+  "contract":{"output":{"required":["findings"],"optional":[],"additional_properties":false}},
+  "cases":[{"id":"empty","expected":{"findings":[]}}]
+}`
+	os.WriteFile(contractPath, []byte(contract), 0o644)
+	os.WriteFile(filepath.Join(dir, "ordinary.json"), []byte(`{"notes":"advisory"}`), 0o644)
+
+	files, err := collectRefFiles([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("JSON references were not collected: %v", files)
+	}
+	contracts, err := loadReferenceContracts(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 1 || contracts[0].Operation != "observe_gate" {
+		t.Fatalf("loaded contracts = %+v", contracts)
+	}
+	instructions := renderReferenceContractInstructions(contracts)
+	for _, want := range []string{"Executable reference contracts", "`observe_gate`", "`findings`", contractPath, "sha256:"} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("contract instructions lack %q:\n%s", want, instructions)
+		}
+	}
+}

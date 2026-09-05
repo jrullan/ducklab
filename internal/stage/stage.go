@@ -7,6 +7,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
@@ -88,6 +89,11 @@ type Params struct {
 	// text — the screenshot that says what a paragraph cannot. The caller
 	// gates them on the architect's vision capability.
 	Images []string
+	// ReferenceContracts are explicitly declared, provenance-bound invariants
+	// extracted by the service from structured reference files. Only the spec
+	// stage renders operation output contracts; other artifacts need not repeat
+	// implementation-level wire shapes.
+	ReferenceContracts []capability.ReferenceContract
 	// SplitTask replaces this one approved task with two narrowly-scoped,
 	// independently-owned sections through the plan amendment gate.
 	SplitTask string
@@ -324,6 +330,16 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		mechanical, semantic, err = reviewComposition(ctx, p, kind, ask, base, produced)
 		if err != nil {
 			return nil, err
+		}
+	} else if len(p.ReferenceContracts) > 0 {
+		// A first draft already received the council's whole-document review,
+		// so it needs only the executable reference check here. Amendments take
+		// the additional semantic composition pass above.
+		mechanical = referenceContractFindings(kind, produced, p.ReferenceContracts)
+		if p.OnEvent != nil {
+			p.OnEvent("composition_mechanical_check", map[string]interface{}{
+				"findings": mechanical, "contract_findings": mechanical, "count": len(mechanical),
+			})
 		}
 	}
 	if err := artifact.WriteProposal(p.ProjectRoot, kind, produced, p.RunID, p.Ducklings); err != nil {

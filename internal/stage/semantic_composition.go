@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/strategy"
 )
 
@@ -23,6 +25,8 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 	if kind == artifact.KindPlan {
 		mechanical = planCompositionFindings(p.ProjectRoot, base, proposed)
 	}
+	contractFindings := referenceContractFindings(kind, proposed, p.ReferenceContracts)
+	mechanical = append(mechanical, contractFindings...)
 	baseBody := artifact.RenderBody(base)
 	delta := strings.TrimSpace(ask)
 	candidateBody := artifact.RenderBody(proposed)
@@ -33,8 +37,16 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 	}
 	if p.OnEvent != nil {
 		p.OnEvent("composition_mechanical_check", map[string]interface{}{
-			"findings": mechanical, "count": len(mechanical),
+			"findings": mechanical, "contract_findings": contractFindings, "count": len(mechanical),
 		})
+	}
+	// A machine contract has already proved the candidate invalid. Spending a
+	// model turn cannot reverse that fact and would blur mechanical evidence
+	// into a semantic opinion.
+	if len(contractFindings) > 0 {
+		return mechanical, nil, nil
+	}
+	if p.OnEvent != nil {
 		started := copyEventFields(digests)
 		started["category"] = "semantic"
 		started["detail"] = "one bounded reviewer is judging the fully composed amendment"
@@ -60,6 +72,56 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 		p.OnEvent("composition_review_completed", completed)
 	}
 	return mechanical, semantic, nil
+}
+
+func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, contracts []capability.ReferenceContract) []string {
+	if kind != artifact.KindSpec || proposed == nil || len(contracts) == 0 {
+		return nil
+	}
+	body := artifact.RenderBody(proposed)
+	seen := map[string]capability.ReferenceContract{}
+	for _, contract := range contracts {
+		if _, exists := seen[contract.Operation]; !exists {
+			seen[contract.Operation] = contract
+		}
+	}
+	operations := make([]string, 0, len(seen))
+	for operation := range seen {
+		operations = append(operations, operation)
+	}
+	sort.Strings(operations)
+	var findings []string
+	for _, operation := range operations {
+		contract := seen[operation]
+		fields, declarations := declaredOperationOutputFields(body, operation)
+		identity := fmt.Sprintf("%s (%s, %s)", operation, contract.Source, contract.Digest)
+		if declarations == 0 {
+			findings = append(findings, fmt.Sprintf("reference contract %s has no mechanically readable output declaration in the specification", identity))
+			continue
+		}
+		if declarations > 1 {
+			findings = append(findings, fmt.Sprintf("reference contract %s has %d output declarations; exactly one is required", identity, declarations))
+			continue
+		}
+		for _, violation := range contract.ValidateOutputFields(fields) {
+			findings = append(findings, fmt.Sprintf("reference contract %s: %s", identity, violation))
+		}
+	}
+	return findings
+}
+
+func declaredOperationOutputFields(body, operation string) ([]string, int) {
+	lineRE := regexp.MustCompile(`(?m)^\s*(?:[-*]\s*)?` + "`" + regexp.QuoteMeta(operation) + "`" + `\s*(?:output\s*)?:\s*([^\n]+)$`)
+	matches := lineRE.FindAllStringSubmatch(body, -1)
+	if len(matches) != 1 {
+		return nil, len(matches)
+	}
+	fieldRE := regexp.MustCompile("`([^`]+)`")
+	var fields []string
+	for _, match := range fieldRE.FindAllStringSubmatch(matches[0][1], -1) {
+		fields = append(fields, match[1])
+	}
+	return fields, 1
 }
 
 func copyEventFields(in map[string]interface{}) map[string]interface{} {

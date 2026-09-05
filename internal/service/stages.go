@@ -19,6 +19,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/budget"
+	"github.com/jrullan/ducklab/internal/capability"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/stage"
@@ -527,6 +528,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	recordLimits(rs, limits)
 	rs.setTracker(tracker)
+	var referenceContracts []capability.ReferenceContract
 	if len(req.Refs) > 0 {
 		refs, rerr := s.stageReferences(ctx, rs, projCfg, req.Stage, req.Refs, roster[config.RoleArchitect])
 		if rerr != nil {
@@ -536,6 +538,14 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		// References are prompt context, recorded by their own run evidence.
 		// They must not be folded into the person's verbatim Intent entry.
 		seed += refs
+		referenceContracts, rerr = loadReferenceContracts(rs.refFiles())
+		if rerr != nil {
+			s.failRun(rs, fmt.Errorf("reference contracts: %w", rerr))
+			return
+		}
+		if req.Stage == "spec" {
+			seed += renderReferenceContractInstructions(referenceContracts)
+		}
 	}
 	// `seed` now carries prompt context as well as the brief. brief.md was
 	// deliberately written above, before that enrichment.
@@ -663,9 +673,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 			return rs.writer.AppendEvent("survey_inventory", detail)
 		},
-		Extend:    req.Extend,
-		SplitTask: req.SplitTask,
-		Images:    images,
+		Extend:             req.Extend,
+		SplitTask:          req.SplitTask,
+		Images:             images,
+		ReferenceContracts: referenceContracts,
 		// A small architect gets the engine as its working memory: below
 		// 64k of declared context, document updates run sectioned — one
 		// triage pass, then one fresh conversation per touched section.
@@ -951,7 +962,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		rs.run.PendingData["composition_mechanical_findings"] = result.CompositionMechanical
 		rs.writer.AppendEvent("proposal_composition_mechanical_blocked", map[string]interface{}{
 			"findings": result.CompositionMechanical,
-			"detail":   "the fully composed plan violates deterministic whole-document invariants",
+			"detail":   "the fully composed artifact violates deterministic whole-document invariants",
 		})
 	}
 	if req.Stage == "intake" {
