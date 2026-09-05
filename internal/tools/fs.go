@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/skill"
@@ -258,8 +260,16 @@ type fsSearchArgs struct {
 	Max     int    `json:"max"`
 }
 
+const fsSearchTimeout = 30 * time.Second
+
+var errFSMaxResults = errors.New("fs_search maximum results reached")
+
 // Execute runs the tool.
 func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.RawMessage) (*Result, error) {
+	return executeFSSearch(ctx, ectx, args, fsSearchTimeout)
+}
+
+func executeFSSearch(ctx context.Context, ectx *ExecContext, args json.RawMessage, timeout time.Duration) (*Result, error) {
 	var a fsSearchArgs
 	if err := ParseArgs(args, &a); err != nil {
 		return ErrorResult("invalid args: %v", err), nil
@@ -272,20 +282,39 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 	// one per file, as a success. A model that sent `count(` read a hundred
 	// lines of "path:invalid regex" and had no way to see its pattern was the
 	// problem, let alone which character.
-	if _, err := regexp.Compile(a.Pattern); err != nil {
+	re, err := regexp.Compile(a.Pattern)
+	if err != nil {
 		return ErrorResult("invalid regex %q: %v — the pattern is a regular expression, not "+
 			"literal text; escape metacharacters like ( ) [ ] . * + ? with a backslash", a.Pattern, err), nil
 	}
+	searchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	var results []string
-	err := filepath.Walk(ectx.ProjectRoot, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(ectx.ProjectRoot, func(path string, info os.FileInfo, err error) error {
+		if ctxErr := searchCtx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
 		}
+		rel, relErr := filepath.Rel(ectx.ProjectRoot, path)
+		if relErr != nil {
+			return relErr
+		}
 		if info.IsDir() {
+			// Run transcripts are not project source. They can be very large and
+			// have their own bounded run_list/run_read interface; searching them
+			// here also feeds old model output back into a new model as if it were
+			// current code.
+			if underDir(rel, ".git") || underDir(rel, filepath.Join(".ducklab", "runs")) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		rel, _ := filepath.Rel(ectx.ProjectRoot, path)
-		if underDir(rel, ".git") {
+		// Content search is for ordinary project files. Opening a FIFO, device,
+		// or socket can block inside the OS where a Go context cannot interrupt
+		// it, defeating the deadline this tool promises.
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 		// Name or relative path, whichever the model meant: a glob like
@@ -294,29 +323,58 @@ func (t *FSSearch) Execute(ctx context.Context, ectx *ExecContext, args json.Raw
 		if a.Glob != "" && !GlobMatch(a.Glob, filepath.Base(path)) && !GlobMatch(a.Glob, filepath.ToSlash(rel)) {
 			return nil
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
 		if isBinary(path) {
 			return nil
 		}
-		matches := SearchInContent(a.Pattern, string(data), a.Max-len(results))
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		matches, searchErr := searchInContentContext(searchCtx, re, string(data), a.Max-len(results))
+		if searchErr != nil {
+			return searchErr
+		}
 		for _, m := range matches {
 			results = append(results, fmt.Sprintf("%s:%s", rel, m))
 		}
 		if len(results) >= a.Max {
-			return fmt.Errorf("max results reached")
+			return errFSMaxResults
 		}
 		return nil
 	})
-	if err != nil && err.Error() != "max results reached" {
+	if errors.Is(err, context.DeadlineExceeded) {
+		if ctx.Err() != nil {
+			return ErrorResult("search interrupted by the run deadline; narrow the glob or pattern before retrying"), nil
+		}
+		return ErrorResult("fs_search timed out after %s; narrow the glob or pattern before retrying", timeout), nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return ErrorResult("search interrupted because the run was canceled"), nil
+	}
+	if err != nil && !errors.Is(err, errFSMaxResults) {
 		return ErrorResult("search: %v", err), nil
 	}
 	if len(results) == 0 {
 		return SuccessResult("no matches"), nil
 	}
 	return SuccessResult("%s", strings.Join(results, "\n")), nil
+}
+
+func searchInContentContext(ctx context.Context, re *regexp.Regexp, content string, maxResults int) ([]string, error) {
+	lines := strings.Split(content, "\n")
+	var results []string
+	for i, line := range lines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if re.MatchString(line) {
+			results = append(results, fmt.Sprintf("%d: %s", i+1, line))
+			if len(results) >= maxResults {
+				break
+			}
+		}
+	}
+	return results, nil
 }
 
 // FSWrite writes a file.
