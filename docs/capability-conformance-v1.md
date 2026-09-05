@@ -64,14 +64,16 @@ silently inheriting an earlier trust decision. Parsing and fixture validation
 do not activate the contract: the engine remains responsible for deciding
 which explicitly supplied structured references may block an artifact gate.
 
-When these contracts constrain a specification, Ducklab renders one exact
-`ducklab-reference-contracts` fenced JSON block into the architect's prompt.
-The candidate must contain that block exactly once. Only its operation keys and
-arrays of bare field names are mechanically authoritative; typed examples and
-other narrative mentions remain ordinary documentation. This prevents prose
-such as `findings: [Finding]` from turning the type annotation into a field
-name, or a second discussion of an operation from becoming a duplicate
-declaration.
+When these contracts constrain a specification, Ducklab—not the model—adds a
+visible machine-owned region to the composed artifact before mechanical and
+semantic review. The region carries source paths and digests plus one exact
+`ducklab-reference-contracts` fenced JSON block. Each operation records its
+required fields, optional fields, and additional-property policy. Ducklab
+replaces stale copies idempotently; the model is told to use the region as
+design context but neither copy nor edit it. Typed examples and other narrative
+mentions remain ordinary documentation. This prevents a model omission,
+duplicate mention, or plausible extra field from silently changing executable
+metadata that the engine already knows.
 
 Unknown schema versions or operations are failures, not invitations to guess.
 Case IDs and provider IDs are unique within their respective scopes. Duplicate

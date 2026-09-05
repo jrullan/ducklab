@@ -87,6 +87,51 @@ func TestReferenceContractsRejectConflictingSources(t *testing.T) {
 	}
 }
 
+func TestReferenceContractRegionIsDeterministicCompleteAndProvenanced(t *testing.T) {
+	contracts := []ReferenceContract{
+		{Operation: "observe_gate", RequiredOutputFields: []string{"findings"}, OptionalOutputFields: []string{}, AdditionalProperties: false, Source: "z.json", Digest: "sha256:z"},
+		{Operation: "inspect_plan_task", RequiredOutputFields: []string{"inspections"}, OptionalOutputFields: []string{"notes"}, AdditionalProperties: true, Source: "a.json", Digest: "sha256:a"},
+		{Operation: "observe_gate", RequiredOutputFields: []string{"findings"}, OptionalOutputFields: []string{}, AdditionalProperties: false, Source: "b.json", Digest: "sha256:b"},
+	}
+	rendered := RenderReferenceContractRegion(contracts)
+	for _, want := range []string{
+		"ducklab-reference-contracts:begin", "ducklab-reference-contracts:end",
+		`"required": [`, `"optional": [`, `"additional_properties": true`,
+		"`inspect_plan_task`: `a.json` (sha256:a)", "`observe_gate`: `b.json` (sha256:b)", "`observe_gate`: `z.json` (sha256:z)",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered region lacks %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Count(rendered, `"observe_gate": {`) != 1 {
+		t.Fatalf("identical sources produced duplicate declarations:\n%s", rendered)
+	}
+	if strings.Index(rendered, "`inspect_plan_task`") > strings.Index(rendered, "`observe_gate`") {
+		t.Fatalf("provenance is not operation-sorted:\n%s", rendered)
+	}
+	if again := RenderReferenceContractRegion(contracts); again != rendered {
+		t.Fatal("rendering identical normalized contracts was not deterministic")
+	}
+}
+
+func TestReferenceOutputDeclarationPreservesSemanticShape(t *testing.T) {
+	contract := ReferenceContract{
+		Operation: "observe_gate", RequiredOutputFields: []string{"findings"},
+		OptionalOutputFields: []string{"notes"}, AdditionalProperties: false,
+	}
+	valid := ReferenceOutputDeclaration{Required: []string{"findings"}, Optional: []string{"notes"}, AdditionalProperties: false}
+	if got := contract.ValidateOutputDeclaration(valid); len(got) != 0 {
+		t.Fatalf("exact declaration rejected: %v", got)
+	}
+	wrong := ReferenceOutputDeclaration{Required: []string{"findings", "notes"}, Optional: []string{}, AdditionalProperties: true}
+	got := strings.Join(contract.ValidateOutputDeclaration(wrong), "\n")
+	for _, want := range []string{"required output fields do not match", "optional output fields do not match", "additional_properties does not match"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("shape mismatch lacks %q: %s", want, got)
+		}
+	}
+}
+
 func fixtureReference(t *testing.T, name string) StructuredReference {
 	t.Helper()
 	path := filepath.Join("testdata", "conformance", "v1", name)

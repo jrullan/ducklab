@@ -30,6 +30,64 @@ type ReferenceContract struct {
 	Digest               string
 }
 
+// ReferenceOutputDeclaration is the canonical artifact representation of a
+// normalized output contract. It preserves required/optional meaning and the
+// additional-property policy instead of flattening them into prose.
+type ReferenceOutputDeclaration struct {
+	Required             []string `json:"required"`
+	Optional             []string `json:"optional"`
+	AdditionalProperties bool     `json:"additional_properties"`
+}
+
+const (
+	referenceContractRegionBegin = "<!-- ducklab-reference-contracts:begin -->"
+	referenceContractRegionEnd   = "<!-- ducklab-reference-contracts:end -->"
+)
+
+// RenderReferenceContractRegion serializes the exact normalized contracts and
+// their provenance as machine-owned, visible artifact content. The same bytes
+// are used in prompts and proposals so a model is never asked to reproduce
+// metadata the harness already possesses.
+func RenderReferenceContractRegion(contracts []ReferenceContract) string {
+	if len(contracts) == 0 {
+		return ""
+	}
+	ordered := append([]ReferenceContract(nil), contracts...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Operation == ordered[j].Operation {
+			return ordered[i].Source < ordered[j].Source
+		}
+		return ordered[i].Operation < ordered[j].Operation
+	})
+	declarations := map[string]ReferenceOutputDeclaration{}
+	for _, contract := range ordered {
+		if _, exists := declarations[contract.Operation]; exists {
+			continue
+		}
+		required := make([]string, len(contract.RequiredOutputFields))
+		copy(required, contract.RequiredOutputFields)
+		optional := make([]string, len(contract.OptionalOutputFields))
+		copy(optional, contract.OptionalOutputFields)
+		declarations[contract.Operation] = ReferenceOutputDeclaration{
+			Required:             required,
+			Optional:             optional,
+			AdditionalProperties: contract.AdditionalProperties,
+		}
+	}
+	encoded, _ := json.MarshalIndent(declarations, "", "  ")
+	var b strings.Builder
+	b.WriteString(referenceContractRegionBegin)
+	b.WriteString("\n\n> **Machine-owned reference contracts.** Ducklab materialized this normalized metadata from the explicitly supplied structured references; model-authored prose cannot replace it.\n>\n> Provenance:\n")
+	for _, contract := range ordered {
+		fmt.Fprintf(&b, "> - `%s`: `%s` (%s)\n", contract.Operation, contract.Source, contract.Digest)
+	}
+	b.WriteString("\n```ducklab-reference-contracts\n")
+	b.Write(encoded)
+	b.WriteString("\n```\n\n")
+	b.WriteString(referenceContractRegionEnd)
+	return b.String()
+}
+
 type referenceEnvelope struct {
 	SchemaVersion string          `json:"schema_version"`
 	Operation     string          `json:"operation"`
@@ -166,6 +224,30 @@ func (c ReferenceContract) ValidateOutputFields(fields []string) []string {
 				violations = append(violations, fmt.Sprintf("%s output declares forbidden field %q", c.Operation, field))
 			}
 		}
+	}
+	return violations
+}
+
+// ValidateOutputDeclaration proves that persisted machine-owned metadata still
+// represents the normalized source contract, including required/optional
+// classification and the additional-property policy.
+func (c ReferenceContract) ValidateOutputDeclaration(declared ReferenceOutputDeclaration) []string {
+	fields := append(append([]string(nil), declared.Required...), declared.Optional...)
+	violations := c.ValidateOutputFields(fields)
+	required, requiredErr := normalizedFieldNames(declared.Required)
+	optional, optionalErr := normalizedFieldNames(declared.Optional)
+	if requiredErr != nil {
+		violations = append(violations, fmt.Sprintf("%s required output fields: %v", c.Operation, requiredErr))
+	} else if strings.Join(required, "\x00") != strings.Join(c.RequiredOutputFields, "\x00") {
+		violations = append(violations, fmt.Sprintf("%s required output fields do not match the source contract", c.Operation))
+	}
+	if optionalErr != nil {
+		violations = append(violations, fmt.Sprintf("%s optional output fields: %v", c.Operation, optionalErr))
+	} else if strings.Join(optional, "\x00") != strings.Join(c.OptionalOutputFields, "\x00") {
+		violations = append(violations, fmt.Sprintf("%s optional output fields do not match the source contract", c.Operation))
+	}
+	if declared.AdditionalProperties != c.AdditionalProperties {
+		violations = append(violations, fmt.Sprintf("%s additional_properties does not match the source contract", c.Operation))
 	}
 	return violations
 }

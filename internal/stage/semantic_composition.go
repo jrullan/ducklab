@@ -23,6 +23,7 @@ var artifactIDRe = regexp.MustCompile(`\b(?:INT|REQ|SPEC)-\d+\b`)
 // each generated part is plausible; this pass catches meaning lost or
 // reintroduced only after the engine folds those parts together.
 func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask string, base, proposed *artifact.Document) ([]string, *agent.Verdict, error) {
+	materializeReferenceContracts(kind, proposed, p.ReferenceContracts)
 	mechanical := []string{}
 	if kind == artifact.KindPlan {
 		mechanical = planCompositionFindings(p.ProjectRoot, base, proposed)
@@ -111,7 +112,7 @@ func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, 
 			findings = append(findings, fmt.Sprintf("reference contract %s is missing from the ducklab-reference-contracts block", identity))
 			continue
 		}
-		for _, violation := range contract.ValidateOutputFields(fields) {
+		for _, violation := range contract.ValidateOutputDeclaration(fields) {
 			findings = append(findings, fmt.Sprintf("reference contract %s: %s", identity, violation))
 		}
 	}
@@ -124,9 +125,12 @@ func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, 
 	return findings
 }
 
-var referenceContractBlockRE = regexp.MustCompile("(?ms)```ducklab-reference-contracts[ \\t]*\\r?\\n(.*?)\\r?\\n```")
+var (
+	referenceContractBlockRE  = regexp.MustCompile("(?ms)```ducklab-reference-contracts[ \\t]*\\r?\\n(.*?)\\r?\\n```")
+	referenceContractRegionRE = regexp.MustCompile("(?ms)\\s*<!-- ducklab-reference-contracts:begin -->.*?<!-- ducklab-reference-contracts:end -->\\s*")
+)
 
-func declaredReferenceContractOutputs(body string) (map[string][]string, int, error) {
+func declaredReferenceContractOutputs(body string) (map[string]capability.ReferenceOutputDeclaration, int, error) {
 	matches := referenceContractBlockRE.FindAllStringSubmatch(body, -1)
 	if len(matches) != 1 {
 		return nil, len(matches), nil
@@ -136,7 +140,7 @@ func declaredReferenceContractOutputs(body string) (map[string][]string, int, er
 	if err != nil || opening != json.Delim('{') {
 		return nil, 1, fmt.Errorf("top-level value must be an object")
 	}
-	outputs := map[string][]string{}
+	outputs := map[string]capability.ReferenceOutputDeclaration{}
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
@@ -149,7 +153,7 @@ func declaredReferenceContractOutputs(body string) (map[string][]string, int, er
 		if _, duplicate := outputs[operation]; duplicate {
 			return nil, 1, fmt.Errorf("operation %q is duplicated", operation)
 		}
-		var fields []string
+		var fields capability.ReferenceOutputDeclaration
 		if err := decoder.Decode(&fields); err != nil {
 			return nil, 1, fmt.Errorf("operation %q fields: %w", operation, err)
 		}
@@ -167,6 +171,32 @@ func declaredReferenceContractOutputs(body string) (map[string][]string, int, er
 		return nil, 1, err
 	}
 	return outputs, 1, nil
+}
+
+func materializeReferenceContracts(kind artifact.Kind, doc *artifact.Document, contracts []capability.ReferenceContract) {
+	if kind != artifact.KindSpec || doc == nil || len(contracts) == 0 {
+		return
+	}
+	clean := func(body string) string {
+		body = referenceContractRegionRE.ReplaceAllString(body, "\n")
+		body = referenceContractBlockRE.ReplaceAllString(body, "\n")
+		return strings.TrimSpace(body)
+	}
+	doc.Preamble = clean(doc.Preamble)
+	var cleanSections func([]artifact.Section)
+	cleanSections = func(sections []artifact.Section) {
+		for i := range sections {
+			sections[i].Body = clean(sections[i].Body)
+			cleanSections(sections[i].Children)
+		}
+	}
+	cleanSections(doc.Sections)
+	region := capability.RenderReferenceContractRegion(contracts)
+	if doc.Preamble == "" {
+		doc.Preamble = region
+	} else {
+		doc.Preamble = region + "\n\n" + doc.Preamble
+	}
 }
 
 func copyEventFields(in map[string]interface{}) map[string]interface{} {

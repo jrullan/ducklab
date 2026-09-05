@@ -258,6 +258,18 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Structured-reference metadata is engine-owned, so it must be present
+		// before the final reviewer fingerprints and judges the candidate. This
+		// keeps the reviewed-candidate identity guard meaningful: reviewer,
+		// digest, and persisted proposal all see the same bytes.
+		if kind == artifact.KindSpec && len(p.ReferenceContracts) > 0 {
+			doc, parseErr := artifact.Parse(materialized.Text, kind)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			materializeReferenceContracts(kind, doc, p.ReferenceContracts)
+			materialized.Text = artifact.RenderBody(doc)
+		}
 		if p.Stage == Intake && !p.Adopt {
 			var linkedDropped []string
 			materialized, linkedDropped, err = linkCandidateIntent(p.ProjectRoot, p.RunID, current, materialized)
@@ -345,8 +357,10 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		}
 	} else if len(p.ReferenceContracts) > 0 {
 		// A first draft already received the council's whole-document review,
-		// so it needs only the executable reference check here. Amendments take
-		// the additional semantic composition pass above.
+		// so it needs only machine-owned reference materialization and the
+		// executable check here. Amendments take the additional semantic
+		// composition pass above.
+		materializeReferenceContracts(kind, produced, p.ReferenceContracts)
 		mechanical = referenceContractFindings(kind, produced, p.ReferenceContracts)
 		if p.OnEvent != nil {
 			p.OnEvent("composition_mechanical_check", map[string]interface{}{

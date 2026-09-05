@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,31 +112,10 @@ func renderReferenceContractInstructions(contracts []capability.ReferenceContrac
 	if len(contracts) == 0 {
 		return ""
 	}
-	byOperation := map[string]capability.ReferenceContract{}
-	for _, contract := range contracts {
-		byOperation[contract.Operation] = contract
-	}
-	operations := make([]string, 0, len(byOperation))
-	for operation := range byOperation {
-		operations = append(operations, operation)
-	}
-	sort.Strings(operations)
-	declarations := make(map[string][]string, len(operations))
-	for _, operation := range operations {
-		contract := byOperation[operation]
-		fields := append(append([]string(nil), contract.RequiredOutputFields...), contract.OptionalOutputFields...)
-		sort.Strings(fields)
-		declarations[operation] = fields
-	}
-	encoded, _ := json.MarshalIndent(declarations, "", "  ")
 	var b strings.Builder
-	b.WriteString("\n\n## Executable reference contracts\n\nThese shapes were declared by structured references and are checked mechanically before semantic review. Copy the following fenced block into the specification exactly once. It is the only machine-readable declaration: narrative examples and typed field descriptions outside it are documentation only. Do not add types or plausible fields inside the arrays.\n\n```ducklab-reference-contracts\n")
-	b.Write(encoded)
-	b.WriteString("\n```\n\nProvenance for the declarations above:\n\n")
-	for _, operation := range operations {
-		contract := byOperation[operation]
-		fmt.Fprintf(&b, "- `%s`: source `%s`, %s\n", operation, contract.Source, contract.Digest)
-	}
+	b.WriteString("\n\n## Executable reference contracts\n\nThese shapes were declared by structured references and are checked mechanically before semantic review. Ducklab, not the model, adds the following machine-owned region to the final specification. Use it as authoritative design context; do not copy, edit, or restate it as control metadata. Typed descriptions elsewhere remain documentation only.\n\n")
+	b.WriteString(capability.RenderReferenceContractRegion(contracts))
+	b.WriteString("\n")
 	return b.String()
 }
 

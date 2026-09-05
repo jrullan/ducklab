@@ -215,32 +215,72 @@ func TestCompositionReviewBoundsNormativeReferences(t *testing.T) {
 	}
 }
 
-func TestStructuredReferenceViolationStopsBeforeSemanticReview(t *testing.T) {
+func TestReferenceContractCheckerStillRejectsAnInvalidUnmaterializedBlock(t *testing.T) {
+	contract := capability.ReferenceContract{
+		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",
+		RequiredOutputFields: []string{"findings"}, Source: "observe_gate.json",
+		Digest: "sha256:0123456789abcdef", AdditionalProperties: false,
+	}
+	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":{\"required\":[\"findings\",\"error\"],\"optional\":[],\"additional_properties\":false}}\n```\n", artifact.KindSpec)
+	got := strings.Join(referenceContractFindings(artifact.KindSpec, candidate, []capability.ReferenceContract{contract}), "\n")
+	for _, want := range []string{"observe_gate", "observe_gate.json", "sha256:0123456789abcdef", `forbidden field "error"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("contract finding lacks %q: %s", want, got)
+		}
+	}
+}
+
+func TestReferenceContractsAreMaterializedBeforeCompositionReview(t *testing.T) {
 	contract := capability.ReferenceContract{
 		SchemaVersion: capability.CapabilityConformanceV1, Operation: "observe_gate",
 		RequiredOutputFields: []string{"findings"}, Source: "observe_gate.json",
 		Digest: "sha256:0123456789abcdef", AdditionalProperties: false,
 	}
 	base, _ := artifact.Parse("## SPEC-001 — Gate\n\nOld contract.\n", artifact.KindSpec)
-	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":[\"findings\",\"error\"]}\n```\n", artifact.KindSpec)
-	called := false
+	candidate, _ := artifact.Parse("## SPEC-001 — Gate\n\nThe output is `findings: [Finding]`.\n", artifact.KindSpec)
+	var prompt string
 	mechanical, semantic, err := reviewComposition(context.Background(), Params{
 		ReferenceContracts: []capability.ReferenceContract{contract},
-		Execute: func(context.Context, *strategy.Script, string) (string, error) {
-			called = true
+		Execute: func(_ context.Context, script *strategy.Script, got string) (string, error) {
+			if script.Name == "composition-review" {
+				prompt = got
+			}
 			return `{"verdict":"approve","findings":[]}`, nil
 		},
 	}, artifact.KindSpec, "clarify gate output", base, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called || semantic != nil {
-		t.Fatalf("semantic review ran after deterministic contract failure: called=%v verdict=%+v", called, semantic)
+	if len(mechanical) != 0 || semantic == nil || semantic.Verdict != "approve" {
+		t.Fatalf("materialized review = mechanical %v semantic %+v", mechanical, semantic)
 	}
-	got := strings.Join(mechanical, "\n")
-	for _, want := range []string{"observe_gate", "observe_gate.json", "sha256:0123456789abcdef", `forbidden field "error"`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("contract finding lacks %q: %s", want, got)
+	rendered := artifact.RenderBody(candidate)
+	for _, want := range []string{"ducklab-reference-contracts:begin", "```ducklab-reference-contracts", `"observe_gate"`, `"findings"`, "observe_gate.json", "sha256:0123456789abcdef"} {
+		if !strings.Contains(rendered, want) || !strings.Contains(prompt, want) {
+			t.Errorf("materialized candidate/review lacks %q\ncandidate:\n%s\nprompt:\n%s", want, rendered, prompt)
+		}
+	}
+}
+
+func TestReferenceContractMaterializationIsIdempotentAndReplacesStaleMetadata(t *testing.T) {
+	doc, _ := artifact.Parse("## SPEC-001 — Gate\n\nKeep this prose.\n", artifact.KindSpec)
+	old := []capability.ReferenceContract{{Operation: "observe_gate", RequiredOutputFields: []string{"old"}, Source: "old.json", Digest: "sha256:old"}}
+	current := []capability.ReferenceContract{{Operation: "observe_gate", RequiredOutputFields: []string{"findings"}, Source: "new.json", Digest: "sha256:new"}}
+	materializeReferenceContracts(artifact.KindSpec, doc, old)
+	materializeReferenceContracts(artifact.KindSpec, doc, current)
+	materializeReferenceContracts(artifact.KindSpec, doc, current)
+	rendered := artifact.RenderBody(doc)
+	if strings.Count(rendered, "```ducklab-reference-contracts") != 1 || strings.Count(rendered, "ducklab-reference-contracts:begin") != 1 {
+		t.Fatalf("materialization duplicated its machine-owned region:\n%s", rendered)
+	}
+	for _, stale := range []string{"old.json", "sha256:old", `"old"`} {
+		if strings.Contains(rendered, stale) {
+			t.Errorf("stale metadata %q survived replacement:\n%s", stale, rendered)
+		}
+	}
+	for _, want := range []string{"Keep this prose.", "new.json", "sha256:new", `"findings"`} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("replacement lost %q:\n%s", want, rendered)
 		}
 	}
 }
@@ -260,14 +300,17 @@ func TestInitialSpecChecksStructuredReferencesWithoutDuplicateSemanticReview(t *
 			if script.Name == "composition-review" {
 				t.Fatal("a first draft already reviewed by its council received a duplicate semantic pass")
 			}
-			return "## SPEC-001 — Findings\n\n```ducklab-reference-contracts\n{\"inspect_review_findings\":[\"inspections\",\"error\"]}\n```\n", nil
+			return "## SPEC-001 — Findings\n\nModel prose without control metadata.\n", nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 1 || len(res.CompositionMechanical) != 1 || !strings.Contains(res.CompositionMechanical[0], `forbidden field "error"`) {
+	if calls != 1 || len(res.CompositionMechanical) != 0 {
 		t.Fatalf("initial contract result calls=%d findings=%v", calls, res.CompositionMechanical)
+	}
+	if !strings.Contains(artifact.RenderBody(res.Proposed), "ducklab-reference-contracts:begin") {
+		t.Fatalf("initial spec lacks materialized reference contract:\n%s", artifact.RenderBody(res.Proposed))
 	}
 }
 
@@ -281,7 +324,7 @@ func TestReferenceContractBlockIgnoresTypedNarrativeMentions(t *testing.T) {
 		"- `observe_gate`: `findings: [Finding]`\n\n"+
 		"The narrative mentions `inspect_plan_task` again without creating another declaration.\n\n"+
 		"```ducklab-reference-contracts\n"+
-		"{\"inspect_plan_task\":[\"error\",\"inspections\"],\"observe_gate\":[\"findings\"]}\n"+
+		"{\"inspect_plan_task\":{\"required\":[\"error\",\"inspections\"],\"optional\":[],\"additional_properties\":false},\"observe_gate\":{\"required\":[\"findings\"],\"optional\":[],\"additional_properties\":false}}\n"+
 		"```\n", artifact.KindSpec)
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +345,7 @@ func TestReferenceContractBlockIsUniqueAndValidJSON(t *testing.T) {
 		{name: "missing", body: "## SPEC-001 — Gate\n\n`observe_gate`: `findings`\n", want: "no ducklab-reference-contracts block"},
 		{name: "duplicate", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{}\n```\n```ducklab-reference-contracts\n{}\n```\n", want: "has 2 ducklab-reference-contracts blocks"},
 		{name: "invalid JSON", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{no}\n```\n", want: "invalid ducklab-reference-contracts JSON"},
-		{name: "duplicate operation", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":[\"findings\"],\"observe_gate\":[\"findings\"]}\n```\n", want: `operation "observe_gate" is duplicated`},
+		{name: "duplicate operation", body: "## SPEC-001 — Gate\n\n```ducklab-reference-contracts\n{\"observe_gate\":{\"required\":[\"findings\"],\"optional\":[],\"additional_properties\":false},\"observe_gate\":{\"required\":[\"findings\"],\"optional\":[],\"additional_properties\":false}}\n```\n", want: `operation "observe_gate" is duplicated`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
