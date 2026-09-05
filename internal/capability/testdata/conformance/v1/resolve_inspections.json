@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "resolve_inspections",
+  "contract": {"output": {"required": ["error", "inspections"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "inspections-compose-and-sort",

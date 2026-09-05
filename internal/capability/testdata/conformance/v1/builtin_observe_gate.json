@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "observe_gate",
+  "contract": {"output": {"required": ["findings"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "builtin-meson-rejects-new-uncompiled-source",

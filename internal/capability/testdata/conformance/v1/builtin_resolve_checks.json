@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "resolve_checks",
+  "contract": {"output": {"required": ["checks", "error"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "builtin-native-checks-preserve-policy-levels",

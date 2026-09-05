@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "inspect_plan_task",
+  "contract": {"output": {"required": ["error", "inspections"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "builtin-gtk4-rejects-removed-drawing-api-from-symbols",

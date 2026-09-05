@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "inspect_review_findings",
+  "contract": {"output": {"required": ["inspections"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "builtin-gtk4-rejects-removed-api-remedy",

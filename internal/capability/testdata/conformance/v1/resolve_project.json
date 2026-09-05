@@ -1,6 +1,7 @@
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "resolve_project",
+  "contract": {"output": {"required": ["detections", "error", "gate", "review_rules"], "optional": [], "additional_properties": false}},
   "cases": [
     {
       "id": "polyglot-composition-is-ordered",

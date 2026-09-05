@@ -40,9 +40,29 @@ Every file is a JSON object with this shape:
 {
   "schema_version": "fledge.capability-conformance/v1",
   "operation": "resolve_project",
+  "contract": {
+    "output": {
+      "required": ["detections", "gate", "review_rules", "error"],
+      "optional": [],
+      "additional_properties": false
+    }
+  },
   "cases": []
 }
 ```
+
+`contract.output` is executable, not guidance. It declares the exact object
+shape that every case's `expected` value and every implementation result must
+satisfy. Required and optional field names are normalized in lexical order;
+duplicates, empty names, contradictory fixtures and conflicting declarations
+for one operation are installation failures. `additional_properties: false`
+means a plausible extra field is still a contract violation.
+
+Ducklab records the source path and SHA-256 of every normalized declaration.
+This makes a contract attributable and prevents an edited reference from
+silently inheriting an earlier trust decision. Parsing and fixture validation
+do not activate the contract: the engine remains responsible for deciding
+which explicitly supplied structured references may block an artifact gate.
 
 Unknown schema versions or operations are failures, not invitations to guess.
 Case IDs and provider IDs are unique within their respective scopes. Duplicate
