@@ -1,0 +1,39 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_checks",
+  "cases": [
+    {
+      "id": "builtin-native-checks-preserve-policy-levels",
+      "registry": "default",
+      "context": {
+        "task_verification": "cc -fsyntax-only src/app.c",
+        "policies": {"c-native.warnings": "required"}
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "checks": [
+          {
+            "capability": "c-native",
+            "name": "API and type safety",
+            "command": "cc -fsyntax-only src/app.c -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=int-conversion",
+            "enforcement": "required"
+          },
+          {
+            "capability": "c-native",
+            "name": "compiler warnings",
+            "command": "cc -fsyntax-only src/app.c -Wall -Wextra -Werror",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-compound-native-command-is-not-rewritten",
+      "registry": "default",
+      "context": {"task_verification": "cc -fsyntax-only src/app.c && ./check"},
+      "selection": {"auto": true},
+      "expected": {"checks": [], "error": ""}
+    }
+  ]
+}

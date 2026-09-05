@@ -1,0 +1,36 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "inspect_review_findings",
+  "cases": [
+    {
+      "id": "builtin-gtk4-rejects-removed-api-remedy",
+      "registry": "default",
+      "capability_ids": ["gtk4-ui"],
+      "review_findings": [
+        {"issue": "window may be covered", "fix": "Add gtk_window_set_keep_above(window, TRUE).", "invariant": "the overlay remains visible"}
+      ],
+      "expected": {
+        "inspections": [
+          {
+            "index": 0,
+            "inspection": {
+              "capability": "gtk4-ui",
+              "name": "invalid-review-remedy",
+              "detail": "finding 0 is inadmissible: its fix proposes gtk_window_set_keep_above, a GTK3 API removed from GTK4",
+              "enforcement": "required"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "builtin-inactive-gtk4-contributes-nothing",
+      "registry": "default",
+      "capability_ids": ["go"],
+      "review_findings": [
+        {"issue": "window may be covered", "fix": "Add gtk_window_set_keep_above(window, TRUE).", "invariant": "the overlay remains visible"}
+      ],
+      "expected": {"inspections": []}
+    }
+  ]
+}

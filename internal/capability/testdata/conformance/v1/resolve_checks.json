@@ -1,0 +1,53 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_checks",
+  "cases": [
+    {
+      "id": "checks-compose-and-sort",
+      "providers": [
+        {
+          "id": "zeta",
+          "checks": [
+            {"capability": "zeta", "name": "syntax", "command": "zeta check", "enforcement": "diagnostic"}
+          ]
+        },
+        {
+          "id": "alpha",
+          "checks": [
+            {"capability": "alpha", "name": "types", "command": "alpha types", "enforcement": "required"},
+            {"capability": "alpha", "name": "format", "command": "alpha fmt", "enforcement": "diagnostic"}
+          ]
+        }
+      ],
+      "selection": {"auto": true},
+      "expected": {
+        "checks": [
+          {"capability": "alpha", "name": "format", "command": "alpha fmt", "enforcement": "diagnostic"},
+          {"capability": "alpha", "name": "types", "command": "alpha types", "enforcement": "required"},
+          {"capability": "zeta", "name": "syntax", "command": "zeta check", "enforcement": "diagnostic"}
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "disabled-provider-contributes-no-checks",
+      "providers": [
+        {"id": "alpha", "checks": [{"capability": "alpha", "name": "types", "command": "alpha types", "enforcement": "required"}]},
+        {"id": "beta", "checks": [{"capability": "beta", "name": "lint", "command": "beta lint", "enforcement": "diagnostic"}]}
+      ],
+      "selection": {"auto": true, "disabled": ["alpha"]},
+      "expected": {
+        "checks": [
+          {"capability": "beta", "name": "lint", "command": "beta lint", "enforcement": "diagnostic"}
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "unknown-enabled-provider-is-an-error",
+      "providers": [{"id": "alpha"}],
+      "selection": {"enabled": ["missing"]},
+      "expected": {"checks": [], "error": "unknown capability \"missing\""}
+    }
+  ]
+}

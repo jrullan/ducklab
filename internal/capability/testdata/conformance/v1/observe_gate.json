@@ -1,0 +1,26 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "observe_gate",
+  "cases": [
+    {
+      "id": "only-frozen-capabilities-observe",
+      "capability_ids": ["zeta", "missing", "alpha"],
+      "gate_observation": {"project_root": "/fixture", "diff": "diff", "output": "green", "build_graph_files": ["src/lib.rs"]},
+      "providers": [
+        {"id": "ignored", "gate_findings": [{"capability": "ignored", "kind": "coverage", "detail": "must not appear", "files": [], "enforcement": "required"}]},
+        {"id": "zeta", "gate_findings": [{"capability": "zeta", "kind": "coverage", "detail": "source omitted", "files": ["src/zeta.rs"], "enforcement": "required"}]},
+        {"id": "alpha", "gate_findings": [
+          {"capability": "alpha", "kind": "types", "detail": "type drift", "files": ["src/a.rs"], "enforcement": "diagnostic"},
+          {"capability": "alpha", "kind": "build", "detail": "not compiled", "files": ["src/b.rs"], "enforcement": "required"}
+        ]}
+      ],
+      "expected": {
+        "findings": [
+          {"capability": "alpha", "kind": "build", "detail": "not compiled", "files": ["src/b.rs"], "enforcement": "required"},
+          {"capability": "alpha", "kind": "types", "detail": "type drift", "files": ["src/a.rs"], "enforcement": "diagnostic"},
+          {"capability": "zeta", "kind": "coverage", "detail": "source omitted", "files": ["src/zeta.rs"], "enforcement": "required"}
+        ]
+      }
+    }
+  ]
+}

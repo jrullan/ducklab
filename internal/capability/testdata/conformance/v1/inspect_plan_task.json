@@ -1,0 +1,25 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "inspect_plan_task",
+  "cases": [
+    {
+      "id": "all-providers-contribute-in-stable-order",
+      "plan_task": {"id": "T-007", "body": "Implement the unit", "verification": "cargo test"},
+      "providers": [
+        {"id": "zeta", "plan_inspections": [{"capability": "zeta", "name": "obsolete-api", "detail": "obsolete API", "enforcement": "required"}]},
+        {"id": "alpha", "plan_inspections": [
+          {"capability": "alpha", "name": "wrong-signature", "detail": "wrong signature", "enforcement": "required"},
+          {"capability": "alpha", "name": "invented-api", "detail": "invented API", "enforcement": "required"}
+        ]}
+      ],
+      "expected": {
+        "inspections": [
+          {"capability": "alpha", "name": "invented-api", "detail": "invented API", "enforcement": "required"},
+          {"capability": "alpha", "name": "wrong-signature", "detail": "wrong signature", "enforcement": "required"},
+          {"capability": "zeta", "name": "obsolete-api", "detail": "obsolete API", "enforcement": "required"}
+        ],
+        "error": ""
+      }
+    }
+  ]
+}

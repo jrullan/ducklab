@@ -1,0 +1,26 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "inspect_plan_task",
+  "cases": [
+    {
+      "id": "builtin-gtk4-rejects-removed-drawing-api-from-symbols",
+      "registry": "default",
+      "plan_task": {
+        "id": "T-007",
+        "body": "Render with gdk_window_begin_draw_frame() and cairo.",
+        "verification": "cc -fsyntax-only src/ui/selection.c"
+      },
+      "expected": {
+        "inspections": [
+          {
+            "capability": "gtk4-ui",
+            "name": "removed-drawing-api",
+            "detail": "task specifies GTK3 drawing; GTK4 GtkDrawingArea uses gtk_drawing_area_set_draw_func",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    }
+  ]
+}

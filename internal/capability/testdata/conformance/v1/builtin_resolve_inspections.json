@@ -1,0 +1,120 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_inspections",
+  "cases": [
+    {
+      "id": "builtin-native-rejects-duplicate-header-contract",
+      "registry": "default",
+      "files": {
+        "src/producer.h": "typedef struct { unsigned width; } ImageData;\n",
+        "src/consumer.h": "typedef struct { int width; } ImageData;\n"
+      },
+      "context": {
+        "task_verification": "cc -c src/app.c",
+        "produced_files": ["src/producer.h"],
+        "consumed_files": ["src/consumer.h"]
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {
+            "capability": "c-native",
+            "name": "header contract",
+            "detail": "complete typedef ImageData is independently defined in both src/consumer.h and src/producer.h; keep one canonical definition and include its owning header",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-glib-options-rejects-hidden-callback-abi",
+      "registry": "default",
+      "files": {
+        "parser.c": "#include <glib.h>\nstatic void help_callback(GOptionContext *context, GOptionGroup *group, gpointer data, GError **error) {}\nstatic GOptionEntry entries[] = {{\"help\", 'h', 0, G_OPTION_ARG_CALLBACK, help_callback, \"help\", NULL}};\n"
+      },
+      "context": {
+        "task_verification": "cc -fsyntax-only $(pkg-config --cflags glib-2.0) parser.c",
+        "produced_files": ["parser.c"]
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {
+            "capability": "glib-options",
+            "name": "callback-abi",
+            "detail": "parser.c assigns help_callback to G_OPTION_ARG_CALLBACK, but its definition does not match gboolean (const gchar *, const gchar *, gpointer, GError **); arg_data erases this type and ordinary compiler pointer warnings cannot validate it",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-gtk4-clipboard-requires-publication-result",
+      "registry": "default",
+      "files": {
+        "clipboard.c": "void publish(void *clipboard, void *provider) {\n  gdk_clipboard_set_content(clipboard, provider);\n}\n"
+      },
+      "context": {
+        "task_verification": "cc -c $(pkg-config --cflags gtk4) clipboard.c"
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {
+            "capability": "gtk4-clipboard",
+            "name": "publish-result",
+            "detail": "gdk_clipboard_set_content returns gboolean but its result is ignored; branch on failure before reporting or scheduling successful delivery",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-glib-async-rejects-impossible-idle-fallback",
+      "registry": "default",
+      "files": {
+        "worker.c": "static gboolean publish(gpointer data) { return G_SOURCE_REMOVE; }\nvoid start(gpointer data) {\n  if (g_idle_add(publish, data) == 0) publish(data);\n}\n"
+      },
+      "context": {
+        "task_verification": "cc -c $(pkg-config --cflags gio-2.0) worker.c"
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {
+            "capability": "glib-async",
+            "name": "idle-source-id",
+            "detail": "g_idle_add/g_idle_add_full is compared with zero as though scheduling could fail; GLib guarantees a source ID greater than zero, so this branch is unreachable and must not be used as an error or synchronous fallback path",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-x11-rejects-width-from-unshifted-mask",
+      "registry": "default",
+      "files": {
+        "capture.c": "static int count_one_bits(unsigned long mask) {\n  int count = 0;\n  while (mask & 1) { count++; mask >>= 1; }\n  return count;\n}\nvoid convert(unsigned long red_mask) {\n  int red_shift = count_trailing_zeroes(red_mask);\n  int red_width = count_one_bits(red_mask);\n}\n"
+      },
+      "context": {
+        "task_verification": "cc -fsyntax-only $(pkg-config --cflags x11) capture.c"
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {
+            "capability": "x11-image",
+            "name": "channel-mask-flow",
+            "detail": "red channel width is counted from the unshifted mask; a low-bit counter returns zero for shifted fields such as 0xff0000. Count width from (red_mask >> red_shift) or from the mask after removing trailing zeroes",
+            "enforcement": "required"
+          }
+        ],
+        "error": ""
+      }
+    }
+  ]
+}

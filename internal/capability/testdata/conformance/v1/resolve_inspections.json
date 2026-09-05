@@ -1,0 +1,33 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_inspections",
+  "cases": [
+    {
+      "id": "inspections-compose-and-sort",
+      "providers": [
+        {"id": "zeta", "inspections": [{"capability": "zeta", "name": "ownership", "detail": "ownership is ambiguous", "enforcement": "required"}]},
+        {"id": "alpha", "inspections": [
+          {"capability": "alpha", "name": "types", "detail": "type mismatch", "enforcement": "required"},
+          {"capability": "alpha", "name": "format", "detail": "format drift", "enforcement": "diagnostic"}
+        ]}
+      ],
+      "selection": {"auto": true},
+      "expected": {
+        "inspections": [
+          {"capability": "alpha", "name": "format", "detail": "format drift", "enforcement": "diagnostic"},
+          {"capability": "alpha", "name": "types", "detail": "type mismatch", "enforcement": "required"},
+          {"capability": "zeta", "name": "ownership", "detail": "ownership is ambiguous", "enforcement": "required"}
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "provider-error-is-attributed",
+      "providers": [
+        {"id": "broken", "inspection_error": "fixture failed"}
+      ],
+      "selection": {"auto": true},
+      "expected": {"inspections": [], "error": "inspect capability broken: fixture failed"}
+    }
+  ]
+}

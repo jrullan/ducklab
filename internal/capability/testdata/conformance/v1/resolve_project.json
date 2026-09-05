@@ -1,0 +1,146 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_project",
+  "cases": [
+    {
+      "id": "polyglot-composition-is-ordered",
+      "providers": [
+        {
+          "id": "rust",
+          "detection": {"capability": "rust", "evidence": ["Cargo.toml"]},
+          "gates": [
+            {"capability": "rust", "kind": "tests", "command": "cargo test", "scope": ".", "priority": 40}
+          ],
+          "review_rules": [
+            {"capability": "rust", "id": "ownership", "guidance": "Preserve ownership contracts."}
+          ]
+        },
+        {
+          "id": "node",
+          "detection": {"capability": "node", "evidence": ["package.json"]},
+          "gates": [
+            {"capability": "node", "kind": "tests", "command": "npm test", "scope": ".", "priority": 30}
+          ],
+          "review_rules": [
+            {"capability": "node", "id": "types", "guidance": "Check the public type contract."}
+          ]
+        }
+      ],
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "node", "evidence": ["package.json"]},
+          {"capability": "rust", "evidence": ["Cargo.toml"]}
+        ],
+        "gate": {"capability": "node", "kind": "tests", "command": "npm test", "scope": ".", "priority": 30, "supplemental": false},
+        "review_rules": [
+          {"capability": "node", "id": "types", "guidance": "Check the public type contract."},
+          {"capability": "rust", "id": "ownership", "guidance": "Preserve ownership contracts."}
+        ],
+        "error": ""
+      }
+    },
+    {
+      "id": "test-gate-composes-supplemental-suite",
+      "providers": [
+        {
+          "id": "node",
+          "detection": {"capability": "node", "evidence": ["frontend/package.json"]},
+          "gates": [
+            {"capability": "node", "kind": "tests", "command": "cd frontend && npm test", "scope": "frontend", "priority": 11, "supplemental": true}
+          ]
+        },
+        {
+          "id": "go",
+          "detection": {"capability": "go", "evidence": ["go.mod"]},
+          "gates": [
+            {"capability": "go", "kind": "tests", "command": "go test ./...", "scope": ".", "priority": 10}
+          ]
+        }
+      ],
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "go", "evidence": ["go.mod"]},
+          {"capability": "node", "evidence": ["frontend/package.json"]}
+        ],
+        "gate": {"capability": "go", "kind": "tests", "command": "go test ./... && cd frontend && npm test", "scope": ".", "priority": 10, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "supplemental-does-not-extend-build-gate",
+      "providers": [
+        {
+          "id": "node",
+          "detection": {"capability": "node", "evidence": ["frontend/package.json"]},
+          "gates": [
+            {"capability": "node", "kind": "tests", "command": "cd frontend && npm test", "scope": "frontend", "priority": 11, "supplemental": true}
+          ]
+        },
+        {
+          "id": "meson",
+          "detection": {"capability": "meson", "evidence": ["meson.build"]},
+          "gates": [
+            {"capability": "meson", "kind": "build", "command": "meson compile -C build", "scope": ".", "priority": 10}
+          ]
+        }
+      ],
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "meson", "evidence": ["meson.build"]},
+          {"capability": "node", "evidence": ["frontend/package.json"]}
+        ],
+        "gate": {"capability": "meson", "kind": "build", "command": "meson compile -C build", "scope": ".", "priority": 10, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "disabled-wins-over-auto-and-enabled",
+      "providers": [
+        {
+          "id": "go",
+          "detection": {"capability": "go", "evidence": ["go.mod"]},
+          "gates": [
+            {"capability": "go", "kind": "tests", "command": "go test ./...", "scope": ".", "priority": 10}
+          ]
+        },
+        {
+          "id": "rust",
+          "detection": {"capability": "rust", "evidence": ["Cargo.toml"]},
+          "gates": [
+            {"capability": "rust", "kind": "tests", "command": "cargo test", "scope": ".", "priority": 5}
+          ]
+        }
+      ],
+      "selection": {"auto": true, "enabled": ["rust"], "disabled": ["rust", "unknown-is-harmless"]},
+      "expected": {
+        "detections": [
+          {"capability": "go", "evidence": ["go.mod"]}
+        ],
+        "gate": {"capability": "go", "kind": "tests", "command": "go test ./...", "scope": ".", "priority": 10, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "unknown-enabled-provider-is-an-error",
+      "providers": [
+        {
+          "id": "go",
+          "detection": {"capability": "go", "evidence": ["go.mod"]}
+        }
+      ],
+      "selection": {"auto": false, "enabled": ["missing"]},
+      "expected": {
+        "detections": [],
+        "gate": null,
+        "review_rules": [],
+        "error": "unknown capability \"missing\""
+      }
+    }
+  ]
+}

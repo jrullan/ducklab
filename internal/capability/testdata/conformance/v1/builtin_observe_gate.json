@@ -1,0 +1,26 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "observe_gate",
+  "cases": [
+    {
+      "id": "builtin-meson-rejects-new-uncompiled-source",
+      "registry": "default",
+      "capability_ids": ["meson"],
+      "gate_observation": {
+        "diff": "diff --git a/src/backend/capture.c b/src/backend/capture.c\nnew file mode 100644\n--- /dev/null\n+++ b/src/backend/capture.c\n",
+        "output": "ninja: no work to do.\n"
+      },
+      "expected": {
+        "findings": [
+          {
+            "capability": "meson",
+            "kind": "build-integration",
+            "detail": "new production source files are absent from Meson's compilation database; the project build does not exercise them",
+            "files": ["src/backend/capture.c"],
+            "enforcement": "required"
+          }
+        ]
+      }
+    }
+  ]
+}

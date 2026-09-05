@@ -1,0 +1,28 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "inspect_review_findings",
+  "cases": [
+    {
+      "id": "only-frozen-capabilities-validate-remedies",
+      "capability_ids": ["zeta", "alpha"],
+      "review_findings": [
+        {"issue": "an API is obsolete", "fix": "replace it", "invariant": "public contract remains valid"}
+      ],
+      "providers": [
+        {"id": "ignored", "review_finding_inspections": [{"index": 0, "inspection": {"capability": "ignored", "name": "bad-remedy", "detail": "must not appear", "enforcement": "required"}}]},
+        {"id": "zeta", "review_finding_inspections": [{"index": 0, "inspection": {"capability": "zeta", "name": "bad-remedy", "detail": "obsolete replacement", "enforcement": "required"}}]},
+        {"id": "alpha", "review_finding_inspections": [
+          {"index": 1, "inspection": {"capability": "alpha", "name": "wrong-owner", "detail": "wrong owner", "enforcement": "diagnostic"}},
+          {"index": 0, "inspection": {"capability": "alpha", "name": "wrong-owner", "detail": "wrong owner", "enforcement": "required"}}
+        ]}
+      ],
+      "expected": {
+        "inspections": [
+          {"index": 0, "inspection": {"capability": "alpha", "name": "wrong-owner", "detail": "wrong owner", "enforcement": "required"}},
+          {"index": 1, "inspection": {"capability": "alpha", "name": "wrong-owner", "detail": "wrong owner", "enforcement": "diagnostic"}},
+          {"index": 0, "inspection": {"capability": "zeta", "name": "bad-remedy", "detail": "obsolete replacement", "enforcement": "required"}}
+        ]
+      }
+    }
+  ]
+}

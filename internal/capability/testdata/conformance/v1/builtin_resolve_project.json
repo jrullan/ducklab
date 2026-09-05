@@ -1,0 +1,98 @@
+{
+  "schema_version": "fledge.capability-conformance/v1",
+  "operation": "resolve_project",
+  "cases": [
+    {
+      "id": "builtin-rust-and-typescript-compose",
+      "registry": "default",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        "tsconfig.json": "{}\n"
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "rust", "evidence": ["Cargo.toml"]},
+          {"capability": "typescript", "evidence": ["tsconfig.json"]}
+        ],
+        "gate": {"capability": "rust", "kind": "tests", "command": "cargo test", "scope": ".", "priority": 40, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-node-wins-polyglot-priority",
+      "registry": "default",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        "package.json": "{\"scripts\":{\"test\":\"node --test\"}}\n"
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "node", "evidence": ["package.json"]},
+          {"capability": "rust", "evidence": ["Cargo.toml"]}
+        ],
+        "gate": {"capability": "node", "kind": "tests", "command": "npm test --silent", "scope": ".", "priority": 30, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-disabled-rust-leaves-typescript",
+      "registry": "default",
+      "files": {
+        "Cargo.toml": "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        "tsconfig.json": "{}\n"
+      },
+      "selection": {"auto": true, "disabled": ["rust"]},
+      "expected": {
+        "detections": [
+          {"capability": "typescript", "evidence": ["tsconfig.json"]}
+        ],
+        "gate": {"capability": "typescript", "kind": "build", "command": "npx tsc --noEmit", "scope": ".", "priority": 60, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-go-probe-selects-tests",
+      "registry": "default",
+      "files": {
+        "go.mod": "module example.com/fixture\n\ngo 1.25\n",
+        "main.go": "package main\nfunc main() {}\n"
+      },
+      "tools": {"go": {"exit_code": 0}},
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "go", "evidence": ["go.mod"]}
+        ],
+        "gate": {"capability": "go", "kind": "tests", "command": "go test ./...", "scope": ".", "priority": 10, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    },
+    {
+      "id": "builtin-python-probes-tests-before-compile",
+      "registry": "default",
+      "files": {
+        "pyproject.toml": "[project]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+        "src/app.py": "print('fixture')\n"
+      },
+      "tools": {
+        "pytest": {"exit_code": 0},
+        "python": {"exit_code": 0}
+      },
+      "selection": {"auto": true},
+      "expected": {
+        "detections": [
+          {"capability": "python", "evidence": ["pyproject.toml"]}
+        ],
+        "gate": {"capability": "python", "kind": "tests", "command": "pytest -q", "scope": ".", "priority": 20, "supplemental": false},
+        "review_rules": [],
+        "error": ""
+      }
+    }
+  ]
+}
