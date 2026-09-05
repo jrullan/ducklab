@@ -22,6 +22,29 @@ import (
 const PersonaCritic = "critic"
 const PersonaPlanManifest = "plan_manifest"
 
+// planCoverageReview is semantic on purpose. Implements links, graph edges and
+// field shapes are mechanical and belong to structureFindings; deciding whether
+// a task's accepted outcomes actually deliver a specification obligation needs
+// a critic. Keeping the instruction here makes that boundary explicit instead
+// of disguising keyword overlap as proof of coverage.
+const planCoverageReview = `## Plan obligation audit — required
+
+An **Implements:** id is an index pointer, never evidence that the task delivers
+the section. Before your verdict, read every accepted SPEC section the plan
+claims and audit its obligations against the tasks' **Work unit:** and top-level
+**Acceptance slices:**.
+
+- Account for independently testable behavior, authority/boundary rules, and
+  named error or exclusion cases. A title, explanatory paragraph, Produces,
+  Exercises, or a broad project gate does not count as an accepted outcome.
+- A specification may be covered by several tasks and one task may cover
+  several related specifications; do not demand a syntactic one-to-one split.
+- If an obligation has no acceptance slice, request changes. Name the exact
+  SPEC id and omitted obligation in one class-level finding, and ask for the
+  smallest task/slice correction rather than rewriting unrelated topology.
+- Approve only after this obligation-level sweep. Do not infer coverage merely
+  because every SPEC id appears somewhere in Implements.`
+
 // SoloArtifactScript is one architect, drafting alone.
 //
 // A deviation from 05 §4.4, which names council as the artifact mode. It is

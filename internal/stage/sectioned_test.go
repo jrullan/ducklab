@@ -477,7 +477,7 @@ func TestSectionedPlanVisitsTasks(t *testing.T) {
 func TestCompositionReviewPromptSeparatesSemanticFromMechanicalJudgment(t *testing.T) {
 	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-01", Title: "Core", Children: []artifact.Section{{ID: "T-001", Title: "Save", Body: "**Work unit:** Save one capture"}}}}}
 	prompt := buildCompositionReviewPrompt("Split saving from capture", &artifact.Document{}, plan)
-	for _, want := range []string{"exactly one Work unit", "Do not repeat formatting or mechanical findings", "T-001", "no repair follows automatically"} {
+	for _, want := range []string{"exactly one Work unit", "Do not repeat formatting or mechanical findings", "T-001", "no repair follows automatically", "An Implements id is an index pointer, not proof of coverage", "authority/boundary rule", "top-level Acceptance slices"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("composition prompt lacks %q:\n%s", want, prompt)
 		}

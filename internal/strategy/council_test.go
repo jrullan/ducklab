@@ -214,6 +214,47 @@ func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	}
 }
 
+// H1d's first Fledge plan named SPEC-001 on its scaffolding task, so every
+// mechanical trace check was green even though no acceptance slice delivered
+// SPEC-001's authority boundary. A plan critic must be assigned the semantic
+// audit explicitly; a generic "anything missing?" review approved that plan.
+func TestPlanCriticAuditsObligationsNotJustImplementsIDs(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"produces":["file:Cargo.toml"],"consumes":[],"verification":"cargo check"}]}]}`
+	manifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planText := "## M-01 — Setup\n\n### T-001 — Scaffold\n\n**Implements:** SPEC-001\n\n**Produces:** file:Cargo.toml\n\n**Consumes:** none\n\n**Verification:** `cargo check`"
+	parsed, err := agent.ParseContract("markdown_sections:M", planText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	_, err = ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
+		&agent.Outcome{Text: manifestText, Parsed: manifest},
+		&agent.Outcome{Text: planText, Parsed: parsed},
+		verdictOutcome("approve"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.prompts) < 3 {
+		t.Fatalf("only %d turns ran", len(rec.prompts))
+	}
+	critic := rec.prompts[2]
+	for _, want := range []string{
+		"Plan obligation audit — required",
+		"An **Implements:** id is an index pointer, never evidence",
+		"authority/boundary rules",
+		"Name the exact\n  SPEC id and omitted obligation",
+		"Do not infer coverage merely",
+	} {
+		if !strings.Contains(critic, want) {
+			t.Errorf("plan critic prompt lacks %q:\n%s", want, critic)
+		}
+	}
+}
+
 func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-008"],"produces":["file:meson.build"],"consumes":[],"verification":"meson compile -C build"}]}]}`
 	manifest, err := agent.ParseContract("json:plan_manifest", manifestText)

@@ -234,6 +234,7 @@ func compositionInvariants(kind artifact.Kind) string {
 		return "Judge only whether the specification implements the referenced requirements, preserves explicit exclusions, and assigns each behavioral contract exactly once without conflicting contracts.\n"
 	case artifact.KindPlan:
 		return "Judge only these cross-task invariants:\n\n" +
+			"- An Implements id is an index pointer, not proof of coverage: every independently testable behavior, authority/boundary rule, and named error or exclusion in each referenced SPEC must appear in at least one task's top-level Acceptance slices. Name the exact SPEC id and omitted obligation when it does not.\n" +
 			"- Every distinct concern requested by the amendment is owned by exactly one Work unit.\n" +
 			"- No two tasks claim the same behavior or artifact responsibility under different wording.\n" +
 			"- A deliverable and its explanation or verification are not mistaken for independent concerns.\n" +
