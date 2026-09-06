@@ -74,6 +74,19 @@ func TestAcceptanceSlicesMayUseAnOrderedMarkdownList(t *testing.T) {
 	if got := topLevelChecklistItems(body, "Acceptance slices"); got != 3 {
 		t.Fatalf("ordered acceptance slices = %d, want 3", got)
 	}
+	if got := nestedChecklistItems(body, "Acceptance slices"); got != 1 {
+		t.Fatalf("nested acceptance slices = %d, want 1", got)
+	}
+}
+
+func TestPlanRejectsNestedAndCompressedAcceptanceSlices(t *testing.T) {
+	previous := "**Implements:** SPEC-001\n\n**Work unit:** Persist capture\n\n**Acceptance slices:**\n- Opens a destination\n- Writes a PNG\n- Reports completion\n\n**Acceptance probes:**\n1. `test-dialog`\n2. `test-write`\n3. `test-complete`\n\n**Produces:** file:save.c\n\n**Consumes:** none\n\n**Verification:** `test-all`\n\n**Exercises:** file:save.c"
+	current := strings.Replace(previous, "- Opens a destination\n- Writes a PNG\n- Reports completion", "- Persists a capture\n  - opens a destination\n  - writes a PNG\n  - reports completion", 1)
+	findings := structureFindings([]agent.Section{{ID: "T-001", Body: previous}}, []agent.Section{{ID: "T-001", Body: current}}, "markdown_sections:T", map[string]bool{"SPEC-001": true}, true, current)
+	joined := strings.Join(findings, "\n")
+	if !strings.Contains(joined, "must be a flat list") || !strings.Contains(joined, "reduced **Acceptance slices:** from 3 to 1") {
+		t.Fatalf("compressed nested slices escaped validation:\n%s", joined)
+	}
 }
 
 func TestTopLevelTaskContractEnforcesAcceptanceSlicesV2(t *testing.T) {
@@ -99,6 +112,31 @@ func TestPlanTaskMustImplementASpecificationSection(t *testing.T) {
 	got := strings.Join(structureFindings(nil, []agent.Section{{ID: "T-010", Body: body}}, "markdown_sections:T", map[string]bool{"REQ-001": true}, true, ""), "\n")
 	if !strings.Contains(got, "names no SPEC-NNN section") {
 		t.Fatalf("requirements-only Implements passed a plan task:\n%s", got)
+	}
+}
+
+func TestPlanUnknownReferenceFindingTargetsNestedTask(t *testing.T) {
+	body := "### T-002 — Registry\n\n**Implements:** SPEC-002, SPEC-010\n\n**Work unit:** Register providers\n\n**Acceptance slices:**\n- Duplicates fail\n\n**Produces:** src/registry.rs\n\n**Consumes:** none\n\n**Verification:** `cargo check`\n\n**Exercises:** src/registry.rs"
+	findings := structureFindings(nil, []agent.Section{{ID: "M-01", Title: "Core", Body: body}}, "markdown_sections:M", map[string]bool{"SPEC-002": true}, true, "## M-01 — Core\n\n"+body)
+	joined := strings.Join(findings, "\n")
+	if !strings.Contains(joined, "T-002 implements SPEC-010") || strings.Contains(joined, "M-01 implements SPEC-010") {
+		t.Fatalf("dangling reference lost task attribution:\n%s", joined)
+	}
+}
+
+func TestPlanManifestReferencesNormalizeBeforeFreeze(t *testing.T) {
+	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Title: "Core", Tasks: []agent.ManifestTask{{
+			ID: "T-002", Implements: []string{"SPEC-002", "SPEC-010"}, AcceptanceProbes: []string{"cargo test"},
+		}},
+	}}}
+	removed, err := normalizePlanManifestReferences(manifest, map[string]bool{"SPEC-002": true})
+	if err != nil || removed != 1 || !slices.Equal(manifest.Milestones[0].Tasks[0].Implements, []string{"SPEC-002"}) {
+		t.Fatalf("normalize removed=%d err=%v manifest=%+v", removed, err, manifest)
+	}
+	manifest.Milestones[0].Tasks[0].Implements = []string{"SPEC-010"}
+	if _, err := normalizePlanManifestReferences(manifest, map[string]bool{"SPEC-002": true}); err == nil || !strings.Contains(err.Error(), "T-002") {
+		t.Fatalf("all-invalid manifest error = %v", err)
 	}
 }
 
@@ -182,7 +220,7 @@ func TestPlanRepairExplainsAcceptanceSliceV2Fields(t *testing.T) {
 		Contract: "markdown_sections:T",
 		KnownIDs: map[string]bool{"SPEC-001": true},
 	})
-	for _, want := range []string{"invalid_work_unit", "field `Work unit`", "invalid_acceptance_slices", "field `Acceptance slices`", "1-3 top-level Markdown list items"} {
+	for _, want := range []string{"invalid_work_unit", "field `Work unit`", "invalid_acceptance_slices", "field `Acceptance slices`", "1-3 flat, top-level Markdown list items"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("repair prompt lacks %q:\n%s", want, note)
 		}
@@ -313,44 +351,28 @@ func TestPlanRejectsSingleOutputCompileWithMultipleInputs(t *testing.T) {
 	}
 }
 
-func TestPlanNormalizesSharedVerificationIntoProbeCardinality(t *testing.T) {
-	raw := "## M-01 — Core\n\n### T-001 — Compose\n\n**Implements:** SPEC-001\n\n**Work unit:** Compose results\n\n**Acceptance slices:**\n- Orders results\n- Normalizes errors\n- Chooses a gate\n\n**Acceptance probes:**\n1. `cargo test composition`\n\n**Produces:** file:src/composition.rs\n\n**Consumes:** none\n\n**Verification:** `cargo test composition`\n\n**Exercises:** file:src/composition.rs"
+func TestManifestRendersDistinctAuthoredProbesWithoutCloningVerification(t *testing.T) {
+	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{ID: "M-01", Title: "Core", Tasks: []agent.ManifestTask{{
+		ID: "T-001", Title: "Compose", Implements: []string{"SPEC-001"}, WorkUnit: "Compose results",
+		AcceptanceSlices: []string{"Orders results", "Normalizes errors", "Chooses a gate"},
+		AcceptanceProbes: []string{"cargo test ordering", "cargo test errors", "cargo test gate"},
+		Produces:         []string{"file:src/composition.rs"}, Verification: "cargo test composition",
+	}}}}}
+	raw := "## M-01 — Core\n\n### T-001 — Compose\n\nDraft prose."
 	parsed, err := agent.ParseContract("markdown_sections:M", raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, changes, err := normalizePlanProbeCardinality(&agent.Outcome{Text: raw, Parsed: parsed}, true)
+	got, _, err := reconcilePlanManifest(&agent.Outcome{Text: raw, Parsed: parsed}, manifest, "markdown_sections:M")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes != 1 || strings.Count(got.Text, "`cargo test composition`") != 4 {
-		t.Fatalf("normalization changes=%d text=\n%s", changes, got.Text)
+	for _, command := range manifest.Milestones[0].Tasks[0].AcceptanceProbes {
+		if strings.Count(got.Text, "`"+command+"`") != 1 {
+			t.Fatalf("authored probe %q was not rendered exactly once:\n%s", command, got.Text)
+		}
 	}
-	doc, err := artifact.Parse(got.Text, artifact.KindPlan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task := doc.Section("T-001")
-	if task == nil {
-		t.Fatal("normalized task is absent")
-	}
-	items, commands := checklistCommandCounts(task.Body, "Acceptance probes")
-	if items != 3 || commands != 3 {
-		t.Fatalf("probe items=%d commands=%d", items, commands)
-	}
-}
-
-func TestPlanLeavesPartialDistinctProbeContractForReviewedRepair(t *testing.T) {
-	raw := "## M-01 — Core\n\n### T-001 — Compose\n\n**Acceptance slices:**\n- One\n- Two\n- Three\n\n**Acceptance probes:**\n1. `cargo test one`\n2. `cargo test two`\n\n**Verification:** `cargo test composition`"
-	parsed, err := agent.ParseContract("markdown_sections:M", raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, changes, err := normalizePlanProbeCardinality(&agent.Outcome{Text: raw, Parsed: parsed}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changes != 0 || got.Text != raw {
-		t.Fatal("a partial distinct probe contract was overwritten")
+	if strings.Count(got.Text, "`cargo test composition`") != 1 {
+		t.Fatalf("verification was cloned into probes:\n%s", got.Text)
 	}
 }

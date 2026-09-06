@@ -673,10 +673,21 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				if !ok || manifest == nil {
 					err = fmt.Errorf("plan manifest turn returned no validated topology")
 				} else {
-					planManifest = manifest
-					emit(params, "plan_manifest", map[string]interface{}{
-						"round": round, "milestones": len(manifest.Milestones), "detail": "validated topology will constrain the rendered plan",
-					})
+					removed, normalizeErr := normalizePlanManifestReferences(manifest, params.KnownIDs)
+					if normalizeErr != nil {
+						err = normalizeErr
+					} else {
+						planManifest = manifest
+						if removed > 0 {
+							emit(params, "structure_normalized", map[string]interface{}{
+								"round": round, "turn": i, "fields": removed,
+								"detail": "removed unknown specification references before freezing plan topology",
+							})
+						}
+						emit(params, "plan_manifest", map[string]interface{}{
+							"round": round, "milestones": len(manifest.Milestones), "detail": "validated topology will constrain the rendered plan",
+						})
+					}
 				}
 			}
 			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect &&
@@ -720,20 +731,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						emit(params, "structure_normalized", map[string]interface{}{
 							"round": round, "turn": i, "fields": manifestChanges + graphChanges,
 							"detail": "compiled the validated manifest and derived Owns and Depends on fields from the plan artifact graph",
-						})
-					}
-				}
-			}
-			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
-				normalized, probeChanges, normalizeErr := normalizePlanProbeCardinality(outcome, params.SmallSeat)
-				if normalizeErr != nil {
-					err = normalizeErr
-				} else {
-					outcome = normalized
-					if probeChanges > 0 {
-						emit(params, "structure_normalized", map[string]interface{}{
-							"round": round, "turn": i, "fields": probeChanges,
-							"detail": "expanded a task's shared Verification command to one Acceptance probe per slice",
 						})
 					}
 				}

@@ -1324,16 +1324,18 @@ Reply with exactly one JSON object:
  {"id":"T-001","title":"short action","implements":["SPEC-001"],
   "work_unit":"one cohesive capability",
   "acceptance_slices":["observable outcome 1","observable outcome 2"],
+  "acceptance_probes":["executable command for outcome 1","executable command for outcome 2"],
   "produces":["file:path/or/capability"],"consumes":[],
   "verification":"executable command"}]}]}
 
 Rules:
 - Each task belongs to exactly one milestone and each produced artifact has one producer.
 - Each task has exactly one cohesive work_unit and 1-3 observable acceptance_slices.
+- Each acceptance_slice has one distinct acceptance_probe at the same array index. Write the executable command itself, without Markdown backticks; never copy one broad verification command into every probe.
 - If a proposed task needs more than three slices or spans independent concerns, split it here before IDs and artifact ownership are frozen.
 - Use exact file, directory, build-target, or capability names.
 - A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
-- Keep tasks small; the next architect renders work_unit and acceptance_slices verbatim.
+- Keep tasks small; the next architect renders work_unit, acceptance_slices, and acceptance_probes verbatim as flat lists. Explanations belong in prose, never as nested list items.
 - Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
 - The next architect turn receives this validated manifest and renders the full plan.`

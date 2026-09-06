@@ -150,6 +150,7 @@ type ManifestTask struct {
 	Implements       []string `json:"implements"`
 	WorkUnit         string   `json:"work_unit"`
 	AcceptanceSlices []string `json:"acceptance_slices"`
+	AcceptanceProbes []string `json:"acceptance_probes"`
 	Produces         []string `json:"produces"`
 	Consumes         []string `json:"consumes"`
 	Verification     string   `json:"verification"`
@@ -180,17 +181,34 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			taskID, ok := canonicalContractID(task.ID, "T")
 			if !ok || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
 				strings.TrimSpace(task.WorkUnit) == "" || len(task.AcceptanceSlices) == 0 || len(task.AcceptanceSlices) > 3 ||
+				len(task.AcceptanceProbes) != len(task.AcceptanceSlices) ||
 				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[taskID] {
 				return nil, fmt.Errorf("plan manifest contract: invalid task %d in %s", ti, milestone.ID)
 			}
 			manifest.Milestones[mi].Tasks[ti].ID = taskID
 			manifest.Milestones[mi].Tasks[ti].WorkUnit = strings.TrimSpace(task.WorkUnit)
+			for ii, id := range task.Implements {
+				id = strings.ToUpper(strings.TrimSpace(id))
+				if !validContractID(id, "SPEC") {
+					return nil, fmt.Errorf("plan manifest contract: %s implements invalid specification id %q", taskID, task.Implements[ii])
+				}
+				manifest.Milestones[mi].Tasks[ti].Implements[ii] = id
+			}
 			for si, slice := range task.AcceptanceSlices {
 				slice = strings.TrimSpace(slice)
 				if slice == "" {
 					return nil, fmt.Errorf("plan manifest contract: empty acceptance slice in %s", taskID)
 				}
 				manifest.Milestones[mi].Tasks[ti].AcceptanceSlices[si] = slice
+			}
+			seenProbes := map[string]bool{}
+			for pi, probe := range task.AcceptanceProbes {
+				probe = strings.TrimSpace(probe)
+				if probe == "" || strings.ContainsAny(probe, "\n`") || seenProbes[probe] {
+					return nil, fmt.Errorf("plan manifest contract: invalid acceptance probe in %s", taskID)
+				}
+				seenProbes[probe] = true
+				manifest.Milestones[mi].Tasks[ti].AcceptanceProbes[pi] = probe
 			}
 			seen[taskID] = true
 			for pi, item := range task.Produces {

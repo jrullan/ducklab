@@ -29,6 +29,7 @@ const (
 
 var requirementPriorityToken = regexp.MustCompile(`(?i)\*\*Priority:\*\*\s*(must|should|could|wont)\.?`)
 var planSpecToken = regexp.MustCompile(`(?i)\bSPEC-\d+\b`)
+var documentIDToken = regexp.MustCompile(`[A-Z]+-\d+`)
 
 // structureRepairContext supplies the closed-world facts a bounded repair
 // cannot discover for itself. The repair turn deliberately has no tools, so a
@@ -74,6 +75,16 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 	// twelve, benchmark run 4); milestone lanes never overlap.
 	if isPlan {
 		var blocks []taskBlock
+		previousSliceCount := map[string]int{}
+		for _, s := range prev {
+			previousBlocks := taskBlocks(s.Body)
+			if strings.HasPrefix(strings.ToUpper(s.ID), "T-") {
+				previousBlocks = []taskBlock{{id: strings.ToUpper(s.ID), body: s.Body}}
+			}
+			for _, block := range previousBlocks {
+				previousSliceCount[block.id] = topLevelChecklistItems(block.body, "Acceptance slices")
+			}
+		}
 		for _, s := range cur {
 			sectionBlocks := taskBlocks(s.Body)
 			// A sectioned plan update uses markdown_sections:T, so its assigned
@@ -96,6 +107,13 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 				} else if !planSpecToken.MatchString(implementsValue) {
 					out = append(out, fmt.Sprintf("%s **Implements:** names no SPEC-NNN section — plan tasks implement accepted specification contracts, not requirements or milestones", block.id))
 				}
+				if len(known) > 0 {
+					for _, id := range documentIDToken.FindAllString(implementsValue, -1) {
+						if !known[id] {
+							out = append(out, fmt.Sprintf("%s implements %s, which is not a section of any project document — name an id that exists, or drop it", block.id, id))
+						}
+					}
+				}
 				if small {
 					if strings.TrimSpace(markdownFieldValue(block.body, "Work unit")) == "" {
 						out = append(out, fmt.Sprintf("%s has no **Work unit:** — name exactly one cohesive capability or concern; split independent concerns into separate tasks", block.id))
@@ -109,10 +127,20 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 					} else if n > 3 {
 						out = append(out, fmt.Sprintf("%s has %d top-level **Acceptance slices:** bullets; a small implementer takes at most 3 — split the task", block.id, n))
 					}
-					if taskHasField(block.body, "Acceptance probes") {
+					if nestedChecklistItems(block.body, "Acceptance slices") > 0 {
+						out = append(out, fmt.Sprintf("%s **Acceptance slices:** must be a flat list — move explanations out of nested bullets so one slice cannot hide multiple obligations", block.id))
+					}
+					if prior := previousSliceCount[block.id]; prior > n {
+						out = append(out, fmt.Sprintf("%s reduced **Acceptance slices:** from %d to %d during revision — preserve the validated atomic outcomes instead of compressing them", block.id, prior, n))
+					}
+					if !taskHasField(block.body, "Acceptance probes") {
+						out = append(out, fmt.Sprintf("%s has no **Acceptance probes:** list — provide one distinct executable command for each Acceptance slice", block.id))
+					} else {
 						probeItems, probeCommands := checklistCommandCounts(block.body, "Acceptance probes")
 						if probeItems != n || probeCommands != probeItems {
 							out = append(out, fmt.Sprintf("%s **Acceptance probes:** must have exactly one backtick command for each of its %d Acceptance slices, in the same order", block.id, n))
+						} else if commands := checklistCommands(block.body, "Acceptance probes"); len(uniqueStrings(commands)) != len(commands) {
+							out = append(out, fmt.Sprintf("%s **Acceptance probes:** repeats a command — each slice needs a distinct probe instead of cloned evidence", block.id))
 						}
 					}
 					if !strings.Contains(strings.ToLower(block.body), "**verification:**") {
@@ -155,7 +183,6 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	implementsLine := regexp.MustCompile(`(?im)^\*\*Implements:\*\*\s*(.+)$`)
-	idToken := regexp.MustCompile(`[A-Z]+-\d+`)
 
 	seen := map[string]bool{}
 	for _, s := range cur {
@@ -182,9 +209,9 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		// Every Implements: target must exist in the project's documents;
 		// an id that is not there is a dangling reference the spine will
 		// report, and a task built against it has no contract.
-		if len(known) > 0 {
+		if len(known) > 0 && !isPlan {
 			for _, m := range implementsLine.FindAllStringSubmatch(s.Body, -1) {
-				for _, id := range idToken.FindAllString(m[1], -1) {
+				for _, id := range documentIDToken.FindAllString(m[1], -1) {
 					if !known[id] {
 						out = append(out, fmt.Sprintf("%s implements %s, which is not a section of any project document — name an id that exists, or drop it", s.ID, id))
 					}
@@ -242,6 +269,31 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 		}
 	}
 	return out
+}
+
+func normalizePlanManifestReferences(manifest *agent.PlanManifest, known map[string]bool) (int, error) {
+	if manifest == nil || len(known) == 0 {
+		return 0, nil
+	}
+	removed := 0
+	for mi := range manifest.Milestones {
+		for ti := range manifest.Milestones[mi].Tasks {
+			task := &manifest.Milestones[mi].Tasks[ti]
+			valid := task.Implements[:0]
+			for _, id := range task.Implements {
+				if known[id] && strings.HasPrefix(id, "SPEC-") {
+					valid = append(valid, id)
+				} else {
+					removed++
+				}
+			}
+			if len(valid) == 0 {
+				return removed, fmt.Errorf("plan manifest task %s implements no accepted SPEC section", task.ID)
+			}
+			task.Implements = valid
+		}
+	}
+	return removed, nil
 }
 
 // scopeArchitectSection discards sibling sections emitted during an isolated
@@ -420,11 +472,16 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 					if command := taskVerificationCommand(task.Body); invalidSingleOutputCompile(command) {
 						out = append(out, fmt.Sprintf("%s **Verification:** uses `-c` with multiple input files and one `-o`; GCC/Clang reject that command before compiling — compile one translation unit or omit the single output", task.ID))
 					}
+					if nestedChecklistItems(task.Body, "Acceptance slices") > 0 {
+						out = append(out, fmt.Sprintf("%s **Acceptance slices:** must be a flat list — move explanations out of nested bullets so one slice cannot hide multiple obligations", task.ID))
+					}
 					if taskHasField(task.Body, "Acceptance probes") {
 						slices := topLevelChecklistItems(task.Body, "Acceptance slices")
 						probeItems, probeCommands := checklistCommandCounts(task.Body, "Acceptance probes")
 						if probeItems != slices || probeCommands != probeItems {
 							out = append(out, fmt.Sprintf("%s **Acceptance probes:** must have exactly one backtick command for each of its %d Acceptance slices, in the same order", task.ID, slices))
+						} else if commands := checklistCommands(task.Body, "Acceptance probes"); len(uniqueStrings(commands)) != len(commands) {
+							out = append(out, fmt.Sprintf("%s **Acceptance probes:** repeats a command — each slice needs a distinct probe instead of cloned evidence", task.ID))
 						}
 					}
 				}
@@ -497,51 +554,6 @@ func taskVerificationCommand(body string) string {
 		return ""
 	}
 	return strings.TrimSpace(m[1])
-}
-
-// normalizePlanProbeCardinality handles the one mechanical repair whose valid
-// value is already present in the task. H1g spent repeated full model calls
-// turning one broad Verification command into N identical probes. Replication
-// is safe only from zero/one existing executable probe; a partial multi-probe
-// contract may encode distinct intent and remains a normal reviewed repair.
-func normalizePlanProbeCardinality(outcome *agent.Outcome, smallSeat bool) (*agent.Outcome, int, error) {
-	if outcome == nil || !smallSeat {
-		return outcome, 0, nil
-	}
-	doc, err := artifact.Parse(outcome.Text, artifact.KindPlan)
-	if err != nil {
-		return outcome, 0, err
-	}
-	text, changed := outcome.Text, 0
-	for _, milestone := range doc.Sections {
-		for _, task := range milestone.Children {
-			slices := topLevelChecklistItems(task.Body, "Acceptance slices")
-			items, commands := checklistCommandCounts(task.Body, "Acceptance probes")
-			verification := taskVerificationCommand(task.Body)
-			if slices <= 1 || verification == "" || items == slices && commands == items || items > 1 || commands > 1 {
-				continue
-			}
-			probes := make([]string, slices)
-			for i := range probes {
-				probes[i] = fmt.Sprintf("%d. `%s`", i+1, verification)
-			}
-			text, err = setMarkdownField(text, task.ID, "Acceptance probes", strings.Join(probes, "\n"))
-			if err != nil {
-				return outcome, changed, err
-			}
-			changed++
-		}
-	}
-	if changed == 0 {
-		return outcome, 0, nil
-	}
-	parsed, err := agent.ParseContract("markdown_sections:M", text)
-	if err != nil {
-		return outcome, 0, err
-	}
-	copy := *outcome
-	copy.Text, copy.Parsed = text, parsed
-	return &copy, changed, nil
 }
 
 func invalidSingleOutputCompile(command string) bool {
@@ -632,6 +644,32 @@ func topLevelChecklistItems(body, label string) int {
 	return n
 }
 
+// nestedChecklistItems detects obligations hidden under a top-level slice.
+// H1i compressed several validated slices into one bullet with indented
+// children, leaving the old cardinality check green while changing the work.
+func nestedChecklistItems(body, label string) int {
+	n := 0
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimRight(line, " \t")
+		switch {
+		case strings.EqualFold(strings.TrimSpace(t), "**"+label+":**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
+			in = false
+		}
+		if !in || len(t) == len(strings.TrimLeft(t, " \t")) {
+			continue
+		}
+		trimmed := strings.TrimLeft(t, " \t")
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || orderedChecklistItem.MatchString(trimmed) {
+			n++
+		}
+	}
+	return n
+}
+
 func topLevelChecklistValues(body, label string) []string {
 	var values []string
 	in := false
@@ -681,6 +719,28 @@ func checklistCommandCounts(body, label string) (items, commands int) {
 		}
 	}
 	return items, commands
+}
+
+func checklistCommands(body, label string) []string {
+	var out []string
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimRight(line, " \t")
+		switch {
+		case strings.EqualFold(strings.TrimSpace(t), "**"+label+":**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
+			in = false
+		}
+		if !in || !(strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || orderedChecklistItem.MatchString(t)) {
+			continue
+		}
+		if match := checklistBacktickCommand.FindString(t); match != "" {
+			out = append(out, strings.Trim(match, "`"))
+		}
+	}
+	return out
 }
 
 type taskBlock struct {
@@ -878,7 +938,7 @@ func describeStructureRepairFinding(message string, ctx structureRepairContext) 
 		d.Recipe = "Use set_field with field `Work unit` and one concise sentence naming exactly one cohesive capability or concern already assigned to this task."
 	case strings.Contains(message, "**Acceptance slices:**"):
 		d.Code, d.Field = "invalid_acceptance_slices", "Acceptance slices"
-		d.Recipe = "Use set_field with field `Acceptance slices` and a JSON string containing 1-3 top-level Markdown list items separated by newlines; each item must be an observable outcome of the single Work unit."
+		d.Recipe = "Use set_field with field `Acceptance slices` and a JSON string containing 1-3 flat, top-level Markdown list items separated by newlines; each item must be an observable outcome of the single Work unit. Put explanations in prose outside the field; nested bullets are forbidden."
 	case strings.Contains(message, "**Acceptance probes:**"):
 		d.Code, d.Field = "invalid_acceptance_probes", "Acceptance probes"
 		d.Recipe = "Use set_field with field `Acceptance probes` and a JSON string containing one numbered Markdown item per Acceptance slice; each item contains exactly one executable command in backticks and keeps the same order as the slices."
@@ -1278,6 +1338,9 @@ func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) 
 			if !slices.Equal(topLevelChecklistValues(actual.body, "Acceptance slices"), task.AcceptanceSlices) {
 				findings = append(findings, fmt.Sprintf("%s **Acceptance slices:** differ from the validated manifest — restore its %d atomic outcomes", task.ID, len(task.AcceptanceSlices)))
 			}
+			if !slices.Equal(checklistCommands(actual.body, "Acceptance probes"), task.AcceptanceProbes) {
+				findings = append(findings, fmt.Sprintf("%s **Acceptance probes:** differ from the validated manifest — restore its %d authored commands", task.ID, len(task.AcceptanceProbes)))
+			}
 			if !sameStringSet(taskFieldItems(actual.body, "Produces"), task.Produces) {
 				findings = append(findings, fmt.Sprintf("%s **Produces:** differs from the validated manifest — set it to %s", task.ID, strings.Join(task.Produces, ", ")))
 			}
@@ -1359,6 +1422,7 @@ func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest,
 				{"Implements", strings.Join(task.Implements, ", ")},
 				{"Work unit", task.WorkUnit},
 				{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
+				{"Acceptance probes", manifestAcceptanceProbes(task.AcceptanceProbes)},
 				{"Produces", manifestItems(task.Produces)},
 				{"Consumes", manifestItems(task.Consumes)},
 				{"Verification", "`" + strings.Trim(strings.TrimSpace(task.Verification), "`") + "`"},
@@ -1404,6 +1468,17 @@ func manifestAcceptanceSlices(items []string) string {
 	var lines []string
 	for _, item := range items {
 		lines = append(lines, "- "+strings.TrimSpace(item))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n")
+}
+
+func manifestAcceptanceProbes(items []string) string {
+	var lines []string
+	for i, item := range items {
+		lines = append(lines, fmt.Sprintf("%d. `%s`", i+1, strings.TrimSpace(item)))
 	}
 	if len(lines) == 0 {
 		return ""

@@ -27,7 +27,15 @@ func filterPlanCriticOutcome(params *ExecuteParams, outcome *agent.Outcome, cand
 
 	kept := make([]agent.Finding, 0, len(v.Findings))
 	rejected := make([]map[string]interface{}, 0)
+	sanitized := make([]map[string]interface{}, 0)
 	for _, finding := range v.Findings {
+		var reasons []string
+		finding, reasons = sanitizePlanCriticFinding(params, finding, candidate)
+		if len(reasons) > 0 {
+			sanitized = append(sanitized, map[string]interface{}{
+				"issue": finding.Issue, "reasons": reasons,
+			})
+		}
 		if reason := invalidPlanCriticFinding(params, finding, candidate); reason != "" {
 			rejected = append(rejected, map[string]interface{}{
 				"issue": finding.Issue, "reason": reason,
@@ -37,16 +45,26 @@ func filterPlanCriticOutcome(params *ExecuteParams, outcome *agent.Outcome, cand
 		finding.Fix = safePlanCriticFix(params, finding, candidate)
 		kept = append(kept, finding)
 	}
-	if len(rejected) == 0 {
+	if len(rejected) == 0 && len(sanitized) == 0 {
 		return
 	}
 	v.Findings = kept
 	if v.Verdict == "request-changes" && len(kept) == 0 {
-		v.Verdict = "approve"
+		// Facts may prove that every proposed edit is unauthorized, but they do
+		// not prove the candidate correct. H1i-1 upgraded an inconclusive review
+		// to approval after discarding a real obligation with a bad SPEC label.
+		v.Findings = []agent.Finding{{
+			Severity:  "major",
+			File:      "plan",
+			Invariant: "A filtered review cannot establish approval",
+			Issue:     "The reviewer requested changes, but every finding conflicted with accepted project facts; the review is inconclusive.",
+			Fix:       "Keep the accepted scope and existing topology unchanged, then re-evaluate the candidate against the accepted specification.",
+		}}
 	}
 	emit(params, "critic_findings_filtered", map[string]interface{}{
 		"round": round, "turn": turn, "rejected": rejected,
-		"rejected_count": len(rejected), "kept_count": len(kept),
+		"rejected_count": len(rejected), "sanitized": sanitized,
+		"sanitized_count": len(sanitized), "kept_count": len(v.Findings),
 		"effective_verdict": v.Verdict,
 		"detail":            "project facts removed findings that cannot authoritatively steer a plan repair",
 	})
@@ -54,20 +72,6 @@ func filterPlanCriticOutcome(params *ExecuteParams, outcome *agent.Outcome, cand
 
 func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, candidate string) string {
 	text := finding.Issue + "\n" + finding.Fix
-	for _, id := range uniqueStrings(criticIDPattern.FindAllString(text, -1)) {
-		prefix := strings.SplitN(id, "-", 2)[0]
-		switch prefix {
-		case "REQ", "SPEC":
-			if len(params.KnownIDs) > 0 && !params.KnownIDs[id] {
-				return fmt.Sprintf("%s is not an accepted project id", id)
-			}
-		case "M", "T":
-			if !strings.Contains(candidate, id) && prescribesNamedTopology(text, id) {
-				return fmt.Sprintf("%s is not in the candidate; a critic cannot allocate topology ids", id)
-			}
-		}
-	}
-
 	lower := strings.ToLower(text)
 	fixLower := strings.ToLower(finding.Fix)
 	for _, id := range uniqueStrings(criticIDPattern.FindAllString(text, -1)) {
@@ -91,6 +95,41 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 		}
 	}
 	return ""
+}
+
+// sanitizePlanCriticFinding separates a semantic observation from the edit a
+// fallible critic proposed for it. H1i proved that a bad SPEC label or a new
+// task number can coexist with the exact issue a human later rejects. Facts
+// remove those unsafe coordinates; they do not erase the observation.
+func sanitizePlanCriticFinding(params *ExecuteParams, finding agent.Finding, candidate string) (agent.Finding, []string) {
+	var reasons []string
+	for _, id := range uniqueStrings(criticIDPattern.FindAllString(finding.Issue, -1)) {
+		prefix := strings.SplitN(id, "-", 2)[0]
+		if (prefix == "REQ" || prefix == "SPEC") && len(params.KnownIDs) > 0 && !params.KnownIDs[id] {
+			finding.Issue = strings.ReplaceAll(finding.Issue, id, "the accepted specification")
+			reasons = append(reasons, id+" is not an accepted project id; the issue was retained without that coordinate")
+		}
+	}
+	unsafeFix := false
+	for _, id := range uniqueStrings(criticIDPattern.FindAllString(finding.Fix, -1)) {
+		prefix := strings.SplitN(id, "-", 2)[0]
+		switch prefix {
+		case "REQ", "SPEC":
+			if len(params.KnownIDs) > 0 && !params.KnownIDs[id] {
+				unsafeFix = true
+				reasons = append(reasons, id+" is not an accepted project id; the fix was neutralized")
+			}
+		case "M", "T":
+			if !strings.Contains(candidate, id) && prescribesNamedTopology(finding.Fix, id) {
+				unsafeFix = true
+				reasons = append(reasons, id+" is not in the candidate; the fix cannot allocate topology ids")
+			}
+		}
+	}
+	if unsafeFix {
+		finding.Fix = "Address the stated issue using accepted specification IDs and the existing candidate topology; do not allocate a named task or milestone in this review fix."
+	}
+	return finding, reasons
 }
 
 func namedDecisionSelected(candidate, name string) bool {

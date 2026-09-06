@@ -7,7 +7,7 @@ import (
 	"github.com/jrullan/ducklab/internal/agent"
 )
 
-func TestPlanCriticFactsRejectInventedIDsAndExcludedWork(t *testing.T) {
+func TestPlanCriticFactsRejectOnlyExcludedWork(t *testing.T) {
 	params := &ExecuteParams{
 		KnownIDs:     map[string]bool{"SPEC-001": true, "SPEC-006": true, "SPEC-007": true},
 		PriorityByID: map[string]string{"SPEC-006": "could", "SPEC-007": "wont"},
@@ -18,8 +18,6 @@ func TestPlanCriticFactsRejectInventedIDsAndExcludedWork(t *testing.T) {
 		finding agent.Finding
 		want    string
 	}{
-		{"unknown spec", agent.Finding{Issue: "T-003 references nonexistent SPEC-009", Fix: "replace it"}, "not an accepted project id"},
-		{"invented milestone", agent.Finding{Issue: "Missing M-07 for governance", Fix: "Add M-07"}, "cannot allocate topology ids"},
 		{"wont as work", agent.Finding{Issue: "SPEC-007 is not covered", Fix: "Add an acceptance slice implementing it"}, "is wont"},
 		{"unselected could", agent.Finding{Issue: "SPEC-006 lacks live probes", Fix: "Add a task to implement live probes"}, "is could"},
 	}
@@ -29,6 +27,25 @@ func TestPlanCriticFactsRejectInventedIDsAndExcludedWork(t *testing.T) {
 				t.Fatalf("reason = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPlanCriticFactsRetainIssueWhileSanitizingBadCoordinatesAndFixes(t *testing.T) {
+	params := &ExecuteParams{KnownIDs: map[string]bool{"SPEC-001": true}}
+	candidate := "## M-01 — Core\n\n### T-008 — Gate\n"
+	finding := agent.Finding{
+		Issue: "SPEC-018 obligation requires provenance evidence for the authority boundary",
+		Fix:   "Add T-009 to enforce the boundary",
+	}
+	got, reasons := sanitizePlanCriticFinding(params, finding, candidate)
+	if len(reasons) != 2 || !strings.Contains(got.Issue, "provenance evidence") || strings.Contains(got.Issue, "SPEC-018") {
+		t.Fatalf("sanitized issue=%q reasons=%v", got.Issue, reasons)
+	}
+	if strings.Contains(got.Fix, "T-009") || !strings.Contains(got.Fix, "existing candidate topology") {
+		t.Fatalf("unsafe fix survived: %q", got.Fix)
+	}
+	if reason := invalidPlanCriticFinding(params, got, candidate); reason != "" {
+		t.Fatalf("retained semantic issue was rejected: %s", reason)
 	}
 }
 
@@ -70,8 +87,8 @@ func TestPlanCriticFactsRespectNamedCouldInsideMixedSpec(t *testing.T) {
 func TestPlanCriticFactsFilterBeforeRepairAndRecordWhy(t *testing.T) {
 	var events []map[string]interface{}
 	params := &ExecuteParams{
-		KnownIDs:     map[string]bool{"SPEC-001": true, "SPEC-007": true},
-		PriorityByID: map[string]string{"SPEC-007": "wont"},
+		KnownIDs:     map[string]bool{"SPEC-001": true, "SPEC-006": true, "SPEC-007": true},
+		PriorityByID: map[string]string{"SPEC-006": "could", "SPEC-007": "wont"},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			if kind == "critic_findings_filtered" {
 				events = append(events, data)
@@ -79,16 +96,32 @@ func TestPlanCriticFactsFilterBeforeRepairAndRecordWhy(t *testing.T) {
 		},
 	}
 	v := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{
-		{Severity: "critical", Issue: "SPEC-009 is absent", Fix: "Add a task"},
+		{Severity: "critical", Issue: "SPEC-006 is absent", Fix: "Add a task to implement it"},
 		{Severity: "major", Issue: "SPEC-007 needs coverage", Fix: "Add an acceptance slice"},
 	}}
 	outcome := &agent.Outcome{Parsed: v}
 	filterPlanCriticOutcome(params, outcome, "## M-01 — Core\n", 2, 3)
-	if v.Verdict != "approve" || len(v.Findings) != 0 {
+	if v.Verdict != "request-changes" || len(v.Findings) != 1 || !strings.Contains(v.Findings[0].Issue, "review is inconclusive") {
 		t.Fatalf("effective verdict = %s findings=%v", v.Verdict, v.Findings)
 	}
 	if len(events) != 1 || events[0]["rejected_count"] != 2 {
 		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestPlanCriticFilterPreservesH1iIssueWhenCoordinateAndFixAreWrong(t *testing.T) {
+	params := &ExecuteParams{KnownIDs: map[string]bool{"SPEC-001": true}}
+	v := &agent.Verdict{Verdict: "request-changes", Findings: []agent.Finding{{
+		Severity: "critical",
+		Issue:    "SPEC-018 obligation not covered: validate provenance and executable fixtures and return evidence",
+		Fix:      "Add T-009 for this obligation",
+	}}}
+	filterPlanCriticOutcome(params, &agent.Outcome{Parsed: v}, "## M-01 — Core\n\n### T-008 — Gate\n", 1, 2)
+	if v.Verdict != "request-changes" || len(v.Findings) != 1 {
+		t.Fatalf("valid issue was filtered: verdict=%s findings=%v", v.Verdict, v.Findings)
+	}
+	if !strings.Contains(v.Findings[0].Issue, "validate provenance") || strings.Contains(v.Findings[0].Issue, "SPEC-018") || strings.Contains(v.Findings[0].Fix, "T-009") {
+		t.Fatalf("issue and fix were not separated: %+v", v.Findings[0])
 	}
 }
 

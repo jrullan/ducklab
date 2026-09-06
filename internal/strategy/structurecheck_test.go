@@ -443,7 +443,8 @@ func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
 		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{
 			ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"},
 			WorkUnit: "build the app", AcceptanceSlices: []string{"the app compiles"},
-			Produces: []string{"build-target:app"}, Consumes: []string{}, Verification: "meson compile -C build",
+			AcceptanceProbes: []string{"meson compile -C build"},
+			Produces:         []string{"build-target:app"}, Consumes: []string{}, Verification: "meson compile -C build",
 		}},
 	}}}
 	missing := sectioned("## M-01 — Setup\n\nNo task yet", agent.Section{ID: "M-01", Title: "Setup", Body: "No task yet"})
@@ -451,7 +452,7 @@ func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
 	if len(findings) != 1 || !strings.Contains(findings[0], "T-001") || !strings.Contains(findings[0], "append") {
 		t.Fatalf("missing task findings = %v", findings)
 	}
-	body := "### T-001 — Build\n\n**Implements:** SPEC-001\n**Work unit:** build the app\n**Acceptance slices:**\n- the app compiles\n**Produces:** build-target:other\n**Consumes:** none\n**Verification:** `true`"
+	body := "### T-001 — Build\n\n**Implements:** SPEC-001\n**Work unit:** build the app\n**Acceptance slices:**\n- the app compiles\n**Acceptance probes:**\n1. `meson compile -C build`\n**Produces:** build-target:other\n**Consumes:** none\n**Verification:** `true`"
 	drifted := sectioned("## M-01 — Setup\n\n"+body, agent.Section{ID: "M-01", Title: "Setup", Body: body})
 	findings = planManifestFindings(manifest, drifted)
 	if len(findings) != 2 || !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "Produces") }) {
@@ -508,12 +509,14 @@ func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
 		{ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{
 			ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"},
 			WorkUnit: "build the app", AcceptanceSlices: []string{"the app compiles"},
-			Produces: []string{"file:meson.build"}, Verification: "meson setup build",
+			AcceptanceProbes: []string{"meson setup build"},
+			Produces:         []string{"file:meson.build"}, Verification: "meson setup build",
 		}}},
 		{ID: "M-02", Title: "UI", Tasks: []agent.ManifestTask{{
 			ID: "T-002", Title: "Window", Implements: []string{"SPEC-002"},
 			WorkUnit: "show the window", AcceptanceSlices: []string{"the window opens"},
-			Produces: []string{"file:src/window.c"}, Consumes: []string{"file:meson.build"}, Verification: "meson compile -C build",
+			AcceptanceProbes: []string{"meson compile -C build"},
+			Produces:         []string{"file:src/window.c"}, Consumes: []string{"file:meson.build"}, Verification: "meson compile -C build",
 		}}},
 	}}
 	raw := "# Plan\n\n## M-01 — Wrong title\n\n**Toolchain:** cmd:meson\n\n### T-002 — misplaced\n\nUseful UI prose.\n\n**Produces:** wrong\n\n### T-099 — invented\n\nDrop me.\n\n## M-02 — UI\n\n### T-001 — misplaced\n\nUseful build prose.\n\n**Produces:** also-wrong"
@@ -533,6 +536,7 @@ func TestRenderedPlanIsCompiledOntoValidatedManifest(t *testing.T) {
 		!strings.Contains(secs[1].Body, "### T-002") || !strings.Contains(compiled.Text, "Useful build prose") ||
 		!strings.Contains(compiled.Text, "**Work unit:** build the app") ||
 		!strings.Contains(compiled.Text, "**Acceptance slices:**\n- the window opens") ||
+		!strings.Contains(compiled.Text, "**Acceptance probes:**\n1. `meson compile -C build`") ||
 		!strings.Contains(compiled.Text, "**Produces:** file:meson.build") || !strings.Contains(compiled.Text, "**Consumes:** none") ||
 		!strings.Contains(compiled.Text, "**Verification:** `meson compile -C build`") {
 		t.Fatalf("compiled plan did not preserve prose and enforce topology:\n%s", compiled.Text)
