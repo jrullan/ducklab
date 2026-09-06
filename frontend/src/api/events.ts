@@ -308,6 +308,7 @@ export const KNOWN_EVENT_TYPES = [
   "composition_review_started",
   "composition_review_completed",
   "reviewer_dissent",
+  "critic_findings_filtered",
   "proposal_review_blocked",
   "proposal_composition_mechanical_blocked",
   "proposal_composition_review_blocked",

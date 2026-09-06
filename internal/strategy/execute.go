@@ -57,6 +57,16 @@ type ExecuteParams struct {
 	// an Implements: target outside this set — eleven dangling references
 	// reached a plan's gate (benchmark run 3). Empty means "do not check".
 	KnownIDs map[string]bool
+	// PriorityByID carries accepted requirement/spec priorities into the
+	// reviewer boundary. A critic may reason about semantics, but it cannot
+	// promote deferred or excluded scope merely by wording a finding as an
+	// instruction to the architect.
+	PriorityByID map[string]string
+	// PriorityByName preserves obligation-level decisions when one SPEC groups
+	// requirements with different priorities. A finding about "Live probes"
+	// must still inherit the accepted requirement's could even if its parent
+	// SPEC also contains must obligations.
+	PriorityByName map[string]string
 	// SmallSeat says the project's implementer is a small local seat: the
 	// plan's structure check enforces the portion rule (≤3 top-level
 	// deliverables per task) instead of only asking for it.
@@ -714,6 +724,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					}
 				}
 			}
+			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
+				normalized, probeChanges, normalizeErr := normalizePlanProbeCardinality(outcome, params.SmallSeat)
+				if normalizeErr != nil {
+					err = normalizeErr
+				} else {
+					outcome = normalized
+					if probeChanges > 0 {
+						emit(params, "structure_normalized", map[string]interface{}{
+							"round": round, "turn": i, "fields": probeChanges,
+							"detail": "expanded a task's shared Verification command to one Acceptance probe per slice",
+						})
+					}
+				}
+			}
 			if outcome != nil {
 				result.Outcome = outcome
 				if turn.Role == config.RoleArchitect && params.InventoryCoverage != nil {
@@ -752,6 +776,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// and the loop resumes from the top once answered.
 				result.Error = err
 				return result, err
+			}
+			if turn.Persona == PersonaCritic && kindOfContract(turn.Contract, script) == "plan" && lastArchitect != nil {
+				filterPlanCriticOutcome(params, outcome, lastArchitect.Text, round, script.TurnIndexBase+i)
 			}
 			// A document council's architect: check the structure of the draft
 			// against the rules and the draft before it, once; and notice a
@@ -1298,6 +1325,7 @@ func finalDocumentReview(ctx context.Context, script *Script, params *ExecutePar
 		if err != nil {
 			return err
 		}
+		filterPlanCriticOutcome(params, outcome, candidate.Text, result.Rounds, index)
 		emitMessage(params, result.Rounds, index, turn.Role, duckling, outcome)
 		emit(params, "turn_end", map[string]interface{}{
 			"round": result.Rounds, "turn": index, "role": string(turn.Role), "final_review": true,

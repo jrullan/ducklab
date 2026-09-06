@@ -499,6 +499,51 @@ func taskVerificationCommand(body string) string {
 	return strings.TrimSpace(m[1])
 }
 
+// normalizePlanProbeCardinality handles the one mechanical repair whose valid
+// value is already present in the task. H1g spent repeated full model calls
+// turning one broad Verification command into N identical probes. Replication
+// is safe only from zero/one existing executable probe; a partial multi-probe
+// contract may encode distinct intent and remains a normal reviewed repair.
+func normalizePlanProbeCardinality(outcome *agent.Outcome, smallSeat bool) (*agent.Outcome, int, error) {
+	if outcome == nil || !smallSeat {
+		return outcome, 0, nil
+	}
+	doc, err := artifact.Parse(outcome.Text, artifact.KindPlan)
+	if err != nil {
+		return outcome, 0, err
+	}
+	text, changed := outcome.Text, 0
+	for _, milestone := range doc.Sections {
+		for _, task := range milestone.Children {
+			slices := topLevelChecklistItems(task.Body, "Acceptance slices")
+			items, commands := checklistCommandCounts(task.Body, "Acceptance probes")
+			verification := taskVerificationCommand(task.Body)
+			if slices <= 1 || verification == "" || items == slices && commands == items || items > 1 || commands > 1 {
+				continue
+			}
+			probes := make([]string, slices)
+			for i := range probes {
+				probes[i] = fmt.Sprintf("%d. `%s`", i+1, verification)
+			}
+			text, err = setMarkdownField(text, task.ID, "Acceptance probes", strings.Join(probes, "\n"))
+			if err != nil {
+				return outcome, changed, err
+			}
+			changed++
+		}
+	}
+	if changed == 0 {
+		return outcome, 0, nil
+	}
+	parsed, err := agent.ParseContract("markdown_sections:M", text)
+	if err != nil {
+		return outcome, 0, err
+	}
+	copy := *outcome
+	copy.Text, copy.Parsed = text, parsed
+	return &copy, changed, nil
+}
+
 func invalidSingleOutputCompile(command string) bool {
 	fields := strings.Fields(command)
 	hasCompile, hasOutput, inputs := false, false, 0

@@ -312,3 +312,45 @@ func TestPlanRejectsSingleOutputCompileWithMultipleInputs(t *testing.T) {
 		t.Fatalf("materialized proposal did not block invalid verification: %s", joined)
 	}
 }
+
+func TestPlanNormalizesSharedVerificationIntoProbeCardinality(t *testing.T) {
+	raw := "## M-01 — Core\n\n### T-001 — Compose\n\n**Implements:** SPEC-001\n\n**Work unit:** Compose results\n\n**Acceptance slices:**\n- Orders results\n- Normalizes errors\n- Chooses a gate\n\n**Acceptance probes:**\n1. `cargo test composition`\n\n**Produces:** file:src/composition.rs\n\n**Consumes:** none\n\n**Verification:** `cargo test composition`\n\n**Exercises:** file:src/composition.rs"
+	parsed, err := agent.ParseContract("markdown_sections:M", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, changes, err := normalizePlanProbeCardinality(&agent.Outcome{Text: raw, Parsed: parsed}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != 1 || strings.Count(got.Text, "`cargo test composition`") != 4 {
+		t.Fatalf("normalization changes=%d text=\n%s", changes, got.Text)
+	}
+	doc, err := artifact.Parse(got.Text, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := doc.Section("T-001")
+	if task == nil {
+		t.Fatal("normalized task is absent")
+	}
+	items, commands := checklistCommandCounts(task.Body, "Acceptance probes")
+	if items != 3 || commands != 3 {
+		t.Fatalf("probe items=%d commands=%d", items, commands)
+	}
+}
+
+func TestPlanLeavesPartialDistinctProbeContractForReviewedRepair(t *testing.T) {
+	raw := "## M-01 — Core\n\n### T-001 — Compose\n\n**Acceptance slices:**\n- One\n- Two\n- Three\n\n**Acceptance probes:**\n1. `cargo test one`\n2. `cargo test two`\n\n**Verification:** `cargo test composition`"
+	parsed, err := agent.ParseContract("markdown_sections:M", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, changes, err := normalizePlanProbeCardinality(&agent.Outcome{Text: raw, Parsed: parsed}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != 0 || got.Text != raw {
+		t.Fatal("a partial distinct probe contract was overwritten")
+	}
+}

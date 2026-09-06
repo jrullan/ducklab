@@ -346,6 +346,62 @@ func (s *Service) knownIDs(projectRoot string) map[string]bool {
 	return known
 }
 
+// acceptedPriorities supplies facts the plan critic is not allowed to
+// reinterpret. Only accepted requirements and specs participate: a proposed
+// document has not yet changed the product decision it amends.
+func (s *Service) acceptedPriorities(projectRoot string) map[string]string {
+	out := map[string]string{}
+	for _, kind := range []artifact.Kind{artifact.KindRequirements, artifact.KindSpec} {
+		doc, err := artifact.Load(projectRoot, kind)
+		if err != nil {
+			continue
+		}
+		for _, section := range doc.Sections {
+			if priority := strings.ToLower(strings.TrimSpace(section.Field("priority"))); priority != "" {
+				out[section.ID] = priority
+			}
+		}
+	}
+	return out
+}
+
+func (s *Service) acceptedPriorityNames(projectRoot string) map[string]string {
+	out := map[string]string{}
+	for _, kind := range []artifact.Kind{artifact.KindRequirements, artifact.KindSpec} {
+		doc, err := artifact.Load(projectRoot, kind)
+		if err != nil {
+			continue
+		}
+		for _, section := range doc.Sections {
+			priority := strings.ToLower(strings.TrimSpace(section.Field("priority")))
+			name := strings.ToLower(strings.TrimSpace(section.Title))
+			if priority != "" && name != "" {
+				out[name] = priority
+			}
+			// A mixed SPEC can contain one explicitly permissive obligation
+			// beside mandatory ones. Preserve the named MAY decision instead of
+			// promoting it through the parent section's broader Implements link.
+			for _, line := range strings.Split(section.Body, "\n") {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "- **") {
+					continue
+				}
+				end := strings.Index(line[4:], ":**")
+				if end < 0 {
+					continue
+				}
+				end += 4
+				label := strings.ToLower(strings.TrimSpace(line[4:end]))
+				body := strings.ToUpper(line[end+3:])
+				if label != "" && strings.Contains(" "+body+" ", " MAY ") && !strings.Contains(" "+body+" ", " MUST ") {
+					out[label] = "could"
+				}
+			}
+		}
+	}
+	return out
+}
+
 // smallImplementerSeat reports whether the project's build implementer is a
 // local seat — a small model, by the founding thesis — so document stages
 // can portion the plan for it (ducklab_portion_control).
@@ -750,8 +806,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 					}
 					return inventoryUnaccounted(inventory.Items, doc)
 				},
-				KnownIDs:  s.knownIDs(projectRoot),
-				SmallSeat: s.smallImplementerSeat(rs.run.ProjectID),
+				KnownIDs:       s.knownIDs(projectRoot),
+				PriorityByID:   s.acceptedPriorities(projectRoot),
+				PriorityByName: s.acceptedPriorityNames(projectRoot),
+				SmallSeat:      s.smallImplementerSeat(rs.run.ProjectID),
 				StructureCheck: func(raw string) []string {
 					switch req.Stage {
 					case "spec":
