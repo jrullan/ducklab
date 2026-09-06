@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -253,7 +254,7 @@ func TestMarkdownSectionsCanonicalizeNumericPadding(t *testing.T) {
 }
 
 func TestPlanManifestContractRejectsIncompleteTopology(t *testing.T) {
-	valid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"produces":["build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
+	valid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"produces":["build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
 	parsed, err := ParseContract("json:plan_manifest", valid)
 	if err != nil {
 		t.Fatal(err)
@@ -262,14 +263,14 @@ func TestPlanManifestContractRejectsIncompleteTopology(t *testing.T) {
 	if len(manifest.Milestones) != 1 || manifest.Milestones[0].Tasks[0].ID != "T-001" {
 		t.Fatalf("manifest = %#v", manifest)
 	}
-	invalid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":[],"produces":[],"verification":""}]}]}`
+	invalid := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":[],"work_unit":"","acceptance_slices":[],"produces":[],"verification":""}]}]}`
 	if _, err := ParseContract("json:plan_manifest", invalid); err == nil {
 		t.Fatal("incomplete topology passed the manifest contract")
 	}
 }
 
 func TestPlanManifestCanonicalizesNumericPadding(t *testing.T) {
-	parsed, err := ParseContract("json:plan_manifest", `{"milestones":[{"id":"M-001","title":"Setup","tasks":[{"id":"T-0001","title":"Build","implements":["SPEC-001"],"produces":["build-target:app"],"consumes":[],"verification":"true"}]}]}`)
+	parsed, err := ParseContract("json:plan_manifest", `{"milestones":[{"id":"M-001","title":"Setup","tasks":[{"id":"T-0001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"produces":["build-target:app"],"consumes":[],"verification":"true"}]}]}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,11 +282,29 @@ func TestPlanManifestCanonicalizesNumericPadding(t *testing.T) {
 
 func TestPlanManifestRejectsDuplicateProducers(t *testing.T) {
 	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[` +
-		`{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"produces":["src/main.c"],"consumes":[],"verification":"true"},` +
-		`{"id":"T-002","title":"Wire app","implements":["SPEC-002"],"produces":[" src/main.c "],"consumes":[],"verification":"true"}` +
+		`{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"work_unit":"scaffold","acceptance_slices":["scaffold exists"],"produces":["src/main.c"],"consumes":[],"verification":"true"},` +
+		`{"id":"T-002","title":"Wire app","implements":["SPEC-002"],"work_unit":"wire app","acceptance_slices":["app is wired"],"produces":[" src/main.c "],"consumes":[],"verification":"true"}` +
 		`]}]}`
 	if _, err := ParseContract("json:plan_manifest", text); err == nil || !strings.Contains(err.Error(), "both produce src/main.c") {
 		t.Fatalf("duplicate producer error = %v", err)
+	}
+}
+
+func TestPlanManifestRequiresAtomicTaskContract(t *testing.T) {
+	base := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":%s,"acceptance_slices":%s,"produces":["build-target:app"],"consumes":[],"verification":"true"}]}]}`
+	for _, tc := range []struct {
+		name, work, slices string
+	}{
+		{"missing work unit", `""`, `["builds"]`},
+		{"missing slices", `"build app"`, `[]`},
+		{"empty slice", `"build app"`, `[""]`},
+		{"too many slices", `"build app"`, `["one","two","three","four"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseContract("json:plan_manifest", fmt.Sprintf(base, tc.work, tc.slices)); err == nil {
+				t.Fatal("non-atomic manifest task passed")
+			}
+		})
 	}
 }
 

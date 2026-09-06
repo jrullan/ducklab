@@ -632,6 +632,35 @@ func topLevelChecklistItems(body, label string) int {
 	return n
 }
 
+func topLevelChecklistValues(body, label string) []string {
+	var values []string
+	in := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimRight(line, " \t")
+		switch {
+		case strings.EqualFold(strings.TrimSpace(t), "**"+label+":**"):
+			in = true
+			continue
+		case in && (strings.HasPrefix(strings.TrimSpace(t), "**") || strings.HasPrefix(t, "#")):
+			in = false
+		}
+		if !in {
+			continue
+		}
+		value := ""
+		switch {
+		case strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* "):
+			value = t[2:]
+		case orderedChecklistItem.MatchString(t):
+			value = orderedChecklistItem.ReplaceAllString(t, "")
+		}
+		if value != "" {
+			values = append(values, strings.TrimSpace(value))
+		}
+	}
+	return values
+}
+
 func checklistCommandCounts(body, label string) (items, commands int) {
 	in := false
 	for _, line := range strings.Split(body, "\n") {
@@ -1243,6 +1272,12 @@ func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) 
 					findings = append(findings, fmt.Sprintf("%s must **Implement:** %s from the validated manifest", task.ID, id))
 				}
 			}
+			if strings.TrimSpace(markdownFieldValue(actual.body, "Work unit")) != task.WorkUnit {
+				findings = append(findings, fmt.Sprintf("%s **Work unit:** differs from the validated manifest — set it to %s", task.ID, task.WorkUnit))
+			}
+			if !slices.Equal(topLevelChecklistValues(actual.body, "Acceptance slices"), task.AcceptanceSlices) {
+				findings = append(findings, fmt.Sprintf("%s **Acceptance slices:** differ from the validated manifest — restore its %d atomic outcomes", task.ID, len(task.AcceptanceSlices)))
+			}
 			if !sameStringSet(taskFieldItems(actual.body, "Produces"), task.Produces) {
 				findings = append(findings, fmt.Sprintf("%s **Produces:** differs from the validated manifest — set it to %s", task.ID, strings.Join(task.Produces, ", ")))
 			}
@@ -1322,6 +1357,8 @@ func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest,
 			block := "### " + task.ID + " — " + strings.TrimSpace(task.Title) + "\n\n" + strings.TrimSpace(body)
 			fields := []struct{ name, value string }{
 				{"Implements", strings.Join(task.Implements, ", ")},
+				{"Work unit", task.WorkUnit},
+				{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
 				{"Produces", manifestItems(task.Produces)},
 				{"Consumes", manifestItems(task.Consumes)},
 				{"Verification", "`" + strings.Trim(strings.TrimSpace(task.Verification), "`") + "`"},
@@ -1361,6 +1398,17 @@ func manifestItems(items []string) string {
 		return "none"
 	}
 	return strings.Join(items, ", ")
+}
+
+func manifestAcceptanceSlices(items []string) string {
+	var lines []string
+	for _, item := range items {
+		lines = append(lines, "- "+strings.TrimSpace(item))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n")
 }
 
 func canonicalPlanTaskID(id string) (string, bool) {
@@ -1475,7 +1523,9 @@ func setMarkdownField(text, id, field, value string) (string, error) {
 	}
 	trimmedValue := strings.TrimSpace(value)
 	line := "**" + strings.TrimSpace(field) + ":** " + trimmedValue
-	if strings.Contains(trimmedValue, "\n") {
+	blockField := strings.EqualFold(strings.TrimSpace(field), "Acceptance slices") ||
+		strings.EqualFold(strings.TrimSpace(field), "Acceptance probes")
+	if strings.Contains(trimmedValue, "\n") || blockField {
 		// Block-valued fields such as Acceptance slices need their first list
 		// item below the marker. Flattening it onto the marker made a valid
 		// two-item repair look like a one-item field on the next check.

@@ -145,12 +145,14 @@ type ManifestMilestone struct {
 }
 
 type ManifestTask struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Implements   []string `json:"implements"`
-	Produces     []string `json:"produces"`
-	Consumes     []string `json:"consumes"`
-	Verification string   `json:"verification"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	Implements       []string `json:"implements"`
+	WorkUnit         string   `json:"work_unit"`
+	AcceptanceSlices []string `json:"acceptance_slices"`
+	Produces         []string `json:"produces"`
+	Consumes         []string `json:"consumes"`
+	Verification     string   `json:"verification"`
 }
 
 func parsePlanManifest(text string) (*PlanManifest, error) {
@@ -177,10 +179,19 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 		for ti, task := range milestone.Tasks {
 			taskID, ok := canonicalContractID(task.ID, "T")
 			if !ok || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
+				strings.TrimSpace(task.WorkUnit) == "" || len(task.AcceptanceSlices) == 0 || len(task.AcceptanceSlices) > 3 ||
 				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[taskID] {
 				return nil, fmt.Errorf("plan manifest contract: invalid task %d in %s", ti, milestone.ID)
 			}
 			manifest.Milestones[mi].Tasks[ti].ID = taskID
+			manifest.Milestones[mi].Tasks[ti].WorkUnit = strings.TrimSpace(task.WorkUnit)
+			for si, slice := range task.AcceptanceSlices {
+				slice = strings.TrimSpace(slice)
+				if slice == "" {
+					return nil, fmt.Errorf("plan manifest contract: empty acceptance slice in %s", taskID)
+				}
+				manifest.Milestones[mi].Tasks[ti].AcceptanceSlices[si] = slice
+			}
 			seen[taskID] = true
 			for pi, item := range task.Produces {
 				item = strings.TrimSpace(item)

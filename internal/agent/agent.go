@@ -1322,14 +1322,18 @@ produce the compact dependency manifest that constrains it.
 Reply with exactly one JSON object:
 {"milestones":[{"id":"M-01","title":"short title","tasks":[
  {"id":"T-001","title":"short action","implements":["SPEC-001"],
+  "work_unit":"one cohesive capability",
+  "acceptance_slices":["observable outcome 1","observable outcome 2"],
   "produces":["file:path/or/capability"],"consumes":[],
   "verification":"executable command"}]}]}
 
 Rules:
 - Each task belongs to exactly one milestone and each produced artifact has one producer.
+- Each task has exactly one cohesive work_unit and 1-3 observable acceptance_slices.
+- If a proposed task needs more than three slices or spans independent concerns, split it here before IDs and artifact ownership are frozen.
 - Use exact file, directory, build-target, or capability names.
 - A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
-- Keep tasks small: at most three top-level deliverables when rendered.
+- Keep tasks small; the next architect renders work_unit and acceptance_slices verbatim.
 - Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
 - The next architect turn receives this validated manifest and renders the full plan.`
