@@ -9,6 +9,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/tools"
 )
 
 func councilParams(rec *recorder, outcomes ...*agent.Outcome) *ExecuteParams {
@@ -217,7 +218,16 @@ func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	planText := "## M-01 — Setup\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n**Produces:** file:meson.build, build-target:app\n**Consumes:** none\n**Verification:** `meson compile -C build`"
 	plan := &agent.Outcome{Text: planText, Parsed: []agent.Section{{ID: "M-01", Title: "Setup", Body: strings.SplitN(planText, "\n\n", 2)[1]}}}
 	rec := &recorder{}
-	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec, manifest, verdictOutcome("approve"), plan, verdictOutcome("approve")))
+	params := councilParams(rec, manifest, verdictOutcome("approve"), plan, verdictOutcome("approve"))
+	params.ExecContext = &tools.ExecContext{}
+	baseRunner := params.Runner
+	params.Runner = func(ctx context.Context, turn *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
+		if turn.Persona == PersonaPlanManifestCritic && params.ExecContext.DraftUnderReview["plan"] != manifestText {
+			t.Fatalf("manifest critic draft = %q", params.ExecContext.DraftUnderReview["plan"])
+		}
+		return baseRunner(ctx, turn, duckling, prompt, toolbelt, tc)
+	}
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), params)
 	if err != nil {
 		t.Fatal(err)
 	}

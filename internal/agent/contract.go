@@ -59,7 +59,26 @@ type ManifestAudit struct {
 }
 
 type ManifestAuditEntry struct {
-	ID       string `json:"id"`
+	ID          string                    `json:"id"`
+	Status      string                    `json:"status"` // pass | fail
+	Evidence    string                    `json:"evidence"`
+	SliceProbes []ManifestSliceProbeAudit `json:"slice_probes,omitempty"`
+	Ownership   *ManifestOwnershipAudit   `json:"ownership,omitempty"`
+}
+
+// ManifestSliceProbeAudit forces a pre-freeze critic to account for the exact
+// pairing the implementer will inherit. A task-level "looks cohesive" pass did
+// not prevent probes for one slice being placed beside another.
+type ManifestSliceProbeAudit struct {
+	Slice    int    `json:"slice"`
+	Status   string `json:"status"` // pass | fail
+	Evidence string `json:"evidence"`
+}
+
+// ManifestOwnershipAudit records whether Produces contains the editable lanes
+// required by the work unit. A build-target names an output; it does not grant
+// ownership of Cargo.toml, meson.build, or another build definition.
+type ManifestOwnershipAudit struct {
 	Status   string `json:"status"` // pass | fail
 	Evidence string `json:"evidence"`
 }
@@ -180,6 +199,12 @@ type ManifestTask struct {
 	Verification     string   `json:"verification"`
 }
 
+// MaxPlanManifestTasks is a hard small-seat boundary, not a style hint. Once
+// a manifest is approved its IDs cannot be split or reallocated, so accepting
+// an oversized graph creates a frozen document that later reviewers can only
+// repair by violating the topology contract.
+const MaxPlanManifestTasks = 10
+
 func parsePlanManifest(text string) (*PlanManifest, error) {
 	raw, err := extractJSONObject(text)
 	if err != nil {
@@ -200,6 +225,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 	}
 	seen := map[string]bool{}
 	producer := map[string]string{}
+	taskCount := 0
 	for mi, milestone := range manifest.Milestones {
 		milestoneID, ok := canonicalContractID(milestone.ID, "M")
 		if !ok || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestoneID] {
@@ -208,6 +234,10 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 		manifest.Milestones[mi].ID = milestoneID
 		seen[milestoneID] = true
 		for ti, task := range milestone.Tasks {
+			taskCount++
+			if taskCount > MaxPlanManifestTasks {
+				return nil, fmt.Errorf("plan manifest contract: at most %d tasks are allowed, got %d", MaxPlanManifestTasks, taskCount)
+			}
 			taskID, ok := canonicalContractID(task.ID, "T")
 			if !ok || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
 				strings.TrimSpace(task.WorkUnit) == "" || len(task.AcceptanceSlices) == 0 || len(task.AcceptanceSlices) > 3 ||

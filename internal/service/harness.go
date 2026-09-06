@@ -21,11 +21,17 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 	}
 	active := append([]string(nil), ectx.ActiveCapabilities...)
 	ectx.NormalizeContract = func(role config.Role, contract string, parsed interface{}) (bool, error) {
-		if role != config.RoleReviewer || (contract != "verdict" && contract != "verdict:native") {
+		if role != config.RoleReviewer {
 			return false, nil
 		}
 		verdict, ok := parsed.(*agent.Verdict)
 		if !ok || verdict == nil {
+			return false, nil
+		}
+		if strings.HasPrefix(contract, "verdict:plan_manifest:") {
+			return false, validatePlanManifestAuditEvidence(ectx, verdict)
+		}
+		if contract != "verdict" && contract != "verdict:native" {
 			return false, nil
 		}
 		if count := len(ectx.TaskAcceptanceProbes); count > 0 {
@@ -101,6 +107,71 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 		}
 		return true, nil
 	}
+}
+
+func validatePlanManifestAuditEvidence(ectx *tools.ExecContext, verdict *agent.Verdict) error {
+	if ectx == nil || verdict == nil || verdict.ManifestAudit == nil {
+		return nil
+	}
+	draft := strings.TrimSpace(ectx.DraftUnderReview["plan"])
+	if draft == "" {
+		return fmt.Errorf("verdict contract: authoritative plan manifest candidate is unavailable")
+	}
+	parsed, err := agent.ParseContract("json:plan_manifest", draft)
+	if err != nil {
+		return fmt.Errorf("verdict contract: parse authoritative plan manifest candidate: %w", err)
+	}
+	manifest := parsed.(*agent.PlanManifest)
+	auditByID := make(map[string]agent.ManifestAuditEntry, len(verdict.ManifestAudit.Tasks))
+	for _, entry := range verdict.ManifestAudit.Tasks {
+		auditByID[entry.ID] = entry
+	}
+	for _, milestone := range manifest.Milestones {
+		for _, task := range milestone.Tasks {
+			entry, ok := auditByID[task.ID]
+			if !ok {
+				continue // the generic contract reports the missing task target.
+			}
+			if len(entry.SliceProbes) != len(task.AcceptanceSlices) {
+				return fmt.Errorf("verdict contract: manifest_audit task %s slice_probes must contain exactly %d entries", task.ID, len(task.AcceptanceSlices))
+			}
+			seen, nestedFailure := make(map[int]bool, len(entry.SliceProbes)), false
+			for _, evidence := range entry.SliceProbes {
+				if evidence.Slice < 1 || evidence.Slice > len(task.AcceptanceSlices) || seen[evidence.Slice] {
+					return fmt.Errorf("verdict contract: manifest_audit task %s must audit each slice 1..%d exactly once", task.ID, len(task.AcceptanceSlices))
+				}
+				seen[evidence.Slice] = true
+				status := strings.ToLower(strings.TrimSpace(evidence.Status))
+				if status != "pass" && status != "fail" {
+					return fmt.Errorf("verdict contract: manifest_audit task %s slice %d status must be pass or fail", task.ID, evidence.Slice)
+				}
+				if !concreteAuditEvidence(evidence.Evidence) {
+					return fmt.Errorf("verdict contract: manifest_audit task %s slice %d must explain the exact probe/outcome pairing", task.ID, evidence.Slice)
+				}
+				nestedFailure = nestedFailure || status == "fail"
+			}
+			if entry.Ownership == nil {
+				return fmt.Errorf("verdict contract: manifest_audit task %s ownership audit is required", task.ID)
+			}
+			ownershipStatus := strings.ToLower(strings.TrimSpace(entry.Ownership.Status))
+			if ownershipStatus != "pass" && ownershipStatus != "fail" {
+				return fmt.Errorf("verdict contract: manifest_audit task %s ownership status must be pass or fail", task.ID)
+			}
+			if !concreteAuditEvidence(entry.Ownership.Evidence) {
+				return fmt.Errorf("verdict contract: manifest_audit task %s ownership must account for editable Produces lanes", task.ID)
+			}
+			nestedFailure = nestedFailure || ownershipStatus == "fail"
+			if nestedFailure && strings.EqualFold(strings.TrimSpace(entry.Status), "pass") {
+				return fmt.Errorf("verdict contract: manifest_audit task %s cannot pass while a slice/probe or ownership audit fails", task.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func concreteAuditEvidence(value string) bool {
+	detail := strings.ToLower(strings.Trim(strings.TrimSpace(value), "."))
+	return detail != "" && detail != "ok" && detail != "verified" && detail != "green" && detail != "pass" && detail != "fail"
 }
 
 // ensureHarnessProfile resolves once and persists before any coding seat is

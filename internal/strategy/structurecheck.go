@@ -1390,6 +1390,51 @@ func reconcilePlanManifestTopology(outcome *agent.Outcome, manifest *agent.PlanM
 	return reconcilePlanManifestMode(outcome, manifest, contract, false)
 }
 
+// restorePlanExercises keeps semantic revisions from rotating verification
+// evidence between frozen task IDs. The previous draft has already passed the
+// deterministic Exercises/Produces check. A dedicated structure-repair turn
+// does not call this helper, so an invalid field remains repairable instead of
+// being restored forever.
+func restorePlanExercises(outcome, previous *agent.Outcome, contract string) (*agent.Outcome, int, error) {
+	if outcome == nil || previous == nil || contract != "markdown_sections:M" {
+		return outcome, 0, nil
+	}
+	prior := map[string][]string{}
+	for _, sec := range sectionsOf(previous) {
+		for _, task := range taskBlocks(sec.Body) {
+			if values := taskFieldItems(task.body, "Exercises"); len(values) > 0 {
+				prior[task.id] = values
+			}
+		}
+	}
+	text, changes := outcome.Text, 0
+	for _, sec := range sectionsOf(outcome) {
+		for _, task := range taskBlocks(sec.Body) {
+			values := prior[task.id]
+			desired := strings.Join(values, ", ")
+			if len(values) == 0 || strings.TrimSpace(markdownFieldValue(task.body, "Exercises")) == desired {
+				continue
+			}
+			var err error
+			text, err = setMarkdownField(text, task.id, "Exercises", desired)
+			if err != nil {
+				return outcome, changes, err
+			}
+			changes++
+		}
+	}
+	if changes == 0 {
+		return outcome, 0, nil
+	}
+	parsed, err := agent.ParseContract(contract, text)
+	if err != nil {
+		return outcome, 0, err
+	}
+	normalized := *outcome
+	normalized.Text, normalized.Parsed = text, parsed
+	return &normalized, changes, nil
+}
+
 func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManifest, contract string, full bool) (*agent.Outcome, int, error) {
 	if outcome == nil || manifest == nil || contract != "markdown_sections:M" {
 		return outcome, 0, nil

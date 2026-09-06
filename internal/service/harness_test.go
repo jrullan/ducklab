@@ -12,6 +12,31 @@ import (
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
+func TestPlanManifestReviewAccountsForEverySliceProbeAndOwnership(t *testing.T) {
+	manifest := `{"milestones":[{"id":"M-01","title":"Core","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"configure and build","acceptance_slices":["configuration is valid","binary builds"],"acceptance_probes":["cargo metadata","cargo build"],"produces":["file:Cargo.toml","build-target:fledge"],"consumes":[],"verification":"cargo build"}]}]}`
+	ectx := &tools.ExecContext{DraftUnderReview: map[string]string{"plan": manifest}}
+	attachReviewContractValidator(ectx)
+	verdict := &agent.Verdict{Verdict: "approve", ManifestAudit: &agent.ManifestAudit{
+		Specs: []agent.ManifestAuditEntry{{ID: "SPEC-001", Status: "pass", Evidence: "T-001 covers the build contract"}},
+		Tasks: []agent.ManifestAuditEntry{{ID: "T-001", Status: "pass", Evidence: "one build concern"}},
+	}}
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:plan_manifest:SPEC-001|T-001", verdict); err == nil || !strings.Contains(err.Error(), "slice_probes") {
+		t.Fatalf("missing slice audit error = %v", err)
+	}
+	verdict.ManifestAudit.Tasks[0].SliceProbes = []agent.ManifestSliceProbeAudit{
+		{Slice: 1, Status: "pass", Evidence: "cargo metadata parses the exact Cargo.toml configuration"},
+		{Slice: 2, Status: "pass", Evidence: "cargo build exits zero only after producing the binary"},
+	}
+	verdict.ManifestAudit.Tasks[0].Ownership = &agent.ManifestOwnershipAudit{Status: "pass", Evidence: "file:Cargo.toml is the edited definition and build-target:fledge is the output"}
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:plan_manifest:SPEC-001|T-001", verdict); err != nil {
+		t.Fatalf("complete task audit failed: %v", err)
+	}
+	verdict.ManifestAudit.Tasks[0].SliceProbes[1].Status = "fail"
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict:plan_manifest:SPEC-001|T-001", verdict); err == nil || !strings.Contains(err.Error(), "cannot pass") {
+		t.Fatalf("contradictory nested audit error = %v", err)
+	}
+}
+
 func TestReviewerRemediesContradictingActiveCapabilitiesAreNormalized(t *testing.T) {
 	ectx := &tools.ExecContext{ActiveCapabilities: []string{"gtk4-ui"}}
 	attachReviewContractValidator(ectx)

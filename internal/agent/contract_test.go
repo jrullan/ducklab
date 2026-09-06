@@ -1,10 +1,30 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestPlanManifestRejectsMoreThanTenTasks(t *testing.T) {
+	manifest := PlanManifest{Milestones: []ManifestMilestone{{ID: "M-01", Title: "Too wide"}}}
+	for i := 1; i <= MaxPlanManifestTasks+1; i++ {
+		manifest.Milestones[0].Tasks = append(manifest.Milestones[0].Tasks, ManifestTask{
+			ID: fmt.Sprintf("T-%03d", i), Title: "Task", Implements: []string{"SPEC-001"},
+			WorkUnit: "one concern", AcceptanceSlices: []string{"observable"},
+			AcceptanceProbes: []string{fmt.Sprintf("test-task-%d", i)},
+			Produces:         []string{fmt.Sprintf("file:src/task%d.rs", i)}, Verification: "cargo test",
+		})
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseContract("json:plan_manifest", string(raw)); err == nil || !strings.Contains(err.Error(), "at most 10 tasks") {
+		t.Fatalf("oversized manifest error = %v", err)
+	}
+}
 
 func TestDecompositionContractAllowsLongBodies(t *testing.T) {
 	declared := 12000

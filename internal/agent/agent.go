@@ -1028,11 +1028,14 @@ or "green" are not concrete evidence.`, len(ectx.TaskAcceptanceProbes))
 		rolePrompt += fmt.Sprintf(`
 
 Your JSON verdict MUST contain a complete manifest_audit in this exact shape:
-"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete work unit, slice and probe evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion and slice/probe evidence"}]}
+"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete work unit, slice and probe evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces names every editable file/directory required by the work unit"}}]}
 Audit every target exactly once. SPEC targets: %s. Task targets: %s. An approval
 requires every entry to pass. A request-changes verdict requires every blocking
 finding to be reflected by at least one failed entry. Do not omit passing
-targets; absence is not evidence that you reviewed them.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
+targets; absence is not evidence that you reviewed them. Every task needs one
+slice_probes entry per acceptance slice, in order, plus ownership. A
+build-target is output identity, not evidence that the task owns the build
+definition it must edit.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
 	}
 	if turn.Persona == "consultant" {
 		rolePrompt = consultantPrompt
@@ -1793,14 +1796,20 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 	attempts := 0
 	for _, part := range []target{{"specs", specs}, {"tasks", tasks}} {
 		attempts++
+		entryShape := `{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}`
+		extraRule := ""
+		if part.kind == "tasks" {
+			entryShape = `{"id":"target","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"why this exact command observes this exact outcome and polarity"}],"ownership":{"status":"pass|fail","evidence":"why Produces names every editable lane required by the work unit"}}`
+			extraRule = " Include one slice_probes entry for every acceptance slice in that task, in order, and one ownership audit. A build-target does not substitute for the build definition the task edits."
+		}
 		conv := append([]provider.Message{}, msgs...)
 		conv = append(conv,
 			provider.Message{Role: "assistant", Content: original},
 			provider.Message{Role: "user", Content: fmt.Sprintf(`Complete only the missing %s ledger for the same plan-manifest review. Do not repeat the verdict or findings.
 
-Reply with ONLY this JSON object: {"%s":[{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}]}
+Reply with ONLY this JSON object: {"%s":[%s]}
 
-Include every target exactly once, in this order: %s. Use fail when the original findings show that target is defective; do not hide a finding behind pass.`, part.kind, part.kind, strings.Join(part.ids, ", "))},
+Include every target exactly once, in this order: %s. Use fail when the original findings show that target is defective; do not hide a finding behind pass.%s`, part.kind, part.kind, entryShape, strings.Join(part.ids, ", "), extraRule)},
 		)
 		req := provider.ChatRequest{Model: loop.Duckling.Model, Messages: conv}
 		applySampling(&req, loop.Duckling, turn.Contract)
@@ -1866,11 +1875,12 @@ func repairInstruction(contract string, parseErr error) string {
 
 What was wrong: %v
 
-Reply with ONLY one JSON object: {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"manifest","line":0,"issue":"defect","fix":"bounded remedy"}],"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}]}}
+Reply with ONLY one JSON object: {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"manifest","line":0,"issue":"defect","fix":"bounded remedy"}],"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion evidence","slice_probes":[{"slice":1,"status":"pass|fail","evidence":"exact probe/outcome/polarity evidence"}],"ownership":{"status":"pass|fail","evidence":"editable Produces lanes required by the work unit"}}]}}
 
 Include every SPEC exactly once: %s. Include every task exactly once: %s.
 Approval requires all entries to pass; request-changes requires at least one
-failed entry and one blocking finding.`, parseErr, strings.Join(specs, ", "), strings.Join(tasks, ", "))
+failed entry and one blocking finding. Every task needs one slice_probes entry
+per acceptance slice plus ownership.`, parseErr, strings.Join(specs, ", "), strings.Join(tasks, ", "))
 	}
 	if contract == "verdict:native" {
 		return fmt.Sprintf(`Your reply did not satisfy the required output format or an active deterministic capability rule.

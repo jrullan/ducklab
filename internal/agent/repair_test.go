@@ -690,7 +690,7 @@ func TestPlanManifestCriticReceivesCompleteAuditContract(t *testing.T) {
 			system += msg.Content
 		}
 	}
-	for _, want := range []string{"complete manifest_audit", "SPEC-001, SPEC-002", "T-001, T-002", "absence is not evidence"} {
+	for _, want := range []string{"complete manifest_audit", "SPEC-001, SPEC-002", "T-001, T-002", "absence is not evidence", "slice_probes", "ownership"} {
 		if !strings.Contains(system, want) {
 			t.Errorf("manifest critic system prompt lacks %q:\n%s", want, system)
 		}

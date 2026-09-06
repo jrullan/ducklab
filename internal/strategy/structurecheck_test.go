@@ -438,6 +438,20 @@ func TestPlanGraphNormalizationDerivesExactLanesAndDependencies(t *testing.T) {
 	}
 }
 
+func TestSemanticPlanRevisionPreservesPriorExercises(t *testing.T) {
+	previousText := "## M-01 — Core\n\n### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/registry.rs"
+	currentText := "## M-01 — Core\n\n### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/other.rs"
+	previous := sectioned(previousText, agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/registry.rs"})
+	current := sectioned(currentText, agent.Section{ID: "M-01", Title: "Core", Body: "### T-001 — Registry\n\n**Produces:** file:src/registry.rs\n\n**Exercises:** file:src/other.rs"})
+	got, changes, err := restorePlanExercises(current, previous, "markdown_sections:M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes != 1 || !strings.Contains(got.Text, "**Exercises:** file:src/registry.rs") || strings.Contains(got.Text, "file:src/other.rs") {
+		t.Fatalf("changes=%d text=%s", changes, got.Text)
+	}
+}
+
 func TestRenderedPlanMustMatchValidatedManifest(t *testing.T) {
 	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
 		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{

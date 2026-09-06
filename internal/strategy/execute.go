@@ -557,6 +557,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					params.ExecContext.DraftUnderReview[kind] = lastArchitect.Text
 				}
 			}
+			if params.ExecContext != nil && turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
+				if params.ExecContext.DraftUnderReview == nil {
+					params.ExecContext.DraftUnderReview = map[string]string{}
+				}
+				params.ExecContext.DraftUnderReview["plan"] = planManifestDraft.Text
+			}
 			// Keep non-negotiable review invariants adjacent to the requested
 			// verdict. When placed before a long candidate, a small critic
 			// reproduced the exact parent/child ownership finding the policy
@@ -722,6 +728,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
 				var normalized *agent.Outcome
 				var manifestChanges int
+				var exerciseChanges int
 				var normalizeErr error
 				if enforcePlanManifest {
 					normalized, manifestChanges, normalizeErr = reconcilePlanManifest(outcome, planManifest, documentContract)
@@ -738,9 +745,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					} else {
 						outcome = graphNormalized
 					}
-					if err == nil && manifestChanges+graphChanges > 0 {
+					// A structurally clean prior draft already established which
+					// produced artifacts its verification exercises. Semantic
+					// revision may change promises, but it must not casually rewrite
+					// this graph/evidence field. Structure-repair turns remain free to
+					// repair Exercises when the checker itself found it invalid.
+					if err == nil && !enforcePlanManifest && repairBase == nil && lastArchitect != nil {
+						outcome, exerciseChanges, normalizeErr = restorePlanExercises(outcome, lastArchitect, documentContract)
+						if normalizeErr != nil {
+							err = normalizeErr
+						}
+					}
+					if err == nil && manifestChanges+graphChanges+exerciseChanges > 0 {
 						emit(params, "structure_normalized", map[string]interface{}{
-							"round": round, "turn": i, "fields": manifestChanges + graphChanges,
+							"round": round, "turn": i, "fields": manifestChanges + graphChanges + exerciseChanges,
 							"detail": "compiled the validated manifest and derived Owns and Depends on fields from the plan artifact graph",
 						})
 					}

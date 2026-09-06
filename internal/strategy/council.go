@@ -51,12 +51,20 @@ manifest is approved. Do not request any key outside this schema.
   concerns.
 - Every probe must actually observe its same-index slice. A generic build,
   grep, or count is not evidence for unrelated runtime or authority behavior.
+- For every task, audit every slice/probe pair separately. State why the exact
+  command observes that exact outcome with the required success/failure
+  polarity; do not let a task-level summary stand in for this accounting.
 - Preserve actor/action/object authority: validation, proposal and execution
   are different responsibilities and must not silently change owners.
 - Implements is a many-to-many trace link, not artifact ownership. Several
   tasks may implement different obligations of one SPEC. Judge ownership from
   Produces/Consumes and the work unit; do not reject duplicate Implements links
   by themselves.
+- Produces must name every file or bounded directory the task will create or
+  edit, as well as any output target/capability another task consumes. A
+  build-target names an output but does not grant ownership of an omitted build
+  definition such as Cargo.toml, meson.build or a project file. Audit that the
+  declared lanes are sufficient for the work unit.
 - Review the whole compact manifest before approving. If it is defective,
   identify the exact SPEC obligation and the smallest repartition needed, but
   do not allocate milestone or task ids in the fix; the architect regenerates
