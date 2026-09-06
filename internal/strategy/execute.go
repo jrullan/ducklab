@@ -688,14 +688,22 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					if normalizeErr != nil {
 						err = normalizeErr
 					} else {
-						planManifest = manifest
-						planManifestDraft = outcome
-						planManifestAttempts++
-						if removed > 0 {
-							emit(params, "structure_normalized", map[string]interface{}{
-								"round": round, "turn": i, "fields": removed,
-								"detail": "removed unknown specification references before freezing plan topology",
-							})
+						encoded, encodeErr := json.Marshal(manifest)
+						if encodeErr != nil {
+							err = fmt.Errorf("canonicalize plan manifest: %w", encodeErr)
+						} else {
+							canonical := *outcome
+							canonical.Text, canonical.Parsed = string(encoded), manifest
+							outcome = &canonical
+							planManifest = manifest
+							planManifestDraft = outcome
+							planManifestAttempts++
+							if removed > 0 {
+								emit(params, "structure_normalized", map[string]interface{}{
+									"round": round, "turn": i, "fields": removed,
+									"detail": "removed unknown specification references before freezing plan topology",
+								})
+							}
 						}
 					}
 				}

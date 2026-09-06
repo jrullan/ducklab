@@ -49,6 +49,26 @@ func TestPlanCriticFactsRetainIssueWhileSanitizingBadCoordinatesAndFixes(t *test
 	}
 }
 
+func TestPlanCriticPreservesGroundedInvalidImplementsID(t *testing.T) {
+	params := &ExecuteParams{
+		KnownIDs:       map[string]bool{"SPEC-001": true, "SPEC-006": true, "SPEC-008": true},
+		PriorityByID:   map[string]string{"SPEC-008": "could"},
+		PriorityByName: map[string]string{"wire-level interface": "could"},
+	}
+	candidate := `{"tasks":[{"id":"T-008","implements":["SPEC-014"]}]}`
+	finding := agent.Finding{
+		Issue: "T-008 Implements references SPEC-014, which is not an accepted specification",
+		Fix:   "Replace SPEC-014 with SPEC-006",
+	}
+	got, reasons := sanitizePlanCriticFinding(params, finding, candidate)
+	if len(reasons) != 0 || !strings.Contains(got.Issue, "SPEC-014") || !strings.Contains(got.Fix, "SPEC-014") {
+		t.Fatalf("grounded broken link was sanitized: finding=%+v reasons=%v", got, reasons)
+	}
+	if reason := invalidPlanCriticFinding(params, got, candidate); reason != "" {
+		t.Fatalf("grounded broken link was filtered: %s", reason)
+	}
+}
+
 func TestPlanCriticFactsKeepSelectedCouldAndExistingTopology(t *testing.T) {
 	params := &ExecuteParams{
 		KnownIDs:     map[string]bool{"SPEC-006": true},

@@ -121,6 +121,14 @@ func sanitizePlanCriticFinding(params *ExecuteParams, finding agent.Finding, can
 	for _, id := range uniqueStrings(criticIDPattern.FindAllString(finding.Issue, -1)) {
 		prefix := strings.SplitN(id, "-", 2)[0]
 		if (prefix == "REQ" || prefix == "SPEC") && len(params.KnownIDs) > 0 && !params.KnownIDs[id] {
+			// An unknown ID copied from the candidate is the evidence for a
+			// broken-link finding. Removing it here turns a precise defect into
+			// "the accepted specification" and may then trigger an unrelated
+			// could/wont name filter. Only sanitize coordinates the critic
+			// invented itself.
+			if strings.Contains(candidate, id) {
+				continue
+			}
 			finding.Issue = strings.ReplaceAll(finding.Issue, id, "the accepted specification")
 			reasons = append(reasons, id+" is not an accepted project id; the issue was retained without that coordinate")
 		}
@@ -131,8 +139,10 @@ func sanitizePlanCriticFinding(params *ExecuteParams, finding agent.Finding, can
 		switch prefix {
 		case "REQ", "SPEC":
 			if len(params.KnownIDs) > 0 && !params.KnownIDs[id] {
-				unsafeFix = true
-				reasons = append(reasons, id+" is not an accepted project id; the fix was neutralized")
+				if !removesCandidateMapping(finding.Fix, candidate, id) {
+					unsafeFix = true
+					reasons = append(reasons, id+" is not an accepted project id; the fix was neutralized")
+				}
 			}
 		case "M", "T":
 			if !strings.Contains(candidate, id) && (prescribesNamedTopology(finding.Fix, id) || prescribesPositiveWork(strings.ToLower(finding.Fix))) {
@@ -152,7 +162,7 @@ func removesCandidateMapping(fix, candidate, id string) bool {
 		return false
 	}
 	lower := strings.ToLower(fix)
-	for _, verb := range []string{"remove", "drop", "delete", "omit"} {
+	for _, verb := range []string{"remove", "drop", "delete", "omit", "replace"} {
 		if strings.Contains(lower, verb) && strings.Contains(lower, strings.ToLower(id)) {
 			return true
 		}

@@ -718,11 +718,35 @@ func TestPlanManifestAuditRepairComposesTwoSmallFragments(t *testing.T) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if got := p.requests[1].Messages[len(p.requests[1].Messages)-1].Content; !strings.Contains(got, "only the missing specs ledger") || strings.Contains(got, "repeat the verdict") && !strings.Contains(got, "Do not repeat") {
+	if got := p.requests[1].Messages[len(p.requests[1].Messages)-1].Content; !strings.Contains(got, "small specs ledger fragment") || strings.Contains(got, "repeat the verdict") && !strings.Contains(got, "Do not repeat") {
 		t.Fatalf("spec fragment prompt = %s", got)
 	}
-	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "only the missing tasks ledger") {
+	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "small tasks ledger fragment") {
 		t.Fatalf("task fragment prompt = %s", got)
+	}
+}
+
+func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001,SPEC-002,SPEC-003,SPEC-004,SPEC-005|T-001,T-002,T-003,T-004,T-005"
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-005 is incomplete","fix":"complete its existing slices"}]}`,
+		`{"specs":[{"id":"SPEC-001","status":"pass","evidence":"covered by T-001"},{"id":"SPEC-002","status":"pass","evidence":"covered by T-002"},{"id":"SPEC-003","status":"pass","evidence":"covered by T-003"},{"id":"SPEC-004","status":"pass","evidence":"covered by T-004"}]}`,
+		`{"specs":[{"id":"SPEC-005","status":"fail","evidence":"T-005 omits one obligation"}]}`,
+		`{"tasks":[{"id":"T-001","status":"pass","evidence":"one concern"},{"id":"T-002","status":"pass","evidence":"one concern"},{"id":"T-003","status":"pass","evidence":"one concern"},{"id":"T-004","status":"pass","evidence":"one concern"}]}`,
+		`{"tasks":[{"id":"T-005","status":"fail","evidence":"one required slice is absent"}]}`,
+	}}
+	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
+	out, err := RunTurn(context.Background(), testLoop(p, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Repairs != 4 || p.calls() != 5 || len(out.Parsed.(*Verdict).ManifestAudit.Tasks) != 5 {
+		t.Fatalf("repairs=%d calls=%d audit=%+v", out.Repairs, p.calls(), out.Parsed.(*Verdict).ManifestAudit)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "SPEC-005") || strings.Contains(got, "SPEC-001") {
+		t.Fatalf("second spec group was not isolated: %s", got)
 	}
 }
 

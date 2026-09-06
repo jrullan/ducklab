@@ -212,8 +212,8 @@ func TestPlanManifestReviewContractNamesEverySpecAndTask(t *testing.T) {
 
 func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["meson compile -C build"],"produces":["file:meson.build","build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
-	manifest := &agent.Outcome{Text: manifestText, Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
-		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"}, WorkUnit: "build the app", AcceptanceSlices: []string{"the app compiles"}, AcceptanceProbes: []string{"meson compile -C build"}, Produces: []string{"file:meson.build", "build-target:app"}, Verification: "meson compile -C build"}},
+	manifest := &agent.Outcome{Text: "```json\n" + manifestText + "\n```", Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Title: "Setup", Tasks: []agent.ManifestTask{{ID: "T-001", Title: "Build", Implements: []string{"SPEC-001"}, WorkUnit: "build the app", AcceptanceSlices: []string{"the app compiles"}, AcceptanceProbes: []string{"meson compile -C build"}, Produces: []string{"file:meson.build", "build-target:app"}, Consumes: []string{}, Verification: "meson compile -C build"}},
 	}}}}
 	planText := "## M-01 — Setup\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n**Produces:** file:meson.build, build-target:app\n**Consumes:** none\n**Verification:** `meson compile -C build`"
 	plan := &agent.Outcome{Text: planText, Parsed: []agent.Section{{ID: "M-01", Title: "Setup", Body: strings.SplitN(planText, "\n\n", 2)[1]}}}
@@ -224,6 +224,9 @@ func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	params.Runner = func(ctx context.Context, turn *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
 		if turn.Persona == PersonaPlanManifestCritic && params.ExecContext.DraftUnderReview["plan"] != manifestText {
 			t.Fatalf("manifest critic draft = %q", params.ExecContext.DraftUnderReview["plan"])
+		}
+		if turn.Persona == PersonaPlanManifestCritic && strings.Contains(prompt, "```json\n```json") {
+			t.Fatalf("manifest candidate was double fenced:\n%s", prompt)
 		}
 		return baseRunner(ctx, turn, duckling, prompt, toolbelt, tc)
 	}
