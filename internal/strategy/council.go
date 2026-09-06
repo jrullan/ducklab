@@ -28,6 +28,13 @@ const planManifestSemanticReview = `## Compact plan manifest audit — required
 Review the JSON manifest below before Ducklab freezes its topology. This is a
 semantic review; deterministic parsing, ids and graph checks have already run.
 
+The candidate's complete schema is exactly: milestone fields id, title and
+tasks; task fields id, title, implements, work_unit, acceptance_slices,
+acceptance_probes, produces, consumes and verification. Do not request
+Markdown rendering fields such as Owns, Toolchain, Depends on, Exercises, Out
+of scope or Assumption. Ducklab derives or validates those after this compact
+manifest is approved. Do not request any key outside this schema.
+
 - Account for every accepted must and in-scope should SPEC obligation. An
   Implements id alone is not coverage: the work unit, observable slice and
   corresponding probe must jointly deliver the behavior and its polarity.

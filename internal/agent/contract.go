@@ -162,7 +162,13 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 		return nil, fmt.Errorf("plan manifest contract: %w", err)
 	}
 	var manifest PlanManifest
-	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	// H1k's small architect copied Markdown-only plan fields into the compact
+	// manifest. encoding/json silently discarded them, so the model believed
+	// it had repaired the critic's finding while the frozen artifact had not
+	// changed. This contract is a protocol boundary, not a tolerant import.
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("plan manifest contract: %w", err)
 	}
 	if len(manifest.Milestones) == 0 {

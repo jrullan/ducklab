@@ -280,6 +280,13 @@ func TestPlanManifestCanonicalizesNumericPadding(t *testing.T) {
 	}
 }
 
+func TestPlanManifestRejectsUnknownProtocolFields(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build app","acceptance_slices":["app builds"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true","owns":["file:app"]}]}]}`
+	if _, err := ParseContract("json:plan_manifest", text); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown manifest field error = %v", err)
+	}
+}
+
 func TestPlanManifestRejectsDuplicateProducers(t *testing.T) {
 	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[` +
 		`{"id":"T-001","title":"Scaffold","implements":["SPEC-001"],"work_unit":"scaffold","acceptance_slices":["scaffold exists"],"acceptance_probes":["true"],"produces":["src/main.c"],"consumes":[],"verification":"true"},` +

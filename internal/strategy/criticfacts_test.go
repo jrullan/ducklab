@@ -104,6 +104,34 @@ func TestPlanCriticFactsKeepRemovalOfForbiddenWontBehavior(t *testing.T) {
 	}
 }
 
+func TestPlanCriticKeepsRemovalOfSpuriousWontMapping(t *testing.T) {
+	params := &ExecuteParams{
+		KnownIDs: map[string]bool{"SPEC-007": true}, PriorityByID: map[string]string{"SPEC-007": "wont"},
+	}
+	finding := agent.Finding{
+		Issue: "T-001 claims SPEC-007 as positive work even though it is a boundary",
+		Fix:   "Remove SPEC-007 from T-001 Implements and preserve the wont boundary",
+	}
+	for _, candidate := range []string{
+		"### T-001 — Build\n\n**Implements:** SPEC-007\n",
+		`{"tasks":[{"id":"T-001","implements":["SPEC-007"]}]}`,
+	} {
+		if got := invalidPlanCriticFinding(params, finding, candidate); got != "" {
+			t.Fatalf("removal of wont mapping was rejected: %s", got)
+		}
+	}
+}
+
+func TestPlanCriticRejectsClaimAboutNonexistentCandidateArtifact(t *testing.T) {
+	finding := agent.Finding{
+		Issue: "T-007 Owns src/stack.rs, but that artifact belongs to another concern",
+		Fix:   "Move src/stack.rs to T-008",
+	}
+	if got := invalidPlanCriticFinding(&ExecuteParams{}, finding, `{"produces":["src/lib.rs"]}`); !strings.Contains(got, "not declared") {
+		t.Fatalf("ungrounded artifact claim survived: %q", got)
+	}
+}
+
 func TestPlanCriticFactsRespectNamedCouldInsideMixedSpec(t *testing.T) {
 	params := &ExecuteParams{
 		KnownIDs:       map[string]bool{"SPEC-006": true},

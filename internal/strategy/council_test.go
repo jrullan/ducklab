@@ -253,6 +253,11 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 		!strings.Contains(rec.prompts[1], "Plan manifest candidate — authoritative") {
 		t.Fatalf("manifest critic did not receive its candidate and policy:\n%s", rec.prompts[1])
 	}
+	for _, prohibited := range []string{"Markdown rendering fields such as Owns", "Depends on", "Assumption", "Do not request any key outside this schema"} {
+		if !strings.Contains(rec.prompts[1], prohibited) {
+			t.Errorf("manifest critic prompt lacks protocol isolation %q:\n%s", prohibited, rec.prompts[1])
+		}
+	}
 	if !strings.Contains(res.Text, "### T-001") {
 		t.Fatalf("approved manifest was not rendered: %s", res.Text)
 	}
@@ -409,8 +414,8 @@ func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	planText := func(spec string) string {
-		return "## M-01 — Setup\n\n### T-001 — Build\n\nBuild the application entry point.\n\n**Deliverables:**\n- A compilable application.\n\n**Implements:** " + spec + "\n\n**Produces:** file:meson.build\n\n**Consumes:** none\n\n**Verification:** `meson compile -C build`\n\n**Exercises:** file:meson.build\n\n**Out of scope:** Packaging.\n\n**Assumption:** Meson is installed."
+	planText := func(spec, workUnit string) string {
+		return "## M-01 — Setup\n\n### T-001 — Build\n\nBuild the application entry point.\n\n**Deliverables:**\n- A compilable application.\n\n**Implements:** " + spec + "\n\n**Work unit:** " + workUnit + "\n\n**Produces:** file:meson.build\n\n**Consumes:** none\n\n**Verification:** `meson compile -C build`\n\n**Exercises:** file:meson.build\n\n**Out of scope:** Packaging.\n\n**Assumption:** Meson is installed."
 	}
 	parsedPlan := func(text string) *agent.Outcome {
 		parsed, parseErr := agent.ParseContract("markdown_sections:M", text)
@@ -423,9 +428,9 @@ func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
 		&agent.Outcome{Text: manifestText, Parsed: manifest},
 		verdictOutcome("approve"),
-		parsedPlan(planText("SPEC-008")),
+		parsedPlan(planText("SPEC-008", "build the app")),
 		verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "draft", Issue: "task maps to exclusions", Fix: "use SPEC-001"}),
-		parsedPlan(planText("SPEC-001")+"\n\n## M-02 — Invented\n\n### T-002 — Extra\n\nUnreviewed topology.\n\n**Implements:** SPEC-001\n\n**Produces:** file:extra\n\n**Consumes:** none\n\n**Verification:** `true`"),
+		parsedPlan(planText("SPEC-001", "install and publish the app")+"\n\n## M-02 — Invented\n\n### T-002 — Extra\n\nUnreviewed topology.\n\n**Implements:** SPEC-001\n\n**Produces:** file:extra\n\n**Consumes:** none\n\n**Verification:** `true`"),
 		verdictOutcome("approve"),
 	))
 	if err != nil {
@@ -433,6 +438,9 @@ func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "**Implements:** SPEC-001") || strings.Contains(res.Text, "**Implements:** SPEC-008") {
 		t.Fatalf("reviewed semantic correction was restored from the manifest:\n%s", res.Text)
+	}
+	if !strings.Contains(res.Text, "**Work unit:** build the app") || strings.Contains(res.Text, "install and publish") {
+		t.Fatalf("review revision changed the frozen task identity:\n%s", res.Text)
 	}
 	if strings.Contains(res.Text, "M-02") || strings.Contains(res.Text, "T-002") || strings.Contains(res.Text, "file:extra") {
 		t.Fatalf("review revision changed frozen topology:\n%s", res.Text)

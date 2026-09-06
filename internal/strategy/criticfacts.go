@@ -10,6 +10,7 @@ import (
 )
 
 var criticIDPattern = regexp.MustCompile(`\b(?:REQ|SPEC|M|T)-[0-9]+\b`)
+var criticArtifactPattern = regexp.MustCompile(`\b(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.*/-]+\b`)
 
 // filterPlanCriticOutcome is the deterministic boundary between an advisory
 // semantic judgment and an authoritative repair ledger. H1g showed a focused
@@ -77,7 +78,7 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 	selectedCouldID := false
 	for _, id := range uniqueStrings(criticIDPattern.FindAllString(text, -1)) {
 		priority := strings.ToLower(params.PriorityByID[id])
-		if priority == "wont" && prescribesPositiveWork(fixLower) {
+		if priority == "wont" && prescribesPositiveWork(fixLower) && !removesCandidateMapping(finding.Fix, candidate, id) {
 			return fmt.Sprintf("%s is wont; it is a boundary, not positive plan work", id)
 		}
 		if priority == "could" {
@@ -101,6 +102,11 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 		// beats the weaker name heuristic.
 		if priority == "could" && !selectedCouldID && !namedDecisionSelected(candidate, name) {
 			return fmt.Sprintf("%q is a could obligation and the candidate does not select it", name)
+		}
+	}
+	for _, path := range uniqueStrings(criticArtifactPattern.FindAllString(finding.Issue, -1)) {
+		if !strings.Contains(candidate, path) && claimsCandidateArtifact(finding.Issue, path) {
+			return fmt.Sprintf("%s is not declared by the candidate", path)
 		}
 	}
 	return ""
@@ -139,6 +145,42 @@ func sanitizePlanCriticFinding(params *ExecuteParams, finding agent.Finding, can
 		finding.Fix = "Address the stated issue using accepted specification IDs and the existing candidate topology; do not allocate a named task or milestone in this review fix."
 	}
 	return finding, reasons
+}
+
+func removesCandidateMapping(fix, candidate, id string) bool {
+	if !candidateImplements(candidate, id) {
+		return false
+	}
+	lower := strings.ToLower(fix)
+	for _, verb := range []string{"remove", "drop", "delete", "omit"} {
+		if strings.Contains(lower, verb) && strings.Contains(lower, strings.ToLower(id)) {
+			return true
+		}
+	}
+	return false
+}
+
+func claimsCandidateArtifact(issue, path string) bool {
+	lower := strings.ToLower(issue)
+	pathAt := strings.Index(lower, strings.ToLower(path))
+	if pathAt < 0 {
+		return false
+	}
+	start := pathAt - 80
+	if start < 0 {
+		start = 0
+	}
+	end := pathAt + len(path) + 80
+	if end > len(lower) {
+		end = len(lower)
+	}
+	window := lower[start:end]
+	for _, claim := range []string{" owns", " produces", " consumes", "declares", "declared", "lists", "listed", "claims"} {
+		if strings.Contains(window, claim) {
+			return true
+		}
+	}
+	return false
 }
 
 func namedDecisionSelected(candidate, name string) bool {

@@ -1431,13 +1431,13 @@ func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManif
 			}
 			block := "### " + task.ID + " — " + strings.TrimSpace(task.Title) + "\n\n" + strings.TrimSpace(body)
 			fields := []struct{ name, value string }{
+				{"Work unit", task.WorkUnit},
 				{"Produces", manifestItems(task.Produces)},
 				{"Consumes", manifestItems(task.Consumes)},
 			}
 			if full {
 				fields = append([]struct{ name, value string }{
 					{"Implements", strings.Join(task.Implements, ", ")},
-					{"Work unit", task.WorkUnit},
 					{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
 					{"Acceptance probes", manifestAcceptanceProbes(task.AcceptanceProbes)},
 				}, fields...)
