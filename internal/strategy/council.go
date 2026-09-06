@@ -21,6 +21,30 @@ import (
 // say so or the model spends its turns hunting for a diff.
 const PersonaCritic = "critic"
 const PersonaPlanManifest = "plan_manifest"
+const PersonaPlanManifestCritic = "plan_manifest_critic"
+
+const planManifestSemanticReview = `## Compact plan manifest audit — required
+
+Review the JSON manifest below before Ducklab freezes its topology. This is a
+semantic review; deterministic parsing, ids and graph checks have already run.
+
+- Account for every accepted must and in-scope should SPEC obligation. An
+  Implements id alone is not coverage: the work unit, observable slice and
+  corresponding probe must jointly deliver the behavior and its polarity.
+- Include could work only when the accepted scope selects it. Treat wont as a
+  boundary, never as positive implementation work.
+- Each task is one cohesive concern with 1–3 independently observable slices.
+  Do not approve bundled concerns merely because they fit in three bullets.
+- Every probe must actually observe its same-index slice. A generic build,
+  grep, or count is not evidence for unrelated runtime or authority behavior.
+- Preserve actor/action/object authority: validation, proposal and execution
+  are different responsibilities and must not silently change owners.
+- Review the whole compact manifest before approving. If it is defective,
+  identify the exact SPEC obligation and the smallest repartition needed, but
+  do not allocate milestone or task ids in the fix; the architect regenerates
+  the complete manifest.
+
+Approve only when this manifest is a sound topology to freeze.`
 
 // planCoverageReview is semantic on purpose. Implements links, graph edges and
 // field shapes are mechanical and belong to structureFindings; deciding whether
@@ -150,6 +174,16 @@ func CouncilScript(prefix string, critics []config.DucklingID) *Script {
 			Contract: "json:plan_manifest",
 			MaxTurns: 2,
 			Persona:  PersonaPlanManifest,
+		})
+		turns = append(turns, Turn{
+			Role:            config.RoleReviewer,
+			Toolbelt:        "none",
+			Contract:        "verdict",
+			MaxTurns:        4,
+			MaxTurnsCeiling: 4,
+			Persona:         PersonaPlanManifestCritic,
+			Anonymize:       true,
+			OmitRole:        config.RoleReviewer,
 		})
 	}
 	turns = append(turns,

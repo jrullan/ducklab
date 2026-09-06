@@ -187,11 +187,14 @@ func TestCouncilContractFollowsThePrefix(t *testing.T) {
 
 func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
 	turns := CouncilScript("M", nil).Turns
-	if len(turns) < 2 || turns[0].Contract != "json:plan_manifest" || turns[0].Persona != PersonaPlanManifest || turns[0].Toolbelt != "none" {
+	if len(turns) < 3 || turns[0].Contract != "json:plan_manifest" || turns[0].Persona != PersonaPlanManifest || turns[0].Toolbelt != "none" {
 		t.Fatalf("plan opening turn = %+v, want tool-free manifest", turns[0])
 	}
-	if turns[1].Contract != "markdown_sections:M" {
-		t.Fatalf("plan document turn = %+v", turns[1])
+	if turns[1].Persona != PersonaPlanManifestCritic || turns[1].Contract != "verdict" || turns[1].Toolbelt != "none" {
+		t.Fatalf("plan manifest review turn = %+v", turns[1])
+	}
+	if turns[2].Contract != "markdown_sections:M" {
+		t.Fatalf("plan document turn = %+v", turns[2])
 	}
 }
 
@@ -203,15 +206,84 @@ func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	planText := "## M-01 — Setup\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n**Produces:** file:meson.build, build-target:app\n**Consumes:** none\n**Verification:** `meson compile -C build`"
 	plan := &agent.Outcome{Text: planText, Parsed: []agent.Section{{ID: "M-01", Title: "Setup", Body: strings.SplitN(planText, "\n\n", 2)[1]}}}
 	rec := &recorder{}
-	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec, manifest, plan, verdictOutcome("approve")))
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec, manifest, verdictOutcome("approve"), plan, verdictOutcome("approve")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(rec.roles, []config.Role{config.RoleArchitect, config.RoleArchitect, config.RoleReviewer}) {
+	if !slices.Equal(rec.roles, []config.Role{config.RoleArchitect, config.RoleReviewer, config.RoleArchitect, config.RoleReviewer}) {
 		t.Fatalf("plan roles = %v", rec.roles)
 	}
 	if !strings.Contains(res.Text, "### T-001") || !strings.Contains(res.Text, "**Owns:**") {
 		t.Fatalf("rendered plan = %s", res.Text)
+	}
+}
+
+func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}]}]}`
+	parsedManifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := &agent.Outcome{Text: manifestText, Parsed: parsedManifest}
+	planText := "## M-01 — Setup\n\n### T-001 — Build\n\nBuild it.\n\n**Implements:** SPEC-001\n\n**Produces:** file:app\n\n**Consumes:** none\n\n**Verification:** `true`"
+	parsedPlan, err := agent.ParseContract("markdown_sections:M", planText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
+		manifest,
+		verdictOutcome("request-changes", agent.Finding{Severity: "major", Issue: "two unrelated concerns are bundled", Fix: "repartition the existing manifest"}),
+		manifest,
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: planText, Parsed: parsedPlan},
+		verdictOutcome("approve"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Role{config.RoleArchitect, config.RoleReviewer, config.RoleArchitect, config.RoleReviewer, config.RoleArchitect, config.RoleReviewer}
+	if !slices.Equal(rec.roles, want) {
+		t.Fatalf("roles = %v, want %v", rec.roles, want)
+	}
+	if !strings.Contains(rec.prompts[2], "two unrelated concerns are bundled") {
+		t.Fatalf("regenerated manifest could not see semantic rejection:\n%s", rec.prompts[2])
+	}
+	if !strings.Contains(rec.prompts[1], "Compact plan manifest audit — required") ||
+		!strings.Contains(rec.prompts[1], "Plan manifest candidate — authoritative") {
+		t.Fatalf("manifest critic did not receive its candidate and policy:\n%s", rec.prompts[1])
+	}
+	if !strings.Contains(res.Text, "### T-001") {
+		t.Fatalf("approved manifest was not rendered: %s", res.Text)
+	}
+}
+
+func TestPlanManifestSemanticReviewStopsAfterThreeRejectedCandidates(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}]}]}`
+	parsedManifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authors, critics, documents := 0, 0, 0
+	params := councilParams(&recorder{})
+	params.Runner = func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
+		switch turn.Persona {
+		case PersonaPlanManifest:
+			authors++
+			return &agent.Outcome{Text: manifestText, Parsed: parsedManifest}, nil
+		case PersonaPlanManifestCritic:
+			critics++
+			return verdictOutcome("request-changes", agent.Finding{Severity: "major", Issue: "concerns remain bundled", Fix: "repartition the existing manifest"}), nil
+		default:
+			documents++
+			return nil, fmt.Errorf("document turn must not run")
+		}
+	}
+	if _, err := ExecuteScript(context.Background(), CouncilScript("M", nil), params); err != ErrStructureFailed {
+		t.Fatalf("error = %v, want ErrStructureFailed", err)
+	}
+	if authors != 3 || critics != 3 || documents != 0 {
+		t.Fatalf("authors=%d critics=%d documents=%d, want 3/3/0", authors, critics, documents)
 	}
 }
 
@@ -233,6 +305,7 @@ func TestPlanCriticAuditsObligationsNotJustImplementsIDs(t *testing.T) {
 	rec := &recorder{}
 	_, err = ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
 		&agent.Outcome{Text: manifestText, Parsed: manifest},
+		verdictOutcome("approve"),
 		&agent.Outcome{Text: planText, Parsed: parsed},
 		verdictOutcome("approve"),
 	))
@@ -242,7 +315,7 @@ func TestPlanCriticAuditsObligationsNotJustImplementsIDs(t *testing.T) {
 	if len(rec.prompts) < 3 {
 		t.Fatalf("only %d turns ran", len(rec.prompts))
 	}
-	critic := rec.prompts[2]
+	critic := rec.prompts[3]
 	for _, want := range []string{
 		"Plan obligation audit — required",
 		"An **Implements:** id is an index pointer, never evidence",
@@ -288,6 +361,8 @@ func TestPlanFinalReviewReceivesTheSameObligationPolicy(t *testing.T) {
 			switch {
 			case turn.Persona == PersonaPlanManifest:
 				return &agent.Outcome{Text: manifestText, Parsed: manifest}, nil
+			case turn.Persona == PersonaPlanManifestCritic:
+				return verdictOutcome("approve"), nil
 			case turn.Role == config.RoleReviewer:
 				reviewerTurns++
 				if tc.Index >= len(script.Turns) {
@@ -347,9 +422,10 @@ func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	rec := &recorder{}
 	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
 		&agent.Outcome{Text: manifestText, Parsed: manifest},
+		verdictOutcome("approve"),
 		parsedPlan(planText("SPEC-008")),
 		verdictOutcome("request-changes", agent.Finding{Severity: "major", File: "draft", Issue: "task maps to exclusions", Fix: "use SPEC-001"}),
-		parsedPlan(planText("SPEC-001")),
+		parsedPlan(planText("SPEC-001")+"\n\n## M-02 — Invented\n\n### T-002 — Extra\n\nUnreviewed topology.\n\n**Implements:** SPEC-001\n\n**Produces:** file:extra\n\n**Consumes:** none\n\n**Verification:** `true`"),
 		verdictOutcome("approve"),
 	))
 	if err != nil {
@@ -357,6 +433,9 @@ func TestPlanCouncilLetsReviewedRevisionCorrectManifestSemantics(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "**Implements:** SPEC-001") || strings.Contains(res.Text, "**Implements:** SPEC-008") {
 		t.Fatalf("reviewed semantic correction was restored from the manifest:\n%s", res.Text)
+	}
+	if strings.Contains(res.Text, "M-02") || strings.Contains(res.Text, "T-002") || strings.Contains(res.Text, "file:extra") {
+		t.Fatalf("review revision changed frozen topology:\n%s", res.Text)
 	}
 }
 

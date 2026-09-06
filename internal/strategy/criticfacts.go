@@ -74,13 +74,18 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 	text := finding.Issue + "\n" + finding.Fix
 	lower := strings.ToLower(text)
 	fixLower := strings.ToLower(finding.Fix)
+	selectedCouldID := false
 	for _, id := range uniqueStrings(criticIDPattern.FindAllString(text, -1)) {
 		priority := strings.ToLower(params.PriorityByID[id])
 		if priority == "wont" && prescribesPositiveWork(fixLower) {
 			return fmt.Sprintf("%s is wont; it is a boundary, not positive plan work", id)
 		}
-		if priority == "could" && !candidateImplements(candidate, id) && prescribesPositiveWork(fixLower) {
-			return fmt.Sprintf("%s is could and the candidate does not select it", id)
+		if priority == "could" {
+			if candidateImplements(candidate, id) {
+				selectedCouldID = true
+			} else if prescribesPositiveWork(fixLower) {
+				return fmt.Sprintf("%s is could and the candidate does not select it", id)
+			}
 		}
 	}
 	for name, priority := range params.PriorityByName {
@@ -90,7 +95,11 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 		if priority == "wont" {
 			return fmt.Sprintf("%q is a wont obligation; it is a boundary, not positive plan work", name)
 		}
-		if priority == "could" && !namedDecisionSelected(candidate, name) {
+		// A reviewer may be asking to remove an accidental Implements mapping
+		// to a could section. H1j discarded exactly that valid correction after
+		// seeing the section's name in the issue. An explicit selected could ID
+		// beats the weaker name heuristic.
+		if priority == "could" && !selectedCouldID && !namedDecisionSelected(candidate, name) {
 			return fmt.Sprintf("%q is a could obligation and the candidate does not select it", name)
 		}
 	}
@@ -120,7 +129,7 @@ func sanitizePlanCriticFinding(params *ExecuteParams, finding agent.Finding, can
 				reasons = append(reasons, id+" is not an accepted project id; the fix was neutralized")
 			}
 		case "M", "T":
-			if !strings.Contains(candidate, id) && prescribesNamedTopology(finding.Fix, id) {
+			if !strings.Contains(candidate, id) && (prescribesNamedTopology(finding.Fix, id) || prescribesPositiveWork(strings.ToLower(finding.Fix))) {
 				unsafeFix = true
 				reasons = append(reasons, id+" is not in the candidate; the fix cannot allocate topology ids")
 			}
@@ -178,7 +187,14 @@ func prescribesPositiveWork(text string) bool {
 
 func candidateImplements(candidate, id string) bool {
 	pattern := regexp.MustCompile(`(?im)^\*\*Implements:\*\*[^\n]*\b` + regexp.QuoteMeta(id) + `\b`)
-	return pattern.MatchString(candidate)
+	if pattern.MatchString(candidate) {
+		return true
+	}
+	// Manifest critics review JSON before Markdown exists. Treat a declared
+	// Implements entry there as selection too, so removal of an accidental
+	// optional mapping cannot be filtered as a demand for new optional work.
+	jsonPattern := regexp.MustCompile(`(?i)"implements"\s*:\s*\[[^\]]*"` + regexp.QuoteMeta(id) + `"`)
+	return jsonPattern.MatchString(candidate)
 }
 
 // A semantic finding may be valid while its prescribed edit is structurally
@@ -198,7 +214,7 @@ func safePlanCriticFix(params *ExecuteParams, finding agent.Finding, candidate s
 			continue
 		}
 		if task := doc.Section(id); task != nil && topLevelChecklistItems(task.Body, "Acceptance slices") >= 3 {
-			return "Address the stated behavior without adding a fourth Acceptance slice: refine an existing slice, or split a genuinely distinct work unit into a new task while preserving existing topology and IDs."
+			return "Address the stated behavior without adding a fourth Acceptance slice: refine or replace the task's existing slices while preserving manifest topology and IDs. If that is impossible, report that the accepted manifest is semantically invalid instead of allocating a new task."
 		}
 	}
 	return finding.Fix

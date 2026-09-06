@@ -61,6 +61,38 @@ func TestPlanCriticFactsKeepSelectedCouldAndExistingTopology(t *testing.T) {
 	}
 }
 
+func TestPlanCriticKeepsRemovalOfSpuriousCouldMapping(t *testing.T) {
+	params := &ExecuteParams{
+		KnownIDs:       map[string]bool{"SPEC-008": true},
+		PriorityByID:   map[string]string{"SPEC-008": "could"},
+		PriorityByName: map[string]string{"wire-level interface": "could"},
+	}
+	finding := agent.Finding{
+		Issue: "T-001 claims SPEC-008 but does not implement the wire-level interface",
+		Fix:   "Remove SPEC-008 from T-001 Implements instead of implementing optional work",
+	}
+	for _, candidate := range []string{
+		"### T-001 — Build\n\n**Implements:** SPEC-008\n",
+		`{"tasks":[{"id":"T-001","implements":["SPEC-008"]}]}`,
+	} {
+		if got := invalidPlanCriticFinding(params, finding, candidate); got != "" {
+			t.Fatalf("removal of selected could mapping was rejected for %q: %s", candidate, got)
+		}
+	}
+}
+
+func TestPlanCriticNeutralizesIndirectUnknownTopologyAllocation(t *testing.T) {
+	params := &ExecuteParams{KnownIDs: map[string]bool{"SPEC-001": true}}
+	finding := agent.Finding{
+		Issue: "SPEC-001 installation governance is absent",
+		Fix:   "Add a task under M-04 that validates provenance",
+	}
+	got, reasons := sanitizePlanCriticFinding(params, finding, "## M-01 — Core\n")
+	if len(reasons) != 1 || strings.Contains(got.Fix, "M-04") || !strings.Contains(got.Fix, "existing candidate topology") {
+		t.Fatalf("indirect topology allocation survived: finding=%+v reasons=%v", got, reasons)
+	}
+}
+
 func TestPlanCriticFactsKeepRemovalOfForbiddenWontBehavior(t *testing.T) {
 	params := &ExecuteParams{
 		KnownIDs:     map[string]bool{"SPEC-007": true},

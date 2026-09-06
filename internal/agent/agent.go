@@ -1020,7 +1020,7 @@ Run or inspect the authoritative probes and account for every slice. An
 approval requires every entry to pass; bare words such as "ok", "verified",
 or "green" are not concrete evidence.`, len(ectx.TaskAcceptanceProbes))
 	}
-	if turn.Persona == "critic" && turn.Role == config.RoleReviewer {
+	if (turn.Persona == "critic" || turn.Persona == "plan_manifest_critic") && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
 	}
 	if turn.Persona == "consultant" {

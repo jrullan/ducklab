@@ -1372,6 +1372,18 @@ func planManifestFindings(manifest *agent.PlanManifest, outcome *agent.Outcome) 
 // dozens of mechanically knowable mismatches and, worse, invent new task IDs
 // while doing so (Neocapture corrida 20).
 func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest, contract string) (*agent.Outcome, int, error) {
+	return reconcilePlanManifestMode(outcome, manifest, contract, true)
+}
+
+// reconcilePlanManifestTopology preserves the manifest's immutable allocation
+// after semantic document review begins. Reviewers may correct what an
+// existing task promises, but neither they nor the prose architect may create,
+// move, rename or re-own work after the compact manifest was approved.
+func reconcilePlanManifestTopology(outcome *agent.Outcome, manifest *agent.PlanManifest, contract string) (*agent.Outcome, int, error) {
+	return reconcilePlanManifestMode(outcome, manifest, contract, false)
+}
+
+func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManifest, contract string, full bool) (*agent.Outcome, int, error) {
 	if outcome == nil || manifest == nil || contract != "markdown_sections:M" {
 		return outcome, 0, nil
 	}
@@ -1419,13 +1431,17 @@ func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest,
 			}
 			block := "### " + task.ID + " — " + strings.TrimSpace(task.Title) + "\n\n" + strings.TrimSpace(body)
 			fields := []struct{ name, value string }{
-				{"Implements", strings.Join(task.Implements, ", ")},
-				{"Work unit", task.WorkUnit},
-				{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
-				{"Acceptance probes", manifestAcceptanceProbes(task.AcceptanceProbes)},
 				{"Produces", manifestItems(task.Produces)},
 				{"Consumes", manifestItems(task.Consumes)},
-				{"Verification", "`" + strings.Trim(strings.TrimSpace(task.Verification), "`") + "`"},
+			}
+			if full {
+				fields = append([]struct{ name, value string }{
+					{"Implements", strings.Join(task.Implements, ", ")},
+					{"Work unit", task.WorkUnit},
+					{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
+					{"Acceptance probes", manifestAcceptanceProbes(task.AcceptanceProbes)},
+				}, fields...)
+				fields = append(fields, struct{ name, value string }{"Verification", "`" + strings.Trim(strings.TrimSpace(task.Verification), "`") + "`"})
 			}
 			var err error
 			for _, field := range fields {
@@ -1434,7 +1450,7 @@ func reconcilePlanManifest(outcome *agent.Outcome, manifest *agent.PlanManifest,
 					return outcome, 0, err
 				}
 			}
-			if !itemsOverlap(task.Produces, taskFieldItems(block, "Exercises")) {
+			if full && !itemsOverlap(task.Produces, taskFieldItems(block, "Exercises")) {
 				block, err = setMarkdownField(block, task.ID, "Exercises", manifestItems(task.Produces))
 				if err != nil {
 					return outcome, 0, err

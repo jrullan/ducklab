@@ -339,6 +339,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	redGateStreak := 0
 	var evidence escalationEvidence
 	var planManifest *agent.PlanManifest
+	var planManifestDraft *agent.Outcome
+	planManifestAttempts := 0
 	materialize := func(detail string) error {
 		if script.MaterializeCandidate == nil || lastArchitect == nil {
 			return nil
@@ -393,7 +395,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
-			if round > 1 && turn.Persona == PersonaPlanManifest {
+			if round > 1 && (turn.Persona == PersonaPlanManifest || turn.Persona == PersonaPlanManifestCritic) {
 				continue
 			}
 			// The person's configured role cap beats the script's baked-in
@@ -514,8 +516,8 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
-			if turn.Role == config.RoleArchitect && turn.Contract == "markdown_sections:M" && verdictsThisRound > 0 {
-				prompt += "\n\n## Reviewed topology amendments\n\nThe manifest constrained the initial render, but the reviewer has now checked its semantics. Apply supported reviewer corrections even when they change a manifest-derived Implements, Produces, Consumes, Verification, Owns, or Depends on field. Preserve all unrelated topology. The revised, deterministically validated plan becomes authoritative."
+			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
+				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReview
 			}
 			if turn.Persona == PersonaCritic && script.CriticScope != "" {
 				prompt += "\n\n## Isolated review boundary — authoritative\n\n" + script.CriticScope
@@ -678,15 +680,14 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						err = normalizeErr
 					} else {
 						planManifest = manifest
+						planManifestDraft = outcome
+						planManifestAttempts++
 						if removed > 0 {
 							emit(params, "structure_normalized", map[string]interface{}{
 								"round": round, "turn": i, "fields": removed,
 								"detail": "removed unknown specification references before freezing plan topology",
 							})
 						}
-						emit(params, "plan_manifest", map[string]interface{}{
-							"round": round, "milestones": len(manifest.Milestones), "detail": "validated topology will constrain the rendered plan",
-						})
 					}
 				}
 			}
@@ -715,8 +716,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			enforcePlanManifest := documentContract == "markdown_sections:M" && round == 1 && verdictsThisRound == 0
-			if err == nil && turn.Role == config.RoleArchitect && enforcePlanManifest {
-				normalized, manifestChanges, normalizeErr := reconcilePlanManifest(outcome, planManifest, documentContract)
+			if err == nil && turn.Role == config.RoleArchitect && documentContract == "markdown_sections:M" {
+				var normalized *agent.Outcome
+				var manifestChanges int
+				var normalizeErr error
+				if enforcePlanManifest {
+					normalized, manifestChanges, normalizeErr = reconcilePlanManifest(outcome, planManifest, documentContract)
+				} else {
+					normalized, manifestChanges, normalizeErr = reconcilePlanManifestTopology(outcome, planManifest, documentContract)
+				}
 				if normalizeErr != nil {
 					err = normalizeErr
 				} else {
@@ -776,6 +784,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			if turn.Persona == PersonaCritic && kindOfContract(turn.Contract, script) == "plan" && lastArchitect != nil {
 				filterPlanCriticOutcome(params, outcome, lastArchitect.Text, round, script.TurnIndexBase+i)
+			}
+			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
+				filterPlanCriticOutcome(params, outcome, planManifestDraft.Text, round, script.TurnIndexBase+i)
 			}
 			// A document council's architect: check the structure of the draft
 			// against the rules and the draft before it, once; and notice a
@@ -887,7 +898,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// on architect turns, but their draft is still the object reviewers
 			// judge and the revision that opens a possible next round. Tracking it
 			// must not depend on the output parser selected for that turn.
-			if turn.Role == config.RoleArchitect && script.RevisionOpensNextRound && !strings.HasPrefix(turn.Contract, "markdown_sections:") {
+			if turn.Role == config.RoleArchitect && turn.Persona != PersonaPlanManifest && script.RevisionOpensNextRound && !strings.HasPrefix(turn.Contract, "markdown_sections:") {
 				if script.FragmentPrefix != "" {
 					lastArchitect = materializeFragment(lastArchitect, outcome, script.FragmentPrefix)
 				} else {
@@ -957,9 +968,32 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// above — it just never left the process.
 			emitMessage(params, round, i, turn.Role, duckling, outcome)
 
+			restartPlanManifest := false
 			// Fold the turn's parsed contract value into the round state.
 			switch v := outcome.Parsed.(type) {
 			case *agent.Verdict:
+				if turn.Persona == PersonaPlanManifestCritic {
+					if v.Verdict == "approve" && len(v.Findings) == 0 {
+						emit(params, "plan_manifest", map[string]interface{}{
+							"round": round, "milestones": len(planManifest.Milestones), "attempt": planManifestAttempts,
+							"detail": "semantic review approved; topology and ownership are now frozen",
+						})
+					} else if planManifestAttempts < 3 {
+						emit(params, "structure_check", map[string]interface{}{
+							"round": round, "turn": i, "attempt": planManifestAttempts, "max_attempts": 3,
+							"findings": v.Findings, "detail": "compact manifest rejected before freeze; regenerating it",
+						})
+						restartPlanManifest = true
+					} else {
+						result.Error = ErrStructureFailed
+						emit(params, "structure_failed", map[string]interface{}{
+							"round": round, "turn": i, "attempt": planManifestAttempts, "max_attempts": 3,
+							"findings": v.Findings, "reason": "plan_manifest_semantic_review_exhausted",
+						})
+						return result, ErrStructureFailed
+					}
+					break
+				}
 				// The WORST verdict of the round, not the last: a council seats
 				// several critics now, and one request-changes among approvals
 				// is a request for changes. Overwriting meant the last critic
@@ -992,6 +1026,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				"findings":                findings,
 				"verified_after_mutation": turn.Role == config.RoleImplementer && outcomeVerifiedAfterMutation(outcome),
 			})
+			if restartPlanManifest {
+				i = -1
+				continue
+			}
 
 			// The rubber duck: after the implementer's turn is closed on the
 			// record, before the reviewer speaks, and only on measured
