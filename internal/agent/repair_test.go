@@ -680,6 +680,26 @@ func TestPlanManifestPersonaAsksForTopologyNotMarkdown(t *testing.T) {
 	}
 }
 
+func TestPlanManifestCriticReceivesCompleteAuditContract(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001,SPEC-002|T-001,T-002"
+	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Contract: contract, Prompt: "review"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	var system string
+	for _, msg := range msgs {
+		if msg.Role == "system" {
+			system += msg.Content
+		}
+	}
+	for _, want := range []string{"complete manifest_audit", "SPEC-001, SPEC-002", "T-001, T-002", "absence is not evidence"} {
+		if !strings.Contains(system, want) {
+			t.Errorf("manifest critic system prompt lacks %q:\n%s", want, system)
+		}
+	}
+	if repair := repairInstruction(contract, errors.New("missing target")); !strings.Contains(repair, "Include every SPEC exactly once") {
+		t.Fatalf("manifest repair lacks complete audit instructions: %s", repair)
+	}
+}
+
 func TestCodingSeatsReceiveTheResolvedHarnessCapsule(t *testing.T) {
 	for _, role := range []config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleAdvisor} {
 		msgs := BuildMessages(&Turn{Role: role, Prompt: "work"}, &tools.ExecContext{

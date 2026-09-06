@@ -488,6 +488,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			promptTranscript := result.Transcript
+			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
+				turn.Contract = planManifestReviewContract(params, planManifestDraft)
+			}
 			if turn.Persona == PersonaCritic && script.MaterializeCandidate != nil {
 				// The authoritative candidate below supersedes architect wire
 				// fragments. Showing both made a small reviewer call REQ-900 and

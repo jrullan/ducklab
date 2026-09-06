@@ -198,6 +198,17 @@ func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
 	}
 }
 
+func TestPlanManifestReviewContractNamesEverySpecAndTask(t *testing.T) {
+	manifest := &agent.Outcome{Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Tasks: []agent.ManifestTask{{ID: "T-002"}, {ID: "T-001"}},
+	}}}}
+	params := &ExecuteParams{KnownIDs: map[string]bool{"REQ-001": true, "SPEC-008": true, "SPEC-001": true}}
+	got := planManifestReviewContract(params, manifest)
+	if got != "verdict:plan_manifest:SPEC-001,SPEC-008|T-001,T-002" {
+		t.Fatalf("manifest review contract = %q", got)
+	}
+}
+
 func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["meson compile -C build"],"produces":["file:meson.build","build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
 	manifest := &agent.Outcome{Text: manifestText, Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
@@ -256,6 +267,11 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 	for _, prohibited := range []string{"Markdown rendering fields such as Owns", "Depends on", "Assumption", "Do not request any key outside this schema"} {
 		if !strings.Contains(rec.prompts[1], prohibited) {
 			t.Errorf("manifest critic prompt lacks protocol isolation %q:\n%s", prohibited, rec.prompts[1])
+		}
+	}
+	for _, semantic := range []string{"same actor", "do not split merely by", "Implements is a many-to-many trace link", "do not reject duplicate Implements links"} {
+		if !strings.Contains(rec.prompts[1], semantic) {
+			t.Errorf("manifest critic prompt lacks cohesion rule %q:\n%s", semantic, rec.prompts[1])
 		}
 	}
 	if !strings.Contains(res.Text, "### T-001") {

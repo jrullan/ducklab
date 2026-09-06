@@ -47,6 +47,21 @@ type Verdict struct {
 	Findings           []Finding            `json:"findings"`
 	NativeChecks       *NativeReviewChecks  `json:"native_checks,omitempty"`
 	AcceptanceEvidence []AcceptanceEvidence `json:"acceptance_evidence,omitempty"`
+	ManifestAudit      *ManifestAudit       `json:"manifest_audit,omitempty"`
+}
+
+// ManifestAudit makes a pre-freeze review accountable for the whole object.
+// A sparse findings list records only what a reviewer noticed; it cannot show
+// that unchanged SPECs and tasks were actually reconsidered after a repair.
+type ManifestAudit struct {
+	Specs []ManifestAuditEntry `json:"specs"`
+	Tasks []ManifestAuditEntry `json:"tasks"`
+}
+
+type ManifestAuditEntry struct {
+	ID       string `json:"id"`
+	Status   string `json:"status"` // pass | fail
+	Evidence string `json:"evidence"`
 }
 
 // AcceptanceEvidence binds one reviewer judgment to one human-approved
@@ -115,6 +130,15 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseVerdict(text, false)
 	case contract == "verdict:native":
 		return parseVerdict(text, true)
+	case strings.HasPrefix(contract, "verdict:plan_manifest:"):
+		v, err := parseVerdict(text, false)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateManifestAudit(v, contract); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case contract == "choice":
 		return parseChoice(text)
 	case contract == "json:decomposition":
@@ -323,6 +347,77 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 		}
 	}
 	return &v, nil
+}
+
+func manifestAuditIDs(contract string) ([]string, []string, error) {
+	raw := strings.TrimPrefix(contract, "verdict:plan_manifest:")
+	parts := strings.SplitN(raw, "|", 2)
+	if len(parts) != 2 {
+		return nil, nil, fmt.Errorf("verdict contract: invalid plan manifest audit target")
+	}
+	split := func(raw string) []string {
+		if raw == "" {
+			return nil
+		}
+		return strings.Split(raw, ",")
+	}
+	specs, tasks := split(parts[0]), split(parts[1])
+	if len(specs) == 0 || len(tasks) == 0 {
+		return nil, nil, fmt.Errorf("verdict contract: plan manifest audit requires SPEC and task targets")
+	}
+	return specs, tasks, nil
+}
+
+func validateManifestAudit(v *Verdict, contract string) error {
+	specs, tasks, err := manifestAuditIDs(contract)
+	if err != nil {
+		return err
+	}
+	if v.ManifestAudit == nil {
+		return fmt.Errorf("verdict contract: manifest_audit is required for a plan manifest review")
+	}
+	failing := 0
+	check := func(kind string, want []string, got []ManifestAuditEntry) error {
+		if len(got) != len(want) {
+			return fmt.Errorf("verdict contract: manifest_audit.%s must contain exactly %d entries (%s)", kind, len(want), strings.Join(want, ", "))
+		}
+		expected := make(map[string]bool, len(want))
+		for _, id := range want {
+			expected[id] = true
+		}
+		seen := make(map[string]bool, len(got))
+		for _, entry := range got {
+			if !expected[entry.ID] || seen[entry.ID] {
+				return fmt.Errorf("verdict contract: manifest_audit.%s must identify each target exactly once; unexpected or duplicate %q", kind, entry.ID)
+			}
+			seen[entry.ID] = true
+			status := strings.ToLower(strings.TrimSpace(entry.Status))
+			if status != "pass" && status != "fail" {
+				return fmt.Errorf("verdict contract: manifest_audit %s %s status must be pass or fail", kind, entry.ID)
+			}
+			evidence := strings.ToLower(strings.Trim(strings.TrimSpace(entry.Evidence), "."))
+			if evidence == "" || evidence == "ok" || evidence == "pass" || evidence == "fail" || evidence == "covered" {
+				return fmt.Errorf("verdict contract: manifest_audit %s %s must name concrete candidate evidence", kind, entry.ID)
+			}
+			if status == "fail" {
+				failing++
+			}
+		}
+		return nil
+	}
+	if err := check("specs", specs, v.ManifestAudit.Specs); err != nil {
+		return err
+	}
+	if err := check("tasks", tasks, v.ManifestAudit.Tasks); err != nil {
+		return err
+	}
+	if v.Approved() && failing > 0 {
+		return fmt.Errorf("verdict contract: plan manifest approval has %d failed audit entries", failing)
+	}
+	if !v.Approved() && failing == 0 {
+		return fmt.Errorf("verdict contract: plan manifest request-changes has no failed audit entry")
+	}
+	return nil
 }
 
 func noOpFinding(f Finding) bool {

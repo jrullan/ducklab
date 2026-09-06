@@ -1023,6 +1023,17 @@ or "green" are not concrete evidence.`, len(ectx.TaskAcceptanceProbes))
 	if (turn.Persona == "critic" || turn.Persona == "plan_manifest_critic") && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
 	}
+	if strings.HasPrefix(turn.Contract, "verdict:plan_manifest:") && turn.Role == config.RoleReviewer {
+		specs, tasks, _ := manifestAuditIDs(turn.Contract)
+		rolePrompt += fmt.Sprintf(`
+
+Your JSON verdict MUST contain a complete manifest_audit in this exact shape:
+"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete work unit, slice and probe evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete cohesion and slice/probe evidence"}]}
+Audit every target exactly once. SPEC targets: %s. Task targets: %s. An approval
+requires every entry to pass. A request-changes verdict requires every blocking
+finding to be reflected by at least one failed entry. Do not omit passing
+targets; absence is not evidence that you reviewed them.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
+	}
 	if turn.Persona == "consultant" {
 		rolePrompt = consultantPrompt
 	}
@@ -1102,7 +1113,7 @@ func main() {}
 // telling it "tests will run" sent a reviewer to call verify_run twice on a
 // requirements draft ("no command configured", Neocapture 2026-08-29).
 func gateDescFor(turn *Turn) string {
-	if turn != nil && (strings.HasPrefix(turn.Contract, "markdown_sections:") || turn.Persona == "critic" ||
+	if turn != nil && (strings.HasPrefix(turn.Contract, "markdown_sections:") || turn.Persona == "critic" || turn.Persona == "plan_manifest_critic" ||
 		turn.Role == config.RoleArchitect || turn.Role == config.RoleScribe || turn.Role == config.RoleTriager) {
 		return "This is a document turn: no tests run after it. ducklab checks the " +
 			"document's structure and the person decides at the gate. verify_run has nothing to run here."
@@ -1764,6 +1775,18 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 }
 
 func repairInstruction(contract string, parseErr error) string {
+	if strings.HasPrefix(contract, "verdict:plan_manifest:") {
+		specs, tasks, _ := manifestAuditIDs(contract)
+		return fmt.Sprintf(`Your reply did not satisfy the complete plan-manifest review contract.
+
+What was wrong: %v
+
+Reply with ONLY one JSON object: {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"manifest","line":0,"issue":"defect","fix":"bounded remedy"}],"manifest_audit":{"specs":[{"id":"SPEC-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}],"tasks":[{"id":"T-NNN","status":"pass|fail","evidence":"concrete manifest evidence"}]}}
+
+Include every SPEC exactly once: %s. Include every task exactly once: %s.
+Approval requires all entries to pass; request-changes requires at least one
+failed entry and one blocking finding.`, parseErr, strings.Join(specs, ", "), strings.Join(tasks, ", "))
+	}
 	if contract == "verdict:native" {
 		return fmt.Sprintf(`Your reply did not satisfy the required output format or an active deterministic capability rule.
 

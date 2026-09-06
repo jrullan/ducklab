@@ -61,6 +61,29 @@ func TestVerdictApproveWithNoFindingsIsValid(t *testing.T) {
 	}
 }
 
+func TestPlanManifestVerdictRequiresCompleteAccountableAudit(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001,SPEC-002|T-001,T-002"
+	valid := `{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-002 bundles selection and execution","fix":"keep only selection in its work unit"}],"manifest_audit":{"specs":[{"id":"SPEC-001","status":"pass","evidence":"T-001 slice 1 and probe 1 preserve the authority boundary"},{"id":"SPEC-002","status":"fail","evidence":"T-002 work unit combines selection and execution"}],"tasks":[{"id":"T-001","status":"pass","evidence":"one registry concern with matching slice and probe"},{"id":"T-002","status":"fail","evidence":"two independent actors occur in its work unit"}]}}`
+	got, err := ParseContract(contract, valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.(*Verdict).ManifestAudit == nil || len(got.(*Verdict).ManifestAudit.Tasks) != 2 {
+		t.Fatalf("manifest audit lost: %#v", got)
+	}
+
+	for name, text := range map[string]string{
+		"missing target":        strings.Replace(valid, `,{"id":"SPEC-002","status":"fail","evidence":"T-002 work unit combines selection and execution"}`, "", 1),
+		"approval with failure": strings.Replace(valid, `"verdict":"request-changes"`, `"verdict":"approve"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseContract(contract, text); err == nil {
+				t.Fatal("incomplete or contradictory manifest audit passed")
+			}
+		})
+	}
+}
+
 func TestVerdictRejectsFindingsThatSayNothingIsWrong(t *testing.T) {
 	for _, text := range []string{
 		`{"verdict":"approve","findings":[{"severity":"minor","file":"x.h","issue":"Task delivered exactly what was asked — no defects found.","fix":"N/A"}]}`,

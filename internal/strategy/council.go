@@ -2,7 +2,10 @@ package strategy
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 )
 
@@ -42,16 +45,46 @@ manifest is approved. Do not request any key outside this schema.
   boundary, never as positive implementation work.
 - Each task is one cohesive concern with 1–3 independently observable slices.
   Do not approve bundled concerns merely because they fit in three bullets.
+  Multiple operations may share one task when they have the same actor,
+  selection policy, change boundary and joint probe; do not split merely by
+  counting endpoint names. Different selection or authority rules are distinct
+  concerns.
 - Every probe must actually observe its same-index slice. A generic build,
   grep, or count is not evidence for unrelated runtime or authority behavior.
 - Preserve actor/action/object authority: validation, proposal and execution
   are different responsibilities and must not silently change owners.
+- Implements is a many-to-many trace link, not artifact ownership. Several
+  tasks may implement different obligations of one SPEC. Judge ownership from
+  Produces/Consumes and the work unit; do not reject duplicate Implements links
+  by themselves.
 - Review the whole compact manifest before approving. If it is defective,
   identify the exact SPEC obligation and the smallest repartition needed, but
   do not allocate milestone or task ids in the fix; the architect regenerates
   the complete manifest.
 
 Approve only when this manifest is a sound topology to freeze.`
+
+func planManifestReviewContract(params *ExecuteParams, outcome *agent.Outcome) string {
+	var specs []string
+	for id := range params.KnownIDs {
+		if strings.HasPrefix(id, "SPEC-") {
+			specs = append(specs, id)
+		}
+	}
+	var tasks []string
+	if outcome != nil {
+		if manifest, ok := outcome.Parsed.(*agent.PlanManifest); ok && manifest != nil {
+			for _, milestone := range manifest.Milestones {
+				for _, task := range milestone.Tasks {
+					tasks = append(tasks, task.ID)
+				}
+			}
+		}
+	}
+	sort.Strings(specs)
+	sort.Strings(tasks)
+	return "verdict:plan_manifest:" + strings.Join(specs, ",") + "|" + strings.Join(tasks, ",")
+}
 
 // planCoverageReview is semantic on purpose. Implements links, graph edges and
 // field shapes are mechanical and belong to structureFindings; deciding whether

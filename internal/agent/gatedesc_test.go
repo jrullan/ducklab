@@ -16,6 +16,7 @@ func TestDocumentTurnsAreNotPromisedATestGate(t *testing.T) {
 		// A document council's critic reviews with the verdict contract; it
 		// still has nothing to run (it called verify_run on a spec draft).
 		{Role: config.RoleReviewer, Contract: "verdict", Persona: "critic"},
+		{Role: config.RoleReviewer, Contract: "verdict:plan_manifest:SPEC-001|T-001", Persona: "plan_manifest_critic"},
 		{Role: config.RoleScribe},
 		{Role: config.RoleTriager},
 	}
