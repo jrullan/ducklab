@@ -86,6 +86,13 @@ func structureFindings(prev, cur []agent.Section, contract string, known map[str
 			}
 		}
 		for _, s := range cur {
+			if strings.HasPrefix(strings.ToUpper(s.ID), "M-") {
+				for _, lane := range taskFieldItems(s.Body, "Owns") {
+					if strings.TrimSpace(lane) == "." || strings.TrimSpace(lane) == "/" {
+						out = append(out, fmt.Sprintf("%s **Owns:** cannot claim workspace root %q — exact produced files or bounded directories must remain disjoint", s.ID, lane))
+					}
+				}
+			}
 			sectionBlocks := taskBlocks(s.Body)
 			// A sectioned plan update uses markdown_sections:T, so its assigned
 			// task is itself the parsed top-level section rather than an H3 inside

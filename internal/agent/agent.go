@@ -1336,7 +1336,7 @@ Reply with exactly one JSON object:
   "work_unit":"one cohesive capability",
   "acceptance_slices":["observable outcome 1","observable outcome 2"],
   "acceptance_probes":["executable command for outcome 1","executable command for outcome 2"],
-  "produces":["file:path/or/capability"],"consumes":[],
+  "produces":["file:path","dir:path","build-target:name","capability:name"],"consumes":[],
   "verification":"executable command"}]}]}
 
 Rules:
@@ -1344,7 +1344,8 @@ Rules:
 - Each task has exactly one cohesive work_unit and 1-3 observable acceptance_slices.
 - Each acceptance_slice has one distinct acceptance_probe at the same array index. Write the executable command itself, without Markdown backticks; never copy one broad verification command into every probe.
 - If a proposed task needs more than three slices or spans independent concerns, split it here before IDs and artifact ownership are frozen.
-- Use exact file, directory, build-target, or capability names.
+- Every produces/consumes item is typed exactly as file:path, dir:path,
+  build-target:name, or capability:name. Bare paths are invalid.
 - A consumer names the producer's artifact byte-for-byte; ducklab derives Depends on.
 - Keep tasks small; the next architect renders work_unit, acceptance_slices, and acceptance_probes verbatim as flat lists. Explanations belong in prose, never as nested list items.
 - Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
@@ -1717,6 +1718,11 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 	if repairs <= 0 {
 		repairs = 2
 	}
+	if strings.HasPrefix(turn.Contract, "verdict:plan_manifest:") && repairs >= 2 {
+		if baseVerdict, baseErr := parseVerdict(text, false); baseErr == nil {
+			return repairManifestAuditFragments(ctx, loop, turn, msgs, text, baseVerdict, ectx)
+		}
+	}
 
 	// The repair conversation KEEPS the original exchange and appends the bad
 	// answer plus the correction. Sending only the correction, as this used to,
@@ -1772,6 +1778,85 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 		text = newText
 	}
 	return "", nil, attempts, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, attempts, parseErr)
+}
+
+func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, original string, verdict *Verdict, ectx *tools.ExecContext) (string, interface{}, int, error) {
+	specs, tasks, err := manifestAuditIDs(turn.Contract)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	type target struct {
+		kind string
+		ids  []string
+	}
+	audit := &ManifestAudit{}
+	attempts := 0
+	for _, part := range []target{{"specs", specs}, {"tasks", tasks}} {
+		attempts++
+		conv := append([]provider.Message{}, msgs...)
+		conv = append(conv,
+			provider.Message{Role: "assistant", Content: original},
+			provider.Message{Role: "user", Content: fmt.Sprintf(`Complete only the missing %s ledger for the same plan-manifest review. Do not repeat the verdict or findings.
+
+Reply with ONLY this JSON object: {"%s":[{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}]}
+
+Include every target exactly once, in this order: %s. Use fail when the original findings show that target is defective; do not hide a finding behind pass.`, part.kind, part.kind, strings.Join(part.ids, ", "))},
+		)
+		req := provider.ChatRequest{Model: loop.Duckling.Model, Messages: conv}
+		applySampling(&req, loop.Duckling, turn.Contract)
+		resp, callErr := loop.Provider.Chat(ctx, req)
+		if callErr != nil {
+			return "", nil, attempts, fmt.Errorf("manifest audit %s fragment: %w", part.kind, callErr)
+		}
+		if len(resp.Choices) == 0 {
+			return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment returned no response", ErrContract, part.kind)
+		}
+		entries, parseErr := parseManifestAuditFragment(resp.Choices[0].Message.Content, part.kind, part.ids)
+		if parseErr != nil {
+			return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment: %v", ErrContract, part.kind, parseErr)
+		}
+		if part.kind == "specs" {
+			audit.Specs = entries
+		} else {
+			audit.Tasks = entries
+		}
+	}
+	verdict.ManifestAudit = audit
+	if err := validateManifestAudit(verdict, turn.Contract); err != nil {
+		return "", nil, attempts, fmt.Errorf("%w: composed manifest audit: %v", ErrContract, err)
+	}
+	if ectx != nil && ectx.NormalizeContract != nil {
+		if _, err := ectx.NormalizeContract(turn.Role, turn.Contract, verdict); err != nil {
+			return "", nil, attempts, fmt.Errorf("%w: composed manifest audit policy: %v", ErrContract, err)
+		}
+	}
+	encoded, err := json.Marshal(verdict)
+	if err != nil {
+		return "", nil, attempts, fmt.Errorf("marshal composed manifest audit: %w", err)
+	}
+	return string(encoded), verdict, attempts, nil
+}
+
+func parseManifestAuditFragment(text, kind string, ids []string) ([]ManifestAuditEntry, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &object); err != nil {
+		return nil, err
+	}
+	if len(object) != 1 || object[kind] == nil {
+		return nil, fmt.Errorf("expected only %q", kind)
+	}
+	var entries []ManifestAuditEntry
+	if err := json.Unmarshal(object[kind], &entries); err != nil {
+		return nil, err
+	}
+	if _, err := validateManifestAuditEntries(kind, ids, entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func repairInstruction(contract string, parseErr error) string {

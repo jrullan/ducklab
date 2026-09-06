@@ -33,6 +33,18 @@ func TestPlanStructureIsCheckedPerTask(t *testing.T) {
 	}
 }
 
+func TestPlanStructureRejectsWorkspaceRootOwnership(t *testing.T) {
+	raw := "## M-01 — Root\n\n**Owns:** .\n\n### T-001 — Build\n\n**Implements:** SPEC-001\n\n**Work unit:** build\n\n**Acceptance slices:**\n- builds\n\n**Acceptance probes:**\n1. `true`\n\n**Produces:** file:Cargo.toml\n\n**Consumes:** none\n\n**Verification:** `true`\n\n**Exercises:** file:Cargo.toml"
+	parsed, err := agent.ParseContract("markdown_sections:M", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := structureFindings(nil, parsed.([]agent.Section), "markdown_sections:M", map[string]bool{"SPEC-001": true}, true, raw)
+	if !slices.ContainsFunc(findings, func(f string) bool { return strings.Contains(f, "cannot claim workspace root") }) {
+		t.Fatalf("root Owns lane passed: %v", findings)
+	}
+}
+
 func TestSmallPlanV2CapsAtomicAcceptanceSlices(t *testing.T) {
 	body := "### T-001 — Save capture\n\n**Implements:** SPEC-001\n\n**Work unit:** Persist one completed capture\n\n**Acceptance slices:**\n- Opens a save destination\n- Writes a valid PNG\n- Reports success\n- Reports failure\n\n**Produces:** src/save.c\n\n**Consumes:** none\n\n**Verification:** `cc -fsyntax-only src/save.c`\n\n**Exercises:** src/save.c"
 	cur := []agent.Section{{ID: "M-01", Title: "Save", Body: body}}

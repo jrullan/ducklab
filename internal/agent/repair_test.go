@@ -700,6 +700,32 @@ func TestPlanManifestCriticReceivesCompleteAuditContract(t *testing.T) {
 	}
 }
 
+func TestPlanManifestAuditRepairComposesTwoSmallFragments(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001,SPEC-002|T-001,T-002"
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-002 bundles concerns","fix":"keep only selection"}]}`,
+		`{"specs":[{"id":"SPEC-001","status":"pass","evidence":"T-001 slice and probe preserve the build boundary"},{"id":"SPEC-002","status":"fail","evidence":"T-002 combines registry and selection"}]}`,
+		`{"tasks":[{"id":"T-001","status":"pass","evidence":"T-001 has one build work unit"},{"id":"T-002","status":"fail","evidence":"T-002 has registry and selection actors"}]}`,
+	}}
+	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
+	out, err := RunTurn(context.Background(), testLoop(p, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict := out.Parsed.(*Verdict)
+	if out.Repairs != 2 || p.calls() != 3 || verdict.ManifestAudit == nil || len(verdict.ManifestAudit.Specs) != 2 || len(verdict.ManifestAudit.Tasks) != 2 {
+		t.Fatalf("outcome repairs=%d calls=%d audit=%+v", out.Repairs, p.calls(), verdict.ManifestAudit)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if got := p.requests[1].Messages[len(p.requests[1].Messages)-1].Content; !strings.Contains(got, "only the missing specs ledger") || strings.Contains(got, "repeat the verdict") && !strings.Contains(got, "Do not repeat") {
+		t.Fatalf("spec fragment prompt = %s", got)
+	}
+	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "only the missing tasks ledger") {
+		t.Fatalf("task fragment prompt = %s", got)
+	}
+}
+
 func TestCodingSeatsReceiveTheResolvedHarnessCapsule(t *testing.T) {
 	for _, role := range []config.Role{config.RoleImplementer, config.RoleReviewer, config.RoleAdvisor} {
 		msgs := BuildMessages(&Turn{Role: role, Prompt: "work"}, &tools.ExecContext{

@@ -243,8 +243,8 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			seen[taskID] = true
 			for pi, item := range task.Produces {
 				item = strings.TrimSpace(item)
-				if item == "" {
-					return nil, fmt.Errorf("plan manifest contract: empty produced artifact in %s", taskID)
+				if !validManifestArtifact(item) {
+					return nil, fmt.Errorf("plan manifest contract: %s produced artifact %q must use file:, dir:, build-target:, or capability:", taskID, item)
 				}
 				if prior := producer[item]; prior != "" && prior != taskID {
 					return nil, fmt.Errorf("plan manifest contract: %s and %s both produce %s", prior, taskID, item)
@@ -252,9 +252,23 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				producer[item] = taskID
 				manifest.Milestones[mi].Tasks[ti].Produces[pi] = item
 			}
+			for ci, item := range task.Consumes {
+				item = strings.TrimSpace(item)
+				if !validManifestArtifact(item) {
+					return nil, fmt.Errorf("plan manifest contract: %s consumed artifact %q must use file:, dir:, build-target:, or capability:", taskID, item)
+				}
+				manifest.Milestones[mi].Tasks[ti].Consumes[ci] = item
+			}
 		}
 	}
 	return &manifest, nil
+}
+
+func validManifestArtifact(item string) bool {
+	kind, value, ok := strings.Cut(item, ":")
+	return ok && strings.TrimSpace(value) != "" && map[string]bool{
+		"file": true, "dir": true, "build-target": true, "capability": true,
+	}[kind]
 }
 
 func validContractID(id, prefix string) bool {
@@ -376,41 +390,15 @@ func validateManifestAudit(v *Verdict, contract string) error {
 	if v.ManifestAudit == nil {
 		return fmt.Errorf("verdict contract: manifest_audit is required for a plan manifest review")
 	}
-	failing := 0
-	check := func(kind string, want []string, got []ManifestAuditEntry) error {
-		if len(got) != len(want) {
-			return fmt.Errorf("verdict contract: manifest_audit.%s must contain exactly %d entries (%s)", kind, len(want), strings.Join(want, ", "))
-		}
-		expected := make(map[string]bool, len(want))
-		for _, id := range want {
-			expected[id] = true
-		}
-		seen := make(map[string]bool, len(got))
-		for _, entry := range got {
-			if !expected[entry.ID] || seen[entry.ID] {
-				return fmt.Errorf("verdict contract: manifest_audit.%s must identify each target exactly once; unexpected or duplicate %q", kind, entry.ID)
-			}
-			seen[entry.ID] = true
-			status := strings.ToLower(strings.TrimSpace(entry.Status))
-			if status != "pass" && status != "fail" {
-				return fmt.Errorf("verdict contract: manifest_audit %s %s status must be pass or fail", kind, entry.ID)
-			}
-			evidence := strings.ToLower(strings.Trim(strings.TrimSpace(entry.Evidence), "."))
-			if evidence == "" || evidence == "ok" || evidence == "pass" || evidence == "fail" || evidence == "covered" {
-				return fmt.Errorf("verdict contract: manifest_audit %s %s must name concrete candidate evidence", kind, entry.ID)
-			}
-			if status == "fail" {
-				failing++
-			}
-		}
-		return nil
-	}
-	if err := check("specs", specs, v.ManifestAudit.Specs); err != nil {
+	specFailures, err := validateManifestAuditEntries("specs", specs, v.ManifestAudit.Specs)
+	if err != nil {
 		return err
 	}
-	if err := check("tasks", tasks, v.ManifestAudit.Tasks); err != nil {
+	taskFailures, err := validateManifestAuditEntries("tasks", tasks, v.ManifestAudit.Tasks)
+	if err != nil {
 		return err
 	}
+	failing := specFailures + taskFailures
 	if v.Approved() && failing > 0 {
 		return fmt.Errorf("verdict contract: plan manifest approval has %d failed audit entries", failing)
 	}
@@ -418,6 +406,35 @@ func validateManifestAudit(v *Verdict, contract string) error {
 		return fmt.Errorf("verdict contract: plan manifest request-changes has no failed audit entry")
 	}
 	return nil
+}
+
+func validateManifestAuditEntries(kind string, want []string, got []ManifestAuditEntry) (int, error) {
+	if len(got) != len(want) {
+		return 0, fmt.Errorf("verdict contract: manifest_audit.%s must contain exactly %d entries (%s)", kind, len(want), strings.Join(want, ", "))
+	}
+	expected := make(map[string]bool, len(want))
+	for _, id := range want {
+		expected[id] = true
+	}
+	seen, failing := make(map[string]bool, len(got)), 0
+	for _, entry := range got {
+		if !expected[entry.ID] || seen[entry.ID] {
+			return 0, fmt.Errorf("verdict contract: manifest_audit.%s must identify each target exactly once; unexpected or duplicate %q", kind, entry.ID)
+		}
+		seen[entry.ID] = true
+		status := strings.ToLower(strings.TrimSpace(entry.Status))
+		if status != "pass" && status != "fail" {
+			return 0, fmt.Errorf("verdict contract: manifest_audit %s %s status must be pass or fail", kind, entry.ID)
+		}
+		evidence := strings.ToLower(strings.Trim(strings.TrimSpace(entry.Evidence), "."))
+		if evidence == "" || evidence == "ok" || evidence == "pass" || evidence == "fail" || evidence == "covered" {
+			return 0, fmt.Errorf("verdict contract: manifest_audit %s %s must name concrete candidate evidence", kind, entry.ID)
+		}
+		if status == "fail" {
+			failing++
+		}
+	}
+	return failing, nil
 }
 
 func noOpFinding(f Finding) bool {

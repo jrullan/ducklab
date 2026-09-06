@@ -90,7 +90,7 @@ func invalidPlanCriticFinding(params *ExecuteParams, finding agent.Finding, cand
 		}
 	}
 	for name, priority := range params.PriorityByName {
-		if !strings.Contains(lower, name) || !prescribesPositiveWork(fixLower) {
+		if !mentionsDecisionName(lower, name) || !prescribesPositiveWork(fixLower) {
 			continue
 		}
 		if priority == "wont" {
@@ -199,13 +199,40 @@ func namedDecisionSelected(candidate, name string) bool {
 			if end < 0 {
 				end = len(lower) - i
 			}
-			if strings.Contains(lower[i:i+end], name) {
+			if mentionsDecisionName(lower[i:i+end], name) {
 				return true
 			}
 			at = i + end
 		}
 	}
 	return false
+}
+
+func mentionsDecisionName(text, name string) bool {
+	text, name = strings.ToLower(text), strings.ToLower(name)
+	if strings.Contains(text, name) {
+		return true
+	}
+	words := regexp.MustCompile(`[a-z0-9]+`).FindAllString(name, -1)
+	var meaningful []string
+	stop := map[string]bool{"a": true, "an": true, "the": true, "of": true, "and": true, "or": true, "out": true, "scope": true}
+	for _, word := range words {
+		if !stop[word] {
+			meaningful = append(meaningful, word)
+		}
+	}
+	if len(meaningful) < 2 {
+		return false
+	}
+	at := 0
+	for _, word := range meaningful {
+		i := strings.Index(text[at:], word)
+		if i < 0 {
+			return false
+		}
+		at += i + len(word)
+	}
+	return true
 }
 
 func prescribesNamedTopology(text, id string) bool {

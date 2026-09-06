@@ -144,6 +144,20 @@ func TestPlanCriticFactsRespectNamedCouldInsideMixedSpec(t *testing.T) {
 	}
 }
 
+func TestPlanCriticFactsMatchDeferredNameAcrossInterveningWords(t *testing.T) {
+	params := &ExecuteParams{PriorityByName: map[string]string{"live probes": "could"}}
+	finding := agent.Finding{
+		Issue: "Live host toolchain probes are not covered",
+		Fix:   "Add an acceptance slice implementing live host toolchain probes",
+	}
+	if got := invalidPlanCriticFinding(params, finding, "### T-001 — Fixtures\n"); !strings.Contains(got, "could obligation") {
+		t.Fatalf("intervening adjective bypassed could scope: %q", got)
+	}
+	if !namedDecisionSelected("**Work unit:** Execute live host toolchain probes.\n", "live probes") {
+		t.Fatal("selected deferred behavior was not recognized across intervening words")
+	}
+}
+
 func TestPlanCriticFactsFilterBeforeRepairAndRecordWhy(t *testing.T) {
 	var events []map[string]interface{}
 	params := &ExecuteParams{
