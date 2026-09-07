@@ -293,6 +293,22 @@ func applySupportProfile(turn *Turn, small bool) {
 	}
 }
 
+const maxSmallSeatAcceptanceSlices = 3
+
+func validatePlanManifestSupportProfile(manifest *agent.PlanManifest, small bool) error {
+	if manifest == nil || !small {
+		return nil
+	}
+	for _, milestone := range manifest.Milestones {
+		for _, task := range milestone.Tasks {
+			if len(task.AcceptanceSlices) > maxSmallSeatAcceptanceSlices {
+				return fmt.Errorf("plan manifest support profile: %s acceptance_slices has %d items, want at most %d for a small seat", task.ID, len(task.AcceptanceSlices), maxSmallSeatAcceptanceSlices)
+			}
+		}
+	}
+	return nil
+}
+
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{Transcript: &conv.Transcript{}}
 
@@ -399,7 +415,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	for _, entry := range result.Transcript.Entries {
 		if parsed, parseErr := agent.ParseContract("json:plan_manifest", entry.Text); parseErr == nil {
 			if manifest, ok := parsed.(*agent.PlanManifest); ok {
-				planManifest = manifest
+				if validatePlanManifestSupportProfile(manifest, params.SmallSeat) == nil {
+					planManifest = manifest
+				}
 			}
 		}
 	}
@@ -586,7 +604,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
-				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReview
+				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReviewFor(params.SmallSeat)
 				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
 					prompt += "\n\n## Unresolved seeded tasks — mechanical fact\n\n" + strings.Join(unresolved, ", ") +
 						" still contain provisional `UNRESOLVED`, `false`, or `capability:unresolved-*` values. " +
@@ -736,6 +754,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					} else {
 						updated, operations, patchErr = applyPlanManifestPatch(manifestPatchBase, patch)
 						if patchErr == nil {
+							patchErr = validatePlanManifestSupportProfile(updated, params.SmallSeat)
+						}
+						if patchErr == nil {
 							if missing := missingPlanSeedCoverage(updated, seedSpecs); len(missing) > 0 {
 								patchErr = fmt.Errorf("patched manifest dropped seeded SPEC coverage: %s", strings.Join(missing, ", "))
 							}
@@ -812,25 +833,29 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				if !ok || manifest == nil {
 					err = fmt.Errorf("plan manifest turn returned no validated topology")
 				} else {
-					removed, normalizeErr := normalizePlanManifestReferences(manifest, params.KnownIDs)
-					if normalizeErr != nil {
-						err = normalizeErr
+					if profileErr := validatePlanManifestSupportProfile(manifest, params.SmallSeat); profileErr != nil {
+						err = profileErr
 					} else {
-						encoded, encodeErr := json.Marshal(manifest)
-						if encodeErr != nil {
-							err = fmt.Errorf("canonicalize plan manifest: %w", encodeErr)
+						removed, normalizeErr := normalizePlanManifestReferences(manifest, params.KnownIDs)
+						if normalizeErr != nil {
+							err = normalizeErr
 						} else {
-							canonical := *outcome
-							canonical.Text, canonical.Parsed = string(encoded), manifest
-							outcome = &canonical
-							planManifest = manifest
-							planManifestDraft = outcome
-							planManifestAttempts++
-							if removed > 0 {
-								emit(params, "structure_normalized", map[string]interface{}{
-									"round": round, "turn": i, "fields": removed,
-									"detail": "removed unknown specification references before freezing plan topology",
-								})
+							encoded, encodeErr := json.Marshal(manifest)
+							if encodeErr != nil {
+								err = fmt.Errorf("canonicalize plan manifest: %w", encodeErr)
+							} else {
+								canonical := *outcome
+								canonical.Text, canonical.Parsed = string(encoded), manifest
+								outcome = &canonical
+								planManifest = manifest
+								planManifestDraft = outcome
+								planManifestAttempts++
+								if removed > 0 {
+									emit(params, "structure_normalized", map[string]interface{}{
+										"round": round, "turn": i, "fields": removed,
+										"detail": "removed unknown specification references before freezing plan topology",
+									})
+								}
 							}
 						}
 					}
@@ -1804,6 +1829,7 @@ func defaultRunner(params *ExecuteParams) TurnRunner {
 			MaxTurns:  t.MaxTurns,
 			Anonymize: t.Anonymize,
 			Persona:   t.Persona,
+			SmallSeat: params.SmallSeat,
 		}, params.ExecContext)
 	}
 }

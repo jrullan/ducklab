@@ -346,10 +346,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				return nil, fmt.Errorf("plan manifest contract: %s work_unit must not be empty", taskID)
 			}
 			if len(task.AcceptanceSlices) == 0 {
-				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices must contain 1-3 items", taskID)
-			}
-			if len(task.AcceptanceSlices) > 3 {
-				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices has %d items, want at most 3", taskID, len(task.AcceptanceSlices))
+				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices must contain at least one item", taskID)
 			}
 			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
 				return nil, fmt.Errorf("plan manifest contract: %s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices))

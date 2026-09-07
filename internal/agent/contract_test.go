@@ -402,13 +402,33 @@ func TestPlanManifestRequiresAtomicTaskContract(t *testing.T) {
 		{"missing work unit", `""`, `["builds"]`},
 		{"missing slices", `"build app"`, `[]`},
 		{"empty slice", `"build app"`, `[""]`},
-		{"too many slices", `"build app"`, `["one","two","three","four"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := ParseContract("json:plan_manifest", fmt.Sprintf(base, tc.work, tc.slices)); err == nil {
 				t.Fatal("non-atomic manifest task passed")
 			}
 		})
+	}
+}
+
+func TestPlanManifestParserDoesNotOwnSupportProfileSliceLimit(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build app","acceptance_slices":["one","two","three","four"],"acceptance_probes":["test-one","test-two","test-three","test-four"],"produces":["build-target:app"],"consumes":[],"verification":"test-all"}]}]}`
+	if _, err := ParseContract("json:plan_manifest", text); err != nil {
+		t.Fatalf("structurally valid standard-profile manifest rejected: %v", err)
+	}
+}
+
+func TestPlanManifestPromptOwnsSmallSeatSliceGuidance(t *testing.T) {
+	small := planManifestPromptFor(true)
+	standard := planManifestPromptFor(false)
+	if !strings.Contains(small, "1-3 observable acceptance_slices") || !strings.Contains(small, "more than three slices") {
+		t.Fatalf("small prompt lost slice ceiling:\n%s", small)
+	}
+	if strings.Contains(standard, "1-3 observable acceptance_slices") || strings.Contains(standard, "more than three slices") {
+		t.Fatalf("standard prompt inherited small-seat slice guidance:\n%s", standard)
+	}
+	if !strings.Contains(standard, "do not split or merge solely because of its slice count") {
+		t.Fatalf("standard prompt lacks cohesion guidance:\n%s", standard)
 	}
 }
 

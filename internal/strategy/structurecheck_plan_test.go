@@ -9,6 +9,34 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 )
 
+func TestPlanManifestSliceLimitBelongsToSmallSupportProfile(t *testing.T) {
+	manifest := &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Title: "Core", Tasks: []agent.ManifestTask{{
+			ID: "T-001", AcceptanceSlices: []string{"one", "two", "three", "four"},
+		}},
+	}}}
+	if err := validatePlanManifestSupportProfile(manifest, false); err != nil {
+		t.Fatalf("standard profile inherited small-seat slice limit: %v", err)
+	}
+	if err := validatePlanManifestSupportProfile(manifest, true); err == nil || !strings.Contains(err.Error(), "want at most 3 for a small seat") {
+		t.Fatalf("small profile slice limit error = %v", err)
+	}
+}
+
+func TestPlanManifestReviewGuidanceRespectsSupportProfile(t *testing.T) {
+	small := planManifestSemanticReviewFor(true)
+	standard := planManifestSemanticReviewFor(false)
+	if !strings.Contains(small, "1–3 independently observable slices") {
+		t.Fatalf("small review guidance lost slice ceiling:\n%s", small)
+	}
+	if strings.Contains(standard, "1–3 independently observable slices") || strings.Contains(standard, "fit in three bullets") {
+		t.Fatalf("standard review guidance inherited small-seat slice rule:\n%s", standard)
+	}
+	if !strings.Contains(standard, "Do not split or merge tasks solely because of their slice count") {
+		t.Fatalf("standard review guidance lacks cohesion rule:\n%s", standard)
+	}
+}
+
 // Plan rules are checked at task granularity: every task names what it
 // implements, a small seat's task carries at most three deliverables, and
 // milestone lanes do not overlap. The reviewer caught all three on

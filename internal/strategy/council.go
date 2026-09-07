@@ -72,6 +72,18 @@ manifest is approved. Do not request any key outside this schema.
 
 Approve only when this manifest is a sound topology to freeze.`
 
+func planManifestSemanticReviewFor(small bool) string {
+	if small {
+		return planManifestSemanticReview
+	}
+	review := strings.Replace(planManifestSemanticReview,
+		"- Each task is one cohesive concern with 1–3 independently observable slices.",
+		"- Each task is one cohesive concern with one or more independently observable slices.", 1)
+	return strings.Replace(review,
+		"  Do not approve bundled concerns merely because they fit in three bullets.\n  Multiple operations may share one task when they have the same actor,",
+		"  Do not split or merge tasks solely because of their slice count. Multiple\n  operations may share one task when they have the same actor,", 1)
+}
+
 func planManifestReviewContract(params *ExecuteParams, outcome *agent.Outcome) string {
 	var specs []string
 	for id := range params.KnownIDs {

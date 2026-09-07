@@ -31,6 +31,10 @@ type Turn struct {
 	// Persona narrows the role's system prompt to the situation ("critic" for
 	// a document council's reviewer). Empty keeps the role's default.
 	Persona string
+	// SmallSeat selects the compact plan-authoring dialect. The JSON parser
+	// validates wire shape for every model; orchestration owns profile policy
+	// such as the three-slice ceiling.
+	SmallSeat bool
 	// Round and Index identify this turn within the run, so streamed tokens
 	// can be attached to it rather than to whichever turn the same duckling
 	// took last.
@@ -1049,9 +1053,9 @@ definition it must edit.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
 	}
 	if turn.Persona == "plan_manifest" && turn.Role == config.RoleArchitect {
 		if turn.Contract == "json:plan_manifest_patch" {
-			rolePrompt = planManifestPatchPrompt
+			rolePrompt = planManifestPatchPromptFor(turn.SmallSeat)
 		} else {
-			rolePrompt = planManifestPrompt
+			rolePrompt = planManifestPromptFor(turn.SmallSeat)
 		}
 	}
 	gateDesc := gateDescFor(turn)
@@ -1395,6 +1399,27 @@ Rules:
 - Unmentioned tasks and milestones are preserved byte-for-byte by Ducklab.
 - Do not return the full manifest, Markdown, commentary, or fields outside this schema.
 - Ducklab applies the patch transactionally and reruns every global parse, ID, ownership, graph, coverage, and semantic check.`
+
+func planManifestPromptFor(small bool) string {
+	if small {
+		return planManifestPrompt
+	}
+	prompt := strings.Replace(planManifestPrompt,
+		"- Each task has exactly one cohesive work_unit and 1-3 observable acceptance_slices.",
+		"- Each task has exactly one cohesive work_unit and one or more observable acceptance_slices.", 1)
+	return strings.Replace(prompt,
+		"- If a proposed task needs more than three slices or spans independent concerns, split it here before IDs and artifact ownership are frozen.",
+		"- Split a proposed task when it spans independent concerns; do not split or merge solely because of its slice count.", 1)
+}
+
+func planManifestPatchPromptFor(small bool) string {
+	if small {
+		return planManifestPatchPrompt
+	}
+	return planManifestPatchPrompt + `
+- The standard support profile has no three-slice ceiling. Preserve one
+  cohesive work_unit per task and split only independent concerns.`
+}
 
 const scribePrompt = `You are the scribe. You write the release notes and changelog entries from the
 list of accepted work you are given.
