@@ -86,9 +86,21 @@ func planManifestSemanticReviewFor(small bool) string {
 
 func planManifestReviewContract(params *ExecuteParams, outcome *agent.Outcome) string {
 	var specs []string
-	for id := range params.KnownIDs {
-		if strings.HasPrefix(id, "SPEC-") {
-			specs = append(specs, id)
+	if len(params.PlanSeed) > 0 {
+		// PlanSeed is the accepted coverage ledger. KnownIDs is deliberately
+		// broader: it also contains deferred and excluded sections so parsers can
+		// distinguish a valid reference from a typo. H3a made the reviewer audit
+		// both sets, including wont/could SPECs the seed had excluded.
+		for _, spec := range params.PlanSeed {
+			if planSeedInScope(spec) {
+				specs = append(specs, spec.ID)
+			}
+		}
+	} else {
+		for id := range params.KnownIDs {
+			if strings.HasPrefix(id, "SPEC-") {
+				specs = append(specs, id)
+			}
 		}
 	}
 	var tasks []string

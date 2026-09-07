@@ -228,6 +228,24 @@ func TestPlanManifestReviewContractNamesEverySpecAndTask(t *testing.T) {
 	}
 }
 
+func TestPlanManifestReviewContractUsesOnlyInScopeCoverageSlots(t *testing.T) {
+	manifest := &agent.Outcome{Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
+		ID: "M-01", Tasks: []agent.ManifestTask{{ID: "T-001"}},
+	}}}}
+	params := &ExecuteParams{
+		KnownIDs: map[string]bool{"SPEC-001": true, "SPEC-002": true, "SPEC-003": true},
+		PlanSeed: []PlanSeedSpec{
+			{ID: "SPEC-001", Priority: "must"},
+			{ID: "SPEC-002", Priority: "wont"},
+			{ID: "SPEC-003", Priority: "could"},
+		},
+	}
+	got := planManifestReviewContract(params, manifest)
+	if got != "verdict:plan_manifest:SPEC-001|T-001" {
+		t.Fatalf("manifest review contract = %q, want only the engine-owned coverage slot", got)
+	}
+}
+
 func TestPlanCouncilRendersAndApprovesValidatedManifest(t *testing.T) {
 	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["meson compile -C build"],"produces":["file:meson.build","build-target:app"],"consumes":[],"verification":"meson compile -C build"}]}]}`
 	manifest := &agent.Outcome{Text: "```json\n" + manifestText + "\n```", Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
