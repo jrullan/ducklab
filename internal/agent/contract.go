@@ -411,12 +411,43 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				}
 				manifest.Milestones[mi].Tasks[ti].Consumes[ci] = item
 			}
+			validationProblems = append(validationProblems, manifestArtifactKindProblems(taskID, manifest.Milestones[mi].Tasks[ti])...)
 		}
 	}
 	if len(validationProblems) > 0 {
 		return nil, fmt.Errorf("plan manifest contract: validation failed: %s", strings.Join(validationProblems, "; "))
 	}
 	return &manifest, nil
+}
+
+func manifestArtifactKindProblems(taskID string, task ManifestTask) []string {
+	produced := map[string]string{}
+	for _, item := range task.Produces {
+		kind, path, ok := strings.Cut(item, ":")
+		if ok && (kind == "file" || kind == "dir") {
+			produced[strings.TrimPrefix(strings.TrimSpace(path), "./")] = kind
+		}
+	}
+	var problems []string
+	for _, probe := range task.AcceptanceProbes {
+		fields := strings.Fields(probe)
+		for i := 0; i+2 < len(fields); i++ {
+			if fields[i] != "test" || (fields[i+1] != "-d" && fields[i+1] != "-f") {
+				continue
+			}
+			path := strings.Trim(fields[i+2], "'\"`;()")
+			path = strings.TrimPrefix(path, "./")
+			declared := produced[path]
+			want := "file"
+			if fields[i+1] == "-d" {
+				want = "dir"
+			}
+			if declared != "" && declared != want {
+				problems = append(problems, fmt.Sprintf("%s acceptance probe %q tests %s as a %s but Produces declares %s:%s", taskID, probe, path, want, declared, path))
+			}
+		}
+	}
+	return problems
 }
 
 func validManifestArtifact(item string) bool {
@@ -444,8 +475,25 @@ func parseVerdict(text string, requireNativeChecks bool) (*Verdict, error) {
 		return nil, fmt.Errorf("verdict contract: %w", err)
 	}
 	var v Verdict
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+	// H3d's final reviewer returned `findments` instead of `findings` and the
+	// tolerant decoder silently turned that protocol error into a clean
+	// approval. A verdict is an authority boundary, not an import format: typos
+	// and future fields must be repaired explicitly rather than discarded.
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&v); err != nil {
 		return nil, fmt.Errorf("verdict contract: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, fmt.Errorf("verdict contract: %w", err)
+	}
+	findings, present := fields["findings"]
+	if !present {
+		return nil, fmt.Errorf(`verdict contract: required field "findings" is missing; use an empty array for approval`)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(findings)), "[") {
+		return nil, fmt.Errorf(`verdict contract: "findings" must be an array, including an empty array for approval`)
 	}
 	if v.Verdict != "approve" && v.Verdict != "request-changes" {
 		return nil, fmt.Errorf(`verdict contract: "verdict" must be "approve" or "request-changes", got %q`, v.Verdict)

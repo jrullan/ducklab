@@ -73,6 +73,18 @@ func TestPlanManifestPatchAcceptsTypedMilestoneCreation(t *testing.T) {
 	}
 }
 
+func TestPlanManifestRejectsProbeArtifactKindContradiction(t *testing.T) {
+	base := `{"milestones":[{"id":"M-01","title":"Fixtures","tasks":[{"id":"T-001","title":"Corpus","implements":["SPEC-001"],"work_unit":"create corpus","acceptance_slices":["corpus is a directory"],"acceptance_probes":["test -d fixtures/v1"],"produces":["file:fixtures/v1"],"consumes":[],"verification":"test -d fixtures/v1"}]}]}`
+	if _, err := ParseContract("json:plan_manifest", base); err == nil || !strings.Contains(err.Error(), "Produces declares file:fixtures/v1") {
+		t.Fatalf("file/directory contradiction error = %v", err)
+	}
+
+	valid := strings.Replace(base, `"file:fixtures/v1"`, `"dir:fixtures/v1"`, 1)
+	if _, err := ParseContract("json:plan_manifest", valid); err != nil {
+		t.Fatalf("matching directory declaration rejected: %v", err)
+	}
+}
+
 func TestDecompositionContractAllowsLongBodies(t *testing.T) {
 	declared := 12000
 	got := outputCapForContract(&declared, "json:decomposition")
@@ -125,6 +137,21 @@ func TestVerdictApproveWithNoFindingsIsValid(t *testing.T) {
 	}
 	if !got.(*Verdict).Approved() {
 		t.Error("approve not recognised")
+	}
+}
+
+func TestVerdictRejectsUnknownOrMissingFindingsField(t *testing.T) {
+	for name, text := range map[string]string{
+		"misspelled": `{"verdict":"approve","findments":[]}`,
+		"missing":    `{"verdict":"approve"}`,
+		"null":       `{"verdict":"approve","findings":null}`,
+		"extra":      `{"verdict":"approve","findings":[],"confidence":"high"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseContract("verdict", text); err == nil {
+				t.Fatalf("invalid verdict accepted: %s", text)
+			}
+		})
 	}
 }
 

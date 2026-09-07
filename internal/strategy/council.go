@@ -51,6 +51,11 @@ manifest is approved. Do not request any key outside this schema.
   concerns.
 - Every probe must actually observe its same-index slice. A generic build,
   grep, or count is not evidence for unrelated runtime or authority behavior.
+- Tests and fixtures are evidence, not the product implementation. When a
+  work unit promises runtime behavior, it must produce or consume through to
+  a reachable production source, library, executable or capability that owns
+  that behavior; a task producing only tests/fixtures cannot implement the
+  runtime obligation even when those tests pass.
 - Trace every produced source artifact to the entry point, build definition,
   build target, or independently discoverable test that its verification
   actually executes. A plausible command or test-name filter is not evidence
@@ -79,6 +84,17 @@ manifest is approved. Do not request any key outside this schema.
   would edit the same artifact, request the smallest repartition that leaves
   all edits to that artifact in one owning task (or one distinct integration
   task) and lets the other task consume only stable outputs.
+- An integration task that owns a late build definition does not make earlier
+  build/test probes executable. If earlier tasks must verify before that
+  integration exists, require independently buildable units (for example
+  separate packages/crates), probes that genuinely compile without the late
+  root, or a cohesive repartition. Do not alternate the same shared root
+  between the first and last task while leaving their probes unchanged.
+- If your analysis identifies a mandatory obligation without an observable
+  slice/probe, an unreachable artifact, or another unresolved gap, it must
+  appear as a finding and the verdict cannot be approve. Do not relabel a gap
+  as "implicit" unless you name the exact probe and execution path that
+  disproves it.
 - Review the whole compact manifest before approving. If it is defective,
   identify the exact SPEC obligation and the smallest repartition needed, but
   do not allocate milestone or task ids in the fix; the architect regenerates
@@ -155,6 +171,10 @@ against the tasks' **Work unit:** and top-level **Acceptance slices:**.
   an Assumption, Out of scope clause, title, explanatory prose, or as input
   injected by an unnamed upstream actor. Require an in-scope Work unit and a
   top-level Acceptance slice that observes the promised behavior.
+- Tests and fixtures can prove behavior but cannot be its only implementation.
+  A task promising runtime/system behavior must trace that behavior to a
+  production source, library, executable or capability in Produces/Consumes;
+  request changes when the only authored artifacts are tests and fixtures.
 - Preserve named authority boundaries as actor/action/object relations. A task
   that validates or returns evidence must not silently become the actor that
   decides, installs, activates, executes, or otherwise owns an action reserved
@@ -173,6 +193,9 @@ against the tasks' **Work unit:** and top-level **Acceptance slices:**.
 - If an obligation has no acceptance slice, request changes. Name the exact
   SPEC id and omitted obligation in one class-level finding, and ask for the
   smallest task/slice correction rather than rewriting unrelated topology.
+- Any unresolved gap you identify in your analysis must remain a finding.
+  Never approve by calling a mandatory property "implicit" unless an exact
+  acceptance probe and reachable execution path demonstrate it.
 - Approve only after this obligation-level sweep. Do not infer coverage merely
   because every SPEC id appears somewhere in Implements.`
 

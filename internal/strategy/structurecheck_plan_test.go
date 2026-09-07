@@ -36,9 +36,21 @@ func TestPlanManifestReviewGuidanceRespectsSupportProfile(t *testing.T) {
 	if !strings.Contains(standard, "Do not split or merge tasks solely because of their slice count") {
 		t.Fatalf("standard review guidance lacks cohesion rule:\n%s", standard)
 	}
-	for _, want := range []string{"Trace every produced source artifact", "independently discoverable test", "final integration"} {
+	for _, want := range []string{"Trace every produced source artifact", "independently discoverable test", "final integration", "Tests and fixtures are evidence", "does not make earlier", "verdict cannot be approve"} {
 		if !strings.Contains(standard, want) {
 			t.Fatalf("standard review guidance lacks reachability rule %q:\n%s", want, standard)
+		}
+	}
+}
+
+func TestPlanCoverageReviewSeparatesEvidenceFromImplementation(t *testing.T) {
+	for _, want := range []string{
+		"Tests and fixtures can prove behavior but cannot be its only implementation",
+		"production source, library, executable or capability",
+		"Any unresolved gap you identify in your analysis must remain a finding",
+	} {
+		if !strings.Contains(planCoverageReview, want) {
+			t.Fatalf("plan coverage guidance lacks %q:\n%s", want, planCoverageReview)
 		}
 	}
 }
