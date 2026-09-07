@@ -192,6 +192,26 @@ func TestPlanManifestPatchPreservesUnmentionedTasksAndRevalidatesWholeGraph(t *t
 	}
 }
 
+func TestPlanManifestPatchAddsMilestoneAndTaskInOneTransaction(t *testing.T) {
+	baseText := `{"milestones":[{"id":"M-01","title":"Core","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build","acceptance_slices":["builds"],"acceptance_probes":["true"],"produces":["capability:core"],"consumes":[],"verification":"true"}]}]}`
+	baseParsed, err := agent.ParseContract("json:plan_manifest", baseText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchText := `{"operations":[{"op":"add_task","task_id":"T-002","milestone_id":"M-02","task":{"id":"T-002","title":"Run","implements":["SPEC-002"],"work_unit":"run","acceptance_slices":["runs"],"acceptance_probes":["true"],"produces":["capability:runtime"],"consumes":["capability:core"],"verification":"true"}},{"op":"add_milestone","milestone_id":"M-02","milestone_title":"Runtime"}]}`
+	patchParsed, err := agent.ParseContract("json:plan_manifest_patch", patchText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, operations, err := applyPlanManifestPatch(baseParsed.(*agent.PlanManifest), patchParsed.(*agent.PlanManifestPatch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operations != 2 || len(got.Milestones) != 2 || got.Milestones[1].ID != "M-02" || len(got.Milestones[1].Tasks) != 1 {
+		t.Fatalf("patched manifest = %#v", got)
+	}
+}
+
 func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *testing.T) {
 	findings := []string{
 		"T-900 **Verification:** must put the executable command in backticks; prose is never executed",

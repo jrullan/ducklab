@@ -411,6 +411,27 @@ func TestStageStartRejectsPlanBeforeSpecificationWithoutCreatingRun(t *testing.T
 	}
 }
 
+func TestAcceptedPlanSeedPreservesSpecOrderAndScope(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	_, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindSpec: "## SPEC-001 — Core\n\nBuild it.\n\n" +
+			"## SPEC-002 — Later\n\n**Priority:** could\n\nDefer it.\n\n" +
+			"## SPEC-003 — Boundary\n\n**Priority:** wont\n\nExclude it.\n\n" +
+			"## SPEC-004 — Governance\n\n**Priority:** must\n\nGovern it.\n\n" +
+			"## SPEC-005 — Existing\n\n**As-built:** yes\n\nAlready there.\n",
+	})
+	got := acceptedPlanSeed(dir)
+	if len(got) != 5 || got[0].ID != "SPEC-001" || got[4].ID != "SPEC-005" {
+		t.Fatalf("accepted seed facts = %#v", got)
+	}
+	if got[1].Priority != "could" || got[2].Priority != "wont" || got[3].Priority != "must" {
+		t.Fatalf("accepted seed priorities = %#v", got)
+	}
+	if !got[4].AsBuilt {
+		t.Fatalf("accepted seed lost as-built scope: %#v", got)
+	}
+}
+
 // A task's status is its latest run. The loop used to assign on every branch,
 // so an older run overwrote a newer one and an accepted task fell back into
 // "in progress" because a stale run happened to be visited last.

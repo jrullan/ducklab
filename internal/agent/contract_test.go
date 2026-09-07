@@ -49,6 +49,30 @@ func TestPlanManifestPatchIsTypedAndScopedToUniqueTasks(t *testing.T) {
 	}
 }
 
+func TestPlanManifestPatchCapsOperationsForSmallStructuredReplies(t *testing.T) {
+	operations := make([]string, 0, MaxPlanManifestPatchOperations+1)
+	for i := 1; i <= MaxPlanManifestPatchOperations+1; i++ {
+		operations = append(operations, fmt.Sprintf(`{"op":"delete_task","task_id":"T-%03d"}`, i))
+	}
+	text := `{"operations":[` + strings.Join(operations, ",") + `]}`
+	_, err := ParseContract("json:plan_manifest_patch", text)
+	if err == nil || !strings.Contains(err.Error(), "operations must contain 1-4 items, got 5") {
+		t.Fatalf("oversized patch error = %v", err)
+	}
+}
+
+func TestPlanManifestPatchAcceptsTypedMilestoneCreation(t *testing.T) {
+	text := `{"operations":[{"op":"add_milestone","milestone_id":"M-02","milestone_title":"Runtime"},{"op":"add_task","task_id":"T-002","milestone_id":"M-02","task":{"id":"T-002","title":"Run","implements":["SPEC-002"],"work_unit":"run service","acceptance_slices":["service runs"],"acceptance_probes":["true"],"produces":["capability:runtime"],"consumes":[],"verification":"true"}}]}`
+	got, err := ParseContract("json:plan_manifest_patch", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := got.(*PlanManifestPatch)
+	if patch.Operations[0].MilestoneID != "M-02" || patch.Operations[0].MilestoneTitle != "Runtime" {
+		t.Fatalf("milestone operation = %#v", patch.Operations[0])
+	}
+}
+
 func TestDecompositionContractAllowsLongBodies(t *testing.T) {
 	declared := 12000
 	got := outputCapForContract(&declared, "json:decomposition")
@@ -400,6 +424,22 @@ func TestPlanManifestRequiresOneDistinctRawProbePerSlice(t *testing.T) {
 				t.Fatal("invalid acceptance probes passed the manifest contract")
 			}
 		})
+	}
+}
+
+func TestPlanManifestReportsAcceptanceProbeCardinality(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build app","acceptance_slices":["one","two"],"acceptance_probes":["test-one","test-two","test-three"],"produces":["build-target:app"],"consumes":[],"verification":"test-all"}]}]}`
+	_, err := ParseContract("json:plan_manifest", text)
+	if err == nil || !strings.Contains(err.Error(), "T-001 acceptance_probes has 3 items, want 2") {
+		t.Fatalf("probe cardinality error = %v", err)
+	}
+}
+
+func TestPlanManifestReportsMissingTaskField(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"","acceptance_slices":["one"],"acceptance_probes":["test-one"],"produces":["build-target:app"],"consumes":[],"verification":"test-all"}]}]}`
+	_, err := ParseContract("json:plan_manifest", text)
+	if err == nil || !strings.Contains(err.Error(), "T-001 work_unit must not be empty") {
+		t.Fatalf("missing work_unit error = %v", err)
 	}
 }
 

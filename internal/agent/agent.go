@@ -1065,8 +1065,11 @@ definition it must edit.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
 Capability invariants in the resolved harness are authoritative compatibility constraints. They override stale API recipes in documents and your own recollection. Review the required behavior through APIs permitted by those invariants. Never issue a finding whose remedy requires a prohibited API; if no valid implementation exists, report that contract conflict without prescribing the prohibited call.`
 		}
 	}
-	// Dialect B: append fenced text protocol instructions
-	if !useNative {
+	// Dialect B: append fenced text protocol instructions only when this turn
+	// can actually call a tool. A contract-only turn with an empty belt used to
+	// receive both the complete ducklab tool grammar and "You have no tools";
+	// small models then wrapped the requested JSON artifact in ducklab_protocol.
+	if !useNative && len(turn.Toolbelt) > 0 {
 		system += `
 
 ## How to use tools
@@ -1097,6 +1100,8 @@ func main() {}
 
 - When you are finished and have no tool to call, reply with your answer and no
   ` + "```ducklab" + ` block at all.`
+		system += toolCatalogue(turn, ectx)
+	} else if !useNative {
 		system += toolCatalogue(turn, ectx)
 	}
 	messages = append(messages, provider.Message{Role: "system", Content: system})
@@ -1371,6 +1376,7 @@ JSON manifest. Change only the tasks implicated by the review findings.
 
 Reply with exactly one JSON object:
 {"operations":[
+ {"op":"add_milestone","milestone_id":"M-02","milestone_title":"short title"},
  {"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
  {"op":"add_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
  {"op":"delete_task","task_id":"T-003"}
@@ -1378,10 +1384,14 @@ Reply with exactly one JSON object:
 
 Rules:
 - Use replace_task for an existing task whose complete contract must change.
+- Use add_milestone with only milestone_id and milestone_title, plus add_task
+  operations in the SAME patch for its initial tasks; an empty milestone is invalid.
 - A split is replace_task for the original plus add_task for each new task; allocate only unused task IDs for additions.
 - A move is replace_task with the existing task_id and its destination milestone_id.
 - Every add/replace task is complete and uses the same compact task schema as the canonical manifest.
-- Do not repeat an operation for one task_id. Use 1-12 operations.
+- Do not repeat an operation for one task_id. Use 1-4 operations. Leave other
+  findings for the next review of the preserved candidate instead of making
+  one large nested response.
 - Unmentioned tasks and milestones are preserved byte-for-byte by Ducklab.
 - Do not return the full manifest, Markdown, commentary, or fields outside this schema.
 - Ducklab applies the patch transactionally and reruns every global parse, ID, ownership, graph, coverage, and semantic check.`
@@ -2020,7 +2030,7 @@ All five native_checks values are required and must name concrete final-code evi
 
 What was wrong: %v
 
-Reply with ONLY one JSON object: {"operations":[{"op":"replace_task|add_task","task_id":"T-NNN","milestone_id":"M-NN","task":{"id":"T-NNN","title":"short action","implements":["SPEC-NNN"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},{"op":"delete_task","task_id":"T-NNN"}]}
+Reply with ONLY one JSON object containing 1-4 operations: {"operations":[{"op":"add_milestone","milestone_id":"M-NN","milestone_title":"short title"},{"op":"replace_task|add_task","task_id":"T-NNN","milestone_id":"M-NN","task":{"id":"T-NNN","title":"short action","implements":["SPEC-NNN"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},{"op":"delete_task","task_id":"T-NNN"}]}
 
 Use 1-12 operations, one per task_id. A split replaces the original and adds new task IDs. Add/replace operations require a complete task and an existing milestone. Delete accepts only op and task_id. Return no full manifest, Markdown, or prose.`, parseErr)
 	}

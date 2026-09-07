@@ -299,6 +299,8 @@ export const KNOWN_EVENT_TYPES = [
   "candidate_materialized",
   "structure_normalized",
   "plan_manifest",
+  "plan_manifest_seeded",
+  "plan_manifest_seed_unresolved",
   "plan_manifest_patched",
   "plan_manifest_patch_rejected",
   "structure_failed",

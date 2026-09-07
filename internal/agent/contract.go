@@ -211,11 +211,18 @@ type PlanManifestPatch struct {
 }
 
 type PlanManifestPatchOperation struct {
-	Op          string        `json:"op"` // replace_task | add_task | delete_task
-	TaskID      string        `json:"task_id"`
-	MilestoneID string        `json:"milestone_id,omitempty"`
-	Task        *ManifestTask `json:"task,omitempty"`
+	Op             string        `json:"op"` // replace_task | add_task | delete_task | add_milestone
+	TaskID         string        `json:"task_id,omitempty"`
+	MilestoneID    string        `json:"milestone_id,omitempty"`
+	MilestoneTitle string        `json:"milestone_title,omitempty"`
+	Task           *ManifestTask `json:"task,omitempty"`
 }
+
+// MaxPlanManifestPatchOperations keeps one repair below the structured-output
+// size that repeatedly produced unbalanced JSON on small seats. The reviewer
+// sees the preserved candidate again and can carry remaining findings into the
+// next bounded candidate; breadth in one response is not correctness.
+const MaxPlanManifestPatchOperations = 4
 
 func parsePlanManifestPatch(text string) (*PlanManifestPatch, error) {
 	raw, err := extractJSONObject(text)
@@ -228,21 +235,22 @@ func parsePlanManifestPatch(text string) (*PlanManifestPatch, error) {
 	if err := decoder.Decode(&patch); err != nil {
 		return nil, fmt.Errorf("plan manifest patch contract: %w", err)
 	}
-	if len(patch.Operations) == 0 || len(patch.Operations) > 12 {
-		return nil, fmt.Errorf("plan manifest patch contract: operations must contain 1-12 items")
+	if len(patch.Operations) == 0 || len(patch.Operations) > MaxPlanManifestPatchOperations {
+		return nil, fmt.Errorf("plan manifest patch contract: operations must contain 1-%d items, got %d", MaxPlanManifestPatchOperations, len(patch.Operations))
 	}
 	seen := map[string]bool{}
+	seenMilestones := map[string]bool{}
 	for i, op := range patch.Operations {
-		taskID, ok := canonicalContractID(op.TaskID, "T")
-		if !ok || seen[taskID] {
-			return nil, fmt.Errorf("plan manifest patch contract: invalid or repeated task_id in operation %d", i)
-		}
-		patch.Operations[i].TaskID = taskID
-		seen[taskID] = true
 		switch op.Op {
 		case "replace_task", "add_task":
+			taskID, ok := canonicalContractID(op.TaskID, "T")
+			if !ok || seen[taskID] {
+				return nil, fmt.Errorf("plan manifest patch contract: invalid or repeated task_id in operation %d", i)
+			}
+			patch.Operations[i].TaskID = taskID
+			seen[taskID] = true
 			milestoneID, milestoneOK := canonicalContractID(op.MilestoneID, "M")
-			if !milestoneOK || op.Task == nil {
+			if !milestoneOK || op.Task == nil || strings.TrimSpace(op.MilestoneTitle) != "" {
 				return nil, fmt.Errorf("plan manifest patch contract: %s needs milestone_id and task", op.Op)
 			}
 			if canonical, taskOK := canonicalContractID(op.Task.ID, "T"); !taskOK || canonical != taskID {
@@ -252,9 +260,23 @@ func parsePlanManifestPatch(text string) (*PlanManifestPatch, error) {
 			}
 			patch.Operations[i].MilestoneID = milestoneID
 		case "delete_task":
-			if op.Task != nil || strings.TrimSpace(op.MilestoneID) != "" {
+			taskID, ok := canonicalContractID(op.TaskID, "T")
+			if !ok || seen[taskID] {
+				return nil, fmt.Errorf("plan manifest patch contract: invalid or repeated task_id in operation %d", i)
+			}
+			patch.Operations[i].TaskID = taskID
+			seen[taskID] = true
+			if op.Task != nil || strings.TrimSpace(op.MilestoneID) != "" || strings.TrimSpace(op.MilestoneTitle) != "" {
 				return nil, fmt.Errorf("plan manifest patch contract: delete_task accepts only op and task_id")
 			}
+		case "add_milestone":
+			milestoneID, ok := canonicalContractID(op.MilestoneID, "M")
+			if !ok || seenMilestones[milestoneID] || strings.TrimSpace(op.MilestoneTitle) == "" || strings.TrimSpace(op.TaskID) != "" || op.Task != nil {
+				return nil, fmt.Errorf("plan manifest patch contract: add_milestone needs unique milestone_id and non-empty milestone_title only")
+			}
+			patch.Operations[i].MilestoneID = milestoneID
+			patch.Operations[i].MilestoneTitle = strings.TrimSpace(op.MilestoneTitle)
+			seenMilestones[milestoneID] = true
 		default:
 			return nil, fmt.Errorf("plan manifest patch contract: unsupported operation %q", op.Op)
 		}
@@ -291,8 +313,17 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 	taskCount := 0
 	for mi, milestone := range manifest.Milestones {
 		milestoneID, ok := canonicalContractID(milestone.ID, "M")
-		if !ok || strings.TrimSpace(milestone.Title) == "" || len(milestone.Tasks) == 0 || seen[milestoneID] {
-			return nil, fmt.Errorf("plan manifest contract: invalid milestone %d", mi)
+		if !ok {
+			return nil, fmt.Errorf("plan manifest contract: milestone %d id %q must use M-NN", mi, milestone.ID)
+		}
+		if strings.TrimSpace(milestone.Title) == "" {
+			return nil, fmt.Errorf("plan manifest contract: %s title must not be empty", milestoneID)
+		}
+		if len(milestone.Tasks) == 0 {
+			return nil, fmt.Errorf("plan manifest contract: %s tasks must contain at least one task", milestoneID)
+		}
+		if seen[milestoneID] {
+			return nil, fmt.Errorf("plan manifest contract: duplicate milestone id %s", milestoneID)
 		}
 		manifest.Milestones[mi].ID = milestoneID
 		seen[milestoneID] = true
@@ -302,11 +333,35 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 				return nil, fmt.Errorf("plan manifest contract: at most %d tasks are allowed, got %d", MaxPlanManifestTasks, taskCount)
 			}
 			taskID, ok := canonicalContractID(task.ID, "T")
-			if !ok || strings.TrimSpace(task.Title) == "" || len(task.Implements) == 0 ||
-				strings.TrimSpace(task.WorkUnit) == "" || len(task.AcceptanceSlices) == 0 || len(task.AcceptanceSlices) > 3 ||
-				len(task.AcceptanceProbes) != len(task.AcceptanceSlices) ||
-				len(task.Produces) == 0 || strings.TrimSpace(task.Verification) == "" || seen[taskID] {
-				return nil, fmt.Errorf("plan manifest contract: invalid task %d in %s", ti, milestone.ID)
+			if !ok {
+				return nil, fmt.Errorf("plan manifest contract: task %d in %s id %q must use T-NNN", ti, milestoneID, task.ID)
+			}
+			if strings.TrimSpace(task.Title) == "" {
+				return nil, fmt.Errorf("plan manifest contract: %s title must not be empty", taskID)
+			}
+			if len(task.Implements) == 0 {
+				return nil, fmt.Errorf("plan manifest contract: %s implements must contain at least one SPEC-NNN id", taskID)
+			}
+			if strings.TrimSpace(task.WorkUnit) == "" {
+				return nil, fmt.Errorf("plan manifest contract: %s work_unit must not be empty", taskID)
+			}
+			if len(task.AcceptanceSlices) == 0 {
+				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices must contain 1-3 items", taskID)
+			}
+			if len(task.AcceptanceSlices) > 3 {
+				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices has %d items, want at most 3", taskID, len(task.AcceptanceSlices))
+			}
+			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
+				return nil, fmt.Errorf("plan manifest contract: %s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices))
+			}
+			if len(task.Produces) == 0 {
+				return nil, fmt.Errorf("plan manifest contract: %s produces must contain at least one typed artifact", taskID)
+			}
+			if strings.TrimSpace(task.Verification) == "" {
+				return nil, fmt.Errorf("plan manifest contract: %s verification must not be empty", taskID)
+			}
+			if seen[taskID] {
+				return nil, fmt.Errorf("plan manifest contract: duplicate task id %s", taskID)
 			}
 			manifest.Milestones[mi].Tasks[ti].ID = taskID
 			manifest.Milestones[mi].Tasks[ti].WorkUnit = strings.TrimSpace(task.WorkUnit)

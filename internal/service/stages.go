@@ -346,6 +346,32 @@ func (s *Service) knownIDs(projectRoot string) map[string]bool {
 	return known
 }
 
+// acceptedPlanSeed exposes only structure already approved by the person.
+// Titles and priorities are facts of the SPEC; implementation grouping,
+// commands and ownership remain absent for the planning architect to supply.
+func acceptedPlanSeed(projectRoot string) []strategy.PlanSeedSpec {
+	doc, err := artifact.Load(projectRoot, artifact.KindSpec)
+	if err != nil || doc == nil {
+		return nil
+	}
+	out := make([]strategy.PlanSeedSpec, 0, len(doc.Sections))
+	for _, section := range doc.Sections {
+		if !strings.HasPrefix(section.ID, "SPEC-") {
+			continue
+		}
+		out = append(out, strategy.PlanSeedSpec{
+			ID:       section.ID,
+			Title:    section.Title,
+			Priority: section.Field("priority"),
+			AsBuilt: func() bool {
+				v := strings.ToLower(strings.TrimSpace(section.Field("as-built")))
+				return v == "yes" || v == "true"
+			}(),
+		})
+	}
+	return out
+}
+
 // acceptedPriorities supplies facts the plan critic is not allowed to
 // reinterpret. Only accepted requirements and specs participate: a proposed
 // document has not yet changed the product decision it amends.
@@ -670,6 +696,22 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			}
 		}
 	}
+	var planSeed []strategy.PlanSeedSpec
+	if req.Stage == "plan" && strings.TrimSpace(req.Revise) == "" && strings.TrimSpace(req.Extend) == "" && strings.TrimSpace(req.SplitTask) == "" {
+		if current, loadErr := artifact.Load(projectRoot, artifact.KindPlan); loadErr == nil && len(current.Sections) == 0 {
+			planSeed = acceptedPlanSeed(projectRoot)
+			inScope := 0
+			for _, spec := range planSeed {
+				if priority := strings.ToLower(strings.TrimSpace(spec.Priority)); !spec.AsBuilt && priority != "wont" && priority != "could" {
+					inScope++
+				}
+			}
+			if inScope > agent.MaxPlanManifestTasks {
+				s.failRun(rs, fmt.Errorf("plan manifest seed: %d in-scope SPEC sections exceed the %d-task boundary; split the product scope before planning", inScope, agent.MaxPlanManifestTasks))
+				return
+			}
+		}
+	}
 	result, err := stage.Run(ctx, stage.Params{
 		ProjectRoot:         projectRoot,
 		Stage:               stage.Name(req.Stage),
@@ -809,6 +851,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				KnownIDs:       s.knownIDs(projectRoot),
 				PriorityByID:   s.acceptedPriorities(projectRoot),
 				PriorityByName: s.acceptedPriorityNames(projectRoot),
+				PlanSeed:       planSeed,
 				SmallSeat:      s.smallImplementerSeat(rs.run.ProjectID),
 				StructureCheck: func(raw string) []string {
 					switch req.Stage {

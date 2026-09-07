@@ -342,8 +342,24 @@ func applyPlanManifestPatch(base *agent.PlanManifest, patch *agent.PlanManifestP
 		tasks := candidate.Milestones[mi].Tasks
 		candidate.Milestones[mi].Tasks = append(tasks[:ti], tasks[ti+1:]...)
 	}
+	// Milestones are declared first regardless of wire order, so a task and its
+	// new destination are one transaction rather than an order-sensitive patch.
+	for _, op := range patch.Operations {
+		if op.Op != "add_milestone" {
+			continue
+		}
+		if milestoneIndex(op.MilestoneID) >= 0 {
+			return base, 0, fmt.Errorf("plan manifest patch: milestone %s already exists", op.MilestoneID)
+		}
+		candidate.Milestones = append(candidate.Milestones, agent.ManifestMilestone{
+			ID: op.MilestoneID, Title: op.MilestoneTitle,
+		})
+	}
 
 	for _, op := range patch.Operations {
+		if op.Op == "add_milestone" {
+			continue
+		}
 		mi, ti := taskIndex(op.TaskID)
 		switch op.Op {
 		case "delete_task":

@@ -638,6 +638,11 @@ func TestATurnWithNoToolsIsToldSo(t *testing.T) {
 	if !strings.Contains(system, "no tools") {
 		t.Error("a turn with an empty toolbelt is not told it has none")
 	}
+	for _, forbidden := range []string{"## How to use tools", "```ducklab", "@payload:"} {
+		if strings.Contains(system, forbidden) {
+			t.Errorf("a turn with an empty toolbelt was taught the competing tool dialect %q", forbidden)
+		}
+	}
 }
 
 // Native tool calling carries the schemas in the request, so the catalogue

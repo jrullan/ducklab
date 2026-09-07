@@ -67,6 +67,11 @@ type ExecuteParams struct {
 	// must still inherit the accepted requirement's could even if its parent
 	// SPEC also contains must obligations.
 	PriorityByName map[string]string
+	// PlanSeed is the human-approved SPEC partition for a first plan. The
+	// engine turns it into a provisional checkpoint so the architect edits
+	// known coverage instead of inventing a complete topology from an empty
+	// response. Empty preserves the legacy cold-authoring path.
+	PlanSeed []PlanSeedSpec
 	// SmallSeat says the project's implementer is a small local seat: the
 	// plan's structure check enforces the portion rule (≤3 top-level
 	// deliverables per task) instead of only asking for it.
@@ -341,6 +346,30 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	var planManifest *agent.PlanManifest
 	var planManifestDraft *agent.Outcome
 	planManifestAttempts := 0
+	seedSpecs := make([]string, 0, len(params.PlanSeed))
+	if len(params.PlanSeed) > 0 {
+		seeded, seedErr := seedPlanManifest(params.PlanSeed)
+		if seedErr != nil {
+			result.Error = seedErr
+			return result, seedErr
+		}
+		encoded, encodeErr := json.Marshal(seeded)
+		if encodeErr != nil {
+			result.Error = fmt.Errorf("encode seeded plan manifest: %w", encodeErr)
+			return result, result.Error
+		}
+		planManifest = seeded
+		planManifestDraft = &agent.Outcome{Text: string(encoded), Parsed: seeded}
+		for _, spec := range params.PlanSeed {
+			if planSeedInScope(spec) {
+				seedSpecs = append(seedSpecs, spec.ID)
+			}
+		}
+		emit(params, "plan_manifest_seeded", map[string]interface{}{
+			"specs": seedSpecs, "tasks": len(seedSpecs), "candidate_digest": documentCandidateDigest(string(encoded)),
+			"detail": "created one provisional task per accepted in-scope SPEC; architect fills or repartitions the preserved checkpoint",
+		})
+	}
 	materialize := func(detail string) error {
 		if script.MaterializeCandidate == nil || lastArchitect == nil {
 			return nil
@@ -533,9 +562,22 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					planManifestDraft.Text +
 					"\n```\n\nReturn only operations for tasks implicated by the latest critic findings. " +
 					"Use the smallest unused T-NNN id only when a split requires a new task."
+				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
+					prompt += "\n\n## Seeded checkpoint — resolve these provisional tasks first\n\n" +
+						"Ducklab derived this coverage partition from the accepted SPEC; it did not infer implementation design. " +
+						"The following tasks contain `UNRESOLVED` fields and `false` probes: " + strings.Join(unresolved, ", ") + ". " +
+						"Replace at most four implicated tasks in this patch. You may split or merge tasks when cohesion requires it, " +
+						"but every seeded SPEC must remain present in at least one Implements list. Do not preserve provisional " +
+						"capability:unresolved-* ownership or placeholder probes. Remaining provisional tasks stay in the engine checkpoint for the next bounded review."
+				}
 			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReview
+				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
+					prompt += "\n\n## Unresolved seeded tasks — mechanical fact\n\n" + strings.Join(unresolved, ", ") +
+						" still contain provisional `UNRESOLVED`, `false`, or `capability:unresolved-*` values. " +
+						"They cannot pass their task audit and the manifest cannot be approved until each is replaced or coherently merged while preserving SPEC coverage."
+				}
 			}
 			if turn.Persona == PersonaCritic && script.CriticScope != "" {
 				prompt += "\n\n## Isolated review boundary — authoritative\n\n" + script.CriticScope
@@ -679,6 +721,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						patchErr = fmt.Errorf("plan manifest repair returned no validated patch")
 					} else {
 						updated, operations, patchErr = applyPlanManifestPatch(manifestPatchBase, patch)
+						if patchErr == nil {
+							if missing := missingPlanSeedCoverage(updated, seedSpecs); len(missing) > 0 {
+								patchErr = fmt.Errorf("patched manifest dropped seeded SPEC coverage: %s", strings.Join(missing, ", "))
+							}
+						}
 					}
 					if patchErr != nil {
 						if applicationAttempt == maxApplicationAttempts {
@@ -883,6 +930,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				filterPlanCriticOutcome(params, outcome, planManifestDraft.Text, round, script.TurnIndexBase+i)
+				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
+					if verdict, ok := outcome.Parsed.(*agent.Verdict); ok && verdict != nil && verdict.Verdict == "approve" {
+						verdict.Verdict = "request-changes"
+						for _, taskID := range unresolved {
+							verdict.Findings = append(verdict.Findings, agent.Finding{
+								Severity: "major", File: "manifest", Invariant: "Seeded tasks must be resolved before topology freeze",
+								Issue: taskID + " still contains provisional seeded fields", Fix: "replace or coherently merge this task while preserving its SPEC coverage",
+							})
+						}
+						emit(params, "plan_manifest_seed_unresolved", map[string]interface{}{
+							"tasks": unresolved, "detail": "reviewer approval lowered because provisional seed fields remain",
+						})
+					}
+				}
 			}
 			// A document council's architect: check the structure of the draft
 			// against the rules and the draft before it, once; and notice a
