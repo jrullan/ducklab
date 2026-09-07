@@ -1931,10 +1931,11 @@ func normalizePlanGraph(outcome *agent.Outcome, contract string) (*agent.Outcome
 				}
 			}
 		}
-		lanes := files
-		if len(lanes) == 0 {
-			lanes = dirs
-		}
+		// A lane is the union of the exact files and bounded directories its
+		// children produce. H3c used files when any existed and directories only
+		// as a fallback, so every mixed milestone lost its fixture directories
+		// after each otherwise-correct repair.
+		lanes := append(append([]string{}, files...), dirs...)
 		var unique []string
 		for _, lane := range lanes {
 			lane = strings.TrimRight(strings.TrimSpace(lane), "/")

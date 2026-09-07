@@ -151,6 +151,7 @@ type PlanTaskContext struct {
 	ID           string
 	Body         string
 	Verification string
+	ProjectRoot  string
 }
 
 type PlanInspector interface {

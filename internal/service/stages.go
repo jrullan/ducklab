@@ -921,7 +921,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 						if err != nil {
 							return nil
 						}
-						return capabilityStructureFindings(doc)
+						return capabilityStructureFindings(projectRoot, doc)
 					default:
 						return nil
 					}

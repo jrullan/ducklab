@@ -112,7 +112,7 @@ func missingTools(declared []string) []string {
 	return missing
 }
 
-func capabilityStructureFindings(plan *artifact.Document) []string {
+func capabilityStructureFindings(projectRoot string, plan *artifact.Document) []string {
 	if plan == nil {
 		return nil
 	}
@@ -127,7 +127,7 @@ func capabilityStructureFindings(plan *artifact.Document) []string {
 		}
 		for _, task := range tasks {
 			for _, finding := range registry.InspectPlanTask(capability.PlanTaskContext{
-				ID: task.ID, Body: task.Body, Verification: task.Field("verification"),
+				ID: task.ID, Body: task.Body, Verification: task.Field("verification"), ProjectRoot: projectRoot,
 			}) {
 				out = append(out, fmt.Sprintf("%s plan contract (%s/%s): %s", task.ID, finding.Capability, finding.Name, finding.Detail))
 			}

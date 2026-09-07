@@ -51,6 +51,12 @@ manifest is approved. Do not request any key outside this schema.
   concerns.
 - Every probe must actually observe its same-index slice. A generic build,
   grep, or count is not evidence for unrelated runtime or authority behavior.
+- Trace every produced source artifact to the entry point, build definition,
+  build target, or independently discoverable test that its verification
+  actually executes. A plausible command or test-name filter is not evidence
+  when the source is disconnected from that graph. If later work cannot edit
+  an earlier-owned entry point/build definition, require a final integration
+  task with exclusive ownership instead of approving isolated modules.
 - For every task, audit every slice/probe pair separately. State why the exact
   command observes that exact outcome with the required success/failure
   polarity; do not let a task-level summary stand in for this accounting.
@@ -156,6 +162,12 @@ against the tasks' **Work unit:** and top-level **Acceptance slices:**.
 - A milestone's Owns lane is the permitted aggregate boundary for its child
   tasks' Produces entries. Do not report that parent/child containment as a
   second owner; report collisions only between competing tasks or milestones.
+- Trace every produced source artifact to the entry point, build definition,
+  build target, or independently discoverable test that its Verification
+  actually executes. A command name or test filter alone does not prove
+  reachability. When downstream modules cannot be wired through an
+  earlier-owned integration artifact, request a distinct integration task
+  whose exclusive Produces lane can perform that wiring.
 - A specification may be covered by several tasks and one task may cover
   several related specifications; do not demand a syntactic one-to-one split.
 - If an obligation has no acceptance slice, request changes. Name the exact

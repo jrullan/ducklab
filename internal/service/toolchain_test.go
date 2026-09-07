@@ -42,9 +42,21 @@ func TestCapabilityStructureRejectsGTK3ContractsInGTK4PlanTask(t *testing.T) {
 	plan := &artifact.Document{Sections: []artifact.Section{{ID: "M-01", Children: []artifact.Section{{
 		ID: "T-006", Body: "**Verification:** `cc -c ui.c $(pkg-config --cflags gtk4)`\nUse gtk_window_set_keep_above and GtkEventControllerButton.",
 	}}}}}
-	joined := strings.Join(capabilityStructureFindings(plan), "\n")
+	joined := strings.Join(capabilityStructureFindings("", plan), "\n")
 	if !strings.Contains(joined, "T-006") || !strings.Contains(joined, "removed-window-api") || !strings.Contains(joined, "invented-controller") {
 		t.Fatalf("GTK4 plan findings = %s", joined)
+	}
+}
+
+func TestCapabilityStructureRejectsDisconnectedRustPlanModules(t *testing.T) {
+	root := t.TempDir()
+	plan, err := artifact.Parse("## M-01 — Rust\n\n### T-001 — Core\n\n**Produces:** file:Cargo.toml, file:src/main.rs\n\n**Verification:** `cargo test`\n\n### T-002 — Selection\n\n**Produces:** file:src/selection.rs\n\n**Consumes:** file:src/main.rs\n\n**Verification:** `cargo test selection`", artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(capabilityStructureFindings(root, plan), "\n")
+	if !strings.Contains(joined, "T-002 plan contract (rust/source-reachability)") || !strings.Contains(joined, "src/selection.rs") {
+		t.Fatalf("Rust plan findings = %s", joined)
 	}
 }
 
@@ -84,7 +96,7 @@ func TestAbsentPkgConfigModuleIsDeferredToBuildPreflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findings := capabilityStructureFindings(plan); len(findings) != 0 {
+	if findings := capabilityStructureFindings("", plan); len(findings) != 0 {
 		t.Fatalf("absent module was treated as an invalid name: %v", findings)
 	}
 	if missing := missingTools([]string{"pkg-config:module-that-is-valid-elsewhere"}); len(missing) != 1 {

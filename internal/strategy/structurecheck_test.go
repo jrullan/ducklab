@@ -423,16 +423,16 @@ func TestStructuredRepairMayReplaceAnAssignedRequirementSection(t *testing.T) {
 }
 
 func TestPlanGraphNormalizationDerivesExactLanesAndDependencies(t *testing.T) {
-	raw := "## M-01 — Setup\n\n**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, build-target:app\n**Consumes:** none\n\n## M-02 — UI\n\n**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"
+	raw := "## M-01 — Setup\n\n**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, dir:fixtures/core, build-target:app\n**Consumes:** none\n\n## M-02 — UI\n\n**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"
 	out := sectioned(raw,
-		agent.Section{ID: "M-01", Title: "Setup", Body: "**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, build-target:app\n**Consumes:** none"},
+		agent.Section{ID: "M-01", Title: "Setup", Body: "**Owns:** src/\n\n### T-001 — Build\n\n**Produces:** file:src/main.c, dir:fixtures/core, build-target:app\n**Consumes:** none"},
 		agent.Section{ID: "M-02", Title: "UI", Body: "**Owns:** src/ui/\n\n### T-002 — Window\n\n**Produces:** file:src/ui/window.c\n**Consumes:** build-target:app"},
 	)
 	normalized, changes, err := normalizePlanGraph(out, "markdown_sections:M")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changes != 3 || !strings.Contains(normalized.Text, "**Owns:** src/main.c") ||
+	if changes != 3 || !strings.Contains(normalized.Text, "**Owns:** src/main.c, fixtures/core") ||
 		!strings.Contains(normalized.Text, "**Owns:** src/ui/window.c") || !strings.Contains(normalized.Text, "**Depends on:** T-001") {
 		t.Fatalf("normalization changes=%d:\n%s", changes, normalized.Text)
 	}

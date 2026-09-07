@@ -117,6 +117,85 @@ func (Rust) Detect(ctx Context) Contributions {
 	}
 }
 
+// InspectPlanTask catches new Rust modules whose proposed Cargo verification
+// cannot discover them. Cargo compiles crate and target roots, not every .rs
+// file under src/. H3c produced plausible `cargo test <filter>` probes for
+// three disconnected modules; all document critics approved because ownership
+// and probe text looked coherent even though no crate root could import them.
+// This knowledge belongs to the Rust provider, not document orchestration.
+func (Rust) InspectPlanTask(ctx PlanTaskContext) []Inspection {
+	if !strings.Contains(strings.ToLower(ctx.Verification), "cargo") {
+		return nil
+	}
+	produces := planFieldItems(ctx.Body, "Produces")
+	var disconnected []string
+	hasIntegrationRoot := false
+	for _, artifact := range produces {
+		kind, path, ok := strings.Cut(strings.TrimSpace(strings.Trim(artifact, "`")), ":")
+		if !ok {
+			continue
+		}
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if kind == "file" && cargoTargetRoot(path) || kind == "dir" && (path == "src" || strings.HasPrefix(path, "tests")) {
+			hasIntegrationRoot = true
+		}
+		if kind != "file" || !strings.HasPrefix(path, "src/") || filepath.Ext(path) != ".rs" || cargoTargetRoot(path) {
+			continue
+		}
+		// Editing an existing module does not require new root wiring; its
+		// reachability is exercised by the project gate. The planning defect is
+		// specific to newly introduced, undiscoverable source artifacts.
+		if ctx.ProjectRoot != "" && fileExists(ctx.ProjectRoot, path) {
+			continue
+		}
+		disconnected = append(disconnected, path)
+	}
+	if hasIntegrationRoot || len(disconnected) == 0 {
+		return nil
+	}
+	return []Inspection{{
+		Capability: "rust", Name: "source-reachability", Enforcement: Required,
+		Detail: fmt.Sprintf("new Rust module(s) %s are not Cargo target roots and this task owns no Cargo.toml, crate root, or discoverable test target that can wire them into its Verification; give the task an independently discoverable target or place crate-root wiring in a later integration task that consumes these modules", strings.Join(disconnected, ", ")),
+	}}
+}
+
+func cargoTargetRoot(path string) bool {
+	if path == "Cargo.toml" || path == "build.rs" || path == "src/lib.rs" || path == "src/main.rs" {
+		return true
+	}
+	if strings.HasPrefix(path, "src/bin/") {
+		return strings.Count(strings.TrimPrefix(path, "src/bin/"), "/") == 0 || strings.HasSuffix(path, "/main.rs")
+	}
+	for _, prefix := range []string{"tests/", "examples/", "benches/"} {
+		if strings.HasPrefix(path, prefix) && strings.HasSuffix(path, ".rs") {
+			return true
+		}
+	}
+	return false
+}
+
+func planFieldItems(body, label string) []string {
+	prefix := "**" + strings.ToLower(label) + ":**"
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToLower(trimmed), prefix) {
+			continue
+		}
+		value := strings.TrimSpace(trimmed[len(prefix):])
+		if value == "" || strings.EqualFold(value, "none") {
+			return nil
+		}
+		var out []string
+		for _, item := range strings.Split(value, ",") {
+			if item = strings.TrimSpace(item); item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 type Meson struct{}
 
 func (Meson) ID() string { return "meson" }

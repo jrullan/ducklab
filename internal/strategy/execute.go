@@ -289,15 +289,11 @@ func applySupportProfile(turn *Turn, small bool) {
 		return
 	}
 	turn.SmallSeat = small
-	if small {
-		return
-	}
-	// A general document critic may need repository context under the standard
-	// profile. The plan-manifest critic is self-contained: its canonical
-	// manifest, specification and requirements are already in the prompt.
-	if turn.Persona == PersonaCritic {
-		turn.Toolbelt = "read-only"
-	}
+	// Support changes capacity-sensitive policy, never authority. Document
+	// councils inject the candidate and its accepted inputs; silently upgrading
+	// a tool-less critic under standard made GLM re-read those same artifacts on
+	// every round and consumed most of H3c's wallclock. A script that genuinely
+	// needs repository evidence must declare that toolbelt itself.
 }
 
 const maxSmallSeatAcceptanceSlices = 3
@@ -510,17 +506,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				// A human turn is scheduled by the stage runner, not here.
 				continue
 			}
-			// A unanimous, finding-free approval is the end of a document
-			// council. The old fixed sequence always bought a final architect
+			// A unanimous approval is the end of a document council; minor
+			// findings remain advisory evidence. The old fixed sequence always bought a final architect
 			// call before evaluating Until; in Neocapture corrida 9 that call
 			// merely re-emitted an approved fragment. A requested change still
 			// gets the revision turn below.
 			if script.RevisionOpensNextRound && turn.Role == config.RoleArchitect && i == len(script.Turns)-1 &&
-				verdictsThisRound > 0 && state.Verdict == "approve" && len(findings) == 0 && lastArchitect != nil {
+				verdictsThisRound > 0 && state.Verdict == "approve" && lastArchitect != nil {
 				result.Outcome = lastArchitect
 				result.Text = lastArchitect.Text
 				emit(params, "revision_skipped", map[string]interface{}{
-					"round": round, "detail": "all reviewers approved without findings; the reviewed draft is the proposal",
+					"round": round, "detail": "all reviewers approved; minor findings remain advisory and the reviewed draft is the proposal",
 				})
 				continue
 			}

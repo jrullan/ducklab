@@ -967,6 +967,34 @@ func TestProjectCapabilitiesComposeGoAndFrontendFromEvidence(t *testing.T) {
 	}
 }
 
+func TestRustPlanInspectionRejectsNewDisconnectedModules(t *testing.T) {
+	root := t.TempDir()
+	findings := DefaultRegistry().InspectPlanTask(PlanTaskContext{
+		ID: "T-002", ProjectRoot: root,
+		Body:         "**Produces:** file:src/selection.rs, file:src/operations.rs\n\n**Consumes:** file:src/provider.rs",
+		Verification: "cargo test selection && cargo test operations",
+	})
+	if len(findings) != 1 || findings[0].Capability != "rust" || findings[0].Name != "source-reachability" || !strings.Contains(findings[0].Detail, "src/selection.rs") {
+		t.Fatalf("Rust reachability findings = %+v", findings)
+	}
+}
+
+func TestRustPlanInspectionAcceptsRootsTestsAndExistingModules(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "src/existing.rs", "pub fn existing() {}\n")
+	for name, body := range map[string]string{
+		"crate root":       "**Produces:** file:Cargo.toml, file:src/lib.rs, file:src/new.rs",
+		"integration test": "**Produces:** file:src/new.rs, file:tests/new.rs",
+		"existing module":  "**Produces:** file:src/existing.rs",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if findings := DefaultRegistry().InspectPlanTask(PlanTaskContext{ProjectRoot: root, Body: body, Verification: "cargo test"}); len(findings) != 0 {
+				t.Fatalf("findings = %+v", findings)
+			}
+		})
+	}
+}
+
 func TestProjectGatePriorityIsDataNotRegistryOrder(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "Cargo.toml", "[package]\nname='fixture'\nversion='0.1.0'\n")

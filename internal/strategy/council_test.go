@@ -74,6 +74,28 @@ func TestCouncilApprovalSkipsTheFinalRevision(t *testing.T) {
 	}
 }
 
+// Minor findings are advisory by contract. H3c parsed approve+minor but then
+// ran another architect turn because the scheduler treated any finding as a
+// repair request, contradicting both verdict and severity.
+func TestCouncilApprovalWithMinorFindingSkipsTheFinalRevision(t *testing.T) {
+	rec := &recorder{}
+	draft := &agent.Outcome{Text: "## REQ-001 — Draft\n\nApproved body.\n\n**Priority:** must", Parsed: []agent.Section{{ID: "REQ-001", Title: "Draft", Body: "Approved body.\n\n**Priority:** must"}}}
+	res, err := ExecuteScript(context.Background(), CouncilScript("REQ", nil), councilParams(rec,
+		draft,
+		verdictOutcome("approve", agent.Finding{Severity: "minor", File: "requirements.md", Issue: "wording can be shorter", Fix: "shorten it later"}),
+		&agent.Outcome{Text: "this turn must not run"},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.roles) != 2 {
+		t.Fatalf("roles = %v, want architect → reviewer", rec.roles)
+	}
+	if res.Text != draft.Text {
+		t.Fatalf("proposal = %q, want reviewed draft %q", res.Text, draft.Text)
+	}
+}
+
 func TestFragmentCouncilParsesApprovalAndCarriesARequestedRevision(t *testing.T) {
 	script := CouncilScript("REQ", nil)
 	for i := range script.Turns {
@@ -199,7 +221,7 @@ func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
 	}
 }
 
-func TestStandardSupportProfileKeepsSelfContainedManifestCriticToolFree(t *testing.T) {
+func TestSupportProfileNeverChangesCriticToolAuthority(t *testing.T) {
 	manifestCritic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaPlanManifestCritic}
 	applySupportProfile(&manifestCritic, false)
 	if manifestCritic.Toolbelt != "none" {
@@ -207,8 +229,8 @@ func TestStandardSupportProfileKeepsSelfContainedManifestCriticToolFree(t *testi
 	}
 	critic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaCritic}
 	applySupportProfile(&critic, false)
-	if critic.Toolbelt != "read-only" {
-		t.Fatalf("standard document critic toolbelt = %q, want read-only", critic.Toolbelt)
+	if critic.Toolbelt != "none" {
+		t.Fatalf("standard document critic toolbelt = %q, want none", critic.Toolbelt)
 	}
 	smallCritic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaCritic}
 	applySupportProfile(&smallCritic, true)
@@ -536,6 +558,8 @@ func TestPlanFinalReviewReceivesTheSameObligationPolicy(t *testing.T) {
 		"an Assumption, Out of scope clause",
 		"actor/action/object relations",
 		"permitted aggregate boundary for its child",
+		"Trace every produced source artifact",
+		"test filter alone does not prove",
 	} {
 		if !strings.Contains(finalPrompt, want) {
 			t.Errorf("final plan critic prompt lacks %q:\n%s", want, finalPrompt)

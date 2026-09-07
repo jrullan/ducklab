@@ -684,16 +684,17 @@ func approvedSections(doc *artifact.Document) []artifact.Section {
 // TaskBodyContract is the shape every task body must take, told to every
 // architect that writes tasks (plan, extend/amend, gap-fill). It makes the
 // unit of work explicit instead of asking the harness to infer "concerns"
-// from a bullet count. Acceptance slices become the implementer's numbered
-// checklist; indented explanation is context, never another obligation.
+// from a bullet count. Acceptance slices become the implementer's flat,
+// numbered checklist; explanatory context remains in the task prose.
 const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"<one or two sentences: what the task achieves and why>\n\n" +
 	"**Work unit:** <exactly one cohesive capability or concern; if you need 'and' to join independent behaviors, split the task>\n\n" +
 	"**Acceptance slices:**\n" +
 	"- <one concrete observable outcome of that work unit, in words a reviewer can check against the diff>\n" +
-	"  - <indented sub-bullets are evidence guidance, files, conventions, or edge cases; they are explanations, not slices>\n" +
 	"- <the next independently checkable outcome of the SAME work unit>\n" +
 	"- <tests may be a slice: name the behavior they must prove, not merely that tests exist>\n\n" +
+	"Put evidence guidance, files, conventions, and edge cases in the task prose above this field. " +
+	"Do not put nested bullets under Acceptance slices; the numbered contract is a flat list.\n\n" +
 	"**Acceptance probes:**\n" +
 	"1. `<optional executable command proving Acceptance slice 1>`\n" +
 	"2. `<one command for slice 2, when present>`\n" +
@@ -707,7 +708,7 @@ const TaskBodyContract = "Write each task body in this shape:\n\n" +
 	"Top-level Acceptance slices are the implementer's numbered contract; it reports on each by number " +
 	"when it finishes, and anything it cannot deliver brings it help. Work unit says WHAT cohesive concern " +
 	"the task owns; Acceptance slices say HOW SUCCESS IS OBSERVED. Never use **Deliverables:** in a v2 task. " +
-	"Keep each slice one outcome, not a paragraph; put explanation in indented sub-bullets. Acceptance probes " +
+	"Keep each slice one outcome, not a paragraph; put explanation in the task prose, never in nested bullets. Acceptance probes " +
 	"are optional, but when behavior can be exercised they map one command to each slice in the same order; " +
 	"Ducklab executes them after Verification and before the project gate.\n\n"
 

@@ -36,6 +36,11 @@ func TestPlanManifestReviewGuidanceRespectsSupportProfile(t *testing.T) {
 	if !strings.Contains(standard, "Do not split or merge tasks solely because of their slice count") {
 		t.Fatalf("standard review guidance lacks cohesion rule:\n%s", standard)
 	}
+	for _, want := range []string{"Trace every produced source artifact", "independently discoverable test", "final integration"} {
+		if !strings.Contains(standard, want) {
+			t.Fatalf("standard review guidance lacks reachability rule %q:\n%s", want, standard)
+		}
+	}
 }
 
 func TestApplySupportProfileCarriesPolicyOnScheduledTurn(t *testing.T) {
