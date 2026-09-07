@@ -284,6 +284,15 @@ func consultRetryLimit(params *ExecuteParams) int {
 	return maxConsultRetries
 }
 
+func applySupportProfile(turn *Turn, small bool) {
+	if turn == nil || small {
+		return
+	}
+	if turn.Persona == PersonaCritic || turn.Persona == PersonaPlanManifestCritic {
+		turn.Toolbelt = "read-only"
+	}
+}
+
 func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (*ExecuteResult, error) {
 	result := &ExecuteResult{Transcript: &conv.Transcript{}}
 
@@ -424,6 +433,11 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 
 		for i := 0; i < len(script.Turns); i++ {
 			turn := script.Turns[i]
+			// Standard-profile document critics may inspect the supplied project
+			// record through their role's read-only ceiling. Small-profile critics
+			// stay closed to prevent rediscovery loops; both still receive the
+			// authoritative candidate in the prompt.
+			applySupportProfile(&turn, params.SmallSeat)
 			if round > 1 && (turn.Persona == PersonaPlanManifest || turn.Persona == PersonaPlanManifestCritic) {
 				continue
 			}
@@ -925,11 +939,13 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				result.Error = err
 				return result, err
 			}
-			if turn.Persona == PersonaCritic && kindOfContract(turn.Contract, script) == "plan" && lastArchitect != nil {
+			if params.SmallSeat && turn.Persona == PersonaCritic && kindOfContract(turn.Contract, script) == "plan" && lastArchitect != nil {
 				filterPlanCriticOutcome(params, outcome, lastArchitect.Text, round, script.TurnIndexBase+i)
 			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
-				filterPlanCriticOutcome(params, outcome, planManifestDraft.Text, round, script.TurnIndexBase+i)
+				if params.SmallSeat {
+					filterPlanCriticOutcome(params, outcome, planManifestDraft.Text, round, script.TurnIndexBase+i)
+				}
 				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
 					if verdict, ok := outcome.Parsed.(*agent.Verdict); ok && verdict != nil && verdict.Verdict == "approve" {
 						verdict.Verdict = "request-changes"

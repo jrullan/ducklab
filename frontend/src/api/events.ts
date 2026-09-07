@@ -303,6 +303,7 @@ export const KNOWN_EVENT_TYPES = [
   "plan_manifest_seed_unresolved",
   "plan_manifest_patched",
   "plan_manifest_patch_rejected",
+  "support_profile_resolved",
   "structure_failed",
   "revision_identical",
   "revision_skipped",

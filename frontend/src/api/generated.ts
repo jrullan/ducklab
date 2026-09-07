@@ -213,6 +213,7 @@ export interface DucklingDuckling {
   params?: ConfigSamplingParams;
   provider?: string;
   roles?: string[];
+  tier?: string;
 }
 
 export interface EngineapiacceptRequest {
@@ -556,6 +557,8 @@ export interface RunlogRun {
   review_evidence?: RunlogReviewEvidence;
   roster?: Record<string, string>;
   roster_sources?: Record<string, string>;
+  seat_tier_sources?: Record<string, string>;
+  seat_tiers?: Record<string, string>;
   spend?: Record<string, RunlogDucklingSpend>;
   stage?: string;
   stage_request?: Record<string, unknown>;
@@ -563,6 +566,8 @@ export interface RunlogRun {
   status?: string;
   stream?: boolean;
   subject?: string;
+  support_profile?: string;
+  support_profile_source?: string;
   task_body_hash?: string;
   task_id?: string;
   tests_modified?: boolean;
@@ -698,6 +703,7 @@ export interface ServiceDucklingView {
   params?: ConfigSamplingParams;
   provider?: string;
   roles?: string[];
+  tier?: string;
 }
 
 export interface ServiceEngineDefaultsView {
@@ -918,6 +924,7 @@ export interface ServiceStageRequest {
   split_task?: string;
   stage?: string;
   stream?: boolean;
+  support_profile?: string;
 }
 
 export interface ServiceStatus {

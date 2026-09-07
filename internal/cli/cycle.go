@@ -34,6 +34,7 @@ func intentCmd(verb, repo string) int {
 func stageCmd(stage string, args []string, repo string) int {
 	from, yes := "", false
 	mode := ""
+	supportProfile := ""
 	rounds := 0
 	adopt := false
 	var refs []string
@@ -77,6 +78,13 @@ func stageCmd(stage string, args []string, repo string) int {
 			}
 			mode = args[i+1]
 			i++
+		case "--support-profile":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: --support-profile needs auto, small, or standard")
+				return 2
+			}
+			supportProfile = args[i+1]
+			i++
 		case "--rounds":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "error: --rounds needs a number")
@@ -97,7 +105,7 @@ func stageCmd(stage string, args []string, repo string) int {
 			// to run — started a fresh multi-minute council instead, and the
 			// proposal the user meant to accept was overwritten by its result.
 			fmt.Fprintf(os.Stderr, "error: unknown argument %q\n", a)
-			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--adopt] [--mode council|solo] [--rounds N] [--yes]\n"+
+			fmt.Fprintf(os.Stderr, "usage: ducklab %s [--from FILE] [--ref FILE|DIR]... [--adopt] [--mode council|solo] [--support-profile auto|small|standard] [--rounds N] [--yes]\n"+
 				"       ducklab %s accept|reject|diff\n"+
 				"       ducklab %s revise \"what to change\"\n", stage, stage, stage)
 			return 2
@@ -125,6 +133,9 @@ func stageCmd(stage string, args []string, repo string) int {
 	}
 	if mode != "" {
 		req["mode"] = mode
+	}
+	if supportProfile != "" {
+		req["support_profile"] = supportProfile
 	}
 	if rounds > 0 {
 		req["rounds"] = rounds

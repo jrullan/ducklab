@@ -32,6 +32,11 @@ import (
 type StageRequest struct {
 	Stage string `json:"stage"`
 	Mode  string `json:"mode"`
+	// SupportProfile controls capacity-sensitive harness accommodations for
+	// this run. Empty/auto resolves from the declared tier of the project's
+	// implementation seat; small and standard are explicit experimental
+	// treatments and are persisted in the run record.
+	SupportProfile string `json:"support_profile,omitempty"`
 	// From seeds intake with an existing document instead of interviewing.
 	From string `json:"from"`
 	// Rounds overrides the script's own limit. Zero means the script decides,
@@ -96,6 +101,9 @@ type StageRequest struct {
 func (s *Service) StageStart(ctx context.Context, projectID string, req StageRequest) (*runlog.Run, error) {
 	if !stage.Valid(req.Stage) {
 		return nil, fmt.Errorf("unknown stage %q (available: intake, spec, plan)", req.Stage)
+	}
+	if err := validateSupportProfile(req.SupportProfile); err != nil {
+		return nil, err
 	}
 	entry, err := s.registry.Get(projectID)
 	if err != nil {
@@ -275,14 +283,15 @@ func (s *Service) StageStart(ctx context.Context, projectID string, req StageReq
 		mode = "council"
 	}
 	run := &runlog.Run{
-		ID:         runlog.GenerateRunID(),
-		ProjectID:  projectID,
-		Stage:      req.Stage,
-		Mode:       mode,
-		Status:     "running",
-		StartedAt:  time.Now().UTC().Format(time.RFC3339),
-		Autonomy:   orDefault(req.Autonomy, "guarded"),
-		AgentTurns: req.AgentTurns,
+		ID:             runlog.GenerateRunID(),
+		ProjectID:      projectID,
+		Stage:          req.Stage,
+		Mode:           mode,
+		Status:         "running",
+		StartedAt:      time.Now().UTC().Format(time.RFC3339),
+		Autonomy:       orDefault(req.Autonomy, "guarded"),
+		AgentTurns:     req.AgentTurns,
+		SupportProfile: strings.TrimSpace(req.SupportProfile),
 		// Always. Streaming is display state the bus fans out to whoever
 		// watches; gating it on the launcher's flag meant a stage launched
 		// from the CLI showed a person watching in the desktop no text and
@@ -429,8 +438,9 @@ func (s *Service) acceptedPriorityNames(projectRoot string) map[string]string {
 }
 
 // smallImplementerSeat reports whether the project's build implementer is a
-// local seat — a small model, by the founding thesis — so document stages
-// can portion the plan for it (ducklab_portion_control).
+// declared small model. Provider locality remains only as a compatibility
+// fallback for ducklings saved before tiers existed; it is never consulted
+// when a tier is present.
 func (s *Service) smallImplementerSeat(projectID string) bool {
 	cfg, err := s.projectConfig(projectID)
 	if err != nil {
@@ -441,17 +451,59 @@ func (s *Service) smallImplementerSeat(projectID string) bool {
 	if id == "" {
 		return false
 	}
+	tier, _ := s.resolvedDucklingTier(id)
+	return tier == config.ModelTierSmall
+}
+
+func (s *Service) resolvedDucklingTier(id config.DucklingID) (config.ModelTier, string) {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	d, ok := s.cfg.Ducklings[id]
 	if !ok {
-		return false
+		return config.ModelTierLarge, "missing duckling"
 	}
-	p, ok := s.cfg.Providers[d.Provider]
-	if !ok {
-		return false
+	if d.Tier != "" {
+		return d.Tier, "declared"
 	}
-	return IsLocalHost(p.BaseURL)
+	if p, ok := s.cfg.Providers[d.Provider]; ok && IsLocalHost(p.BaseURL) {
+		return config.ModelTierSmall, "legacy provider locality"
+	}
+	return config.ModelTierLarge, "legacy provider locality"
+}
+
+func (s *Service) recordSeatTiers(run *runlog.Run, roster map[config.Role]config.DucklingID) {
+	run.SeatTiers = map[string]string{}
+	run.SeatTierSources = map[string]string{}
+	for role, id := range roster {
+		if id == "" {
+			continue
+		}
+		tier, source := s.resolvedDucklingTier(id)
+		run.SeatTiers[string(role)] = string(tier)
+		run.SeatTierSources[string(role)] = source
+	}
+}
+
+func validateSupportProfile(profile string) error {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "auto", "small", "standard":
+		return nil
+	default:
+		return fmt.Errorf("invalid support_profile %q (available: auto, small, standard)", profile)
+	}
+}
+
+func (s *Service) stageSupportProfile(projectID, requested string) (name, source string, small bool) {
+	switch strings.ToLower(strings.TrimSpace(requested)) {
+	case "small":
+		return "small", "request", true
+	case "standard":
+		return "standard", "request", false
+	}
+	if s.smallImplementerSeat(projectID) {
+		return "small", "implementer tier", true
+	}
+	return "standard", "implementer tier", false
 }
 
 func liveRequirementCount(doc *artifact.Document) int {
@@ -578,9 +630,18 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	}
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, nil)
+	s.recordSeatTiers(rs.run, roster)
 	for _, role := range filled {
 		rs.run.RosterSources[string(role)] = "request"
 	}
+	profile, profileSource, smallSeat := s.stageSupportProfile(rs.run.ProjectID, req.SupportProfile)
+	rs.run.SupportProfile = profile
+	rs.run.SupportProfileSource = profileSource
+	rs.writer.AppendEvent("support_profile_resolved", map[string]interface{}{
+		"profile": profile, "source": profileSource,
+		"detail": "capacity-sensitive harness treatment resolved independently from the run's model roster",
+	})
+	rs.writer.WriteState()
 	if warning != "" {
 		rs.run.Warning = warning
 		rs.writer.AppendEvent("warning", map[string]interface{}{"detail": warning})
@@ -742,7 +803,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		Mode:      req.Mode,
 		Rounds:    s.roundsFor(rs.run.Mode, req.Rounds),
 		Revision:  req.Revise,
-		SmallSeat: s.smallImplementerSeat(rs.run.ProjectID),
+		SmallSeat: smallSeat,
 		OnEvent:   func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 		// An amendment revision edits its own pending fragment, not the
 		// approved plan it originally extended.
@@ -852,7 +913,7 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 				PriorityByID:   s.acceptedPriorities(projectRoot),
 				PriorityByName: s.acceptedPriorityNames(projectRoot),
 				PlanSeed:       planSeed,
-				SmallSeat:      s.smallImplementerSeat(rs.run.ProjectID),
+				SmallSeat:      smallSeat,
 				StructureCheck: func(raw string) []string {
 					switch req.Stage {
 					case "spec":

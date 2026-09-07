@@ -17,6 +17,7 @@ type Duckling struct {
 	ID       config.DucklingID     `json:"id"`
 	Provider config.ProviderID     `json:"provider"`
 	Model    string                `json:"model"`
+	Tier     config.ModelTier      `json:"tier,omitempty"`
 	Roles    []config.Role         `json:"roles,omitempty"`
 	Notes    string                `json:"notes,omitempty"`
 	Params   config.SamplingParams `json:"params"`
@@ -422,6 +423,7 @@ func FromConfig(id config.DucklingID, cfg config.Duckling) *Duckling {
 		ID:       id,
 		Provider: cfg.Provider,
 		Model:    cfg.Model,
+		Tier:     cfg.Tier,
 		Roles:    cfg.Roles,
 		Notes:    cfg.Notes,
 		Params:   cfg.Params,

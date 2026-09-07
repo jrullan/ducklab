@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,6 +87,24 @@ func TestEditingKeepsTheSamplingParams(t *testing.T) {
 	}
 	if !d.Params.DisableThinking {
 		t.Error("disable_thinking did not reach the registry")
+	}
+}
+
+func TestEditingKeepsTheDeclaredModelTier(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.DucklingSet("pato-uno", DucklingView{Provider: "fake", Model: "m", Tier: "large"}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.ducklings.Get("pato-uno")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Tier != config.ModelTierLarge {
+		t.Fatalf("registry tier = %q, want large", d.Tier)
+	}
+	view, err := s.DucklingGet(context.Background(), "pato-uno")
+	if err != nil || view.Tier != "large" {
+		t.Fatalf("editable tier = %q, err = %v", view.Tier, err)
 	}
 }
 

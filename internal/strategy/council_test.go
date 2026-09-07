@@ -199,6 +199,24 @@ func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
 	}
 }
 
+func TestStandardSupportProfileOpensOnlyCriticsToReadOnlyTools(t *testing.T) {
+	critic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaPlanManifestCritic}
+	applySupportProfile(&critic, false)
+	if critic.Toolbelt != "read-only" {
+		t.Fatalf("standard critic toolbelt = %q, want read-only", critic.Toolbelt)
+	}
+	smallCritic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaCritic}
+	applySupportProfile(&smallCritic, true)
+	if smallCritic.Toolbelt != "none" {
+		t.Fatalf("small critic toolbelt = %q, want none", smallCritic.Toolbelt)
+	}
+	architect := Turn{Role: config.RoleArchitect, Toolbelt: "none", Persona: PersonaPlanManifest}
+	applySupportProfile(&architect, false)
+	if architect.Toolbelt != "none" {
+		t.Fatalf("architect toolbelt changed to %q", architect.Toolbelt)
+	}
+}
+
 func TestPlanManifestReviewContractNamesEverySpecAndTask(t *testing.T) {
 	manifest := &agent.Outcome{Parsed: &agent.PlanManifest{Milestones: []agent.ManifestMilestone{{
 		ID: "M-01", Tasks: []agent.ManifestTask{{ID: "T-002"}, {ID: "T-001"}},

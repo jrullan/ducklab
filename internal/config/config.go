@@ -209,6 +209,26 @@ type Cost struct {
 	OutputPerMTok float64 `toml:"output_per_mtok" json:"output_per_mtok"`
 }
 
+// ModelTier is a declared capacity class. It is deliberately independent of
+// provider locality: a hosted endpoint can serve a small model and a local
+// endpoint can serve a large one. Empty retains the legacy locality fallback
+// while existing configurations are migrated.
+type ModelTier string
+
+const (
+	ModelTierSmall ModelTier = "small"
+	ModelTierLarge ModelTier = "large"
+)
+
+func ValidateModelTier(tier ModelTier) error {
+	switch tier {
+	case "", ModelTierSmall, ModelTierLarge:
+		return nil
+	default:
+		return fmt.Errorf("invalid model tier %q (available: small, large)", tier)
+	}
+}
+
 // Caps holds capability overrides.
 type Caps struct {
 	NativeTools   *bool `toml:"native_tools" json:"native_tools"`
@@ -262,14 +282,17 @@ type ExternalIndex struct {
 
 // Duckling is a named, configured model participant.
 type Duckling struct {
-	Provider ProviderID     `toml:"provider" json:"provider"`
-	Model    string         `toml:"model" json:"model"`
-	Roles    []Role         `toml:"roles" json:"roles"`
-	Notes    string         `toml:"notes" json:"notes"`
-	Params   SamplingParams `toml:"params" json:"params"`
-	Caps     Caps           `toml:"caps" json:"caps"`
-	Cost     Cost           `toml:"cost" json:"cost"`
-	Index    *ExternalIndex `toml:"index,omitempty" json:"index,omitempty"`
+	Provider ProviderID `toml:"provider" json:"provider"`
+	Model    string     `toml:"model" json:"model"`
+	// Tier selects capacity-sensitive harness behavior. It describes the
+	// model, not where its provider happens to run.
+	Tier   ModelTier      `toml:"tier,omitempty" json:"tier,omitempty"`
+	Roles  []Role         `toml:"roles" json:"roles"`
+	Notes  string         `toml:"notes" json:"notes"`
+	Params SamplingParams `toml:"params" json:"params"`
+	Caps   Caps           `toml:"caps" json:"caps"`
+	Cost   Cost           `toml:"cost" json:"cost"`
+	Index  *ExternalIndex `toml:"index,omitempty" json:"index,omitempty"`
 	// Fallback names the duckling that takes this one's seats when its
 	// provider is unreachable — declared here by the person, never chosen by
 	// a router. Availability only; quality-based switching is Switchyard's
@@ -659,6 +682,9 @@ func (g *Global) Validate(path string) error {
 		}
 		if _, ok := g.Providers[d.Provider]; !ok {
 			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.provider", id), Msg: fmt.Sprintf("provider %q not defined", d.Provider)}
+		}
+		if err := ValidateModelTier(d.Tier); err != nil {
+			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.tier", id), Msg: err.Error()}
 		}
 		for _, r := range d.Roles {
 			if err := ValidateRole(r); err != nil {

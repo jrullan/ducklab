@@ -23,6 +23,11 @@ type Run struct {
 	ProjectID string `json:"project_id"`
 	Stage     string `json:"stage"`
 	Mode      string `json:"mode"`
+	// SupportProfile is the capacity-sensitive harness treatment selected for
+	// this run. It is recorded separately from model tier so experiments can
+	// hold the roster constant while varying the treatment.
+	SupportProfile       string `json:"support_profile,omitempty"`
+	SupportProfileSource string `json:"support_profile_source,omitempty"`
 	// ModeSource records how an omitted mode was resolved: settings, project,
 	// or fallback. An explicit request is recorded as request.
 	ModeSource string `json:"mode_source,omitempty"`
@@ -31,6 +36,11 @@ type Run struct {
 	// Historical runs remain readable but cannot contaminate a recycled ID.
 	TaskBodyHash string            `json:"task_body_hash,omitempty"`
 	Roster       map[string]string `json:"roster"`
+	// SeatTiers records the declared capacity class resolved for every occupied
+	// role. The support profile may be overridden independently, but the model
+	// treatment remains auditable per seat.
+	SeatTiers       map[string]string `json:"seat_tiers,omitempty"`
+	SeatTierSources map[string]string `json:"seat_tier_sources,omitempty"`
 	// RosterSources records whether each role came from the roster or a per-run pick.
 	RosterSources map[string]string `json:"roster_sources,omitempty"`
 	Gate          string            `json:"gate"`

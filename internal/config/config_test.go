@@ -494,6 +494,7 @@ func TestSaveGlobalRoundTripsProvidersAndDucklings(t *testing.T) {
 	nativeTools := true
 	g.Ducklings = map[DucklingID]Duckling{
 		"pato-nube": {Provider: "openrouter", Model: "qwen/qwen3.6",
+			Tier:  ModelTierSmall,
 			Roles: []Role{RoleImplementer, RoleReviewer},
 			Caps:  Caps{NativeTools: &nativeTools},
 			Cost:  Cost{InputPerMTok: 0.2, OutputPerMTok: 0.6}},
@@ -518,6 +519,18 @@ func TestSaveGlobalRoundTripsProvidersAndDucklings(t *testing.T) {
 	}
 	if d.Cost.OutputPerMTok != 0.6 {
 		t.Errorf("cost lost: %+v", d.Cost)
+	}
+	if d.Tier != ModelTierSmall {
+		t.Errorf("declared tier lost: %q", d.Tier)
+	}
+}
+
+func TestGlobalRejectsUnknownDucklingTier(t *testing.T) {
+	g := DefaultGlobal()
+	g.Providers["p"] = Provider{Kind: ProviderKindOpenAI, BaseURL: "https://example.test/v1"}
+	g.Ducklings["pato"] = Duckling{Provider: "p", Model: "m", Tier: ModelTier("medium")}
+	if err := g.Validate("config.toml"); err == nil || !strings.Contains(err.Error(), "duckling.pato.tier") {
+		t.Fatalf("unknown tier validation = %v", err)
 	}
 }
 

@@ -756,6 +756,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "tier": {
+            "type": "string"
           }
         },
         "required": [
@@ -1903,6 +1906,18 @@
             },
             "type": "object"
           },
+          "seat_tier_sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "seat_tiers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "spend": {
             "additionalProperties": {
               "$ref": "#/components/schemas/RunlogDucklingSpend"
@@ -1926,6 +1941,12 @@
             "type": "boolean"
           },
           "subject": {
+            "type": "string"
+          },
+          "support_profile": {
+            "type": "string"
+          },
+          "support_profile_source": {
             "type": "string"
           },
           "task_body_hash": {
@@ -2391,6 +2412,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "tier": {
+            "type": "string"
           }
         },
         "required": [
@@ -3202,6 +3226,9 @@
           },
           "stream": {
             "type": "boolean"
+          },
+          "support_profile": {
+            "type": "string"
           }
         },
         "required": [

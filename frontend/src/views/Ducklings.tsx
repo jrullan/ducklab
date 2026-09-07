@@ -571,6 +571,7 @@ function DucklingForm({
   const [id, setId] = useState(existing?.id ?? "");
   const [provider, setProvider] = useState(existing?.provider ?? providers[0]?.id ?? "");
   const [model, setModel] = useState(existing?.model ?? "");
+  const [tier, setTier] = useState(existing?.tier ?? "");
   const [roles, setRoles] = useState<string[]>(existing?.roles ?? []);
   const [contextTokens, setContextTokens] = useState(String(existing?.caps?.context_tokens ?? ""));
   const [nativeTools, setNativeTools] = useState(existing?.caps?.native_tools !== false);
@@ -607,6 +608,7 @@ function DucklingForm({
       .ducklingSet(id.trim(), {
         provider,
         model: model.trim(),
+        tier: tier || undefined,
         roles,
         // Empty means "do not send it": a temperature of 0 is a real choice and
         // an unset temperature is the endpoint's default, and collapsing the
@@ -669,6 +671,18 @@ function DucklingForm({
           onChange={(e) => setModel(e.target.value)}
           className="min-w-56 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
         />
+        <select
+          aria-label="model tier"
+          data-testid="duckling-tier"
+          value={tier}
+          onChange={(e) => setTier(e.target.value as "" | "small" | "large")}
+          title="declared capacity class used by tier-sensitive harness behavior"
+          className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+        >
+          <option value="">tier: legacy auto</option>
+          <option value="small">tier: small</option>
+          <option value="large">tier: large</option>
+        </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-ink-secondary">

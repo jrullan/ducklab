@@ -155,6 +155,29 @@ func TestTaskSeatClassificationRecognizesLocalBuildImplementer(t *testing.T) {
 	}
 }
 
+func TestDeclaredTierOverridesProviderLocality(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-local")
+	s.cfgMu.Lock()
+	provider := s.cfg.Providers["fake"]
+	provider.BaseURL = "http://127.0.0.1:1234/v1"
+	s.cfg.Providers["fake"] = provider
+	duck := s.cfg.Ducklings["pato-local"]
+	duck.Tier = config.ModelTierLarge
+	s.cfg.Ducklings["pato-local"] = duck
+	s.cfgMu.Unlock()
+
+	projectID, _ := projectWithConfig(t, s, "declared-large-seat")
+	if s.smallImplementerSeat(projectID) {
+		t.Fatal("declared large tier was overridden by local provider address")
+	}
+	if name, source, small := s.stageSupportProfile(projectID, "small"); name != "small" || source != "request" || !small {
+		t.Fatalf("explicit support profile = %q/%q/%v", name, source, small)
+	}
+	if name, source, small := s.stageSupportProfile(projectID, "auto"); name != "standard" || source != "implementer tier" || small {
+		t.Fatalf("automatic support profile = %q/%q/%v", name, source, small)
+	}
+}
+
 // Neocapture's fragment reviewer inherited the configured generic reviewer
 // cap of 100 and exposed that service-side script rewriting happened before
 // ExecuteScript's critic guard. Document critics carry their draft in the

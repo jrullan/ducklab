@@ -47,6 +47,7 @@ type DucklingView struct {
 	ID       string                `json:"id"`
 	Provider string                `json:"provider"`
 	Model    string                `json:"model"`
+	Tier     string                `json:"tier,omitempty"`
 	Roles    []string              `json:"roles,omitempty"`
 	Notes    string                `json:"notes,omitempty"`
 	Params   config.SamplingParams `json:"params"`
@@ -180,6 +181,9 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 	if view.Model == "" {
 		return fmt.Errorf("duckling %q needs a model", id)
 	}
+	if err := config.ValidateModelTier(config.ModelTier(view.Tier)); err != nil {
+		return fmt.Errorf("duckling %q: %w", id, err)
+	}
 
 	// What the person left blank, the provider may know. OpenRouter's model
 	// listing declares context_length and per-token pricing; a duckling saved
@@ -220,6 +224,7 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 	}
 	d := config.Duckling{
 		Provider: config.ProviderID(view.Provider), Model: view.Model,
+		Tier:  config.ModelTier(view.Tier),
 		Roles: roles, Notes: view.Notes,
 		Params: view.Params, Caps: view.Caps, Cost: view.Cost,
 		Color: view.Color, Fallback: view.Fallback,
@@ -296,6 +301,7 @@ func (s *Service) DucklingGet(ctx context.Context, id string) (*DucklingView, er
 	}
 	return &DucklingView{
 		ID: id, Provider: string(d.Provider), Model: d.Model,
+		Tier:  string(d.Tier),
 		Roles: roles, Notes: d.Notes,
 		Params: d.Params, Caps: d.Caps, Cost: d.Cost,
 		Color: d.Color, Fallback: d.Fallback,
