@@ -88,3 +88,32 @@ func TestAPartialLineUpLeavesTheRestAlone(t *testing.T) {
 		t.Error("an empty line-up changed the roster")
 	}
 }
+
+// Fledge P4 explicitly seated two different OpenRouter ducklings, yet every
+// stage warned that the configured local duckling reviewed itself. The stage
+// had computed the warning before applying the requested line-up.
+func TestAStageWarningUsesItsEffectiveLineUp(t *testing.T) {
+	s := writableService(t, "pato-local", "pato-k3", "pato-glm")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — A\n\n**Priority:** must\n",
+	})
+
+	run, err := s.StageStart(context.Background(), id, StageRequest{
+		Stage: "spec", Mode: "council", Ducklings: []string{"pato-k3", "pato-glm"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.waitForRun(context.Background(), run.ID)
+
+	d, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Run.Warning != "" {
+		t.Fatalf("warning describes configured rather than effective seats: %q", d.Run.Warning)
+	}
+	if d.Run.Roster["architect"] != "pato-k3" || d.Run.Roster["reviewer"] != "pato-glm" {
+		t.Fatalf("effective roster = %#v", d.Run.Roster)
+	}
+}

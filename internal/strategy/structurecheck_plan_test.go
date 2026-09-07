@@ -241,6 +241,46 @@ func TestPlanManifestPatchPreservesUnmentionedTasksAndRevalidatesWholeGraph(t *t
 	}
 }
 
+func TestPlanManifestPatchReportsIndependentFieldErrorsTogether(t *testing.T) {
+	baseText := `{"milestones":[{"id":"M-01","title":"Core","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build","acceptance_slices":["builds"],"acceptance_probes":["cargo check"],"produces":["file:Cargo.toml"],"consumes":[],"verification":"cargo check"}]}]}`
+	parsedBase, err := agent.ParseContract("json:plan_manifest", baseText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := &agent.PlanManifestPatch{Operations: []agent.PlanManifestPatchOperation{{
+		Op:          "replace_task",
+		TaskID:      "T-001",
+		MilestoneID: "M-01",
+		Task: &agent.ManifestTask{
+			ID:               "T-001",
+			Title:            "",
+			Implements:       []string{"REQ-001"},
+			WorkUnit:         "",
+			AcceptanceSlices: []string{"builds", "installs"},
+			AcceptanceProbes: []string{"cargo check"},
+			Produces:         []string{"Cargo.toml"},
+			Verification:     "",
+		},
+	}}}
+	_, _, err = applyPlanManifestPatch(parsedBase.(*agent.PlanManifest), patch)
+	if err == nil {
+		t.Fatal("invalid patch unexpectedly passed")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"T-001 title must not be empty",
+		"T-001 work_unit must not be empty",
+		"T-001 acceptance_probes has 1 items, want 2",
+		`T-001 implements invalid specification id "REQ-001"`,
+		`T-001 produced artifact "Cargo.toml"`,
+		"T-001 verification must not be empty",
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("patch error lacks %q:\n%s", want, message)
+		}
+	}
+}
+
 func TestPlanManifestPatchAddsMilestoneAndTaskInOneTransaction(t *testing.T) {
 	baseText := `{"milestones":[{"id":"M-01","title":"Core","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build","acceptance_slices":["builds"],"acceptance_probes":["true"],"produces":["capability:core"],"consumes":[],"verification":"true"}]}]}`
 	baseParsed, err := agent.ParseContract("json:plan_manifest", baseText)

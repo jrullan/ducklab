@@ -628,6 +628,10 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 		filled = applyStageLineup(roster, lineup)
 		critics = s.criticsFrom(rs.run.Mode, lineup)
 	}
+	// The stage line-up is the effective pair. Computing this warning from the
+	// configured roster above produced a self-review warning even when an
+	// explicit K3 -> GLM line-up had already separated the seats (Fledge P4).
+	warning = bothSidesWarning(roster)
 	rs.run.Roster = rosterStrings(roster)
 	rs.run.RosterSources = s.rosterSources(projCfg, rs.run.Mode, req.Ducklings, nil)
 	s.recordSeatTiers(rs.run, roster)
@@ -761,16 +765,6 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 	if req.Stage == "plan" && strings.TrimSpace(req.Revise) == "" && strings.TrimSpace(req.Extend) == "" && strings.TrimSpace(req.SplitTask) == "" {
 		if current, loadErr := artifact.Load(projectRoot, artifact.KindPlan); loadErr == nil && len(current.Sections) == 0 {
 			planSeed = acceptedPlanSeed(projectRoot)
-			inScope := 0
-			for _, spec := range planSeed {
-				if priority := strings.ToLower(strings.TrimSpace(spec.Priority)); !spec.AsBuilt && priority != "wont" && priority != "could" {
-					inScope++
-				}
-			}
-			if inScope > agent.MaxPlanManifestTasks {
-				s.failRun(rs, fmt.Errorf("plan manifest seed: %d in-scope SPEC sections exceed the %d-task boundary; split the product scope before planning", inScope, agent.MaxPlanManifestTasks))
-				return
-			}
 		}
 	}
 	result, err := stage.Run(ctx, stage.Params{

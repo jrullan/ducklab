@@ -713,17 +713,14 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		if loop.Duckling.Params.DisableThinking {
 			applyThinkingSuppression(&final, loop.Duckling.Caps)
 		}
-		if resp, err := loop.Provider.Chat(ctx, final); err == nil && len(resp.Choices) > 0 {
-			calc := provider.CostCalculator{
-				InputPerMTok:  loop.Duckling.Cost.InputPerMTok,
-				OutputPerMTok: loop.Duckling.Cost.OutputPerMTok,
-			}
-			cost := calc.Cost(resp.Usage)
-			loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+		if resp, cost, err := chatForcedConclusion(ctx, loop, turn, final, 1); err != nil {
+			return outcome, err
+		} else if len(resp.Choices) > 0 {
 			outcome.TokensIn += resp.Usage.PromptTokens
 			outcome.TokensOut += resp.Usage.CompletionTokens
 			outcome.CostUSD += cost
-			answer, _ := splitThinking(resp.Choices[0].Message.Content)
+			answer, thought := splitThinking(resp.Choices[0].Message.Content)
+			outcome.Reasoning = joinReasoning(outcome.Reasoning, thought)
 			outcome.Text = answer
 			// Some small text-protocol models reproduce the now-inert tool
 			// envelope even after the grammar is removed. Give that protocol
@@ -737,13 +734,15 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 							"Rewrite the intended result as ordinary prose or the requested JSON contract only. " +
 							"Do not mention or spell any tool name, arguments, fence, or call syntax.",
 					})
-					if second, secondErr := loop.Provider.Chat(ctx, retry); secondErr == nil && len(second.Choices) > 0 {
-						secondCost := calc.Cost(second.Usage)
-						loop.Budget.Record(second.Usage.PromptTokens, second.Usage.CompletionTokens, secondCost)
+					if second, secondCost, secondErr := chatForcedConclusion(ctx, loop, turn, retry, 2); secondErr != nil {
+						return outcome, secondErr
+					} else if len(second.Choices) > 0 {
 						outcome.TokensIn += second.Usage.PromptTokens
 						outcome.TokensOut += second.Usage.CompletionTokens
 						outcome.CostUSD += secondCost
-						outcome.Text, _ = splitThinking(second.Choices[0].Message.Content)
+						var secondThought string
+						outcome.Text, secondThought = splitThinking(second.Choices[0].Message.Content)
+						outcome.Reasoning = joinReasoning(outcome.Reasoning, secondThought)
 					}
 				}
 			}
@@ -791,6 +790,75 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	outcome.Parsed = parsed
 
 	return outcome, nil
+}
+
+// chatForcedConclusion accounts for and records the tool-free call made after
+// a seat exhausts its tool-call allowance. Fledge P4 showed the budget charging
+// this call while llm.jsonl jumped directly from the last tool call to the next
+// actor, because this path bypassed the ordinary per-call recorder.
+func chatForcedConclusion(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, attempt int) (provider.ChatResponse, float64, error) {
+	if loop.Budget != nil {
+		if msg, exceeded := loop.Budget.Check(); exceeded {
+			return provider.ChatResponse{}, 0, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+	}
+	start := time.Now()
+	resp, err := loop.Provider.Chat(ctx, req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		if loop.RunWriter != nil {
+			_ = loop.RunWriter.AppendLLM(&LLMCallRecord{
+				Duckling: string(loop.Duckling.ID), Provider: string(loop.Duckling.Provider), Model: loop.Duckling.Model,
+				Role: string(turn.Role), Request: requestMap(req),
+				Response:  map[string]interface{}{"error": err.Error(), "forced_conclusion": true},
+				LatencyMs: latency, Attempt: attempt, FinishReason: "forced_conclusion_error",
+			})
+		}
+		return resp, 0, fmt.Errorf("provider forced conclusion: %w", err)
+	}
+
+	calc := provider.CostCalculator{InputPerMTok: loop.Duckling.Cost.InputPerMTok, OutputPerMTok: loop.Duckling.Cost.OutputPerMTok}
+	cost := calc.Cost(resp.Usage)
+	if loop.Budget != nil {
+		loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+	}
+	response := map[string]interface{}{"choices": len(resp.Choices), "forced_conclusion": true}
+	finish := "no_choices"
+	message := provider.Message{}
+	if len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		message = choice.Message
+		if answer, thought := splitThinking(message.Content); thought != "" {
+			message.Content = answer
+			message.Reasoning = joinReasoning(message.Reasoning, thought)
+		} else {
+			message.Content = answer
+		}
+		finish = choice.FinishReason
+		response = map[string]interface{}{
+			"content": message.Content, "finish_reason": finish, "forced_conclusion": true,
+		}
+		if message.Reasoning != "" {
+			response["reasoning"] = message.Reasoning
+		}
+		if len(message.ToolCalls) > 0 {
+			response["tool_calls"] = message.ToolCalls
+		}
+	}
+	if loop.RunWriter != nil {
+		_ = loop.RunWriter.AppendLLM(&LLMCallRecord{
+			Duckling: string(loop.Duckling.ID), Provider: string(loop.Duckling.Provider), Upstream: resp.Upstream,
+			Model: loop.Duckling.Model, Role: string(turn.Role), Request: requestMap(req), Response: response,
+			Usage: usageMap(resp.Usage, message), CostUSD: cost, LatencyMs: latency, Attempt: attempt,
+			CostSource: calc.CostSource(resp.Usage), FinishReason: finish,
+		})
+	}
+	if loop.Budget != nil {
+		if msg, exceeded := loop.Budget.CheckWallclock(); exceeded {
+			return resp, cost, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+	}
+	return resp, cost, nil
 }
 
 // ErrRepetitionLoop reports a token repetition loop detected in a stream.

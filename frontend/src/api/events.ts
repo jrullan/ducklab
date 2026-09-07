@@ -301,6 +301,7 @@ export const KNOWN_EVENT_TYPES = [
   "plan_manifest",
   "plan_manifest_seeded",
   "plan_manifest_seed_unresolved",
+  "plan_manifest_coverage_unassigned",
   "plan_manifest_patched",
   "plan_manifest_patch_rejected",
   "support_profile_resolved",

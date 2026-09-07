@@ -455,6 +455,32 @@ func TestPlanManifestReportsAcceptanceProbeCardinality(t *testing.T) {
 	}
 }
 
+// H1t patches could carry several independent bad fields, but the transaction
+// reported only the first. The retry fixed one field merely to discover the
+// next, spending its only application retry on serial diagnosis.
+func TestPlanManifestReportsAllIndependentTaskFieldErrors(t *testing.T) {
+	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[` +
+		`{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"","acceptance_slices":["one","two"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"},` +
+		`{"id":"T-002","title":"Wire","implements":["REQ-002"],"work_unit":"wire app","acceptance_slices":["wired"],"acceptance_probes":["cargo test wire"],"produces":["src/main.rs"],"consumes":["Cargo.toml"],"verification":""}` +
+		`]}]}`
+	_, err := ParseContract("json:plan_manifest", text)
+	if err == nil {
+		t.Fatal("invalid fields were accepted")
+	}
+	for _, want := range []string{
+		"T-001 work_unit must not be empty",
+		"T-001 acceptance_probes has 1 items, want 2",
+		`T-002 implements invalid specification id "REQ-002"`,
+		`T-002 produced artifact "src/main.rs"`,
+		`T-002 consumed artifact "Cargo.toml"`,
+		"T-002 verification must not be empty",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not include %q", err, want)
+		}
+	}
+}
+
 func TestPlanManifestReportsMissingTaskField(t *testing.T) {
 	text := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"","acceptance_slices":["one"],"acceptance_probes":["test-one"],"produces":["build-target:app"],"consumes":[],"verification":"test-all"}]}]}`
 	_, err := ParseContract("json:plan_manifest", text)

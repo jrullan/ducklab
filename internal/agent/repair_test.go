@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -856,10 +857,12 @@ func TestTurnExhaustionForcesAConclusionInsteadOfFailing(t *testing.T) {
 	toolCall := "Let me look.\n```ducklab\n{\"tool\":\"fs_read\",\"args\":{\"path\":\"a.go\"}}\n```"
 	p := &countingProvider{
 		replies: []string{toolCall, toolCall,
-			`{"verdict":"request-changes","findings":[{"severity":"major","file":"requirements.md","issue":"could not verify REQ-009 against the tree","fix":"narrow it"}]}`},
+			`<think>checked the available context</think>{"verdict":"request-changes","findings":[{"severity":"major","file":"requirements.md","issue":"could not verify REQ-009 against the tree","fix":"narrow it"}]}`},
 	}
 	loop := testLoop(p, 0)
 	loop.Registry = reg
+	w := &recordingWriter{}
+	loop.RunWriter = w
 
 	turn := &Turn{Role: config.RoleReviewer, Prompt: "critique the draft", Contract: "verdict",
 		MaxTurns: 2, Toolbelt: []string{"fs_read"}}
@@ -886,6 +889,15 @@ func TestTurnExhaustionForcesAConclusionInsteadOfFailing(t *testing.T) {
 	if !strings.Contains(last.Messages[0].Content, "tool-call syntax are unavailable") || !strings.Contains(lastMsg.Content, "Do not emit a ducklab fence") {
 		t.Error("the text-protocol conclusion does not close tool syntax explicitly")
 	}
+	if len(w.calls) != 3 {
+		t.Fatalf("llm records = %d, want both tool calls and forced conclusion", len(w.calls))
+	}
+	if forced, _ := w.calls[2].Response["forced_conclusion"].(bool); !forced {
+		t.Fatalf("terminal call is not identified as a forced conclusion: %+v", w.calls[2].Response)
+	}
+	if !strings.Contains(out.Reasoning, "checked the available context") || !strings.Contains(fmt.Sprint(w.calls[2].Response["reasoning"]), "checked the available context") {
+		t.Fatalf("forced conclusion thinking was not preserved in both turn and call records: outcome=%q record=%+v", out.Reasoning, w.calls[2].Response)
+	}
 }
 
 func TestForcedConclusionReformatsResidualToolEnvelopeOnce(t *testing.T) {
@@ -899,6 +911,8 @@ func TestForcedConclusionReformatsResidualToolEnvelopeOnce(t *testing.T) {
 	}}
 	loop := testLoop(p, 0)
 	loop.Registry = reg
+	w := &recordingWriter{}
+	loop.RunWriter = w
 	turn := &Turn{Role: config.RoleReviewer, Prompt: "critique", Contract: "verdict",
 		MaxTurns: 2, Toolbelt: []string{"fs_read"}}
 	out, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir(), Role: config.RoleReviewer})
@@ -914,6 +928,14 @@ func TestForcedConclusionReformatsResidualToolEnvelopeOnce(t *testing.T) {
 	last := p.requests[len(p.requests)-1]
 	if !strings.Contains(last.Messages[len(last.Messages)-1].Content, "previous response was rejected") || len(last.Tools) != 0 {
 		t.Fatalf("reformulation request was not tool-free and explicit: %+v", last)
+	}
+	if len(w.calls) != 4 {
+		t.Fatalf("llm records = %d, want every provider invocation", len(w.calls))
+	}
+	for i, call := range w.calls[2:] {
+		if forced, _ := call.Response["forced_conclusion"].(bool); !forced {
+			t.Errorf("forced call %d is not identified: %+v", i+1, call.Response)
+		}
 	}
 }
 

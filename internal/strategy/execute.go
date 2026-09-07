@@ -395,8 +395,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			}
 		}
 		emit(params, "plan_manifest_seeded", map[string]interface{}{
-			"specs": seedSpecs, "tasks": len(seedSpecs), "candidate_digest": documentCandidateDigest(string(encoded)),
-			"detail": "created one provisional task per accepted in-scope SPEC; architect fills or repartitions the preserved checkpoint",
+			"specs": seedSpecs, "coverage_slots": len(seedSpecs), "tasks": 0,
+			"candidate_digest": documentCandidateDigest(string(encoded)),
+			"detail":           "created an engine-owned SPEC coverage ledger and an empty task topology; architect groups concerns through bounded patches",
 		})
 	}
 	materialize := func(detail string) error {
@@ -598,21 +599,20 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					planManifestDraft.Text +
 					"\n```\n\nReturn only operations for tasks implicated by the latest critic findings. " +
 					"Use the smallest unused T-NNN id only when a split requires a new task."
-				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
-					prompt += "\n\n## Seeded checkpoint — resolve these provisional tasks first\n\n" +
-						"Ducklab derived this coverage partition from the accepted SPEC; it did not infer implementation design. " +
-						"The following tasks contain `UNRESOLVED` fields and `false` probes: " + strings.Join(unresolved, ", ") + ". " +
-						"Replace at most four implicated tasks in this patch. You may split or merge tasks when cohesion requires it, " +
-						"but every seeded SPEC must remain present in at least one Implements list. Do not preserve provisional " +
-						"capability:unresolved-* ownership or placeholder probes. Remaining provisional tasks stay in the engine checkpoint for the next bounded review."
+				if missing := missingPlanSeedCoverage(planManifest, seedSpecs); len(missing) > 0 {
+					prompt += "\n\n## Engine-owned coverage slots — assign without copying their partition\n\n" +
+						planCoverageSlotPrompt(params.PlanSeed, missing) + "\n\n" +
+						"These SPEC identities are unassigned coverage obligations, not provisional tasks. Add or replace at most four cohesive tasks in this patch. " +
+						"A task may implement several slots and a slot may require several tasks; do not create one task per slot unless implementation cohesion independently calls for it. " +
+						"Use add_task for new work and keep every previously assigned slot present in at least one Implements list."
 				}
 			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReviewFor(params.SmallSeat)
-				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
-					prompt += "\n\n## Unresolved seeded tasks — mechanical fact\n\n" + strings.Join(unresolved, ", ") +
-						" still contain provisional `UNRESOLVED`, `false`, or `capability:unresolved-*` values. " +
-						"They cannot pass their task audit and the manifest cannot be approved until each is replaced or coherently merged while preserving SPEC coverage."
+				if missing := missingPlanSeedCoverage(planManifest, seedSpecs); len(missing) > 0 {
+					prompt += "\n\n## Unassigned coverage slots — mechanical fact\n\n" + strings.Join(missing, ", ") +
+						" are not present in any task's Implements list. They are engine-owned obligations, not predetermined tasks. " +
+						"The manifest cannot be approved until cohesive tasks cover them."
 				}
 			}
 			if turn.Persona == PersonaCritic && script.CriticScope != "" {
@@ -759,11 +759,6 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 						updated, operations, patchErr = applyPlanManifestPatch(manifestPatchBase, patch)
 						if patchErr == nil {
 							patchErr = validatePlanManifestSupportProfile(updated, params.SmallSeat)
-						}
-						if patchErr == nil {
-							if missing := missingPlanSeedCoverage(updated, seedSpecs); len(missing) > 0 {
-								patchErr = fmt.Errorf("patched manifest dropped seeded SPEC coverage: %s", strings.Join(missing, ", "))
-							}
 						}
 					}
 					if patchErr != nil {
@@ -975,17 +970,17 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				if params.SmallSeat {
 					filterPlanCriticOutcome(params, outcome, planManifestDraft.Text, round, script.TurnIndexBase+i)
 				}
-				if unresolved := unresolvedPlanSeedTasks(planManifest); len(unresolved) > 0 {
-					if verdict, ok := outcome.Parsed.(*agent.Verdict); ok && verdict != nil && verdict.Verdict == "approve" {
+				if missing := missingPlanSeedCoverage(planManifest, seedSpecs); len(missing) > 0 {
+					if verdict, ok := outcome.Parsed.(*agent.Verdict); ok && verdict != nil {
 						verdict.Verdict = "request-changes"
-						for _, taskID := range unresolved {
+						for _, specID := range missing {
 							verdict.Findings = append(verdict.Findings, agent.Finding{
-								Severity: "major", File: "manifest", Invariant: "Seeded tasks must be resolved before topology freeze",
-								Issue: taskID + " still contains provisional seeded fields", Fix: "replace or coherently merge this task while preserving its SPEC coverage",
+								Severity: "major", File: "manifest", Invariant: "Every engine-owned coverage slot must be assigned",
+								Issue: specID + " is absent from every task Implements list", Fix: "assign it to one or more cohesive tasks without assuming the SPEC section is itself a task",
 							})
 						}
-						emit(params, "plan_manifest_seed_unresolved", map[string]interface{}{
-							"tasks": unresolved, "detail": "reviewer approval lowered because provisional seed fields remain",
+						emit(params, "plan_manifest_coverage_unassigned", map[string]interface{}{
+							"specs": missing, "detail": "reviewer verdict lowered because engine-owned coverage slots remain unassigned",
 						})
 					}
 				}

@@ -310,6 +310,7 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 	}
 	seen := map[string]bool{}
 	producer := map[string]string{}
+	var validationProblems []string
 	taskCount := 0
 	for mi, milestone := range manifest.Milestones {
 		milestoneID, ok := canonicalContractID(milestone.ID, "M")
@@ -336,43 +337,46 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			if !ok {
 				return nil, fmt.Errorf("plan manifest contract: task %d in %s id %q must use T-NNN", ti, milestoneID, task.ID)
 			}
-			if strings.TrimSpace(task.Title) == "" {
-				return nil, fmt.Errorf("plan manifest contract: %s title must not be empty", taskID)
-			}
-			if len(task.Implements) == 0 {
-				return nil, fmt.Errorf("plan manifest contract: %s implements must contain at least one SPEC-NNN id", taskID)
-			}
-			if strings.TrimSpace(task.WorkUnit) == "" {
-				return nil, fmt.Errorf("plan manifest contract: %s work_unit must not be empty", taskID)
-			}
-			if len(task.AcceptanceSlices) == 0 {
-				return nil, fmt.Errorf("plan manifest contract: %s acceptance_slices must contain at least one item", taskID)
-			}
-			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
-				return nil, fmt.Errorf("plan manifest contract: %s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices))
-			}
-			if len(task.Produces) == 0 {
-				return nil, fmt.Errorf("plan manifest contract: %s produces must contain at least one typed artifact", taskID)
-			}
-			if strings.TrimSpace(task.Verification) == "" {
-				return nil, fmt.Errorf("plan manifest contract: %s verification must not be empty", taskID)
-			}
 			if seen[taskID] {
 				return nil, fmt.Errorf("plan manifest contract: duplicate task id %s", taskID)
 			}
 			manifest.Milestones[mi].Tasks[ti].ID = taskID
+			seen[taskID] = true
+			if strings.TrimSpace(task.Title) == "" {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s title must not be empty", taskID))
+			}
+			if len(task.Implements) == 0 {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s implements must contain at least one SPEC-NNN id", taskID))
+			}
 			manifest.Milestones[mi].Tasks[ti].WorkUnit = strings.TrimSpace(task.WorkUnit)
+			if manifest.Milestones[mi].Tasks[ti].WorkUnit == "" {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s work_unit must not be empty", taskID))
+			}
+			if len(task.AcceptanceSlices) == 0 {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_slices must contain at least one item", taskID))
+			}
+			if len(task.AcceptanceProbes) != len(task.AcceptanceSlices) {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes has %d items, want %d (one per acceptance_slice)", taskID, len(task.AcceptanceProbes), len(task.AcceptanceSlices)))
+			}
+			if len(task.Produces) == 0 {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s produces must contain at least one typed artifact", taskID))
+			}
+			if strings.TrimSpace(task.Verification) == "" {
+				validationProblems = append(validationProblems, fmt.Sprintf("%s verification must not be empty", taskID))
+			}
 			for ii, id := range task.Implements {
 				id = strings.ToUpper(strings.TrimSpace(id))
 				if !validContractID(id, "SPEC") {
-					return nil, fmt.Errorf("plan manifest contract: %s implements invalid specification id %q", taskID, task.Implements[ii])
+					validationProblems = append(validationProblems, fmt.Sprintf("%s implements invalid specification id %q", taskID, task.Implements[ii]))
+					continue
 				}
 				manifest.Milestones[mi].Tasks[ti].Implements[ii] = id
 			}
 			for si, slice := range task.AcceptanceSlices {
 				slice = strings.TrimSpace(slice)
 				if slice == "" {
-					return nil, fmt.Errorf("plan manifest contract: empty acceptance slice in %s", taskID)
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_slices contains an empty item", taskID))
+					continue
 				}
 				manifest.Milestones[mi].Tasks[ti].AcceptanceSlices[si] = slice
 			}
@@ -380,19 +384,21 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			for pi, probe := range task.AcceptanceProbes {
 				probe = strings.TrimSpace(probe)
 				if probe == "" || strings.ContainsAny(probe, "\n`") || seenProbes[probe] {
-					return nil, fmt.Errorf("plan manifest contract: invalid acceptance probe in %s", taskID)
+					validationProblems = append(validationProblems, fmt.Sprintf("%s acceptance_probes contains an empty, multiline, fenced, or repeated item", taskID))
+					continue
 				}
 				seenProbes[probe] = true
 				manifest.Milestones[mi].Tasks[ti].AcceptanceProbes[pi] = probe
 			}
-			seen[taskID] = true
 			for pi, item := range task.Produces {
 				item = strings.TrimSpace(item)
 				if !validManifestArtifact(item) {
-					return nil, fmt.Errorf("plan manifest contract: %s produced artifact %q must use file:, dir:, build-target:, or capability:", taskID, item)
+					validationProblems = append(validationProblems, fmt.Sprintf("%s produced artifact %q must use file:, dir:, build-target:, or capability:", taskID, item))
+					continue
 				}
 				if prior := producer[item]; prior != "" && prior != taskID {
-					return nil, fmt.Errorf("plan manifest contract: %s and %s both produce %s", prior, taskID, item)
+					validationProblems = append(validationProblems, fmt.Sprintf("%s and %s both produce %s", prior, taskID, item))
+					continue
 				}
 				producer[item] = taskID
 				manifest.Milestones[mi].Tasks[ti].Produces[pi] = item
@@ -400,11 +406,15 @@ func parsePlanManifest(text string) (*PlanManifest, error) {
 			for ci, item := range task.Consumes {
 				item = strings.TrimSpace(item)
 				if !validManifestArtifact(item) {
-					return nil, fmt.Errorf("plan manifest contract: %s consumed artifact %q must use file:, dir:, build-target:, or capability:", taskID, item)
+					validationProblems = append(validationProblems, fmt.Sprintf("%s consumed artifact %q must use file:, dir:, build-target:, or capability:", taskID, item))
+					continue
 				}
 				manifest.Milestones[mi].Tasks[ti].Consumes[ci] = item
 			}
 		}
+	}
+	if len(validationProblems) > 0 {
+		return nil, fmt.Errorf("plan manifest contract: validation failed: %s", strings.Join(validationProblems, "; "))
 	}
 	return &manifest, nil
 }
