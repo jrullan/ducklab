@@ -726,7 +726,8 @@ func TestPlanManifestAuditRepairComposesTwoSmallFragments(t *testing.T) {
 	p := &countingProvider{replies: []string{
 		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-002 bundles concerns","fix":"keep only selection"}]}`,
 		`{"specs":[{"id":"SPEC-001","status":"pass","evidence":"T-001 slice and probe preserve the build boundary"},{"id":"SPEC-002","status":"fail","evidence":"T-002 combines registry and selection"}]}`,
-		`{"tasks":[{"id":"T-001","status":"pass","evidence":"T-001 has one build work unit"},{"id":"T-002","status":"fail","evidence":"T-002 has registry and selection actors"}]}`,
+		`{"tasks":[{"id":"T-001","status":"pass","evidence":"T-001 has one build work unit"}]}`,
+		`{"tasks":[{"id":"T-002","status":"fail","evidence":"T-002 has registry and selection actors"}]}`,
 	}}
 	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
 	out, err := RunTurn(context.Background(), testLoop(p, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
@@ -734,7 +735,7 @@ func TestPlanManifestAuditRepairComposesTwoSmallFragments(t *testing.T) {
 		t.Fatal(err)
 	}
 	verdict := out.Parsed.(*Verdict)
-	if out.Repairs != 2 || p.calls() != 3 || verdict.ManifestAudit == nil || len(verdict.ManifestAudit.Specs) != 2 || len(verdict.ManifestAudit.Tasks) != 2 {
+	if out.Repairs != 3 || p.calls() != 4 || verdict.ManifestAudit == nil || len(verdict.ManifestAudit.Specs) != 2 || len(verdict.ManifestAudit.Tasks) != 2 {
 		t.Fatalf("outcome repairs=%d calls=%d audit=%+v", out.Repairs, p.calls(), verdict.ManifestAudit)
 	}
 	p.mu.Lock()
@@ -745,6 +746,9 @@ func TestPlanManifestAuditRepairComposesTwoSmallFragments(t *testing.T) {
 	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "small tasks ledger fragment") {
 		t.Fatalf("task fragment prompt = %s", got)
 	}
+	if got := p.requests[3].Messages[len(p.requests[3].Messages)-1].Content; !strings.Contains(got, "T-002") || strings.Contains(got, "T-001") {
+		t.Fatalf("second task fragment was not isolated: %s", got)
+	}
 }
 
 func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
@@ -753,7 +757,10 @@ func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
 		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-005 is incomplete","fix":"complete its existing slices"}]}`,
 		`{"specs":[{"id":"SPEC-001","status":"pass","evidence":"covered by T-001"},{"id":"SPEC-002","status":"pass","evidence":"covered by T-002"},{"id":"SPEC-003","status":"pass","evidence":"covered by T-003"},{"id":"SPEC-004","status":"pass","evidence":"covered by T-004"}]}`,
 		`{"specs":[{"id":"SPEC-005","status":"fail","evidence":"T-005 omits one obligation"}]}`,
-		`{"tasks":[{"id":"T-001","status":"pass","evidence":"one concern"},{"id":"T-002","status":"pass","evidence":"one concern"},{"id":"T-003","status":"pass","evidence":"one concern"},{"id":"T-004","status":"pass","evidence":"one concern"}]}`,
+		`{"tasks":[{"id":"T-001","status":"pass","evidence":"one concern"}]}`,
+		`{"tasks":[{"id":"T-002","status":"pass","evidence":"one concern"}]}`,
+		`{"tasks":[{"id":"T-003","status":"pass","evidence":"one concern"}]}`,
+		`{"tasks":[{"id":"T-004","status":"pass","evidence":"one concern"}]}`,
 		`{"tasks":[{"id":"T-005","status":"fail","evidence":"one required slice is absent"}]}`,
 	}}
 	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
@@ -761,7 +768,7 @@ func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Repairs != 4 || p.calls() != 5 || len(out.Parsed.(*Verdict).ManifestAudit.Tasks) != 5 {
+	if out.Repairs != 7 || p.calls() != 8 || len(out.Parsed.(*Verdict).ManifestAudit.Tasks) != 5 {
 		t.Fatalf("repairs=%d calls=%d audit=%+v", out.Repairs, p.calls(), out.Parsed.(*Verdict).ManifestAudit)
 	}
 	p.mu.Lock()

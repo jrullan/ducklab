@@ -1856,12 +1856,18 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 	audit := &ManifestAudit{}
 	attempts := 0
 	for _, part := range []target{{"specs", specs}, {"tasks", tasks}} {
-		// Four targets keep the response small enough for a local reviewer to
-		// account for every nested slice without truncating. This is bounded by
-		// the manifest contract itself: at most 8 SPECs and 10 tasks currently
-		// produce no more than five deterministic fragments.
-		for start := 0; start < len(part.ids); start += 4 {
-			end := start + 4
+		// SPEC evidence is flat and remains cheap in groups of four. A task entry
+		// contains a variable slice_probes array plus ownership; four such trees
+		// repeatedly lost a closing brace and placed ownership outside the task,
+		// even on a localized retry. Give each nested task its own fragment.
+		// The hard manifest limits bound this at 12 fragments: 2 SPEC groups and
+		// 10 tasks.
+		chunkSize := 4
+		if part.kind == "tasks" {
+			chunkSize = 1
+		}
+		for start := 0; start < len(part.ids); start += chunkSize {
+			end := start + chunkSize
 			if end > len(part.ids) {
 				end = len(part.ids)
 			}
