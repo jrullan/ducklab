@@ -429,11 +429,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 						// 373 s thought-only revision turn, 2026-08-29).
 						Response: map[string]interface{}{
 							"error":           "thought-only reply: no content, no tool calls",
-							"usage":           resp.Usage,
 							"reasoning_chars": len(c.Message.Reasoning),
 							"reasoning_head":  firstChars(c.Message.Reasoning, 2000),
 							"reasoning_tail":  lastChars(c.Message.Reasoning, 1000),
 						},
+						Usage:        usageMap(resp.Usage, c.Message),
 						LatencyMs:    time.Since(start).Milliseconds(),
 						Attempt:      attempt,
 						FinishReason: "thought_only",
@@ -472,6 +472,12 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				"content":       choice.Message.Content,
 				"finish_reason": finishReason,
 			}
+			if choice.Message.Reasoning != "" {
+				// Persist the separated text beside the accounting. Events carry
+				// the turn aggregate, but llm.jsonl is the only record that can
+				// attribute reasoning cost to one provider call.
+				respMap["reasoning"] = choice.Message.Reasoning
+			}
 			if len(choice.Message.ToolCalls) > 0 {
 				respMap["tool_calls"] = choice.Message.ToolCalls
 			}
@@ -483,7 +489,7 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 				Role:         string(turn.Role),
 				Request:      reqMap,
 				Response:     respMap,
-				Usage:        usageMap(resp.Usage),
+				Usage:        usageMap(resp.Usage, choice.Message),
 				CostUSD:      cost,
 				LatencyMs:    latencyMs,
 				Attempt:      1,
@@ -1814,6 +1820,7 @@ func chatContractRepair(ctx context.Context, loop *Loop, turn *Turn, req provide
 	}
 	response := map[string]interface{}{"choices": len(resp.Choices)}
 	finish := "no_choices"
+	responseMessage := provider.Message{}
 	if len(resp.Choices) > 0 {
 		choice := &resp.Choices[0]
 		if answer, thought := splitThinking(choice.Message.Content); thought != "" {
@@ -1827,12 +1834,13 @@ func chatContractRepair(ctx context.Context, loop *Loop, turn *Turn, req provide
 		if choice.Message.Reasoning != "" {
 			response["reasoning"] = choice.Message.Reasoning
 		}
+		responseMessage = choice.Message
 	}
 	if loop.RunWriter != nil {
 		_ = loop.RunWriter.AppendLLM(&LLMCallRecord{
 			Duckling: string(loop.Duckling.ID), Provider: string(loop.Duckling.Provider), Upstream: resp.Upstream,
 			Model: loop.Duckling.Model, Role: string(turn.Role), Request: requestMap(req), Response: response,
-			Usage: usageMap(resp.Usage), CostUSD: cost, LatencyMs: latency, Attempt: attempt,
+			Usage: usageMap(resp.Usage, responseMessage), CostUSD: cost, LatencyMs: latency, Attempt: attempt,
 			CostSource: calc.CostSource(resp.Usage), FinishReason: finish,
 		})
 	}
@@ -2050,7 +2058,7 @@ The proposal is advice only; it never creates tasks until a person promotes it.`
 // double-count. "The run spent 400k tokens" and "the run spent 400k tokens, 380k
 // of them thinking" call for different actions, and only the second explains a
 // budget that ran out with nothing written.
-func usageMap(u provider.Usage) map[string]interface{} {
+func usageMap(u provider.Usage, messages ...provider.Message) map[string]interface{} {
 	out := map[string]interface{}{
 		"prompt_tokens":     u.PromptTokens,
 		"completion_tokens": u.CompletionTokens,
@@ -2058,7 +2066,72 @@ func usageMap(u provider.Usage) map[string]interface{} {
 	if u.ReasoningTokens > 0 {
 		out["reasoning_tokens"] = u.ReasoningTokens
 	}
+	if len(messages) == 1 {
+		out["completion_breakdown"] = completionBreakdown(u, messages[0])
+	}
 	return out
+}
+
+// completionBreakdown attributes the completion budget to private reasoning
+// and visible content/tool envelopes. Provider-reported reasoning tokens win.
+// Local OpenAI-compatible servers commonly omit that detail even though they
+// return separated reasoning text; in that case the split is a proportional
+// estimate whose two token fields still add up to completion_tokens. Byte
+// counts remain beside it so later analysis can replace the heuristic without
+// losing the observation it was based on.
+func completionBreakdown(u provider.Usage, m provider.Message) map[string]interface{} {
+	toolBytes := 0
+	for _, call := range m.ToolCalls {
+		toolBytes += len(call.Function.Name) + len(call.Function.Arguments)
+	}
+	contentBytes := len(m.Content)
+	reasoningBytes := len(m.Reasoning)
+	reasoningTokens, contentTokens, unattributed := 0, 0, 0
+	source := "unattributed"
+
+	if u.ReasoningTokens > 0 {
+		reasoningTokens = u.ReasoningTokens
+		if reasoningTokens > u.CompletionTokens {
+			reasoningTokens = u.CompletionTokens
+		}
+		contentTokens = u.CompletionTokens - reasoningTokens
+		source = "provider"
+	} else {
+		reasoningWeight := provider.EstimateTokens(m.Reasoning)
+		if reasoningBytes > 0 && reasoningWeight == 0 {
+			reasoningWeight = 1
+		}
+		contentWeight := provider.EstimateTokens(m.Content) + toolBytes/4
+		if contentBytes+toolBytes > 0 && contentWeight == 0 {
+			contentWeight = 1
+		}
+		totalWeight := reasoningWeight + contentWeight
+		switch {
+		case totalWeight > 0:
+			reasoningTokens = (u.CompletionTokens*reasoningWeight + totalWeight/2) / totalWeight
+			if reasoningTokens > u.CompletionTokens {
+				reasoningTokens = u.CompletionTokens
+			}
+			contentTokens = u.CompletionTokens - reasoningTokens
+			if reasoningWeight > 0 {
+				source = "proportional_text_estimate"
+			} else {
+				source = "observed_content_only"
+			}
+		default:
+			unattributed = u.CompletionTokens
+		}
+	}
+
+	return map[string]interface{}{
+		"reasoning_tokens":    reasoningTokens,
+		"content_tokens":      contentTokens,
+		"unattributed_tokens": unattributed,
+		"reasoning_bytes":     reasoningBytes,
+		"content_bytes":       contentBytes,
+		"tool_call_bytes":     toolBytes,
+		"source":              source,
+	}
 }
 
 // requestMap is what goes to llm.jsonl for one call's request.
