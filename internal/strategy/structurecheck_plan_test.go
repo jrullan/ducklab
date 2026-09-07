@@ -7,6 +7,7 @@ import (
 
 	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/artifact"
+	"github.com/jrullan/ducklab/internal/config"
 )
 
 func TestPlanManifestSliceLimitBelongsToSmallSupportProfile(t *testing.T) {
@@ -34,6 +35,26 @@ func TestPlanManifestReviewGuidanceRespectsSupportProfile(t *testing.T) {
 	}
 	if !strings.Contains(standard, "Do not split or merge tasks solely because of their slice count") {
 		t.Fatalf("standard review guidance lacks cohesion rule:\n%s", standard)
+	}
+}
+
+func TestApplySupportProfileCarriesPolicyOnScheduledTurn(t *testing.T) {
+	turn := &Turn{Persona: PersonaPlanManifest, Toolbelt: "none"}
+	applySupportProfile(turn, true)
+	if !turn.SmallSeat {
+		t.Fatal("small support profile was not carried on the scheduled turn")
+	}
+	applySupportProfile(turn, false)
+	if turn.SmallSeat {
+		t.Fatal("standard support profile retained stale small-seat policy")
+	}
+}
+
+func TestAgentTurnCarriesScheduledSupportPolicy(t *testing.T) {
+	turn := &Turn{Role: config.RoleArchitect, Persona: PersonaPlanManifest, Contract: "json:plan_manifest", SmallSeat: true, Images: []string{"image"}}
+	agentTurn := turn.AgentTurn("duck", "prompt", []string{"fs_read"}, 2, 3)
+	if !agentTurn.SmallSeat || agentTurn.Persona != PersonaPlanManifest || agentTurn.Round != 2 || agentTurn.Index != 3 || len(agentTurn.Images) != 1 {
+		t.Fatalf("agent turn lost scheduled policy: %+v", agentTurn)
 	}
 }
 

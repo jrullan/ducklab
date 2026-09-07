@@ -172,6 +172,22 @@ type Turn struct {
 	// that by design does not exist, and its tools truthfully told it the
 	// wrong story: git_diff empty, artifact_read serving the old document.
 	Persona string
+	// SmallSeat is the resolved support profile for this run. It travels on the
+	// scheduled turn so every TurnRunner — the default and service runners
+	// alike — presents the same policy the strategy enforces.
+	SmallSeat bool
+}
+
+// AgentTurn is the single transport boundary from a scheduled strategy turn
+// to the agent loop. Keeping it here prevents alternate runners from silently
+// dropping execution policy when new turn fields are added.
+func (t *Turn) AgentTurn(duckling config.DucklingID, prompt string, toolbelt []string, round, index int) *agent.Turn {
+	return &agent.Turn{
+		Role: t.Role, Duckling: duckling, Prompt: prompt, Toolbelt: toolbelt,
+		Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
+		Persona: t.Persona, SmallSeat: t.SmallSeat, Images: t.Images,
+		Round: round, Index: index,
+	}
 }
 
 // ResolveToolbelt resolves the turn's toolbelt against its ROLE's ceiling.

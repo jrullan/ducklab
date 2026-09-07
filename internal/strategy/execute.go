@@ -285,7 +285,11 @@ func consultRetryLimit(params *ExecuteParams) int {
 }
 
 func applySupportProfile(turn *Turn, small bool) {
-	if turn == nil || small {
+	if turn == nil {
+		return
+	}
+	turn.SmallSeat = small
+	if small {
 		return
 	}
 	if turn.Persona == PersonaCritic || turn.Persona == PersonaPlanManifestCritic {
@@ -1818,19 +1822,7 @@ func registryFrom(params *ExecuteParams) *tools.Registry {
 
 func defaultRunner(params *ExecuteParams) TurnRunner {
 	return func(ctx context.Context, t *Turn, duckling config.DucklingID, prompt string, toolbelt []string, tc TurnContext) (*agent.Outcome, error) {
-		return agent.RunTurn(ctx, params.AgentLoop, &agent.Turn{
-			Round:     tc.Round,
-			Index:     tc.Index,
-			Role:      t.Role,
-			Duckling:  duckling,
-			Prompt:    prompt,
-			Toolbelt:  toolbelt,
-			Contract:  t.Contract,
-			MaxTurns:  t.MaxTurns,
-			Anonymize: t.Anonymize,
-			Persona:   t.Persona,
-			SmallSeat: params.SmallSeat,
-		}, params.ExecContext)
+		return agent.RunTurn(ctx, params.AgentLoop, t.AgentTurn(duckling, prompt, toolbelt, tc.Round, tc.Index), params.ExecContext)
 	}
 }
 
