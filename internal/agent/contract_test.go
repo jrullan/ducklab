@@ -26,6 +26,29 @@ func TestPlanManifestRejectsMoreThanTenTasks(t *testing.T) {
 	}
 }
 
+func TestPlanManifestPatchIsTypedAndScopedToUniqueTasks(t *testing.T) {
+	text := `{"operations":[{"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["app compiles"],"acceptance_probes":["cargo check"],"produces":["file:Cargo.toml"],"consumes":[],"verification":"cargo check"}},{"op":"delete_task","task_id":"T-002"}]}`
+	got, err := ParseContract("json:plan_manifest_patch", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := got.(*PlanManifestPatch)
+	if len(patch.Operations) != 2 || patch.Operations[0].Task.ID != "T-001" {
+		t.Fatalf("patch = %#v", patch)
+	}
+
+	for _, invalid := range []string{
+		`{"operations":[]}`,
+		`{"operations":[{"op":"delete_task","task_id":"T-001"},{"op":"delete_task","task_id":"T-001"}]}`,
+		`{"operations":[{"op":"add_task","task_id":"T-003","milestone_id":"M-01","task":{"id":"T-004"}}]}`,
+		`{"operations":[{"op":"rewrite_everything","task_id":"T-001"}]}`,
+	} {
+		if _, err := ParseContract("json:plan_manifest_patch", invalid); err == nil {
+			t.Errorf("invalid patch accepted: %s", invalid)
+		}
+	}
+}
+
 func TestDecompositionContractAllowsLongBodies(t *testing.T) {
 	declared := 12000
 	got := outputCapForContract(&declared, "json:decomposition")

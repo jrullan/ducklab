@@ -168,6 +168,8 @@ func ParseContract(contract, text string) (interface{}, error) {
 		return parseInventory(text)
 	case contract == "json:plan_manifest":
 		return parsePlanManifest(text)
+	case contract == "json:plan_manifest_patch":
+		return parsePlanManifestPatch(text)
 	case strings.HasPrefix(contract, "json:"):
 		return parseJSONObject(text)
 	case strings.HasPrefix(contract, "markdown_sections:"):
@@ -197,6 +199,67 @@ type ManifestTask struct {
 	Produces         []string `json:"produces"`
 	Consumes         []string `json:"consumes"`
 	Verification     string   `json:"verification"`
+}
+
+// PlanManifestPatch changes only the tasks named by a rejected semantic
+// review. Regenerating the whole manifest made already-correct obligations
+// disappear while the architect repaired a different finding. The engine
+// applies these operations to its canonical manifest and revalidates the full
+// result before another critic sees it.
+type PlanManifestPatch struct {
+	Operations []PlanManifestPatchOperation `json:"operations"`
+}
+
+type PlanManifestPatchOperation struct {
+	Op          string        `json:"op"` // replace_task | add_task | delete_task
+	TaskID      string        `json:"task_id"`
+	MilestoneID string        `json:"milestone_id,omitempty"`
+	Task        *ManifestTask `json:"task,omitempty"`
+}
+
+func parsePlanManifestPatch(text string) (*PlanManifestPatch, error) {
+	raw, err := extractJSONObject(text)
+	if err != nil {
+		return nil, fmt.Errorf("plan manifest patch contract: %w", err)
+	}
+	var patch PlanManifestPatch
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&patch); err != nil {
+		return nil, fmt.Errorf("plan manifest patch contract: %w", err)
+	}
+	if len(patch.Operations) == 0 || len(patch.Operations) > 12 {
+		return nil, fmt.Errorf("plan manifest patch contract: operations must contain 1-12 items")
+	}
+	seen := map[string]bool{}
+	for i, op := range patch.Operations {
+		taskID, ok := canonicalContractID(op.TaskID, "T")
+		if !ok || seen[taskID] {
+			return nil, fmt.Errorf("plan manifest patch contract: invalid or repeated task_id in operation %d", i)
+		}
+		patch.Operations[i].TaskID = taskID
+		seen[taskID] = true
+		switch op.Op {
+		case "replace_task", "add_task":
+			milestoneID, milestoneOK := canonicalContractID(op.MilestoneID, "M")
+			if !milestoneOK || op.Task == nil {
+				return nil, fmt.Errorf("plan manifest patch contract: %s needs milestone_id and task", op.Op)
+			}
+			if canonical, taskOK := canonicalContractID(op.Task.ID, "T"); !taskOK || canonical != taskID {
+				return nil, fmt.Errorf("plan manifest patch contract: task.id must equal task_id %s", taskID)
+			} else {
+				op.Task.ID = canonical
+			}
+			patch.Operations[i].MilestoneID = milestoneID
+		case "delete_task":
+			if op.Task != nil || strings.TrimSpace(op.MilestoneID) != "" {
+				return nil, fmt.Errorf("plan manifest patch contract: delete_task accepts only op and task_id")
+			}
+		default:
+			return nil, fmt.Errorf("plan manifest patch contract: unsupported operation %q", op.Op)
+		}
+	}
+	return &patch, nil
 }
 
 // MaxPlanManifestTasks is a hard small-seat boundary, not a style hint. Once

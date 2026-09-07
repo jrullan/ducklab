@@ -487,6 +487,15 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					return result, err
 				}
 			}
+			var manifestPatchBase *agent.PlanManifest
+			if turn.Persona == PersonaPlanManifest && planManifestDraft != nil && planManifest != nil {
+				// A semantic rejection repairs the canonical topology instead of
+				// resampling every task. H1r introduced Installation Governance in
+				// candidate two and lost it in candidate three while fixing a
+				// different finding; unmentioned tasks are not model-owned state.
+				turn.Contract = "json:plan_manifest_patch"
+				manifestPatchBase = planManifest
+			}
 			promptTranscript := result.Transcript
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				turn.Contract = planManifestReviewContract(params, planManifestDraft)
@@ -519,6 +528,12 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				}
 			}
 			prompt, err := buildPrompt(&turn, promptParams, promptTranscript, findings, correctiveNotes, operational, lastReport, lastReview, seatLooked[turn.Role])
+			if manifestPatchBase != nil {
+				prompt += "\n\n## Canonical plan manifest — patch this object\n\n```json\n" +
+					planManifestDraft.Text +
+					"\n```\n\nReturn only operations for tasks implicated by the latest critic findings. " +
+					"Use the smallest unused T-NNN id only when a split requires a new task."
+			}
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				prompt += "\n\n## Plan manifest candidate — authoritative\n\n```json\n" + planManifestDraft.Text + "\n```\n\nReview only this compact candidate. It is not frozen yet.\n\n" + planManifestSemanticReview
 			}
@@ -650,8 +665,60 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				turn.MaxTurns = 8
 			}
 
-			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, TurnContext{Round: round, Index: script.TurnIndexBase + i})
+			turnContext := TurnContext{Round: round, Index: script.TurnIndexBase + i}
+			outcome, err := runner(ctx, &turn, duckling, prompt, toolbelt, turnContext)
 			turn.Contract = documentContract
+			if err == nil && manifestPatchBase != nil {
+				const maxApplicationAttempts = 2
+				for applicationAttempt := 1; applicationAttempt <= maxApplicationAttempts; applicationAttempt++ {
+					patch, ok := outcome.Parsed.(*agent.PlanManifestPatch)
+					var updated *agent.PlanManifest
+					var operations int
+					var patchErr error
+					if !ok || patch == nil {
+						patchErr = fmt.Errorf("plan manifest repair returned no validated patch")
+					} else {
+						updated, operations, patchErr = applyPlanManifestPatch(manifestPatchBase, patch)
+					}
+					if patchErr != nil {
+						if applicationAttempt == maxApplicationAttempts {
+							err = patchErr
+							break
+						}
+						emit(params, "plan_manifest_patch_rejected", map[string]interface{}{
+							"round": round, "turn": i, "application_attempt": applicationAttempt,
+							"max_application_attempts": maxApplicationAttempts, "detail": patchErr.Error(),
+						})
+						emitMessage(params, round, i, turn.Role, duckling, outcome)
+						retryPrompt := prompt + "\n\n## Patch application rejected — canonical manifest unchanged\n\n" +
+							patchErr.Error() + "\n\nReturn a corrected transactional patch only."
+						outcome, err = runner(ctx, &turn, duckling, retryPrompt, toolbelt, turnContext)
+						if err != nil {
+							break
+						}
+						continue
+					}
+					encoded, encodeErr := json.Marshal(updated)
+					if encodeErr != nil {
+						err = fmt.Errorf("canonicalize patched plan manifest: %w", encodeErr)
+						break
+					}
+					canonical := *outcome
+					canonical.Text, canonical.Parsed = string(encoded), updated
+					outcome = &canonical
+					targets := make([]string, 0, len(patch.Operations))
+					for _, operation := range patch.Operations {
+						targets = append(targets, operation.Op+":"+operation.TaskID)
+					}
+					emit(params, "plan_manifest_patched", map[string]interface{}{
+						"round": round, "turn": i, "attempt": planManifestAttempts + 1,
+						"application_attempt": applicationAttempt,
+						"operation_count":     operations, "targets": targets,
+						"detail": "localized operations applied; unmentioned tasks preserved before global validation",
+					})
+					break
+				}
+			}
 			if err == nil && repairBase == nil && turn.Role == config.RoleArchitect && script.ArchitectScopeID != "" {
 				var scopeErr error
 				outcome, scopeErr = scopeArchitectSection(outcome, documentContract, script.ArchitectScopeID, script.ArchitectScopeTitle)
@@ -1010,7 +1077,7 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					} else if planManifestAttempts < 3 {
 						emit(params, "structure_check", map[string]interface{}{
 							"round": round, "turn": i, "attempt": planManifestAttempts, "max_attempts": 3,
-							"findings": v.Findings, "detail": "compact manifest rejected before freeze; regenerating it",
+							"findings": v.Findings, "detail": "compact manifest rejected before freeze; patching named tasks transactionally",
 						})
 						restartPlanManifest = true
 					} else {

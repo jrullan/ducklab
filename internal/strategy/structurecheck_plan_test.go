@@ -152,6 +152,46 @@ func TestPlanManifestReferencesNormalizeBeforeFreeze(t *testing.T) {
 	}
 }
 
+func TestPlanManifestPatchPreservesUnmentionedTasksAndRevalidatesWholeGraph(t *testing.T) {
+	baseText := `{"milestones":[{"id":"M-01","title":"Core","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build","acceptance_slices":["builds"],"acceptance_probes":["cargo check"],"produces":["file:Cargo.toml"],"consumes":[],"verification":"cargo check"},{"id":"T-002","title":"Govern","implements":["SPEC-001"],"work_unit":"validate provenance","acceptance_slices":["invalid provenance is rejected"],"acceptance_probes":["cargo test provenance"],"produces":["file:src/govern.rs"],"consumes":["file:Cargo.toml"],"verification":"cargo test provenance"}]}]}`
+	parsedBase, err := agent.ParseContract("json:plan_manifest", baseText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchText := `{"operations":[{"op":"replace_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"Govern installation","implements":["SPEC-001"],"work_unit":"return provenance and fixture evidence without installing","acceptance_slices":["Ducklab receives evidence and remains the installation authority"],"acceptance_probes":["cargo test installation_authority"],"produces":["file:src/govern.rs"],"consumes":["file:Cargo.toml"],"verification":"cargo test installation_authority"}}]}`
+	parsedPatch, err := agent.ParseContract("json:plan_manifest_patch", patchText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, operations, err := applyPlanManifestPatch(parsedBase.(*agent.PlanManifest), parsedPatch.(*agent.PlanManifestPatch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operations != 1 || len(got.Milestones) != 1 || len(got.Milestones[0].Tasks) != 2 {
+		t.Fatalf("patched manifest = %#v", got)
+	}
+	if got.Milestones[0].Tasks[0].Title != parsedBase.(*agent.PlanManifest).Milestones[0].Tasks[0].Title ||
+		got.Milestones[0].Tasks[0].WorkUnit != parsedBase.(*agent.PlanManifest).Milestones[0].Tasks[0].WorkUnit ||
+		!slices.Equal(got.Milestones[0].Tasks[0].Produces, parsedBase.(*agent.PlanManifest).Milestones[0].Tasks[0].Produces) {
+		t.Error("unmentioned T-001 changed")
+	}
+	if got.Milestones[0].Tasks[1].Title != "Govern installation" {
+		t.Errorf("replacement was not applied: %#v", got.Milestones[0].Tasks[1])
+	}
+
+	deleteEverything := &agent.PlanManifestPatch{Operations: []agent.PlanManifestPatchOperation{{
+		Op: "delete_task", TaskID: "T-001",
+	}, {
+		Op: "delete_task", TaskID: "T-002",
+	}}}
+	if _, _, err := applyPlanManifestPatch(parsedBase.(*agent.PlanManifest), deleteEverything); err == nil || !strings.Contains(err.Error(), "patched manifest is invalid") {
+		t.Fatalf("globally invalid patch error = %v", err)
+	}
+	if len(parsedBase.(*agent.PlanManifest).Milestones[0].Tasks) != 2 {
+		t.Fatal("a rejected patch mutated the canonical base manifest")
+	}
+}
+
 func TestStructureRepairExplainsExecutableVerificationAndArtifactExercises(t *testing.T) {
 	findings := []string{
 		"T-900 **Verification:** must put the executable command in backticks; prose is never executed",

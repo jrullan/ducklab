@@ -249,6 +249,12 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 		t.Fatal(err)
 	}
 	manifest := &agent.Outcome{Text: manifestText, Parsed: parsedManifest}
+	patchText := `{"operations":[{"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}}]}`
+	parsedPatch, err := agent.ParseContract("json:plan_manifest_patch", patchText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := &agent.Outcome{Text: patchText, Parsed: parsedPatch}
 	planText := "## M-01 — Setup\n\n### T-001 — Build\n\nBuild it.\n\n**Implements:** SPEC-001\n\n**Produces:** file:app\n\n**Consumes:** none\n\n**Verification:** `true`"
 	parsedPlan, err := agent.ParseContract("markdown_sections:M", planText)
 	if err != nil {
@@ -258,7 +264,7 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), councilParams(rec,
 		manifest,
 		verdictOutcome("request-changes", agent.Finding{Severity: "major", Issue: "two unrelated concerns are bundled", Fix: "repartition the existing manifest"}),
-		manifest,
+		patch,
 		verdictOutcome("approve"),
 		&agent.Outcome{Text: planText, Parsed: parsedPlan},
 		verdictOutcome("approve"),
@@ -271,7 +277,10 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 		t.Fatalf("roles = %v, want %v", rec.roles, want)
 	}
 	if !strings.Contains(rec.prompts[2], "two unrelated concerns are bundled") {
-		t.Fatalf("regenerated manifest could not see semantic rejection:\n%s", rec.prompts[2])
+		t.Fatalf("manifest patch could not see semantic rejection:\n%s", rec.prompts[2])
+	}
+	if rec.contracts[2] != "json:plan_manifest_patch" || !strings.Contains(rec.prompts[2], "Canonical plan manifest — patch this object") {
+		t.Fatalf("second architect was not constrained to a transactional patch: contract=%q\n%s", rec.contracts[2], rec.prompts[2])
 	}
 	if !strings.Contains(rec.prompts[1], "Compact plan manifest audit — required") ||
 		!strings.Contains(rec.prompts[1], "Plan manifest candidate — authoritative") {
@@ -292,9 +301,61 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 	}
 }
 
+func TestPlanManifestPatchRetriesOnceWhenItCannotApplyToCanonicalBase(t *testing.T) {
+	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}]}]}`
+	parsedManifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := &agent.Outcome{Text: manifestText, Parsed: parsedManifest}
+	patchFor := func(id string) *agent.Outcome {
+		text := `{"operations":[{"op":"replace_task","task_id":"` + id + `","milestone_id":"M-01","task":{"id":"` + id + `","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}}]}`
+		parsed, parseErr := agent.ParseContract("json:plan_manifest_patch", text)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		return &agent.Outcome{Text: text, Parsed: parsed}
+	}
+	planText := "## M-01 — Setup\n\n### T-001 — Build\n\nBuild it.\n\n**Implements:** SPEC-001\n\n**Produces:** file:app\n\n**Consumes:** none\n\n**Verification:** `true`"
+	parsedPlan, err := agent.ParseContract("markdown_sections:M", planText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	var events []string
+	params := councilParams(rec,
+		manifest,
+		verdictOutcome("request-changes", agent.Finding{Severity: "major", Issue: "tighten T-001", Fix: "replace T-001"}),
+		patchFor("T-999"),
+		patchFor("T-001"),
+		verdictOutcome("approve"),
+		&agent.Outcome{Text: planText, Parsed: parsedPlan},
+		verdictOutcome("approve"),
+	)
+	params.OnEvent = func(kind string, _ map[string]interface{}) { events = append(events, kind) }
+	res, err := ExecuteScript(context.Background(), CouncilScript("M", nil), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(events, "plan_manifest_patch_rejected") || !slices.Contains(events, "plan_manifest_patched") {
+		t.Fatalf("patch application evidence = %v", events)
+	}
+	if len(rec.prompts) < 4 || !strings.Contains(rec.prompts[3], "replace target T-999 does not exist") {
+		t.Fatalf("application error was not fed to bounded retry: prompts=%d", len(rec.prompts))
+	}
+	if !strings.Contains(res.Text, "### T-001") {
+		t.Fatalf("valid retry did not reach the rendered plan: %s", res.Text)
+	}
+}
+
 func TestPlanManifestSemanticReviewStopsAfterThreeRejectedCandidates(t *testing.T) {
 	manifestText := `{"milestones":[{"id":"M-01","title":"Setup","tasks":[{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}]}]}`
 	parsedManifest, err := agent.ParseContract("json:plan_manifest", manifestText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patchText := `{"operations":[{"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"Build","implements":["SPEC-001"],"work_unit":"build the app","acceptance_slices":["the app compiles"],"acceptance_probes":["true"],"produces":["file:app"],"consumes":[],"verification":"true"}}]}`
+	parsedPatch, err := agent.ParseContract("json:plan_manifest_patch", patchText)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +365,9 @@ func TestPlanManifestSemanticReviewStopsAfterThreeRejectedCandidates(t *testing.
 		switch turn.Persona {
 		case PersonaPlanManifest:
 			authors++
+			if turn.Contract == "json:plan_manifest_patch" {
+				return &agent.Outcome{Text: patchText, Parsed: parsedPatch}, nil
+			}
 			return &agent.Outcome{Text: manifestText, Parsed: parsedManifest}, nil
 		case PersonaPlanManifestCritic:
 			critics++

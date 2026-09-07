@@ -303,6 +303,94 @@ func normalizePlanManifestReferences(manifest *agent.PlanManifest, known map[str
 	return removed, nil
 }
 
+// applyPlanManifestPatch preserves every unmentioned task while applying the
+// bounded semantic corrections requested by a critic. The full result goes
+// back through the ordinary plan-manifest parser, so a local patch cannot
+// bypass global IDs, cardinality, ownership, artifact or slice/probe checks.
+func applyPlanManifestPatch(base *agent.PlanManifest, patch *agent.PlanManifestPatch) (*agent.PlanManifest, int, error) {
+	if base == nil || patch == nil || len(patch.Operations) == 0 {
+		return base, 0, fmt.Errorf("plan manifest patch: missing canonical manifest or operations")
+	}
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return base, 0, fmt.Errorf("plan manifest patch: copy canonical manifest: %w", err)
+	}
+	var candidate agent.PlanManifest
+	if err := json.Unmarshal(raw, &candidate); err != nil {
+		return base, 0, fmt.Errorf("plan manifest patch: copy canonical manifest: %w", err)
+	}
+
+	milestoneIndex := func(id string) int {
+		for i := range candidate.Milestones {
+			if candidate.Milestones[i].ID == id {
+				return i
+			}
+		}
+		return -1
+	}
+	taskIndex := func(id string) (int, int) {
+		for mi := range candidate.Milestones {
+			for ti := range candidate.Milestones[mi].Tasks {
+				if candidate.Milestones[mi].Tasks[ti].ID == id {
+					return mi, ti
+				}
+			}
+		}
+		return -1, -1
+	}
+	removeTask := func(mi, ti int) {
+		tasks := candidate.Milestones[mi].Tasks
+		candidate.Milestones[mi].Tasks = append(tasks[:ti], tasks[ti+1:]...)
+	}
+
+	for _, op := range patch.Operations {
+		mi, ti := taskIndex(op.TaskID)
+		switch op.Op {
+		case "delete_task":
+			if mi < 0 {
+				return base, 0, fmt.Errorf("plan manifest patch: delete target %s does not exist", op.TaskID)
+			}
+			removeTask(mi, ti)
+		case "replace_task":
+			if mi < 0 {
+				return base, 0, fmt.Errorf("plan manifest patch: replace target %s does not exist", op.TaskID)
+			}
+			destination := milestoneIndex(op.MilestoneID)
+			if destination < 0 {
+				return base, 0, fmt.Errorf("plan manifest patch: milestone %s does not exist", op.MilestoneID)
+			}
+			replacement := *op.Task
+			if destination == mi {
+				candidate.Milestones[mi].Tasks[ti] = replacement
+			} else {
+				removeTask(mi, ti)
+				candidate.Milestones[destination].Tasks = append(candidate.Milestones[destination].Tasks, replacement)
+			}
+		case "add_task":
+			if mi >= 0 {
+				return base, 0, fmt.Errorf("plan manifest patch: add target %s already exists", op.TaskID)
+			}
+			destination := milestoneIndex(op.MilestoneID)
+			if destination < 0 {
+				return base, 0, fmt.Errorf("plan manifest patch: milestone %s does not exist", op.MilestoneID)
+			}
+			candidate.Milestones[destination].Tasks = append(candidate.Milestones[destination].Tasks, *op.Task)
+		default:
+			return base, 0, fmt.Errorf("plan manifest patch: unsupported operation %q", op.Op)
+		}
+	}
+
+	encoded, err := json.Marshal(&candidate)
+	if err != nil {
+		return base, 0, fmt.Errorf("plan manifest patch: encode result: %w", err)
+	}
+	parsed, err := agent.ParseContract("json:plan_manifest", string(encoded))
+	if err != nil {
+		return base, 0, fmt.Errorf("plan manifest patch: patched manifest is invalid: %w", err)
+	}
+	return parsed.(*agent.PlanManifest), len(patch.Operations), nil
+}
+
 // scopeArchitectSection discards sibling sections emitted during an isolated
 // section pass before they can enter structure repair or reviewer context.
 // The stage owns routing; a model reply cannot expand that assignment.

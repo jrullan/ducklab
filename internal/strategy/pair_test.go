@@ -18,6 +18,7 @@ import (
 type recorder struct {
 	prompts   []string
 	roles     []config.Role
+	contracts []string
 	ducklings []config.DucklingID
 	belts     [][]string
 	maxTurns  []int
@@ -28,6 +29,7 @@ func (r *recorder) runner(outcomes ...*agent.Outcome) TurnRunner {
 	return func(ctx context.Context, t *Turn, d config.DucklingID, prompt string, belt []string, tc TurnContext) (*agent.Outcome, error) {
 		r.prompts = append(r.prompts, prompt)
 		r.roles = append(r.roles, t.Role)
+		r.contracts = append(r.contracts, t.Contract)
 		r.ducklings = append(r.ducklings, d)
 		r.belts = append(r.belts, belt)
 		r.maxTurns = append(r.maxTurns, t.MaxTurns)

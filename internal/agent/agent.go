@@ -1048,7 +1048,11 @@ definition it must edit.`, strings.Join(specs, ", "), strings.Join(tasks, ", "))
 		rolePrompt = consultantPrompt
 	}
 	if turn.Persona == "plan_manifest" && turn.Role == config.RoleArchitect {
-		rolePrompt = planManifestPrompt
+		if turn.Contract == "json:plan_manifest_patch" {
+			rolePrompt = planManifestPatchPrompt
+		} else {
+			rolePrompt = planManifestPrompt
+		}
 	}
 	gateDesc := gateDescFor(turn)
 
@@ -1361,6 +1365,26 @@ Rules:
 - Prefer 5–8 tasks and keep the total at 10 or fewer unless the specification makes that impossible.
 - This is topology only. No prose, markdown, Owns lanes, or implementation code.
 - The next architect turn receives this validated manifest and renders the full plan.`
+
+const planManifestPatchPrompt = `You are the plan topology repair architect. Ducklab already owns a canonical
+JSON manifest. Change only the tasks implicated by the review findings.
+
+Reply with exactly one JSON object:
+{"operations":[
+ {"op":"replace_task","task_id":"T-001","milestone_id":"M-01","task":{"id":"T-001","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
+ {"op":"add_task","task_id":"T-002","milestone_id":"M-01","task":{"id":"T-002","title":"short action","implements":["SPEC-001"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},
+ {"op":"delete_task","task_id":"T-003"}
+]}
+
+Rules:
+- Use replace_task for an existing task whose complete contract must change.
+- A split is replace_task for the original plus add_task for each new task; allocate only unused task IDs for additions.
+- A move is replace_task with the existing task_id and its destination milestone_id.
+- Every add/replace task is complete and uses the same compact task schema as the canonical manifest.
+- Do not repeat an operation for one task_id. Use 1-12 operations.
+- Unmentioned tasks and milestones are preserved byte-for-byte by Ducklab.
+- Do not return the full manifest, Markdown, commentary, or fields outside this schema.
+- Ducklab applies the patch transactionally and reruns every global parse, ID, ownership, graph, coverage, and semantic check.`
 
 const scribePrompt = `You are the scribe. You write the release notes and changelog entries from the
 list of accepted work you are given.
@@ -1990,6 +2014,15 @@ Reply again with ONLY one JSON object, with no prose or Markdown fences, in exac
 {"verdict":"approve|request-changes","findings":[{"severity":"critical|major|minor","file":"path or *","line":0,"issue":"what is wrong","fix":"valid concrete remedy","invariant":"rule when class-level"}],"native_checks":{"completion":"concrete function/path evidence","resources":"concrete allocation/handle evidence","threads":"concrete ownership/join/unref/blocking evidence","representation":"concrete masks/width/byte-order/stride/alpha evidence","cleanup":"concrete null/error-path evidence"}}
 
 All five native_checks values are required and must name concrete final-code evidence. The "What was wrong" field is an authoritative validation result, not a suggestion or a question. Apply it literally. If it says a finding is inadmissible or must be deleted, remove that finding; do not defend or repeat it. If no valid finding remains, approve with an empty findings array.`, contract, parseErr)
+	}
+	if contract == "json:plan_manifest_patch" {
+		return fmt.Sprintf(`Your reply did not satisfy the transactional plan-manifest patch contract.
+
+What was wrong: %v
+
+Reply with ONLY one JSON object: {"operations":[{"op":"replace_task|add_task","task_id":"T-NNN","milestone_id":"M-NN","task":{"id":"T-NNN","title":"short action","implements":["SPEC-NNN"],"work_unit":"one cohesive capability","acceptance_slices":["observable outcome"],"acceptance_probes":["executable command"],"produces":["file:path"],"consumes":[],"verification":"executable command"}},{"op":"delete_task","task_id":"T-NNN"}]}
+
+Use 1-12 operations, one per task_id. A split replaces the original and adds new task IDs. Add/replace operations require a complete task and an existing milestone. Delete accepts only op and task_id. Return no full manifest, Markdown, or prose.`, parseErr)
 	}
 	return fmt.Sprintf(`Your reply did not satisfy the required output format.
 
