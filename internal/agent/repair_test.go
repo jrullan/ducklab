@@ -138,6 +138,27 @@ func TestRepairSucceedsAndReturnsTheParsedValue(t *testing.T) {
 	}
 }
 
+func TestContractRepairCallsAreBudgetedAndLogged(t *testing.T) {
+	p := &countingProvider{replies: []string{"not a choice", `{"choice":"A","reason":"grounded"}`}}
+	loop := testLoop(p, 2)
+	w := &recordingWriter{}
+	loop.RunWriter = w
+	turn := &Turn{Role: config.RoleJudge, Prompt: "choose", Contract: "choice", MaxTurns: 1}
+
+	if _, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loop.Budget.Spend.Snapshot().Tokens; got != 30 {
+		t.Fatalf("budget tokens = %d, want both 15-token calls", got)
+	}
+	if len(w.calls) != 2 {
+		t.Fatalf("llm records = %d, want initial and repair", len(w.calls))
+	}
+	if repaired, _ := w.calls[1].Response["contract_repair"].(bool); !repaired {
+		t.Fatalf("repair record is not identifiable: %+v", w.calls[1].Response)
+	}
+}
+
 func TestParsedContractPolicyUsesOrdinaryRepairPath(t *testing.T) {
 	p := &countingProvider{replies: []string{
 		`{"verdict":"request-changes","findings":[{"severity":"major","file":"app.c","line":1,"issue":"x","fix":"forbidden remedy"}]}`,
@@ -747,6 +768,49 @@ func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
 	defer p.mu.Unlock()
 	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "SPEC-005") || strings.Contains(got, "SPEC-001") {
 		t.Fatalf("second spec group was not isolated: %s", got)
+	}
+}
+
+func TestPlanManifestAuditRetriesOnlyTheMalformedFragment(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001|T-001"
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-001 misses a slice","fix":"add its probe"}]}`,
+		`{"specs":[]}`,
+		`{"specs":[{"id":"SPEC-001","status":"fail","evidence":"T-001 omits one obligation"}]}`,
+		`{"tasks":[{"id":"T-001","status":"fail","evidence":"one required slice is absent"}]}`,
+	}}
+	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
+	out, err := RunTurn(context.Background(), testLoop(p, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Repairs != 3 || p.calls() != 4 {
+		t.Fatalf("repairs=%d calls=%d", out.Repairs, p.calls())
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content
+	if !strings.Contains(got, "SPEC-001") || !strings.Contains(got, "violated its contract") {
+		t.Fatalf("localized retry did not name its exact group and failure: %s", got)
+	}
+}
+
+func TestPlanManifestAuditReportsTheFailedFragment(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001|T-001"
+	p := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-001 misses a slice","fix":"add its probe"}]}`,
+		`{"specs":[]}`,
+		`{"specs":[]}`,
+	}}
+	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1}
+	out, err := RunTurn(context.Background(), testLoop(p, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err == nil || out.ContractError == nil {
+		t.Fatal("malformed fragment unexpectedly passed")
+	}
+	for _, want := range []string{"initial parse", "repair failed", "specs fragment SPEC-001", "localized retry"} {
+		if !strings.Contains(out.ContractError.Error(), want) {
+			t.Fatalf("contract error does not contain %q: %v", want, out.ContractError)
+		}
 	}
 }
 

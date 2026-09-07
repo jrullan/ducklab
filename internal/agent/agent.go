@@ -768,10 +768,11 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 		repairedText, repairedVal, attempts, rerr := repairContract(ctx, loop, turn, messages, outcome.Text, err, ectx)
 		outcome.Repairs = attempts
 		if rerr != nil {
-			// Name the contract and the original parse failure: "contract
-			// parse failed" alone gives no way to tell a malformed verdict
-			// from a malformed choice.
-			outcome.ContractError = fmt.Errorf("%s contract (role %s): %w", turn.Contract, turn.Role, err)
+			// Preserve both layers. The original failure explains why repair
+			// began; the repair failure names the exact fragment that prevented
+			// recovery. Reporting only the former made four hidden audit calls
+			// look like they never happened.
+			outcome.ContractError = fmt.Errorf("%s contract (role %s): initial parse: %v; repair failed: %w", turn.Contract, turn.Role, err, rerr)
 			return outcome, fmt.Errorf("%w: %v", ErrContract, outcome.ContractError)
 		}
 		outcome.Text = repairedText
@@ -1749,7 +1750,7 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 		}
 		applySampling(&req, loop.Duckling, turn.Contract)
 
-		resp, err := loop.Provider.Chat(ctx, req)
+		resp, err := chatContractRepair(ctx, loop, turn, req, attempts)
 		if err != nil {
 			// A transport failure is not the model failing the contract.
 			// Burning a repair attempt on it would spend the budget the
@@ -1783,6 +1784,66 @@ func repairContract(ctx context.Context, loop *Loop, turn *Turn, msgs []provider
 	return "", nil, attempts, fmt.Errorf("%w: after %d repair attempts: %v", ErrContract, attempts, parseErr)
 }
 
+// chatContractRepair gives contract-repair calls the same budget and durable
+// evidence as the turn's initial call. These calls used to go straight to the
+// provider: they consumed real time and tokens while the budget, spend card and
+// llm.jsonl all claimed they did not exist.
+func chatContractRepair(ctx context.Context, loop *Loop, turn *Turn, req provider.ChatRequest, attempt int) (provider.ChatResponse, error) {
+	if loop.Budget != nil {
+		if msg, exceeded := loop.Budget.Check(); exceeded {
+			return provider.ChatResponse{}, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+	}
+	start := time.Now()
+	resp, err := loop.Provider.Chat(ctx, req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		if loop.RunWriter != nil {
+			_ = loop.RunWriter.AppendLLM(&LLMCallRecord{
+				Duckling: string(loop.Duckling.ID), Provider: string(loop.Duckling.Provider), Model: loop.Duckling.Model,
+				Role: string(turn.Role), Request: requestMap(req), Response: map[string]interface{}{"error": err.Error()},
+				LatencyMs: latency, Attempt: attempt, FinishReason: "contract_repair_error",
+			})
+		}
+		return resp, err
+	}
+	calc := provider.CostCalculator{InputPerMTok: loop.Duckling.Cost.InputPerMTok, OutputPerMTok: loop.Duckling.Cost.OutputPerMTok}
+	cost := calc.Cost(resp.Usage)
+	if loop.Budget != nil {
+		loop.Budget.Record(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, cost)
+	}
+	response := map[string]interface{}{"choices": len(resp.Choices)}
+	finish := "no_choices"
+	if len(resp.Choices) > 0 {
+		choice := &resp.Choices[0]
+		if answer, thought := splitThinking(choice.Message.Content); thought != "" {
+			choice.Message.Content = answer
+			choice.Message.Reasoning = joinReasoning(choice.Message.Reasoning, thought)
+		} else {
+			choice.Message.Content = answer
+		}
+		finish = choice.FinishReason
+		response = map[string]interface{}{"content": choice.Message.Content, "finish_reason": choice.FinishReason, "contract_repair": true}
+		if choice.Message.Reasoning != "" {
+			response["reasoning"] = choice.Message.Reasoning
+		}
+	}
+	if loop.RunWriter != nil {
+		_ = loop.RunWriter.AppendLLM(&LLMCallRecord{
+			Duckling: string(loop.Duckling.ID), Provider: string(loop.Duckling.Provider), Upstream: resp.Upstream,
+			Model: loop.Duckling.Model, Role: string(turn.Role), Request: requestMap(req), Response: response,
+			Usage: usageMap(resp.Usage), CostUSD: cost, LatencyMs: latency, Attempt: attempt,
+			CostSource: calc.CostSource(resp.Usage), FinishReason: finish,
+		})
+	}
+	if loop.Budget != nil {
+		if msg, exceeded := loop.Budget.CheckWallclock(); exceeded {
+			return resp, fmt.Errorf("%w: %s", ErrBudgetExceeded, msg)
+		}
+	}
+	return resp, nil
+}
+
 func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, msgs []provider.Message, original string, verdict *Verdict, ectx *tools.ExecContext) (string, interface{}, int, error) {
 	specs, tasks, err := manifestAuditIDs(turn.Contract)
 	if err != nil {
@@ -1805,7 +1866,6 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 				end = len(part.ids)
 			}
 			group := part.ids[start:end]
-			attempts++
 			entryShape := `{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}`
 			extraRule := ""
 			if part.kind == "tasks" {
@@ -1821,18 +1881,31 @@ Reply with ONLY this JSON object: {"%s":[%s]}
 
 		Include every target exactly once, in this order: %s. This is one fragment; do not add targets from another group. Use fail when the original findings show that target is defective; do not hide a finding behind pass.%s`, part.kind, part.kind, entryShape, strings.Join(group, ", "), extraRule)},
 			)
-			req := provider.ChatRequest{Model: loop.Duckling.Model, Messages: conv}
-			applySampling(&req, loop.Duckling, turn.Contract)
-			resp, callErr := loop.Provider.Chat(ctx, req)
-			if callErr != nil {
-				return "", nil, attempts, fmt.Errorf("manifest audit %s fragment: %w", part.kind, callErr)
-			}
-			if len(resp.Choices) == 0 {
-				return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment returned no response", ErrContract, part.kind)
-			}
-			entries, parseErr := parseManifestAuditFragment(resp.Choices[0].Message.Content, part.kind, group)
-			if parseErr != nil {
-				return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment: %v", ErrContract, part.kind, parseErr)
+			var entries []ManifestAuditEntry
+			for fragmentTry := 1; fragmentTry <= 2; fragmentTry++ {
+				attempts++
+				req := provider.ChatRequest{Model: loop.Duckling.Model, Messages: conv}
+				applySampling(&req, loop.Duckling, turn.Contract)
+				resp, callErr := chatContractRepair(ctx, loop, turn, req, attempts)
+				if callErr != nil {
+					return "", nil, attempts, fmt.Errorf("manifest audit %s fragment %s: %w", part.kind, strings.Join(group, ","), callErr)
+				}
+				if len(resp.Choices) == 0 {
+					return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment %s returned no response", ErrContract, part.kind, strings.Join(group, ","))
+				}
+				fragment := resp.Choices[0].Message.Content
+				var parseErr error
+				entries, parseErr = parseManifestAuditFragment(fragment, part.kind, group)
+				if parseErr == nil {
+					break
+				}
+				if fragmentTry == 2 {
+					return "", nil, attempts, fmt.Errorf("%w: manifest audit %s fragment %s failed after one localized retry: %v", ErrContract, part.kind, strings.Join(group, ","), parseErr)
+				}
+				conv = append(conv,
+					provider.Message{Role: "assistant", Content: fragment},
+					provider.Message{Role: "user", Content: fmt.Sprintf("That ledger fragment violated its contract: %v. Correct only this same %s group (%s), return the JSON object only, and include no other targets.", parseErr, part.kind, strings.Join(group, ", "))},
+				)
 			}
 			if part.kind == "specs" {
 				audit.Specs = append(audit.Specs, entries...)
