@@ -292,7 +292,10 @@ func applySupportProfile(turn *Turn, small bool) {
 	if small {
 		return
 	}
-	if turn.Persona == PersonaCritic || turn.Persona == PersonaPlanManifestCritic {
+	// A general document critic may need repository context under the standard
+	// profile. The plan-manifest critic is self-contained: its canonical
+	// manifest, specification and requirements are already in the prompt.
+	if turn.Persona == PersonaCritic {
 		turn.Toolbelt = "read-only"
 	}
 }

@@ -60,11 +60,19 @@ manifest is approved. Do not request any key outside this schema.
   tasks may implement different obligations of one SPEC. Judge ownership from
   Produces/Consumes and the work unit; do not reject duplicate Implements links
   by themselves.
-- Produces must name every file or bounded directory the task will create or
-  edit, as well as any output target/capability another task consumes. A
-  build-target names an output but does not grant ownership of an omitted build
-  definition such as Cargo.toml, meson.build or a project file. Audit that the
-  declared lanes are sufficient for the work unit.
+- Produces declares exclusive writable ownership: every exact artifact has one
+  producer in the whole manifest. It must name every file or bounded directory
+  the task will create or edit, as well as any output target/capability another
+  task consumes. Consumes is read-only and never grants permission to edit the
+  producer's artifact. A build-target names an output but does not grant
+  ownership of an omitted build definition such as Cargo.toml, meson.build or
+  a project file. Audit that the declared lanes are sufficient for the work
+  unit.
+- A remedy must preserve that producer uniqueness. Never tell a task to add an
+  artifact to Produces when another task already produces it. If two work units
+  would edit the same artifact, request the smallest repartition that leaves
+  all edits to that artifact in one owning task (or one distinct integration
+  task) and lets the other task consume only stable outputs.
 - Review the whole compact manifest before approving. If it is defective,
   identify the exact SPEC obligation and the smallest repartition needed, but
   do not allocate milestone or task ids in the fix; the architect regenerates

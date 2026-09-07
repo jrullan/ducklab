@@ -1461,6 +1461,10 @@ Rules:
 - A split is replace_task for the original plus add_task for each new task; allocate only unused task IDs for additions.
 - A move is replace_task with the existing task_id and its destination milestone_id.
 - Every add/replace task is complete and uses the same compact task schema as the canonical manifest.
+- Every produced artifact has exactly one producer across the complete
+  manifest. Consumes is read-only. Never repair one task by claiming an
+  artifact already produced by another; repartition the affected work units so
+  only one task edits and produces that artifact.
 - Do not repeat an operation for one task_id. Use 1-4 operations. Leave other
   findings for the next review of the preserved candidate instead of making
   one large nested response.

@@ -707,6 +707,22 @@ func TestPlanManifestPersonaAsksForTopologyNotMarkdown(t *testing.T) {
 	}
 }
 
+func TestPlanManifestPatchPersonaPreservesExclusiveOwnership(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleArchitect, Persona: "plan_manifest", Contract: "json:plan_manifest_patch", Prompt: "repair"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry()}, true)
+	var system string
+	for _, msg := range msgs {
+		if msg.Role == "system" {
+			system += msg.Content
+		}
+	}
+	for _, want := range []string{"exactly one producer", "Consumes is read-only", "artifact already produced by another", "repartition"} {
+		if !strings.Contains(system, want) {
+			t.Errorf("manifest patch persona lacks ownership rule %q:\n%s", want, system)
+		}
+	}
+}
+
 func TestPlanManifestCriticReceivesCompleteAuditContract(t *testing.T) {
 	contract := "verdict:plan_manifest:SPEC-001,SPEC-002|T-001,T-002"
 	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Contract: contract, Prompt: "review"},

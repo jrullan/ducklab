@@ -199,11 +199,16 @@ func TestPlanCouncilPreflightsATopologyManifestWithoutTools(t *testing.T) {
 	}
 }
 
-func TestStandardSupportProfileOpensOnlyCriticsToReadOnlyTools(t *testing.T) {
-	critic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaPlanManifestCritic}
+func TestStandardSupportProfileKeepsSelfContainedManifestCriticToolFree(t *testing.T) {
+	manifestCritic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaPlanManifestCritic}
+	applySupportProfile(&manifestCritic, false)
+	if manifestCritic.Toolbelt != "none" {
+		t.Fatalf("standard manifest critic toolbelt = %q, want none", manifestCritic.Toolbelt)
+	}
+	critic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaCritic}
 	applySupportProfile(&critic, false)
 	if critic.Toolbelt != "read-only" {
-		t.Fatalf("standard critic toolbelt = %q, want read-only", critic.Toolbelt)
+		t.Fatalf("standard document critic toolbelt = %q, want read-only", critic.Toolbelt)
 	}
 	smallCritic := Turn{Role: config.RoleReviewer, Toolbelt: "none", Persona: PersonaCritic}
 	applySupportProfile(&smallCritic, true)
@@ -330,6 +335,12 @@ func TestPlanManifestIsReviewedBeforeFreezeAndRegeneratedAtMostThreeTimes(t *tes
 	for _, semantic := range []string{"same actor", "do not split merely by", "Implements is a many-to-many trace link", "do not reject duplicate Implements links"} {
 		if !strings.Contains(rec.prompts[1], semantic) {
 			t.Errorf("manifest critic prompt lacks cohesion rule %q:\n%s", semantic, rec.prompts[1])
+		}
+	}
+	normalizedPrompt := strings.Join(strings.Fields(rec.prompts[1]), " ")
+	for _, ownership := range []string{"exclusive writable ownership", "one producer in the whole manifest", "Consumes is read-only", "Never tell a task to add an artifact to Produces when another task already produces it"} {
+		if !strings.Contains(normalizedPrompt, ownership) {
+			t.Errorf("manifest critic prompt lacks ownership invariant %q:\n%s", ownership, rec.prompts[1])
 		}
 	}
 	if !strings.Contains(res.Text, "### T-001") {
