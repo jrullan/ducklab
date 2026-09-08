@@ -8,7 +8,7 @@ based_on: bccf4dbbbfe129bc
 approved_by: human
 ---
 
-## M-001 — Reported bugs
+## M-01 — Reported bugs
 
 ### T-001 — Expose budget lifting through MCP and identify the invalid kind field in lift errors
 
@@ -5060,8 +5060,348 @@ The resume path currently re-enters executeTestFirst, whose unconditional before
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-255 — Enforce post-composition semantic review
 
-## M-002 — Reported bugs
+Fixes B-302.
+
+**Acceptance:**
+- A composed candidate that contradicts an approved section repair or requested scope cannot be approved without an explicit semantic finding.
+- The review record visibly identifies the base, delta, and final candidate used for comparison.
+
+**Owns:** artifact composition/review
+
+Fixes B-302.
+
+## Reported
+
+Fledge intake/spec runs r-20260905-144401-cm6b and r-20260905-151820-2b2w approved local section repairs, but the final composed proposal reintroduced replaced content or invented out-of-scope architecture (including a stdin/stdout wire protocol explicitly excluded from H1). Expected: every artifact amendment receives a visible post-composition semantic review against base + requested delta + final candidate, distinct from deterministic structure checks.
+
+**Deliverables:**
+- Every artifact amendment triggers a visible semantic review after composition, in addition to deterministic structure checks.
+- The post-composition review compares the base artifact, requested delta, and final candidate and rejects reintroduced or out-of-scope content.
+- A regression test covers both reintroduction of replaced section content and addition of the excluded stdin/stdout protocol.
+- Review output distinguishes semantic findings from deterministic structure-check failures.
+
+## Triage
+
+**Component:** artifact composition and review
+
+This is a distinct high-severity composition-time semantic gap, not the structured-reference contract enforcement addressed by B-303.
+
+**Verification (triage recommends):** test-first — Compose an amendment that replaces approved content or adds excluded architecture and assert the final candidate is rejected with a visible semantic finding.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-256 — Model and normalize structured reference contracts
+
+Fixes B-303.
+
+**Acceptance:**
+- Conformance inputs expose executable contract invariants independently of findings and inspections.
+- Normalization produces stable, mechanically comparable invariants for the composed candidate.
+
+**Owns:** internal/capability, internal/capability/conformance_test.go, docs/capability-conformance-v1.md
+
+Fixes B-303.
+
+## Reported
+
+Across Fledge spec attempts r-20260905-150920-owlm, r-20260905-151820-2b2w, and r-20260905-152733-eqm4, the conformance JSON fixtures define observe_gate output as findings only and inspect_review_findings as inspections only, but drafts repeatedly added error to both and reviewers approved. Expected: references declared as executable/structured contracts are normalized into mechanical invariants checked on the composed candidate; semantic review remains separate.
+
+**Deliverables:**
+- Structured conformance fixtures distinguish executable reference contracts from gate findings and review inspections, rejecting incompatible output such as an added error field.
+- Reference contracts are normalized into deterministic invariants and checked against the composed candidate before artifact approval.
+- Required contract violations block verification or reviewer approval and record the violated capability and contract, while semantic findings remain separate.
+- Regression tests cover both observe_gate and inspect_review_findings paths, including the previously approved invalid drafts.
+
+## Triage
+
+**Component:** capability conformance
+**Suspected files:** internal/capability/capability.go, internal/capability/conformance_test.go, internal/service/harness.go, internal/tools/exec.go, internal/service/service.go, docs/capability-conformance-v1.md
+
+The conformance boundary currently treats structured reference output as advisory findings or inspections, allowing contradictory draft fields to survive composition and receive approval.
+
+**Verification (triage recommends):** test-first — Compose candidates whose observe_gate and inspect_review_findings contracts forbid an extra error field and assert approval is blocked before semantic review.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-257 — Enforce normalized contracts during artifact review
+
+Fixes B-303.
+
+**Acceptance:**
+- A candidate violating a required reference invariant cannot receive an approved gate or reviewer verdict.
+- Semantic review findings continue to be processed separately from contract violations.
+
+**Owns:** internal/service, internal/tools
+
+Fixes B-303.
+
+## Reported
+
+Across Fledge spec attempts r-20260905-150920-owlm, r-20260905-151820-2b2w, and r-20260905-152733-eqm4, the conformance JSON fixtures define observe_gate output as findings only and inspect_review_findings as inspections only, but drafts repeatedly added error to both and reviewers approved. Expected: references declared as executable/structured contracts are normalized into mechanical invariants checked on the composed candidate; semantic review remains separate.
+
+**Deliverables:**
+- Structured conformance fixtures distinguish executable reference contracts from gate findings and review inspections, rejecting incompatible output such as an added error field.
+- Reference contracts are normalized into deterministic invariants and checked against the composed candidate before artifact approval.
+- Required contract violations block verification or reviewer approval and record the violated capability and contract, while semantic findings remain separate.
+- Regression tests cover both observe_gate and inspect_review_findings paths, including the previously approved invalid drafts.
+
+## Triage
+
+**Component:** capability conformance
+**Suspected files:** internal/capability/capability.go, internal/capability/conformance_test.go, internal/service/harness.go, internal/tools/exec.go, internal/service/service.go, docs/capability-conformance-v1.md
+
+The conformance boundary currently treats structured reference output as advisory findings or inspections, allowing contradictory draft fields to survive composition and receive approval.
+
+**Verification (triage recommends):** test-first — Compose candidates whose observe_gate and inspect_review_findings contracts forbid an extra error field and assert approval is blocked before semantic review.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-258 — Derive artifact participation from run calls
+
+Fixes B-304.
+
+**Acceptance:**
+- A stage artifact records participating ducklings from actual LLM calls and does not include configured seats that never called.
+- The configured/available duckling set remains separately available when needed for audit context.
+
+**Owns:** internal/stage/, internal/service/stages.go, internal/artifact/, internal/runlog/
+
+Fixes B-304.
+
+## Reported
+
+Fledge artifact front matter lists beelink-local, luna, and k3, while llm.jsonl for the runs shows only beelink-local architect/reviewer calls. Expected: records distinguish configured/available ducklings from participating ducklings derived from actual calls, so experiment audits cannot infer a false model mix.
+
+**Deliverables:**
+- Artifact front matter distinguishes configured ducklings from participating ducklings instead of populating participation from the roster alone.
+- Participating ducklings are derived deterministically from the run's actual llm.jsonl call records, with stable de-duplicated ordering.
+- A regression test covers configured-but-unused ducklings and verifies the emitted front matter cannot imply a false model mix.
+- Existing artifact parsing and rendering preserve the new provenance fields through proposal and promotion.
+
+## Triage
+
+**Component:** artifact provenance
+**Suspected files:** internal/service/stages.go, internal/stage/stage.go, internal/artifact/store.go, internal/runlog/runlog.go
+
+The stage currently passes roster-derived ducklings to WriteProposal, so artifacts can claim participation by configured seats that never appear in llm.jsonl.
+
+**Verification (triage recommends):** test-first — Run a stage with configured ducklings that make no calls and assert front matter lists only ducklings present in llm.jsonl.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-259 — Make reference contract output parsing explicit, typed, and prose-safe
+
+Fixes B-305.
+
+## Reported
+
+Observed in frozen Fledge H1b spec runs r-20260905-165545-5idm and r-20260905-171132-3zwz. The candidate semantically declared the correct output fields, but the post-composition checker either failed to recognize `**Contract Output:** fields` or treated typed entries such as `findings: [Finding]` as the literal field name, reporting both missing `findings` and forbidden `findings: [Finding]`. It also counted narrative mentions in multiple sections as duplicate declarations (`inspect_plan_task has 2 output declarations`). Expected: one unambiguous, machine-owned or explicitly delimited contract block per operation; types are separate from field names; prose mentions cannot become authoritative declarations; findings are one actionable result per operation. This is stack-neutral and must not add Rust-specific rules. H1b exhausted N=3 and is closed; fix only in a post-freeze harness iteration.
+
+**Deliverables:**
+- A machine-owned or explicitly delimited output-contract block is required and parsed once per operation.
+- Typed entries such as `findings: [Finding]` normalize to field name `findings` with a separate type, without producing a forbidden literal field.
+- Narrative mentions outside the authoritative contract block are ignored and cannot create duplicate output declarations.
+- Validation enforces one actionable `findings` result per operation without adding Rust-specific rules, with regression fixtures for both reported runs.
+
+## Triage
+
+**Component:** reference contract parser
+
+The reported runs consistently reproduce an ambiguous contract parser that misreads typed fields and narrative text, causing false missing, forbidden-field, and duplicate-declaration errors.
+
+**Verification (triage recommends):** test-first — Replay the reported Fledge outputs and assert that one delimited contract block yields typed field names without treating narrative mentions as declarations.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-260 — Centralize artifact field vocabulary and validation
+
+Fixes B-343.
+
+**Acceptance:**
+- Parser and structural checks consume one scoped canonical vocabulary with aliases and reject unknown bold fields with actionable diagnostics.
+- Focused tests cover canonical, aliased, localized near-match, unrelated unknown, and complete plan milestone/task fields.
+
+**Owns:** internal/artifact/artifact.go, internal/artifact/*_test.go
+
+Fixes B-343.
+
+## Reported
+
+## Evidence
+
+Fledge oracle v8 was accepted by a human and independently reviewed, then
+frozen at SHA-256
+`fb5806ac7d3203694a115caadb1ee1e0c13e5d7cfcc401674af062443ad467cf`.
+Its single N=1 mechanical run returned
+`proposal_structure_findings=0` and `plan_graph_findings=34`.
+
+All 27 tasks used `**Implementa:**` instead of canonical
+`**Implements:**`. The parser therefore materialized the tasks but no trace
+edges. CheckPlan emitted 27 unjustified_task findings plus seven
+unimplemented_spec findings. The same document also uses `**Depende de:**`,
+`**Produce:**`, and `**Ownership:**`, so fixing only the first visible label
+would leave other metadata silently inert.
+
+Full evidence:
+`/home/jrullan/dev/Fledge/.ducklab/oracle/plan.oracle.v8.mechanical-result.md`
+and F-076 in
+`/home/jrullan/wiki/Desarrollo/ducklab/fledge-friccion.md`.
+
+## Problem
+
+The parser accepts arbitrary bold `**Key:**` lines into Section.Fields while
+the final structural layer does not reject keys outside the artifact grammar.
+A vocabulary mismatch therefore becomes many downstream graph symptoms. The
+unbolded-field allowlist in artifact.knownField is also a separate, incomplete
+approximation: it lacks current plan keys such as Work unit and Acceptance
+slices.
+
+This is stack-neutral and especially costly for small models and localized
+documents.
+
+## Required behavior
+
+- Define the complete canonical artifact-field vocabulary once beside the
+  parser, with artifact/section scope and intentional aliases such as
+  Dependencies -> Depends on.
+- Make parsing and structural validation consume that same authority; do not
+  maintain a second field list in strategy.
+- For a plan task containing `**Implementa:** SPEC-001`, emit a primary,
+  actionable finding such as
+  `T-001 unknown field **Implementa:**; use **Implements:**`.
+- Reject arbitrary unknown bold fields even when no close suggestion exists.
+- Cover the complete plan vocabulary, including milestone and task fields, not
+  only Implementa/Depende de/Produce.
+- When primary structural field errors explain absent graph data, do not present
+  the resulting unjustified_task/unimplemented_spec cascade as independent
+  blockers. Suppress it or mark it explicitly derived.
+- State in the user-facing contract that prose may be localized but schema keys
+  are canonical and are not translated.
+- Expose or preserve a read-only syntax-lint path that can validate a candidate
+  file without promoting it or consuming a semantic oracle run.
+
+## Regression
+
+Use a fixture derived from the frozen oracle shape, plus focused fixtures for:
+canonical fields; intentional aliases; a localized near-match; an unrelated
+unknown field; every supported plan milestone/task field; and cascade
+suppression at the proposal gate.
+
+**Deliverables:**
+- A single artifact-field vocabulary defines canonical keys, section scope, and intentional aliases, including the complete plan milestone/task vocabulary.
+- Parsing and structural validation reject arbitrary bold fields with actionable canonical-key suggestions while preserving accepted aliases such as Dependencies -> Depends on.
+- The proposal gate identifies field errors before graph checks and suppresses or marks unjustified-task and unimplemented-spec findings derived solely from missing parsed edges.
+- Regression fixtures cover canonical fields, aliases, localized near-matches, unrelated unknown fields, every supported plan field, frozen-oracle-shaped plans, and gate cascade suppression.
+- A read-only candidate syntax-lint path and user-facing contract state that prose may be localized but schema keys remain canonical and untranslated.
+
+## Triage
+
+**Component:** artifact parsing and plan structural gate
+**Suspected files:** internal/artifact/artifact.go, internal/artifact/trace.go, internal/strategy/structurecheck.go, internal/service/stages.go
+
+A reproducible schema-validation defect allowed an accepted localized plan to lose all trace edges and produce dozens of misleading graph blockers, so it requires an early high-severity gate fix.
+
+**Verification (triage recommends):** test-first — Parse a plan task with **Implementa:** and assert an actionable unknown-field finding while graph cascade findings are suppressed or marked derived.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
+### T-261 — Make plan diagnostics causal and lintable
+
+Fixes B-343.
+
+**Acceptance:**
+- Proposal-gate output reports primary field errors and suppresses or labels graph findings caused by absent edges.
+- A candidate-file syntax lint operation validates without promotion or semantic-oracle consumption, with regression coverage for the frozen oracle shape.
+
+**Owns:** internal/artifact/trace.go, internal/strategy/structurecheck.go, internal/service/stages.go
+
+Fixes B-343.
+
+## Reported
+
+## Evidence
+
+Fledge oracle v8 was accepted by a human and independently reviewed, then
+frozen at SHA-256
+`fb5806ac7d3203694a115caadb1ee1e0c13e5d7cfcc401674af062443ad467cf`.
+Its single N=1 mechanical run returned
+`proposal_structure_findings=0` and `plan_graph_findings=34`.
+
+All 27 tasks used `**Implementa:**` instead of canonical
+`**Implements:**`. The parser therefore materialized the tasks but no trace
+edges. CheckPlan emitted 27 unjustified_task findings plus seven
+unimplemented_spec findings. The same document also uses `**Depende de:**`,
+`**Produce:**`, and `**Ownership:**`, so fixing only the first visible label
+would leave other metadata silently inert.
+
+Full evidence:
+`/home/jrullan/dev/Fledge/.ducklab/oracle/plan.oracle.v8.mechanical-result.md`
+and F-076 in
+`/home/jrullan/wiki/Desarrollo/ducklab/fledge-friccion.md`.
+
+## Problem
+
+The parser accepts arbitrary bold `**Key:**` lines into Section.Fields while
+the final structural layer does not reject keys outside the artifact grammar.
+A vocabulary mismatch therefore becomes many downstream graph symptoms. The
+unbolded-field allowlist in artifact.knownField is also a separate, incomplete
+approximation: it lacks current plan keys such as Work unit and Acceptance
+slices.
+
+This is stack-neutral and especially costly for small models and localized
+documents.
+
+## Required behavior
+
+- Define the complete canonical artifact-field vocabulary once beside the
+  parser, with artifact/section scope and intentional aliases such as
+  Dependencies -> Depends on.
+- Make parsing and structural validation consume that same authority; do not
+  maintain a second field list in strategy.
+- For a plan task containing `**Implementa:** SPEC-001`, emit a primary,
+  actionable finding such as
+  `T-001 unknown field **Implementa:**; use **Implements:**`.
+- Reject arbitrary unknown bold fields even when no close suggestion exists.
+- Cover the complete plan vocabulary, including milestone and task fields, not
+  only Implementa/Depende de/Produce.
+- When primary structural field errors explain absent graph data, do not present
+  the resulting unjustified_task/unimplemented_spec cascade as independent
+  blockers. Suppress it or mark it explicitly derived.
+- State in the user-facing contract that prose may be localized but schema keys
+  are canonical and are not translated.
+- Expose or preserve a read-only syntax-lint path that can validate a candidate
+  file without promoting it or consuming a semantic oracle run.
+
+## Regression
+
+Use a fixture derived from the frozen oracle shape, plus focused fixtures for:
+canonical fields; intentional aliases; a localized near-match; an unrelated
+unknown field; every supported plan milestone/task field; and cascade
+suppression at the proposal gate.
+
+**Deliverables:**
+- A single artifact-field vocabulary defines canonical keys, section scope, and intentional aliases, including the complete plan milestone/task vocabulary.
+- Parsing and structural validation reject arbitrary bold fields with actionable canonical-key suggestions while preserving accepted aliases such as Dependencies -> Depends on.
+- The proposal gate identifies field errors before graph checks and suppresses or marks unjustified-task and unimplemented-spec findings derived solely from missing parsed edges.
+- Regression fixtures cover canonical fields, aliases, localized near-matches, unrelated unknown fields, every supported plan field, frozen-oracle-shaped plans, and gate cascade suppression.
+- A read-only candidate syntax-lint path and user-facing contract state that prose may be localized but schema keys remain canonical and untranslated.
+
+## Triage
+
+**Component:** artifact parsing and plan structural gate
+**Suspected files:** internal/artifact/artifact.go, internal/artifact/trace.go, internal/strategy/structurecheck.go, internal/service/stages.go
+
+A reproducible schema-validation defect allowed an accepted localized plan to lose all trace edges and produce dozens of misleading graph blockers, so it requires an early high-severity gate fix.
+
+**Verification (triage recommends):** test-first — Parse a plan task with **Implementa:** and assert an actionable unknown-field finding while graph cascade findings are suppressed or marked derived.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+
+## M-02 — Reported bugs
 
 ### T-235 — Render and submit the escalation multiplier
 
@@ -5100,7 +5440,7 @@ The report identifies a reproducible high-severity save blocker caused by a miss
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-## M-003 — Reported bugs
+## M-03 — Reported bugs
 
 ### T-239 — Isolate snapshot and restoration roots
 
@@ -5141,7 +5481,7 @@ The reported path-root mismatch is directly visible and can cause rejected or fa
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-## M-004 — Reported bugs
+## M-04 — Reported bugs
 
 ### T-240 — Add worktree snapshot regression coverage
 
@@ -5182,7 +5522,7 @@ The reported path-root mismatch is directly visible and can cause rejected or fa
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-## M-005 — Reported bugs
+## M-05 — Reported bugs
 
 ### T-241 — Expose the no-changes retry door on task cards
 
@@ -5223,7 +5563,7 @@ The engine already carries Note and enforces the no-changes brake, but the deskt
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-## M-006 — Reported bugs
+## M-06 — Reported bugs
 
 ### T-242 — Wire notes through shared launch controls
 

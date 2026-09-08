@@ -18,6 +18,10 @@ autonomy = "yolo"
   setup = ""
   timeout_s = 900
 
+[capabilities]
+  auto = true
+  [capabilities.policy]
+
 [install]
   command = "make desktop && make install"
   timeout_s = 600
@@ -29,10 +33,12 @@ autonomy = "yolo"
 
 [roster]
   consultant = "k3"
+  scribe = "luna"
   triager = "luna"
 
 [roster_seats]
   consultant = ["k3"]
+  scribe = ["luna"]
   triager = ["luna"]
 
 [mode_seats]
@@ -41,7 +47,7 @@ autonomy = "yolo"
   [mode_seats.pair]
     advisor = ["k3"]
     implementer = ["terra"]
-    reviewer = ["luna"]
+    reviewer = ["glm52"]
 
 [modes]
 
