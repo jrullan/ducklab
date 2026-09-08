@@ -551,22 +551,20 @@ func (s *Service) BugPromote(ctx context.Context, projectID, bugID, actor string
 	return out, nil
 }
 
-// promotedTaskBody is what an implementer is given when a report becomes work.
-//
-// The reporter's words AND what the triage worked out. It used to be the words
-// alone: the component, the suspected files and the reasoning were computed,
-// shown once at a gate, and then discarded — so the model that had to fix the
-// bug went looking for a location somebody had already found.
+// promotedPortionBody puts a split portion's contract ahead of the original
+// report. The report can describe the whole incident (and therefore sibling
+// work), so it is useful evidence but must not become this task's checklist.
 func promotedPortionBody(b *store.Bug, portion agent.SplitProposal) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Fixes %s.\n\n**Acceptance:**\n", b.ID)
+	fmt.Fprintf(&sb, "Fixes %s.\n\n## Current portion contract (authoritative)\n\n**Acceptance slices:**\n", b.ID)
 	for _, criterion := range portion.Acceptance {
 		fmt.Fprintf(&sb, "- %s\n", criterion)
 	}
 	if len(portion.Owns) > 0 {
 		fmt.Fprintf(&sb, "\n**Owns:** %s\n", strings.Join(portion.Owns, ", "))
 	}
-	sb.WriteString("\n")
+	sb.WriteString("\nOnly the Acceptance slices and Owns above are required for this portion.\n")
+	sb.WriteString("\n## Parent context (non-binding)\n\n")
 	sb.WriteString(promotedTaskBody(b))
 	return sb.String()
 }
