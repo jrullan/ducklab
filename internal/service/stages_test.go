@@ -614,6 +614,52 @@ func TestATaskWhoseRunFailedIsBlockedNotTodo(t *testing.T) {
 // at its gate described the document the human had already accepted. The trace
 // rail in the desktop sits beside the Accept button and was reporting on last
 // week's plan.
+// A localized field label must be diagnosed at the proposal gate before its
+// missing parsed edge turns every task and spec into a misleading graph blocker.
+// This is the frozen-oracle shape: 27 task labels lose their Implements edges
+// while seven otherwise-valid specification sections wait for those tasks.
+func TestProposalGateReportsLocalizedFieldErrorsBeforeGraphCascade(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Core\n\n**Priority:** must\n",
+		artifact.KindSpec:         "## SPEC-001 — One\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-002 — Two\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-003 — Three\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-004 — Four\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-005 — Five\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-006 — Six\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-007 — Seven\n\n**Implements:** REQ-001\n",
+	})
+
+	var candidate strings.Builder
+	candidate.WriteString("## M-01 — Localized proposal\n")
+	for i := 1; i <= 27; i++ {
+		fmt.Fprintf(&candidate, "\n### T-%03d — Task\n\n**Implementa:** SPEC-%03d\n", i, (i-1)%7+1)
+	}
+	if err := os.WriteFile(artifact.ProposedPath(dir, artifact.KindPlan), []byte(candidate.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Proposed) != 1 || res.Proposed[0] != "plan" {
+		t.Fatalf("checked documents = %v, want pending plan", res.Proposed)
+	}
+	if len(res.FieldErrors) != 27 {
+		t.Fatalf("primary field errors = %d, want 27: %v", len(res.FieldErrors), res.FieldErrors)
+	}
+	if got := res.FieldErrors[0].Error(); got != "T-001 unknown field **Implementa:**; use **Implements:**" {
+		t.Fatalf("first primary diagnostic = %q", got)
+	}
+	for _, finding := range res.Errors {
+		if finding.Kind == artifact.UnjustifiedTask || finding.Kind == artifact.UnimplementedSpec {
+			t.Fatalf("graph cascade was presented as an independent blocker: %+v; field errors = %v", finding, res.FieldErrors)
+		}
+	}
+}
+
 func TestTraceCheckReadsTheProposalYouAreAboutToAccept(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
