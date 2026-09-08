@@ -80,6 +80,54 @@ type Frontmatter struct {
 // Approved reports whether a human has signed off on this version.
 func (f Frontmatter) Approved() bool { return strings.TrimSpace(f.ApprovedBy) != "" }
 
+// FieldScope identifies where a schema field may appear.
+type FieldScope string
+
+const (
+	SectionScope       FieldScope = "section"
+	PlanMilestoneScope FieldScope = "plan milestone"
+	PlanTaskScope      FieldScope = "plan task"
+)
+
+// FieldDefinition is one canonical Markdown schema key. Prose may be localized,
+// but these keys are canonical and are not translated.
+type FieldDefinition struct {
+	Canonical string
+	Kind      Kind
+	Scope     FieldScope
+	Aliases   []string
+}
+
+// fieldVocabulary is the single authority for parser and syntax-lint field validation.
+var fieldVocabulary = []FieldDefinition{
+	{"Run", KindIntent, SectionScope, nil}, {"Submitted at", KindIntent, SectionScope, nil}, {"Outcome", KindIntent, SectionScope, nil}, {"Requirements", KindIntent, SectionScope, nil},
+	{"Originates from", KindRequirements, SectionScope, nil}, {"Priority", KindRequirements, SectionScope, nil}, {"Status", KindRequirements, SectionScope, nil}, {"Acceptance", KindRequirements, SectionScope, nil}, {"Acceptance probes", KindRequirements, SectionScope, nil},
+	{"Implements", KindSpec, SectionScope, nil}, {"Priority", KindSpec, SectionScope, nil}, {"Status", KindSpec, SectionScope, nil}, {"Complexity", KindSpec, SectionScope, nil}, {"Acceptance", KindSpec, SectionScope, nil}, {"Acceptance probes", KindSpec, SectionScope, nil}, {"Verification", KindSpec, SectionScope, nil}, {"Exercises", KindSpec, SectionScope, nil}, {"As-built", KindSpec, SectionScope, nil}, {"Covers", KindSpec, SectionScope, nil},
+	{"Owns", KindPlan, PlanMilestoneScope, nil}, {"Milestone", KindPlan, PlanMilestoneScope, nil}, {"Work unit", KindPlan, PlanMilestoneScope, nil}, {"Acceptance slices", KindPlan, PlanMilestoneScope, nil}, {"Toolchain", KindPlan, PlanMilestoneScope, nil}, {"Implements", KindPlan, PlanMilestoneScope, nil},
+	{"Implements", KindPlan, PlanTaskScope, nil}, {"Priority", KindPlan, PlanTaskScope, nil}, {"Status", KindPlan, PlanTaskScope, nil}, {"Complexity", KindPlan, PlanTaskScope, nil}, {"Depends on", KindPlan, PlanTaskScope, []string{"Dependencies"}}, {"Role hint", KindPlan, PlanTaskScope, nil}, {"Acceptance", KindPlan, PlanTaskScope, nil}, {"Acceptance slices", KindPlan, PlanTaskScope, nil}, {"Acceptance probes", KindPlan, PlanTaskScope, nil}, {"Work unit", KindPlan, PlanTaskScope, nil}, {"Owns", KindPlan, PlanTaskScope, nil}, {"Toolchain", KindPlan, PlanTaskScope, nil}, {"Produces", KindPlan, PlanTaskScope, nil}, {"Consumes", KindPlan, PlanTaskScope, nil}, {"Verification", KindPlan, PlanTaskScope, nil}, {"Exercises", KindPlan, PlanTaskScope, nil}, {"Out of scope", KindPlan, PlanTaskScope, nil}, {"Assumption", KindPlan, PlanTaskScope, nil},
+}
+
+// FieldVocabulary returns a copy of the canonical, scoped field schema.
+func FieldVocabulary() []FieldDefinition {
+	out := make([]FieldDefinition, len(fieldVocabulary))
+	copy(out, fieldVocabulary)
+	for i := range out {
+		out[i].Aliases = append([]string(nil), out[i].Aliases...)
+	}
+	return out
+}
+
+// FieldError describes a schema key that cannot be consumed by the parser.
+type FieldError struct{ ID, Key, Suggestion string }
+
+func (e FieldError) Error() string {
+	message := fmt.Sprintf("%s unknown field **%s:**", e.ID, e.Key)
+	if e.Suggestion != "" {
+		message += fmt.Sprintf("; use **%s:**", e.Suggestion)
+	}
+	return message
+}
+
 // Section is one addressable unit of an artifact.
 type Section struct {
 	ID    string
@@ -95,6 +143,8 @@ type Section struct {
 	// For plan documents this field is normally declared on the milestone and
 	// inherited by its child tasks.
 	Owns []string
+	// FieldErrors are unknown or out-of-scope bold fields in this section.
+	FieldErrors []FieldError
 	// Children are nested sections (tasks under a milestone in plan.md).
 	Children []Section
 }
@@ -112,6 +162,8 @@ type Document struct {
 	Front    Frontmatter
 	Preamble string
 	Sections []Section
+	// FieldErrors are syntax-lint diagnostics collected while parsing.
+	FieldErrors []FieldError
 	// Raw is the file exactly as read, so nothing is lost by round-tripping a
 	// document ducklab did not fully understand.
 	Raw string
@@ -172,16 +224,21 @@ func Parse(content string, kind Kind) (*Document, error) {
 		switch {
 		case currentChild != nil:
 			currentChild.Body = text
-			parseSectionFields(currentChild, text)
+			parseSectionFields(currentChild, text, kind, PlanTaskScope)
 		case current != nil:
 			current.Body = text
-			parseSectionFields(current, text)
+			scope := SectionScope
+			if kind == KindPlan {
+				scope = PlanMilestoneScope
+			}
+			parseSectionFields(current, text, kind, scope)
 		default:
 			preamble = append(preamble, text)
 		}
 	}
 	commitChild := func() {
 		if currentChild != nil && current != nil {
+			doc.FieldErrors = append(doc.FieldErrors, currentChild.FieldErrors...)
 			current.Children = append(current.Children, *currentChild)
 			currentChild = nil
 		}
@@ -189,6 +246,7 @@ func Parse(content string, kind Kind) (*Document, error) {
 	commitParent := func() {
 		commitChild()
 		if current != nil {
+			doc.FieldErrors = append(doc.FieldErrors, current.FieldErrors...)
 			doc.Sections = append(doc.Sections, *current)
 			current = nil
 		}
@@ -309,21 +367,33 @@ func canonicalID(id, prefix string) string {
 	return fmt.Sprintf("%s-%0*d", prefix, width, n)
 }
 
-// parseSectionFields extracts `**Key:** value` lines and the Implements edge.
-func parseSectionFields(s *Section, body string) {
+// SyntaxLint validates a candidate without writing or promoting it. Prose may
+// be localized; Markdown schema keys must remain canonical and untranslated.
+func SyntaxLint(content string, kind Kind) ([]FieldError, error) {
+	doc, err := Parse(content, kind)
+	if err != nil {
+		return nil, err
+	}
+	return append([]FieldError(nil), doc.FieldErrors...), nil
+}
+
+// parseSectionFields extracts valid `**Key:** value` lines and trace edges.
+func parseSectionFields(s *Section, body string, context ...interface{}) {
+	kind, scope := fieldContext(s, context...)
 	s.Fields = map[string]string{}
 	for _, line := range strings.Split(body, "\n") {
-		key, value, ok := parseFieldLine(line)
+		key, value, bold, ok := parseFieldLine(line)
 		if !ok {
 			continue
 		}
-		// "Dependencies:" is what a model writes when nobody spelled the
-		// field: a plan revision carried 15 of them and the parser dropped
-		// every edge in silence (Neocapture, 2026-08-30). Same meaning, same
-		// field — aliased before it is stored, so every reader sees it.
-		if key == "dependencies" {
-			key = "depends on"
+		canonical, valid := canonicalField(key, kind, scope)
+		if !valid {
+			if bold {
+				s.FieldErrors = append(s.FieldErrors, FieldError{ID: s.ID, Key: key, Suggestion: fieldSuggestion(key, kind, scope)})
+			}
+			continue
 		}
+		key = strings.ToLower(canonical)
 		s.Fields[key] = value
 		if key == "owns" {
 			for _, path := range strings.Split(value, ",") {
@@ -333,50 +403,112 @@ func parseSectionFields(s *Section, body string) {
 				}
 			}
 		}
-		if key == "implements" || key == "depends on" {
-			ids := splitIDs(value)
-			if key == "implements" {
-				s.Implements = append(s.Implements, ids...)
+		if key == "implements" {
+			s.Implements = append(s.Implements, splitIDs(value)...)
+		}
+	}
+}
+
+// parseFieldLine recognises a field and reports whether it was bold. Unbolded
+// fields are accepted only when the scoped vocabulary recognizes their key.
+func parseFieldLine(line string) (key, value string, bold, ok bool) {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
+	bold = strings.HasPrefix(t, "**")
+	if bold {
+		t = strings.TrimPrefix(t, "**")
+	}
+	i := strings.Index(t, ":")
+	if i <= 0 || (!bold && (i > 24 || strings.Contains(t[:i], " and "))) {
+		return "", "", false, false
+	}
+	key = strings.TrimSpace(strings.TrimSuffix(t[:i], "**"))
+	value = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t[i+1:]), "**"))
+	return key, value, bold, true
+}
+
+func fieldContext(s *Section, context ...interface{}) (Kind, FieldScope) {
+	if len(context) == 2 {
+		return context[0].(Kind), context[1].(FieldScope)
+	}
+	if strings.HasPrefix(s.ID, "INT-") {
+		return KindIntent, SectionScope
+	}
+	if strings.HasPrefix(s.ID, "REQ-") {
+		return KindRequirements, SectionScope
+	}
+	if strings.HasPrefix(s.ID, "SPEC-") {
+		return KindSpec, SectionScope
+	}
+	return KindPlan, PlanTaskScope
+}
+
+func canonicalField(key string, kind Kind, scope FieldScope) (string, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, definition := range fieldVocabulary {
+		if definition.Kind != kind || definition.Scope != scope {
+			continue
+		}
+		if strings.EqualFold(key, definition.Canonical) {
+			return definition.Canonical, true
+		}
+		for _, alias := range definition.Aliases {
+			if strings.EqualFold(key, alias) {
+				return definition.Canonical, true
 			}
 		}
 	}
+	return "", false
 }
 
-// parseFieldLine recognises `**Key:** value`, tolerating a missing bold marker
-// because models drop it often enough that rejecting the line would lose real
-// content.
-func parseFieldLine(line string) (key, value string, ok bool) {
-	t := strings.TrimSpace(line)
-	t = strings.TrimPrefix(t, "- ")
-	if !strings.HasPrefix(t, "**") {
-		// Accept `Key: value` only when the key looks like a field, not prose.
-		i := strings.Index(t, ":")
-		if i <= 0 || i > 24 || strings.Contains(t[:i], " and ") {
-			return "", "", false
+func fieldSuggestion(key string, kind Kind, scope FieldScope) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	best, distance := "", 3
+	for _, definition := range fieldVocabulary {
+		if definition.Kind != kind || definition.Scope != scope {
+			continue
 		}
-		k := strings.ToLower(strings.TrimSpace(t[:i]))
-		if !knownField(k) {
-			return "", "", false
+		if d := levenshtein(key, strings.ToLower(definition.Canonical)); d < distance {
+			best, distance = definition.Canonical, d
 		}
-		return k, strings.TrimSpace(t[i+1:]), true
+		for _, alias := range definition.Aliases {
+			if d := levenshtein(key, strings.ToLower(alias)); d < distance {
+				best, distance = definition.Canonical, d
+			}
+		}
 	}
-	t = strings.TrimPrefix(t, "**")
-	i := strings.Index(t, ":")
-	if i < 0 {
-		return "", "", false
-	}
-	k := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(t[:i], "**")))
-	v := strings.TrimSpace(t[i+1:])
-	v = strings.TrimPrefix(v, "**")
-	return k, strings.TrimSpace(v), true
+	return best
 }
 
-func knownField(k string) bool {
-	switch k {
-	case "implements", "originates from", "requirements", "run", "submitted at", "outcome", "priority", "status", "complexity", "depends on", "dependencies", "role hint", "acceptance", "acceptance probes", "owns", "toolchain", "produces", "consumes", "verification", "exercises":
-		return true
+func levenshtein(a, b string) int {
+	a, b = string([]rune(a)), string([]rune(b))
+	ar, br := []rune(a), []rune(b)
+	row := make([]int, len(br)+1)
+	for j := range row {
+		row[j] = j
 	}
-	return false
+	for i, x := range ar {
+		next := make([]int, len(br)+1)
+		next[0] = i + 1
+		for j, y := range br {
+			cost := 0
+			if x != y {
+				cost = 1
+			}
+			next[j+1] = min(next[j]+1, row[j+1]+1, row[j]+cost)
+		}
+		row = next
+	}
+	return row[len(br)]
+}
+
+func min(values ...int) int {
+	result := values[0]
+	for _, value := range values[1:] {
+		if value < result {
+			result = value
+		}
+	}
+	return result
 }
 
 // splitIDs parses a comma-separated id list, ignoring anything that is not an
