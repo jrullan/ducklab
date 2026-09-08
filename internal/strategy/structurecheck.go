@@ -571,6 +571,10 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 	if doc == nil {
 		return nil
 	}
+	var findings []string
+	for _, fieldErr := range doc.FieldErrors {
+		findings = append(findings, fieldErr.Error())
+	}
 	isRequirements := doc.Front.Kind == artifact.KindRequirements
 	if doc.Front.Kind == "" && len(doc.Sections) > 0 {
 		isRequirements = strings.HasPrefix(doc.Sections[0].ID, "REQ-")
@@ -597,9 +601,9 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 					}
 				}
 			}
-			return out
+			return append(findings, out...)
 		}
-		return nil
+		return findings
 	}
 	var out []string
 	for _, sec := range doc.Sections {
@@ -616,7 +620,7 @@ func ProposalStructureFindings(doc *artifact.Document) []string {
 			out = append(out, fmt.Sprintf("%s says the capability is optional (`may` or `not required`) but retains **Priority:** must — make the body and Priority agree", sec.ID))
 		}
 	}
-	return out
+	return append(findings, out...)
 }
 
 func priorityMarkerCount(body string) int {

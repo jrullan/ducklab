@@ -622,7 +622,7 @@ func TestProposalGateReportsLocalizedFieldErrorsBeforeGraphCascade(t *testing.T)
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
 		artifact.KindRequirements: "## REQ-001 — Core\n\n**Priority:** must\n",
-		artifact.KindSpec:         "## SPEC-001 — One\n\n**Implements:** REQ-001\n\n" +
+		artifact.KindSpec: "## SPEC-001 — One\n\n**Implements:** REQ-001\n\n" +
 			"## SPEC-002 — Two\n\n**Implements:** REQ-001\n\n" +
 			"## SPEC-003 — Three\n\n**Implements:** REQ-001\n\n" +
 			"## SPEC-004 — Four\n\n**Implements:** REQ-001\n\n" +
@@ -658,6 +658,68 @@ func TestProposalGateReportsLocalizedFieldErrorsBeforeGraphCascade(t *testing.T)
 			t.Fatalf("graph cascade was presented as an independent blocker: %+v; field errors = %v", finding, res.FieldErrors)
 		}
 	}
+}
+
+func TestCandidateSyntaxLintIsReadOnlyAndUsesCompletePlanVocabulary(t *testing.T) {
+	var milestone, task strings.Builder
+	for _, definition := range artifact.FieldVocabulary() {
+		if definition.Kind != artifact.KindPlan {
+			continue
+		}
+		line := "**" + definition.Canonical + ":** value\n"
+		if definition.Scope == artifact.PlanMilestoneScope {
+			milestone.WriteString(line)
+		} else if definition.Scope == artifact.PlanTaskScope {
+			task.WriteString(line)
+		}
+	}
+	candidate := "## M-01 — Localized prose is allowed\n\n" + milestone.String() +
+		"\n### T-001 — Task\n\n" + task.String()
+	errs, err := CandidateSyntaxLint(candidate, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("canonical plan vocabulary rejected: %v", errs)
+	}
+
+	errs, err = SyntaxLintCandidate("## M-01 — Core\n\n### T-001 — Task\n\n**Dependencies:** T-002\n**Implementa:** SPEC-001\n**Unrelated:** value\n", artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 2 || errs[0].Suggestion != "Implements" || errs[1].Suggestion != "" {
+		t.Fatalf("syntax lint diagnostics = %+v, want localized suggestion and unrelated unknown field", errs)
+	}
+}
+
+func TestProposalGateRetainsUnrelatedUnimplementedSpecAfterLocalizedFieldError(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Core\n\n**Priority:** must\n",
+		artifact.KindSpec: "## SPEC-001 — Localized task target\n\n**Implements:** REQ-001\n\n" +
+			"## SPEC-002 — Actually unimplemented\n\n**Implements:** REQ-001\n",
+	})
+	candidate := "## M-01 — Proposal\n\n### T-001 — Localized\n\n**Implementa:** SPEC-001\n"
+	if err := os.WriteFile(artifact.ProposedPath(dir, artifact.KindPlan), []byte(candidate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.TraceCheck(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) == 0 || res.Errors[0].Kind != artifact.UnknownField {
+		t.Fatalf("primary error must lead graph findings: %+v", res.Errors)
+	}
+	for _, finding := range res.Errors {
+		if finding.Kind == artifact.UnimplementedSpec && finding.ID == "SPEC-001" {
+			t.Fatalf("SPEC-001 finding is derived solely from localized field error: %+v", finding)
+		}
+		if finding.Kind == artifact.UnimplementedSpec && finding.ID == "SPEC-002" {
+			return
+		}
+	}
+	t.Fatalf("unrelated SPEC-002 gap was suppressed: %+v", res.Errors)
 }
 
 func TestTraceCheckReadsTheProposalYouAreAboutToAccept(t *testing.T) {

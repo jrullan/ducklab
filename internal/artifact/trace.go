@@ -35,6 +35,7 @@ const (
 	DuplicateID       TraceErrorKind = "duplicate_id"
 	DuplicateProducer TraceErrorKind = "duplicate_producer"
 	MissingDependency TraceErrorKind = "missing_producer_dependency"
+	UnknownField      TraceErrorKind = "unknown_field"
 )
 
 // TraceError is one break, with enough detail to act on.
@@ -195,23 +196,28 @@ func (s *Spine) Check() []TraceError {
 
 	errs = append(errs, CheckPlan(s.Spec, s.Plan)...)
 
-	sort.Slice(errs, func(i, j int) bool {
-		if errs[i].Kind != errs[j].Kind {
-			return errs[i].Kind < errs[j].Kind
-		}
-		return errs[i].ID < errs[j].ID
-	})
+	sortTraceErrors(errs)
 	return errs
 }
 
 // CheckPlan validates the complete plan as a graph, independently of model
-// judgment. It is exported so a newly composed proposal can be checked before
+// judgment. Primary parser diagnostics are returned before graph findings. It is exported so a newly composed proposal can be checked before
 // it reaches the human gate; Check historically saw only approved artifacts.
 func CheckPlan(spec, plan *Document) []TraceError {
 	if spec == nil || plan == nil {
 		return nil
 	}
 	var errs []TraceError
+	// Unknown schema keys are primary parse failures. In particular, a
+	// near-miss for Implements means the graph has no edge to inspect; do not
+	// turn that one repair into a misleading task/spec cascade.
+	invalidImplements := map[string][]string{}
+	for _, fieldErr := range plan.FieldErrors {
+		errs = append(errs, TraceError{Kind: UnknownField, ID: fieldErr.ID, Detail: strings.TrimPrefix(fieldErr.Error(), fieldErr.ID+" ")})
+		if fieldErr.Suggestion == "Implements" {
+			invalidImplements[fieldErr.ID] = append(invalidImplements[fieldErr.ID], fieldErr.Key)
+		}
+	}
 	specIDs := map[string]Section{}
 	for _, section := range spec.Sections {
 		specIDs[section.ID] = section
@@ -233,7 +239,7 @@ func CheckPlan(spec, plan *Document) []TraceError {
 			}
 			seenIDs[task.ID] = true
 			if len(task.Implements) == 0 {
-				if !fixesBug(task.Body) {
+				if len(invalidImplements[task.ID]) == 0 && !fixesBug(task.Body) {
 					errs = append(errs, TraceError{Kind: UnjustifiedTask, ID: task.ID, Detail: "task implements no spec section"})
 				}
 			} else {
@@ -255,8 +261,16 @@ func CheckPlan(spec, plan *Document) []TraceError {
 		}
 	}
 
+	invalidCoverage := map[string]bool{}
+	for _, task := range tasks {
+		for _, key := range invalidImplements[task.ID] {
+			for _, target := range invalidFieldIDs(task.Body, key) {
+				invalidCoverage[target] = true
+			}
+		}
+	}
 	for _, section := range spec.Sections {
-		if coveredSpecs[section.ID] || nonNormative(section) || asBuilt(section) {
+		if invalidCoverage[section.ID] || coveredSpecs[section.ID] || nonNormative(section) || asBuilt(section) {
 			continue
 		}
 		errs = append(errs, TraceError{Kind: UnimplementedSpec, ID: section.ID, Detail: "no task implements this spec section"})
@@ -275,13 +289,36 @@ func CheckPlan(spec, plan *Document) []TraceError {
 
 	errs = append(errs, checkDependencies(plan)...)
 	errs = append(errs, checkLaneCollisions(plan)...)
+	sortTraceErrors(errs)
+	return errs
+}
+
+// invalidFieldIDs reads the values of an invalid bold field solely to identify
+// graph findings caused by its missing parsed edges. The field remains invalid;
+// this never promotes its value into the document's trace graph.
+func invalidFieldIDs(body, key string) []string {
+	re := regexp.MustCompile(`(?im)^\s*\*\*` + regexp.QuoteMeta(key) + `:\*\*\s*(.*)$`)
+	match := re.FindStringSubmatch(body)
+	if match == nil {
+		return nil
+	}
+	return splitIDs(match[1])
+}
+
+// sortTraceErrors keeps primary schema diagnostics ahead of dependent graph
+// findings while retaining stable kind/id ordering within each class.
+func sortTraceErrors(errs []TraceError) {
 	sort.Slice(errs, func(i, j int) bool {
+		primaryI := errs[i].Kind == UnknownField
+		primaryJ := errs[j].Kind == UnknownField
+		if primaryI != primaryJ {
+			return primaryI
+		}
 		if errs[i].Kind != errs[j].Kind {
 			return errs[i].Kind < errs[j].Kind
 		}
 		return errs[i].ID < errs[j].ID
 	})
-	return errs
 }
 
 func fieldItems(value string) []string {

@@ -1414,6 +1414,8 @@ func (s *Service) resolveStageRun(runID, approvedBy string) {
 // TraceResult is a spine check and what it was run against.
 type TraceResult struct {
 	Errors []artifact.TraceError `json:"errors"`
+	// FieldErrors are primary syntax diagnostics, reported separately from graph findings.
+	FieldErrors []artifact.FieldError `json:"field_errors,omitempty"`
 	// Proposed names the stages whose pending proposal was checked instead of
 	// the approved artifact. Empty means every stage was the approved one.
 	Proposed []string `json:"proposed,omitempty"`
@@ -1434,14 +1436,33 @@ func (s *Service) TraceCheck(ctx context.Context, projectID string) (*TraceResul
 		return nil, err
 	}
 	errs := spine.Check()
+	fieldErrors := append([]artifact.FieldError(nil), spine.Plan.FieldErrors...)
 	if errs == nil {
 		errs = []artifact.TraceError{}
 	}
-	out := &TraceResult{Errors: errs}
+	out := &TraceResult{Errors: errs, FieldErrors: fieldErrors}
 	for _, k := range proposed {
 		out.Proposed = append(out.Proposed, string(k))
 	}
 	return out, nil
+}
+
+// CandidateSyntaxLint parses a candidate artifact and returns only deterministic
+// schema diagnostics. It neither writes/promotes the candidate nor invokes a
+// semantic oracle; prose may be localized, but schema keys are canonical and
+// are not translated.
+func CandidateSyntaxLint(content string, kind artifact.Kind) ([]artifact.FieldError, error) {
+	doc, err := artifact.Parse(content, kind)
+	if err != nil {
+		return nil, err
+	}
+	return append([]artifact.FieldError(nil), doc.FieldErrors...), nil
+}
+
+// SyntaxLintCandidate is an explicit read-only alias for callers validating a
+// candidate before a proposal or semantic review exists.
+func SyntaxLintCandidate(content string, kind artifact.Kind) ([]artifact.FieldError, error) {
+	return CandidateSyntaxLint(content, kind)
 }
 
 // TraceShow walks the spine from one id.
