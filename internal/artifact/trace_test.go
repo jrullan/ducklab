@@ -131,6 +131,74 @@ func TestSpecWithNoTaskIsReported(t *testing.T) {
 	}
 }
 
+func TestTaskImplementsGrammarRejectsTokensWithoutLosingValidIDs(t *testing.T) {
+	plan, err := Parse("## M-01 — Core\n\n"+
+		"### T-001 — Valid\n\n**Implements:** SPEC-001, SPEC-002\n\n"+
+		"### T-002 — Range\n\n**Implements:** SPEC-003–SPEC-005\n\n"+
+		"### T-003 — Punctuation\n\n**Implements:** SPEC-006.\n\n"+
+		"### T-004 — Group\n\n**Implements:** SPEC-007; SPEC-008\n\n"+
+		"### T-005 — Wrong kind\n\n**Implements:** REQ-001\n", KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.Section("T-001").Implements; len(got) != 2 || got[0] != "SPEC-001" || got[1] != "SPEC-002" {
+		t.Fatalf("valid comma-separated ids = %v", got)
+	}
+	for _, id := range []string{"T-002", "T-003", "T-004"} {
+		section := plan.Section(id)
+		if len(section.Implements) != 0 || len(section.FieldErrors) != 1 || section.FieldErrors[0].Code != "invalid_id_token" {
+			t.Errorf("%s malformed Implements = ids %v diagnostics %+v", id, section.Implements, section.FieldErrors)
+		}
+	}
+	wrong := plan.Section("T-005")
+	if len(wrong.Implements) != 0 || len(wrong.FieldErrors) != 1 || wrong.FieldErrors[0].Code != "wrong_id_kind" {
+		t.Errorf("wrong-kind Implements = ids %v diagnostics %+v", wrong.Implements, wrong.FieldErrors)
+	}
+	joined := make([]string, 0, len(plan.FieldErrors))
+	for _, diagnostic := range plan.FieldErrors {
+		joined = append(joined, diagnostic.Error())
+	}
+	message := strings.Join(joined, "\n")
+	for _, want := range []string{"SPEC-003–SPEC-005", "ranges are not supported", "SPEC-006.", "punctuation", "semicolon groups", "REQ-001", "use SPEC-NNN"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("direct Implements diagnostics lack %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestMalformedImplementsSuppressOnlyItsDerivedGraphCascade(t *testing.T) {
+	spec, err := Parse("## SPEC-001 — One\n\n## SPEC-002 — Two\n\n## SPEC-003 — Three\n\n## SPEC-004 — Four\n\n## SPEC-005 — Five\n\n## SPEC-006 — Unrelated\n", KindSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Parse("## M-01 — Core\n\n"+
+		"### T-001 — Range\n\n**Implements:** SPEC-001–SPEC-003\n\n"+
+		"### T-002 — Punctuation\n\n**Implements:** SPEC-004.\n\n"+
+		"### T-003 — Group\n\n**Implements:** SPEC-005; REQ-001\n", KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errList := CheckPlan(spec, plan)
+	primary := 0
+	for _, finding := range errList {
+		if finding.Kind == InvalidField {
+			primary++
+		}
+		if finding.Kind == UnjustifiedTask {
+			t.Fatalf("malformed task produced derived unjustified-task finding: %+v; all=%v", finding, errList)
+		}
+		if finding.Kind == UnimplementedSpec && finding.ID != "SPEC-006" {
+			t.Fatalf("malformed token produced derived coverage finding: %+v; all=%v", finding, errList)
+		}
+	}
+	if primary != 3 {
+		t.Fatalf("primary malformed-field findings = %d, want 3: %v", primary, errList)
+	}
+	if !hasError(errList, UnimplementedSpec, "SPEC-006") {
+		t.Fatalf("unrelated real coverage gap was suppressed: %v", errList)
+	}
+}
+
 // An empty project is not broken, it is empty.
 func TestEmptyProjectHasNoErrors(t *testing.T) {
 	spine, err := LoadSpine(t.TempDir())

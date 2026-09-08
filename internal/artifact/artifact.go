@@ -8,6 +8,7 @@ package artifact
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -22,6 +23,10 @@ const (
 	KindPlan         Kind = "plan"
 	KindProject      Kind = "project"
 )
+
+// CurrentGrammar is the common artifact grammar written by Ducklab. It is
+// independent from Frontmatter.Version, which remains the document revision.
+const CurrentGrammar = 2
 
 // Prefix is the section id prefix an artifact's sections carry.
 func (k Kind) Prefix() string {
@@ -58,7 +63,10 @@ type Frontmatter struct {
 	// which identifies this revision of the document.
 	Grammar    int
 	grammarSet bool
+	grammarRaw string
 	Version    int
+	versionSet bool
+	versionRaw string
 	UpdatedAt  string
 	RunID      string
 	Ducklings  []string
@@ -100,15 +108,45 @@ type FieldDefinition struct {
 	Kind      Kind
 	Scope     FieldScope
 	Aliases   []string
+	// Shape and cardinality are part of the same authority as the field name.
+	// Empty Shape means the field is vocabulary-only and has no grammar-v2
+	// contract beyond being in scope.
+	Shape    FieldShape
+	Required bool
+	MinItems int
+	MaxItems int
 }
+
+// FieldShape names the deterministic value grammar for a schema field.
+type FieldShape string
+
+const (
+	ShapeInline           FieldShape = "inline text"
+	ShapeSpecIDs          FieldShape = "comma-separated literal SPEC-NNN ids"
+	ShapeChecklist        FieldShape = "flat markdown list"
+	ShapeCommandChecklist FieldShape = "flat markdown list with one backtick command per item"
+	ShapeArtifacts        FieldShape = "comma-separated artifact list"
+	ShapeCommand          FieldShape = "one backtick command"
+)
 
 // fieldVocabulary is the single authority for parser and syntax-lint field validation.
 var fieldVocabulary = []FieldDefinition{
-	{"Run", KindIntent, SectionScope, nil}, {"Submitted at", KindIntent, SectionScope, nil}, {"Outcome", KindIntent, SectionScope, nil}, {"Requirements", KindIntent, SectionScope, nil},
-	{"Originates from", KindRequirements, SectionScope, nil}, {"Priority", KindRequirements, SectionScope, nil}, {"Status", KindRequirements, SectionScope, nil}, {"Acceptance", KindRequirements, SectionScope, nil}, {"Acceptance probes", KindRequirements, SectionScope, nil},
-	{"Implements", KindSpec, SectionScope, nil}, {"Priority", KindSpec, SectionScope, nil}, {"Status", KindSpec, SectionScope, nil}, {"Complexity", KindSpec, SectionScope, nil}, {"Acceptance", KindSpec, SectionScope, nil}, {"Acceptance probes", KindSpec, SectionScope, nil}, {"Verification", KindSpec, SectionScope, nil}, {"Exercises", KindSpec, SectionScope, nil}, {"As-built", KindSpec, SectionScope, nil}, {"Covers", KindSpec, SectionScope, nil},
-	{"Owns", KindPlan, PlanMilestoneScope, nil}, {"Milestone", KindPlan, PlanMilestoneScope, nil}, {"Work unit", KindPlan, PlanMilestoneScope, nil}, {"Acceptance slices", KindPlan, PlanMilestoneScope, nil}, {"Toolchain", KindPlan, PlanMilestoneScope, nil}, {"Implements", KindPlan, PlanMilestoneScope, nil},
-	{"Implements", KindPlan, PlanTaskScope, nil}, {"Priority", KindPlan, PlanTaskScope, nil}, {"Status", KindPlan, PlanTaskScope, nil}, {"Complexity", KindPlan, PlanTaskScope, nil}, {"Depends on", KindPlan, PlanTaskScope, []string{"Dependencies"}}, {"Role hint", KindPlan, PlanTaskScope, nil}, {"Acceptance", KindPlan, PlanTaskScope, nil}, {"Acceptance slices", KindPlan, PlanTaskScope, nil}, {"Acceptance probes", KindPlan, PlanTaskScope, nil}, {"Work unit", KindPlan, PlanTaskScope, nil}, {"Owns", KindPlan, PlanTaskScope, nil}, {"Toolchain", KindPlan, PlanTaskScope, nil}, {"Produces", KindPlan, PlanTaskScope, nil}, {"Consumes", KindPlan, PlanTaskScope, nil}, {"Verification", KindPlan, PlanTaskScope, nil}, {"Exercises", KindPlan, PlanTaskScope, nil}, {"Out of scope", KindPlan, PlanTaskScope, nil}, {"Assumption", KindPlan, PlanTaskScope, nil},
+	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope},
+	{Canonical: "Originates from", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Priority", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Status", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindRequirements, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindRequirements, Scope: SectionScope},
+	{Canonical: "Implements", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Priority", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Status", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Complexity", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Acceptance", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Acceptance probes", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Verification", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Exercises", Kind: KindSpec, Scope: SectionScope}, {Canonical: "As-built", Kind: KindSpec, Scope: SectionScope}, {Canonical: "Covers", Kind: KindSpec, Scope: SectionScope},
+	{Canonical: "Owns", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Milestone", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Work unit", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Acceptance slices", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Toolchain", Kind: KindPlan, Scope: PlanMilestoneScope}, {Canonical: "Implements", Kind: KindPlan, Scope: PlanMilestoneScope},
+	{Canonical: "Implements", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeSpecIDs, Required: true},
+	{Canonical: "Priority", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Status", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Complexity", Kind: KindPlan, Scope: PlanTaskScope},
+	{Canonical: "Depends on", Kind: KindPlan, Scope: PlanTaskScope, Aliases: []string{"Dependencies"}}, {Canonical: "Role hint", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Acceptance", Kind: KindPlan, Scope: PlanTaskScope},
+	{Canonical: "Acceptance slices", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeChecklist, Required: true, MinItems: 1, MaxItems: 3},
+	{Canonical: "Acceptance probes", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeCommandChecklist, Required: true},
+	{Canonical: "Work unit", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeInline, Required: true},
+	{Canonical: "Owns", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Toolchain", Kind: KindPlan, Scope: PlanTaskScope},
+	{Canonical: "Produces", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true, MinItems: 1},
+	{Canonical: "Consumes", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true},
+	{Canonical: "Verification", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeCommand, Required: true},
+	{Canonical: "Exercises", Kind: KindPlan, Scope: PlanTaskScope, Shape: ShapeArtifacts, Required: true, MinItems: 1},
+	{Canonical: "Out of scope", Kind: KindPlan, Scope: PlanTaskScope}, {Canonical: "Assumption", Kind: KindPlan, Scope: PlanTaskScope},
 }
 
 // FieldVocabulary returns a copy of the canonical, scoped field schema.
@@ -122,10 +160,20 @@ func FieldVocabulary() []FieldDefinition {
 }
 
 // FieldError describes a schema key that cannot be consumed by the parser.
-type FieldError struct{ ID, Key, Suggestion, Code string }
+type FieldError struct {
+	ID, Key, Suggestion, Code string
+	Detail                    string
+	// RelatedIDs are syntactically recognizable SPEC ids inside a malformed
+	// token. They are evidence for suppressing only the graph findings derived
+	// from that primary parse failure; they never become trace edges.
+	RelatedIDs []string
+}
 
 func (e FieldError) Error() string {
 	if e.Code != "" {
+		if e.Detail != "" {
+			return e.Code + ": " + e.Detail
+		}
 		return e.Code
 	}
 	message := fmt.Sprintf("%s unknown field **%s:**", e.ID, e.Key)
@@ -215,6 +263,7 @@ func Parse(content string, kind Kind) (*Document, error) {
 	if fm, rest, ok := splitFrontmatter(content); ok {
 		doc.Front = parseFrontmatter(fm)
 		doc.FieldErrors = append(doc.FieldErrors, grammarDiagnostic(doc.Front)...)
+		doc.FieldErrors = append(doc.FieldErrors, frontmatterDiagnostics(doc.Front)...)
 		body = rest
 	}
 
@@ -385,6 +434,198 @@ func SyntaxLint(content string, kind Kind) ([]FieldError, error) {
 	return append([]FieldError(nil), doc.FieldErrors...), nil
 }
 
+// ContractLint validates the complete deterministic shape of a candidate.
+// It intentionally does not inspect coverage, dependencies, repository state,
+// or prose meaning; those belong to graph and semantic review layers.
+func ContractLint(content string, kind Kind) ([]FieldError, error) {
+	doc, err := Parse(content, kind)
+	if err != nil {
+		return nil, err
+	}
+	diagnostics := append([]FieldError(nil), doc.FieldErrors...)
+	if kind == KindPlan {
+		diagnostics = append(diagnostics, planContractDiagnostics(doc)...)
+	}
+	return diagnostics, nil
+}
+
+func planContractDiagnostics(doc *Document) []FieldError {
+	if len(doc.Sections) == 0 {
+		return []FieldError{{Key: "milestone", Code: "invalid_plan_structure", Detail: "plan has no M-NN milestone sections"}}
+	}
+	var diagnostics []FieldError
+	for _, milestone := range doc.Sections {
+		if len(milestone.Children) == 0 {
+			diagnostics = append(diagnostics, FieldError{ID: milestone.ID, Key: "task", Code: "invalid_plan_structure", Detail: milestone.ID + " has no T-NNN task sections"})
+		}
+		for _, task := range milestone.Children {
+			if !strings.HasPrefix(task.ID, "T-") {
+				diagnostics = append(diagnostics, FieldError{ID: task.ID, Key: "task", Code: "invalid_plan_structure", Detail: fmt.Sprintf("%s is not a T-NNN task id", task.ID)})
+			}
+			diagnostics = append(diagnostics, planTaskContractDiagnostics(task)...)
+		}
+	}
+	return diagnostics
+}
+
+func planTaskContractDiagnostics(task Section) []FieldError {
+	var diagnostics []FieldError
+	rules := fieldDefinitions(KindPlan, PlanTaskScope)
+	for _, rule := range rules {
+		if !rule.Required {
+			continue
+		}
+		key := strings.ToLower(rule.Canonical)
+		value, present := task.Fields[key]
+		block := fieldBlock(task.Body, rule.Canonical)
+		if !present {
+			diagnostics = append(diagnostics, FieldError{ID: task.ID, Key: rule.Canonical, Code: "missing_required_field", Detail: fmt.Sprintf("%s has no **%s:** field", task.ID, rule.Canonical)})
+			continue
+		}
+		switch rule.Shape {
+		case ShapeInline:
+			if strings.TrimSpace(value) == "" {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "write one non-empty inline value"))
+			}
+		case ShapeChecklist:
+			items, nested := markdownListItems(block)
+			if len(items) < rule.MinItems || (rule.MaxItems > 0 && len(items) > rule.MaxItems) {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, fmt.Sprintf("use %d-%d flat top-level list items", rule.MinItems, rule.MaxItems)))
+			} else if nested {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "use a flat list without nested items"))
+			}
+		case ShapeCommandChecklist:
+			items, nested := markdownListItems(block)
+			slices, _ := markdownListItems(fieldBlock(task.Body, "Acceptance slices"))
+			validCommands := len(items) == len(slices) && len(items) > 0 && !nested
+			for _, item := range items {
+				if len(backtickCommands(item)) != 1 {
+					validCommands = false
+				}
+			}
+			if !validCommands {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, fmt.Sprintf("provide exactly one backtick command for each of the %d Acceptance slices", len(slices))))
+			}
+		case ShapeArtifacts:
+			if rule.MinItems > 0 && len(commaItems(value)) < rule.MinItems {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "name at least one artifact; `none` is not valid here"))
+			}
+		case ShapeCommand:
+			commands := backtickCommands(strings.Join(block, "\n"))
+			if len(commands) != 1 {
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "provide exactly one executable command in one backtick span; join dependent steps inside that command"))
+			}
+		}
+	}
+	return diagnostics
+}
+
+func invalidFieldShape(id string, rule FieldDefinition, remedy string) FieldError {
+	return FieldError{ID: id, Key: rule.Canonical, Code: "invalid_field_shape", Detail: fmt.Sprintf("%s **%s:** must be %s; %s", id, rule.Canonical, rule.Shape, remedy)}
+}
+
+func fieldDefinitions(kind Kind, scope FieldScope) []FieldDefinition {
+	var out []FieldDefinition
+	for _, definition := range fieldVocabulary {
+		if definition.Kind == kind && definition.Scope == scope {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+// PlanTaskGrammar describes the public grammar from the same rules consumed
+// by ContractLint. Callers can present it without maintaining another list.
+func PlanTaskGrammar() string {
+	var lines []string
+	for _, rule := range fieldDefinitions(KindPlan, PlanTaskScope) {
+		if rule.Shape == "" {
+			continue
+		}
+		required := "optional"
+		if rule.Required {
+			required = "required"
+		}
+		shape := string(rule.Shape)
+		if rule.MinItems > 0 && rule.MaxItems > 0 {
+			shape += fmt.Sprintf(" (%d-%d items)", rule.MinItems, rule.MaxItems)
+		}
+		lines = append(lines, fmt.Sprintf("**%s:** %s; %s", rule.Canonical, shape, required))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fieldBlock(body, name string) []string {
+	lines := strings.Split(body, "\n")
+	var out []string
+	inside := false
+	for _, line := range lines {
+		key, value, bold, ok := parseFieldLine(line)
+		if !inside {
+			if ok && strings.EqualFold(strings.TrimSpace(key), name) {
+				inside = true
+				if value != "" {
+					out = append(out, value)
+				}
+			}
+			continue
+		}
+		if ok {
+			_, canonical := canonicalField(key, KindPlan, PlanTaskScope)
+			if bold || canonical {
+				break
+			}
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "##") {
+			break
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+var markdownListItem = regexp.MustCompile(`^(?:[-*]|[0-9]+\.)\s+(.+)$`)
+var backtickCommand = regexp.MustCompile("`([^`\\n]+)`")
+
+func markdownListItems(lines []string) ([]string, bool) {
+	var items []string
+	nested := false
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		match := markdownListItem.FindStringSubmatch(trimmed)
+		if match == nil {
+			continue
+		}
+		if len(line) != len(trimmed) {
+			nested = true
+			continue
+		}
+		items = append(items, match[1])
+	}
+	return items, nested
+}
+
+func backtickCommands(value string) []string {
+	var out []string
+	for _, match := range backtickCommand.FindAllStringSubmatch(value, -1) {
+		if strings.TrimSpace(match[1]) != "" {
+			out = append(out, strings.TrimSpace(match[1]))
+		}
+	}
+	return out
+}
+
+func commaItems(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(strings.Trim(item, "`"))
+		if item != "" && !strings.EqualFold(item, "none") && item != "-" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 // parseSectionFields extracts valid `**Key:** value` lines and trace edges.
 func parseSectionFields(s *Section, body string, context ...interface{}) {
 	kind, scope := fieldContext(s, context...)
@@ -412,7 +653,15 @@ func parseSectionFields(s *Section, body string, context ...interface{}) {
 			}
 		}
 		if key == "implements" {
-			s.Implements = append(s.Implements, splitIDs(value)...)
+			expected := ""
+			if kind == KindSpec {
+				expected = "REQ"
+			} else if kind == KindPlan && scope == PlanTaskScope {
+				expected = "SPEC"
+			}
+			ids, fieldErrors := parseIDField(s.ID, canonical, value, expected)
+			s.Implements = append(s.Implements, ids...)
+			s.FieldErrors = append(s.FieldErrors, fieldErrors...)
 		}
 	}
 }
@@ -519,8 +768,9 @@ func min(values ...int) int {
 	return result
 }
 
-// splitIDs parses a comma-separated id list, ignoring anything that is not an
-// id so a prose aside does not become a phantom edge.
+// splitIDs parses a comma-separated id list for tolerant, non-contract fields
+// such as Depends on. Implements uses parseIDField and never drops malformed
+// machine-readable tokens silently.
 func splitIDs(v string) []string {
 	var out []string
 	for _, part := range strings.Split(v, ",") {
@@ -536,6 +786,81 @@ func splitIDs(v string) []string {
 	}
 	return out
 }
+
+var embeddedID = regexp.MustCompile(`[A-Z]+-[0-9]+`)
+var idRange = regexp.MustCompile(`^(SPEC)-([0-9]+)\s*[-–—]\s*(SPEC)-([0-9]+)$`)
+
+// parseIDField implements grammar 2's literal list syntax. A valid item is one
+// bare ID and items are separated only by commas. Related ids are retained on
+// malformed diagnostics so graph validation can suppress only consequences
+// of the failed parse without treating those ids as accepted edges.
+func parseIDField(sectionID, field, value, expectedPrefix string) ([]string, []FieldError) {
+	var ids []string
+	var diagnostics []FieldError
+	for _, raw := range strings.Split(value, ",") {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			diagnostics = append(diagnostics, invalidIDDiagnostic(sectionID, field, token, "empty list item; use literal ids separated by commas"))
+			continue
+		}
+		if looksLikeID(token) {
+			prefix, _, _ := strings.Cut(token, "-")
+			if expectedPrefix != "" && prefix != expectedPrefix {
+				diagnostics = append(diagnostics, FieldError{
+					ID: sectionID, Key: field, Code: "wrong_id_kind",
+					Detail: fmt.Sprintf("%s **%s:** token %q has kind %s; use %s-NNN ids", sectionID, field, token, prefix, expectedPrefix),
+				})
+				continue
+			}
+			ids = append(ids, token)
+			continue
+		}
+
+		reason := "use one literal " + expectedPrefix + "-NNN id per comma-separated item"
+		if strings.ContainsAny(token, ";") {
+			reason = "semicolon groups are not supported; separate literal ids with commas"
+		} else if idRange.MatchString(token) {
+			reason = "ranges are not supported; expand every literal id and separate them with commas"
+		} else if matches := embeddedID.FindAllString(token, -1); len(matches) == 1 {
+			reason = "punctuation or prose around an id is not supported; use the bare literal id"
+		}
+		diagnostics = append(diagnostics, invalidIDDiagnostic(sectionID, field, token, reason))
+	}
+	return ids, diagnostics
+}
+
+func invalidIDDiagnostic(sectionID, field, token, reason string) FieldError {
+	return FieldError{
+		ID: sectionID, Key: field, Code: "invalid_id_token",
+		Detail:     fmt.Sprintf("%s unparsed token %q in **%s:**; %s", sectionID, token, field, reason),
+		RelatedIDs: relatedSpecIDs(token),
+	}
+}
+
+func relatedSpecIDs(token string) []string {
+	if match := idRange.FindStringSubmatch(token); match != nil {
+		first, firstErr := strconv.Atoi(match[2])
+		last, lastErr := strconv.Atoi(match[4])
+		if firstErr == nil && lastErr == nil && first <= last && last-first <= 1000 {
+			out := make([]string, 0, last-first+1)
+			for n := first; n <= last; n++ {
+				out = append(out, fmt.Sprintf("SPEC-%03d", n))
+			}
+			return out
+		}
+	}
+	var out []string
+	for _, id := range embeddedID.FindAllString(token, -1) {
+		if strings.HasPrefix(id, "SPEC-") && validID(id, "SPEC") {
+			out = append(out, canonicalID(id, "SPEC"))
+		}
+	}
+	return out
+}
+
+// FormatTaskImplements renders the exact delimiter accepted by the grammar-2
+// task Implements parser.
+func FormatTaskImplements(ids []string) string { return strings.Join(ids, ", ") }
 
 func looksLikeID(s string) bool {
 	for _, prefix := range []string{"INT-", "REQ-", "SPEC-", "M-", "T-", "B-", "ADR-"} {
@@ -589,9 +914,12 @@ func parseFrontmatter(fm string) Frontmatter {
 			f.Project = val
 		case "grammar":
 			f.grammarSet = true
+			f.grammarRaw = val
 			n, _ := strconv.Atoi(val)
 			f.Grammar = n
 		case "version":
+			f.versionSet = true
+			f.versionRaw = val
 			n, _ := strconv.Atoi(val)
 			f.Version = n
 		case "updated_at":
@@ -619,8 +947,22 @@ func grammarDiagnostic(f Frontmatter) []FieldError {
 	if !f.grammarSet {
 		return []FieldError{{Code: "legacy_grammar"}}
 	}
-	if f.Grammar != 2 {
-		return []FieldError{{Code: "unsupported_grammar"}}
+	if _, err := strconv.Atoi(f.grammarRaw); err != nil {
+		return []FieldError{{Key: "grammar", Code: "invalid_frontmatter", Detail: fmt.Sprintf("grammar must be an integer, got %q", f.grammarRaw)}}
+	}
+	if f.Grammar != CurrentGrammar {
+		return []FieldError{{Key: "grammar", Code: "unsupported_grammar", Detail: fmt.Sprintf("grammar %d is not supported; use grammar: %d", f.Grammar, CurrentGrammar)}}
+	}
+	return nil
+}
+
+func frontmatterDiagnostics(f Frontmatter) []FieldError {
+	if !f.versionSet {
+		return nil
+	}
+	n, err := strconv.Atoi(f.versionRaw)
+	if err != nil || n < 0 {
+		return []FieldError{{Key: "version", Code: "invalid_frontmatter", Detail: fmt.Sprintf("version must be a non-negative integer, got %q", f.versionRaw)}}
 	}
 	return nil
 }

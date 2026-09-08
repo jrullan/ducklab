@@ -73,6 +73,7 @@ func WriteProposalProvenance(projectRoot string, kind Kind, doc *Document, runID
 		return err
 	}
 	doc.Front.Kind = kind
+	doc.Front.Grammar = CurrentGrammar
 	doc.Front.Version = current.Front.Version + 1
 	doc.Front.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	doc.Front.RunID = runID

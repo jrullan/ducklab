@@ -531,6 +531,7 @@ the body is the human's and the model's.
 ---
 kind: intent | requirements | spec | plan | adr | review | release | project
 project: miempresa
+grammar: 2                 # shared artifact grammar; independent of revision
 version: 3                 # bumped on every write
 updated_at: 2026-07-25T15:30:12Z
 run_id: r-20260725-153012-k7q2   # run that produced this version
@@ -604,12 +605,38 @@ without an `Implements:` line is a trace error.
 
 ### T-003 — Implement session token issuance
 **Implements:** SPEC-004
-**Complexity:** medium
+**Work unit:** Issue a session token after valid credentials
+**Acceptance slices:**
+- Valid credentials produce a signed session token
+**Acceptance probes:**
+1. `go test ./internal/session -run TestIssueToken`
+**Produces:** file:internal/session/token.go
+**Consumes:** capability:credential-validation
 **Depends on:** T-001
-**Role hint:** implementer
-
-What done looks like, in one or two sentences.
+**Verification:** `go test ./internal/session`
+**Exercises:** file:internal/session/token.go
 ```
+
+Grammar 2 treats these task fields as a machine-readable contract:
+
+- `Implements` is required and contains only literal `SPEC-NNN` ids separated
+  by commas, for example `SPEC-004, SPEC-007`. Ranges (`SPEC-004–SPEC-007`),
+  semicolon groups, terminal punctuation (`SPEC-004.`), prose, and ids of
+  another kind such as `REQ-004` are invalid. Expand every id literally.
+- `Work unit` is one required, non-empty inline value.
+- `Acceptance slices` is a required flat list of 1–3 observable outcomes.
+- `Acceptance probes` is a required flat list with exactly one numbered,
+  backtick-delimited command for each acceptance slice, in the same order.
+- `Produces` and `Exercises` are required comma-separated artifact lists with
+  at least one item. `Consumes` is required and may be `none`.
+- `Verification` is required and contains exactly one backtick-delimited
+  command. Put dependent shell steps inside that one span, for example
+  `` `generate && test` ``; multiple independent command spans are invalid.
+
+Milestones are `## M-NN` sections and contain one or more `### T-NNN` tasks.
+These shape checks are deterministic syntax validation. Trace coverage,
+dependency validity, repository state, and the meaning of prose are checked by
+separate graph, execution, or semantic layers.
 
 ### 5.6 `project.md` — rolling project memory
 

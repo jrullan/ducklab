@@ -721,20 +721,12 @@ func TestProposalGateReportsLocalizedFieldErrorsBeforeGraphCascade(t *testing.T)
 }
 
 func TestCandidateSyntaxLintIsReadOnlyAndUsesCompletePlanVocabulary(t *testing.T) {
-	var milestone, task strings.Builder
-	for _, definition := range artifact.FieldVocabulary() {
-		if definition.Kind != artifact.KindPlan {
-			continue
-		}
-		line := "**" + definition.Canonical + ":** value\n"
-		if definition.Scope == artifact.PlanMilestoneScope {
-			milestone.WriteString(line)
-		} else if definition.Scope == artifact.PlanTaskScope {
-			task.WriteString(line)
-		}
-	}
-	candidate := "## M-01 — Localized prose is allowed\n\n" + milestone.String() +
-		"\n### T-001 — Task\n\n" + task.String()
+	candidate := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
+		"## M-01 — Localized prose is allowed\n\n**Owns:** src/\n\n" +
+		"### T-001 — Task\n\n**Implements:** SPEC-001\n\n**Work unit:** deliver one capability\n\n" +
+		"**Acceptance slices:**\n- the capability is delivered\n\n" +
+		"**Acceptance probes:**\n1. `go test ./...`\n\n**Produces:** file:src/main.go\n\n" +
+		"**Consumes:** none\n\n**Verification:** `go test ./...`\n\n**Exercises:** file:src/main.go\n"
 	errs, err := CandidateSyntaxLint(candidate, artifact.KindPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -747,8 +739,44 @@ func TestCandidateSyntaxLintIsReadOnlyAndUsesCompletePlanVocabulary(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(errs) != 2 || errs[0].Suggestion != "Implements" || errs[1].Suggestion != "" {
-		t.Fatalf("syntax lint diagnostics = %+v, want localized suggestion and unrelated unknown field", errs)
+	if !slices.ContainsFunc(errs, func(err artifact.FieldError) bool { return err.Suggestion == "Implements" }) ||
+		!slices.ContainsFunc(errs, func(err artifact.FieldError) bool { return err.Key == "Unrelated" && err.Suggestion == "" }) {
+		t.Fatalf("syntax lint diagnostics = %+v, want localized suggestion and unrelated unknown field among contract diagnostics", errs)
+	}
+}
+
+func TestCandidateSyntaxLintReportsCompletePlanContractFailures(t *testing.T) {
+	candidate := "---\nkind: plan\ngrammar: 2\nversion: canonical-1\n---\n\n" +
+		"## M-01 — Core\n\n### T-001 — Invalid task\n\n" +
+		"**Implements:** SPEC-001\n\n**Work unit:** deliver one capability\n\n" +
+		"**Acceptance slices:**\n- first outcome\n- second outcome\n\n" +
+		"**Acceptance probes:**\n1. prose is not executable\n2. `go test ./...`\n\n" +
+		"**Consumes:** none\n\n**Verification:** `go test ./...` and `go vet ./...`\n"
+
+	errs, err := CandidateSyntaxLint(candidate, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := make([]string, 0, len(errs))
+	for _, diagnostic := range errs {
+		joined = append(joined, diagnostic.Error())
+	}
+	got := strings.Join(joined, "\n")
+	for _, want := range []string{
+		"invalid_frontmatter: version must be a non-negative integer",
+		"T-001 **Acceptance probes:** must be flat markdown list with one backtick command per item",
+		"T-001 has no **Produces:** field",
+		"T-001 **Verification:** must be one backtick command",
+		"T-001 has no **Exercises:** field",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("contract diagnostics lack %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{"unimplemented_spec", "dependency", "coverage"} {
+		if strings.Contains(strings.ToLower(got), forbidden) {
+			t.Errorf("candidate lint performed graph/semantic check %q:\n%s", forbidden, got)
+		}
 	}
 }
 
