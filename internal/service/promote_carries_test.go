@@ -204,6 +204,109 @@ func TestPromotingAStoredSplitCreatesLanesAndWaitsForEveryPortion(t *testing.T) 
 
 // A bug promoted without being triaged keeps working: the report is all there
 // is, and it is enough to start from.
+// A split task's portion contract must stand before the inherited report. The
+// report deliberately names both lanes: it is useful context, but must not
+// silently turn the sibling's acceptance or files into this task's contract.
+func TestPromotedPortionsBoundParentContextBehindTheirOwnContracts(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
+	if _, err := s.BugAdd(context.Background(), id, BugRequest{
+		Title: "proposal gates need canonical vocabulary and integration",
+		Body:  "## Problem\n\nBoth portions are needed for the complete fix.\n\n## Required behavior\n\n- canonical artifact vocabulary is rendered\n- proposal gates run during stage integration\n\n## Regression\n\nThe integration lane changes internal/service/trace.go and internal/service/structurecheck.go.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	proposal := []interface{}{
+		map[string]interface{}{
+			"title":      "Render canonical artifact vocabulary",
+			"acceptance": []interface{}{"canonical artifact vocabulary is rendered"},
+			"owns":       []interface{}{"internal/service/stages.go"},
+		},
+		map[string]interface{}{
+			"title":      "Integrate proposal gates",
+			"acceptance": []interface{}{"proposal gates run during stage integration"},
+			"owns":       []interface{}{"internal/service/trace.go", "internal/service/structurecheck.go"},
+		},
+	}
+	if _, err := s.ApplyTriage(context.Background(), id, []map[string]interface{}{{
+		"bug":             "B-001",
+		"severity":        "high",
+		"proposal":        proposal,
+		"deliverables":    []string{"render the canonical vocabulary", "run proposal gates during integration"},
+		"component":       "proposal gates",
+		"suspected_files": []string{"internal/service/stages.go", "internal/service/trace.go", "internal/service/structurecheck.go"},
+		"reason":          "the report spans the rendering and integration lanes",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BugPromote(context.Background(), id, "B-001", "human"); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := s.TaskList(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		acceptance        string
+		owns              []string
+		siblingAcceptance string
+		siblingOwns       []string
+	}{
+		"Render canonical artifact vocabulary": {
+			acceptance:        "canonical artifact vocabulary is rendered",
+			owns:              []string{"internal/service/stages.go"},
+			siblingAcceptance: "proposal gates run during stage integration",
+			siblingOwns:       []string{"internal/service/trace.go", "internal/service/structurecheck.go"},
+		},
+		"Integrate proposal gates": {
+			acceptance:        "proposal gates run during stage integration",
+			owns:              []string{"internal/service/trace.go", "internal/service/structurecheck.go"},
+			siblingAcceptance: "canonical artifact vocabulary is rendered",
+			siblingOwns:       []string{"internal/service/stages.go"},
+		},
+	}
+	found := 0
+	for _, task := range tasks {
+		portion, ok := want[task.Title]
+		if !ok {
+			continue
+		}
+		found++
+		marker := "## Parent context (non-binding)"
+		at := strings.Index(task.Body, marker)
+		if at < 0 {
+			t.Errorf("%q does not mark inherited parent context as non-binding:\n%s", task.Title, task.Body)
+			continue
+		}
+		contract, parent := task.Body[:at], task.Body[at+len(marker):]
+		if !strings.Contains(contract, portion.acceptance) {
+			t.Errorf("%q's acceptance is not in its authoritative contract:\n%s", task.Title, contract)
+		}
+		for _, own := range portion.owns {
+			if !strings.Contains(contract, own) {
+				t.Errorf("%q's own lane %q is not before parent context:\n%s", task.Title, own, contract)
+			}
+		}
+		if strings.Contains(contract, portion.siblingAcceptance) {
+			t.Errorf("%q treats sibling acceptance as its work contract:\n%s", task.Title, contract)
+		}
+		for _, siblingOwn := range portion.siblingOwns {
+			if strings.Contains(contract, siblingOwn) {
+				t.Errorf("%q treats sibling lane %q as its work contract:\n%s", task.Title, siblingOwn, contract)
+			}
+		}
+		for _, inherited := range []string{"## Problem", "## Triage", "proposal gates"} {
+			if !strings.Contains(parent, inherited) {
+				t.Errorf("%q lost inherited parent context %q after marker:\n%s", task.Title, inherited, parent)
+			}
+		}
+	}
+	if found != len(want) {
+		t.Fatalf("promoted portions found = %d, want %d", found, len(want))
+	}
+}
+
 func TestAnUntriagedBugStillPromotes(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, _ := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: planDoc})
