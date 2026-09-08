@@ -1452,11 +1452,7 @@ func (s *Service) TraceCheck(ctx context.Context, projectID string) (*TraceResul
 // semantic oracle; prose may be localized, but schema keys are canonical and
 // are not translated.
 func CandidateSyntaxLint(content string, kind artifact.Kind) ([]artifact.FieldError, error) {
-	doc, err := artifact.Parse(content, kind)
-	if err != nil {
-		return nil, err
-	}
-	return append([]artifact.FieldError(nil), doc.FieldErrors...), nil
+	return artifact.ContractLint(content, kind)
 }
 
 // SyntaxLintCandidate is an explicit read-only alias for callers validating a

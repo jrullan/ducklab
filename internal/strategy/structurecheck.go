@@ -1597,7 +1597,7 @@ func reconcilePlanManifestMode(outcome *agent.Outcome, manifest *agent.PlanManif
 			}
 			if full {
 				fields = append([]struct{ name, value string }{
-					{"Implements", strings.Join(task.Implements, ", ")},
+					{"Implements", artifact.FormatTaskImplements(task.Implements)},
 					{"Acceptance slices", manifestAcceptanceSlices(task.AcceptanceSlices)},
 					{"Acceptance probes", manifestAcceptanceProbes(task.AcceptanceProbes)},
 				}, fields...)

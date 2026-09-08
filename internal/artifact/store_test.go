@@ -45,6 +45,21 @@ func TestProposalDoesNotTouchTheArtifact(t *testing.T) {
 	}
 }
 
+func TestProposalWritesCurrentGrammarWithoutOverloadingRevision(t *testing.T) {
+	root := emptyProject(t)
+	if err := WriteProposal(root, KindPlan, doc(Section{ID: "M-01", Title: "Core"}), "r-grammar", nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(ProposedPath(root, KindPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "grammar: 2\n") || !strings.Contains(text, "version: 1\n") {
+		t.Fatalf("proposal frontmatter does not separate grammar from revision:\n%s", text)
+	}
+}
+
 func TestProposalSeparatesParticipantsFromConfiguredRoster(t *testing.T) {
 	root := emptyProject(t)
 	err := WriteProposalProvenance(root, KindSpec, doc(Section{ID: "SPEC-001", Title: "Audit"}), "r-p",

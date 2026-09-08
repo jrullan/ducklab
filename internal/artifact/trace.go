@@ -36,6 +36,7 @@ const (
 	DuplicateProducer TraceErrorKind = "duplicate_producer"
 	MissingDependency TraceErrorKind = "missing_producer_dependency"
 	UnknownField      TraceErrorKind = "unknown_field"
+	InvalidField      TraceErrorKind = "invalid_field"
 )
 
 // TraceError is one break, with enough detail to act on.
@@ -211,11 +212,17 @@ func CheckPlan(spec, plan *Document) []TraceError {
 	// Unknown schema keys are primary parse failures. In particular, a
 	// near-miss for Implements means the graph has no edge to inspect; do not
 	// turn that one repair into a misleading task/spec cascade.
-	invalidImplements := map[string][]string{}
+	invalidImplements := map[string][]FieldError{}
 	for _, fieldErr := range plan.FieldErrors {
-		errs = append(errs, TraceError{Kind: UnknownField, ID: fieldErr.ID, Detail: strings.TrimPrefix(fieldErr.Error(), fieldErr.ID+" ")})
-		if fieldErr.Suggestion == "Implements" {
-			invalidImplements[fieldErr.ID] = append(invalidImplements[fieldErr.ID], fieldErr.Key)
+		if fieldErr.Code != "legacy_grammar" {
+			kind := UnknownField
+			if fieldErr.Code != "" {
+				kind = InvalidField
+			}
+			errs = append(errs, TraceError{Kind: kind, ID: fieldErr.ID, Detail: strings.TrimPrefix(fieldErr.Error(), fieldErr.ID+" ")})
+		}
+		if fieldErr.Suggestion == "Implements" || (fieldErr.Key == "Implements" && (fieldErr.Code == "invalid_id_token" || fieldErr.Code == "wrong_id_kind")) {
+			invalidImplements[fieldErr.ID] = append(invalidImplements[fieldErr.ID], fieldErr)
 		}
 	}
 	specIDs := map[string]Section{}
@@ -263,8 +270,11 @@ func CheckPlan(spec, plan *Document) []TraceError {
 
 	invalidCoverage := map[string]bool{}
 	for _, task := range tasks {
-		for _, key := range invalidImplements[task.ID] {
-			for _, target := range invalidFieldIDs(task.Body, key) {
+		for _, fieldErr := range invalidImplements[task.ID] {
+			for _, target := range fieldErr.RelatedIDs {
+				invalidCoverage[target] = true
+			}
+			for _, target := range invalidFieldIDs(task.Body, fieldErr.Key) {
 				invalidCoverage[target] = true
 			}
 		}
@@ -309,8 +319,8 @@ func invalidFieldIDs(body, key string) []string {
 // findings while retaining stable kind/id ordering within each class.
 func sortTraceErrors(errs []TraceError) {
 	sort.Slice(errs, func(i, j int) bool {
-		primaryI := errs[i].Kind == UnknownField
-		primaryJ := errs[j].Kind == UnknownField
+		primaryI := errs[i].Kind == UnknownField || errs[i].Kind == InvalidField
+		primaryJ := errs[j].Kind == UnknownField || errs[j].Kind == InvalidField
 		if primaryI != primaryJ {
 			return primaryI
 		}

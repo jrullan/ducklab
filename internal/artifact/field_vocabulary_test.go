@@ -11,7 +11,11 @@ func TestSyntaxLintPlanFieldVocabulary(t *testing.T) {
 		if definition.Kind != KindPlan {
 			continue
 		}
-		line := "**" + definition.Canonical + ":** value\n"
+		value := "value"
+		if definition.Canonical == "Implements" {
+			value = "SPEC-001"
+		}
+		line := "**" + definition.Canonical + ":** " + value + "\n"
 		if definition.Scope == PlanMilestoneScope {
 			milestone.WriteString(line)
 		} else if definition.Scope == PlanTaskScope {
