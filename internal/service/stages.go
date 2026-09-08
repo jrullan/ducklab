@@ -1868,7 +1868,11 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 			b.WriteString("\nRead-only inputs: " + strings.Join(inputs, ", ") + ". Consuming an artifact authorizes reading and using its public contract, not redefining or modifying its owner.\n")
 		}
 		if strings.TrimSpace(task.Body) != "" {
-			b.WriteString("\n" + strings.TrimSpace(task.Body) + "\n")
+			body := strings.TrimSpace(task.Body)
+			if strings.Contains(body, "## Parent context (non-binding)") {
+				b.WriteString("\nThe current portion contract above is authoritative. Parent context is evidence only; do not require or implement sibling deliverables or modify sibling-owned files.\n")
+			}
+			b.WriteString("\n" + body + "\n")
 		}
 		if len(task.Implements) > 0 {
 			// Who else delivers these sections, and therefore what is not this

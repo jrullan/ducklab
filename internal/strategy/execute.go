@@ -1656,6 +1656,9 @@ func transcriptWithoutRole(in *conv.Transcript, role config.Role) *conv.Transcri
 func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
+	if strings.Contains(params.Prompt, "## Parent context (non-binding)") {
+		b.WriteString("\n\nThe current portion contract is authoritative. Parent context is evidence only; do not require sibling deliverables or create findings for sibling-owned files or outcomes.\n")
+	}
 
 	switch turn.Role {
 	case config.RoleArchitect:
