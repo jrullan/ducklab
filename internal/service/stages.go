@@ -1869,6 +1869,14 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 		}
 		if strings.TrimSpace(task.Body) != "" {
 			body := strings.TrimSpace(task.Body)
+			if contract, evidence, legacy := legacyPromotedTaskParts(body); legacy {
+				// Early promotions stored their current Acceptance/Owns followed by
+				// the complete report without a boundary marker. Reconstruct that
+				// boundary at execution time: the structured portion is the contract;
+				// the inherited report remains useful, non-binding evidence.
+				body = "## Current portion contract (authoritative)\n\n" + contract +
+					"\n\n## Parent context (non-binding)\n\n" + evidence
+			}
 			if strings.Contains(body, "## Parent context (non-binding)") {
 				b.WriteString("\nThe current portion contract above is authoritative. Parent context is evidence only; do not require or implement sibling deliverables or modify sibling-owned files.\n")
 			}
@@ -1901,6 +1909,48 @@ func (s *Service) buildTaskPrompt(ctx context.Context, projectID, projectRoot, t
 		b.WriteString(artifact.RenderFailedAttempts(prior))
 	}
 	return b.String()
+}
+
+// legacyPromotedTaskParts recognizes pre-boundary bug promotions. Their structured
+// Acceptance and Owns precede the copied report; only that prefix is a contract.
+func legacyPromotedTaskParts(body string) (contract, evidence string, ok bool) {
+	if strings.Contains(body, "## Parent context (non-binding)") {
+		return "", "", false
+	}
+	at := strings.Index(body, "## Reported")
+	if at < 0 || !strings.Contains(body[:at], "**Acceptance:**") || !strings.Contains(body[:at], "**Owns:**") {
+		return "", "", false
+	}
+	contract = strings.TrimSpace(body[:at])
+	evidence = strings.TrimSpace(body[at:])
+	return contract, evidence, evidence != ""
+}
+
+// legacyPromotedAcceptance extracts the current structured Acceptance block,
+// rather than an inherited report's Deliverables block.
+func legacyPromotedAcceptance(body string) []string {
+	contract, _, ok := legacyPromotedTaskParts(body)
+	if !ok {
+		return nil
+	}
+	at := strings.Index(contract, "**Acceptance:**")
+	if at < 0 {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(contract[at+len("**Acceptance:**"):], "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "-") {
+			if len(out) > 0 && line != "" {
+				break
+			}
+			continue
+		}
+		if item := strings.TrimSpace(strings.TrimPrefix(line, "-")); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // scopeNote tells a task what is its part of a spec section, and what is not.

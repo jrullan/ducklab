@@ -952,5 +952,8 @@ func (s *Service) taskDeliverables(ctx context.Context, projectID, taskID string
 	if task == nil {
 		return nil
 	}
+	if acceptance := legacyPromotedAcceptance(task.Body); len(acceptance) > 0 {
+		return acceptance
+	}
 	return strategy.ExtractDeliverables(task.Title, task.Body)
 }

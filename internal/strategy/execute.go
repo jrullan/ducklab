@@ -1651,13 +1651,27 @@ func transcriptWithoutRole(in *conv.Transcript, role config.Role) *conv.Transcri
 	return out
 }
 
+// hasParentEvidence recognizes both current bounded portions and pre-marker
+// promotions passed directly by callers that have not yet reconstructed one.
+func hasParentEvidence(prompt string) bool {
+	if strings.Contains(prompt, "## Parent context (non-binding)") {
+		return true
+	}
+	reported := strings.Index(prompt, "## Reported")
+	if reported < 0 {
+		return false
+	}
+	contract := prompt[:reported]
+	return strings.Contains(contract, "**Acceptance:**") && strings.Contains(contract, "**Owns:**")
+}
+
 // buildPrompt assembles the turn's user prompt: the task, the previous round's
 // review if this is an implementer, and the diff if this is a reviewer.
 func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, findings []conv.Finding, correctiveNotes []string, operational string, report *DeliverablesReport, lastReview *reviewMemory, looked []string) (string, error) {
 	var b strings.Builder
 	b.WriteString(params.Prompt)
-	if strings.Contains(params.Prompt, "## Parent context (non-binding)") {
-		b.WriteString("\n\nThe current portion contract is authoritative. Parent context is evidence only; do not require sibling deliverables or create findings for sibling-owned files or outcomes.\n")
+	if hasParentEvidence(params.Prompt) {
+		b.WriteString("\n\nThe current portion contract is authoritative. Parent context is evidence only; do not require sibling deliverables or create findings for sibling-owned files or outcomes. This applies equally to legacy promotions whose boundary was reconstructed before execution.\n")
 	}
 
 	switch turn.Role {
