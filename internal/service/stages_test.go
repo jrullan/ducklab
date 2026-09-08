@@ -315,6 +315,66 @@ func TestBuildPromptCarriesProjectMemory(t *testing.T) {
 }
 
 // A task ducklab knows nothing about must still produce a usable prompt.
+// A historical bug promotion predates the parent-context marker. Its stored
+// body still has the complete promotion envelope: current structured fields
+// followed by the reporter's inherited evidence. Only the current Acceptance
+// and Owns define this task's work; sibling report deliverables and lanes must
+// remain evidence.
+func TestLegacyPromotedTaskPromptBoundsStructuredContract(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Reported bugs\n\n### T-262 — Harden legacy task prompt construction\n\n**Acceptance:**\n- legacy promoted tasks use their structured contract\n\n**Owns:** internal/strategy/execute.go\n\nFixes B-348.\n\n## Reported\n\nThe parent plan also needs sibling lint work.\n\n## Deliverables\n- reserve plan-v2 lint grammar for sibling tasks\n\nSibling lane: internal/service/stages.go.\n",
+	})
+
+	prompt := s.buildTaskPrompt(context.Background(), id, dir, "T-262")
+	deliverables := s.taskDeliverables(context.Background(), id, "T-262")
+	if len(deliverables) != 1 || deliverables[0] != "legacy promoted tasks use their structured contract" {
+		t.Fatalf("legacy task checklist = %v; want only its structured Acceptance", deliverables)
+	}
+
+	marker := "## Parent context (non-binding)"
+	at := strings.Index(prompt, marker)
+	if at < 0 {
+		t.Fatalf("legacy promotion was not demoted to non-binding evidence:\n%s", prompt)
+	}
+	contract, evidence := prompt[:at], prompt[at+len(marker):]
+	for _, want := range []string{"legacy promoted tasks use their structured contract", "internal/strategy/execute.go"} {
+		if !strings.Contains(contract, want) {
+			t.Errorf("authoritative contract lost %q:\n%s", want, contract)
+		}
+	}
+	for _, sibling := range []string{"reserve plan-v2 lint grammar for sibling tasks", "internal/service/stages.go"} {
+		if strings.Contains(contract, sibling) {
+			t.Errorf("sibling %q became part of the legacy task contract:\n%s", sibling, contract)
+		}
+		if !strings.Contains(evidence, sibling) {
+			t.Errorf("legacy body evidence lost sibling %q:\n%s", sibling, evidence)
+		}
+	}
+	if !strings.Contains(prompt, "do not require or implement sibling deliverables or modify sibling-owned files") {
+		t.Errorf("legacy prompt lacks the bounded-scope instruction:\n%s", prompt)
+	}
+}
+
+// A normal task may cite a bug while retaining an ordinary Deliverables
+// contract. A bare Fixes line is not promotion provenance and must not cause a
+// task to be reclassified as legacy parent evidence.
+func TestNormalTaskFixesReferenceIsNotLegacyPromotion(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-01 — Maintenance\n\n### T-263 — Keep an ordinary task bounded\n\nFixes B-348.\n\n## Deliverables\n- retain this task's ordinary deliverable\n",
+	})
+
+	prompt := s.buildTaskPrompt(context.Background(), id, dir, "T-263")
+	if strings.Contains(prompt, "## Parent context (non-binding)") {
+		t.Errorf("a bare Fixes reference was incorrectly treated as legacy promotion provenance:\n%s", prompt)
+	}
+	got := s.taskDeliverables(context.Background(), id, "T-263")
+	if len(got) != 1 || got[0] != "retain this task's ordinary deliverable" {
+		t.Errorf("ordinary task checklist = %v", got)
+	}
+}
+
 func TestBuildPromptForAnUnknownTask(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

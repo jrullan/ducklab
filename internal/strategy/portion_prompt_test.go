@@ -13,6 +13,46 @@ import (
 // numbered work contract and review scope stop at the authoritative current
 // portion. Parent context can name a sibling's files and outcome without making
 // either a deliverable or a review finding for this task.
+// A persisted promotion from before the marker format must receive the same
+// implementer and reviewer warning. Its complete promotion structure, rather
+// than a bare Fixes reference, identifies the inherited report.
+func TestLegacyPromotedTaskPromptsRejectSiblingEvidence(t *testing.T) {
+	rec := &recorder{}
+	siblingOutcome := "reserve plan-v2 lint grammar for sibling tasks"
+	siblingFile := "internal/service/stages.go"
+	prompt := "T-262 — Harden legacy task prompt construction\n\n" +
+		"**Acceptance:**\n- legacy promoted tasks use their structured contract\n\n" +
+		"**Owns:** internal/strategy/execute.go\n\n" +
+		"Fixes B-348.\n\n## Reported\n\n" +
+		"## Deliverables\n- " + siblingOutcome + "\n\nSibling lane: " + siblingFile + ".\n"
+	params := pairParams(rec, "green",
+		&agent.Outcome{Text: `{"deliverables":[{"id":1,"status":"done"}]}`},
+		verdictOutcome("approve"),
+	)
+	params.Prompt = prompt
+	params.Deliverables = []string{"legacy promoted tasks use their structured contract"}
+	params.Rounds = 1
+
+	if _, err := ExecutePair(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	for i, role := range rec.roles {
+		if role != config.RoleImplementer && role != config.RoleReviewer {
+			continue
+		}
+		got := rec.prompts[i]
+		if !strings.Contains(got, "do not require sibling deliverables") {
+			t.Errorf("%s legacy prompt lacks bounded-scope instruction:\n%s", role, got)
+		}
+		if strings.Contains(got[strings.Index(got, "## Deliverables"):], "1. "+siblingOutcome) {
+			t.Errorf("%s prompt made legacy sibling outcome a numbered deliverable:\n%s", role, got)
+		}
+		if !strings.Contains(got, siblingFile) {
+			t.Errorf("%s prompt lost legacy sibling evidence:\n%s", role, got)
+		}
+	}
+}
+
 func TestPromotedPortionPromptsBindOnlyTheCurrentContract(t *testing.T) {
 	rec := &recorder{}
 	parentSiblingOutcome := "proposal gates run during stage integration"
