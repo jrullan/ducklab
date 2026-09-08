@@ -52,12 +52,16 @@ func ValidKind(s string) bool {
 
 // Frontmatter is the machine-readable header every artifact carries.
 type Frontmatter struct {
-	Kind      Kind
-	Project   string
-	Version   int
-	UpdatedAt string
-	RunID     string
-	Ducklings []string
+	Kind    Kind
+	Project string
+	// Grammar is the version of the artifact syntax, independent from Version,
+	// which identifies this revision of the document.
+	Grammar    int
+	grammarSet bool
+	Version    int
+	UpdatedAt  string
+	RunID      string
+	Ducklings  []string
 	// ConfiguredDucklings is the available roster at launch. Ducklings names
 	// only models with actual LLM calls, so provenance cannot imply that an
 	// unused configured seat participated.
@@ -118,9 +122,12 @@ func FieldVocabulary() []FieldDefinition {
 }
 
 // FieldError describes a schema key that cannot be consumed by the parser.
-type FieldError struct{ ID, Key, Suggestion string }
+type FieldError struct{ ID, Key, Suggestion, Code string }
 
 func (e FieldError) Error() string {
+	if e.Code != "" {
+		return e.Code
+	}
 	message := fmt.Sprintf("%s unknown field **%s:**", e.ID, e.Key)
 	if e.Suggestion != "" {
 		message += fmt.Sprintf("; use **%s:**", e.Suggestion)
@@ -207,6 +214,7 @@ func Parse(content string, kind Kind) (*Document, error) {
 	body := content
 	if fm, rest, ok := splitFrontmatter(content); ok {
 		doc.Front = parseFrontmatter(fm)
+		doc.FieldErrors = append(doc.FieldErrors, grammarDiagnostic(doc.Front)...)
 		body = rest
 	}
 
@@ -579,6 +587,10 @@ func parseFrontmatter(fm string) Frontmatter {
 			f.Kind = Kind(val)
 		case "project":
 			f.Project = val
+		case "grammar":
+			f.grammarSet = true
+			n, _ := strconv.Atoi(val)
+			f.Grammar = n
 		case "version":
 			n, _ := strconv.Atoi(val)
 			f.Version = n
@@ -599,6 +611,18 @@ func parseFrontmatter(fm string) Frontmatter {
 		}
 	}
 	return f
+}
+
+// grammarDiagnostic reports a grammar mismatch without rejecting a document:
+// callers can still inspect and migrate legacy artifacts.
+func grammarDiagnostic(f Frontmatter) []FieldError {
+	if !f.grammarSet {
+		return []FieldError{{Code: "legacy_grammar"}}
+	}
+	if f.Grammar != 2 {
+		return []FieldError{{Code: "unsupported_grammar"}}
+	}
+	return nil
 }
 
 func parseList(v string) []string {
@@ -622,6 +646,9 @@ func Render(doc *Document) string {
 	fmt.Fprintf(&b, "kind: %s\n", doc.Front.Kind)
 	if doc.Front.Project != "" {
 		fmt.Fprintf(&b, "project: %s\n", doc.Front.Project)
+	}
+	if doc.Front.Grammar != 0 {
+		fmt.Fprintf(&b, "grammar: %d\n", doc.Front.Grammar)
 	}
 	fmt.Fprintf(&b, "version: %d\n", doc.Front.Version)
 	if doc.Front.UpdatedAt != "" {
