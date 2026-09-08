@@ -1,11 +1,12 @@
 ---
 kind: plan
-version: 14
-updated_at: 2026-08-25T11:31:39Z
-run_id: r-20260825-112559-6ex6
-ducklings: [k3, terra, atom-local, luna, glm52]
-based_on: bccf4dbbbfe129bc
-approved_by: human
+version: 15
+updated_at: 2026-09-08T22:22:15Z
+run_id: r-20260908-221704-z22k
+ducklings: [human]
+configured_ducklings: [human]
+based_on: ee3e851e27151dd8
+approved_by: mcp:codex-mcp-client
 ---
 
 ## M-01 — Reported bugs
@@ -5307,7 +5308,6 @@ A reproducible schema-validation defect allowed an accepted localized plan to lo
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
-
 ### T-261 — Make plan diagnostics causal and lintable
 
 Fixes B-343.
@@ -5400,6 +5400,243 @@ A reproducible schema-validation defect allowed an accepted localized plan to lo
 
 This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
+### T-262 — Centralize the versioned artifact grammar
+
+Fixes B-346.
+
+**Acceptance:**
+- A common `grammar: 2` frontmatter field is parsed independently from document `version` for requirements, spec, and plan; parsing preserves `version: 41` and rendering a grammar-2 document preserves both fields.
+- A missing grammar remains readable and produces a nonblocking `legacy_grammar` diagnostic; an unknown grammar such as `99` produces distinct `unsupported_grammar` and never `legacy_grammar`.
+
+**Owns:** internal/artifact/artifact.go
+
+### T-263 — Expand read-only contract diagnostics
+
+Fixes B-346.
+
+**Acceptance:**
+- CandidateSyntaxLint returns structural diagnostics for malformed frontmatter and invalid plan contracts while avoiding semantic or graph checks.
+- Regression tests cover the canonical invalid artifact and assert all relevant findings.
+
+**Owns:** internal/service/stages.go, internal/artifact/*_test.go, internal/service/*_test.go
+
+Fixes B-346.
+
+## Reported
+
+Observed while preparing the Fledge oracle canonical-1 under Ducklab v0.9.4. The read-only CandidateSyntaxLint returned no findings although the candidate had a non-integer frontmatter version, prose under executable Acceptance probes, 26/27 tasks without the publicly required Produces field, and two independent Verification commands in T-023/T-026. Root cause: SyntaxLint returns only unknown-field vocabulary diagnostics. Also, the public plan docs do not expose the complete plan-v2 grammar enforced by the engine (Work unit, 1-3 Acceptance slices, one probe per slice, Consumes and Exercises), making a clean-room oracle impossible to author without reading internal code/checkers. Required direction: distinguish field-vocabulary lint from a full deterministic read-only artifact-contract lint; derive docs, parser/runtime, prompts and lint from one versioned grammar; validate frontmatter types, required fields, cardinality and block/command shape without invoking semantic or graph checks. Evidence: F-077 and F-078 in ~/wiki/Desarrollo/ducklab/fledge-friccion.md and canonical-1 verification in ~/wiki/Desarrollo/ducklab/fledge-oracle-plan-canonical-1-verificacion-2026-09-08.md.
+
+**Deliverables:**
+- CandidateSyntaxLint reports frontmatter type and required-field violations instead of only unknown vocabulary fields.
+- Plan-v2 validation enforces milestone/task structure, 1-3 acceptance slices, one executable probe per slice, and required Produces, Consumes, and Exercises fields.
+- Lint rejects prose in executable Acceptance probes and multiple independent Verification commands with deterministic, actionable diagnostics.
+- Public artifact grammar documentation, parser/runtime validation, prompts, and lint share one versioned grammar authority.
+
+## Triage
+
+**Component:** artifact contract lint
+**Suspected files:** internal/artifact/artifact.go, internal/service/stages.go, internal/artifact/field_vocabulary_test.go, internal/service/stages_test.go
+
+The read-only lint demonstrably returns false green for multiple invalid contract shapes, and the missing public grammar prevents clean-room artifact authoring.
+
+**Verification (triage recommends):** test-first — A plan with a non-integer version, missing Produces fields, prose acceptance content, or multiple Verification commands must return structural diagnostics without semantic graph checks.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-264 — Validate task Implements references
+
+Fixes B-347.
+
+**Acceptance:**
+- Malformed range, punctuation, semicolon, and non-SPEC tokens produce direct validation findings.
+- Valid comma-separated SPEC IDs remain intact and are attributed to the containing task.
+
+**Owns:** plan contract parser/lint
+
+Fixes B-347.
+
+## Reported
+
+Fledge oracle canonical-2 was independently accepted as grammatically and semantically correct, frozen at SHA-256 ddf28bad20673fb8ac53cdbf8a9ae1cb2267a5131952be9069a14b58ff6d3be5, and executed once against Ducklab v0.9.4. ProposalStructureFindings returned 0; CheckPlan returned 12 because splitIDs silently discarded range tokens such as SPEC-002–SPEC-005, final punctuated tokens such as SPEC-008., and semicolon groups such as SPEC-006; REQ-005. Result: 10 unjustified tasks plus SPEC-003/SPEC-008 unimplemented. Required direction: validate ID-field values in the read-only contract lint, document/render the literal comma-separated grammar, restrict task Implements to SPEC IDs, and report malformed tokens as primary causes while suppressing derived coverage cascades. Evidence: F-079 in ~/wiki/Desarrollo/ducklab/fledge-friccion.md and ~/dev/Fledge/.ducklab/oracle/plan.oracle.canonical-2.mechanical-result.md.
+
+**Deliverables:**
+- The read-only contract lint validates Implements values against the literal comma-separated SPEC-ID grammar and rejects ranges, punctuation-suffixed IDs, semicolon groups, and non-SPEC IDs.
+- Malformed ID tokens are reported as primary actionable findings with their task and field context.
+- Plan graph checking suppresses or marks unjustified-task and unimplemented-SPEC findings derived solely from malformed Implements values.
+- User-facing plan documentation and rendering state the literal comma-separated SPEC-ID grammar and task Implements restriction.
+
+## Triage
+
+**Component:** plan artifact contract lint
+
+The accepted oracle demonstrates that splitIDs silently loses malformed and grouped ID tokens, causing incorrect task coverage and secondary graph findings.
+
+**Verification (triage recommends):** test-first — Lint and plan-check fixtures can assert malformed ranges, punctuation, and semicolon groups produce primary ID errors without derived coverage cascades.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-265 — Suppress derived plan cascades
+
+Fixes B-347.
+
+**Acceptance:**
+- Malformed Implements findings are primary causes.
+- Derived coverage findings are suppressed or explicitly marked derived when caused by malformed tokens.
+
+**Owns:** plan graph/checker diagnostics
+
+Fixes B-347.
+
+## Reported
+
+Fledge oracle canonical-2 was independently accepted as grammatically and semantically correct, frozen at SHA-256 ddf28bad20673fb8ac53cdbf8a9ae1cb2267a5131952be9069a14b58ff6d3be5, and executed once against Ducklab v0.9.4. ProposalStructureFindings returned 0; CheckPlan returned 12 because splitIDs silently discarded range tokens such as SPEC-002–SPEC-005, final punctuated tokens such as SPEC-008., and semicolon groups such as SPEC-006; REQ-005. Result: 10 unjustified tasks plus SPEC-003/SPEC-008 unimplemented. Required direction: validate ID-field values in the read-only contract lint, document/render the literal comma-separated grammar, restrict task Implements to SPEC IDs, and report malformed tokens as primary causes while suppressing derived coverage cascades. Evidence: F-079 in ~/wiki/Desarrollo/ducklab/fledge-friccion.md and ~/dev/Fledge/.ducklab/oracle/plan.oracle.canonical-2.mechanical-result.md.
+
+**Deliverables:**
+- The read-only contract lint validates Implements values against the literal comma-separated SPEC-ID grammar and rejects ranges, punctuation-suffixed IDs, semicolon groups, and non-SPEC IDs.
+- Malformed ID tokens are reported as primary actionable findings with their task and field context.
+- Plan graph checking suppresses or marks unjustified-task and unimplemented-SPEC findings derived solely from malformed Implements values.
+- User-facing plan documentation and rendering state the literal comma-separated SPEC-ID grammar and task Implements restriction.
+
+## Triage
+
+**Component:** plan artifact contract lint
+
+The accepted oracle demonstrates that splitIDs silently loses malformed and grouped ID tokens, causing incorrect task coverage and secondary graph findings.
+
+**Verification (triage recommends):** test-first — Lint and plan-check fixtures can assert malformed ranges, punctuation, and semicolon groups produce primary ID errors without derived coverage cascades.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-266 — Document the ID grammar
+
+Fixes B-347.
+
+**Acceptance:**
+- The public contract documents literal comma-separated SPEC IDs and rejects ranges or grouped punctuation.
+- Rendered plan guidance uses the same grammar as validation.
+
+**Owns:** plan contract documentation/rendering
+
+Fixes B-347.
+
+## Reported
+
+Fledge oracle canonical-2 was independently accepted as grammatically and semantically correct, frozen at SHA-256 ddf28bad20673fb8ac53cdbf8a9ae1cb2267a5131952be9069a14b58ff6d3be5, and executed once against Ducklab v0.9.4. ProposalStructureFindings returned 0; CheckPlan returned 12 because splitIDs silently discarded range tokens such as SPEC-002–SPEC-005, final punctuated tokens such as SPEC-008., and semicolon groups such as SPEC-006; REQ-005. Result: 10 unjustified tasks plus SPEC-003/SPEC-008 unimplemented. Required direction: validate ID-field values in the read-only contract lint, document/render the literal comma-separated grammar, restrict task Implements to SPEC IDs, and report malformed tokens as primary causes while suppressing derived coverage cascades. Evidence: F-079 in ~/wiki/Desarrollo/ducklab/fledge-friccion.md and ~/dev/Fledge/.ducklab/oracle/plan.oracle.canonical-2.mechanical-result.md.
+
+**Deliverables:**
+- The read-only contract lint validates Implements values against the literal comma-separated SPEC-ID grammar and rejects ranges, punctuation-suffixed IDs, semicolon groups, and non-SPEC IDs.
+- Malformed ID tokens are reported as primary actionable findings with their task and field context.
+- Plan graph checking suppresses or marks unjustified-task and unimplemented-SPEC findings derived solely from malformed Implements values.
+- User-facing plan documentation and rendering state the literal comma-separated SPEC-ID grammar and task Implements restriction.
+
+## Triage
+
+**Component:** plan artifact contract lint
+
+The accepted oracle demonstrates that splitIDs silently loses malformed and grouped ID tokens, causing incorrect task coverage and secondary graph findings.
+
+**Verification (triage recommends):** test-first — Lint and plan-check fixtures can assert malformed ranges, punctuation, and semicolon groups produce primary ID errors without derived coverage cascades.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-267 — Make portion promotion emit bounded task briefs
+
+Fixes B-344.
+
+**Acceptance:**
+- A split promotion renders each task with its own Acceptance and Owns contract plus clearly marked non-binding parent context.
+- A regression test proves sibling acceptance and lane text is not treated as the promoted task's work contract.
+
+**Owns:** internal/service/bugs.go
+
+Fixes B-344.
+
+## Reported
+
+Observed in B-343 after promotion split it into T-260 and T-261. T-260 had narrow Acceptance and Owns for the canonical artifact vocabulary, while T-261 owned trace.go, structurecheck.go, and stages.go for proposal-gate integration and linting. However, both task briefs retained the full parent Problem, Required behavior, Regression, and Deliverables. In build run r-20260908-172247-3mdr, every technical gate passed, but the reviewer rejected T-260 because structurecheck.go and the user-facing generation contract were not updated—work explicitly assigned to T-261. Earlier reviewer findings also induced the implementer to modify trace.go outside T-260's lane. Expected: decomposed task briefs make the task-specific Acceptance and Owns authoritative and either partition or clearly mark inherited parent context as non-binding; reviewer prompts must evaluate the current slice without requiring sibling deliverables. This should prevent false failures, cross-lane edits, duplicated work, and wasted model turns.
+
+**Deliverables:**
+- Promoted portions retain their own Acceptance and Owns as the authoritative implementation contract, with inherited parent report context explicitly non-binding.
+- Implementer prompts for decomposed tasks identify only the current portion's required outcomes and lane, without demanding sibling-owned files.
+- Reviewer prompts and deliverable checks evaluate the current task slice without treating sibling acceptance criteria or deliverables as missing work.
+- Regression tests cover a multi-portion promotion and assert no sibling-lane work is required or induced.
+
+## Triage
+
+**Component:** task contracts and reviewer scope
+**Suspected files:** internal/service/bugs.go, internal/service/stages.go, internal/strategy
+
+The reported split promotion is reproducible in the current code because promotedPortionBody appends the complete parent body and the task prompt/reviewer contract can consequently treat sibling work as required, causing false failures and cross-lane edits.
+
+**Verification (triage recommends):** test-first — Promoting a stored split proposal should produce task-specific prompts and reviewer contracts that do not require another portion's files or deliverables.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-268 — Constrain implementation and reviewer prompts to the current portion
+
+Fixes B-344.
+
+**Acceptance:**
+- The implementer and reviewer receive the current task's authoritative Acceptance/Owns slice and are told not to require sibling deliverables.
+- Prompt tests demonstrate that a sibling-owned file or outcome does not create a finding for the current task.
+
+**Owns:** internal/service/stages.go, internal/strategy
+
+Fixes B-344.
+
+## Reported
+
+Observed in B-343 after promotion split it into T-260 and T-261. T-260 had narrow Acceptance and Owns for the canonical artifact vocabulary, while T-261 owned trace.go, structurecheck.go, and stages.go for proposal-gate integration and linting. However, both task briefs retained the full parent Problem, Required behavior, Regression, and Deliverables. In build run r-20260908-172247-3mdr, every technical gate passed, but the reviewer rejected T-260 because structurecheck.go and the user-facing generation contract were not updated—work explicitly assigned to T-261. Earlier reviewer findings also induced the implementer to modify trace.go outside T-260's lane. Expected: decomposed task briefs make the task-specific Acceptance and Owns authoritative and either partition or clearly mark inherited parent context as non-binding; reviewer prompts must evaluate the current slice without requiring sibling deliverables. This should prevent false failures, cross-lane edits, duplicated work, and wasted model turns.
+
+**Deliverables:**
+- Promoted portions retain their own Acceptance and Owns as the authoritative implementation contract, with inherited parent report context explicitly non-binding.
+- Implementer prompts for decomposed tasks identify only the current portion's required outcomes and lane, without demanding sibling-owned files.
+- Reviewer prompts and deliverable checks evaluate the current task slice without treating sibling acceptance criteria or deliverables as missing work.
+- Regression tests cover a multi-portion promotion and assert no sibling-lane work is required or induced.
+
+## Triage
+
+**Component:** task contracts and reviewer scope
+**Suspected files:** internal/service/bugs.go, internal/service/stages.go, internal/strategy
+
+The reported split promotion is reproducible in the current code because promotedPortionBody appends the complete parent body and the task prompt/reviewer contract can consequently treat sibling work as required, causing false failures and cross-lane edits.
+
+**Verification (triage recommends):** test-first — Promoting a stored split proposal should produce task-specific prompts and reviewer contracts that do not require another portion's files or deliverables.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
+
+### T-269 — Harden legacy task prompt construction
+
+Fixes B-348.
+
+**Acceptance:**
+- A pre-marker promoted task receives the same authoritative-contract guidance as a marked task.
+- Generated implementer and reviewer prompts do not turn inherited parent deliverables or sibling lanes into requirements.
+
+**Owns:** internal/service/stages.go, internal/strategy/execute.go
+
+Fixes B-348.
+
+## Reported
+
+Observed after accepting T-267 and T-268. T-262 was promoted before those fixes and its persisted body has no `## Parent context (non-binding)` marker. In redo run r-20260908-204821-ygu6, the synthesized Acceptance/Owns and an explicit redo note limited the task to the shared grammar authority, but the implementer followed inherited parent Deliverables, implemented the full plan-v2 lint reserved for T-263..T-266, and modified internal/service/stages.go outside T-262's lane. The run was aborted. Expected: bounded scope applies to historical promoted tasks too. Prompt construction should use the task's structured Acceptance/Owns as the authoritative contract and demote the legacy body to evidence, or deterministically migrate stored briefs; sibling outcomes and lanes must not become deliverables/reviewer findings. Add a regression fixture for a pre-marker promoted task. Evidence: F-080 in ~/wiki/Desarrollo/ducklab/fledge-friccion.md.
+
+**Deliverables:**
+- Legacy promoted task prompts treat structured Acceptance and Owns as the authoritative implementation and review contract.
+- Prompt construction demotes a pre-marker task body to non-binding parent evidence or deterministically migrates it before execution.
+- Reviewer and implementer prompts explicitly reject sibling deliverables, outcomes, and owned files for legacy tasks.
+- A regression fixture covers a pre-marker promoted task whose inherited body names sibling work and verifies the generated prompt remains bounded.
+
+## Triage
+
+**Component:** task contracts and reviewer scope
+**Suspected files:** internal/service/stages.go, internal/strategy/execute.go, internal/service/promote_carries_test.go, internal/strategy/portion_prompt_test.go
+
+The reported redo is a reproducible high-impact scope breach in which legacy persisted task bodies override structured bounded contracts and cause out-of-lane implementation.
+
+**Verification (triage recommends):** test-first — A pre-marker promoted task can be exercised through prompt construction and must exclude inherited sibling deliverables and lanes.
+
+This section is the triager's reading, not the reporter's. Check it rather than assume it.
 
 ## M-02 — Reported bugs
 
