@@ -202,11 +202,14 @@ func TestWorktreeRestoreDoesNotRestoreSameNamedHumanFile(t *testing.T) {
 	}
 }
 
-// B-279: rejecting a worktree run used to restore its snapshot from the
-// registered checkout root, overwriting a person's same-named edit. This seeds
-// the persisted snapshot and fs_write receipt that make rejection exercise that
-// restore path; it was verified to fail against that pre-fix cleanup because
-// the human checkout was restored to "original".
+// B-279: rejecting a worktree run used to skip restoreAfterUnaccepted
+// entirely for worktree runs, so the run's recorded mutation was never undone
+// before its checkout was removed. This seeds the persisted snapshot and
+// fs_write receipt that make rejection exercise the restore path. Against that
+// pre-fix cleanup the test fails at the tree_restored assertion at the end,
+// because the skip path never emits the event; the same-named-file check above
+// it guards the other half of the contract (the registered checkout is never
+// the restore source) and passes before and after the fix (B-295).
 func TestRejectWorktreeRestoresOnlyItsRecordedMutation(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, nil)

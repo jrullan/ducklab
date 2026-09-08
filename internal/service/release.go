@@ -629,22 +629,41 @@ func copyDirectory(source, target string) error {
 		if d.IsDir() {
 			return os.MkdirAll(destination, 0o755)
 		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
+		// B-292: a symlink in the bundle is recreated as the same link, never
+		// dereferenced into a copy of whatever it pointed at.
+		if d.Type()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, destination)
 		}
-		defer in.Close()
-		out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
+		return copyFile(path, destination)
 	})
+}
+
+// copyFile copies one regular file and reports a failed close of either side;
+// the previous inline version discarded the source's close error.
+func copyFile(path, destination string) error {
+	in, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		in.Close()
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	inErr := in.Close()
+	outErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if inErr != nil {
+		return inErr
+	}
+	return outErr
 }
 
 // syncVersionedManifests rewrites every project-owned manifest that records
