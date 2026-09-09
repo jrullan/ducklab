@@ -537,6 +537,18 @@ export interface Bug {
   attachments?: string[];
   /** The audit trail: every status transition, signed by who made it. */
   history?: BugAuditEntry[];
+  /** The split on the table: the portions "make it a task" will turn into one
+   * task each. A triager recommends one; the person writes, corrects or
+   * discards it through bugEdit until promote consumes it. */
+  proposal?: BugPortion[];
+}
+
+/** One lane of a split proposal: a task title, the 1-2 acceptance criteria it
+ * reports against, and the files only that task may touch. */
+export interface BugPortion {
+  title: string;
+  acceptance: string[];
+  owns: string[];
 }
 
 /** One signed status transition from the bug's audit trail. */
@@ -1448,7 +1460,7 @@ export class EngineClient {
   /** Correct what a report says. A bug could be moved, triaged and promoted but
    * never edited, so a typo or a missing detail lived as long as the bug did —
    * and the triager, and then the implementer, worked from it. */
-  bugEdit(projectId: string, bugId: string, body: { title?: string; body?: string; severity?: string }) {
+  bugEdit(projectId: string, bugId: string, body: { title?: string; body?: string; severity?: string; proposal?: BugPortion[] }) {
     return this.request<Bug>("PUT", `/v1/projects/${projectId}/bugs/${bugId}`, body);
   }
   /** Amend one task's prose through the plan document; its lanes stay intact. */

@@ -28,6 +28,10 @@ type BugRequest struct {
 	Severity string `json:"severity"`
 	Reporter string `json:"reporter"`
 	Source   string `json:"source"`
+	// Proposal, on an edit, is the split the person wants promote to make.
+	// A pointer so three requests stay distinct: absent leaves the stored
+	// proposal alone, an empty list discards it, a list replaces it.
+	Proposal *[]bug.Portion `json:"proposal,omitempty"`
 }
 
 // BugAdd records a report (05 §6).
@@ -175,8 +179,24 @@ func toBug(r *store.Bug) *bug.Bug {
 		DuplicateOf: r.DuplicateOf, TaskID: r.TaskID,
 		Source: r.Source, Reporter: r.Reporter,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-		Next: bug.NextFrom(bug.Status(r.Status)),
+		Next:     bug.NextFrom(bug.Status(r.Status)),
+		Proposal: storedPortions(r),
 	}
+}
+
+// storedPortions reads the split on the table. The store keeps the triager's
+// JSON verbatim; a person's edit is stored in the same shape, so promote reads
+// both through one path. Unreadable JSON is shown as no proposal here and
+// refused by promote, where the failure can be acted on.
+func storedPortions(r *store.Bug) []bug.Portion {
+	if strings.TrimSpace(r.Proposal) == "" {
+		return nil
+	}
+	var portions []bug.Portion
+	if err := json.Unmarshal([]byte(r.Proposal), &portions); err != nil {
+		return nil
+	}
+	return portions
 }
 
 // MaxTriageBatch bounds one triage run (05 §6).
@@ -980,6 +1000,33 @@ func (s *Service) BugEdit(ctx context.Context, projectID, bugID string, req BugR
 			return nil, fmt.Errorf("unknown severity %q, want critical, high, normal or low", req.Severity)
 		}
 		rec.Severity = sev
+	}
+	// The split is the person's to write, correct or discard — the triager
+	// only recommends one. Until promote, that is: the portions became tasks
+	// then, and editing a proposal that was already consumed would describe a
+	// split the plan does not have.
+	if req.Proposal != nil {
+		if rec.TaskID != "" || (bug.Status(rec.Status) != bug.Open && bug.Status(rec.Status) != bug.Triaged) {
+			became := rec.TaskID
+			if became == "" {
+				became = "a task"
+			}
+			return nil, fmt.Errorf("%s is %s: its split was consumed when it became %s; edit the tasks instead",
+				rec.ID, rec.Status, became)
+		}
+		portions, err := bug.ValidatePortions(*req.Proposal)
+		if err != nil {
+			return nil, fmt.Errorf("split proposal: %w", err)
+		}
+		if len(portions) == 0 {
+			rec.Proposal = ""
+		} else {
+			data, err := json.Marshal(portions)
+			if err != nil {
+				return nil, fmt.Errorf("store split proposal: %w", err)
+			}
+			rec.Proposal = string(data)
+		}
 	}
 	if err := db.UpdateBug(rec); err != nil {
 		return nil, err
