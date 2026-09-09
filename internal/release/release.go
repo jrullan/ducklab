@@ -114,6 +114,11 @@ type Notes struct {
 	// Landed contains commits in the release range which were landed outside a
 	// Ducklab task run. They are inventory facts, not inferred release prose.
 	Landed []Landed
+	// Amendments are commits landed by accepted document-stage runs — an
+	// intake, spec or plan amendment. They carry a Ducklab-Run trailer like
+	// task work but ship no task: inventoried under their own heading so the
+	// notes say what changed in the loop's documents without claiming a task.
+	Amendments []Amendment
 	// Unverified counts accepted work whose gate never ran. Reported rather
 	// than hidden: a release note that reads the same whether or not anything
 	// was tested is a release note that cannot be trusted (P3).
@@ -127,6 +132,11 @@ type Notes struct {
 type Milestone struct {
 	ID    string
 	Items []Item
+}
+
+// Amendment is a commit landed by an accepted document-stage run.
+type Amendment struct {
+	Stage, RunID, SHA, Subject string
 }
 
 // Landed is a commit not backed by a Ducklab task run.
@@ -189,6 +199,9 @@ func Render(n Notes, prose string) string {
 	}
 	fmt.Fprintf(&b, "tasks: %d\n", count(n))
 	fmt.Fprintf(&b, "landed_outside: %d\n", len(n.Landed))
+	if len(n.Amendments) > 0 {
+		fmt.Fprintf(&b, "documents_amended: %d\n", len(n.Amendments))
+	}
 	if n.Unverified > 0 {
 		fmt.Fprintf(&b, "unverified: %d\n", n.Unverified)
 		if len(n.UnverifiedTasks) > 0 {
@@ -199,7 +212,7 @@ func Render(n Notes, prose string) string {
 
 	fmt.Fprintf(&b, "# %s\n\n", n.Version)
 
-	if count(n)+len(n.Landed) == 0 {
+	if count(n)+len(n.Landed)+len(n.Amendments) == 0 {
 		// The exact wording AC-58 asks for. A release document that says
 		// nothing shipped is a statement someone may act on, so it says the
 		// same thing every time rather than a phrasing that drifts.
@@ -240,6 +253,15 @@ func Render(n Notes, prose string) string {
 				fmt.Fprintf(&b, " [PR #%d: %s]", it.PRNumber, it.PRTitle)
 			}
 			b.WriteString("\n")
+		}
+	}
+	if len(n.Amendments) > 0 {
+		if len(n.Landed) > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("## Documents amended in the loop\n\n")
+		for _, a := range n.Amendments {
+			fmt.Fprintf(&b, "- %s amendment (`%s`) — %s [run %s]\n", a.Stage, short(a.SHA), a.Subject, a.RunID)
 		}
 	}
 	return b.String()

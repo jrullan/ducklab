@@ -277,7 +277,7 @@ func TestAcceptRecordsItsReceiptInAFollowingCommit(t *testing.T) {
 	if strings.Contains(text, "audit.jsonl") {
 		t.Fatalf("record commit swept churn this run did not make:\n%s", text)
 	}
-	items, landed, _, err := s.releaseInventory(context.Background(), id, root, "")
+	items, landed, _, _, err := s.releaseInventory(context.Background(), id, root, "")
 	if err != nil {
 		t.Fatal(err)
 	}

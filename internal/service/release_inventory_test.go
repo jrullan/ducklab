@@ -273,3 +273,92 @@ func TestReleasePlanRefusesUnresolvedTrailerCommits(t *testing.T) {
 		}
 	}
 }
+
+// B-351: an accepted document-stage run lands its amendment with a Ducklab-Run
+// trailer like any run, but ships no task. The inventory treated it as missing
+// task work and refused the whole release — the plan amendment that landed
+// T-262's revision blocked the v0.9.5 baseline cut. It is inventoried as what
+// it is, under its own heading; a trailer that names no accepted run at all
+// still refuses.
+func TestReleasePlanInventoriesAcceptedDocumentStageRunCommits(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	projectID, root := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindPlan: "## M-001 — Inventory\n\n### T-001 — Tracked work\n\nShip the tracked change.\n",
+	})
+	git := gitProject(t, root)
+	if err := git.Tag("v0.1.0", "previous release"); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(name, subject, runID string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(subject+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := git.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		sha, err := git.CommitWithTrailer(subject, map[string]string{"Ducklab-Run": runID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sha
+	}
+	taskSHA := commit("tracked.txt", "tracked change", "r-tracked")
+	s.runs["r-tracked"] = &runState{run: &runlog.Run{
+		ID: "r-tracked", ProjectID: projectID, TaskID: "T-001", Stage: "build", Accepted: true,
+		CommitSHA: taskSHA, Verdict: "PASSED", StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
+	planSHA := commit("plan-amendment.txt", "focus T-262 on the shared grammar contract", "r-plan-amend")
+	s.runs["r-plan-amend"] = &runState{run: &runlog.Run{
+		ID: "r-plan-amend", ProjectID: projectID, Stage: "plan", Mode: "human", Accepted: true,
+		CommitSHA: planSHA, StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
+	// Accepted but a run of no stage and no task: nothing an inventory can
+	// name. It must keep refusing rather than be waved through as a document.
+	s.runs["r-nameless"] = &runState{run: &runlog.Run{
+		ID: "r-nameless", ProjectID: projectID, Accepted: true, StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
+
+	fake, ok := s.providers["fake"].(*provider.Fake)
+	if !ok {
+		t.Fatal("test service did not install fake provider")
+	}
+	fake.ScriptFunc = func(provider.ChatRequest, int) *provider.ChatResponse {
+		return &provider.ChatResponse{Choices: []provider.Choice{{
+			Message:      provider.Message{Role: "assistant", Content: "The release prose."},
+			FinishReason: provider.FinishStop,
+		}}}
+	}
+	run, err := s.ReleasePlan(context.Background(), projectID, ReleaseRequest{Bump: "minor"})
+	if err != nil {
+		t.Fatalf("release planning refused an accepted plan amendment: %v", err)
+	}
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	<-rs.done
+
+	body, err := os.ReadFile(release.Path(root, release.Version{Major: 0, Minor: 2, Patch: 0}) + ".proposed")
+	if err != nil {
+		t.Fatalf("read proposed release: %v", err)
+	}
+	notes := string(body)
+	for _, want := range []string{
+		"tasks: 1\n", "landed_outside: 0\n", "documents_amended: 1\n",
+		"**T-001** Tracked work",
+		"## Documents amended in the loop\n\n",
+		"- plan amendment (`" + planSHA[:7] + "`) — focus T-262 on the shared grammar contract [run r-plan-amend]\n",
+	} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("release inventory missing %q:\n%s", want, notes)
+		}
+	}
+	if strings.Contains(notes, "## Landed outside the loop") {
+		t.Errorf("a document amendment was filed as work landed outside the loop:\n%s", notes)
+	}
+
+	namelessSHA := commit("nameless.txt", "accepted by a run with no stage", "r-nameless")
+	if _, err := s.ReleasePlan(context.Background(), projectID, ReleaseRequest{Bump: "minor"}); err == nil || !strings.Contains(err.Error(), namelessSHA) {
+		t.Fatalf("a trailer naming an accepted run with neither task nor stage was inventoried: %v", err)
+	}
+}
