@@ -72,12 +72,12 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 		since = prev.String()
 	}
 
-	items, landed, unverifiedIDs, err := s.releaseInventory(ctx, projectID, entry.Path, since)
+	items, landed, amendments, unverifiedIDs, err := s.releaseInventory(ctx, projectID, entry.Path, since)
 	if err != nil {
 		return nil, err
 	}
 	notes := release.Notes{
-		Version: next, Since: since, Milestones: release.Group(items), Landed: landed,
+		Version: next, Since: since, Milestones: release.Group(items), Landed: landed, Amendments: amendments,
 		Unverified: len(unverifiedIDs), UnverifiedTasks: unverifiedIDs,
 	}
 	// A revision reads the draft it revises. Refused without one: a note
@@ -146,26 +146,36 @@ func (s *Service) ReleasePlan(ctx context.Context, projectID string, req Release
 }
 
 // releaseInventory classifies every commit in the release range. A
-// Ducklab-Run trailer requires a corresponding accepted task run; no trailer is
-// ordinary landed work. Anything else makes a completeness claim impossible.
-func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, []release.Landed, []string, error) {
+// Ducklab-Run trailer requires a corresponding accepted run: a task run is
+// shipped work, a document-stage run is an amendment of the loop's own
+// documents (B-351: the plan amendment that landed T-262's revision blocked
+// the v0.9.5 cut because it had a trailer, an accepted run, and no task). No
+// trailer is ordinary landed work. Anything else makes a completeness claim
+// impossible.
+func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTag string) ([]release.Item, []release.Landed, []release.Amendment, []string, error) {
 	runs, err := s.RunList(ctx, RunFilter{ProjectID: projectID})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	commits, err := vcs.New(root).CommitsAfter(sinceTag)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	byID := map[string]*runlog.Run{}
+	documents := map[string]*runlog.Run{}
 	for _, r := range runs {
-		if r.Accepted && r.TaskID != "" {
+		switch {
+		case !r.Accepted:
+		case r.TaskID != "":
 			byID[r.ID] = r
+		case r.Stage != "":
+			documents[r.ID] = r
 		}
 	}
 	titles := s.taskTitles(ctx, projectID)
 	var items []release.Item
 	var landed []release.Landed
+	var amendments []release.Amendment
 	var unverified, uncovered []string
 	git := vcs.New(root)
 	for _, c := range commits {
@@ -187,6 +197,10 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 		}
 		r := byID[c.DucklabRun]
 		if r == nil {
+			if d := documents[c.DucklabRun]; d != nil {
+				amendments = append(amendments, release.Amendment{Stage: d.Stage, RunID: d.ID, SHA: c.SHA, Subject: c.Subject})
+				continue
+			}
 			uncovered = append(uncovered, c.SHA)
 			continue
 		}
@@ -197,9 +211,9 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 		}
 	}
 	if len(uncovered) > 0 {
-		return nil, nil, nil, fmt.Errorf("release inventory incomplete: commits with unresolved Ducklab-Run trailers: %s", strings.Join(uncovered, ", "))
+		return nil, nil, nil, nil, fmt.Errorf("release inventory incomplete: commits with unresolved Ducklab-Run trailers: %s", strings.Join(uncovered, ", "))
 	}
-	return items, landed, unverified, nil
+	return items, landed, amendments, unverified, nil
 }
 
 var localPRRe = regexp.MustCompile(`\s*\(#(\d+)\)$`)
