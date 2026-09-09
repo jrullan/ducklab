@@ -439,9 +439,11 @@ Before submitting a hand-written requirements, specification, or plan,
 machine-readable grammar through the same deterministic contract lint used by
 the proposal gate. The equivalent engine API and MCP `artifact_lint` tool
 return section, field, offending token, canonical replacement, code, detail,
-and the gate's exact message. This operation is read-only and intentionally
+and the gate's exact error message. A missing grammar version is returned
+separately as an actionable, non-blocking notice, including for legacy
+documents with no frontmatter. This operation is read-only and intentionally
 does not run trace-graph, repository, or semantic checks. A valid document
-exits zero; grammar errors are printed and exit one.
+exits zero after printing any notices; grammar errors are printed and exit one.
 
 After the project gate, resolved build-system adapters may inspect their own
 evidence. An adapter may block when a new production source or a source

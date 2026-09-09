@@ -626,6 +626,7 @@ export interface ServiceArtifactLintRequest {
 export interface ServiceArtifactLintResult {
   errors?: ServiceArtifactLintDiagnostic[];
   kind?: string;
+  notices?: ServiceArtifactLintDiagnostic[];
   valid?: boolean;
 }
 

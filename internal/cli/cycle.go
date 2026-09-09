@@ -491,6 +491,15 @@ func artifactCmd(verb string, args []string, repo string) int {
 		return 1
 	}
 	errors, _ := result["errors"].([]interface{})
+	notices, _ := result["notices"].([]interface{})
+	for _, raw := range notices {
+		diagnostic, _ := raw.(map[string]interface{})
+		message := str(diagnostic["message"])
+		if message == "" {
+			message = str(diagnostic["detail"])
+		}
+		fmt.Printf("notice: %s\n", message)
+	}
 	if valid, _ := result["valid"].(bool); valid && len(errors) == 0 {
 		fmt.Printf("%s grammar is valid.\n", kind)
 		return 0

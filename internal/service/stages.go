@@ -1485,9 +1485,10 @@ type ArtifactLintDiagnostic struct {
 // ArtifactLintResult is a deterministic syntax-only verdict. It contains no
 // coverage, graph, repository, or semantic-review findings.
 type ArtifactLintResult struct {
-	Kind   string                   `json:"kind"`
-	Valid  bool                     `json:"valid"`
-	Errors []ArtifactLintDiagnostic `json:"errors"`
+	Kind    string                   `json:"kind"`
+	Valid   bool                     `json:"valid"`
+	Errors  []ArtifactLintDiagnostic `json:"errors"`
+	Notices []ArtifactLintDiagnostic `json:"notices"`
 }
 
 // ArtifactLint exposes CandidateSyntaxLint without creating a proposal or a
@@ -1505,18 +1506,32 @@ func (s *Service) ArtifactLint(ctx context.Context, projectID, kind string, req 
 	if err != nil {
 		return nil, err
 	}
-	out := &ArtifactLintResult{Kind: kind, Valid: len(diagnostics) == 0, Errors: make([]ArtifactLintDiagnostic, 0, len(diagnostics))}
+	out := &ArtifactLintResult{
+		Kind: kind, Valid: true,
+		Errors:  make([]ArtifactLintDiagnostic, 0, len(diagnostics)),
+		Notices: make([]ArtifactLintDiagnostic, 0),
+	}
 	for _, diagnostic := range diagnostics {
 		canonical := diagnostic.Suggestion
 		if canonical == "" {
 			canonical = diagnostic.Key
 		}
-		out.Errors = append(out.Errors, ArtifactLintDiagnostic{
+		public := ArtifactLintDiagnostic{
 			Section: diagnostic.ID, Field: diagnostic.Key,
 			OffendingToken: diagnostic.Token, Canonical: canonical,
 			Code: diagnostic.Code, Detail: diagnostic.Detail,
 			Message: diagnostic.Error(), RelatedIDs: append([]string(nil), diagnostic.RelatedIDs...),
-		})
+		}
+		if diagnostic.Code == "legacy_grammar" {
+			public.Field = "grammar"
+			public.Canonical = fmt.Sprintf("grammar: %d", artifact.CurrentGrammar)
+			public.Message = fmt.Sprintf(`frontmatter has no grammar: add "grammar: %d" to be checked against the current contract`, artifact.CurrentGrammar)
+			public.Detail = public.Message
+			out.Notices = append(out.Notices, public)
+			continue
+		}
+		out.Valid = false
+		out.Errors = append(out.Errors, public)
 	}
 	return out, nil
 }

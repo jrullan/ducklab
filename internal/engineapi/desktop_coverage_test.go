@@ -46,7 +46,7 @@ var notInTheDesktop = map[string]string{
 	"GET /v1/openapi.json":                                "the document itself, for tooling",
 	"POST /v1/shutdown":                                   "the Go shell reaches it through engineclt during a supervised restart; the webview itself still cannot stop the engine it is standing in",
 	"GET /v1/projects/{id}/bugs/{bug}/attachments/{name}": "reached by client.bugAttachmentUrl through a raw authenticated fetch: the bytes become a blob URL for <img>, which the JSON request helper cannot produce",
-	"POST /v1/projects/{id}/artifacts/{kind}/lint":        "CLI and MCP grammar preflight unblock hand-written oracles; a Documents editor action is explicit follow-up scope",
+	"POST /v1/projects/{id}/artifacts/{kind}/lint":        "CLI and MCP grammar preflight unblock hand-written oracles; the Documents editor action is tracked by B-356",
 }
 
 func TestEveryEngineCapabilityIsReachableFromTheDesktop(t *testing.T) {
