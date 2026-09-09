@@ -2099,6 +2099,74 @@
         ],
         "type": "object"
       },
+      "ServiceArtifactLintDiagnostic": {
+        "properties": {
+          "canonical": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "offending_token": {
+            "type": "string"
+          },
+          "related_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "section": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "ServiceArtifactLintRequest": {
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "ServiceArtifactLintResult": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceArtifactLintDiagnostic"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "errors",
+          "kind",
+          "valid"
+        ],
+        "type": "object"
+      },
       "ServiceAutopilotDefaultsView": {
         "properties": {
           "autonomy": {
@@ -4632,6 +4700,60 @@
           }
         ],
         "summary": "Read an artifact and any pending proposal"
+      }
+    },
+    "/v1/projects/{id}/artifacts/{kind}/lint": {
+      "post": {
+        "operationId": "ArtifactLint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceArtifactLintRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceArtifactLintResult"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "401": {
+            "description": "missing or invalid credentials"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Preflight candidate artifact grammar without writing a proposal or running graph/semantic checks"
       }
     },
     "/v1/projects/{id}/artifacts/{kind}/promote": {

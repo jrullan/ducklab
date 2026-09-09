@@ -15,6 +15,79 @@ import (
 	"github.com/jrullan/ducklab/internal/daemon"
 )
 
+// B-355: grammar preflight is useful only before a run exists. The CLI sends
+// the file body to the dedicated syntax-only route, prints the gate's exact
+// diagnostic, and exits non-zero so a script can stop the freeze.
+func TestArtifactLintPrintsTheOffendingTokenAndExitsOne(t *testing.T) {
+	repo := t.TempDir()
+	candidate := filepath.Join(repo, "candidate.md")
+	content := "## M-01 — Core\n\n### T-001 — Task\n\n**Implementa:** SPEC-001\n"
+	if err := os.WriteFile(candidate, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var lintCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects":
+			_, _ = w.Write([]byte(`{"items":[{"id":"calc","path":"` + filepath.ToSlash(repo) + `"}]}`))
+		case "/v1/projects/calc/artifacts/plan/lint":
+			lintCalled = r.Method == http.MethodPost
+			var request map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request["content"] != content {
+				t.Errorf("lint content = %q, want complete file", request["content"])
+			}
+			_, _ = w.Write([]byte(`{"kind":"plan","valid":false,"errors":[{"section":"T-001","field":"Implementa","offending_token":"Implementa","canonical":"Implements","message":"T-001 unknown field **Implementa:**; use **Implements:**"}]}`))
+		default:
+			t.Fatalf("unexpected engine request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(endpoint.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	enginePath, err := daemon.EngineJSONPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(enginePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine, _ := json.Marshal(daemon.EngineInfo{Port: port, Token: "test"})
+	if err := os.WriteFile(enginePath, engine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldOut := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = write
+	code := artifactCmd("lint", []string{"--kind", "plan", candidate}, repo)
+	_ = write.Close()
+	os.Stdout = oldOut
+	out, _ := io.ReadAll(read)
+	_ = read.Close()
+	if code != 1 {
+		t.Errorf("artifact lint exit code = %d, want 1", code)
+	}
+	if !lintCalled {
+		t.Fatal("artifact lint did not call the syntax-only route")
+	}
+	if got := string(out); !strings.Contains(got, "Implementa") || !strings.Contains(got, "use **Implements:**") {
+		t.Errorf("lint output omitted the offending token or canonical form: %q", got)
+	}
+}
+
 func TestTaskRemoveUsesTheTaskDeleteRouteAndPrintsItsRefusal(t *testing.T) {
 	repo := t.TempDir()
 	var deleteCalled bool

@@ -1462,6 +1462,65 @@ func CandidateSyntaxLint(content string, kind artifact.Kind) ([]artifact.FieldEr
 	return artifact.ContractLint(content, kind)
 }
 
+// ArtifactLintRequest is a candidate document supplied for read-only grammar
+// preflight. The content is never written as a proposal.
+type ArtifactLintRequest struct {
+	Content string `json:"content"`
+}
+
+// ArtifactLintDiagnostic is the public, structured form of the same
+// FieldError used by the proposal gate. Message is deliberately produced by
+// FieldError.Error so CLI, MCP and gate wording cannot drift.
+type ArtifactLintDiagnostic struct {
+	Section        string   `json:"section,omitempty"`
+	Field          string   `json:"field,omitempty"`
+	OffendingToken string   `json:"offending_token,omitempty"`
+	Canonical      string   `json:"canonical,omitempty"`
+	Code           string   `json:"code,omitempty"`
+	Detail         string   `json:"detail,omitempty"`
+	Message        string   `json:"message"`
+	RelatedIDs     []string `json:"related_ids,omitempty"`
+}
+
+// ArtifactLintResult is a deterministic syntax-only verdict. It contains no
+// coverage, graph, repository, or semantic-review findings.
+type ArtifactLintResult struct {
+	Kind   string                   `json:"kind"`
+	Valid  bool                     `json:"valid"`
+	Errors []ArtifactLintDiagnostic `json:"errors"`
+}
+
+// ArtifactLint exposes CandidateSyntaxLint without creating a proposal or a
+// run. B-355 was found when the only way to preflight a hand-written oracle
+// plan was to submit it and contaminate the experiment it was meant to test.
+func (s *Service) ArtifactLint(ctx context.Context, projectID, kind string, req ArtifactLintRequest) (*ArtifactLintResult, error) {
+	if _, err := s.registry.Get(projectID); err != nil {
+		return nil, err
+	}
+	k := artifact.Kind(kind)
+	if k != artifact.KindRequirements && k != artifact.KindSpec && k != artifact.KindPlan {
+		return nil, fmt.Errorf("artifact lint supports requirements, spec, or plan; got %q", kind)
+	}
+	diagnostics, err := CandidateSyntaxLint(req.Content, k)
+	if err != nil {
+		return nil, err
+	}
+	out := &ArtifactLintResult{Kind: kind, Valid: len(diagnostics) == 0, Errors: make([]ArtifactLintDiagnostic, 0, len(diagnostics))}
+	for _, diagnostic := range diagnostics {
+		canonical := diagnostic.Suggestion
+		if canonical == "" {
+			canonical = diagnostic.Key
+		}
+		out.Errors = append(out.Errors, ArtifactLintDiagnostic{
+			Section: diagnostic.ID, Field: diagnostic.Key,
+			OffendingToken: diagnostic.Token, Canonical: canonical,
+			Code: diagnostic.Code, Detail: diagnostic.Detail,
+			Message: diagnostic.Error(), RelatedIDs: append([]string(nil), diagnostic.RelatedIDs...),
+		})
+	}
+	return out, nil
+}
+
 // SyntaxLintCandidate is an explicit read-only alias for callers validating a
 // candidate before a proposal or semantic review exists.
 func SyntaxLintCandidate(content string, kind artifact.Kind) ([]artifact.FieldError, error) {

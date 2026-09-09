@@ -434,6 +434,15 @@ When probes exist, the reviewer verdict must contain one concrete
 generic evidence, and an approval whose evidence contains a failed slice are
 contract errors repaired before the verdict can steer the run.
 
+Before submitting a hand-written requirements, specification, or plan,
+`ducklab artifact lint --kind <requirements|spec|plan> <file>` preflights its
+machine-readable grammar through the same deterministic contract lint used by
+the proposal gate. The equivalent engine API and MCP `artifact_lint` tool
+return section, field, offending token, canonical replacement, code, detail,
+and the gate's exact message. This operation is read-only and intentionally
+does not run trace-graph, repository, or semantic checks. A valid document
+exits zero; grammar errors are printed and exit one.
+
 After the project gate, resolved build-system adapters may inspect their own
 evidence. An adapter may block when a new production source or a source
 provided by the task's accepted dependency closure is absent from the build

@@ -179,6 +179,8 @@ func Run(args []string) int {
 		return rosterCmd(verb, cmdArgs, repo)
 	case "intent":
 		return intentCmd(verb, repo)
+	case "artifact":
+		return artifactCmd(verb, cmdArgs, repo)
 	case "intake", "spec", "plan":
 		return stageCmd(noun, remaining[1:], repo)
 	case "test":
@@ -243,6 +245,7 @@ usage: ducklab [--repo <path>] [--no-autostart] <command> [args]
   intake    draft requirements (--from <brief>, --ref <doc|dir>, --adopt)
   spec      draft the spec from approved requirements
   plan      draft milestones and tasks from the spec
+  artifact  lint --kind requirements|spec|plan <file>
   run       <task-id> | list | show | diff | accept | reject | answer
   test      write the failing test first (test-first flow)
   review    read an accepted task's commit

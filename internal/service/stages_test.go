@@ -745,6 +745,59 @@ func TestCandidateSyntaxLintIsReadOnlyAndUsesCompletePlanVocabulary(t *testing.T
 	}
 }
 
+// B-355: the public preflight is the proposal gate's parser made reachable,
+// not a second validator. It preserves the exact gate message and useful
+// machine fields while leaving both the proposal slot and run ledger alone.
+func TestArtifactLintUsesTheGateAuthorityWithoutWritingCandidate(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
+		artifact.KindRequirements: "## REQ-001 — Core\n\n**Priority:** must\n",
+		artifact.KindSpec:         "## SPEC-001 — One\n\n**Implements:** REQ-001\n",
+	})
+	candidate := "## M-01 — Core\n\n### T-001 — Task\n\n**Implementa:** SPEC-001\n"
+
+	result, err := s.ArtifactLint(context.Background(), id, "plan", ArtifactLintRequest{Content: candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid {
+		t.Fatal("localized machine field passed grammar preflight")
+	}
+	var got *ArtifactLintDiagnostic
+	for i := range result.Errors {
+		if result.Errors[i].OffendingToken == "Implementa" {
+			got = &result.Errors[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("structured diagnostics omitted the offending token: %+v", result.Errors)
+	}
+	if got.Section != "T-001" || got.Field != "Implementa" || got.Canonical != "Implements" ||
+		got.Message != "T-001 unknown field **Implementa:**; use **Implements:**" {
+		t.Fatalf("public diagnostic diverged from the gate: %+v", *got)
+	}
+	badValue := "## M-01 — Core\n\n### T-001 — Task\n\n**Implements:** SPEC-001.\n"
+	valueResult, err := s.ArtifactLint(context.Background(), id, "plan", ArtifactLintRequest{Content: badValue})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(valueResult.Errors, func(d ArtifactLintDiagnostic) bool {
+		return d.Field == "Implements" && d.OffendingToken == "SPEC-001." && d.Canonical == "Implements"
+	}) {
+		t.Fatalf("value diagnostic omitted token or canonical field: %+v", valueResult.Errors)
+	}
+	if _, err := os.Stat(artifact.ProposedPath(dir, artifact.KindPlan)); !os.IsNotExist(err) {
+		t.Fatalf("syntax preflight wrote a proposal: %v", err)
+	}
+	if len(s.runs) != 0 {
+		t.Fatalf("syntax preflight created %d run(s)", len(s.runs))
+	}
+	if _, err := s.ArtifactLint(context.Background(), id, "intent", ArtifactLintRequest{Content: "# Intent"}); err == nil {
+		t.Fatal("artifact lint accepted a kind outside requirements/spec/plan")
+	}
+}
+
 func TestCandidateSyntaxLintReportsCompletePlanContractFailures(t *testing.T) {
 	candidate := "---\nkind: plan\ngrammar: 2\nversion: canonical-1\n---\n\n" +
 		"## M-01 — Core\n\n### T-001 — Invalid task\n\n" +

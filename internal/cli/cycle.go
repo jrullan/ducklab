@@ -446,6 +446,71 @@ func traceCmd(verb string, args []string, repo string) int {
 	}
 }
 
+// artifactCmd exposes the proposal gate's deterministic grammar as a
+// preflight. The CLI reads the file and sends its body; the engine remains the
+// sole parser and no candidate is written to the project (B-355).
+func artifactCmd(verb string, args []string, repo string) int {
+	usage := func() int {
+		fmt.Fprintln(os.Stderr, "usage: ducklab artifact lint --kind requirements|spec|plan <file>")
+		return 2
+	}
+	if verb != "lint" {
+		return usage()
+	}
+	kind, path := "", ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--kind":
+			if i+1 >= len(args) {
+				return usage()
+			}
+			kind = args[i+1]
+			i++
+		default:
+			if strings.HasPrefix(args[i], "-") || path != "" {
+				return usage()
+			}
+			path = args[i]
+		}
+	}
+	if kind == "" || path == "" {
+		return usage()
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: read %s: %v\n", path, err)
+		return 1
+	}
+	client, projectID, code := project(repo)
+	if code != 0 {
+		return code
+	}
+	result, err := client.ArtifactLint(projectID, kind, string(content))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	errors, _ := result["errors"].([]interface{})
+	if valid, _ := result["valid"].(bool); valid && len(errors) == 0 {
+		fmt.Printf("%s grammar is valid.\n", kind)
+		return 0
+	}
+	if len(errors) == 0 {
+		fmt.Fprintln(os.Stderr, "error: artifact grammar is invalid but the engine returned no diagnostics")
+		return 1
+	}
+	fmt.Printf("%d artifact grammar error(s):\n", len(errors))
+	for _, raw := range errors {
+		diagnostic, _ := raw.(map[string]interface{})
+		message := str(diagnostic["message"])
+		if message == "" {
+			message = str(diagnostic["detail"])
+		}
+		fmt.Printf("  %s\n", message)
+	}
+	return 1
+}
+
 // project resolves the engine client and this repo's project id.
 func project(repo string) (*engineclt.Client, string, int) {
 	info, err := daemon.ReadEngineJSON()
