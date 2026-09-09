@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRuns } from "../store/runs";
-import type { Bug, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
+import type { Bug, BugPortion, Duckling, EngineClient, GateResult, RosterEntry, Task } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorCard } from "../components/ErrorCard";
 import { Prose } from "../components/Prose";
@@ -1508,6 +1508,7 @@ function BugRail({
         <Row label="duplicate of" value={bug.duplicate_of} />
         <Row label="task" value={bug.task_id} />
       </dl>
+      <BugPortions bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugBody bug={bug} client={client} projectId={projectId} onDone={onDone} />
       <BugAttachments bug={bug} client={client} projectId={projectId} onChanged={onDone} />
       <BugHistory bug={bug} />
@@ -1740,7 +1741,7 @@ function BugNext({
           onClick={() => act(() => client.promoteBug(projectId, bug.id))}
           className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
         >
-          Make it a task
+          {(bug.proposal?.length ?? 0) > 1 ? `Make it ${bug.proposal!.length} tasks` : "Make it a task"}
         </button>
       )}
       {bug.task_id && (
@@ -1781,6 +1782,195 @@ function BugNext({
       )}
       {failure !== null && <ErrorCard error={failure} testId="bug-next-error" />}
     </div>
+  );
+}
+
+
+/** The split on the table, and the person's hand on it.
+ *
+ * A triager can recommend portioning a multi-concern report into tasks with
+ * their own lanes. The doctrine says the triager recommends and the person
+ * decides — but the first multi-promote attempt (B-284) found no door: the
+ * only writer was the triage sweep, which touches open bugs only, so a
+ * triaged bug could never gain, correct or lose its split. Deciding was
+ * reduced to promote-all-or-one. Here the portions are the person's to write,
+ * until promote turns them into tasks. */
+type PortionDraft = { title: string; acceptance: string; owns: string };
+const linesOf = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boolean);
+const toDraft = (p: BugPortion): PortionDraft => ({ title: p.title, acceptance: p.acceptance.join("\n"), owns: p.owns.join("\n") });
+const fromDraft = (d: PortionDraft): BugPortion => ({ title: d.title.trim(), acceptance: linesOf(d.acceptance), owns: linesOf(d.owns) });
+const emptyPortion: PortionDraft = { title: "", acceptance: "", owns: "" };
+
+function BugPortions({
+  bug,
+  client,
+  projectId,
+  onDone,
+}: {
+  bug: Bug;
+  client: EngineClient;
+  projectId: string;
+  onDone: () => void;
+}) {
+  const stored = bug.proposal ?? [];
+  // Promote consumes the split; after it the portions are tasks on the board
+  // and the plan, and this card only tells what was made.
+  const editable = !bug.task_id && (bug.status === "open" || bug.status === "triaged");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<PortionDraft[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+
+  const save = (portions: BugPortion[]) => {
+    setBusy(true);
+    setFailure(null);
+    void client
+      .bugEdit(projectId, bug.id, { proposal: portions })
+      .then(() => {
+        setEditing(false);
+        onDone();
+      })
+      .catch((e) => setFailure(e))
+      .finally(() => setBusy(false));
+  };
+
+  if (stored.length === 0 && !editable) return null;
+
+  if (!editing) {
+    return (
+      <section className="space-y-2 rounded-card border border-hairline p-2" data-testid="bug-portions">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-xs font-medium text-ink">
+            {stored.length === 0 ? "one task" : `split into ${stored.length} task${stored.length === 1 ? "" : "s"}`}
+          </h3>
+          <span className="text-xs text-ink-muted">
+            {bug.task_id ? "what promote made" : "what \u201cmake it a task\u201d will create"}
+          </span>
+        </div>
+        {stored.length > 0 ? (
+          <ol className="space-y-2">
+            {stored.map((p, i) => (
+              <li key={i} className="text-sm" data-testid={`bug-portion-${i}`}>
+                <div className="text-ink">{i + 1}. {p.title}</div>
+                <ul className="list-disc pl-5 text-xs text-ink-secondary">
+                  {p.acceptance.map((a, j) => <li key={j}>{a}</li>)}
+                </ul>
+                <div className="font-mono text-xs text-ink-muted">owns {p.owns.join(", ")}</div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-xs text-ink-muted">The whole report becomes one task. Split it when it names more than one fix, so each part gets its own lane and its own gate.</p>
+        )}
+        {editable && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="bug-portions-edit"
+              disabled={busy}
+              onClick={() => {
+                setDraft(stored.length > 0 ? stored.map(toDraft) : [{ ...emptyPortion }, { ...emptyPortion }]);
+                setFailure(null);
+                setEditing(true);
+              }}
+              className="text-xs text-ink-muted underline disabled:opacity-40"
+            >
+              {stored.length > 0 ? "edit portions" : "propose a split"}
+            </button>
+            {stored.length > 0 && (
+              <button
+                type="button"
+                data-testid="bug-portions-discard"
+                disabled={busy}
+                onClick={() => save([])}
+                className="text-xs text-ink-muted underline disabled:opacity-40"
+                title="promote will make one task from the whole report"
+              >
+                discard split
+              </button>
+            )}
+          </div>
+        )}
+        {failure !== null && <ErrorCard error={failure} testId="bug-portions-error" />}
+      </section>
+    );
+  }
+
+  const update = (i: number, patch: Partial<PortionDraft>) =>
+    setDraft((d) => d.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const complete = draft.every((d) => d.title.trim() && linesOf(d.acceptance).length > 0 && linesOf(d.owns).length > 0);
+
+  return (
+    <section className="space-y-2 rounded-card border border-hairline p-2" data-testid="bug-portions-form">
+      <h3 className="text-xs font-medium text-ink">portions</h3>
+      <p className="text-xs text-ink-muted">Each portion becomes one task. Its acceptance is what that task reports against (one or two lines); its owns are the files only that task may touch, one per line — two portions cannot share a file.</p>
+      {draft.map((d, i) => (
+        <div key={i} className="space-y-1 rounded border border-hairline p-2" data-testid={`bug-portion-draft-${i}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-ink-muted">{i + 1}.</span>
+            <input
+              aria-label={`portion ${i + 1} title`}
+              data-testid={`bug-portion-title-${i}`}
+              value={d.title}
+              placeholder="task title"
+              onChange={(e) => update(i, { title: e.target.value })}
+              className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
+            />
+            {draft.length > 1 && (
+              <button
+                type="button"
+                data-testid={`bug-portion-remove-${i}`}
+                onClick={() => setDraft((cur) => cur.filter((_, j) => j !== i))}
+                className="text-xs text-ink-muted underline"
+              >
+                remove
+              </button>
+            )}
+          </div>
+          <textarea
+            aria-label={`portion ${i + 1} acceptance`}
+            data-testid={`bug-portion-acceptance-${i}`}
+            rows={2}
+            value={d.acceptance}
+            placeholder="acceptance — one criterion per line, at most two"
+            onChange={(e) => update(i, { acceptance: e.target.value })}
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+          <textarea
+            aria-label={`portion ${i + 1} owns`}
+            data-testid={`bug-portion-owns-${i}`}
+            rows={2}
+            value={d.owns}
+            placeholder="owns — one file path per line"
+            onChange={(e) => update(i, { owns: e.target.value })}
+            className="w-full rounded border border-hairline bg-surface2 px-2 py-1 font-mono text-xs"
+          />
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="bug-portions-add"
+          onClick={() => setDraft((cur) => [...cur, { ...emptyPortion }])}
+          className="text-xs text-ink-muted underline"
+        >
+          add portion
+        </button>
+        <button
+          type="button"
+          data-testid="bug-portions-save"
+          disabled={busy || draft.length === 0 || !complete}
+          onClick={() => save(draft.map(fromDraft))}
+          className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40"
+        >
+          Save split
+        </button>
+        <button type="button" onClick={() => setEditing(false)} className="text-xs text-ink-muted underline">
+          cancel
+        </button>
+      </div>
+      {failure !== null && <ErrorCard error={failure} testId="bug-portions-error" />}
+    </section>
   );
 }
 

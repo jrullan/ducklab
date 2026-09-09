@@ -146,6 +146,56 @@ type Bug struct {
 	// happens not to handle, sitting with nothing to click on it, which is what
 	// left a fixed report stuck at in_progress with no way to move it by hand.
 	Next []Status `json:"next,omitempty"`
+	// Proposal is the split on the table: the portions promote will turn into
+	// one task each. A triager recommends it; the person decides it — and
+	// deciding includes writing, correcting or discarding portions, not only
+	// taking the recommendation whole. Empty means promote makes one task.
+	Proposal []Portion `json:"proposal,omitempty"`
+}
+
+// Portion is one lane of a split proposal: a task title, the 1-2 acceptance
+// criteria it reports against, and the files it owns. The same contract the
+// triager is held to (04 §6.6), so a person-authored portion promotes exactly
+// like a triager-stored one.
+type Portion struct {
+	Title      string   `json:"title"`
+	Acceptance []string `json:"acceptance"`
+	Owns       []string `json:"owns"`
+}
+
+// ValidatePortions holds a proposal to the triage contract: every portion
+// needs a title, one or two acceptance criteria and at least one owned path,
+// and no path may sit in two portions — two tasks sharing a file would race on
+// it the moment both were launched. The trimmed portions are returned.
+func ValidatePortions(portions []Portion) ([]Portion, error) {
+	out := make([]Portion, 0, len(portions))
+	seen := map[string]string{}
+	for i, p := range portions {
+		p.Title = strings.TrimSpace(p.Title)
+		p.Acceptance = trimNonEmpty(p.Acceptance)
+		p.Owns = trimNonEmpty(p.Owns)
+		if p.Title == "" || len(p.Acceptance) == 0 || len(p.Acceptance) > 2 || len(p.Owns) == 0 {
+			return nil, fmt.Errorf("portion %d: proposal portions need title, 1-2 acceptance criteria, and owns", i+1)
+		}
+		for _, path := range p.Owns {
+			if other, dup := seen[path]; dup {
+				return nil, fmt.Errorf("portion %d: %s is already owned by portion %q; lanes must be disjoint", i+1, path, other)
+			}
+			seen[path] = p.Title
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func trimNonEmpty(in []string) []string {
+	var out []string
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // AuditEntry is one signed status transition. Actor says who ("human",

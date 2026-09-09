@@ -1391,3 +1391,106 @@ it("the record rail folds to a strip and remembers", async () => {
   await screen.findByTestId("board-rail");
   localStorage.removeItem("ducklab.boardrail");
 });
+
+// B-284: a triager's split proposal was read-only and invisible. The doctrine
+// says the triager recommends and the person decides — deciding includes
+// writing, correcting or discarding the portions before "make it a task"
+// consumes them.
+describe("the split on the table", () => {
+  const split = [
+    { title: "Persist the avatar on profile save", acceptance: ["a saved avatar is present after reload"], owns: ["internal/profile/persist.go"] },
+    { title: "Refresh the avatar cache", acceptance: ["the cache serves the newly saved avatar"], owns: ["internal/profile/persist.go"] },
+  ];
+  const bugsWith = (bugs: Bug[]) =>
+    ({
+      tasks: vi.fn(() => Promise.resolve([])),
+      bugs: vi.fn(() => Promise.resolve(bugs)),
+      ducklings: vi.fn(() => Promise.resolve([])),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {} })),
+      projectGate: vi.fn(() => Promise.resolve({ mode: "tests", command: "go test ./..." })),
+      taskNext: vi.fn(() => Promise.resolve(null)),
+      bugEdit: vi.fn((_p: string, _id: string, body: unknown) => Promise.resolve({ ...bugs[0], ...(body as object) })),
+      promoteBug: vi.fn(() => Promise.resolve({ bug: "B-002", task: "T-010" })),
+    }) as unknown as EngineClient & { bugEdit: ReturnType<typeof vi.fn> };
+  const triaged = (extra: Partial<Bug> = {}): Bug => ({
+    id: "B-002", title: "saving a profile loses its avatar and leaves the cache stale", severity: "high", status: "triaged",
+    source: "manual", created_at: "2026-07-02T00:00:00Z", updated_at: "2026-07-02T00:00:00Z", next: ["in_progress"], ...extra,
+  });
+  const open = async (c: EngineClient, title: string) => {
+    render(<Board client={c} projectId="p" tab="bugs" />);
+    fireEvent.click(await screen.findByText(title));
+    await screen.findByTestId("bug-portions");
+  };
+
+  it("shows the portions and names what promote will make", async () => {
+    const c = bugsWith([triaged({ proposal: split })]);
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    const card = screen.getByTestId("bug-portions");
+    expect(card.textContent).toContain("split into 2 tasks");
+    expect(card.textContent).toContain("Persist the avatar on profile save");
+    expect(card.textContent).toContain("internal/profile/persist.go");
+    expect(screen.getByTestId("bug-next-promote").textContent).toBe("Make it 2 tasks");
+  });
+
+  it("lets the person correct a portion and saves the whole split", async () => {
+    const c = bugsWith([triaged({ proposal: split })]);
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    fireEvent.click(screen.getByTestId("bug-portions-edit"));
+    fireEvent.change(screen.getByTestId("bug-portion-title-1"), { target: { value: "Refresh the avatar cache after profile save" } });
+    fireEvent.change(screen.getByTestId("bug-portion-owns-1"), { target: { value: "internal/profile/cache.go\n" } });
+    fireEvent.click(screen.getByTestId("bug-portions-save"));
+    await waitFor(() =>
+      expect(c.bugEdit).toHaveBeenCalledWith("p", "B-002", {
+        proposal: [
+          split[0],
+          { title: "Refresh the avatar cache after profile save", acceptance: ["the cache serves the newly saved avatar"], owns: ["internal/profile/cache.go"] },
+        ],
+      }),
+    );
+    // Only the split travelled: the report's words are not this form's to send.
+    const sent = c.bugEdit.mock.calls[0]![2] as Record<string, unknown>;
+    expect(Object.keys(sent)).toEqual(["proposal"]);
+  });
+
+  it("authors a split from nothing and refuses to save an incomplete portion", async () => {
+    const c = bugsWith([triaged()]);
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    expect(screen.getByTestId("bug-portions").textContent).toContain("one task");
+    expect(screen.getByTestId("bug-next-promote").textContent).toBe("Make it a task");
+    fireEvent.click(screen.getByTestId("bug-portions-edit"));
+    // Two empty portions to start from; nothing to save until each has its
+    // title, acceptance and owns — the same contract the triager is held to.
+    expect(screen.getByTestId("bug-portion-draft-1")).toBeTruthy();
+    expect(screen.getByTestId("bug-portions-save")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("bug-portion-remove-1"));
+    fireEvent.change(screen.getByTestId("bug-portion-title-0"), { target: { value: "Persist the avatar" } });
+    fireEvent.change(screen.getByTestId("bug-portion-acceptance-0"), { target: { value: "a saved avatar is present after reload" } });
+    expect(screen.getByTestId("bug-portions-save")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("bug-portion-owns-0"), { target: { value: "internal/profile/persist.go" } });
+    fireEvent.click(screen.getByTestId("bug-portions-save"));
+    await waitFor(() =>
+      expect(c.bugEdit).toHaveBeenCalledWith("p", "B-002", {
+        proposal: [{ title: "Persist the avatar", acceptance: ["a saved avatar is present after reload"], owns: ["internal/profile/persist.go"] }],
+      }),
+    );
+  });
+
+  it("discards the split with an empty proposal and shows the engine's refusal", async () => {
+    const c = bugsWith([triaged({ proposal: split })]);
+    c.bugEdit.mockImplementationOnce(() => Promise.reject(new Error("split proposal: portion 2: internal/profile/persist.go is already owned by portion \"Persist the avatar on profile save\"; lanes must be disjoint")));
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    fireEvent.click(screen.getByTestId("bug-portions-discard"));
+    await screen.findByTestId("bug-portions-error");
+    expect(screen.getByTestId("bug-portions-error").textContent).toContain("lanes must be disjoint");
+    expect(c.bugEdit).toHaveBeenCalledWith("p", "B-002", { proposal: [] });
+  });
+
+  it("keeps a promoted bug's split as a record, not a form", async () => {
+    const c = bugsWith([triaged({ status: "in_progress", task_id: "T-010", proposal: split, next: ["fixed"] })]);
+    await open(c, "saving a profile loses its avatar and leaves the cache stale");
+    const card = screen.getByTestId("bug-portions");
+    expect(card.textContent).toContain("what promote made");
+    expect(screen.queryByTestId("bug-portions-edit")).toBeNull();
+    expect(screen.queryByTestId("bug-portions-discard")).toBeNull();
+  });
+});
