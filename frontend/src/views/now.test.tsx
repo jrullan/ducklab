@@ -501,6 +501,24 @@ describe("verification in the inbox", () => {
     expect(screen.queryByTestId("now-verify-proof")).toBeNull();
   });
 
+  // A Rust or C fix whose tests Ducklab cannot run for the person must not be
+  // told "no pinning test": the tests exist, and the row says which files.
+  it("says which tests landed when it cannot derive a command, and never claims eyes-only", async () => {
+    seed([{ ...base, id: "r-fix", task_id: "T-026", status: "done", verdict: "PASSED", accepted: true,
+      pending_kind: undefined, started_at: "2026-07-31T01:20:20Z" }]);
+    const runDiff = vi.fn(() => Promise.resolve({ diff: "diff --git a/tests/check_probe.c b/tests/check_probe.c\n--- /dev/null\n+++ b/tests/check_probe.c\n@@ -0,0 +1,2 @@\n+static void test_probe_reports_reason(void) {\n+}\n" }));
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])), runDiff } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    fireEvent.click(await screen.findByTestId("now-verify-expand"));
+    const section = await screen.findByTestId("now-verify-unknown-tests");
+    expect(section.textContent).toContain("tests/check_probe.c");
+    expect(section.textContent).toContain("cannot run for you yet");
+    expect(screen.queryByTestId("now-verify-try")).toBeNull();
+    expect(screen.queryByText(/only proof is your eyes/)).toBeNull();
+    expect(screen.getByTestId("now-verify-yes").textContent).toBe("Verified — it works");
+  });
+
   it("says so when the fix has no task or no accepted run in the record", async () => {
     const orphan = { ...fixedBug, id: "B-004", task_id: undefined };
     const unrecorded = { ...fixedBug, id: "B-005", task_id: "T-999" };

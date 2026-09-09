@@ -28,15 +28,28 @@ export interface Proof {
   cmd: string;
 }
 
-/** What the accepted run's diff says about how to verify. */
+/** What the accepted run's diff says about how to verify. Three states, kept
+ * apart on purpose: proofs Ducklab can name and run; tests it can see but
+ * cannot turn into a command yet (a stack it does not know); and no test at
+ * all. Only the last one may be told "the only proof is your eyes". */
 export interface FixEvidence {
   files: string[];
   proofs: Proof[];
+  /** Files that add tests Ducklab recognised as tests but could not derive
+   * an exact command for. Never described as "no test". */
+  unknownTests: string[];
 }
 
 const GO_TEST = /^\+func (Test\w+)\(/gm;
 const VITEST = /^\+\s*(?:it|test)\(\s*(["'`])(.+?)\1/gm;
 const PYTEST = /^\+def (test_\w+)\(/gm;
+const RUST_TEST_ATTR = /^\+\s*#\[(?:\w+::)*test\]/;
+const RUST_FN = /^\+\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/;
+/** Any added line that reads as a test definition in a stack Ducklab does not
+ * derive commands for (C/C++ TEST( macros, generic test_ functions, Rust
+ * attributes it could not pair with a fn, …). Evidence that a test exists,
+ * not a proof it can name. */
+const GENERIC_TEST_MARKER = /^\+\s*(?:TEST(?:_F|_P)?\s*\(|(?:static\s+)?(?:void|int|bool)\s+test_\w+\s*\(|#\[(?:\w+::)*test\]|@Test\b|def test_|func Test|\bit\(|\btest\()/m;
 
 /** The tests a diff adds, each with its runnable command. Derived from the
  * record, never from a model: a test that is not in the diff is not a proof. */
@@ -49,8 +62,22 @@ export function proofsFromDiff(files: readonly DiffFile[]): Proof[] {
     out.push({ name, cmd });
   };
   for (const file of files) {
-    if (!file.isTest) continue;
     const added = file.hunks.join("\n");
+    if (/\.rs$/.test(file.path)) {
+      // Rust tests are marked by attribute, not by path: a #[test] inside
+      // src/lib.rs is as much a proof as one under tests/.
+      let armed = false;
+      for (const line of added.split("\n")) {
+        if (RUST_TEST_ATTR.test(line)) { armed = true; continue; }
+        if (armed) {
+          const m = RUST_FN.exec(line);
+          if (m) add(m[1]!, `cargo test ${m[1]}`);
+          if (line.startsWith("+") && line.trim() !== "+") armed = !!m ? false : armed && !/\S/.test(line.slice(1)) ? armed : false;
+        }
+      }
+      continue;
+    }
+    if (!file.isTest) continue;
     if (/_test\.go$/.test(file.path)) {
       const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ".";
       for (const m of added.matchAll(GO_TEST)) add(m[1]!, `go test ./${dir} -run '^${m[1]}$'`);
@@ -68,9 +95,28 @@ export function proofsFromDiff(files: readonly DiffFile[]): Proof[] {
   return out;
 }
 
+/** Files that add a test Ducklab can see but not name a command for. */
+export function unknownTestsFromDiff(files: readonly DiffFile[], proofs: readonly Proof[]): string[] {
+  const named = new Set(proofs.map((p) => p.name));
+  const out: string[] = [];
+  for (const file of files) {
+    const added = file.hunks.join("\n");
+    const marker = GENERIC_TEST_MARKER.test(added);
+    if (!file.isTest && !marker) continue;
+    // A file whose added tests were all turned into proofs is accounted for.
+    const knownStack = /_test\.go$|\.test\.(ts|tsx|js|jsx)$|\.py$|\.rs$/.test(file.path);
+    const producedProof = proofs.some((p) => added.includes(p.name) && named.has(p.name));
+    if (knownStack && producedProof) continue;
+    if (!marker && knownStack) continue; // a known-stack test file with no added test
+    out.push(file.path);
+  }
+  return out;
+}
+
 export function evidenceFromDiff(diff: string): FixEvidence {
   const files = parseDiff(diff);
-  return { files: files.map((f) => f.path).filter(Boolean), proofs: proofsFromDiff(files) };
+  const proofs = proofsFromDiff(files);
+  return { files: files.map((f) => f.path).filter(Boolean), proofs, unknownTests: unknownTestsFromDiff(files, proofs) };
 }
 
 /** The run whose accept landed this task's fix, when the record holds one. */
@@ -113,7 +159,7 @@ export function VerificationLedger({
     client
       .runDiff(run.id)
       .then((d) => setEvidence((cur) => ({ ...cur, [run.id]: evidenceFromDiff(d.diff ?? "") })))
-      .catch(() => setEvidence((cur) => ({ ...cur, [run.id]: { files: [], proofs: [] } })));
+      .catch(() => setEvidence((cur) => ({ ...cur, [run.id]: { files: [], proofs: [], unknownTests: [] } })));
   };
 
   const move = (bug: Bug, status: string) =>
@@ -207,6 +253,13 @@ export function VerificationLedger({
                               </li>
                             ))}
                           </ul>
+                        </section>
+                      ) : ev.unknownTests.length > 0 ? (
+                        <section data-testid="now-verify-unknown-tests">
+                          <h4 className="text-xs font-medium text-ink">Tests landed that Ducklab cannot run for you yet</h4>
+                          <p className="mt-1 text-xs text-ink-secondary">
+                            {b.task_id} adds tests in {ev.unknownTests.join(", ")}{run.commit_sha ? ` (commit ${run.commit_sha.slice(0, 7)})` : ""}, in a stack Ducklab does not derive commands for. Run that suite, or the project's gate, and mark Verified on that evidence. The report's steps are below in case the behaviour is also observable.
+                          </p>
                         </section>
                       ) : (
                         <section data-testid="now-verify-try">
