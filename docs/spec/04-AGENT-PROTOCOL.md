@@ -110,7 +110,7 @@ All tools live in `internal/tools`. Names are stable API; do not rename.
 | `fs_list` | `{path?: string, depth?: int}` | Default `.`, depth 2. Respects `.gitignore`. |
 | `fs_read` | `{path: string, start?: int, end?: int}` | 1-indexed inclusive lines. Returns content with line numbers prefixed as `NNNN\t`. |
 | `fs_search` | `{pattern: string, glob?: string, max?: int}` | Go `regexp` syntax. Returns `path:line: text`, max 100. |
-| `fs_write` | `{path: string, content: string}` | Creates parent dirs. Mutating. |
+| `fs_write` | `{path: string, content: string, executable?: boolean}` | Creates parent dirs. `executable: true` adds the executable bit through the jailed filesystem tool so a script can run by path and git records mode `100755`; omitted/false preserves an existing mode and creates an ordinary `0644` file. Mutating. |
 | `fs_write_lines` | `{path: string, start: int, end: int, first_line: string, content: string}` | Replaces lines `start..end` (1-based, inclusive — **the numbers `fs_read` shows**) of an existing file. `first_line` must equal the current content of line `start`; a mismatch refuses the write and **teaches the actual line**. Empty `content` deletes the range. The success message warns that numbers below the edit shifted. Mutating. |
 | `fs_patch` | `{path: string, edits: [{search, replace}]}` | Each `search` must match **exactly once**; otherwise the whole call fails with a diagnostic naming the match count. Mutating. |
 | `fs_delete` | `{path: string}` | Mutating. Refuses directories unless `recursive: true`. |

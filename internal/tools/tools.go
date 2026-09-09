@@ -979,7 +979,10 @@ func ShellPolicyCheck(ectx *ExecContext, cmd string) *Result {
 		first := strings.Fields(cmd)
 		if len(first) > 0 {
 			switch first[0] {
-			case "mkdir", "touch", "cp", "mv", "rm", "cat", "echo", "tee", "sed", "chmod":
+			case "chmod":
+				return ErrorResult("shell policy: %q is not in the allowlist, and file metadata is not changed through the shell here: "+
+					"use fs_write with executable:true and the complete file content to make a script runnable by path.", first[0])
+			case "mkdir", "touch", "cp", "mv", "rm", "cat", "echo", "tee", "sed":
 				return ErrorResult("shell policy: %q is not in the allowlist, and file operations are not done through the shell here: "+
 					"fs_write creates a file AND its directories, fs_patch/fs_write_lines edit, fs_delete removes, fs_read/fs_list inspect. Use those.", first[0])
 			}
