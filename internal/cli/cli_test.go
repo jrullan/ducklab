@@ -88,6 +88,64 @@ func TestArtifactLintPrintsTheOffendingTokenAndExitsOne(t *testing.T) {
 	}
 }
 
+func TestArtifactLintPrintsLegacyNoticeAndExitsZero(t *testing.T) {
+	repo := t.TempDir()
+	candidate := filepath.Join(repo, "legacy.md")
+	if err := os.WriteFile(candidate, []byte("## M-01 — Core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/projects":
+			_, _ = w.Write([]byte(`{"items":[{"id":"calc","path":"` + filepath.ToSlash(repo) + `"}]}`))
+		case "/v1/projects/calc/artifacts/plan/lint":
+			_, _ = w.Write([]byte(`{"kind":"plan","valid":true,"errors":[],"notices":[{"code":"legacy_grammar","message":"frontmatter has no grammar: add \"grammar: 2\" to be checked against the current contract"}]}`))
+		default:
+			t.Fatalf("unexpected engine request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(endpoint.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	enginePath, err := daemon.EngineJSONPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(enginePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	engine, _ := json.Marshal(daemon.EngineInfo{Port: port, Token: "test"})
+	if err := os.WriteFile(enginePath, engine, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldOut := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = write
+	code := artifactCmd("lint", []string{"--kind", "plan", candidate}, repo)
+	_ = write.Close()
+	os.Stdout = oldOut
+	out, _ := io.ReadAll(read)
+	_ = read.Close()
+	if code != 0 {
+		t.Fatalf("legacy lint exit code = %d, want 0; output: %s", code, out)
+	}
+	got := string(out)
+	if !strings.Contains(got, "notice: frontmatter has no grammar") || !strings.Contains(got, "plan grammar is valid") {
+		t.Fatalf("legacy lint output = %q", got)
+	}
+}
+
 func TestTaskRemoveUsesTheTaskDeleteRouteAndPrintsItsRefusal(t *testing.T) {
 	repo := t.TempDir()
 	var deleteCalled bool

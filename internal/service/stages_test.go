@@ -798,6 +798,35 @@ func TestArtifactLintUsesTheGateAuthorityWithoutWritingCandidate(t *testing.T) {
 	}
 }
 
+// A missing grammar version describes a readable legacy document. The trace
+// gate does not reject it, so the public preflight must keep it green while
+// telling the person how to opt into the current contract. Cover both legacy
+// shapes: old frontmatter and no frontmatter at all.
+func TestArtifactLintReportsLegacyGrammarAsANonBlockingNotice(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, _ := projectWithDocs(t, s, nil)
+	const body = "## M-01 — Core\n\n### T-001 — Task\n\n**Implements:** SPEC-001\n"
+	candidates := []string{
+		"---\nkind: plan\nversion: 1\n---\n\n" + body,
+		body,
+	}
+	for _, candidate := range candidates {
+		result, err := s.ArtifactLint(context.Background(), id, "plan", ArtifactLintRequest{Content: candidate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || len(result.Errors) != 0 {
+			t.Fatalf("legacy document was rejected: %+v", result)
+		}
+		if len(result.Notices) != 1 || result.Notices[0].Code != "legacy_grammar" {
+			t.Fatalf("legacy notices = %+v, want one legacy_grammar", result.Notices)
+		}
+		if got := result.Notices[0].Message; got != `frontmatter has no grammar: add "grammar: 2" to be checked against the current contract` {
+			t.Fatalf("legacy notice = %q", got)
+		}
+	}
+}
+
 func TestCandidateSyntaxLintReportsCompletePlanContractFailures(t *testing.T) {
 	candidate := "---\nkind: plan\ngrammar: 2\nversion: canonical-1\n---\n\n" +
 		"## M-01 — Core\n\n### T-001 — Invalid task\n\n" +

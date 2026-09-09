@@ -447,6 +447,20 @@ func ContractLint(content string, kind Kind) ([]FieldError, error) {
 		return nil, err
 	}
 	diagnostics := append([]FieldError(nil), doc.FieldErrors...)
+	// Parse only sees frontmatter diagnostics after it finds a frontmatter
+	// block. A hand-written legacy document may have no block at all; contract
+	// preflight still needs to identify that shape so callers can present the
+	// same non-blocking migration notice consistently (B-355).
+	hasGrammarDiagnostic := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "legacy_grammar" || diagnostic.Key == "grammar" {
+			hasGrammarDiagnostic = true
+			break
+		}
+	}
+	if !hasGrammarDiagnostic {
+		diagnostics = append(diagnostics, grammarDiagnostic(doc.Front)...)
+	}
 	// Legacy plans remain readable during migration. Their vocabulary and
 	// machine-readable values are still parsed (and malformed Implements tokens
 	// still surface above), but fields introduced by grammar 2 are not required
