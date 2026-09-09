@@ -273,6 +273,64 @@ func TestDeclaredTierOverridesProviderLocality(t *testing.T) {
 	}
 }
 
+// Neocapture's fragment reviewer inherited the configured generic reviewer
+// cap of 100 and exposed that service-side resolution happened before the
+// document critic's guard. Critics carry their draft in the prompt: their
+// six-call design remains an upper bound, while a lower run cap is honoured.
+func TestRoleConfigurationCannotRaiseADocumentCriticCap(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	type observed struct {
+		effective, requested int
+		source, ceiling      string
+	}
+	run := func(override int) observed {
+		t.Helper()
+		resolved := s.resolveTurnCaps("spec", override)
+		var got observed
+		_, err := strategy.ExecuteScript(context.Background(), strategy.CouncilScript("REQ", nil), &strategy.ExecuteParams{
+			TurnCaps: resolved.Caps, TurnCapSources: resolved.Sources,
+			Roster: map[config.Role]config.DucklingID{
+				config.RoleArchitect: "pato-uno", config.RoleReviewer: "pato-uno",
+			},
+			Runner: func(_ context.Context, turn *strategy.Turn, _ config.DucklingID, _ string, _ []string, _ strategy.TurnContext) (*agent.Outcome, error) {
+				if turn.Role == config.RoleReviewer {
+					got = observed{
+						effective: turn.MaxTurns, requested: turn.MaxTurnsRequested,
+						source: turn.MaxTurnsSource, ceiling: turn.MaxTurnsCeilingSource,
+					}
+					return &agent.Outcome{Text: `{"verdict":"approve","findings":[]}`}, nil
+				}
+				return &agent.Outcome{Text: "## REQ-001 — Draft\n\nBody."}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	configured := run(0)
+	if configured.effective != 6 || configured.requested != 100 ||
+		configured.source != "reviewer role default" || configured.ceiling != "document critic ceiling" {
+		t.Fatalf("configured critic = %+v, want effective 6 requested 100 with role/ceiling provenance", configured)
+	}
+	lower := run(3)
+	if lower.effective != 3 || lower.requested != 3 || lower.source != "run override" {
+		t.Fatalf("lower run cap critic = %+v, want effective/requested 3", lower)
+	}
+	lifted := run(-1)
+	if lifted.effective != 6 || lifted.requested != uncappedTurns ||
+		lifted.source != "run no-cap" || lifted.ceiling != "document critic ceiling" {
+		t.Fatalf("lifted critic = %+v, want ceiling 6 over no-cap request", lifted)
+	}
+}
+
 // Negative is "no cap", the same word the budget lifts speak: finite in
 // letter (I3), beyond use in practice, with the token and cost budgets still
 // guarding every call. A human turn keeps its cap — the lift unblocks
