@@ -212,11 +212,15 @@ func Render(n Notes, prose string) string {
 
 	fmt.Fprintf(&b, "# %s\n\n", n.Version)
 
-	if count(n)+len(n.Landed)+len(n.Amendments) == 0 {
+	if count(n)+len(n.Landed) == 0 {
 		// The exact wording AC-58 asks for. A release document that says
 		// nothing shipped is a statement someone may act on, so it says the
-		// same thing every time rather than a phrasing that drifts.
+		// same thing every time rather than a phrasing that drifts. A
+		// document amendment is inventory of the loop's own records, not a
+		// user-visible change: it is listed after the sentence, never
+		// counted against it.
 		b.WriteString("No user-visible changes.\n")
+		renderAmendments(&b, n, true)
 		return b.String()
 	}
 
@@ -255,16 +259,23 @@ func Render(n Notes, prose string) string {
 			b.WriteString("\n")
 		}
 	}
-	if len(n.Amendments) > 0 {
-		if len(n.Landed) > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString("## Documents amended in the loop\n\n")
-		for _, a := range n.Amendments {
-			fmt.Fprintf(&b, "- %s amendment (`%s`) — %s [run %s]\n", a.Stage, short(a.SHA), a.Subject, a.RunID)
-		}
-	}
+	renderAmendments(&b, n, len(n.Landed) > 0)
 	return b.String()
+}
+
+// renderAmendments lists the loop's own document amendments after whatever
+// shipped. separate says a section precedes it and needs a blank line.
+func renderAmendments(b *strings.Builder, n Notes, separate bool) {
+	if len(n.Amendments) == 0 {
+		return
+	}
+	if separate {
+		b.WriteString("\n")
+	}
+	b.WriteString("## Documents amended in the loop\n\n")
+	for _, a := range n.Amendments {
+		fmt.Fprintf(b, "- %s amendment (`%s`) — %s [run %s]\n", a.Stage, short(a.SHA), a.Subject, a.RunID)
+	}
 }
 
 func count(n Notes) int {

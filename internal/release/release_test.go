@@ -135,3 +135,28 @@ func TestUnverifiedSentenceNamesTheTasks(t *testing.T) {
 		t.Errorf("rendered:\n%s", md)
 	}
 }
+
+// A document amendment is inventory of the loop's own records, not a
+// user-visible change. A release that shipped nothing but amended its plan
+// still says the exact AC-58 sentence, then lists the amendment — and never
+// opens an empty "What shipped".
+func TestRenderKeepsTheEmptyStateWhenOnlyDocumentsWereAmended(t *testing.T) {
+	got := Render(Notes{
+		Version: Version{Major: 0, Minor: 9, Patch: 5}, Since: "v0.9.4",
+		Amendments: []Amendment{{Stage: "plan", RunID: "r-plan-amend", SHA: "5ff7f1100086c56ed6897dd698b2eaaa398ef2c5", Subject: "focus T-262 on the shared grammar contract"}},
+	}, "prose that must not appear")
+	for _, want := range []string{
+		"documents_amended: 1\n",
+		"# v0.9.5\n\nNo user-visible changes.\n",
+		"## Documents amended in the loop\n\n- plan amendment (`5ff7f11`) — focus T-262 on the shared grammar contract [run r-plan-amend]\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	for _, reject := range []string{"## What shipped", "prose that must not appear"} {
+		if strings.Contains(got, reject) {
+			t.Errorf("amendment-only release rendered %q:\n%s", reject, got)
+		}
+	}
+}
