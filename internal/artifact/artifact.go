@@ -443,7 +443,11 @@ func ContractLint(content string, kind Kind) ([]FieldError, error) {
 		return nil, err
 	}
 	diagnostics := append([]FieldError(nil), doc.FieldErrors...)
-	if kind == KindPlan {
+	// Legacy plans remain readable during migration. Their vocabulary and
+	// machine-readable values are still parsed (and malformed Implements tokens
+	// still surface above), but fields introduced by grammar 2 are not required
+	// until the document explicitly opts into that grammar.
+	if kind == KindPlan && doc.Front.Grammar == CurrentGrammar {
 		diagnostics = append(diagnostics, planContractDiagnostics(doc)...)
 	}
 	return diagnostics, nil
@@ -504,7 +508,11 @@ func planTaskContractDiagnostics(task Section) []FieldError {
 				}
 			}
 			if !validCommands {
-				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, fmt.Sprintf("provide exactly one backtick command for each of the %d Acceptance slices", len(slices))))
+				remedy := fmt.Sprintf("provide exactly one backtick command for each of the %d Acceptance slices", len(slices))
+				if len(slices) == 0 {
+					remedy = "define Acceptance slices first, then provide exactly one backtick command for each slice"
+				}
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, remedy))
 			}
 		case ShapeArtifacts:
 			if rule.MinItems > 0 && len(commaItems(value)) < rule.MinItems {

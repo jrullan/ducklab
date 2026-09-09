@@ -780,6 +780,58 @@ func TestCandidateSyntaxLintReportsCompletePlanContractFailures(t *testing.T) {
 	}
 }
 
+func TestCandidateSyntaxLintKeepsLegacyShapeNonBlockingButValidatesValues(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("---\nkind: plan\nversion: 9\n---\n\n## M-01 — Legacy oracle\n")
+	for i := 1; i <= 29; i++ {
+		fmt.Fprintf(&body, "\n### T-%03d — Task\n\n**Implements:** SPEC-%03d.\n", i, i)
+	}
+
+	legacy, err := CandidateSyntaxLint(body.String(), artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidTokens, missingFields := 0, 0
+	for _, diagnostic := range legacy {
+		switch diagnostic.Code {
+		case "invalid_id_token":
+			invalidTokens++
+		case "missing_required_field":
+			missingFields++
+		}
+	}
+	if invalidTokens != 29 || missingFields != 0 {
+		t.Fatalf("legacy diagnostics: invalid tokens=%d missing fields=%d; want 29 and 0: %+v", invalidTokens, missingFields, legacy)
+	}
+
+	grammar2 := strings.Replace(body.String(), "kind: plan\n", "kind: plan\ngrammar: 2\n", 1)
+	current, err := CandidateSyntaxLint(grammar2, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(current, func(diagnostic artifact.FieldError) bool { return diagnostic.Code == "missing_required_field" }) {
+		t.Fatalf("grammar-2 plan did not enforce required fields: %+v", current)
+	}
+}
+
+func TestCandidateSyntaxLintDoesNotDescribeZeroAcceptanceSlices(t *testing.T) {
+	candidate := "---\nkind: plan\ngrammar: 2\nversion: 1\n---\n\n" +
+		"## M-01 — Core\n\n### T-001 — Task\n\n**Implements:** SPEC-001\n\n" +
+		"**Acceptance probes:**\n1. prose only\n"
+	diagnostics, err := CandidateSyntaxLint(candidate, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var joined []string
+	for _, diagnostic := range diagnostics {
+		joined = append(joined, diagnostic.Error())
+	}
+	message := strings.Join(joined, "\n")
+	if strings.Contains(message, "each of the 0 Acceptance slices") || !strings.Contains(message, "define Acceptance slices first") {
+		t.Fatalf("missing-slices diagnostic is not actionable:\n%s", message)
+	}
+}
+
 func TestProposalGateRetainsUnrelatedUnimplementedSpecAfterLocalizedFieldError(t *testing.T) {
 	s := serviceWithDucklings(t, "pato-uno")
 	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{
