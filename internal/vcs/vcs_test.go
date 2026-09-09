@@ -4,11 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestRunEnvDoesNotMutateCaller(t *testing.T) {
+	t.Setenv("DUCKLAB_RUNENV_EXISTING", "from-process")
+	env := map[string]string{
+		"DUCKLAB_RUNENV_EXISTING": "override",
+		"DUCKLAB_RUNENV_NEW":      "new",
+	}
+	want := map[string]string{
+		"DUCKLAB_RUNENV_EXISTING": "override",
+		"DUCKLAB_RUNENV_NEW":      "new",
+	}
+	if _, err := New(t.TempDir()).runEnv(env, "--version"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(env, want) {
+		t.Fatalf("runEnv mutated caller map: got %#v, want %#v", env, want)
+	}
+}
 
 func newRepo(t *testing.T) (*Git, string) {
 	t.Helper()
