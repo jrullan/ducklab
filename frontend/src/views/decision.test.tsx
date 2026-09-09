@@ -77,10 +77,12 @@ describe("RunView — one decision surface at a green gate with an unconvinced r
     expect(within(card).getByTestId("file-findings")).toBeTruthy();
   });
 
-  // B-258: the follow-up run goes through the one relaunch path — the
-  // mode's saved line-up — and never carries seat overrides copied from
-  // this run.
-  it("accept-then-fix accepts, then relaunches through the single launch path without seat overrides", async () => {
+  // B-258: the follow-up run goes through the one relaunch path and names
+  // no ducklings at all, so the engine fills the mode's saved line-up from
+  // the project's CURRENT flock. Copying this run's roster, as seats or as
+  // ducklings, is the override the engine honours; a flock changed after the
+  // first run must reach the follow-up.
+  it("accept-then-fix accepts, then relaunches through the single launch path with no roster copied from this run", async () => {
     const client = clientWith();
     render(<RunView runId="r-1" client={client} />);
     fireEvent.click(await screen.findByTestId("accept-and-fix"));
@@ -93,6 +95,9 @@ describe("RunView — one decision surface at a green gate with an unconvinced r
     expect(opts.mode).toBe("pair");
     expect(String(opts.note)).toContain("wrong week boundary");
     expect(opts.seats).toBeUndefined();
+    expect(opts.ducklings ?? []).toEqual([]);
+    // Nothing of this run's roster (luna, glm52) travels in the request.
+    expect(JSON.stringify(opts)).not.toMatch(/luna|glm52/);
   });
 
   it("files the findings from the card and reports the bug ids", async () => {
