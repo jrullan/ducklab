@@ -227,14 +227,13 @@ type ModeDefaultsView struct {
 	ModeSeats map[string]map[string][]string `json:"mode_seats,omitempty"`
 	RolePins  map[string][]string            `json:"role_pins,omitempty"`
 	// RoleTurns caps the model calls one turn of a role may chain. Zero or
-	// absent inherits the phase default, then AgentMaxTurns.
+	// absent keeps the phase portion or the script's designed cap.
 	RoleTurns map[string]int `json:"role_turns"`
 	// PhaseTurns overrides the global calls/reply fallback for build and test.
 	// Role and run overrides remain more specific.
 	PhaseTurns map[string]int `json:"phase_turns"`
-	// ScriptRoleTurns is the legacy inventory of role-shaped script values. It
-	// remains client-compatible and supplies the Settings role list; effective
-	// calls/reply use the explicit global -> phase -> role -> run precedence.
+	// ScriptRoleTurns inventories the designed fallback for each role so a
+	// client can distinguish it from configured phase/role/run portions.
 	ScriptRoleTurns map[string]int `json:"script_role_turns"`
 	// TurnCeilings are hard script invariants derived from the scripts
 	// themselves. Defaults and live lifts may not raise them.
@@ -248,9 +247,9 @@ type ModeDefaultsView struct {
 	TestMode  string `json:"test_mode,omitempty"`
 }
 
-// ScriptRoleTurns inventories roles and their historical script values for
-// clients. Effective calls/reply are resolved by resolveTurnCaps; hard script
-// invariants are published separately as TurnCeilings.
+// ScriptRoleTurns inventories roles and their designed script fallbacks for
+// clients. Explicit phase/role/run portions are resolved by resolveTurnCaps;
+// hard script invariants are published separately as TurnCeilings.
 //
 // A reviewer gets fewer than an implementer on purpose: reviewing is reading and
 // giving a verdict, not iterating. A judge gets one — it chooses between
@@ -623,72 +622,4 @@ func (s *Service) roundsFor(mode string, requested int) int {
 	s.cfgMu.RLock()
 	defer s.cfgMu.RUnlock()
 	return s.cfg.Defaults.Rounds[mode]
-}
-
-// turnsFor returns the call cap for one role: the configured one, else the
-// script's own.
-func (s *Service) turnsFor(role string, scriptCap int) int {
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	if n := s.cfg.Defaults.RoleTurns[role]; n > 0 {
-		return n
-	}
-	return scriptCap
-}
-
-// applyRoleTurns rewrites a script's per-role caps from the configuration,
-// then from the run's own override when it carries one.
-//
-// Done here rather than in the scripts because a script is a fixed shape and the
-// caps are a preference. Walking the turns is what makes a setting apply to
-// every mode at once instead of to whichever ones somebody remembered.
-//
-// The override used to ride only ExecuteParams.TurnCaps — which tournament
-// and split read, and the script modes never did. So the per-run
-// "calls/reply" was accepted, recorded, and silently ignored in exactly the
-// modes most runs use. Human turns keep their cap: the override unblocks
-// models, not people.
-func (s *Service) applyRoleTurns(script *strategy.Script, override int) *strategy.Script {
-	if script == nil {
-		return script
-	}
-	resolved := s.resolveTurnCaps("", override)
-	for i := range script.Turns {
-		designCap := script.Turns[i].MaxTurns
-		configured := strategy.CapFor(resolved.Caps, script.Turns[i].Role, designCap)
-		script.Turns[i].MaxTurnsRequested = configured
-		script.Turns[i].MaxTurnsSource = strategy.CapSourceFor(resolved.Sources, script.Turns[i].Role, "script default")
-		ceiling := designCap
-		if script.Turns[i].MaxTurnsCeiling > 0 {
-			ceiling = script.Turns[i].MaxTurnsCeiling
-		}
-		if (script.Turns[i].Persona == strategy.PersonaCritic || script.Turns[i].MaxTurnsCeiling > 0) && configured > ceiling {
-			configured = ceiling
-		}
-		script.Turns[i].MaxTurns = configured
-		if script.Turns[i].Persona == strategy.PersonaCritic || script.Turns[i].MaxTurnsCeiling > 0 {
-			script.Turns[i].MaxTurnsCeiling = ceiling
-			if script.Turns[i].MaxTurnsCeilingSource == "" {
-				if script.Turns[i].Persona == strategy.PersonaCritic {
-					script.Turns[i].MaxTurnsCeilingSource = "document critic ceiling"
-				} else {
-					script.Turns[i].MaxTurnsCeilingSource = script.Name + " ceiling"
-				}
-			}
-		}
-	}
-	return script
-}
-
-// roleTurnCaps is the configured caps in the shape the strategies want.
-func (s *Service) roleTurnCaps() map[config.Role]int {
-	s.cfgMu.RLock()
-	defer s.cfgMu.RUnlock()
-	out := map[config.Role]int{}
-	for role, n := range s.cfg.Defaults.RoleTurns {
-		if n > 0 {
-			out[config.Role(role)] = n
-		}
-	}
-	return out
 }

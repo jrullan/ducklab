@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/agent"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/strategy"
@@ -19,7 +20,7 @@ import (
 func TestARolesTurnCapCanBeRaised(t *testing.T) {
 	s := writableService(t, "pato-uno")
 
-	if got := s.turnsFor("triager", ScriptRoleTurns["triager"]); got != 6 {
+	if got := strategy.CapFor(s.resolveTurnCaps("triage", 0).Caps, config.RoleTriager, ScriptRoleTurns["triager"]); got != 6 {
 		t.Fatalf("the script's own cap is not the fallback: %d", got)
 	}
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
@@ -27,11 +28,11 @@ func TestARolesTurnCapCanBeRaised(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.turnsFor("triager", 6); got != 20 {
+	if got := strategy.CapFor(s.resolveTurnCaps("triage", 0).Caps, config.RoleTriager, 6); got != 20 {
 		t.Errorf("cap = %d, want the configured 20", got)
 	}
 	// A role nobody configured keeps the script's own.
-	if got := s.turnsFor("reviewer", 8); got != 8 {
+	if got := strategy.CapFor(s.resolveTurnCaps("triage", 0).Caps, config.RoleReviewer, 8); got != 8 {
 		t.Errorf("reviewer = %d, want 8", got)
 	}
 }
@@ -46,22 +47,51 @@ func TestTheCapReachesEveryMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Script-driven modes.
-	pair := s.applyRoleTurns(strategy.PairScript(), 0)
-	for _, turn := range pair.Turns {
-		want := map[config.Role]int{config.RoleImplementer: 30, config.RoleReviewer: 3}[turn.Role]
-		if want != 0 && turn.MaxTurns != want {
-			t.Errorf("pair %s = %d, want %d", turn.Role, turn.MaxTurns, want)
-		}
-	}
-
-	// And the ones that build their own.
-	caps := s.roleTurnCaps()
+	caps := s.resolveTurnCaps("build", 0).Caps
 	if got := strategy.CapFor(caps, config.RoleImplementer, 24); got != 30 {
-		t.Errorf("tournament/split implementer = %d, want 30", got)
+		t.Errorf("script implementer = %d, want 30", got)
+	}
+	if got := strategy.CapFor(caps, config.RoleReviewer, 8); got != 3 {
+		t.Errorf("script reviewer = %d, want 3", got)
 	}
 	if got := strategy.CapFor(caps, config.RoleJudge, 1); got != 1 {
 		t.Errorf("an unconfigured role lost its own cap: %d", got)
+	}
+}
+
+// B-275 adds phase portions; it does not erase the script's role-specific
+// design. With untouched Settings a judge must remain a one-call chooser and
+// a triager a six-call classifier, not inherit the global implementer plate.
+func TestUntouchedConfigurationKeepsScriptRoleCaps(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	resolved := s.resolveTurnCaps("review", 0)
+	if _, ok := resolved.Caps[config.RoleJudge]; ok {
+		t.Fatalf("default resolver populated judge: %#v", resolved.Caps)
+	}
+	if got := strategy.CapFor(resolved.Caps, config.RoleTriager, 6); got != 6 {
+		t.Fatalf("triager = %d, want script default 6", got)
+	}
+
+	var got int
+	script := &strategy.Script{
+		Name: "judge-default-probe", MaxRounds: 1, Until: "round == 1",
+		Turns: []strategy.Turn{{
+			Role: config.RoleJudge, Toolbelt: "read-only", Contract: "freeform", MaxTurns: 1,
+		}},
+	}
+	_, err := strategy.ExecuteScript(context.Background(), script, &strategy.ExecuteParams{
+		TurnCaps: resolved.Caps, TurnCapSources: resolved.Sources,
+		Roster: map[config.Role]config.DucklingID{config.RoleJudge: "pato-uno"},
+		Runner: func(_ context.Context, turn *strategy.Turn, _ config.DucklingID, _ string, _ []string, _ strategy.TurnContext) (*agent.Outcome, error) {
+			got = turn.MaxTurns
+			return &agent.Outcome{Text: "chosen"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 1 {
+		t.Fatalf("judge ran with %d calls, want script default 1", got)
 	}
 }
 
@@ -111,24 +141,20 @@ func TestTheTurnCeilingFitsASurveyingCritic(t *testing.T) {
 // modes most runs use.
 func TestThePerRunOverrideReachesScriptModes(t *testing.T) {
 	s := writableService(t, "pato-uno")
-	pair := s.applyRoleTurns(strategy.PairScript(), 33)
-	for _, turn := range pair.Turns {
+	resolved := s.resolveTurnCaps("build", 33)
+	for _, turn := range strategy.PairScript().Turns {
 		if turn.Role == config.RoleHuman {
 			continue
 		}
-		want := 33
-		if turn.Role == config.RoleReviewer {
-			want = 8
-		}
-		if turn.MaxTurns != want {
-			t.Errorf("pair %s = %d, want %d", turn.Role, turn.MaxTurns, want)
+		if got := strategy.CapFor(resolved.Caps, turn.Role, turn.MaxTurns); got != 33 {
+			t.Errorf("pair %s request = %d, want 33", turn.Role, got)
 		}
 	}
 }
 
 // The UI exposed several numbers without saying which one won. Keep the
-// resolution executable in one place: global -> phase -> role -> run. Script
-// ceilings are applied later, when the concrete turn is known.
+// resolution executable in one place: an implementer's global/phase portion,
+// then role, then run. Script ceilings are applied when the turn is known.
 func TestCallsPerReplyPrecedenceIsGlobalPhaseRoleRun(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
@@ -178,6 +204,20 @@ func TestCallsPerReplyPrecedenceIsGlobalPhaseRoleRun(t *testing.T) {
 	}
 }
 
+func TestEmptyPhaseUsesGlobalFallbackForImplementerOnly(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	resolved := s.resolveTurnCaps("test", 0)
+	if got := resolved.Caps[config.RoleImplementer]; got != 24 {
+		t.Fatalf("test implementer = %d, want global fallback 24", got)
+	}
+	if got := resolved.Sources[config.RoleImplementer]; got != "global default" {
+		t.Fatalf("test implementer source = %q", got)
+	}
+	if _, ok := resolved.Caps[config.RoleReviewer]; ok {
+		t.Fatalf("phase fallback replaced reviewer script cap: %#v", resolved.Caps)
+	}
+}
+
 func TestModeDefaultsPublishesPhaseDefaultsAndScriptCeilings(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	if err := s.ModeDefaultsSet(ModeDefaultsView{
@@ -193,21 +233,6 @@ func TestModeDefaultsPublishesPhaseDefaultsAndScriptCeilings(t *testing.T) {
 	}
 	if got.TurnCeilings["pair.reviewer"] != 8 {
 		t.Fatalf("pair reviewer ceiling = %d, want 8", got.TurnCeilings["pair.reviewer"])
-	}
-}
-
-func TestRoleConfigurationCannotInflatePairReview(t *testing.T) {
-	s := writableService(t, "pato-uno")
-	if err := s.ModeDefaultsSet(ModeDefaultsView{
-		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 100},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	pair := s.applyRoleTurns(strategy.PairScript(), 0)
-	for _, turn := range pair.Turns {
-		if turn.Role == config.RoleReviewer && turn.MaxTurns != 8 {
-			t.Fatalf("pair reviewer cap = %d, want its designed ceiling 8", turn.MaxTurns)
-		}
 	}
 }
 
@@ -248,57 +273,18 @@ func TestDeclaredTierOverridesProviderLocality(t *testing.T) {
 	}
 }
 
-// Neocapture's fragment reviewer inherited the configured generic reviewer
-// cap of 100 and exposed that service-side script rewriting happened before
-// ExecuteScript's critic guard. Document critics carry their draft in the
-// prompt; their six-call design cap remains an upper bound, while a lower
-// project or run cap is still honored.
-func TestRoleConfigurationCannotRaiseADocumentCriticCap(t *testing.T) {
-	s := writableService(t, "pato-uno")
-	if err := s.ModeDefaultsSet(ModeDefaultsView{
-		AgentMaxTurns: 24, RoleTurns: map[string]int{"reviewer": 100},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	council := s.applyRoleTurns(strategy.CouncilScript("REQ", nil), 0)
-	for _, turn := range council.Turns {
-		if turn.Persona == strategy.PersonaCritic && turn.MaxTurns != 6 {
-			t.Fatalf("configured critic cap = %d, want 6", turn.MaxTurns)
-		}
-	}
-
-	council = s.applyRoleTurns(strategy.CouncilScript("REQ", nil), 3)
-	for _, turn := range council.Turns {
-		if turn.Persona == strategy.PersonaCritic && turn.MaxTurns != 3 {
-			t.Fatalf("lower run critic cap = %d, want 3", turn.MaxTurns)
-		}
-	}
-}
-
 // Negative is "no cap", the same word the budget lifts speak: finite in
 // letter (I3), beyond use in practice, with the token and cost budgets still
 // guarding every call. A human turn keeps its cap — the lift unblocks
 // models, not people.
 func TestANegativeOverrideLiftsTheCap(t *testing.T) {
 	s := writableService(t, "pato-uno")
-
-	review := s.applyRoleTurns(strategy.ReviewScript(true), -1)
-	for _, turn := range review.Turns {
-		if turn.Role == config.RoleHuman {
-			if turn.MaxTurns != 1 {
-				t.Errorf("the human turn's cap moved: %d", turn.MaxTurns)
-			}
-			continue
-		}
-		if turn.MaxTurns != uncappedTurns {
-			t.Errorf("%s = %d, want uncapped (%d)", turn.Role, turn.MaxTurns, uncappedTurns)
-		}
-	}
-
-	// And the modes that build their own turns read the same lift.
-	caps := s.roleTurnCapsFor(-1)
+	caps := s.resolveTurnCaps("review", -1).Caps
 	if got := strategy.CapFor(caps, config.RoleImplementer, 24); got != uncappedTurns {
-		t.Errorf("tournament/split implementer = %d, want uncapped (%d)", got, uncappedTurns)
+		t.Errorf("implementer = %d, want uncapped (%d)", got, uncappedTurns)
+	}
+	if got := strategy.CapFor(caps, config.RoleReviewer, 8); got != uncappedTurns {
+		t.Errorf("reviewer = %d, want uncapped (%d)", got, uncappedTurns)
 	}
 	if _, ok := caps[config.RoleHuman]; ok {
 		t.Error("the lift reached the human role")
