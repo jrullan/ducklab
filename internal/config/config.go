@@ -132,12 +132,16 @@ type Defaults struct {
 	// was to edit Go and rebuild.
 	Rounds map[string]int `toml:"rounds" json:"rounds"`
 	// RoleTurns caps the model calls one turn of a given role may chain, keyed
-	// by role. Absent or zero leaves the script's own cap alone.
+	// by role. Absent or zero inherits the phase default, then AgentMaxTurns.
 	//
 	// The caps were literals in five files — council 12, pair 24 and 8, triage
 	// 6 — so a triager that used all six of its turns calling tools and never
 	// answered told its reader to raise a number that could not be raised.
 	RoleTurns map[string]int `toml:"role_turns" json:"role_turns"`
+	// PhaseTurns caps one reply by lifecycle phase before a role or run
+	// override is applied. It lets test-first reconnaissance have a different
+	// portion from implementation without retuning every seat globally.
+	PhaseTurns map[string]int `toml:"phase_turns" json:"phase_turns"`
 	// ModeDucklings is the duckling line-up to use for each mode when a run does
 	// not name one. Ordered: tournament and split assign positionally, and pair
 	// takes the first as implementer and the second as reviewer.

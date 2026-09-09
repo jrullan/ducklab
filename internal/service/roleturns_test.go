@@ -126,6 +126,76 @@ func TestThePerRunOverrideReachesScriptModes(t *testing.T) {
 	}
 }
 
+// The UI exposed several numbers without saying which one won. Keep the
+// resolution executable in one place: global -> phase -> role -> run. Script
+// ceilings are applied later, when the concrete turn is known.
+func TestCallsPerReplyPrecedenceIsGlobalPhaseRoleRun(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24,
+		PhaseTurns:    map[string]int{"build": 40, "test": 60},
+		RoleTurns:     map[string]int{"reviewer": 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	build := s.resolveTurnCaps("build", 0)
+	if got := build.Caps[config.RoleImplementer]; got != 40 {
+		t.Fatalf("build implementer = %d, want phase default 40", got)
+	}
+	if got := build.Sources[config.RoleImplementer]; got != "build default" {
+		t.Fatalf("build implementer source = %q", got)
+	}
+	if got := build.Caps[config.RoleReviewer]; got != 100 {
+		t.Fatalf("build reviewer = %d, want role override 100", got)
+	}
+	if got := build.Sources[config.RoleReviewer]; got != "reviewer role default" {
+		t.Fatalf("build reviewer source = %q", got)
+	}
+
+	testCaps := s.resolveTurnCaps("test", 0)
+	if got := testCaps.Caps[config.RoleImplementer]; got != 60 {
+		t.Fatalf("test implementer = %d, want phase default 60", got)
+	}
+	if got := testCaps.Sources[config.RoleImplementer]; got != "test default" {
+		t.Fatalf("test implementer source = %q", got)
+	}
+
+	run := s.resolveTurnCaps("build", 70)
+	if got := run.Caps[config.RoleReviewer]; got != 70 {
+		t.Fatalf("run reviewer = %d, want run override 70", got)
+	}
+	if got := run.Sources[config.RoleReviewer]; got != "run override" {
+		t.Fatalf("run reviewer source = %q", got)
+	}
+
+	lifted := s.resolveTurnCaps("build", -1)
+	if got := lifted.Caps[config.RoleReviewer]; got != uncappedTurns {
+		t.Fatalf("lifted reviewer = %d, want %d", got, uncappedTurns)
+	}
+	if got := lifted.Sources[config.RoleReviewer]; got != "run no-cap" {
+		t.Fatalf("lifted reviewer source = %q", got)
+	}
+}
+
+func TestModeDefaultsPublishesPhaseDefaultsAndScriptCeilings(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	if err := s.ModeDefaultsSet(ModeDefaultsView{
+		AgentMaxTurns: 24,
+		PhaseTurns:    map[string]int{"build": 40, "test": 60},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.ModeDefaults()
+	if got.PhaseTurns["build"] != 40 || got.PhaseTurns["test"] != 60 {
+		t.Fatalf("phase defaults = %#v", got.PhaseTurns)
+	}
+	if got.TurnCeilings["pair.reviewer"] != 8 {
+		t.Fatalf("pair reviewer ceiling = %d, want 8", got.TurnCeilings["pair.reviewer"])
+	}
+}
+
 func TestRoleConfigurationCannotInflatePairReview(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	if err := s.ModeDefaultsSet(ModeDefaultsView{

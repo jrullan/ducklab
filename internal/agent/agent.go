@@ -24,13 +24,17 @@ import (
 
 // Turn is one scheduled unit of conversation.
 type Turn struct {
-	Role      config.Role
-	Duckling  config.DucklingID
-	Prompt    string
-	Toolbelt  []string
-	Contract  string
-	MaxTurns  int
-	Anonymize bool
+	Role                  config.Role
+	Duckling              config.DucklingID
+	Prompt                string
+	Toolbelt              []string
+	Contract              string
+	MaxTurns              int
+	MaxTurnsRequested     int
+	MaxTurnsSource        string
+	MaxTurnsCeiling       int
+	MaxTurnsCeilingSource string
+	Anonymize             bool
 	// Persona narrows the role's system prompt to the situation ("critic" for
 	// a document council's reviewer). Empty keeps the role's default.
 	Persona string
@@ -287,16 +291,43 @@ func RunTurn(ctx context.Context, loop *Loop, turn *Turn, ectx *tools.ExecContex
 	if maxTurns <= 0 {
 		maxTurns = 24
 	}
+	requestedMax := turn.MaxTurnsRequested
+	if requestedMax <= 0 {
+		requestedMax = maxTurns
+	}
+	// Strategy normally supplies the already-clamped effective value. Keep the
+	// transport boundary safe for direct callers too: a declared invariant is
+	// authoritative even when MaxTurns accidentally carries the request.
+	if turn.MaxTurnsCeiling > 0 && maxTurns > turn.MaxTurnsCeiling {
+		maxTurns = turn.MaxTurnsCeiling
+	}
+	maxSource := turn.MaxTurnsSource
+	if maxSource == "" {
+		maxSource = "script default"
+	}
 
 	var conversation []provider.Message
 	conversation = append(conversation, messages...)
 
-	for turnNum := 1; turnNum <= maxTurns; turnNum++ {
+	for turnNum := 1; ; turnNum++ {
 		// A live lift lands between calls: the cap disappears mid-reply
 		// instead of after the death it was about to cause.
-		if maxTurns < UncappedTurns && loop.CapLift != nil && loop.CapLift() {
-			maxTurns = UncappedTurns
+		if requestedMax < UncappedTurns && loop.CapLift != nil && loop.CapLift() {
+			requestedMax = UncappedTurns
+			maxSource = "live no-cap"
+			maxTurns = requestedMax
+			if turn.MaxTurnsCeiling > 0 && maxTurns > turn.MaxTurnsCeiling {
+				maxTurns = turn.MaxTurnsCeiling
+			}
 		}
+		// Check after the live flag. A person can lift while the previous model
+		// call is in flight; checking in the for condition discarded that lift
+		// before the loop body had a chance to observe it.
+		if turnNum > maxTurns {
+			break
+		}
+		turn.MaxTurnsRequested = requestedMax
+		turn.MaxTurnsSource = maxSource
 		if turnNum == maxTurns && maxTurns < UncappedTurns && loop.OnCapNear != nil {
 			loop.OnCapNear(turn, turnNum-1, maxTurns)
 		}

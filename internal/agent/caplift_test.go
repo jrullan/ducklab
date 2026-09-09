@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -97,5 +98,58 @@ func TestAnUnliftedCapStillBinds(t *testing.T) {
 	}
 	if !sawConclude.Load() {
 		t.Error("the cap never bound: the tools-withheld conclude call was not made")
+	}
+}
+
+// A live "no cap" used to replace the effective cap with 10000 inside the
+// loop, bypassing PairScript's reviewer ceiling after strategy had correctly
+// clamped it to eight. Preferences may be lifted; script invariants may not.
+func TestALiveLiftCannotCrossAHardTurnCeiling(t *testing.T) {
+	var lifted atomic.Bool
+	var calls []string
+	fake := provider.NewFake("f")
+	fake.ScriptFunc = func(req provider.ChatRequest, callCount int) *provider.ChatResponse {
+		content := "Looking.\n```ducklab\n{\"tool\":\"fs_list\",\"args\":{\"path\":\".\"}}\n```"
+		if callCount == 2 {
+			lifted.Store(true)
+		}
+		if last := req.Messages[len(req.Messages)-1]; last.Role == "user" && strings.Contains(last.Content, "out of tool calls") {
+			content = "Stopped at the hard ceiling."
+		}
+		return &provider.ChatResponse{
+			Choices: []provider.Choice{{
+				Message: provider.Message{Role: "assistant", Content: content}, FinishReason: provider.FinishStop,
+			}},
+			Usage: provider.Usage{PromptTokens: 100, CompletionTokens: 50},
+		}
+	}
+	loop := &Loop{
+		Provider: fake,
+		Duckling: &DucklingConfig{ID: "rev", Provider: "openrouter", Model: "m"},
+		Registry: tools.NewRegistry(),
+		Budget: budget.NewTracker(&budget.Budget{
+			MaxUSD: 10, MaxTokens: 1e6, MaxTurns: 50, MaxWallclockS: 600,
+		}),
+		CapLift: lifted.Load,
+		OnCall: func(turn *Turn, n, max int) {
+			calls = append(calls, fmt.Sprintf("%d/%d/%d/%s", n, max, turn.MaxTurnsRequested, turn.MaxTurnsSource))
+		},
+	}
+	turn := &Turn{
+		Role: config.RoleReviewer, Prompt: "Review it.", Contract: "freeform",
+		Toolbelt: []string{"fs_list"}, MaxTurns: 2, MaxTurnsRequested: 2,
+		MaxTurnsSource: "run override", MaxTurnsCeiling: 3, MaxTurnsCeilingSource: "pair ceiling",
+	}
+
+	outcome, err := RunTurn(context.Background(), loop, turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Text != "Stopped at the hard ceiling." {
+		t.Fatalf("outcome = %q", outcome.Text)
+	}
+	want := []string{"1/2/2/run override", "2/2/2/run override", "3/3/10000/live no-cap"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("call caps = %v, want %v", calls, want)
 	}
 }

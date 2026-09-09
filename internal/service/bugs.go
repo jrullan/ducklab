@@ -305,6 +305,7 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 	s.attachStreaming(rs, cache)
 	runner := s.runnerFor(cache, roster, ectx)
 	duckling := roster[config.RoleTriager]
+	turnCaps := s.resolveTurnCaps("triage", 0)
 
 	proposals := make([]map[string]interface{}, 0, len(todo))
 	for i, b := range todo {
@@ -313,8 +314,10 @@ func (s *Service) executeTriage(ctx context.Context, rs *runState, projectRoot s
 			Toolbelt: "full", // narrowed to the triager's ceiling
 			Contract: "json:triage",
 			// The cap that told its own failure message to raise a number
-			// nobody could reach. Configurable now, with six as the default.
-			MaxTurns: s.turnsFor(string(config.RoleTriager), ScriptRoleTurns["triager"]),
+			// nobody could reach. It now follows the shared precedence rule.
+			MaxTurns:          strategy.CapFor(turnCaps.Caps, config.RoleTriager, ScriptRoleTurns["triager"]),
+			MaxTurnsRequested: strategy.CapFor(turnCaps.Caps, config.RoleTriager, ScriptRoleTurns["triager"]),
+			MaxTurnsSource:    strategy.CapSourceFor(turnCaps.Sources, config.RoleTriager, "script default"),
 		}
 		// The report's screenshots, shown to a triager that can see. Gated on
 		// the declared vision cap: a text-only model sent an image array gets

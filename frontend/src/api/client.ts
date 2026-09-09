@@ -294,7 +294,11 @@ export interface ModeDefaultsView {
    * than an implementer on purpose: reviewing is reading and giving a verdict,
    * not iterating. */
   role_turns?: Record<string, number>;
+  /** Phase defaults sit between the global fallback and role overrides. */
+  phase_turns?: Record<string, number>;
   script_role_turns?: Record<string, number>;
+  /** Hard script ceilings, derived by the engine (for example pair.reviewer). */
+  turn_ceilings?: Record<string, number>;
   /** How many ducklings each mode can seat — zero or absent means as many as
    * are ticked. Rendered as disabled checkboxes, so a full mode says "no more
    * chairs" at the box instead of failing at Save. */

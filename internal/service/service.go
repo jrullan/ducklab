@@ -4354,21 +4354,31 @@ func (s *Service) attachStreaming(rs *runState, cache *loopCache) {
 	// Where the reply stands against its cap, as it moves. The card read
 	// "default" while an architect sat at 19 calls of an invisible 24.
 	cache.onCall = func(t *agent.Turn, n, max int) {
-		rs.writer.AppendEvent("reply_call", map[string]interface{}{
+		data := map[string]interface{}{
 			"round": t.Round, "turn": t.Index,
 			"role": string(t.Role), "duckling": string(t.Duckling),
-			"n": n, "max": max,
-		})
+			"n": n, "max": max, "source": t.MaxTurnsSource,
+			"requested": t.MaxTurnsRequested,
+		}
+		if t.MaxTurnsCeiling > 0 {
+			data["ceiling"] = t.MaxTurnsCeiling
+			data["ceiling_source"] = t.MaxTurnsCeilingSource
+		}
+		rs.writer.AppendEvent("reply_call", data)
 	}
 	// In time to act: the reply is about to spend its last allowed call,
 	// and the lift that could save it sits one tick away in the budget card.
 	cache.onCapNear = func(t *agent.Turn, used, max int) {
+		detail := fmt.Sprintf("%s is on the LAST of its %d calls for this reply — tick "+
+			"\"no cap\" on calls/reply in the budget card to let it keep working, or it "+
+			"will answer from what it has", t.Role, max)
+		if t.MaxTurnsCeiling > 0 && max == t.MaxTurnsCeiling && t.MaxTurnsRequested >= t.MaxTurnsCeiling {
+			detail = fmt.Sprintf("%s is on the LAST of its %d calls for this reply — %s is a hard ceiling; defaults, overrides, and no-cap cannot raise it", t.Role, max, t.MaxTurnsCeilingSource)
+		}
 		rs.writer.AppendEvent("warning", map[string]interface{}{
 			"round": t.Round, "turn": t.Index,
 			"role": string(t.Role), "duckling": string(t.Duckling),
-			"detail": fmt.Sprintf("%s is on the LAST of its %d calls for this reply — tick "+
-				"\"no cap\" on calls/reply in the budget card to let it keep working, or it "+
-				"will answer from what it has", t.Role, max),
+			"detail": detail,
 		})
 	}
 	// Provider weather, on the record as it happens: the person watching an

@@ -467,7 +467,8 @@ func (s *Service) prBody(ctx context.Context, projectID string, p *projectState,
 	cache := &loopCache{svc: s, tracker: tracker, writer: s.llmWriter(rs, tracker), capLift: rs.capLifted.Load, loops: map[config.DucklingID]*agent.Loop{}}
 	s.attachStreaming(rs, cache)
 	writer.AppendEvent("pr_body_draft", map[string]interface{}{"source": "run_record", "title": title})
-	res, err := strategy.ExecuteScript(runCtx, strategy.ReleaseScript(), &strategy.ExecuteParams{LiveToolEvents: true, ProjectRoot: p.git.Root, Prompt: prScribePrompt(title, record), Runner: s.runnerFor(cache, roster, ectx), Roster: roster, OnEvent: func(kind string, data map[string]interface{}) { writer.AppendEvent(kind, data) }})
+	turnCaps := s.resolveTurnCaps("release", 0)
+	res, err := strategy.ExecuteScript(runCtx, strategy.ReleaseScript(), &strategy.ExecuteParams{LiveToolEvents: true, ProjectRoot: p.git.Root, Prompt: prScribePrompt(title, record), Runner: s.runnerFor(cache, roster, ectx), Roster: roster, TurnCaps: turnCaps.Caps, TurnCapSources: turnCaps.Sources, OnEvent: func(kind string, data map[string]interface{}) { writer.AppendEvent(kind, data) }})
 	recordSpend(rs, tracker)
 	if err != nil || res == nil || res.Outcome == nil || strings.TrimSpace(res.Outcome.Text) == "" {
 		run.Status = "failed"

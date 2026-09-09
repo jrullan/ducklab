@@ -142,6 +142,7 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
+	turnCaps := s.resolveTurnCaps("review", rs.run.AgentTurns)
 
 	params := &strategy.ExecuteParams{
 		LiveToolEvents: true,
@@ -150,6 +151,8 @@ func (s *Service) executeReview(ctx context.Context, rs *runState, projectRoot s
 		Prompt:         reviewPrompt(req.TaskID, diff),
 		Runner:         s.runnerFor(cache, roster, ectx),
 		Roster:         roster,
+		TurnCaps:       turnCaps.Caps,
+		TurnCapSources: turnCaps.Sources,
 		Diff:           func() (string, error) { return diff, nil },
 		OnEvent: func(kind string, data map[string]interface{}) {
 			rs.writer.AppendEvent(kind, data)

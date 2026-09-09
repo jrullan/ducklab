@@ -19,6 +19,7 @@ func TestModeDefaultsSurviveTheConfigFile(t *testing.T) {
 		AgentMaxTurns: 24,
 		Rounds:        map[string]int{"pair": 5},
 		RoleTurns:     map[string]int{"triager": 20},
+		PhaseTurns:    map[string]int{"build": 40},
 		Ducklings:     map[string][]string{"pair": {"pato-uno"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -28,7 +29,7 @@ func TestModeDefaultsSurviveTheConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"role_turns", "triager", "rounds", "mode_ducklings"} {
+	for _, want := range []string{"role_turns", "triager", "phase_turns", "build", "rounds", "mode_ducklings"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("the config file does not mention %q:\n%s", want, raw)
 		}

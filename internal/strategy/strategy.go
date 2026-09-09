@@ -148,12 +148,17 @@ type Turn struct {
 	Toolbelt string // "full", "read-only", or a comma-separated list
 	Contract string
 	MaxTurns int
+	// MaxTurnsRequested and its source preserve the value before a hard script
+	// ceiling clamps it. This is operator evidence, not scheduling policy.
+	MaxTurnsRequested int
+	MaxTurnsSource    string
 	// MaxTurnsCeiling is a script invariant, not a preference. Role and
 	// per-run caps may make this turn smaller, but cannot make it larger.
 	// Most turns deliberately leave it unset: a large implementer or survey
 	// may need the configured room. Pair's independent review is short and
 	// repeated by round, so inflating it turns review into open-ended browsing.
-	MaxTurnsCeiling int
+	MaxTurnsCeiling       int
+	MaxTurnsCeilingSource string
 	// Images are data URLs for a vision duckling — a bug's screenshots on a
 	// triage turn. Carried through to the agent turn untouched.
 	Images []string
@@ -193,6 +198,8 @@ func (t *Turn) AgentTurn(duckling config.DucklingID, prompt string, toolbelt []s
 	return &agent.Turn{
 		Role: t.Role, Duckling: duckling, Prompt: prompt, Toolbelt: toolbelt,
 		Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
+		MaxTurnsRequested: t.MaxTurnsRequested, MaxTurnsSource: t.MaxTurnsSource,
+		MaxTurnsCeiling: t.MaxTurnsCeiling, MaxTurnsCeilingSource: t.MaxTurnsCeilingSource,
 		Persona: t.Persona, SmallSeat: t.SmallSeat, Images: t.Images,
 		Round: round, Index: index,
 		ManifestAuditInputs:     t.ManifestAuditInputs,

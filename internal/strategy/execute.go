@@ -104,6 +104,9 @@ type ExecuteParams struct {
 	// than from a script, so walking a script's turns reaches four modes out of
 	// six and a setting that applies to some modes is worse than none.
 	TurnCaps map[config.Role]int
+	// TurnCapSources explains which precedence layer supplied TurnCaps. It is
+	// parallel metadata so direct strategy callers need not provide it.
+	TurnCapSources map[config.Role]string
 	// LiveToolEvents says the runner emits tool_call events itself, per call,
 	// as they complete (agent.Loop.OnToolCall) — the post-turn batch here
 	// would duplicate every one of them in the record.
@@ -476,6 +479,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// implementer at TestFirstScript's hardcoded 24 while role_turns
 			// said 100 and the Settings fallback said 40. A strong seat died
 			// reading a 30-file project with every configured number decorative.
+			requested := CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
+			turn.MaxTurnsRequested = requested
+			turn.MaxTurnsSource = CapSourceFor(params.TurnCapSources, turn.Role, "script default")
 			if turn.Persona == PersonaCritic || turn.MaxTurnsCeiling > 0 {
 				// A document critic reads a draft that is in its prompt; the
 				// script's six calls are the design. Other turns may declare the
@@ -486,20 +492,32 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				if turn.MaxTurnsCeiling > 0 {
 					ceiling = turn.MaxTurnsCeiling
 				}
-				if c := CapFor(params.TurnCaps, turn.Role, turn.MaxTurns); c < ceiling {
-					turn.MaxTurns = c
+				turn.MaxTurnsCeiling = ceiling
+				if turn.MaxTurnsCeilingSource == "" {
+					if turn.Persona == PersonaCritic {
+						turn.MaxTurnsCeilingSource = "document critic ceiling"
+					} else {
+						turn.MaxTurnsCeilingSource = script.Name + " ceiling"
+					}
+				}
+				if requested < ceiling {
+					turn.MaxTurns = requested
 				} else {
 					turn.MaxTurns = ceiling
 				}
 			} else {
-				turn.MaxTurns = CapFor(params.TurnCaps, turn.Role, turn.MaxTurns)
+				turn.MaxTurns = requested
 			}
-			if params.SmallSeat && script.Name == "pair" && turn.Role == config.RoleImplementer && turn.MaxTurns > 24 {
+			if params.SmallSeat && script.Name == "pair" && turn.Role == config.RoleImplementer {
 				// Pair mode promises an independent reviewer. A small local seat
 				// can otherwise spend a configured high role cap on slow calls
 				// until the run wallclock expires before review begins. Large
 				// seats retain the explicit role-cap override contract.
-				turn.MaxTurns = 24
+				turn.MaxTurnsCeiling = 24
+				turn.MaxTurnsCeilingSource = "small-seat pair reserve"
+				if turn.MaxTurns > turn.MaxTurnsCeiling {
+					turn.MaxTurns = turn.MaxTurnsCeiling
+				}
 			}
 
 			if params.ResumeFrom != nil && (round < params.ResumeFrom.Round || (round == params.ResumeFrom.Round && i < params.ResumeFrom.Index)) {
@@ -2055,6 +2073,14 @@ func resumeCheckpointNotes(raw string) string {
 func CapFor(caps map[config.Role]int, role config.Role, fallback int) int {
 	if n, ok := caps[role]; ok && n > 0 {
 		return n
+	}
+	return fallback
+}
+
+// CapSourceFor mirrors CapFor for operator-facing provenance.
+func CapSourceFor(sources map[config.Role]string, role config.Role, fallback string) string {
+	if source := sources[role]; source != "" {
+		return source
 	}
 	return fallback
 }

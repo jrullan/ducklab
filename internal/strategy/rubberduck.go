@@ -209,7 +209,9 @@ func parseAdvice(outcome *agent.Outcome) advice {
 func consultAdvisor(ctx context.Context, params *ExecuteParams, runner TurnRunner, registry *tools.Registry, round, index int, implementer config.DucklingID, outcome *agent.Outcome, signals distressSignals) (string, *AdvisorStop, error) {
 	turn := Turn{
 		Role: config.RoleAdvisor, Toolbelt: "full", Contract: adviceContract,
-		MaxTurns: CapFor(params.TurnCaps, config.RoleAdvisor, consultAdvisorDefaultTurns),
+		MaxTurns:          CapFor(params.TurnCaps, config.RoleAdvisor, consultAdvisorDefaultTurns),
+		MaxTurnsRequested: CapFor(params.TurnCaps, config.RoleAdvisor, consultAdvisorDefaultTurns),
+		MaxTurnsSource:    CapSourceFor(params.TurnCapSources, config.RoleAdvisor, "script default"),
 	}
 	advisor := resolveDuckling(params, turn)
 	if advisor == "" {
