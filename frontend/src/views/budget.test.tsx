@@ -312,11 +312,11 @@ describe("rounds and turns in Settings", () => {
 // failure message told the reader to raise the turn cap for that role. There was
 // nowhere to raise it.
 describe("per-role turn caps in Settings", () => {
-  it("shows the global fallback as the placeholder", async () => {
+  it("shows the script's own cap as the placeholder", async () => {
     render(settings(clientWith()));
     const triager = (await screen.findByTestId("role-turns-triager")) as HTMLInputElement;
     expect(triager.value).toBe("");
-    expect(triager.placeholder).toBe("24");
+    expect(triager.placeholder).toBe("6");
   });
 
   it("saves a raised cap", async () => {
@@ -360,7 +360,8 @@ describe("calls/reply precedence in Settings", () => {
     expect(build.value).toBe("40");
     expect(test.value).toBe("60");
     expect(screen.getByTestId("turn-ceilings").textContent).toContain("pair.reviewer 8");
-    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → role → run override");
+    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → role → run");
+    expect(screen.getByTestId("config-settings").textContent).toContain("other roles keep their script design");
 
     fireEvent.change(build, { target: { value: "48" } });
     fireEvent.click(screen.getByTestId("settings-save"));

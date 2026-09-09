@@ -784,7 +784,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         )}
       </div>
       <p className="mt-2 text-xs text-ink-muted">
-        Empty uses the global default ({modes.agent_max_turns}). Precedence is global → phase → role → run override; a hard script ceiling still wins.
+        Empty uses the global implementer fallback ({modes.agent_max_turns}). For build/test implementers precedence is global → phase → role → run; other roles keep their script design until a role or run override applies. A hard script ceiling still wins.
       </p>
 
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>
@@ -813,7 +813,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
               (v) => setRoleTurns({ ...roleTurns, [role]: v }),
               role,
               `role-turns-${role}`,
-              String(modes.agent_max_turns),
+              String(modes.script_role_turns?.[role] ?? ""),
               "w-16",
             ),
           )}
@@ -830,8 +830,8 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         A round is one pass over every participant, so pair spends two turns on
         each. "Calls per reply" is the separate limit on one participant
         chaining tool calls — a model working in circles is stopped by that, not
-        by the round count. Empty role overrides inherit the phase default, then
-        the global default shown in the box.
+        by the round count. Empty role overrides keep the script value shown in
+        the box; the build/test implementer may receive its phase portion first.
       </p>
       </SettingsCard>
       </div>

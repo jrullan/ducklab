@@ -412,10 +412,12 @@ type resolvedTurnCaps struct {
 	Sources map[config.Role]string
 }
 
-// resolveTurnCaps is the single precedence rule for calls/reply:
-// global -> phase -> role -> run. A script may still impose a hard ceiling;
-// strategy applies and records that final clamp because only it knows the
-// concrete turn being scheduled.
+// resolveTurnCaps is the single precedence rule for calls/reply. The returned
+// maps stay sparse: a role absent from them keeps the script's designed cap.
+// Build/test apply their phase portion to the implementer only (an empty phase
+// value uses the global fallback); role and run overrides are progressively
+// more specific and may name every role. A script may still impose a hard
+// ceiling; strategy records that final clamp because only it knows the turn.
 func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
 	s.cfgMu.RLock()
 	global := s.cfg.Defaults.AgentMaxTurns
@@ -429,26 +431,30 @@ func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
 		global = 24
 	}
 	out := resolvedTurnCaps{Caps: map[config.Role]int{}, Sources: map[config.Role]string{}}
-	for _, role := range config.ValidRoles() {
-		if role == config.RoleHuman {
-			continue
-		}
+	if phase == "build" || phase == "test" {
 		cap, source := global, "global default"
 		if phaseCap > 0 {
 			cap, source = phaseCap, phase+" default"
 		}
+		out.Caps[config.RoleImplementer] = cap
+		out.Sources[config.RoleImplementer] = source
+	}
+	for _, role := range config.ValidRoles() {
+		if role == config.RoleHuman {
+			continue
+		}
 		if n := roleCaps[string(role)]; n > 0 {
-			cap, source = n, string(role)+" role default"
+			out.Caps[role] = n
+			out.Sources[role] = string(role) + " role default"
 		}
 		if override != 0 {
-			cap = capOverride(override)
+			out.Caps[role] = capOverride(override)
 			if override < 0 {
-				source = "run no-cap"
+				out.Sources[role] = "run no-cap"
 			} else {
-				source = "run override"
+				out.Sources[role] = "run override"
 			}
 		}
-		out.Caps[role], out.Sources[role] = cap, source
 	}
 	return out
 }
@@ -459,13 +465,6 @@ func capOverride(override int) int {
 		return uncappedTurns
 	}
 	return override
-}
-
-// roleTurnCapsFor is the configured caps, unless the run asked for its own:
-// a per-run override applies to every role, because the person raising it is
-// unblocking THIS work, not retuning the fleet. Negative lifts the cap.
-func (s *Service) roleTurnCapsFor(override int) map[config.Role]int {
-	return s.resolveTurnCaps("", override).Caps
 }
 
 // modeContext carries everything a mode dispatch needs.

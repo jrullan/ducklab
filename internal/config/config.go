@@ -132,7 +132,8 @@ type Defaults struct {
 	// was to edit Go and rebuild.
 	Rounds map[string]int `toml:"rounds" json:"rounds"`
 	// RoleTurns caps the model calls one turn of a given role may chain, keyed
-	// by role. Absent or zero inherits the phase default, then AgentMaxTurns.
+	// by role. Absent or zero keeps the phase portion (for build/test
+	// implementers) or the script's own designed cap.
 	//
 	// The caps were literals in five files — council 12, pair 24 and 8, triage
 	// 6 — so a triager that used all six of its turns calling tools and never

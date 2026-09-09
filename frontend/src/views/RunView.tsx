@@ -2347,9 +2347,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                 >
                   <span>calls / reply</span>
                   <span className="flex items-baseline gap-2">
-                    {/* Live: where the CURRENT reply stands against its real
-                        cap, from the loop's own count — the only thing that
-                        knows both numbers. At rest: the configured shape. */}
+                    {/* The last observed reply against its real cap, live or
+                        archived, from the loop's own count — the only source
+                        that knows both requested and effective values. */}
                     <span className="tabular-nums" data-testid="calls-cap-value">
                       {(() => {
                         for (let i = events.length - 1; i >= 0; i--) {

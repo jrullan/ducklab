@@ -294,7 +294,7 @@ export interface ModeDefaultsView {
    * than an implementer on purpose: reviewing is reading and giving a verdict,
    * not iterating. */
   role_turns?: Record<string, number>;
-  /** Phase defaults sit between the global fallback and role overrides. */
+  /** Build/test implementer defaults sit between the global fallback and role overrides. */
   phase_turns?: Record<string, number>;
   script_role_turns?: Record<string, number>;
   /** Hard script ceilings, derived by the engine (for example pair.reviewer). */
