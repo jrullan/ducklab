@@ -154,6 +154,7 @@ function CycleMap({ stage }: { stage: string }) {
 
 export function RunView({ runId, client }: { runId: string; client: EngineClient }) {
   const run = useRuns((s) => s.runs[runId]);
+  const allRuns = useRuns((s) => s.runs);
   // The door this run's accept opened for its task, fetched once the accept
   // is confirmed (the version key flips on accepted/status).
   const journey = useJourney(
@@ -861,12 +862,19 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             })
           : await client.runStart(run.project_id, run.task_id, { ...opts, redo: true });
       setRelaunched(started.id);
+      return started.id;
     } catch (e) {
       setRelaunchError(e instanceof Error ? e.message : String(e));
+      return undefined;
     } finally {
       setRelaunchBusy(false);
     }
   };
+  // B-247: the task's work already landed under another accepted run. The
+  // T-181 phantom re-run was accepted because nothing said so.
+  const landedAs = run.task_id
+    ? Object.values(allRuns).find((r) => r.id !== run.id && r.task_id === run.task_id && r.accepted && r.commit_sha)?.commit_sha
+    : undefined;
 
   const requestChanges = async (text: string) => {
     setActionError(null);
@@ -1299,7 +1307,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           was to open events.jsonl. Some of these messages exist to be acted on:
           split refuses a decomposition with the exact file two subtasks both
           claimed. */}
-      {dissent && (
+      {/* B-261: while a decision is open, the dissent lives INSIDE the decision
+          card. Once decided, it stays here as history for whoever reads the run. */}
+      {dissent && !decisionOpen && (
         <section
           data-testid="reviewer-dissent"
           className="m-2 rounded-card border border-serious p-3"
@@ -1310,60 +1320,13 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             {dissent.findings > 0 &&
               ` with ${dissent.findings} finding${dissent.findings === 1 ? "" : "s"}`}
             {" "}and its rounds ran out. The gate decides the verdict; the reviewer only
-            advises — read them before accepting:
+            advises:
           </p>
           <ul className="mt-2 space-y-1 text-sm" data-testid="dissent-findings-list">
             {dissent.notes.map((n, i) => (
               <li key={i} className="text-ink-secondary">{n}</li>
             ))}
           </ul>
-          {/* "Almost" for code is a new run — but the new run used to be born
-              amnesiac: nothing carried the findings into its prompt, and
-              reject would RESTORE the green work away. One click: accept
-              what passed, then a follow-up run that reads the objections. */}
-          {(run.next ?? []).includes("accept") && dissent.findings > 0 && (
-            <div className="mt-2">
-              <button
-                type="button"
-                data-testid="accept-and-fix"
-                disabled={fixBusy}
-                onClick={() => {
-                  setFixBusy(true);
-                  setFixError(null);
-                  const note =
-                    "The previous run passed its gate but its reviewer requested changes. " +
-                    "Address these outstanding findings:\n" +
-                    dissent.notes.map((n) => `- ${n}`).join("\n");
-                  void client
-                    .accept(run.id)
-                    .then(() =>
-                      client.runStart(run.project_id, run.task_id, {
-                        mode: run.mode,
-                        ducklings: seatsFromRoster(run.mode, run.roster),
-                        seats: roleSeats(run.mode, seatsFromRoster(run.mode, run.roster)),
-                        note,
-                        // The accept a moment ago made this task "accepted";
-                        // the fix-forward run is authorized by that same click.
-                        redo: true,
-                      }),
-                    )
-                    .then((r) => {
-                      location.hash = `#/runs/${r.id}`;
-                    })
-                    .catch((e) => setFixError(e instanceof Error ? e.message : String(e)))
-                    .finally(() => setFixBusy(false));
-                }}
-                className="rounded border border-hairline px-2 py-1 text-sm"
-              >
-                {fixBusy ? "Starting…" : "Accept, then fix the findings"}
-              </button>
-              {fixError && (
-                <p className="mt-1 text-xs text-critical" data-testid="accept-and-fix-error">
-                  {fixError}
-                </p>
-              )}
-            </div>
-          )}
         </section>
       )}
       {/* The transition proposes in place: the accept that just moved this
@@ -1447,7 +1410,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           </p>
         </section>
       )}
-      {fileable && (
+      {fileable && !decisionOpen && (
         <section data-testid="file-findings" className="m-2 rounded-card border border-hairline p-3">
           <p className="text-sm text-ink">
             The reviewer's last verdict ({lastVerdict!.verdict}) carries{" "}
@@ -1738,6 +1701,48 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             redoNote={run.redo_note}
             onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
 			documentGate={!!(documentProposal || run.stage === "release")}
+            landedAs={landedAs}
+            dissent={codeRun ? dissent : null}
+            acceptAndFix={codeRun && dissent && dissent.findings > 0 && next.includes("accept") ? {
+              busy: fixBusy,
+              error: fixError,
+              mode: run.mode,
+              spent: budget && budget.usd > 0 ? money(budget.usd) : undefined,
+              onClick: () => {
+                setFixBusy(true);
+                setFixError(null);
+                const note =
+                  "The previous run passed its gate but its reviewer requested changes. " +
+                  "Address these outstanding findings:\n" +
+                  dissent.notes.map((n) => `- ${n}`).join("\n");
+                // Through the one relaunch path (B-258): the mode's saved
+                // line-up, no per-run seat overrides copied from this run.
+                void client
+                  .accept(run.id)
+                  .then(() => relaunch({ mode: run.mode, ducklings: relaunchDucklings, note }))
+                  .then((id) => {
+                    if (id) location.hash = `#/runs/${id}`;
+                  })
+                  .catch((e) => setFixError(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setFixBusy(false));
+              },
+            } : undefined}
+            fileFindings={fileable ? {
+              items: lastVerdict!.findings,
+              filed,
+              busy: fileBusy,
+              error: fileError,
+              boardHref: routeHref({ name: "board", tab: "bugs" }),
+              onFile: () => {
+                setFileBusy(true);
+                setFileError(null);
+                void client
+                  .runFileFindings(run.id)
+                  .then((r) => setFiledBugs(r.items.map((b) => b.id)))
+                  .catch((e) => setFileError(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setFileBusy(false));
+              },
+            } : undefined}
           />
           <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
           {(() => {
@@ -1831,7 +1836,9 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           of the view, where the conversation grows toward it — the reply box
           at the top had the person scrolling down to read and back up to
           answer, on every turn. */}
-      {pending && pending.kind !== "chat" && (
+      {/* B-261: a plain gate's "waiting for you" strip duplicated the decision
+          card. The strip stays for pauses that carry a question or a reason. */}
+      {pending && pending.kind !== "chat" && !(decisionOpen && pending.kind === "gate" && !pending.question && !pending.detail) && (
         <section className="m-2 rounded-card border border-hairline p-3" data-testid="pending-human">
           <StatusChip role="serious" label={`waiting for you — ${pending.kind}`} />
           {pending.detail && !pending.question && (
