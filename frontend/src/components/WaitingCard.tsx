@@ -5,6 +5,7 @@ import { runLabel } from "../lib/runview";
 import { waitingFor, moneyOrZero } from "../lib/format";
 import { useState } from "react";
 import { EvidenceDrawerHost } from "./EvidenceDrawer";
+import { useRuns } from "../store/runs";
 
 function waitingExplanation(run: Run): string {
   if (run.pending_kind === "question") {
@@ -45,6 +46,13 @@ export function WaitingCard({
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
+  // B-247: the task's work already landed under another accepted run. The
+  // T-181 phantom re-run was accepted from a card that looked like any other.
+  const landedAs = useRuns((s) =>
+    run.task_id
+      ? Object.values(s.runs).find((r) => r.id !== run.id && r.task_id === run.task_id && r.accepted && r.commit_sha)?.commit_sha
+      : undefined,
+  );
   return (
     <li data-testid="now-waiting-card" className="rounded-card border border-serious p-3">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -82,6 +90,11 @@ export function WaitingCard({
       <p className="mt-2 text-sm text-ink-secondary" data-testid="waiting-explanation">
         {waitingExplanation(run)}
       </p>
+      {landedAs && (
+        <p className="mt-1 rounded border border-warn px-2 py-1 text-xs text-ink" data-testid="landed-notice">
+          This task already landed as <span className="font-mono">{landedAs.slice(0, 7)}</span> — accepting this re-run lands a second change on top of it. Only accept a deliberate redo.
+        </p>
+      )}
       {/* The reason the run stopped, where the decision is offered. A card
           saying "waiting — error" with the error a click away taught the
           person the card could not be trusted to say why. */}
