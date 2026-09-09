@@ -1,0 +1,53 @@
+import { describe, it, expect } from "vitest";
+import { evidenceFromDiff, proofsFromDiff } from "./VerificationLedger";
+import { parseDiff } from "../lib/runview";
+
+// B-216: the proof of an internal fix is the test its accepted diff added,
+// named with the exact command that runs it. Nothing a model wrote counts.
+describe("proofs from an accepted diff", () => {
+  const diff = [
+    "diff --git a/internal/service/recovery.go b/internal/service/recovery.go",
+    "--- a/internal/service/recovery.go",
+    "+++ b/internal/service/recovery.go",
+    "@@ -1,2 +1,3 @@",
+    "+func recover() {}",
+    "diff --git a/internal/service/recovery_test.go b/internal/service/recovery_test.go",
+    "--- a/internal/service/recovery_test.go",
+    "+++ b/internal/service/recovery_test.go",
+    "@@ -10,0 +11,4 @@",
+    "+func TestProjectRecoveryDoors(t *testing.T) {",
+    "+}",
+    "+func TestProjectRecoveryKeepsId(t *testing.T) {",
+    " func TestUnchanged(t *testing.T) {",
+    "diff --git a/frontend/src/views/now.test.tsx b/frontend/src/views/now.test.tsx",
+    "--- a/frontend/src/views/now.test.tsx",
+    "+++ b/frontend/src/views/now.test.tsx",
+    "@@ -5,0 +6,2 @@",
+    '+  it("folds every fixed report into one ledger card", async () => {',
+    "+  });",
+    "diff --git a/tests/test_probe.py b/tests/test_probe.py",
+    "--- a/tests/test_probe.py",
+    "+++ b/tests/test_probe.py",
+    "@@ -0,0 +1,2 @@",
+    "+def test_probe_reports_reason():",
+    "+    pass",
+  ].join("\n");
+
+  it("names each added test with the command that runs it, per language", () => {
+    const proofs = proofsFromDiff(parseDiff(diff));
+    expect(proofs.map((p) => p.cmd)).toEqual([
+      "go test ./internal/service -run '^TestProjectRecoveryDoors$'",
+      "go test ./internal/service -run '^TestProjectRecoveryKeepsId$'",
+      'cd frontend && npx vitest run src/views/now.test.tsx -t "folds every fixed report into one ledger card"',
+      "pytest tests/test_probe.py -k test_probe_reports_reason",
+    ]);
+    // A pre-existing test in the same file is not a proof of this fix.
+    expect(proofs.map((p) => p.name)).not.toContain("TestUnchanged");
+  });
+
+  it("lists the changed files and finds no proof in a diff without tests", () => {
+    const ev = evidenceFromDiff("diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n+package x\n");
+    expect(ev.files).toEqual(["x.go"]);
+    expect(ev.proofs).toEqual([]);
+  });
+});

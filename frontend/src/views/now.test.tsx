@@ -435,6 +435,7 @@ describe("verification in the inbox", () => {
     // The honest caveat, from the project that taught it: 21 accepted tasks
     // against a syntax gate and the feature never worked.
     expect(ledger.textContent).toContain("may prove much less");
+    expect(ledger.textContent).toContain("the test that proves an internal fix");
     fireEvent.click(screen.getByTestId("now-verify-open"));
     const drawer = await screen.findByTestId("now-verify-drawer");
     const rows = within(drawer).getAllByTestId("now-verify-row");
@@ -445,37 +446,72 @@ describe("verification in the inbox", () => {
     expect(within(rows[0]!).getByTestId("now-verify-no")).toBeTruthy();
   });
 
-  // B-216, absorbed: the expanded row tells the person HOW to verify — the
-  // report's own steps and what the fix changed, read from the fixing task's
-  // accepted commit — instead of the generic sentence.
-  it("teaches how to verify in the expanded row: the report's steps and what the fix changed", async () => {
-    const review = vi.fn(() => Promise.resolve("## Changed\n\n- the vertex handler now writes the angle field\n\nTest: TestVertexAngleEditable"));
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])), review } as Partial<EngineClient>);
+  // B-216, absorbed: an internal fix is proven by the test its accepted diff
+  // added. The expanded row names that test and the exact command that runs
+  // it, read from the run record, and the accept affordance says so.
+  it("names the pinning test and its command when the accepted diff carries one", async () => {
+    seed([{ ...base, id: "r-fix", task_id: "T-026", status: "done", verdict: "PASSED", accepted: true,
+      commit_sha: "b01f4240deadbeef", pending_kind: undefined, started_at: "2026-07-31T01:20:20Z" }]);
+    const runDiff = vi.fn(() => Promise.resolve({ diff: [
+      "diff --git a/internal/service/recovery_test.go b/internal/service/recovery_test.go",
+      "--- a/internal/service/recovery_test.go",
+      "+++ b/internal/service/recovery_test.go",
+      "@@ -10,0 +11,2 @@",
+      "+func TestProjectRecoveryDoors(t *testing.T) {",
+      "+}",
+      "diff --git a/internal/service/recovery.go b/internal/service/recovery.go",
+      "--- a/internal/service/recovery.go",
+      "+++ b/internal/service/recovery.go",
+      "@@ -1 +1 @@",
+      "+// keep the id",
+    ].join("\n") }));
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])), runDiff } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    fireEvent.click(await screen.findByTestId("now-verify-expand"));
+    const proof = await screen.findByTestId("now-verify-proof");
+    expect(runDiff).toHaveBeenCalledWith("r-fix");
+    expect(proof.textContent).toContain("a test that pins it");
+    expect(proof.textContent).toContain("commit b01f424");
+    expect(within(proof).getByTestId("shell-cmd").textContent).toBe("go test ./internal/service -run '^TestProjectRecoveryDoors$'");
+    expect(screen.getByTestId("now-verify-yes").textContent).toContain("The test proves it");
+    expect(screen.getByTestId("now-verify-row").getAttribute("data-proof")).toBe("test");
+    expect(screen.queryByTestId("now-verify-try")).toBeNull();
+    expect(screen.queryByText(/Try what the report describes/)).toBeNull();
+    const guide = screen.getByTestId("now-verify-guide");
+    expect(guide.textContent).toContain("recovery.go");
+  });
+
+  // Only a fix with observable behaviour gets the "try it" phrasing, and then
+  // the row carries the report's own steps and the files the fix touched.
+  it("falls back to the report's steps when the accepted diff carries no test", async () => {
+    seed([{ ...base, id: "r-fix", task_id: "T-026", status: "done", verdict: "PASSED", accepted: true,
+      pending_kind: undefined, started_at: "2026-07-31T01:20:20Z" }]);
+    const runDiff = vi.fn(() => Promise.resolve({ diff: "diff --git a/ui/vertex.ts b/ui/vertex.ts\n--- a/ui/vertex.ts\n+++ b/ui/vertex.ts\n@@ -1 +1 @@\n+editable = true\n" }));
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])), runDiff } as unknown as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
     fireEvent.click(await screen.findByTestId("now-verify-open"));
     fireEvent.click(await screen.findByTestId("now-verify-expand"));
     const guide = await screen.findByTestId("now-verify-guide");
+    await screen.findByTestId("now-verify-try");
+    expect(guide.textContent).toContain("landed without a pinning test");
     expect(guide.textContent).toContain("drag the red vertex");
-    expect(review).toHaveBeenCalledWith("p", "T-026");
-    await waitFor(() => expect(guide.textContent).toContain("vertex handler now writes the angle field"));
-    expect(guide.textContent).toContain("proven by its test");
-    expect(screen.queryByText(/Try what the report describes/)).toBeNull();
+    expect(guide.textContent).toContain("ui/vertex.ts");
+    expect(screen.getByTestId("now-verify-yes").textContent).toBe("Verified — it works");
+    expect(screen.queryByTestId("now-verify-proof")).toBeNull();
   });
 
-  it("says so when the fix has no task or no readable commit", async () => {
+  it("says so when the fix has no task or no accepted run in the record", async () => {
     const orphan = { ...fixedBug, id: "B-004", task_id: undefined };
-    const unreadable = { ...fixedBug, id: "B-005" };
-    const client = clientWith({
-      bugs: vi.fn(() => Promise.resolve([orphan, unreadable])),
-      review: vi.fn(() => Promise.reject(new Error("no review"))),
-    } as Partial<EngineClient>);
+    const unrecorded = { ...fixedBug, id: "B-005", task_id: "T-999" };
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([orphan, unrecorded])) } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
     fireEvent.click(await screen.findByTestId("now-verify-open"));
     const [first, second] = screen.getAllByTestId("now-verify-expand");
     fireEvent.click(first!);
     expect((await screen.findByTestId("now-verify-guide")).textContent).toContain("No task is recorded for this fix");
     fireEvent.click(second!);
-    await waitFor(() => expect(screen.getAllByTestId("now-verify-guide").at(-1)!.textContent).toContain("has no readable accepted commit"));
+    await waitFor(() => expect(screen.getAllByTestId("now-verify-guide").at(-1)!.textContent).toContain("No accepted run for T-999 is in the record"));
   });
 
   it("moves it with the person's verdict, either way, and the row leaves the ledger", async () => {
