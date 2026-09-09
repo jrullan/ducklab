@@ -45,9 +45,67 @@ describe("proofs from an accepted diff", () => {
     expect(proofs.map((p) => p.name)).not.toContain("TestUnchanged");
   });
 
+  // Fledge is Rust: a #[test] is a proof whether it lives under tests/ or
+  // inside src/, and the command is cargo's.
+  it("names Rust tests by their attribute, wherever they live", () => {
+    const rust = [
+      "diff --git a/tests/conformance.rs b/tests/conformance.rs",
+      "--- /dev/null",
+      "+++ b/tests/conformance.rs",
+      "@@ -0,0 +1,6 @@",
+      "+#[test]",
+      "+fn fixture_isolation() {",
+      "+}",
+      "+#[tokio::test]",
+      "+async fn dispatch_rejects_unknown_schema() {",
+      "+}",
+      "diff --git a/src/lib.rs b/src/lib.rs",
+      "--- a/src/lib.rs",
+      "+++ b/src/lib.rs",
+      "@@ -40,0 +41,4 @@",
+      "+    #[test]",
+      "+    fn selection_defaults() {",
+      "+    }",
+      "+pub fn not_a_test() {}",
+    ].join("\n");
+    const ev = evidenceFromDiff(rust);
+    expect(ev.proofs.map((p) => p.cmd)).toEqual([
+      "cargo test fixture_isolation",
+      "cargo test dispatch_rejects_unknown_schema",
+      "cargo test selection_defaults",
+    ]);
+    expect(ev.unknownTests).toEqual([]);
+  });
+
+  // A stack Ducklab cannot derive a command for is not "no test": the row
+  // must say the tests exist and cannot yet be run for the person, never
+  // that the only proof is their eyes.
+  it("separates tests it can see but not name from a diff with no test at all", () => {
+    const c = [
+      "diff --git a/tests/check_probe.c b/tests/check_probe.c",
+      "--- /dev/null",
+      "+++ b/tests/check_probe.c",
+      "@@ -0,0 +1,3 @@",
+      "+static void test_probe_reports_reason(void) {",
+      "+}",
+      "diff --git a/src/probe.c b/src/probe.c",
+      "--- a/src/probe.c",
+      "+++ b/src/probe.c",
+      "@@ -1 +1 @@",
+      "+int probe(void) { return 0; }",
+    ].join("\n");
+    const ev = evidenceFromDiff(c);
+    expect(ev.proofs).toEqual([]);
+    expect(ev.unknownTests).toEqual(["tests/check_probe.c"]);
+    // A test file added with no test in it, in a known stack, is not evidence either way.
+    const emptyGo = "diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ b/x_test.go\n@@ -1 +1 @@\n+package x\n";
+    expect(evidenceFromDiff(emptyGo).unknownTests).toEqual([]);
+  });
+
   it("lists the changed files and finds no proof in a diff without tests", () => {
     const ev = evidenceFromDiff("diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n+package x\n");
     expect(ev.files).toEqual(["x.go"]);
     expect(ev.proofs).toEqual([]);
+    expect(ev.unknownTests).toEqual([]);
   });
 });
