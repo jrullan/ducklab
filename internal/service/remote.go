@@ -107,12 +107,18 @@ func (s *Service) writeRemoteReceipt(p *projectState, result RemoteResult) {
 // written by the Push service itself; the run additionally carries its receipt
 // so a client can show live-or-live-soon without re-reading the audit file.
 func (s *Service) publishAccept(ctx context.Context, rs *runState) {
-	if s.onAcceptPolicy(rs) != "push" {
-		return
+	switch s.onAcceptPolicy(rs) {
+	case "push":
+		s.publishAcceptPush(ctx, rs)
+	case "pr":
+		s.publishAcceptPR(ctx, rs)
 	}
+}
+
+func (s *Service) publishAcceptPush(ctx context.Context, rs *runState) {
 	p, err := s.remoteProject(rs.run.ProjectID)
 	if err != nil {
-		s.recordPublishFailure(rs, "", err)
+		s.recordPublishFailure(rs, "push", "", err)
 		s.persistPublishResult(rs)
 		return
 	}
@@ -123,7 +129,46 @@ func (s *Service) publishAccept(ctx context.Context, rs *runState) {
 	branch := s.baseBranchForPush(p)
 	out, pushErr := s.Push(ctx, rs.run.ProjectID, RemoteRequest{Actor: rs.run.Resolution, Branch: branch})
 	if pushErr != nil {
-		s.recordPublishFailure(rs, branch, pushErr)
+		s.recordPublishFailure(rs, "push", branch, pushErr)
+		s.persistPublishResult(rs)
+		return
+	}
+	if out != nil {
+		s.recordPublishReceipt(rs, *out)
+	}
+	s.persistPublishResult(rs)
+}
+
+// publishAcceptPR is the pr policy (B-289): the default branch stays local; the
+// run's own branch, pointed at the landed commit, is pushed and a pull request
+// into the configured base is opened — or, when one is already open for that
+// branch, updated by the push. The card's consequence line promises exactly
+// this, and until now the policy returned without doing anything.
+func (s *Service) publishAcceptPR(ctx context.Context, rs *runState) {
+	p, err := s.remoteProject(rs.run.ProjectID)
+	if err != nil {
+		s.recordPublishFailure(rs, "pr", "", err)
+		s.persistPublishResult(rs)
+		return
+	}
+	branch := rs.run.Branch
+	if branch == "" {
+		if rs.run.TaskID != "" {
+			branch = "ducklab/" + rs.run.TaskID
+		} else {
+			branch = "ducklab/" + rs.run.ID
+		}
+	}
+	if !p.git.BranchExists(branch) || !p.git.BranchContains(branch, rs.run.CommitSHA) {
+		if err := p.git.SetBranch(branch, rs.run.CommitSHA); err != nil {
+			s.recordPublishFailure(rs, "pr", branch, fmt.Errorf("point %s at %s: %w", branch, short(rs.run.CommitSHA), err))
+			s.persistPublishResult(rs)
+			return
+		}
+	}
+	out, prErr := s.PR(ctx, rs.run.ProjectID, RemoteRequest{Actor: rs.run.Resolution, Branch: branch, Title: acceptCommitSubject(rs.run)})
+	if prErr != nil {
+		s.recordPublishFailure(rs, "pr", branch, prErr)
 		s.persistPublishResult(rs)
 		return
 	}
@@ -146,10 +191,10 @@ func (s *Service) recordPublishReceipt(rs *runState, out RemoteResult) {
 // recordPublishFailure keeps the acceptance and records the exact state with
 // the push door as the retry: the accepted commit is durable, it just did not
 // reach the remote, and the person may push it by hand.
-func (s *Service) recordPublishFailure(rs *runState, branch string, err error) {
-	rs.run.Warning = fmt.Sprintf("committed as %s; push failed: %v", rs.run.CommitSHA, err)
+func (s *Service) recordPublishFailure(rs *runState, action, branch string, err error) {
+	rs.run.Warning = fmt.Sprintf("committed as %s; %s failed: %v", rs.run.CommitSHA, action, err)
 	receipt := map[string]interface{}{
-		"action": "push", "branch": branch, "status": "failed", "error": err.Error(),
+		"action": action, "branch": branch, "status": "failed", "error": err.Error(),
 	}
 	rs.run.RemoteReceipts = append(rs.run.RemoteReceipts, receipt)
 }
@@ -351,6 +396,15 @@ func (s *Service) PR(ctx context.Context, projectID string, req RemoteRequest) (
 	}
 	if gh, e := exec.LookPath("gh"); e == nil && cfg.GitHub.PRTool != "none" {
 		if exec.CommandContext(ctx, gh, "auth", "status").Run() == nil {
+			// Opens OR updates: a pull request already open for this branch was
+			// updated by the push above; creating a second one would fail and
+			// fall through to a compare URL that misdescribes the state.
+			if url, ok := existingPullRequest(ctx, gh, p.git.Root, branch); ok {
+				push.Status = "updated"
+				push.PRURL = url
+				s.writeRemoteReceipt(p, *push)
+				return push, nil
+			}
 			title := req.Title
 			if title == "" {
 				title = branch
@@ -467,3 +521,20 @@ func compareURL(remote, base, branch string) string {
 }
 
 var _ = config.Project{}
+
+// existingPullRequest asks gh for an open pull request whose head is branch.
+func existingPullRequest(ctx context.Context, gh, dir, branch string) (string, bool) {
+	cmd := exec.CommandContext(ctx, gh, "pr", "list", "--head", branch, "--state", "open", "--json", "url", "--limit", "1")
+	cmd.Dir = dir
+	raw, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	var prs []struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &prs) != nil || len(prs) == 0 || prs[0].URL == "" {
+		return "", false
+	}
+	return prs[0].URL, true
+}

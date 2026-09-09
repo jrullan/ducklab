@@ -167,3 +167,39 @@ describe("publication API", () => {
     expect(paths).toEqual(["/v1/runs/run/accept", "/v1/projects/project/status"]);
   });
 });
+
+// B-287: a committed accept may leave a failed, retryable publication receipt
+// on the run. The receipt type carries the exact error; the client must hand
+// it through untouched so the retry door can name it.
+describe("publication receipts", () => {
+  it("round-trips a failed remote receipt with its retryable error through the run", async () => {
+    const receipt = { action: "push", actor: "human", branch: "main", status: "failed", error: "denied: repository is read-only" };
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async () =>
+        new Response(JSON.stringify({ run: { id: "r-1", project_id: "p", stage: "build", mode: "solo", task_id: "T-1", status: "done", verdict: "PASSED", accepted: true, commit_sha: "abc1234", warning: "committed as abc1234; push failed: denied: repository is read-only", started_at: "2026-09-09T00:00:00Z", remote_receipts: [receipt] }, events: [] }), {
+          headers: { "Content-Type": "application/json" },
+        })) as unknown as typeof fetch,
+    });
+    const { run } = await c.run("r-1");
+    expect(run.remote_receipts).toEqual([receipt]);
+    expect(run.remote_receipts?.[0]?.status).toBe("failed");
+    expect(run.remote_receipts?.[0]?.error).toBe("denied: repository is read-only");
+    expect(run.warning).toContain("push failed");
+  });
+
+  it("round-trips a pull-request receipt with its URL", async () => {
+    const receipt = { action: "pr", actor: "accepted by human", branch: "ducklab/T-1-abcd", status: "updated", pr_url: "https://github.com/example/repo/pull/7" };
+    const c = new EngineClient({
+      baseUrl: "http://engine",
+      token: "t",
+      fetchFn: (async () =>
+        new Response(JSON.stringify({ run: { id: "r-2", project_id: "p", stage: "build", mode: "solo", task_id: "T-1", status: "done", verdict: "PASSED", accepted: true, started_at: "2026-09-09T00:00:00Z", remote_receipts: [receipt] }, events: [] }), {
+          headers: { "Content-Type": "application/json" },
+        })) as unknown as typeof fetch,
+    });
+    const { run } = await c.run("r-2");
+    expect(run.remote_receipts?.[0]).toEqual(receipt);
+  });
+});

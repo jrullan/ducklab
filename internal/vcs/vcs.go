@@ -752,6 +752,9 @@ type Commit struct {
 	Subject    string
 	Author     string
 	DucklabRun string
+	// DucklabRecord marks a harness record commit (a run's receipt and its own
+	// bug-ladder lines); it is bookkeeping, never delivered work (B-291).
+	DucklabRecord string
 }
 
 // CommitsAfter lists every commit reachable from HEAD but not from ref, newest first.
@@ -775,9 +778,19 @@ func (g *Git) CommitsAfter(ref string) ([]Commit, error) {
 		}
 		c := Commit{SHA: strings.TrimSpace(parts[0]), Subject: strings.TrimSpace(parts[1]), Author: strings.TrimSpace(parts[2])}
 		for _, line := range strings.Split(parts[3], "\n") {
-			if key, value, ok := strings.Cut(strings.TrimSpace(line), ": "); ok && key == "Ducklab-Run" {
-				c.DucklabRun = strings.TrimSpace(value)
-				break
+			key, value, ok := strings.Cut(strings.TrimSpace(line), ": ")
+			if !ok {
+				continue
+			}
+			switch key {
+			case "Ducklab-Run":
+				if c.DucklabRun == "" {
+					c.DucklabRun = strings.TrimSpace(value)
+				}
+			case "Ducklab-Record":
+				if c.DucklabRecord == "" {
+					c.DucklabRecord = strings.TrimSpace(value)
+				}
 			}
 		}
 		commits = append(commits, c)
@@ -1348,4 +1361,71 @@ func (g *Git) LsFiles() []string {
 		}
 	}
 	return files
+}
+
+// BranchContains reports whether name's history includes sha.
+func (g *Git) BranchContains(name, sha string) bool {
+	_, err := g.run("merge-base", "--is-ancestor", sha, name)
+	return err == nil
+}
+
+// SetBranch points name at sha without touching the checkout. Git itself
+// refuses to move the checked-out branch this way, which is the right refusal.
+func (g *Git) SetBranch(name, sha string) error {
+	_, err := g.run("branch", "-f", shellEscape(name), sha)
+	return err
+}
+
+// StagedPaths lists what the index holds beyond HEAD.
+func (g *Git) StagedPaths() ([]string, error) {
+	out, err := g.run("diff", "--cached", "--name-only")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// AddedLines returns the lines path adds relative to HEAD (worktree and index
+// together). An untracked file contributes every line; an absent or unchanged
+// file contributes none.
+func (g *Git) AddedLines(path string) ([]string, error) {
+	if _, err := g.run("ls-files", "--error-unmatch", "--", path); err != nil {
+		data, rerr := os.ReadFile(filepath.Join(g.Root, path))
+		if rerr != nil {
+			return nil, nil
+		}
+		var lines []string
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(l) != "" {
+				lines = append(lines, l)
+			}
+		}
+		return lines, nil
+	}
+	out, err := g.run("diff", "HEAD", "--", path)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+			lines = append(lines, l[1:])
+		}
+	}
+	return lines, nil
+}
+
+// IsIgnored reports whether the project's ignore rules exclude path. Staging
+// an explicitly named ignored path is an error in git, so callers that stage
+// harness records must ask first: a project that did not opt into shipping
+// its receipts has nothing to record, and that is not a failure.
+func (g *Git) IsIgnored(path string) bool {
+	_, err := g.run("check-ignore", "-q", "--", path)
+	return err == nil
 }
