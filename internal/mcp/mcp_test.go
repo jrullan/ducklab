@@ -35,6 +35,8 @@ type fakeEngine struct {
 	attachedName        string
 	revised             []string
 	lastStageReq        map[string]interface{}
+	lastReleaseBump     string
+	lastReleaseRevise   string
 	lastTriageReq       map[string]interface{}
 	removedProject      string
 	removedTask         string
@@ -186,6 +188,11 @@ func (f *fakeEngine) StageStart(p, stage string, req map[string]interface{}) (ma
 		f.images = append(f.images, imgs...)
 	}
 	return map[string]interface{}{"id": "r-rev"}, nil
+}
+func (f *fakeEngine) ReleasePlan(_ string, bump, revise string) (map[string]interface{}, error) {
+	f.lastReleaseBump = bump
+	f.lastReleaseRevise = revise
+	return map[string]interface{}{"id": "r-release-rev"}, nil
 }
 func (f *fakeEngine) ArtifactGet(_, kind string) (map[string]interface{}, error) {
 	if f.artifacts != nil {

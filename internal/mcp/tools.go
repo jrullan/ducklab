@@ -860,6 +860,19 @@ func (s *Server) decide(runID, action, reason string) (map[string]interface{}, e
 	case "request_changes":
 		projectID, _ := run["project_id"].(string)
 		stageName, _ := run["stage"].(string)
+		// Releases have their own proposal endpoint. Sending them through the
+		// generic document-stage door advertises a legal action that can only
+		// fail with "unknown stage release".
+		if stageName == "release" {
+			out, err := s.eng.ReleasePlan(projectID, "", reason)
+			if err != nil {
+				return nil, err
+			}
+			return toolJSON(out), nil
+		}
+		if stageName != "intake" && stageName != "spec" && stageName != "plan" {
+			return nil, fmt.Errorf("cannot revise run stage %q: no revision dispatcher is registered", stageName)
+		}
 		// An amendment is its own small operation. Replay its persisted request
 		// so its change, solo mode, and one-round limit survive the revision.
 		// Other stages retain the ordinary document-revision path.

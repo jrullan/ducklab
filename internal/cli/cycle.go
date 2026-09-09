@@ -532,7 +532,7 @@ func releaseCmd(verb string, args []string, repo string) int {
 				i++
 			}
 		}
-		run, err := client.ReleasePlan(projectID, bump)
+		run, err := client.ReleasePlan(projectID, bump, "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
