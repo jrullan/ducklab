@@ -644,6 +644,77 @@ func TestQueueSerializesScribeTurnsAtProviderCap(t *testing.T) {
 	}
 }
 
+// Pausing ends the current execution unit and therefore releases its provider
+// turn. Re-entry is a fresh execution unit: it must acquire again and wait if
+// another run has used the slot while the first was paused.
+func TestPausedRunReleasesProviderAndResumeReacquiresAtTurn(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p := s.cfg.Providers["fake"]
+	p.BaseURL = "http://localhost:8081/v1"
+	p.MaxConcurrent = 1
+	s.cfg.Providers["fake"] = p
+	s.queue = newRunQueue(2)
+
+	paused := make(chan struct{})
+	first := queuedRun(t, "r-pause", "one", func() {
+		if err := s.queue.acquireProvider(context.Background(), s, "fake", "r-pause"); err != nil {
+			t.Error(err)
+			return
+		}
+		s.queue.releaseProvider("fake", "r-pause")
+		close(paused)
+	})
+	first.parallel = true
+	s.queue.submit(s, first)
+	select {
+	case <-paused:
+	case <-time.After(time.Second):
+		t.Fatal("first run did not reach its pause boundary")
+	}
+
+	secondHolding := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	second := queuedRun(t, "r-other", "two", func() {
+		if err := s.queue.acquireProvider(context.Background(), s, "fake", "r-other"); err != nil {
+			t.Error(err)
+			return
+		}
+		close(secondHolding)
+		<-releaseSecond
+		s.queue.releaseProvider("fake", "r-other")
+	})
+	second.parallel = true
+	s.queue.submit(s, second)
+	select {
+	case <-secondHolding:
+	case <-time.After(time.Second):
+		t.Fatal("another run could not use the provider after the first paused")
+	}
+
+	resumedAcquired := make(chan struct{})
+	resumed := queuedRun(t, "r-pause", "one", func() {
+		if err := s.queue.acquireProvider(context.Background(), s, "fake", "r-pause"); err != nil {
+			t.Error(err)
+			return
+		}
+		close(resumedAcquired)
+		s.queue.releaseProvider("fake", "r-pause")
+	})
+	resumed.parallel = true
+	s.queue.submit(s, resumed)
+	select {
+	case <-resumedAcquired:
+		t.Fatal("resumed run skipped provider acquisition while another turn held the slot")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(releaseSecond)
+	select {
+	case <-resumedAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("resumed run did not reacquire after the provider slot was released")
+	}
+}
+
 func TestQueueStats(t *testing.T) {
 	q := newRunQueue(2)
 	running, waiting, limit := q.stats()
