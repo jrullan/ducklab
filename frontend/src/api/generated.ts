@@ -671,6 +671,13 @@ export interface ServiceCandidateView {
   label?: string;
 }
 
+export interface ServiceCapsUpdate {
+  context_tokens?: number;
+  json_mode?: boolean;
+  native_tools?: boolean;
+  vision?: boolean;
+}
+
 export interface ServiceChatStartRequest {
   about_id?: string;
   about_kind?: string;
@@ -685,6 +692,11 @@ export interface ServiceConfigDiagnostics {
   remote_reachable?: string;
 }
 
+export interface ServiceCostUpdate {
+  input_per_mtok?: number;
+  output_per_mtok?: number;
+}
+
 export interface ServiceCriterion {
   direction?: string;
   key?: string;
@@ -692,15 +704,14 @@ export interface ServiceCriterion {
   source?: string;
 }
 
-export interface ServiceDucklingView {
-  caps?: ConfigCaps;
+export interface ServiceDucklingUpdate {
+  caps?: ServiceCapsUpdate;
   color?: number;
-  cost?: ConfigCost;
+  cost?: ServiceCostUpdate;
   fallback?: string;
-  id?: string;
   model?: string;
   notes?: string;
-  params?: ConfigSamplingParams;
+  params?: ServiceSamplingParamsUpdate;
   provider?: string;
   roles?: string[];
   tier?: string;
@@ -880,6 +891,14 @@ export interface ServiceRunRequest {
   task_id?: string;
   unsafe_writes?: boolean;
   verify?: string;
+}
+
+export interface ServiceSamplingParamsUpdate {
+  disable_thinking?: boolean;
+  max_tokens?: number;
+  stop?: string[];
+  temperature?: number;
+  top_p?: number;
 }
 
 export interface ServiceScorecard {

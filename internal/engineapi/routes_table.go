@@ -256,7 +256,7 @@ func routeTable() []Route {
 			Response: listOf{Items: []service.Scorecard{}}, Summary: "Comparable duckling scorecards",
 			ClientMethod: "Scorecards", handler: func(s *Server) http.HandlerFunc { return s.handleScorecards }},
 		{Method: "PUT", Path: "/v1/ducklings/{id}", Auth: true,
-			Request: service.DucklingView{}, Summary: "Add or replace a duckling",
+			Request: service.DucklingUpdate{}, Summary: "Add or update a duckling; omitted fields keep their current values",
 			ClientMethod: "DucklingSet",
 			handler:      func(s *Server) http.HandlerFunc { return s.handleDucklingSet }},
 		{Method: "DELETE", Path: "/v1/ducklings/{id}", Auth: true,

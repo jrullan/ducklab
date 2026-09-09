@@ -116,7 +116,7 @@ func providerCmd(verb string, args []string) int {
 // ducklingSetCmd is `ducklab duckling set` and `remove`.
 func ducklingSetCmd(client *engineclt.Client, args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: ducklab duckling set <id> --provider P --model M [--roles a,b] [--context N] [--no-native-tools] [--cost-in X --cost-out Y] [--max-tokens N] [--temperature F] [--suppress-thinking] [--notes ...]")
+		fmt.Fprintln(os.Stderr, "usage: ducklab duckling set <id> [--provider P] [--model M] [--roles a,b] [--context N] [--vision|--no-vision] [--color 0-8] [--native-tools|--no-native-tools] [--cost-in X --cost-out Y] [--max-tokens N] [--temperature F] [--suppress-thinking|--allow-thinking] [--notes ...]")
 		return 2
 	}
 	id := args[0]
@@ -164,6 +164,23 @@ func ducklingSetCmd(client *engineclt.Client, args []string) int {
 			caps["native_tools"] = false
 		case "--native-tools":
 			caps["native_tools"] = true
+		case "--vision":
+			caps["vision"] = true
+		case "--no-vision":
+			caps["vision"] = false
+		case "--json-mode":
+			caps["json_mode"] = true
+		case "--no-json-mode":
+			caps["json_mode"] = false
+		case "--color":
+			if v, ok := next(); ok {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 || n > 8 {
+					fmt.Fprintf(os.Stderr, "error: --color wants 0-8, got %q\n", v)
+					return 2
+				}
+				body["color"] = n
+			}
 		case "--cost-in":
 			if v, ok := next(); ok {
 				f, err := strconv.ParseFloat(v, 64)

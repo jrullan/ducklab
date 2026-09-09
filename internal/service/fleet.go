@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -57,6 +58,43 @@ type DucklingView struct {
 	Color int `json:"color,omitempty"`
 	// Fallback is the declared stand-in for provider weather.
 	Fallback string `json:"fallback,omitempty"`
+}
+
+// DucklingUpdate is a partial edit. Pointers distinguish an omitted field
+// from an explicit zero value: --allow-thinking must be able to send false,
+// --color 0 must be able to restore automatic colour selection, and neither
+// may erase unrelated capabilities that the caller did not repeat.
+type DucklingUpdate struct {
+	Provider *string               `json:"provider,omitempty"`
+	Model    *string               `json:"model,omitempty"`
+	Tier     *string               `json:"tier,omitempty"`
+	Roles    *[]string             `json:"roles,omitempty"`
+	Notes    *string               `json:"notes,omitempty"`
+	Params   *SamplingParamsUpdate `json:"params,omitempty"`
+	Caps     *CapsUpdate           `json:"caps,omitempty"`
+	Cost     *CostUpdate           `json:"cost,omitempty"`
+	Color    *int                  `json:"color,omitempty"`
+	Fallback *string               `json:"fallback,omitempty"`
+}
+
+type SamplingParamsUpdate struct {
+	Temperature     *float64  `json:"temperature,omitempty"`
+	TopP            *float64  `json:"top_p,omitempty"`
+	MaxTokens       *int      `json:"max_tokens,omitempty"`
+	DisableThinking *bool     `json:"disable_thinking,omitempty"`
+	Stop            *[]string `json:"stop,omitempty"`
+}
+
+type CapsUpdate struct {
+	NativeTools   *bool `json:"native_tools,omitempty"`
+	ContextTokens *int  `json:"context_tokens,omitempty"`
+	Vision        *bool `json:"vision,omitempty"`
+	JSONMode      *bool `json:"json_mode,omitempty"`
+}
+
+type CostUpdate struct {
+	InputPerMTok  *float64 `json:"input_per_mtok,omitempty"`
+	OutputPerMTok *float64 `json:"output_per_mtok,omitempty"`
 }
 
 // ProviderList returns every configured provider.
@@ -170,7 +208,59 @@ func (s *Service) ProviderRemove(id string) error {
 	return nil
 }
 
-// DucklingSet adds or replaces a duckling.
+// DucklingUpdate applies only the fields present in an API edit. New
+// ducklings start from zero values and therefore retain DucklingSet's required
+// provider/model validation.
+func (s *Service) DucklingUpdate(id string, patch map[string]interface{}) error {
+	base := map[string]interface{}{}
+	if current, err := s.DucklingGet(context.Background(), id); err == nil {
+		raw, marshalErr := json.Marshal(current)
+		if marshalErr != nil {
+			return fmt.Errorf("encode duckling %q for update: %w", id, marshalErr)
+		}
+		if err := json.Unmarshal(raw, &base); err != nil {
+			return fmt.Errorf("decode duckling %q for update: %w", id, err)
+		}
+	}
+	mergeDucklingUpdate(base, patch)
+	// The path is authoritative. A body id came from the editable view in old
+	// clients but was never a supported rename operation.
+	delete(base, "id")
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return fmt.Errorf("encode duckling %q update: %w", id, err)
+	}
+	var view DucklingView
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return fmt.Errorf("decode duckling %q update: %w", id, err)
+	}
+	return s.DucklingSet(id, view)
+}
+
+// mergeDucklingUpdate follows JSON Merge Patch semantics for the editable
+// object: absent keys survive, nested objects merge recursively, and null
+// clears an optional value. This is what lets the desktop deliberately clear
+// max_tokens while a sparse CLI edit preserves it.
+func mergeDucklingUpdate(dst, patch map[string]interface{}) {
+	for key, value := range patch {
+		if value == nil {
+			delete(dst, key)
+			continue
+		}
+		if object, ok := value.(map[string]interface{}); ok {
+			current, _ := dst[key].(map[string]interface{})
+			if current == nil {
+				current = map[string]interface{}{}
+			}
+			mergeDucklingUpdate(current, object)
+			dst[key] = current
+			continue
+		}
+		dst[key] = value
+	}
+}
+
+// DucklingSet adds or replaces a complete duckling definition.
 func (s *Service) DucklingSet(id string, view DucklingView) error {
 	if err := s.canWriteConfig(); err != nil {
 		return err

@@ -90,6 +90,66 @@ func TestEditingKeepsTheSamplingParams(t *testing.T) {
 	}
 }
 
+// A one-field CLI edit must not erase fields that CLI did not repeat. This
+// was impossible to use safely: allowing thinking zeroed max_tokens, vision,
+// context, colour, cost, notes, and every other omitted setting.
+func TestDucklingUpdateMergesOmittedFieldsAndExplicitZeroValues(t *testing.T) {
+	s := writableService(t, "pato-uno")
+	maxTokens := 20000
+	contextTokens := 256000
+	nativeTools := true
+	vision := true
+	if err := s.DucklingSet("pato-uno", DucklingView{
+		Provider: "fake", Model: "qwen38-27b", Notes: "keep me", Color: 6,
+		Params: config.SamplingParams{MaxTokens: &maxTokens, DisableThinking: true},
+		Caps:   config.Caps{NativeTools: &nativeTools, ContextTokens: &contextTokens, Vision: &vision},
+		Cost:   config.Cost{InputPerMTok: 1.25, OutputPerMTok: 2.5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DucklingUpdate("pato-uno", map[string]interface{}{
+		"params": map[string]interface{}{"disable_thinking": false},
+		"color":  0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.DucklingGet(context.Background(), "pato-uno")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "fake" || got.Model != "qwen38-27b" || got.Notes != "keep me" {
+		t.Fatalf("sparse edit erased identity or notes: %+v", got)
+	}
+	if got.Params.DisableThinking || got.Color != 0 {
+		t.Fatalf("explicit zero values were not applied: params=%+v color=%d", got.Params, got.Color)
+	}
+	if got.Params.MaxTokens == nil || *got.Params.MaxTokens != 20000 {
+		t.Fatalf("omitted max_tokens was erased: %+v", got.Params)
+	}
+	if got.Caps.Vision == nil || !*got.Caps.Vision || got.Caps.ContextTokens == nil || *got.Caps.ContextTokens != 256000 {
+		t.Fatalf("omitted capabilities were erased: %+v", got.Caps)
+	}
+	if got.Cost.InputPerMTok != 1.25 || got.Cost.OutputPerMTok != 2.5 {
+		t.Fatalf("omitted cost was erased: %+v", got.Cost)
+	}
+
+	// Null is different from omission: the desktop uses it to return an
+	// optional sampling value to the provider default.
+	if err := s.DucklingUpdate("pato-uno", map[string]interface{}{
+		"params": map[string]interface{}{"max_tokens": nil},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.DucklingGet(context.Background(), "pato-uno")
+	if got.Params.MaxTokens != nil {
+		t.Fatalf("explicit null did not clear max_tokens: %+v", got.Params)
+	}
+	if got.Caps.Vision == nil || !*got.Caps.Vision {
+		t.Fatalf("clearing max_tokens erased an unrelated capability: %+v", got.Caps)
+	}
+}
+
 func TestEditingKeepsTheDeclaredModelTier(t *testing.T) {
 	s := writableService(t, "pato-uno")
 	if err := s.DucklingSet("pato-uno", DucklingView{Provider: "fake", Model: "m", Tier: "large"}); err != nil {

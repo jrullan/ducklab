@@ -344,7 +344,7 @@ func (c *Client) ProviderRemove(id string) error {
 	return c.delete("/v1/providers/" + id)
 }
 
-// DucklingSet adds or replaces a duckling.
+// DucklingSet adds or partially updates a duckling.
 func (c *Client) DucklingSet(id string, body map[string]interface{}) error {
 	return c.put("/v1/ducklings/"+id, body, nil)
 }
