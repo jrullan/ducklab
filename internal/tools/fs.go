@@ -387,19 +387,22 @@ func (t *FSWrite) Mutating() bool { return true }
 // Description returns the tool description.
 func (t *FSWrite) Description() string {
 	return "Write a file in full — the content REPLACES everything the file held. " +
-		"Creates parent directories. For a partial change prefer fs_write_lines or fs_patch."
+		"Creates parent directories. Set executable=true for a script that must run by path; " +
+		"the executable bit is stored in git. For a partial change prefer fs_write_lines or fs_patch."
 }
 
 // Schema returns the argument schema.
 func (t *FSWrite) Schema() interface{} {
 	return NewSchema().
 		AddString("path", "File path to write", true).
-		AddString("content", "File content", true)
+		AddString("content", "File content", true).
+		AddBool("executable", "Set the file's executable bit so it can run directly and git records mode 100755", false)
 }
 
 type fsWriteArgs struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path       string `json:"path"`
+	Content    string `json:"content"`
+	Executable bool   `json:"executable"`
 }
 
 // Execute runs the tool.
@@ -422,10 +425,29 @@ func (t *FSWrite) Execute(ctx context.Context, ectx *ExecContext, args json.RawM
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return ErrorResult("mkdir: %v", err), nil
 	}
-	if err := os.WriteFile(absPath, []byte(a.Content), 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(absPath); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if a.Executable {
+		mode |= 0o111
+	}
+	if err := os.WriteFile(absPath, []byte(a.Content), mode); err != nil {
 		return ErrorResult("write: %v", err), nil
 	}
+	// os.WriteFile's permission argument only applies when it creates a file.
+	// An existing 0644 script therefore needs an explicit mode update after its
+	// content lands. Keep shell chmod denied: filesystem metadata changes belong
+	// behind the same jail and write guard as filesystem content (B-359).
+	if a.Executable {
+		if err := os.Chmod(absPath, mode); err != nil {
+			return ErrorResult("set executable: %v", err), nil
+		}
+	}
 	msg := fmt.Sprintf("wrote %s (%d bytes)", a.Path, len(a.Content))
+	if a.Executable {
+		msg += "; executable"
+	}
 	if note := skillLayoutNote(a.Path); note != "" {
 		msg += "\n" + note
 	}
