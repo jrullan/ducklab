@@ -608,6 +608,27 @@ export interface ServiceAppStatus {
   url?: string;
 }
 
+export interface ServiceArtifactLintDiagnostic {
+  canonical?: string;
+  code?: string;
+  detail?: string;
+  field?: string;
+  message?: string;
+  offending_token?: string;
+  related_ids?: string[];
+  section?: string;
+}
+
+export interface ServiceArtifactLintRequest {
+  content?: string;
+}
+
+export interface ServiceArtifactLintResult {
+  errors?: ServiceArtifactLintDiagnostic[];
+  kind?: string;
+  valid?: boolean;
+}
+
 export interface ServiceAutopilotDefaultsView {
   autonomy?: string;
   max_fails?: number;
@@ -1054,6 +1075,7 @@ export const OPERATIONS = [
   { id: "AppStart", method: "POST", path: "/v1/projects/{id}/app/start" },
   { id: "AppStop", method: "POST", path: "/v1/projects/{id}/app/stop" },
   { id: "ArtifactGet", method: "GET", path: "/v1/projects/{id}/artifacts/{kind}" },
+  { id: "ArtifactLint", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/lint" },
   { id: "ArtifactPromote", method: "POST", path: "/v1/projects/{id}/artifacts/{kind}/promote" },
   { id: "ArtifactDiscard", method: "DELETE", path: "/v1/projects/{id}/artifacts/{kind}/proposal" },
   { id: "ProjectAutonomy", method: "GET", path: "/v1/projects/{id}/autonomy" },

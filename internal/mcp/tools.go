@@ -93,6 +93,15 @@ func toolList() []map[string]interface{} {
 			}, "project_id", "kind"),
 		},
 		{
+			"name":        "artifact_lint",
+			"description": "Preflight a hand-written requirements, spec, or plan document against the same deterministic grammar used by proposal gates. Returns only syntax/contract diagnostics — no trace graph, repository, or semantic review — and never writes the candidate.",
+			"inputSchema": obj(map[string]interface{}{
+				"project_id": str("the project id"),
+				"kind":       str("requirements | spec | plan"),
+				"content":    str("the complete candidate Markdown document"),
+			}, "project_id", "kind", "content"),
+		},
+		{
 			"name": "task_list",
 			"description": "The project's tasks: a status summary first, then one compact line per " +
 				"task (id, status, title, blocked reason when blocked, next). Answer \"anything pending?\" from the summary. " +
@@ -467,6 +476,12 @@ func (s *Server) call(name string, raw json.RawMessage) (map[string]interface{},
 			return nil, err
 		}
 		return toolJSON(doc), nil
+	case "artifact_lint":
+		result, err := s.eng.ArtifactLint(a.str("project_id"), a.str("kind"), a.str("content"))
+		if err != nil {
+			return nil, err
+		}
+		return toolJSON(result), nil
 	case "task_remove":
 		out, err := s.eng.TaskRemove(a.str("project_id"), a.str("task_id"))
 		if err != nil {

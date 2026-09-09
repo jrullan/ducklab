@@ -937,6 +937,15 @@ func (c *Client) ArtifactGet(projectID, kind string) (map[string]interface{}, er
 	return result, err
 }
 
+// ArtifactLint preflights a candidate's deterministic grammar without writing
+// it to the project or invoking graph and semantic checks.
+func (c *Client) ArtifactLint(projectID, kind, content string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.post(fmt.Sprintf("/v1/projects/%s/artifacts/%s/lint", projectID, kind),
+		map[string]string{"content": content}, &result)
+	return result, err
+}
+
 // ArtifactPromote accepts a pending proposal.
 func (c *Client) ArtifactPromote(projectID, kind, approvedBy string) (map[string]interface{}, error) {
 	var result map[string]interface{}

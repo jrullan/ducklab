@@ -1895,6 +1895,20 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, got)
 }
 
+func (s *Server) handleArtifactLint(w http.ResponseWriter, r *http.Request) {
+	var body service.ArtifactLintRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	got, err := s.svc.ArtifactLint(r.Context(), r.PathValue("id"), r.PathValue("kind"), body)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, got)
+}
+
 func (s *Server) handleArtifactPromote(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ApprovedBy string `json:"approved_by"`

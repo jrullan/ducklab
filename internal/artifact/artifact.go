@@ -162,7 +162,11 @@ func FieldVocabulary() []FieldDefinition {
 // FieldError describes a schema key that cannot be consumed by the parser.
 type FieldError struct {
 	ID, Key, Suggestion, Code string
-	Detail                    string
+	// Token is the exact field name, id token, or frontmatter value the parser
+	// could not consume. Public preflight clients surface it without parsing
+	// the human-readable Detail string (B-355).
+	Token  string
+	Detail string
 	// RelatedIDs are syntactically recognizable SPEC ids inside a malformed
 	// token. They are evidence for suppressing only the graph findings derived
 	// from that primary parse failure; they never become trace edges.
@@ -646,7 +650,7 @@ func parseSectionFields(s *Section, body string, context ...interface{}) {
 		canonical, valid := canonicalField(key, kind, scope)
 		if !valid {
 			if bold {
-				s.FieldErrors = append(s.FieldErrors, FieldError{ID: s.ID, Key: key, Suggestion: fieldSuggestion(key, kind, scope)})
+				s.FieldErrors = append(s.FieldErrors, FieldError{ID: s.ID, Key: key, Suggestion: fieldSuggestion(key, kind, scope), Token: key})
 			}
 			continue
 		}
@@ -816,6 +820,7 @@ func parseIDField(sectionID, field, value, expectedPrefix string) ([]string, []F
 			if expectedPrefix != "" && prefix != expectedPrefix {
 				diagnostics = append(diagnostics, FieldError{
 					ID: sectionID, Key: field, Code: "wrong_id_kind",
+					Token:  token,
 					Detail: fmt.Sprintf("%s **%s:** token %q has kind %s; use %s-NNN ids", sectionID, field, token, prefix, expectedPrefix),
 				})
 				continue
@@ -840,6 +845,7 @@ func parseIDField(sectionID, field, value, expectedPrefix string) ([]string, []F
 func invalidIDDiagnostic(sectionID, field, token, reason string) FieldError {
 	return FieldError{
 		ID: sectionID, Key: field, Code: "invalid_id_token",
+		Token:      token,
 		Detail:     fmt.Sprintf("%s unparsed token %q in **%s:**; %s", sectionID, token, field, reason),
 		RelatedIDs: relatedSpecIDs(token),
 	}
@@ -956,10 +962,10 @@ func grammarDiagnostic(f Frontmatter) []FieldError {
 		return []FieldError{{Code: "legacy_grammar"}}
 	}
 	if _, err := strconv.Atoi(f.grammarRaw); err != nil {
-		return []FieldError{{Key: "grammar", Code: "invalid_frontmatter", Detail: fmt.Sprintf("grammar must be an integer, got %q", f.grammarRaw)}}
+		return []FieldError{{Key: "grammar", Code: "invalid_frontmatter", Token: f.grammarRaw, Detail: fmt.Sprintf("grammar must be an integer, got %q", f.grammarRaw)}}
 	}
 	if f.Grammar != CurrentGrammar {
-		return []FieldError{{Key: "grammar", Code: "unsupported_grammar", Detail: fmt.Sprintf("grammar %d is not supported; use grammar: %d", f.Grammar, CurrentGrammar)}}
+		return []FieldError{{Key: "grammar", Code: "unsupported_grammar", Token: f.grammarRaw, Detail: fmt.Sprintf("grammar %d is not supported; use grammar: %d", f.Grammar, CurrentGrammar)}}
 	}
 	return nil
 }
@@ -970,7 +976,7 @@ func frontmatterDiagnostics(f Frontmatter) []FieldError {
 	}
 	n, err := strconv.Atoi(f.versionRaw)
 	if err != nil || n < 0 {
-		return []FieldError{{Key: "version", Code: "invalid_frontmatter", Detail: fmt.Sprintf("version must be a non-negative integer, got %q", f.versionRaw)}}
+		return []FieldError{{Key: "version", Code: "invalid_frontmatter", Token: f.versionRaw, Detail: fmt.Sprintf("version must be a non-negative integer, got %q", f.versionRaw)}}
 	}
 	return nil
 }

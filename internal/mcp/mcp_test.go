@@ -24,6 +24,8 @@ type fakeEngine struct {
 	testNote            string
 	tasks               []map[string]interface{}
 	artifacts           map[string]map[string]interface{}
+	lastLintKind        string
+	lastLintContent     string
 	bugs                []map[string]interface{}
 	nextSteps           []map[string]interface{}
 	runs                map[string]map[string]interface{}
@@ -202,6 +204,16 @@ func (f *fakeEngine) ArtifactGet(_, kind string) (map[string]interface{}, error)
 		return nil, fmt.Errorf("artifact %q not found", kind)
 	}
 	return map[string]interface{}{"kind": "requirements"}, nil
+}
+func (f *fakeEngine) ArtifactLint(_, kind, content string) (map[string]interface{}, error) {
+	f.lastLintKind, f.lastLintContent = kind, content
+	return map[string]interface{}{
+		"kind": kind, "valid": false,
+		"errors": []interface{}{map[string]interface{}{
+			"section": "T-001", "field": "Implementa", "offending_token": "Implementa",
+			"canonical": "Implements", "message": "T-001 unknown field **Implementa:**; use **Implements:**",
+		}},
+	}, nil
 }
 func (f *fakeEngine) TaskList(string) ([]map[string]interface{}, error) {
 	if f.tasks != nil {
@@ -599,6 +611,29 @@ func TestStatusIncludesProjectNextSteps(t *testing.T) {
 	}
 }
 
+// B-355: an MCP operator preparing a frozen oracle must be able to check the
+// candidate without starting a stage run. The tool carries the complete body
+// to the engine and returns its structured, gate-identical diagnostic.
+func TestArtifactLintPreflightsWithoutStartingARun(t *testing.T) {
+	eng := &fakeEngine{}
+	candidate := "## M-01 — Core\n\n### T-001 — Task\n\n**Implementa:** SPEC-001"
+	args, _ := json.Marshal(map[string]string{"project_id": "p", "kind": "plan", "content": candidate})
+	resps := drive(t, eng, initFrame,
+		callFrame(2, "artifact_lint", string(args)))
+	text, isErr := toolResultText(t, resps[1])
+	if isErr {
+		t.Fatal(text)
+	}
+	if eng.lastLintKind != "plan" || eng.lastLintContent != "## M-01 — Core\n\n### T-001 — Task\n\n**Implementa:** SPEC-001" {
+		t.Fatalf("lint request = kind %q content %q", eng.lastLintKind, eng.lastLintContent)
+	}
+	for _, want := range []string{"offending_token", "Implementa", "canonical", "Implements", "T-001 unknown field"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("artifact_lint result omitted %q: %s", want, text)
+		}
+	}
+}
+
 func TestRunGetCarriesTheDiffAndNext(t *testing.T) {
 	eng := &fakeEngine{runs: map[string]map[string]interface{}{
 		"r-1": {"id": "r-1", "status": "paused", "verdict": "PASSED", "next": []interface{}{"accept", "reject"}},
@@ -870,7 +905,7 @@ func TestTheFullBugCycleIsReachable(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 	)
 	blob, _ := json.Marshal(listResp[1])
-	for _, must := range []string{"bug_attach", "bug_triage", "bug_promote", "bug_move", "test_build", "test_only", "bug_list", "\"app\""} {
+	for _, must := range []string{"artifact_lint", "bug_attach", "bug_triage", "bug_promote", "bug_move", "test_build", "test_only", "bug_list", "\"app\""} {
 		if !strings.Contains(string(blob), must) {
 			t.Errorf("tools/list is missing %q", must)
 		}
