@@ -1715,11 +1715,14 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                   "The previous run passed its gate but its reviewer requested changes. " +
                   "Address these outstanding findings:\n" +
                   dissent.notes.map((n) => `- ${n}`).join("\n");
-                // Through the one relaunch path (B-258): the mode's saved
-                // line-up, no per-run seat overrides copied from this run.
+                // Through the one relaunch path (B-258), naming NO ducklings:
+                // the engine fills the mode's saved line-up from the project's
+                // current flock, exactly like any launch that names none.
+                // Copying this run's roster (even as ducklings, not seats) is
+                // the override the engine honours, and the regression Jose saw.
                 void client
                   .accept(run.id)
-                  .then(() => relaunch({ mode: run.mode, ducklings: relaunchDucklings, note }))
+                  .then(() => relaunch({ mode: run.mode, ducklings: [], note }))
                   .then((id) => {
                     if (id) location.hash = `#/runs/${id}`;
                   })
