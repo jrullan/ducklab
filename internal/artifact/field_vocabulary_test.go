@@ -73,6 +73,21 @@ func TestSyntaxLintAcceptsPlanBoundaryFields(t *testing.T) {
 	}
 }
 
+// B-352: intake and adoption explicitly tell the architect to record inferred
+// requirements as Assumption fields. Once grammar 2 made the vocabulary
+// strict, the field was legal only on plan tasks, so every REQ in Ducklab's
+// own adopted document became a deterministic proposal blocker.
+func TestSyntaxLintAcceptsAnIntakeAssumptionOnARequirement(t *testing.T) {
+	content := "## REQ-001 — Existing behavior\n\n**Priority:** must\n\n**Assumption:** inferred from the checked-in command handler.\n"
+	errs, err := SyntaxLint(content, KindRequirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("intake assumption rejected: %v", errs)
+	}
+}
+
 func TestUnboldedPlanVocabularyUsesSameAuthority(t *testing.T) {
 	doc, err := Parse("## M-01 — Core\n\nWork unit: delivery\n\n### T-001 — Task\n\nAcceptance slices: smoke\n", KindPlan)
 	if err != nil {
