@@ -318,6 +318,12 @@ func TestReleasePlanInventoriesAcceptedDocumentStageRunCommits(t *testing.T) {
 	s.runs["r-nameless"] = &runState{run: &runlog.Run{
 		ID: "r-nameless", ProjectID: projectID, Accepted: true, StartedAt: time.Now().UTC().Format(time.RFC3339),
 	}}
+	// Accepted, taskless, and of a stage that proposes no document: a build
+	// with no task is a corrupt record, not an amendment. Only intake, spec
+	// and plan can have landed a document (artifactKindForStage).
+	s.runs["r-taskless-build"] = &runState{run: &runlog.Run{
+		ID: "r-taskless-build", ProjectID: projectID, Stage: "build", Accepted: true, StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}}
 
 	fake, ok := s.providers["fake"].(*provider.Fake)
 	if !ok {
@@ -360,5 +366,9 @@ func TestReleasePlanInventoriesAcceptedDocumentStageRunCommits(t *testing.T) {
 	namelessSHA := commit("nameless.txt", "accepted by a run with no stage", "r-nameless")
 	if _, err := s.ReleasePlan(context.Background(), projectID, ReleaseRequest{Bump: "minor"}); err == nil || !strings.Contains(err.Error(), namelessSHA) {
 		t.Fatalf("a trailer naming an accepted run with neither task nor stage was inventoried: %v", err)
+	}
+	buildSHA := commit("taskless-build.txt", "accepted by a taskless build run", "r-taskless-build")
+	if _, err := s.ReleasePlan(context.Background(), projectID, ReleaseRequest{Bump: "minor"}); err == nil || !strings.Contains(err.Error(), buildSHA) {
+		t.Fatalf("a trailer naming an accepted taskless build run was inventoried as a document amendment: %v", err)
 	}
 }

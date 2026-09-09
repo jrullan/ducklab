@@ -168,7 +168,10 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 		case !r.Accepted:
 		case r.TaskID != "":
 			byID[r.ID] = r
-		case r.Stage != "":
+		case artifactKindForStage(r.Stage) != "":
+			// Only the stages that propose a document can have landed one.
+			// A taskless accepted run of any other stage names nothing an
+			// inventory can claim, so its trailer stays unresolved below.
 			documents[r.ID] = r
 		}
 	}
