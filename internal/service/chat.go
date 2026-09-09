@@ -367,12 +367,20 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		"round": turnNo, "turn": 0, "role": "consultant", "duckling": ducklingID,
 	})
 	belt := strings.Split(chatToolbelt, ",")
-	outcome, terr := agent.RunTurn(ctx, loop, &agent.Turn{
-		Role: config.RoleConsultant, Duckling: config.DucklingID(ducklingID),
-		Prompt: prompt, Toolbelt: belt, Contract: "freeform",
-		MaxTurns: 12, Persona: "consultant", Images: images,
-		Round: turnNo, Index: 0,
-	}, ectx)
+	providerID := string(loop.Duckling.Provider)
+	if err := s.queue.acquireProvider(ctx, s, providerID, rs.run.ID); err != nil {
+		s.failRun(rs, err)
+		return
+	}
+	outcome, terr := func() (*agent.Outcome, error) {
+		defer s.queue.releaseProvider(providerID, rs.run.ID)
+		return agent.RunTurn(ctx, loop, &agent.Turn{
+			Role: config.RoleConsultant, Duckling: config.DucklingID(ducklingID),
+			Prompt: prompt, Toolbelt: belt, Contract: "freeform",
+			MaxTurns: 12, Persona: "consultant", Images: images,
+			Round: turnNo, Index: 0,
+		}, ectx)
+	}()
 	recordSpend(rs, tracker)
 	s.publishSpend(rs, tracker)
 	if terr != nil {

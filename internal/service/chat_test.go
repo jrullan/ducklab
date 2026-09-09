@@ -19,6 +19,7 @@ import (
 	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
+	"github.com/jrullan/ducklab/internal/provider"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 )
@@ -126,6 +127,79 @@ func TestAChatConversesAndPausesForTheNextMessage(t *testing.T) {
 	// A chat cannot be fed while it is thinking or after it ends.
 	if _, err := s.ChatSend(context.Background(), "r-nope", "hi"); err == nil {
 		t.Error("sent to a chat that does not exist")
+	}
+}
+
+// A consultant consumes provider capacity only while producing a reply. An
+// open conversation at rest must not hold a cap-one local model hostage, but
+// another turn must also not overlap the active reply.
+func TestChatReleasesProviderSlotBetweenMessages(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	p := s.cfg.Providers["fake"]
+	p.BaseURL = "http://localhost:8081/v1"
+	p.MaxConcurrent = 1
+	s.cfg.Providers["fake"] = p
+	nativeTools := false
+	duck := s.cfg.Ducklings["pato-uno"]
+	duck.Caps.NativeTools = &nativeTools
+	s.cfg.Ducklings["pato-uno"] = duck
+	fake := s.providers["fake"].(*provider.Fake)
+	chatEntered := make(chan struct{})
+	releaseChat := make(chan struct{})
+	fake.ScriptFunc = func(provider.ChatRequest, int) *provider.ChatResponse {
+		close(chatEntered)
+		<-releaseChat
+		return &provider.ChatResponse{Choices: []provider.Choice{{
+			Message:      provider.Message{Role: "assistant", Content: "answer"},
+			FinishReason: provider.FinishStop,
+		}}}
+	}
+
+	dir := t.TempDir()
+	project, err := s.ProjectInit(context.Background(), InitRequest{Path: dir, Name: "T", GitInit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.ChatStart(context.Background(), project.ID, ChatStartRequest{
+		Duckling: "pato-uno", AboutKind: "ducklab", Message: "why?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-chatEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("chat did not enter its provider turn")
+	}
+	otherAcquired := make(chan struct{})
+	go func() {
+		if err := s.queue.acquireProvider(context.Background(), s, "fake", "other-run"); err != nil {
+			return
+		}
+		close(otherAcquired)
+		s.queue.releaseProvider("fake", "other-run")
+	}()
+	select {
+	case <-otherAcquired:
+		t.Fatal("another turn acquired a cap-one provider while the chat was replying")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(releaseChat)
+	select {
+	case <-otherAcquired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle chat retained the provider slot between messages")
+	}
+
+	s.runsMu.RLock()
+	rs := s.runs[run.ID]
+	s.runsMu.RUnlock()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !(rs.run.Status == "paused" && rs.run.PendingKind == "chat") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if rs.run.Status != "paused" || rs.run.PendingKind != "chat" {
+		t.Fatalf("chat did not become idle after releasing its provider: %s/%s", rs.run.Status, rs.run.PendingKind)
 	}
 }
 
