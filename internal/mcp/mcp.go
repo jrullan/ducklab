@@ -41,6 +41,7 @@ type Engine interface {
 	RunFileFindings(id string) ([]map[string]interface{}, error)
 	RunStart(projectID string, req map[string]interface{}) (map[string]interface{}, error)
 	StageStart(projectID, stage string, req map[string]interface{}) (map[string]interface{}, error)
+	ReleasePlan(projectID, bump, revise string) (map[string]interface{}, error)
 	ArtifactGet(projectID, kind string) (map[string]interface{}, error)
 	TaskList(projectID string) ([]map[string]interface{}, error)
 	TaskRemove(projectID, taskID string) (map[string]interface{}, error)

@@ -586,10 +586,16 @@ func (c *Client) BugMove(projectID, bugID, status, actor string) (map[string]int
 	return result, err
 }
 
-// ReleasePlan drafts the notes for the next release.
-func (c *Client) ReleasePlan(projectID, bump string) (map[string]interface{}, error) {
+// ReleasePlan drafts the notes for the next release. Revise is empty for a
+// new proposal and carries the operator's note when rewriting one already on
+// the table.
+func (c *Client) ReleasePlan(projectID, bump, revise string) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	err := c.post("/v1/projects/"+projectID+"/releases", map[string]string{"bump": bump}, &result)
+	req := map[string]string{"bump": bump}
+	if strings.TrimSpace(revise) != "" {
+		req["revise"] = revise
+	}
+	err := c.post("/v1/projects/"+projectID+"/releases", req, &result)
 	return result, err
 }
 
