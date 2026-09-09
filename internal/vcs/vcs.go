@@ -37,15 +37,22 @@ func (g *Git) runEnv(env map[string]string, args ...string) (string, error) {
 	cmdLine := "git " + strings.Join(args, " ")
 	var commandEnv []string
 	if env != nil {
+		// Treat the caller's map as input. CherryPick reuses its provenance map
+		// for the whole operation; deleting keys merely because they also exist
+		// in os.Environ made runEnv an unexpected, order-dependent mutation.
+		remaining := make(map[string]string, len(env))
+		for key, value := range env {
+			remaining[key] = value
+		}
 		commandEnv = os.Environ()
 		for i, entry := range commandEnv {
 			key, _, ok := strings.Cut(entry, "=")
-			if value, replace := env[key]; ok && replace {
+			if value, replace := remaining[key]; ok && replace {
 				commandEnv[i] = key + "=" + value
-				delete(env, key)
+				delete(remaining, key)
 			}
 		}
-		for key, value := range env {
+		for key, value := range remaining {
 			commandEnv = append(commandEnv, key+"="+value)
 		}
 	}
