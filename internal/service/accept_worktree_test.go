@@ -64,6 +64,25 @@ func TestAcceptWorktreeRefusesTurnRootMismatchWithoutStrandingCandidate(t *testi
 	if err == nil || !strings.Contains(err.Error(), "root mismatch") {
 		t.Fatalf("accept error = %v, want an explicit worktree root mismatch refusal", err)
 	}
+	events, err := runlog.ReadEvents(filepath.Join(dir, ".ducklab", "runs", run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refusal *runlog.Event
+	for _, event := range events {
+		if event.Type == "accept_refused" {
+			refusal = event
+		}
+	}
+	if refusal == nil {
+		t.Fatal("accept root refusal was returned to the client but not persisted")
+	}
+	if got := refusal.Data["reason"]; !strings.Contains(got.(string), "root mismatch") {
+		t.Fatalf("recorded refusal reason = %q, want root mismatch", got)
+	}
+	if got := refusal.Data["worktree_path"]; got != run.WorktreePath {
+		t.Fatalf("recorded worktree = %q, want %q", got, run.WorktreePath)
+	}
 	if _, err := os.Stat(filepath.Join(run.WorktreePath, candidate)); err != nil {
 		t.Fatalf("candidate was removed from its run worktree: %v", err)
 	}
