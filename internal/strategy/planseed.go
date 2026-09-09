@@ -15,6 +15,10 @@ type PlanSeedSpec struct {
 	Title    string
 	Priority string
 	AsBuilt  bool
+	// Digest identifies the complete accepted SPEC section without exposing its
+	// prose as model-owned planning state. Manifest-critic cache keys use it so
+	// a changed obligation invalidates every task that implements that section.
+	Digest string
 }
 
 func planSeedInScope(spec PlanSeedSpec) bool {

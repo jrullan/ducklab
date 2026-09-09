@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -68,10 +69,19 @@ func TestApplySupportProfileCarriesPolicyOnScheduledTurn(t *testing.T) {
 }
 
 func TestAgentTurnCarriesScheduledSupportPolicy(t *testing.T) {
-	turn := &Turn{Role: config.RoleArchitect, Persona: PersonaPlanManifest, Contract: "json:plan_manifest", SmallSeat: true, Images: []string{"image"}}
+	cache := &agent.ManifestAuditCache{}
+	called := false
+	turn := &Turn{Role: config.RoleArchitect, Persona: PersonaPlanManifest, Contract: "json:plan_manifest", SmallSeat: true, Images: []string{"image"},
+		ManifestAuditInputs: map[string]json.RawMessage{"T-001": json.RawMessage(`{"task":"one"}`)}, ManifestAuditPolicy: "policy", ManifestAuditCache: cache,
+		OnManifestAuditCacheHit: func(_, _ string) { called = true }}
 	agentTurn := turn.AgentTurn("duck", "prompt", []string{"fs_read"}, 2, 3)
-	if !agentTurn.SmallSeat || agentTurn.Persona != PersonaPlanManifest || agentTurn.Round != 2 || agentTurn.Index != 3 || len(agentTurn.Images) != 1 {
+	if !agentTurn.SmallSeat || agentTurn.Persona != PersonaPlanManifest || agentTurn.Round != 2 || agentTurn.Index != 3 || len(agentTurn.Images) != 1 ||
+		agentTurn.ManifestAuditCache != cache || agentTurn.ManifestAuditPolicy != "policy" || len(agentTurn.ManifestAuditInputs) != 1 {
 		t.Fatalf("agent turn lost scheduled policy: %+v", agentTurn)
+	}
+	agentTurn.OnManifestAuditCacheHit("T-001", "key")
+	if !called {
+		t.Fatal("agent turn lost manifest cache event callback")
 	}
 }
 

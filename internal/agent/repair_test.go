@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -797,6 +798,84 @@ func TestPlanManifestAuditRepairChunksLargeLedgers(t *testing.T) {
 	defer p.mu.Unlock()
 	if got := p.requests[2].Messages[len(p.requests[2].Messages)-1].Content; !strings.Contains(got, "SPEC-005") || strings.Contains(got, "SPEC-001") {
 		t.Fatalf("second spec group was not isolated: %s", got)
+	}
+}
+
+func TestPlanManifestAuditReusesOnlyUnchangedTaskFragmentsAndReauditsSpecs(t *testing.T) {
+	contract := "verdict:plan_manifest:SPEC-001|T-001,T-002"
+	cache := &ManifestAuditCache{}
+	inputs := map[string]json.RawMessage{
+		"T-001": json.RawMessage(`{"task":{"id":"T-001","work_unit":"load packs"},"specs":[{"id":"SPEC-001","digest":"spec-a"}]}`),
+		"T-002": json.RawMessage(`{"task":{"id":"T-002","work_unit":"old selection"},"specs":[{"id":"SPEC-001","digest":"spec-a"}]}`),
+	}
+	first := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-002 needs a narrower work unit","fix":"repair T-002"}]}`,
+		`{"specs":[{"id":"SPEC-001","status":"pass","evidence":"both tasks cover the accepted obligation"}]}`,
+		`{"tasks":[{"id":"T-001","status":"pass","evidence":"one cohesive pack-loading concern"}]}`,
+		`{"tasks":[{"id":"T-002","status":"fail","evidence":"selection is bundled"}]}`,
+	}}
+	turn := &Turn{Role: config.RoleReviewer, Persona: "plan_manifest_critic", Prompt: "review candidate", Contract: contract, MaxTurns: 1,
+		ManifestAuditInputs: inputs, ManifestAuditPolicy: "policy-v1", ManifestAuditCache: cache}
+	if _, err := RunTurn(context.Background(), testLoop(first, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+
+	secondInputs := map[string]json.RawMessage{
+		"T-001": inputs["T-001"],
+		"T-002": json.RawMessage(`{"task":{"id":"T-002","work_unit":"select one provider"},"specs":[{"id":"SPEC-001","digest":"spec-a"}]}`),
+	}
+	second := &countingProvider{replies: []string{
+		`{"verdict":"request-changes","findings":[{"severity":"major","file":"manifest","line":0,"issue":"T-002 still lacks one probe","fix":"add a T-002 probe"}]}`,
+		`{"specs":[{"id":"SPEC-001","status":"fail","evidence":"the revised task still omits an observable outcome"}]}`,
+		`{"tasks":[{"id":"T-002","status":"fail","evidence":"the revised concern lacks its probe"}]}`,
+	}}
+	var hits []string
+	turn.ManifestAuditInputs = secondInputs
+	turn.OnManifestAuditCacheHit = func(taskID, key string) { hits = append(hits, taskID+"@"+key) }
+	out, err := RunTurn(context.Background(), testLoop(second, 2), turn, &tools.ExecContext{ProjectRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.calls() != 3 || out.Repairs != 2 {
+		t.Fatalf("second review calls=%d repairs=%d, want initial + SPEC + changed task", second.calls(), out.Repairs)
+	}
+	if len(hits) != 1 || !strings.HasPrefix(hits[0], "T-001@sha256:") {
+		t.Fatalf("cache hits = %v, want only unchanged T-001 with recorded key", hits)
+	}
+	audit := out.Parsed.(*Verdict).ManifestAudit
+	if len(audit.Specs) != 1 || audit.Specs[0].Status != "fail" {
+		t.Fatalf("SPEC audit was reused instead of recomputed: %+v", audit.Specs)
+	}
+	if len(audit.Tasks) != 2 || audit.Tasks[0].ID != "T-001" || audit.Tasks[1].ID != "T-002" {
+		t.Fatalf("composed task audit = %+v", audit.Tasks)
+	}
+}
+
+func TestManifestAuditTaskCacheKeyInvalidatesPolicySpecAndRelevantFindings(t *testing.T) {
+	cache := &ManifestAuditCache{}
+	turn := &Turn{ManifestAuditCache: cache, ManifestAuditPolicy: "policy-v1", ManifestAuditInputs: map[string]json.RawMessage{
+		"T-001": json.RawMessage(`{"task":{"id":"T-001"},"specs":[{"id":"SPEC-001","digest":"a"}]}`),
+	}}
+	base := manifestAuditTaskCacheKey(turn, nil, "T-001")
+	if base == "" {
+		t.Fatal("cache key unexpectedly disabled")
+	}
+	turn.ManifestAuditPolicy = "policy-v2"
+	if got := manifestAuditTaskCacheKey(turn, nil, "T-001"); got == base {
+		t.Fatal("policy change did not invalidate key")
+	}
+	turn.ManifestAuditPolicy = "policy-v1"
+	turn.ManifestAuditInputs["T-001"] = json.RawMessage(`{"task":{"id":"T-001"},"specs":[{"id":"SPEC-001","digest":"b"}]}`)
+	if got := manifestAuditTaskCacheKey(turn, nil, "T-001"); got == base {
+		t.Fatal("SPEC digest change did not invalidate key")
+	}
+	turn.ManifestAuditInputs["T-001"] = json.RawMessage(`{"task":{"id":"T-001"},"specs":[{"id":"SPEC-001","digest":"a"}]}`)
+	findings := []Finding{{Severity: "major", Issue: "T-001 has a missing probe"}}
+	if got := manifestAuditTaskCacheKey(turn, findings, "T-001"); got == base {
+		t.Fatal("relevant finding did not invalidate key")
+	}
+	if got := manifestAuditTaskCacheKey(turn, []Finding{{Issue: "T-002 changed"}}, "T-001"); got != base {
+		t.Fatal("unrelated finding invalidated key")
 	}
 }
 

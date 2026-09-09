@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,6 +26,10 @@ import (
 const PersonaCritic = "critic"
 const PersonaPlanManifest = "plan_manifest"
 const PersonaPlanManifestCritic = "plan_manifest_critic"
+
+// This is part of the cache key, not a display version. Changing the audit
+// entry schema or its interpretation must invalidate every in-flight reuse.
+const planManifestAuditCacheSchema = "manifest-audit-entry-v1"
 
 const planManifestSemanticReview = `## Compact plan manifest audit — required
 
@@ -146,6 +151,44 @@ func planManifestReviewContract(params *ExecuteParams, outcome *agent.Outcome) s
 	sort.Strings(specs)
 	sort.Strings(tasks)
 	return "verdict:plan_manifest:" + strings.Join(specs, ",") + "|" + strings.Join(tasks, ",")
+}
+
+// planManifestAuditInputs creates one canonical cache input per task. The
+// accepted SPEC digests make a task miss when an obligation it implements
+// changes, while unrelated task repairs retain their prior audit entries.
+func planManifestAuditInputs(params *ExecuteParams, manifest *agent.PlanManifest) map[string]json.RawMessage {
+	if manifest == nil {
+		return nil
+	}
+	seedByID := map[string]PlanSeedSpec{}
+	for _, spec := range params.PlanSeed {
+		seedByID[spec.ID] = spec
+	}
+	type specContext struct {
+		ID       string `json:"id"`
+		Title    string `json:"title,omitempty"`
+		Priority string `json:"priority,omitempty"`
+		Digest   string `json:"digest,omitempty"`
+	}
+	type taskContext struct {
+		Task  agent.ManifestTask `json:"task"`
+		Specs []specContext      `json:"specs"`
+	}
+	inputs := map[string]json.RawMessage{}
+	for _, milestone := range manifest.Milestones {
+		for _, task := range milestone.Tasks {
+			context := taskContext{Task: task}
+			for _, id := range task.Implements {
+				spec := seedByID[id]
+				context.Specs = append(context.Specs, specContext{ID: id, Title: spec.Title, Priority: spec.Priority, Digest: spec.Digest})
+			}
+			sort.Slice(context.Specs, func(i, j int) bool { return context.Specs[i].ID < context.Specs[j].ID })
+			if encoded, err := json.Marshal(context); err == nil {
+				inputs[task.ID] = encoded
+			}
+		}
+	}
+	return inputs
 }
 
 // planCoverageReview is semantic on purpose. Implements links, graph edges and

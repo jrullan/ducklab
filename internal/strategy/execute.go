@@ -338,6 +338,10 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 	if runner == nil {
 		runner = defaultRunner(params)
 	}
+	// Reuse is bounded to this execution. A later run may have different
+	// accepted documents, configuration or reviewer policy even when task JSON
+	// happens to look the same.
+	manifestAuditCache := &agent.ManifestAuditCache{}
 
 	// findings carry the previous round's review into this round's implementer
 	// prompt; this is what makes pair an iteration rather than two monologues.
@@ -564,6 +568,16 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			promptTranscript := result.Transcript
 			if turn.Persona == PersonaPlanManifestCritic && planManifestDraft != nil {
 				turn.Contract = planManifestReviewContract(params, planManifestDraft)
+				turn.ManifestAuditInputs = planManifestAuditInputs(params, planManifest)
+				turn.ManifestAuditPolicy = planManifestAuditCacheSchema + "\n" + planManifestSemanticReviewFor(params.SmallSeat)
+				turn.ManifestAuditCache = manifestAuditCache
+				currentRound, currentTurn := round, script.TurnIndexBase+i
+				turn.OnManifestAuditCacheHit = func(taskID, key string) {
+					emit(params, "plan_manifest_critic_cache_hit", map[string]interface{}{
+						"round": currentRound, "turn": currentTurn, "task": taskID, "key": key,
+						"detail": "unchanged task audit reused; global SPEC coverage is still recomputed",
+					})
+				}
 			}
 			if turn.Persona == PersonaCritic && script.MaterializeCandidate != nil {
 				// The authoritative candidate below supersedes architect wire

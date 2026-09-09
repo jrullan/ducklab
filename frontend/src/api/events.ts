@@ -307,6 +307,7 @@ export const KNOWN_EVENT_TYPES = [
   "plan_manifest_coverage_unassigned",
   "plan_manifest_patched",
   "plan_manifest_patch_rejected",
+  "plan_manifest_critic_cache_hit",
   "support_profile_resolved",
   "structure_failed",
   "revision_identical",
