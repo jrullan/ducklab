@@ -12,6 +12,7 @@ import (
 	"github.com/jrullan/ducklab/internal/bus"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/vcs"
 )
 
 // serviceWithAcceptPolicy loads the policy through the same global TOML path
@@ -167,12 +168,12 @@ func TestOnAcceptPushHonorsGlobalDefaultAndProjectOverride(t *testing.T) {
 	t.Run("global push applies when project leaves policy unset", func(t *testing.T) {
 		s := serviceWithAcceptPolicy(t, "push")
 		_, root, sha := acceptIntoRemote(t, s, "")
-		remote, err := exec.Command("git", "-C", root, "remote", "get-url", "origin").Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !remoteHasCommit(t, strings.TrimSpace(string(remote)), gitBranch(t, root), sha) {
-			t.Fatalf("remote master was not pushed to accepted commit %s", sha)
+		// The push carries the landing commit and the record commit that
+		// follows it (B-291): the remote branch descends from the accepted
+		// commit rather than ending exactly at it.
+		remoteGit := vcs.New(root)
+		if !remoteGit.BranchContains("origin/"+gitBranch(t, root), sha) {
+			t.Fatalf("remote %s was not pushed past accepted commit %s", gitBranch(t, root), sha)
 		}
 		receipt, err := os.ReadFile(filepath.Join(root, ".ducklab", "remote-actions.jsonl"))
 		if err != nil || !strings.Contains(string(receipt), `"action":"push"`) || !strings.Contains(string(receipt), `"status":"pushed"`) {

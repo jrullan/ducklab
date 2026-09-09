@@ -169,6 +169,11 @@ func (s *Service) releaseInventory(ctx context.Context, projectID, root, sinceTa
 	var unverified, uncovered []string
 	git := vcs.New(root)
 	for _, c := range commits {
+		// A run's record commit (its receipt, its own bug-ladder lines) is
+		// bookkeeping of work already inventoried under its run (B-291).
+		if c.DucklabRecord != "" {
+			continue
+		}
 		if c.DucklabRun == "" {
 			entry := release.Landed{SHA: c.SHA, Subject: c.Subject, Author: c.Author}
 			if match := localPRRe.FindStringSubmatch(c.Subject); match != nil {
@@ -539,9 +544,21 @@ func (s *Service) ReleaseCut(ctx context.Context, projectID, version string) (ma
 	if err := git.Add(adds...); err != nil {
 		return nil, fmt.Errorf("release cut: %w", err)
 	}
+	// The cut is the sweep's owner (B-291): harness state the engine dirtied
+	// since the last release — bug audit lines, plan edits, Settings, receipts
+	// a record commit had to defer — rides the release commit, named in its
+	// message rather than mixed into any task's code commit.
+	swept, err := stageHarnessState(git, entry.Path)
+	if err != nil {
+		return nil, fmt.Errorf("release cut: %w", err)
+	}
 	sha := ""
 	if clean, cerr := git.IsClean(); cerr == nil && !clean {
-		if sha, err = git.Commit(fmt.Sprintf("ducklab: release %s", v)); err != nil {
+		message := fmt.Sprintf("ducklab: release %s", v)
+		if len(swept) > 0 {
+			message += fmt.Sprintf("\n\nSweeps %d harness state file(s) under .ducklab into this release: receipts, bug audit trail, documents, settings.", len(swept))
+		}
+		if sha, err = git.Commit(message); err != nil {
 			return nil, fmt.Errorf("release cut: %w", err)
 		}
 	} else {
@@ -901,4 +918,47 @@ func summariseRelease(version, body string) ReleaseSummary {
 		}
 	}
 	return sum
+}
+
+// harnessStatePaths are the tracked harness records a release cut sweeps. The
+// .gitignore contract decides what under them is tracked; the cut only names
+// the roots.
+var harnessStatePaths = []string{
+	filepath.Join(".ducklab", "bugs", "audit.jsonl"),
+	filepath.Join(".ducklab", "docs"),
+	filepath.Join(".ducklab", "project.toml"),
+	filepath.Join(".ducklab", "runs"),
+}
+
+// stageHarnessState stages the harness records that exist and reports which
+// paths under .ducklab the index then carries.
+func stageHarnessState(git *vcs.Git, root string) ([]string, error) {
+	var present []string
+	for _, p := range harnessStatePaths {
+		if _, err := os.Stat(filepath.Join(root, p)); err != nil {
+			continue
+		}
+		// An explicitly named ignored path makes git add fail; the project's
+		// ignore rules decide what is harness state here, not the cut.
+		if git.IsIgnored(p) {
+			continue
+		}
+		present = append(present, p)
+	}
+	if len(present) > 0 {
+		if err := git.Add(present...); err != nil {
+			return nil, err
+		}
+	}
+	staged, err := git.StagedPaths()
+	if err != nil {
+		return nil, err
+	}
+	var swept []string
+	for _, p := range staged {
+		if strings.HasPrefix(p, ".ducklab/") && !strings.HasPrefix(p, ".ducklab/docs/releases/") {
+			swept = append(swept, p)
+		}
+	}
+	return swept, nil
 }

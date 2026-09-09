@@ -2825,6 +2825,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
 			return fmt.Errorf("write acceptance receipt: %w", err)
 		}
+		s.commitRunRecord(entry.Path, rs)
 		return nil
 	}
 
@@ -2895,6 +2896,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
 		return fmt.Errorf("write acceptance receipt: %w", err)
 	}
+	s.commitRunRecord(entry.Path, rs)
 	return nil
 }
 
@@ -2980,6 +2982,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
 			return fmt.Errorf("write acceptance receipt: %w", err)
 		}
+		s.commitRunRecord(entry.Path, rs)
 		s.continueChain(ctx, rs)
 		s.cleanupRunWorktree(rs, entry.Path)
 		return nil
@@ -3093,6 +3096,7 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	if err := writeAcceptanceReceipt(entry.Path, rs.run, actor); err != nil {
 		return fmt.Errorf("write acceptance receipt: %w", err)
 	}
+	s.commitRunRecord(entry.Path, rs)
 	s.cleanupRunWorktree(rs, entry.Path)
 	return nil
 }
