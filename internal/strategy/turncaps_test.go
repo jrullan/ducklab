@@ -55,12 +55,20 @@ func TestAScriptCapStandsWhenNoRoleCapIsConfigured(t *testing.T) {
 
 func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
 	var got int
+	var requested int
+	var source, ceilingSource string
 	params := &ExecuteParams{
 		Roster:   map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "review"},
 		TurnCaps: map[config.Role]int{config.RoleReviewer: 100},
+		TurnCapSources: map[config.Role]string{
+			config.RoleReviewer: "reviewer role default",
+		},
 		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
 			if turn.Role == config.RoleReviewer {
 				got = turn.MaxTurns
+				requested = turn.MaxTurnsRequested
+				source = turn.MaxTurnsSource
+				ceilingSource = turn.MaxTurnsCeilingSource
 				return verdictOutcome("approve"), nil
 			}
 			return &agent.Outcome{Text: "done"}, nil
@@ -74,10 +82,18 @@ func TestTurnCapsCannotInflateAPairReviewer(t *testing.T) {
 	if got != 8 {
 		t.Fatalf("pair reviewer ran with MaxTurns=%d; configured 100 must not raise its ceiling 8", got)
 	}
+	if requested != 100 || source != "reviewer role default" {
+		t.Fatalf("requested cap = %d from %q, want 100 from reviewer role default", requested, source)
+	}
+	if ceilingSource != "pair ceiling" {
+		t.Fatalf("ceiling source = %q, want pair ceiling", ceilingSource)
+	}
 }
 
 func TestSmallSeatTurnCapsCannotSpendPairReviewReserveOnImplementer(t *testing.T) {
 	var got int
+	var requested int
+	var ceilingSource string
 	params := &ExecuteParams{
 		SmallSeat: true,
 		Roster:    map[config.Role]config.DucklingID{config.RoleImplementer: "impl", config.RoleReviewer: "review"},
@@ -85,6 +101,8 @@ func TestSmallSeatTurnCapsCannotSpendPairReviewReserveOnImplementer(t *testing.T
 		Runner: func(_ context.Context, turn *Turn, _ config.DucklingID, _ string, _ []string, _ TurnContext) (*agent.Outcome, error) {
 			if turn.Role == config.RoleImplementer {
 				got = turn.MaxTurns
+				requested = turn.MaxTurnsRequested
+				ceilingSource = turn.MaxTurnsCeilingSource
 				return &agent.Outcome{Text: "done"}, nil
 			}
 			return verdictOutcome("approve"), nil
@@ -97,5 +115,8 @@ func TestSmallSeatTurnCapsCannotSpendPairReviewReserveOnImplementer(t *testing.T
 	}
 	if got != 24 {
 		t.Fatalf("pair implementer ran with MaxTurns=%d; configured 100 must not consume the reviewer reserve above ceiling 24", got)
+	}
+	if requested != 100 || ceilingSource != "small-seat pair reserve" {
+		t.Fatalf("clamp provenance = requested %d, ceiling %q", requested, ceilingSource)
 	}
 }

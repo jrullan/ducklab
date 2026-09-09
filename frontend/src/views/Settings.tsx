@@ -388,6 +388,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
   const [b, setB] = useState<Record<string, string>>({});
   const [rounds, setRounds] = useState<Record<string, string>>({});
   const [roleTurns, setRoleTurns] = useState<Record<string, string>>({});
+  const [phaseTurns, setPhaseTurns] = useState<Record<string, string>>({});
   const [agentTurns, setAgentTurns] = useState("");
   const [buildMode, setBuildMode] = useState("");
   const [testMode, setTestMode] = useState("");
@@ -459,6 +460,10 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
       rt[role] = v.role_turns?.[role] ? String(v.role_turns[role]) : "";
     }
     setRoleTurns(rt);
+    setPhaseTurns({
+      build: v.phase_turns?.build ? String(v.phase_turns.build) : "",
+      test: v.phase_turns?.test ? String(v.phase_turns.test) : "",
+    });
     setAgentTurns(String(v.agent_max_turns));
     setBuildMode(v.build_mode ?? "");
     setTestMode(v.test_mode ?? "");
@@ -547,6 +552,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         build_mode: buildMode,
         test_mode: testMode,
         role_turns: numbersOnly(roleTurns),
+        phase_turns: numbersOnly(phaseTurns),
       }),
     ])
       .then(([savedAp, savedBudget, savedEngine, savedModes]) => {
@@ -764,6 +770,23 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
         Leave blank to use the project's [modes] habit, then solo. The per-project [modes] table stays config.toml-only for now.
       </p>
 
+      <h3 className="mt-4 text-xs text-ink-muted">calls per reply — phase defaults</h3>
+      <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
+        {(["build", "test"] as const).map((phase) =>
+          num(
+            phaseTurns[phase] ?? "",
+            (v) => setPhaseTurns({ ...phaseTurns, [phase]: v }),
+            phase,
+            `phase-turns-${phase}`,
+            String(modes.agent_max_turns),
+            "w-20",
+          ),
+        )}
+      </div>
+      <p className="mt-2 text-xs text-ink-muted">
+        Empty uses the global default ({modes.agent_max_turns}). Precedence is global → phase → role → run override; a hard script ceiling still wins.
+      </p>
+
       <h3 className="mt-4 text-xs text-ink-muted">rounds per mode</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
         {Object.keys(modes.script_rounds ?? {})
@@ -780,7 +803,7 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
           )}
       </div>
 
-      <h3 className="mt-4 text-xs text-ink-muted">model calls per turn</h3>
+      <h3 className="mt-4 text-xs text-ink-muted">calls per reply — role overrides</h3>
       <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
         {Object.keys(modes.script_role_turns ?? {})
           .sort()
@@ -790,18 +813,25 @@ function ConfigSection({ client, section, projectId }: { client: EngineClient; s
               (v) => setRoleTurns({ ...roleTurns, [role]: v }),
               role,
               `role-turns-${role}`,
-              String(modes.script_role_turns?.[role] ?? ""),
+              String(modes.agent_max_turns),
               "w-16",
             ),
           )}
-        {num(agentTurns, setAgentTurns, "fallback", "rounds-agent-max-turns", undefined, "w-20")}
+        {num(agentTurns, setAgentTurns, "global default", "rounds-agent-max-turns", undefined, "w-24")}
       </div>
+
+      {Object.entries(modes.turn_ceilings ?? {}).length > 0 && (
+        <p className="mt-2 text-xs text-warn" data-testid="turn-ceilings">
+          Hard ceilings: {Object.entries(modes.turn_ceilings ?? {}).map(([turn, cap]) => `${turn} ${cap}`).join(", ")}. Higher defaults, run overrides, and live no-cap are clamped here.
+        </p>
+      )}
 
       <p className="mt-2 text-xs text-ink-muted">
         A round is one pass over every participant, so pair spends two turns on
-        each. "Model calls per turn" is the separate limit on one participant
+        each. "Calls per reply" is the separate limit on one participant
         chaining tool calls — a model working in circles is stopped by that, not
-        by the round count. Empty uses the built-in value shown in the box.
+        by the round count. Empty role overrides inherit the phase default, then
+        the global default shown in the box.
       </p>
       </SettingsCard>
       </div>

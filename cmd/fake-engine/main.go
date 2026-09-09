@@ -406,7 +406,9 @@ func (f *fakeEngine) modeDefaults(w http.ResponseWriter, r *http.Request) {
 		"script_rounds":     map[string]int{"solo": 3, "pair": 3, "tournament": 1, "council": 2, "split": 1},
 		"ducklings":         map[string][]string{"solo": {"pato-uno"}, "pair": {"pato-uno", "pato-dos"}},
 		"role_turns":        map[string]int{},
+		"phase_turns":       map[string]int{},
 		"script_role_turns": map[string]int{"implementer": 24, "reviewer": 8, "architect": 12, "judge": 1, "triager": 6, "advisor": 6, "scribe": 12},
+		"turn_ceilings":     map[string]int{"pair.reviewer": 8},
 		"seats":             map[string]int{"solo": 1, "pair": 2, "tournament": 0, "council": 0, "split": 0},
 	})
 }

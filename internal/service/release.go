@@ -319,6 +319,7 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
+	turnCaps := s.resolveTurnCaps("release", rs.run.AgentTurns)
 
 	params := &strategy.ExecuteParams{
 		LiveToolEvents: true,
@@ -326,6 +327,8 @@ func (s *Service) scribeNotes(ctx context.Context, rs *runState, projectRoot str
 		Prompt:         scribePrompt(notes) + revisionAddendum(revise, priorDraft),
 		Runner:         s.runnerFor(cache, roster, ectx),
 		Roster:         roster,
+		TurnCaps:       turnCaps.Caps,
+		TurnCapSources: turnCaps.Sources,
 		OnEvent: func(kind string, data map[string]interface{}) {
 			rs.writer.AppendEvent(kind, data)
 		},

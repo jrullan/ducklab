@@ -536,16 +536,37 @@ describe("the calls/reply row", () => {
     useRuns.setState({
       runs: { "r-1": running },
       events: { "r-1": [
-        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24 } },
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24, source: "build default", requested: 24 } },
       ] as never },
       deltas: {}, reasoning: {}, spend: {},
     });
     render(<RunView runId="r-1" client={clientWith({
       run: vi.fn(() => Promise.resolve({ run: running, events: [
-        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24 } },
+        { type: "reply_call", run_id: "r-1", ts: "t", data: { role: "architect", n: 19, max: 24, source: "build default", requested: 24 } },
       ] })),
     } as Partial<EngineClient>)} />);
-    await waitFor(() => expect(screen.getByTestId("calls-cap-value").textContent).toBe("19 / 24"));
+    await waitFor(() => expect(screen.getByTestId("calls-cap-value").textContent).toBe("19 / 24 · build default"));
+  });
+
+  it("names a hard ceiling and the higher value it clamped", async () => {
+    const running = {
+      ...failed, status: "running" as const, verdict: "",
+      budget: { usd: 0.1, tokens: 700000, turns: 1, wallclock_s: 60,
+        limit: { usd: 5, tokens: 3000000, turns: 40, wallclock_s: 1800 } },
+    };
+    const event = { type: "reply_call", run_id: "r-1", ts: "t", data: {
+      role: "reviewer", n: 8, max: 8, source: "reviewer role default",
+      requested: 100, ceiling: 8, ceiling_source: "pair ceiling",
+    } };
+    useRuns.setState({
+      runs: { "r-1": running }, events: { "r-1": [event] as never },
+      deltas: {}, reasoning: {}, spend: {},
+    });
+    render(<RunView runId="r-1" client={clientWith({
+      run: vi.fn(() => Promise.resolve({ run: running, events: [event] })),
+    } as Partial<EngineClient>)} />);
+    await waitFor(() => expect(screen.getByTestId("calls-cap-value").textContent)
+      .toBe("8 / 8 · pair ceiling (reviewer role default requested 100)"));
   });
 
   it("says no cap when the loop runs lifted", async () => {

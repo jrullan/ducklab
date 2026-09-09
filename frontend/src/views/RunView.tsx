@@ -2352,14 +2352,17 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
                         knows both numbers. At rest: the configured shape. */}
                     <span className="tabular-nums" data-testid="calls-cap-value">
                       {(() => {
-                        if (liveNow) {
-                          for (let i = events.length - 1; i >= 0; i--) {
-                            const e = events[i]!;
-                            if (e.type === "reply_call") {
-                              const d = e.data as { n?: number; max?: number };
-                              const max = d.max ?? 0;
-                              return `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
+                        for (let i = events.length - 1; i >= 0; i--) {
+                          const e = events[i]!;
+                          if (e.type === "reply_call") {
+                            const d = e.data as { n?: number; max?: number; source?: string; requested?: number; ceiling?: number; ceiling_source?: string };
+                            const max = d.max ?? 0;
+                            const count = `${d.n ?? "?"} / ${max >= 10000 ? "no cap" : max}`;
+                            if (d.ceiling && d.requested && d.requested > max) {
+                              const requested = d.requested >= 10000 ? "no cap" : d.requested;
+                              return `${count} · ${d.ceiling_source ?? "hard ceiling"} (${d.source ?? "default"} requested ${requested})`;
                             }
+                            return d.source ? `${count} · ${d.source}` : count;
                           }
                         }
                         return run.agent_turns === -1 ? "no cap" : run.agent_turns ? String(run.agent_turns) : "default";

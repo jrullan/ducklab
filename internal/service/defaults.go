@@ -227,10 +227,18 @@ type ModeDefaultsView struct {
 	ModeSeats map[string]map[string][]string `json:"mode_seats,omitempty"`
 	RolePins  map[string][]string            `json:"role_pins,omitempty"`
 	// RoleTurns caps the model calls one turn of a role may chain. Zero or
-	// absent leaves the script's own cap alone.
+	// absent inherits the phase default, then AgentMaxTurns.
 	RoleTurns map[string]int `json:"role_turns"`
-	// ScriptRoleTurns is what each role gets when nothing overrides it.
+	// PhaseTurns overrides the global calls/reply fallback for build and test.
+	// Role and run overrides remain more specific.
+	PhaseTurns map[string]int `json:"phase_turns"`
+	// ScriptRoleTurns is the legacy inventory of role-shaped script values. It
+	// remains client-compatible and supplies the Settings role list; effective
+	// calls/reply use the explicit global -> phase -> role -> run precedence.
 	ScriptRoleTurns map[string]int `json:"script_role_turns"`
+	// TurnCeilings are hard script invariants derived from the scripts
+	// themselves. Defaults and live lifts may not raise them.
+	TurnCeilings map[string]int `json:"turn_ceilings"`
 	// Seats is how many ducklings each mode can seat, zero meaning as many as
 	// are ticked. Reported so a client can stop a third box being ticked for a
 	// two-chair mode instead of accepting a preference that will not run.
@@ -240,8 +248,9 @@ type ModeDefaultsView struct {
 	TestMode  string `json:"test_mode,omitempty"`
 }
 
-// ScriptRoleTurns are the caps the scripts themselves carry, so a client can
-// show the real number rather than an empty box.
+// ScriptRoleTurns inventories roles and their historical script values for
+// clients. Effective calls/reply are resolved by resolveTurnCaps; hard script
+// invariants are published separately as TurnCeilings.
 //
 // A reviewer gets fewer than an implementer on purpose: reviewing is reading and
 // giving a verdict, not iterating. A judge gets one — it chooses between
@@ -268,6 +277,16 @@ var ModeSeats = map[string]int{
 	"solo": 1, "pair": 2, "tournament": 0, "council": 0, "split": 0,
 }
 
+func scriptTurnCeilings() map[string]int {
+	out := map[string]int{}
+	for _, turn := range strategy.PairScript().Turns {
+		if turn.MaxTurnsCeiling > 0 {
+			out["pair."+string(turn.Role)] = turn.MaxTurnsCeiling
+		}
+	}
+	return out
+}
+
 // ModeDefaults returns the per-mode round counts and the per-turn call cap.
 func (s *Service) ModeDefaults() ModeDefaultsView {
 	s.cfgMu.RLock()
@@ -278,7 +297,9 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 		ScriptRounds:    ModeRounds,
 		Ducklings:       map[string][]string{},
 		RoleTurns:       map[string]int{},
+		PhaseTurns:      map[string]int{},
 		ScriptRoleTurns: ScriptRoleTurns,
+		TurnCeilings:    scriptTurnCeilings(),
 		Seats:           ModeSeats,
 		ModeSeats:       map[string]map[string][]string{},
 		RolePins:        map[string][]string{},
@@ -301,6 +322,9 @@ func (s *Service) ModeDefaults() ModeDefaultsView {
 	}
 	for role, n := range s.cfg.Defaults.RoleTurns {
 		out.RoleTurns[role] = n
+	}
+	for phase, n := range s.cfg.Defaults.PhaseTurns {
+		out.PhaseTurns[phase] = n
 	}
 	return out
 }
@@ -359,6 +383,14 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		// net, not a leash.
 		if n < 0 || n > 200 {
 			return fmt.Errorf("turns for %q must be 0 (use the script default) to 200; got %d", role, n)
+		}
+	}
+	for phase, n := range v.PhaseTurns {
+		if phase != "build" && phase != "test" {
+			return fmt.Errorf("unknown calls/reply phase %q (available: build, test)", phase)
+		}
+		if n < 0 || n > 200 {
+			return fmt.Errorf("turns for phase %q must be 0 (use the global default) to 200; got %d", phase, n)
 		}
 	}
 
@@ -437,6 +469,7 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 	defer s.cfgMu.Unlock()
 	prevRounds, prevTurns := s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns
 	prevModeSeats, prevRoleTurns := s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns
+	prevPhaseTurns := s.cfg.Defaults.PhaseTurns
 	prevRolePins := s.cfg.Defaults.RolePins
 	prevBuildMode, prevTestMode := s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode
 	rounds := map[string]int{}
@@ -484,11 +517,19 @@ func (s *Service) ModeDefaultsSet(v ModeDefaultsView) error {
 		s.cfg.Defaults.RolePins = rolePins
 	}
 	s.cfg.Defaults.RoleTurns = roleTurns
+	phaseTurns := map[string]int{}
+	for phase, n := range v.PhaseTurns {
+		if n > 0 {
+			phaseTurns[phase] = n
+		}
+	}
+	s.cfg.Defaults.PhaseTurns = phaseTurns
 	s.cfg.Defaults.BuildMode = v.BuildMode
 	s.cfg.Defaults.TestMode = v.TestMode
 	if err := s.saveConfig(); err != nil {
 		s.cfg.Defaults.Rounds, s.cfg.Defaults.AgentMaxTurns = prevRounds, prevTurns
 		s.cfg.Defaults.ModeSeats, s.cfg.Defaults.RoleTurns = prevModeSeats, prevRoleTurns
+		s.cfg.Defaults.PhaseTurns = prevPhaseTurns
 		s.cfg.Defaults.RolePins = prevRolePins
 		s.cfg.Defaults.BuildMode, s.cfg.Defaults.TestMode = prevBuildMode, prevTestMode
 		return err
@@ -611,9 +652,12 @@ func (s *Service) applyRoleTurns(script *strategy.Script, override int) *strateg
 	if script == nil {
 		return script
 	}
+	resolved := s.resolveTurnCaps("", override)
 	for i := range script.Turns {
 		designCap := script.Turns[i].MaxTurns
-		configured := s.turnsFor(string(script.Turns[i].Role), designCap)
+		configured := strategy.CapFor(resolved.Caps, script.Turns[i].Role, designCap)
+		script.Turns[i].MaxTurnsRequested = configured
+		script.Turns[i].MaxTurnsSource = strategy.CapSourceFor(resolved.Sources, script.Turns[i].Role, "script default")
 		ceiling := designCap
 		if script.Turns[i].MaxTurnsCeiling > 0 {
 			ceiling = script.Turns[i].MaxTurnsCeiling
@@ -622,12 +666,15 @@ func (s *Service) applyRoleTurns(script *strategy.Script, override int) *strateg
 			configured = ceiling
 		}
 		script.Turns[i].MaxTurns = configured
-		if override != 0 && script.Turns[i].Role != config.RoleHuman {
-			overridden := capOverride(override)
-			if (script.Turns[i].Persona == strategy.PersonaCritic || script.Turns[i].MaxTurnsCeiling > 0) && overridden > ceiling {
-				overridden = ceiling
+		if script.Turns[i].Persona == strategy.PersonaCritic || script.Turns[i].MaxTurnsCeiling > 0 {
+			script.Turns[i].MaxTurnsCeiling = ceiling
+			if script.Turns[i].MaxTurnsCeilingSource == "" {
+				if script.Turns[i].Persona == strategy.PersonaCritic {
+					script.Turns[i].MaxTurnsCeilingSource = "document critic ceiling"
+				} else {
+					script.Turns[i].MaxTurnsCeilingSource = script.Name + " ceiling"
+				}
 			}
-			script.Turns[i].MaxTurns = overridden
 		}
 	}
 	return script

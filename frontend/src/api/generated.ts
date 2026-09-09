@@ -39,6 +39,7 @@ export interface BugBug {
   history?: BugAuditEntry[];
   id?: string;
   next?: string[];
+  proposal?: BugPortion[];
   reporter?: string;
   severity?: string;
   source?: string;
@@ -46,6 +47,12 @@ export interface BugBug {
   task_id?: string;
   title?: string;
   updated_at?: string;
+}
+
+export interface BugPortion {
+  acceptance?: string[];
+  owns?: string[];
+  title?: string;
 }
 
 export interface ConfigBudget {
@@ -647,6 +654,7 @@ export interface ServiceBudgetView {
 
 export interface ServiceBugRequest {
   body?: string;
+  proposal?: BugPortion[];
   reporter?: string;
   severity?: string;
   source?: string;
@@ -792,6 +800,7 @@ export interface ServiceModeDefaultsView {
   build_mode?: string;
   ducklings?: Record<string, string[]>;
   mode_seats?: Record<string, Record<string, string[]>>;
+  phase_turns?: Record<string, number>;
   role_pins?: Record<string, string[]>;
   role_turns?: Record<string, number>;
   rounds?: Record<string, number>;
@@ -799,6 +808,7 @@ export interface ServiceModeDefaultsView {
   script_rounds?: Record<string, number>;
   seats?: Record<string, number>;
   test_mode?: string;
+  turn_ceilings?: Record<string, number>;
 }
 
 export interface ServiceNextStep {

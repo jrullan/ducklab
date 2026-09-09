@@ -880,17 +880,20 @@ func (s *Service) executeStage(ctx context.Context, rs *runState, projectRoot st
 			if fatal != "" {
 				return "", fmt.Errorf("%s", fatal)
 			}
-			res, rerr := strategy.ExecuteScript(ctx, s.applyRoleTurns(script, req.AgentTurns), &strategy.ExecuteParams{
+			turnCaps := s.resolveTurnCaps(req.Stage, req.AgentTurns)
+			res, rerr := strategy.ExecuteScript(ctx, script, &strategy.ExecuteParams{
 				LiveToolEvents: true,
 				ProjectRoot:    projectRoot,
 				ResumeFrom:     resumeTurn(rs.run),
 				// Decisions the person already made ride the prompt, like on
 				// build and test runs: a resumed stage replays from scratch,
 				// and a model that cannot see the answers re-asks them.
-				Prompt:      prompt + rs.answeredDecisions(),
-				ExecContext: ectx,
-				Runner:      s.runnerFor(cache, roster, ectx),
-				Roster:      roster,
+				Prompt:         prompt + rs.answeredDecisions(),
+				ExecContext:    ectx,
+				Runner:         s.runnerFor(cache, roster, ectx),
+				Roster:         roster,
+				TurnCaps:       turnCaps.Caps,
+				TurnCapSources: turnCaps.Sources,
 				InventoryUnaccounted: func() []agent.InventoryItem {
 					if !adoptSurvey || inventory == nil {
 						return nil

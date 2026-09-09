@@ -103,6 +103,7 @@ mode                = "solo"
 repair_attempts     = 2
 tool_result_max_bytes = 32768
 agent_max_turns     = 24          # per conversation turn (agent loop cap)
+phase_turns         = { build = 40, test = 60 } # calls/reply between global and role/run overrides
 http_timeout_s      = 300
 transient_retries   = 3
 

@@ -407,6 +407,52 @@ func humanNote(note string) string {
 // applied mid-flight mean the same number.
 const uncappedTurns = agent.UncappedTurns
 
+type resolvedTurnCaps struct {
+	Caps    map[config.Role]int
+	Sources map[config.Role]string
+}
+
+// resolveTurnCaps is the single precedence rule for calls/reply:
+// global -> phase -> role -> run. A script may still impose a hard ceiling;
+// strategy applies and records that final clamp because only it knows the
+// concrete turn being scheduled.
+func (s *Service) resolveTurnCaps(phase string, override int) resolvedTurnCaps {
+	s.cfgMu.RLock()
+	global := s.cfg.Defaults.AgentMaxTurns
+	phaseCap := s.cfg.Defaults.PhaseTurns[phase]
+	roleCaps := make(map[string]int, len(s.cfg.Defaults.RoleTurns))
+	for role, n := range s.cfg.Defaults.RoleTurns {
+		roleCaps[role] = n
+	}
+	s.cfgMu.RUnlock()
+	if global <= 0 {
+		global = 24
+	}
+	out := resolvedTurnCaps{Caps: map[config.Role]int{}, Sources: map[config.Role]string{}}
+	for _, role := range config.ValidRoles() {
+		if role == config.RoleHuman {
+			continue
+		}
+		cap, source := global, "global default"
+		if phaseCap > 0 {
+			cap, source = phaseCap, phase+" default"
+		}
+		if n := roleCaps[string(role)]; n > 0 {
+			cap, source = n, string(role)+" role default"
+		}
+		if override != 0 {
+			cap = capOverride(override)
+			if override < 0 {
+				source = "run no-cap"
+			} else {
+				source = "run override"
+			}
+		}
+		out.Caps[role], out.Sources[role] = cap, source
+	}
+	return out
+}
+
 // capOverride resolves a run's AgentTurns override: negative means no cap.
 func capOverride(override int) int {
 	if override < 0 {
@@ -419,16 +465,7 @@ func capOverride(override int) int {
 // a per-run override applies to every role, because the person raising it is
 // unblocking THIS work, not retuning the fleet. Negative lifts the cap.
 func (s *Service) roleTurnCapsFor(override int) map[config.Role]int {
-	caps := s.roleTurnCaps()
-	if override == 0 {
-		return caps
-	}
-	for _, role := range config.ValidRoles() {
-		if role != config.RoleHuman {
-			caps[role] = capOverride(override)
-		}
-	}
-	return caps
+	return s.resolveTurnCaps("", override).Caps
 }
 
 // modeContext carries everything a mode dispatch needs.
@@ -526,6 +563,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 	currentSeat := string(mc.roster[config.RoleImplementer])
 	escalationCandidates, currentFloor := escalationCandidatesFor(string(config.RoleImplementer), currentSeat, cards)
 	root := mc.ectx.ProjectRoot
+	turnCaps := s.resolveTurnCaps("build", mc.req.AgentTurns)
 	base := strategy.ExecuteParams{
 		LiveToolEvents:       true,
 		EscalationCandidates: escalationCandidates,
@@ -555,7 +593,8 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 		Roster: mc.roster,
 		// So tournament and split, which build their own turns, honour the same
 		// per-role caps as every other mode.
-		TurnCaps: s.roleTurnCapsFor(mc.req.AgentTurns),
+		TurnCaps:       turnCaps.Caps,
+		TurnCapSources: turnCaps.Sources,
 		Gate: func(ctx context.Context) (string, string, error) {
 			mc.rs.gateRoot = root
 			mc.rs.run.GateRoot = root
@@ -599,11 +638,11 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 
 	switch mc.rs.run.Mode {
 	case "", "solo":
-		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.SoloScript(), mc.req.AgentTurns), &base)
+		res, err := strategy.ExecuteScript(ctx, strategy.SoloScript(), &base)
 		return pendingOrErr(res, err)
 
 	case "pair":
-		res, err := strategy.ExecuteScript(ctx, s.applyRoleTurns(strategy.PairScript(), mc.req.AgentTurns), &base)
+		res, err := strategy.ExecuteScript(ctx, strategy.PairScript(), &base)
 		return pendingOrErr(res, err)
 
 	case "tournament":

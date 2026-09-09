@@ -16,7 +16,9 @@ const clientWith = (over: Partial<EngineClient> = {}) =>
         agent_max_turns: 24,
         script_rounds: { solo: 3, pair: 3, tournament: 1, council: 2, split: 1 },
         role_turns: {},
+        phase_turns: {},
         script_role_turns: { implementer: 24, reviewer: 8, triager: 6, judge: 1 },
+        turn_ceilings: { "pair.reviewer": 8 },
       }),
     ),
     modeDefaultsSet: vi.fn((v: unknown) => Promise.resolve(v)),
@@ -310,11 +312,11 @@ describe("rounds and turns in Settings", () => {
 // failure message told the reader to raise the turn cap for that role. There was
 // nowhere to raise it.
 describe("per-role turn caps in Settings", () => {
-  it("shows the script's own cap as the placeholder", async () => {
+  it("shows the global fallback as the placeholder", async () => {
     render(settings(clientWith()));
     const triager = (await screen.findByTestId("role-turns-triager")) as HTMLInputElement;
     expect(triager.value).toBe("");
-    expect(triager.placeholder).toBe("6");
+    expect(triager.placeholder).toBe("24");
   });
 
   it("saves a raised cap", async () => {
@@ -337,6 +339,34 @@ describe("per-role turn caps in Settings", () => {
     fireEvent.click(screen.getByTestId("settings-save"));
     const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
     expect((body as { role_turns: Record<string, number> }).role_turns).toEqual({});
+  });
+});
+
+describe("calls/reply precedence in Settings", () => {
+  it("shows and saves phase defaults beside the authoritative hard ceiling", async () => {
+    const client = clientWith({
+      modeDefaults: vi.fn(() => Promise.resolve({
+        rounds: { pair: 5 }, agent_max_turns: 24,
+        script_rounds: { solo: 3, pair: 3 }, role_turns: {},
+        phase_turns: { build: 40, test: 60 },
+        script_role_turns: { implementer: 24, reviewer: 8 },
+        turn_ceilings: { "pair.reviewer": 8 },
+      })),
+    });
+    render(settings(client));
+
+    const build = (await screen.findByTestId("phase-turns-build")) as HTMLInputElement;
+    const test = screen.getByTestId("phase-turns-test") as HTMLInputElement;
+    expect(build.value).toBe("40");
+    expect(test.value).toBe("60");
+    expect(screen.getByTestId("turn-ceilings").textContent).toContain("pair.reviewer 8");
+    expect(screen.getByTestId("config-settings").textContent).toContain("global → phase → role → run override");
+
+    fireEvent.change(build, { target: { value: "48" } });
+    fireEvent.click(screen.getByTestId("settings-save"));
+    await waitFor(() => expect(client.modeDefaultsSet).toHaveBeenCalled());
+    const [body] = (client.modeDefaultsSet as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]!;
+    expect(body).toMatchObject({ phase_turns: { build: 48, test: 60 } });
   });
 });
 

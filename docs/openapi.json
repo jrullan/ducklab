@@ -121,6 +121,12 @@
             },
             "type": "array"
           },
+          "proposal": {
+            "items": {
+              "$ref": "#/components/schemas/BugPortion"
+            },
+            "type": "array"
+          },
           "reporter": {
             "type": "string"
           },
@@ -152,6 +158,31 @@
           "status",
           "title",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "BugPortion": {
+        "properties": {
+          "acceptance": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "owns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "acceptance",
+          "owns",
+          "title"
         ],
         "type": "object"
       },
@@ -2211,6 +2242,12 @@
           "body": {
             "type": "string"
           },
+          "proposal": {
+            "items": {
+              "$ref": "#/components/schemas/BugPortion"
+            },
+            "type": "array"
+          },
           "reporter": {
             "type": "string"
           },
@@ -2713,6 +2750,12 @@
             },
             "type": "object"
           },
+          "phase_turns": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
           "role_pins": {
             "additionalProperties": {
               "items": {
@@ -2754,16 +2797,24 @@
           },
           "test_mode": {
             "type": "string"
+          },
+          "turn_ceilings": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
           }
         },
         "required": [
           "agent_max_turns",
           "ducklings",
+          "phase_turns",
           "role_turns",
           "rounds",
           "script_role_turns",
           "script_rounds",
-          "seats"
+          "seats",
+          "turn_ceilings"
         ],
         "type": "object"
       },

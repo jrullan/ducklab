@@ -13,6 +13,7 @@ import (
 	"github.com/jrullan/ducklab/internal/budget"
 	"github.com/jrullan/ducklab/internal/config"
 	"github.com/jrullan/ducklab/internal/runlog"
+	"github.com/jrullan/ducklab/internal/strategy"
 	"github.com/jrullan/ducklab/internal/tools"
 )
 
@@ -358,6 +359,8 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		return
 	}
 	turnNo := chatTurnCount(rs)
+	turnCaps := s.resolveTurnCaps("chat", 0)
+	consultantCap := strategy.CapFor(turnCaps.Caps, config.RoleConsultant, 12)
 	if len(images) > 0 {
 		rs.writer.AppendEvent("warning", map[string]interface{}{
 			"detail": fmt.Sprintf("%d screenshot(s) shown to the consultant", len(images)),
@@ -377,7 +380,9 @@ func (s *Service) executeChatTurn(ctx context.Context, rs *runState, projectRoot
 		return agent.RunTurn(ctx, loop, &agent.Turn{
 			Role: config.RoleConsultant, Duckling: config.DucklingID(ducklingID),
 			Prompt: prompt, Toolbelt: belt, Contract: "freeform",
-			MaxTurns: 12, Persona: "consultant", Images: images,
+			MaxTurns: consultantCap, MaxTurnsRequested: consultantCap,
+			MaxTurnsSource: strategy.CapSourceFor(turnCaps.Sources, config.RoleConsultant, "script default"),
+			Persona:        "consultant", Images: images,
 			Round: turnNo, Index: 0,
 		}, ectx)
 	}()

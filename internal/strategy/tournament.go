@@ -273,10 +273,12 @@ func runContestant(ctx context.Context, p *TournamentParams, i int) (e struct {
 	}
 
 	turn := &Turn{
-		Role:     config.RoleImplementer,
-		Toolbelt: "full",
-		Contract: "edits",
-		MaxTurns: CapFor(p.TurnCaps, config.RoleImplementer, 24),
+		Role:              config.RoleImplementer,
+		Toolbelt:          "full",
+		Contract:          "edits",
+		MaxTurns:          CapFor(p.TurnCaps, config.RoleImplementer, 24),
+		MaxTurnsRequested: CapFor(p.TurnCaps, config.RoleImplementer, 24),
+		MaxTurnsSource:    CapSourceFor(p.TurnCapSources, config.RoleImplementer, "script default"),
 	}
 	belt, err := turn.ResolveToolbelt(registryFrom(&p.ExecuteParams))
 	if err != nil {

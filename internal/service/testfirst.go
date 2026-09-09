@@ -492,6 +492,7 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		loops:   map[config.DucklingID]*agent.Loop{},
 	}
 	s.attachStreaming(rs, cache)
+	turnCaps := s.resolveTurnCaps("test", req.AgentTurns)
 
 	params := &strategy.ExecuteParams{
 		LiveToolEvents: true,
@@ -504,12 +505,13 @@ func (s *Service) executeTestFirst(ctx context.Context, rs *runState, projectRoo
 		Prompt: testFirstPrompt(
 			s.buildTaskPrompt(ctx, rs.run.ProjectID, projectRoot, req.TaskID),
 			before.Command) + humanNote(req.Note) + rs.answeredDecisions(),
-		ExecContext: ectx,
-		Runner:      s.runnerFor(cache, roster, ectx),
-		Roster:      roster,
-		TurnCaps:    s.roleTurnCapsFor(req.AgentTurns),
-		Diff:        func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
-		OnEvent:     func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
+		ExecContext:    ectx,
+		Runner:         s.runnerFor(cache, roster, ectx),
+		Roster:         roster,
+		TurnCaps:       turnCaps.Caps,
+		TurnCapSources: turnCaps.Sources,
+		Diff:           func() (string, error) { return vcs.New(projectRoot).DiffExcluding(rs.run.LinkedDeps...) },
+		OnEvent:        func(kind string, data map[string]interface{}) { rs.writer.AppendEvent(kind, data) },
 	}
 
 	// The round gate earns its suite only in pair: two rounds, and a green
