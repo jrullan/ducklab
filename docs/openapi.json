@@ -2307,6 +2307,23 @@
         ],
         "type": "object"
       },
+      "ServiceCapsUpdate": {
+        "properties": {
+          "context_tokens": {
+            "type": "integer"
+          },
+          "json_mode": {
+            "type": "boolean"
+          },
+          "native_tools": {
+            "type": "boolean"
+          },
+          "vision": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ServiceChatStartRequest": {
         "properties": {
           "about_id": {
@@ -2355,6 +2372,17 @@
         ],
         "type": "object"
       },
+      "ServiceCostUpdate": {
+        "properties": {
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
       "ServiceCriterion": {
         "properties": {
           "direction": {
@@ -2378,21 +2406,18 @@
         ],
         "type": "object"
       },
-      "ServiceDucklingView": {
+      "ServiceDucklingUpdate": {
         "properties": {
           "caps": {
-            "$ref": "#/components/schemas/ConfigCaps"
+            "$ref": "#/components/schemas/ServiceCapsUpdate"
           },
           "color": {
             "type": "integer"
           },
           "cost": {
-            "$ref": "#/components/schemas/ConfigCost"
+            "$ref": "#/components/schemas/ServiceCostUpdate"
           },
           "fallback": {
-            "type": "string"
-          },
-          "id": {
             "type": "string"
           },
           "model": {
@@ -2402,7 +2427,7 @@
             "type": "string"
           },
           "params": {
-            "$ref": "#/components/schemas/ConfigSamplingParams"
+            "$ref": "#/components/schemas/ServiceSamplingParamsUpdate"
           },
           "provider": {
             "type": "string"
@@ -2417,14 +2442,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "caps",
-          "cost",
-          "id",
-          "model",
-          "params",
-          "provider"
-        ],
         "type": "object"
       },
       "ServiceEngineDefaultsView": {
@@ -3069,6 +3086,29 @@
           "unsafe_writes",
           "verify"
         ],
+        "type": "object"
+      },
+      "ServiceSamplingParamsUpdate": {
+        "properties": {
+          "disable_thinking": {
+            "type": "boolean"
+          },
+          "max_tokens": {
+            "type": "integer"
+          },
+          "stop": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "top_p": {
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "ServiceScorecard": {
@@ -4057,7 +4097,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceDucklingView"
+                "$ref": "#/components/schemas/ServiceDucklingUpdate"
               }
             }
           },
@@ -4076,7 +4116,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add or replace a duckling"
+        "summary": "Add or update a duckling; omitted fields keep their current values"
       }
     },
     "/v1/ducklings/{id}/probe": {

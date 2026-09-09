@@ -446,12 +446,12 @@ func (s *Server) handleScorecards(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDucklingSet(w http.ResponseWriter, r *http.Request) {
-	var view service.DucklingView
-	if err := json.NewDecoder(r.Body).Decode(&view); err != nil {
+	var update map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		s.error(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if err := s.svc.DucklingSet(r.PathValue("id"), view); err != nil {
+	if err := s.svc.DucklingUpdate(r.PathValue("id"), update); err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
