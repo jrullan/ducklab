@@ -1,0 +1,91 @@
+---
+kind: release
+version: v0.9.5
+since: v0.9.4
+tasks: 8
+landed_outside: 23
+documents_amended: 1
+---
+
+# v0.9.5
+
+## Artifact and task workflow
+
+- Versioned artifacts now follow one consistent grammar, and plans are checked against that grammar before graph validation. This makes malformed or outdated artifact structures easier to catch.
+- Portion promotion now produces bounded task briefs, while implementation and review prompts stay focused on the current portion. This reduces scope drift and makes delegated work more predictable.
+- Legacy task prompts are constructed more safely, improving compatibility with older task formats.
+- Split proposals remain editable by the person responsible for them, who can correct or discard them before promotion.
+- Unchanged manifest critic tasks are cached, reducing unnecessary repeated work.
+
+## Releases and acceptance
+
+- Amendment-only releases now preserve the empty state instead of creating unnecessary task work.
+- Commits from accepted document-stage runs are recorded as release amendments rather than being reported as missing task work.
+- Release revision decisions are dispatched correctly, so requested release changes reach the appropriate workflow.
+- Rebase conflicts are materialized in run worktrees, making conflicts available for inspection and resolution.
+- Pull-request publication now follows the configured publication policy, and the harness’s own record receives a commit owner.
+
+## Desktop experience
+
+- Accept-then-fix follow-up runs now use the project’s current flock when no ducklings are named.
+- Gate screens show one decision card per state, explain the consequence of every action, and identify when a task has already landed.
+- Verification results no longer label unrecognised tests as “no test.”
+- Verification rows identify the pinning test and the command used to run it.
+- The verification queue is presented as a single ledger with typed next steps and links back to the live chat.
+
+## Budgets and service behavior
+
+- Calls-per-reply precedence and ceilings are now visible, and script-specific call portions remain distinct. This makes provider usage limits easier to understand and control.
+- Provider slots are scoped to active chat turns, preventing inactive conversations from consuming capacity.
+- Re-entry and acceptance provenance are preserved, making it clearer how work reached its current state.
+
+## Project and file integrity
+
+- Run environment inputs remain immutable, protecting the conditions under which a run was created.
+- Duckling edits preserve omitted content instead of accidentally deleting it.
+- Bundle copies preserve symbolic links.
+- Legacy plan shapes remain nonblocking, allowing older projects to continue through the workflow.
+- Requirements can explicitly record intake assumptions, making the basis for accepted work clearer.
+
+## What shipped
+
+### M-01
+
+- **T-262** Centralize the versioned artifact grammar (`82f67b8`)
+- **T-262** Centralize the versioned artifact grammar (`332e934`)
+- **T-267** Make portion promotion emit bounded task briefs (`5d4bed1`)
+- **T-267** Make portion promotion emit bounded task briefs (`8c30dd4`)
+- **T-268** Constrain implementation and reviewer prompts to the current portion (`e89d9e7`)
+- **T-268** Constrain implementation and reviewer prompts to the current portion (`ce3fa48`)
+- **T-269** Harden legacy task prompt construction (`7af9df7`)
+- **T-269** Harden legacy task prompt construction (`45d9d7d`)
+
+## Landed outside the loop
+
+- artifact: admit intake assumptions in requirements (f25d893) — Jose Rullan [PR #26: artifact: admit intake assumptions in requirements (B-352)]
+- release: only document stages amend; an amendment-only release keeps the empty state (1ad2a7b) — Jose Rullan [PR #25: release: inventory an accepted document-stage run's commit as an amendment, not as missing task work (B-351)]
+- release: inventory an accepted document-stage run's commit as an amendment, not as missing task work (2262121) — Jose Rullan [PR #25: release: inventory an accepted document-stage run's commit as an amendment, not as missing task work (B-351)]
+- test: preserve document critic call ceiling regression (8e2bb5a) — Jose Rullan [PR #24: budget: make calls/reply precedence and hard ceilings authoritative]
+- budget: preserve script-specific call portions (4ae0937) — Jose Rullan [PR #24: budget: make calls/reply precedence and hard ceilings authoritative]
+- budget: expose calls-per-reply precedence and ceilings (298d86b) — Jose Rullan [PR #24: budget: make calls/reply precedence and hard ceilings authoritative]
+- bugs: the split proposal is the person's to write, correct or discard before promote (5dc2dcf) — Jose Rullan [PR #23: bugs: the split proposal is the person's to write, correct or discard before promote (B-284)]
+- fix: dispatch release revision decisions (1d3a0a0) — Jose Rullan [PR #22: fix: dispatch release revision decisions (B-345)]
+- accept: materialize rebase conflicts in run worktrees (5081867) — Jose Rullan [PR #21: Leave accept-time rebase conflicts resolvable (B-283)]
+- strategy: cache unchanged manifest critic tasks (3b166f3) — Jose Rullan [PR #19: Cache unchanged plan-manifest critic tasks (B-342)]
+- service: honour the pr publication policy; give the harness's own record a commit owner (14d4311) — Jose Rullan [PR #20: service: honour the pr publication policy; give the harness's own record a commit owner (B-289, B-291, B-287)]
+- desktop: accept-then-fix names no ducklings, so the follow-up run takes the project's current flock (c87d71e) — Jose Rullan [PR #18: desktop: one decision card per gate state, with every action's consequence; say when the task already landed (B-261, B-247)]
+- desktop: one decision card per gate state, every action with its consequence; say when the task already landed (bcbe686) — Jose Rullan [PR #18: desktop: one decision card per gate state, with every action's consequence; say when the task already landed (B-261, B-247)]
+- desktop: the verification row never calls an unrecognised test "no test" (b0c4222) — Jose Rullan [PR #16: desktop: fold verification into one ledger, type the guide's next steps, link back to a live chat (B-281, B-282, B-251, B-285)]
+- desktop: the verification row names the pinning test and the command that runs it (fdcca25) — Jose Rullan [PR #16: desktop: fold verification into one ledger, type the guide's next steps, link back to a live chat (B-281, B-282, B-251, B-285)]
+- desktop: fold the verification queue into one ledger, type the guide's next steps, link back to a live chat (66bd809) — Jose Rullan [PR #16: desktop: fold verification into one ledger, type the guide's next steps, link back to a live chat (B-281, B-282, B-251, B-285)]
+- service: scope provider slots to active chat turns (88e93c2) — Jose Rullan [PR #17: service: pin provider-slot lifecycle across pause and chat (B-256 B-257)]
+- vcs: keep run environment inputs immutable (c05f30f) — Jose Rullan [PR #15: vcs: keep run environment inputs immutable (B-178)]
+- fleet: make duckling edits omission-preserving (fa663f0) — Jose Rullan [PR #14: fleet: preserve omitted duckling fields (B-301)]
+- service: preserve re-entry and accept provenance (1a9783a) — Jose Rullan [PR #13: service: preserve re-entry and accept provenance (B-270)]
+- artifact: keep legacy plan shape nonblocking (c951a48) — Jose Rullan [PR #12: artifact: enforce plan grammar before graph checks (B-346, B-347)]
+- artifact: enforce plan grammar before graph checks (0f543c6) — Jose Rullan [PR #12: artifact: enforce plan grammar before graph checks (B-346, B-347)]
+- service: bundle copy preserves symlinks; fix a misleading test comment (0357354) — Jose Rullan [PR #11: service: bundle copy preserves symlinks; fix a misleading test comment (B-292, B-295)]
+
+## Documents amended in the loop
+
+- plan amendment (`5ff7f11`) — La enmienda focaliza T-262 en el contrato común de grammar ya cubierto por el test rojo aceptado, elimina el conflicto con tareas posteriores y conserva un único lane de ownership. [run r-20260908-221704-z22k]
