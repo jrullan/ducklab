@@ -57,9 +57,11 @@ func runNext(r *runlog.Run) []string {
 			return []string{"abort"}
 		case "gate":
 			// A rebase conflict is deliberately not an agent retry: the only
-			// choices are to resolve it in the recorded worktree or discard it.
+			// choices are to finish it in the recorded worktree and retry the
+			// same acceptance, or discard it. Accept refuses while Git's rebase
+			// state remains, so the button cannot commit unresolved markers.
 			if _, conflict := r.PendingData["conflicting_files"]; conflict {
-				return []string{"resolve_by_hand", "reject"}
+				return []string{"accept", "reject"}
 			}
 			var out []string
 			// A FAILED verdict has nothing to accept; offering the button and

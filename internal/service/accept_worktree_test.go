@@ -489,17 +489,81 @@ func TestAcceptWorktreeConflictPausesCleanly(t *testing.T) {
 	if !ok || len(files) != 1 || files[0] != "index.html" {
 		t.Fatalf("conflicts = %#v", detail.Run.PendingData["conflicting_files"])
 	}
-	if got := detail.Run.Next; len(got) != 2 || got[0] != "resolve_by_hand" || got[1] != "reject" {
+	if got := detail.Run.Next; len(got) != 2 || got[0] != "accept" || got[1] != "reject" {
 		t.Fatalf("next = %v", got)
 	}
-	for _, name := range []string{"REBASE_HEAD", "MERGE_HEAD"} {
-		out, err := vcs.New(run.WorktreePath).GitPath(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(strings.TrimSpace(out)); !os.IsNotExist(err) {
-			t.Fatalf("stale %s remains: %v", name, err)
-		}
+	workGit := vcs.New(run.WorktreePath)
+	rebaseHead, err := workGit.GitPath("rebase-merge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(rebaseHead)); err != nil {
+		t.Fatalf("rebase was rolled back instead of left resolvable: %v", err)
+	}
+	conflicted, err := os.ReadFile(filepath.Join(run.WorktreePath, "index.html"))
+	if err != nil || !strings.Contains(string(conflicted), "<<<<<<<") {
+		t.Fatalf("worktree does not contain materialized conflict: %v\n%s", err, conflicted)
+	}
+	if !strings.Contains(detail.Run.PendingData["detail"].(string), "git rebase --continue") {
+		t.Fatalf("conflict instructions = %q", detail.Run.PendingData["detail"])
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "rebase is still in progress") {
+		t.Fatalf("retry before resolving = %v, want non-mutating guidance", err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(rebaseHead)); err != nil {
+		t.Fatalf("premature retry destroyed the materialized rebase: %v", err)
+	}
+
+	// The advertised resolution path is real: complete the stopped rebase in
+	// the named worktree, then acceptance can prove and land that exact commit.
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := workGit.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-c", "core.editor=true", "rebase", "--continue")
+	cmd.Dir = run.WorktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("continue materialized rebase: %v: %s", err, out)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err != nil {
+		t.Fatalf("accept manually resolved rebase: %v", err)
+	}
+}
+
+func TestRejectAbortsMaterializedAcceptRebase(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	id, dir := projectWithDocs(t, s, nil)
+	git := gitProject(t, dir)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-conflict-reject")
+	if err := os.WriteFile(filepath.Join(run.WorktreePath, "index.html"), []byte("worktree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("default\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Add("index.html"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Commit("default conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil {
+		t.Fatal("conflicting rebase accepted")
+	}
+	if err := s.RunReject(context.Background(), run.ID, "discard conflict"); err != nil {
+		t.Fatalf("reject materialized rebase: %v", err)
+	}
+	if _, err := os.Stat(run.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("rejected conflict worktree remains: %v", err)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Run.Status != "done" || detail.Run.Verdict != "FAILED" {
+		t.Fatalf("rejected conflict state = %s/%s", detail.Run.Status, detail.Run.Verdict)
 	}
 }
 
@@ -527,6 +591,9 @@ func TestAcceptWorktreeRetryReusesCommitAfterFailedRebase(t *testing.T) {
 		t.Fatal("conflicting rebase accepted")
 	}
 	workGit := vcs.New(run.WorktreePath)
+	// This test exercises retry after the repository conflict is removed rather
+	// than the manual-resolution path covered above.
+	workGit.AbortIntegration()
 	firstCommit := mustHead(t, workGit)
 	if has, err := workGit.HeadHasTrailer("Ducklab-Run", run.ID); err != nil || !has {
 		t.Fatalf("failed accept did not leave its run commit: has=%v err=%v", has, err)

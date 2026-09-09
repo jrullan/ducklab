@@ -2931,6 +2931,16 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		message = acceptCommitSubject(rs.run)
 	}
 	workGit := vcs.New(rs.run.WorktreePath)
+	// Retrying Accept is the UI door after a person resolves the materialized
+	// conflict. Do not let the ordinary staging path turn unresolved conflict
+	// markers into a commit: the rebase itself must first be completed in the
+	// worktree named by the gate.
+	rebaseWasMaterialized, _ := rs.run.PendingData["rebase_in_progress"].(bool)
+	if rebaseWasMaterialized {
+		if integrationInProgress(workGit, "rebase-merge", "rebase-apply") {
+			return fmt.Errorf("rebase is still in progress in %s; resolve the files, run git add and git rebase --continue, then retry Accept", rs.run.WorktreePath)
+		}
+	}
 	if err := stageRun(workGit, rs.run, entry.Path); err != nil {
 		return fmt.Errorf("stage worktree: %w", err)
 	}
@@ -2995,14 +3005,22 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	if defaultSHA != rs.run.BaseSHA {
 		files, rebaseErr := workGit.RebaseOnto(defaultSHA)
 		if rebaseErr != nil {
-			workGit.AbortIntegration()
-			detail := fmt.Sprintf("rebase conflict from base %s onto default %s; conflicting files: %s. Resolve by hand in the worktree %s, or reject.", short(rs.run.BaseSHA), short(defaultSHA), strings.Join(files, ", "), rs.run.WorktreePath)
+			detail := fmt.Sprintf("rebase stopped with conflicts from base %s onto default %s in worktree %s; conflicting files: %s. Resolve the files there, run git add and git rebase --continue, then retry Accept; or reject.", short(rs.run.BaseSHA), short(defaultSHA), rs.run.WorktreePath, strings.Join(files, ", "))
+			pending := map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "worktree": rs.run.WorktreePath, "retain_worktree": true}
 			if len(files) == 0 {
-				detail = fmt.Sprintf("rebase from base %s onto default %s failed: %v. Resolve by hand in the worktree %s, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr, rs.run.WorktreePath)
+				// A non-conflict rebase failure has no useful in-progress state for a
+				// person to resolve. Roll it back and say so; never point at a clean
+				// worktree as if conflict markers lived there.
+				workGit.AbortIntegration()
+				detail = fmt.Sprintf("rebase from base %s onto default %s failed and was rolled back: %v. Correct the repository state and retry Accept, or reject.", short(rs.run.BaseSHA), short(defaultSHA), rebaseErr)
+				pending["detail"] = detail
+			} else {
+				pending["conflicting_files"] = files
+				pending["rebase_in_progress"] = true
 			}
 			rs.run.Status, rs.run.PendingKind = "paused", "gate"
 			rs.run.PendingSince = time.Now().UTC().Format(time.RFC3339)
-			rs.run.PendingData = map[string]interface{}{"verdict": rs.run.Verdict, "detail": detail, "base_sha": rs.run.BaseSHA, "default_sha": defaultSHA, "conflicting_files": files, "worktree": rs.run.WorktreePath, "retain_worktree": true}
+			rs.run.PendingData = pending
 			rs.writer.AppendEvent("human_needed", map[string]interface{}{"kind": "gate", "detail": detail})
 			_ = rs.writer.WriteState()
 			return fmt.Errorf("%s", detail)
@@ -3099,6 +3117,19 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 	s.commitRunRecord(entry.Path, rs)
 	s.cleanupRunWorktree(rs, entry.Path)
 	return nil
+}
+
+func integrationInProgress(git *vcs.Git, markers ...string) bool {
+	for _, marker := range markers {
+		path, err := git.GitPath(marker)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(strings.TrimSpace(path)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyAcceptedCommit runs the configured gate from a detached worktree at
@@ -4076,6 +4107,13 @@ func (s *Service) RunReject(ctx context.Context, id, reason string) error {
 	w, err := s.ensureWriter(rs)
 	if err != nil {
 		return err
+	}
+	// An accept-time rebase conflict is intentionally left materialized so the
+	// person can resolve it in the named worktree. Reject is the abort door: put
+	// the branch back before normal snapshot restoration and cleanup run.
+	rebaseInProgress, _ := rs.run.PendingData["rebase_in_progress"].(bool)
+	if rs.run.PendingKind == "gate" && rebaseInProgress {
+		vcs.New(runRoot(rs.run, rs.projectPath)).AbortIntegration()
 	}
 	// Restore through the run's execution root before removing an isolated
 	// checkout. Its snapshot and recorded writes belong to that worktree, never
