@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Duckling, EngineClient } from "../api/client";
+import { useRuns } from "../store/runs";
+
+/** A conversation that ended, however it ended, is a record, not a door. */
+const TERMINAL = new Set(["done", "failed", "aborted", "canceled", "cancelled", "ended"]);
 
 /** "Chat about this": a conversation with a chosen duckling about one
  * subject, its history as context, read-only tools to investigate. The chat
@@ -35,6 +39,14 @@ export function ChatAbout({
 }) {
   const [open, setOpen] = useState(startOpen);
   const [duckling, setDuckling] = useState(preselectedDuckling);
+  // B-285: a chat about this subject already open is the door back to it.
+  // The engine stamps every chat run with its subject; the runs store is the
+  // same one Now reads, so no second request is needed.
+  const runs = useRuns((s) => s.runs);
+  const subject = `chat about ${aboutKind} ${aboutId}`;
+  const liveChat = Object.values(runs)
+    .filter((r) => r.stage === "chat" && r.note === subject && !TERMINAL.has(String(r.status).toLowerCase()))
+    .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0];
   const pickerTouched = useRef(false);
   // The consultant is a roster decision, not a second question at the chat door.
   // Resolve it here so project, task, and bug chats all share the same seat.
@@ -80,6 +92,13 @@ export function ChatAbout({
     }))).then((pickedImages) => setImages((current) => [...current, ...pickedImages]))
       .catch(() => setImageError("Could not read the selected image."));
   };
+  if (!open && liveChat) {
+    return (
+      <a href={`#/runs/${liveChat.id}`} data-testid="chat-about-existing" className="text-xs text-ink underline">
+        continue the chat ({liveChat.id})
+      </a>
+    );
+  }
   if (!open) {
     return (
       <button

@@ -121,6 +121,39 @@ describe("chat transcript author avatars", () => {
   });
 });
 
+// B-285: once a chat about this subject exists, the place it was started from
+// links back to it instead of offering to start another. The engine stamps
+// every chat run with its subject; a chat that ended is a record, not a door.
+describe("ChatAbout returns to a live chat", () => {
+  const ducklings = [{ id: "luna", provider: "test", model: "test" }];
+  const chat = (id: string, status: string, note: string): Run =>
+    ({ id, project_id: "p", stage: "chat", mode: "solo", task_id: "", status, verdict: "", note,
+      started_at: "2026-08-27T18:00:00Z", next: [], budget: { usd: 0, tokens: 0, turns: 0, wallclock_s: 0 } }) as unknown as Run;
+  const seedRuns = (runs: Run[]) => useRuns.setState({ runs: Object.fromEntries(runs.map((r) => [r.id, r])), events: {}, deltas: {}, reasoning: {}, spend: {}, acceptState: {} });
+
+  it("links to the open chat about this subject instead of starting another", () => {
+    seedRuns([
+      chat("r-old", "done", "chat about bug B-1"),
+      chat("r-live", "paused", "chat about bug B-1"),
+      chat("r-other", "paused", "chat about bug B-2"),
+    ]);
+    render(<ChatAbout client={{} as EngineClient} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={ducklings} />);
+    const door = screen.getByTestId("chat-about-existing");
+    expect(door.getAttribute("href")).toBe("#/runs/r-live");
+    expect(door.textContent).toContain("r-live");
+    expect(screen.queryByTestId("chat-about")).toBeNull();
+    seedRuns([]);
+  });
+
+  it("offers to start a chat when the only chats about it have ended", () => {
+    seedRuns([chat("r-old", "done", "chat about bug B-1")]);
+    render(<ChatAbout client={{} as EngineClient} projectId="p" aboutKind="bug" aboutId="B-1" ducklings={ducklings} />);
+    expect(screen.getByTestId("chat-about")).toBeTruthy();
+    expect(screen.queryByTestId("chat-about-existing")).toBeNull();
+    seedRuns([]);
+  });
+});
+
 describe("ChatAbout roster seating", () => {
   it("pre-seats the resolved consultant when the chat opens", async () => {
     const roster = vi.fn().mockResolvedValue({ entries: [{ role: "consultant", duckling: "luna", source: "project" }] });

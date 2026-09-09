@@ -19,20 +19,14 @@ import { PlanCard } from "../components/PlanCard";
 import { roleSeats, RunLauncher, type LaunchOpts, type ModeEstimates, type PhaseConfig } from "../components/RunLauncher";
 import { TddLaunch } from "../components/TddLaunch";
 import { EmptyState } from "../components/EmptyState";
-import { moneyOrZero, tokens, waitingFor } from "../lib/format";
+import { VerificationLedger } from "../components/VerificationLedger";
+import { NextStepCards } from "../components/NextStepCards";
+import { money, moneyOrZero, tokens, waitingFor } from "../lib/format";
 import { runLabel } from "../lib/runview";
 import { runStatusRole } from "../lib/colors";
 import { routeHref } from "../app/routes";
 import { ContextStrip, PageHeader } from "../components/PageShell";
 
-function nextStepHref(step: NextStep): string {
-  if (step.kind === "run" && step.ref) return routeHref({ name: "run", id: step.ref });
-  if (step.kind === "stage") return routeHref({ name: "cycle", stage: step.ref || undefined });
-  if (step.kind === "bug") return routeHref({ name: "board", tab: "bugs" });
-  if (step.kind === "task") return routeHref({ name: "board" });
-  if (step.kind === "release") return routeHref({ name: "release" });
-  return routeHref({ name: "cycle" });
-}
 
 export function Now({ client, projectId }: { client: EngineClient; projectId: string }) {
   const runs = useRuns((s) => s.runs);
@@ -209,21 +203,17 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       {/* Running work is owned by Now; the retired guide rail no longer duplicates it. */}
       {/* The inbox's own live section carries the fuller view
           with live spend, in the inbox's own flow. */}
-      {nextSteps.length > 0 && (
-        <section className="mb-4" data-testid="now-next-steps">
-          <h2 className="text-sm font-medium text-ink">Next steps</h2>
-          <ol className="mt-2 space-y-1.5">
-            {nextSteps.map((step, index) => (
-              <li key={`${step.id}:${step.ref ?? index}`} data-testid="now-next-step">
-                <a href={nextStepHref(step)} title={`${step.action} — ${step.reason}`} className="text-sm text-ink underline">
-                  {step.action.split(" — ")[0]!.replace(/\s*\([^)]*\)\s*$/, "").trim()}
-                </a>
-                {index === 0 && <p className="text-xs text-ink-muted">{step.reason}</p>}
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <NextStepCards
+        steps={nextSteps}
+        costFor={(step) => {
+          // A launch's price at the point of use: the mode the step would open
+          // and what runs of that mode have cost here so far.
+          if (step.kind !== "task" || (step.id !== "test-first" && step.id !== "build")) return undefined;
+          const est = estimates[buildMode];
+          if (!est || est.runs === 0) return undefined;
+          return `opens ${buildMode} · ~${money(est.usd)}`;
+        }}
+      />
 
       {plan?.proposal && (
         <PlanCard
@@ -279,56 +269,20 @@ export function Now({ client, projectId }: { client: EngineClient; projectId: st
       {toVerify.length > 0 && (
         <section className="mt-4" data-testid="now-verify">
           <h2 className="text-sm font-medium text-ink">Fixed — did it actually answer the report?</h2>
-          <ul className="mt-2 space-y-2">
-            {toVerify.map((b) => (
-              <li key={b.id} data-testid="now-verify-card" className="rounded-card border border-hairline p-3">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="font-mono text-ink">{b.id}</span>
-                  <span className="text-sm text-ink-secondary">{b.title}</span>
-                  {b.task_id && <span className="text-xs text-ink-muted">fixed by {b.task_id}</span>}
-                </div>
-                <p className="mt-1 text-xs text-ink-muted">
-                  Try what the report describes. The gate that passed may prove much less.
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  {(b.next ?? []).includes("verified") && (
-                    <button
-                      type="button"
-                      data-testid="now-verify-yes"
-                      onClick={() =>
-                        void client
-                          .moveBug(projectId, b.id, "verified")
-                          .then(() => setBugs((cur) => cur.filter((x) => x.id !== b.id)))
-                          .catch(() => {})
-                      }
-                      className="rounded border border-hairline px-2 py-1 text-xs"
-                    >
-                      Verified — it works
-                    </button>
-                  )}
-                  {(b.next ?? []).includes("in_progress") && (
-                    <button
-                      type="button"
-                      data-testid="now-verify-no"
-                      onClick={() =>
-                        void client
-                          .moveBug(projectId, b.id, "in_progress")
-                          .then(() =>
-                            setBugs((cur) =>
-                              cur.map((x) => (x.id === b.id ? { ...x, status: "in_progress" } : x)),
-                            ),
-                          )
-                          .catch(() => {})
-                      }
-                      className="rounded border border-hairline px-2 py-1 text-xs"
-                    >
-                      Still broken
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2">
+            <VerificationLedger
+              bugs={toVerify}
+              client={client}
+              projectId={projectId}
+              onMoved={(id, status) =>
+                setBugs((cur) =>
+                  status === "verified"
+                    ? cur.filter((x) => x.id !== id)
+                    : cur.map((x) => (x.id === id ? { ...x, status } : x)),
+                )
+              }
+            />
+          </div>
         </section>
       )}
 
