@@ -134,12 +134,20 @@ describe("Now — the inbox", () => {
     expect(screen.queryByText(/chat-(done|failed|aborted)/)).toBeNull();
   });
 
-  it("does not let a terminal chat suppress a reopened report", async () => {
+  // B-251: the terminal variant alone would have passed before the terminal-chat
+  // filter existed, because a dead chat never counted as in flight. The pair
+  // pins the interaction: a live conversation about the task keeps the
+  // reopened card quiet exactly as any in-flight run does; a dead one does not.
+  it("lets a live chat about the task keep a reopened report quiet, and a dead one not", async () => {
+    const reopened = { id: "B-reopened", title: "Still broken", severity: "high", status: "in_progress", task_id: "T-026", source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z", next: ["fixed"] };
+    seed([{ ...base, id: "chat-live", stage: "chat", task_id: "T-026", status: "paused", verdict: "", pending_kind: "chat", next: ["reply", "end"] }]);
+    const live = render(<Now client={clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>)} projectId="p" />);
+    await screen.findByTestId("now-view");
+    expect(screen.queryByTestId("now-reopened-card")).toBeNull();
+    live.unmount();
+
     seed([{ ...base, id: "chat-dead", stage: "chat", task_id: "T-026", status: "failed", verdict: "FAILED", next: [] }]);
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([
-      { id: "B-reopened", title: "Still broken", severity: "high", status: "in_progress", task_id: "T-026", source: "desktop", created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:45:00Z", next: ["fixed"] },
-    ])) } as Partial<EngineClient>);
-    render(<Now client={client} projectId="p" />);
+    render(<Now client={clientWith({ bugs: vi.fn(() => Promise.resolve([reopened])) } as Partial<EngineClient>)} projectId="p" />);
     expect(await screen.findByTestId("now-reopened-card")).toBeTruthy();
   });
 
@@ -255,13 +263,45 @@ describe("Now — the inbox", () => {
   it("renders next steps as a native Now section", async () => {
     const client = clientWith({
       projectNext: vi.fn(() => Promise.resolve([
-        { kind: "task", id: "T-029", action: "start T-029", reason: "it is ready" },
+        { kind: "task", id: "test-first", ref: "T-029", action: "Start T-029 (test first, then build)", reason: "it is ready" },
       ])),
     } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
     const nextSteps = await screen.findByTestId("now-next-steps");
     expect(nextSteps.tagName).toBe("SECTION");
     expect(screen.getAllByTestId("now-next-steps")).toHaveLength(1);
+  });
+
+  // B-282: the guide's typed steps are rendered as what they are — action
+  // cards grouped by kind, each carrying its consequence and its cost — and
+  // the install step is not rendered at all: the sidebar footer owns
+  // landed-vs-serving (T-228), and one truth gets one surface.
+  it("groups next steps by kind as action cards with reason and cost, and leaves install to the footer", async () => {
+    const client = clientWith({
+      projectNext: vi.fn(() => Promise.resolve([
+        { kind: "project", id: "install", action: "Reinstall ducklab — the repo is 3 commit(s) ahead of the running engine", reason: "run `make install`" },
+        { kind: "task", id: "test-first", ref: "T-029", action: "Start T-029 (test first, then build)", reason: "it is the next task whose dependencies are all accepted" },
+        { kind: "bug", id: "verify-bug", ref: "B-1", refs: ["B-1", "B-2"], action: "Verify 2 fixed bugs — confirm each fix answers its report", reason: "2 fixes are waiting for human verification" },
+      ])),
+      modeDefaults: vi.fn(() => Promise.resolve({ rounds: {}, agent_max_turns: 24, ducklings: {}, build_mode: "pair" })),
+      report: vi.fn(() => Promise.resolve({ rows: [{ key: "pair", cost_usd: 0.94, runs: 3 }] })),
+    } as unknown as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    const section = await screen.findByTestId("now-next-steps");
+    expect(section.textContent).not.toContain("Reinstall");
+    const bugs = await screen.findByTestId("now-next-group-bug");
+    const tasks = await screen.findByTestId("now-next-group-task");
+    expect(bugs.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("now-next-group-project")).toBeNull();
+    const cards = screen.getAllByTestId("now-next-step");
+    expect(cards).toHaveLength(2);
+    const task = cards.find((c) => c.getAttribute("data-kind") === "task")!;
+    expect(within(task).getByRole("link").textContent).toBe("Start T-029");
+    expect(task.textContent).toContain("next task whose dependencies are all accepted");
+    await waitFor(() => expect(within(task).getByTestId("now-next-step-cost").textContent).toContain("opens pair · ~$0.94"));
+    const bug = cards.find((c) => c.getAttribute("data-kind") === "bug")!;
+    expect(bug.textContent).toContain("2 fixes are waiting");
+    expect(within(bug).queryByTestId("now-next-step-cost")).toBeNull();
   });
 
   it("shows pending plan evidence through the view join and explains approval", async () => {
@@ -377,34 +417,86 @@ describe("verification in the inbox", () => {
   const fixedBug = {
     id: "B-003", title: "Angle in red vertex does not allow changing", severity: "high",
     status: "fixed", task_id: "T-026", source: "desktop",
+    body: "Steps: drag the red vertex; the angle field stays read-only.",
     created_at: "2026-07-30T23:00:00Z", updated_at: "2026-07-31T01:35:00Z",
     next: ["verified", "in_progress"],
   };
+  const more = (n: number) => Array.from({ length: n }, (_, i) => ({ ...fixedBug, id: `B-${100 + i}`, title: `Report ${i}` }));
 
-  it("asks whether the fix actually answered the report", async () => {
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])) } as Partial<EngineClient>);
+  // B-281: N fixed reports are one queue, not N decisions. Now's scroll must
+  // not grow with the verification backlog.
+  it("folds every fixed report into one ledger card whose drawer lists compact rows", async () => {
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve(more(24))) } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
-    const card = await screen.findByTestId("now-verify-card");
-    expect(card.textContent).toContain("B-003");
-    expect(card.textContent).toContain("fixed by T-026");
+    const ledger = await screen.findByTestId("now-verify-ledger");
+    expect(screen.getAllByTestId("now-verify-ledger")).toHaveLength(1);
+    expect(screen.queryByTestId("now-verify-row")).toBeNull();
+    expect(ledger.textContent).toContain("24 fixed bugs await your verification");
     // The honest caveat, from the project that taught it: 21 accepted tasks
     // against a syntax gate and the feature never worked.
-    expect(card.textContent).toContain("may prove much less");
+    expect(ledger.textContent).toContain("may prove much less");
+    fireEvent.click(screen.getByTestId("now-verify-open"));
+    const drawer = await screen.findByTestId("now-verify-drawer");
+    const rows = within(drawer).getAllByTestId("now-verify-row");
+    expect(rows).toHaveLength(24);
+    expect(rows[0]!.textContent).toContain("B-100");
+    expect(rows[0]!.textContent).toContain("fixed by T-026");
+    expect(within(rows[0]!).getByTestId("now-verify-yes")).toBeTruthy();
+    expect(within(rows[0]!).getByTestId("now-verify-no")).toBeTruthy();
   });
 
-  it("moves it with the person's verdict, either way", async () => {
-    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])) } as Partial<EngineClient>);
+  // B-216, absorbed: the expanded row tells the person HOW to verify — the
+  // report's own steps and what the fix changed, read from the fixing task's
+  // accepted commit — instead of the generic sentence.
+  it("teaches how to verify in the expanded row: the report's steps and what the fix changed", async () => {
+    const review = vi.fn(() => Promise.resolve("## Changed\n\n- the vertex handler now writes the angle field\n\nTest: TestVertexAngleEditable"));
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug])), review } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
-    fireEvent.click(await screen.findByTestId("now-verify-yes"));
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    fireEvent.click(await screen.findByTestId("now-verify-expand"));
+    const guide = await screen.findByTestId("now-verify-guide");
+    expect(guide.textContent).toContain("drag the red vertex");
+    expect(review).toHaveBeenCalledWith("p", "T-026");
+    await waitFor(() => expect(guide.textContent).toContain("vertex handler now writes the angle field"));
+    expect(guide.textContent).toContain("proven by its test");
+    expect(screen.queryByText(/Try what the report describes/)).toBeNull();
+  });
+
+  it("says so when the fix has no task or no readable commit", async () => {
+    const orphan = { ...fixedBug, id: "B-004", task_id: undefined };
+    const unreadable = { ...fixedBug, id: "B-005" };
+    const client = clientWith({
+      bugs: vi.fn(() => Promise.resolve([orphan, unreadable])),
+      review: vi.fn(() => Promise.reject(new Error("no review"))),
+    } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    const [first, second] = screen.getAllByTestId("now-verify-expand");
+    fireEvent.click(first!);
+    expect((await screen.findByTestId("now-verify-guide")).textContent).toContain("No task is recorded for this fix");
+    fireEvent.click(second!);
+    await waitFor(() => expect(screen.getAllByTestId("now-verify-guide").at(-1)!.textContent).toContain("has no readable accepted commit"));
+  });
+
+  it("moves it with the person's verdict, either way, and the row leaves the ledger", async () => {
+    const client = clientWith({ bugs: vi.fn(() => Promise.resolve([fixedBug, { ...fixedBug, id: "B-006" }])) } as Partial<EngineClient>);
+    render(<Now client={client} projectId="p" />);
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    fireEvent.click(screen.getAllByTestId("now-verify-yes")[0]!);
     await waitFor(() => expect(client.moveBug).toHaveBeenCalledWith("p", "B-003", "verified"));
+    await waitFor(() => expect(screen.getAllByTestId("now-verify-row")).toHaveLength(1));
+    fireEvent.click(screen.getByTestId("now-verify-no"));
+    await waitFor(() => expect(client.moveBug).toHaveBeenCalledWith("p", "B-006", "in_progress"));
   });
 
   it("offers only what the engine states", async () => {
     const stuck = { ...fixedBug, next: [] as string[] };
     const client = clientWith({ bugs: vi.fn(() => Promise.resolve([stuck])) } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
-    await screen.findByTestId("now-verify-card");
+    fireEvent.click(await screen.findByTestId("now-verify-open"));
+    await screen.findByTestId("now-verify-row");
     expect(screen.queryByTestId("now-verify-yes")).toBeNull();
+    expect(screen.queryByTestId("now-verify-no")).toBeNull();
   });
 });
 
