@@ -3,6 +3,7 @@
 package strategy
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/jrullan/ducklab/internal/agent"
@@ -176,6 +177,13 @@ type Turn struct {
 	// scheduled turn so every TurnRunner — the default and service runners
 	// alike — presents the same policy the strategy enforces.
 	SmallSeat bool
+	// Manifest-audit cache data is populated only for the compact plan critic.
+	// It travels through this transport boundary so service and default runners
+	// enforce the same reuse semantics.
+	ManifestAuditInputs     map[string]json.RawMessage
+	ManifestAuditPolicy     string
+	ManifestAuditCache      *agent.ManifestAuditCache
+	OnManifestAuditCacheHit func(taskID, key string)
 }
 
 // AgentTurn is the single transport boundary from a scheduled strategy turn
@@ -187,6 +195,10 @@ func (t *Turn) AgentTurn(duckling config.DucklingID, prompt string, toolbelt []s
 		Contract: t.Contract, MaxTurns: t.MaxTurns, Anonymize: t.Anonymize,
 		Persona: t.Persona, SmallSeat: t.SmallSeat, Images: t.Images,
 		Round: round, Index: index,
+		ManifestAuditInputs:     t.ManifestAuditInputs,
+		ManifestAuditPolicy:     t.ManifestAuditPolicy,
+		ManifestAuditCache:      t.ManifestAuditCache,
+		OnManifestAuditCacheHit: t.OnManifestAuditCacheHit,
 	}
 }
 

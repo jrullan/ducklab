@@ -6,11 +6,14 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/budget"
@@ -43,6 +46,48 @@ type Turn struct {
 	// Images are data URLs shown to a vision model with the prompt — a bug's
 	// screenshot in a triage turn. Set only when the duckling can see.
 	Images []string
+	// ManifestAuditInputs is the canonical, task-local input used to decide
+	// whether a prior manifest-critic ledger entry can be reused. Strategy owns
+	// its contents because it has both the accepted SPEC ledger and the current
+	// canonical manifest; the agent adds the original findings that mention the
+	// task before deriving the key.
+	ManifestAuditInputs map[string]json.RawMessage
+	ManifestAuditPolicy string
+	ManifestAuditCache  *ManifestAuditCache
+	// OnManifestAuditCacheHit records reuse in the run timeline. A cache that
+	// saves calls without leaving evidence would make the experiment impossible
+	// to interpret after the fact.
+	OnManifestAuditCacheHit func(taskID, key string)
+}
+
+// ManifestAuditCache is scoped to one strategy execution. It deliberately
+// caches task fragments only: SPEC coverage is global state and must be
+// recomputed for every candidate after every patch.
+type ManifestAuditCache struct {
+	mu      sync.Mutex
+	entries map[string]ManifestAuditEntry
+}
+
+func (c *ManifestAuditCache) get(key string) (ManifestAuditEntry, bool) {
+	if c == nil {
+		return ManifestAuditEntry{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	return entry, ok
+}
+
+func (c *ManifestAuditCache) put(key string, entry ManifestAuditEntry) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[string]ManifestAuditEntry{}
+	}
+	c.entries[key] = entry
 }
 
 // Outcome is the result of a turn.
@@ -1993,6 +2038,10 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 		ids  []string
 	}
 	audit := &ManifestAudit{}
+	// New fragments become reusable only after the complete audit passes both
+	// the wire contract and the strategy policy. Otherwise a locally well-formed
+	// entry from a globally invalid review could poison the next candidate.
+	pendingCache := map[string]ManifestAuditEntry{}
 	attempts := 0
 	for _, part := range []target{{"specs", specs}, {"tasks", tasks}} {
 		// SPEC evidence is flat and remains cheap in groups of four. A task entry
@@ -2011,6 +2060,19 @@ func repairManifestAuditFragments(ctx context.Context, loop *Loop, turn *Turn, m
 				end = len(part.ids)
 			}
 			group := part.ids[start:end]
+			cacheKey := ""
+			if part.kind == "tasks" && len(group) == 1 {
+				cacheKey = manifestAuditTaskCacheKey(turn, verdict.Findings, group[0])
+				if cacheKey != "" {
+					if cached, ok := turn.ManifestAuditCache.get(cacheKey); ok {
+						audit.Tasks = append(audit.Tasks, cached)
+						if turn.OnManifestAuditCacheHit != nil {
+							turn.OnManifestAuditCacheHit(group[0], cacheKey)
+						}
+						continue
+					}
+				}
+			}
 			entryShape := `{"id":"target","status":"pass|fail","evidence":"concrete candidate work unit, slice and probe evidence"}`
 			extraRule := ""
 			if part.kind == "tasks" {
@@ -2056,6 +2118,9 @@ Reply with ONLY this JSON object: {"%s":[%s]}
 				audit.Specs = append(audit.Specs, entries...)
 			} else {
 				audit.Tasks = append(audit.Tasks, entries...)
+				if cacheKey != "" {
+					pendingCache[cacheKey] = entries[0]
+				}
 			}
 		}
 	}
@@ -2068,11 +2133,60 @@ Reply with ONLY this JSON object: {"%s":[%s]}
 			return "", nil, attempts, fmt.Errorf("%w: composed manifest audit policy: %v", ErrContract, err)
 		}
 	}
+	for key, entry := range pendingCache {
+		turn.ManifestAuditCache.put(key, entry)
+	}
 	encoded, err := json.Marshal(verdict)
 	if err != nil {
 		return "", nil, attempts, fmt.Errorf("marshal composed manifest audit: %w", err)
 	}
 	return string(encoded), verdict, attempts, nil
+}
+
+// manifestAuditTaskCacheKey binds reuse to every task-local input that can
+// change the critic's answer: the canonical task and accepted SPEC context
+// supplied by strategy, the original findings that name the task, and the
+// current policy/schema version. Unrelated findings do not invalidate an
+// unchanged task. Missing context disables caching rather than guessing.
+func manifestAuditTaskCacheKey(turn *Turn, findings []Finding, taskID string) string {
+	if turn == nil || turn.ManifestAuditCache == nil || len(turn.ManifestAuditInputs) == 0 {
+		return ""
+	}
+	input, ok := turn.ManifestAuditInputs[taskID]
+	if !ok || len(input) == 0 || strings.TrimSpace(turn.ManifestAuditPolicy) == "" {
+		return ""
+	}
+	relevant := make([]Finding, 0)
+	for _, finding := range findings {
+		if findingMentionsManifestTask(finding, taskID) {
+			relevant = append(relevant, finding)
+		}
+	}
+	sort.Slice(relevant, func(i, j int) bool {
+		left, _ := json.Marshal(relevant[i])
+		right, _ := json.Marshal(relevant[j])
+		return bytes.Compare(left, right) < 0
+	})
+	payload := struct {
+		Input    json.RawMessage `json:"input"`
+		Findings []Finding       `json:"findings"`
+		Policy   string          `json:"policy"`
+	}{Input: input, Findings: relevant, Policy: turn.ManifestAuditPolicy}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("sha256:%x", digest)
+}
+
+func findingMentionsManifestTask(finding Finding, taskID string) bool {
+	for _, text := range []string{finding.File, finding.Issue, finding.Fix, finding.Invariant} {
+		if strings.Contains(text, taskID) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseManifestAuditFragment(text, kind string, ids []string) ([]ManifestAuditEntry, error) {

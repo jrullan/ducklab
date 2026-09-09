@@ -372,6 +372,10 @@ func acceptedPlanSeed(projectRoot string) []strategy.PlanSeedSpec {
 			ID:       section.ID,
 			Title:    section.Title,
 			Priority: section.Field("priority"),
+			Digest: func() string {
+				hash := sha256.Sum256([]byte(section.ID + "\x00" + section.Title + "\x00" + section.Body))
+				return hex.EncodeToString(hash[:])
+			}(),
 			AsBuilt: func() bool {
 				v := strings.ToLower(strings.TrimSpace(section.Field("as-built")))
 				return v == "yes" || v == "true"
