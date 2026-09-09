@@ -270,6 +270,9 @@ export const KNOWN_EVENT_TYPES = [
   // An accept whose commit did not reproduce from a clean checkout takes
   // the commit back; the diff stays in the tree, uncommitted (B-069).
   "commit_withdrawn",
+  // A refused decision is durable evidence too: retain the reason and custody
+  // roots after the HTTP response and the client that received it are gone.
+  "accept_refused",
   // Which reference documents a stage loaded, and what its caps dropped.
   "references_loaded",
   "reference_digested",

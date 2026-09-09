@@ -3371,7 +3371,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		startActiveWallclock(rs.run, time.Now())
 		clearPending(rs.run)
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+		w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, entry.Path))
 		w.WriteState()
 		go s.executeStage(runCtx, rs, entry.Path, sreq)
 		return rs.run, nil
@@ -3410,7 +3410,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		// The failure text was the pause's reason; resuming answers it. Left
 		// in place, a resumed, working run went on wearing "Why it failed".
 		rs.run.Failure = ""
-		w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+		w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, runRoot(rs.run, entry.Path)))
 		w.WriteState()
 		s.queue.submit(s, &queued{
 			rs: rs, ctx: runCtx, chained: true,
@@ -3434,7 +3434,7 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 	// resuming answers it. Left in place, a resumed, working run went on
 	// wearing "Why it failed" over a live conversation.
 	rs.run.Failure = ""
-	w.AppendEvent("checkpoint", map[string]interface{}{"reason": "resume", "status": "running"})
+	w.AppendEvent("checkpoint", resumeCheckpointData(rs.run, runRoot(rs.run, entry.Path)))
 	w.WriteState()
 
 	// Through the queue like everything else, at the FRONT: it was mid-flight
@@ -3446,6 +3446,19 @@ func (s *Service) RunResume(ctx context.Context, id string) (*runlog.Run, error)
 		exec: func(c context.Context) { s.executeRun(c, rs, entry, req) },
 	})
 	return rs.run, nil
+}
+
+// resumeCheckpointData makes the checkout chosen at re-entry part of the
+// durable record. Status alone cannot distinguish a correct worktree resume
+// from a stale-tree binary re-entering through the registered checkout.
+func resumeCheckpointData(run *runlog.Run, root string) map[string]interface{} {
+	return map[string]interface{}{
+		"reason":         "resume",
+		"status":         "running",
+		"execution_root": root,
+		"worktree_path":  run.WorktreePath,
+		"gate_root":      run.GateRoot,
+	}
 }
 
 // resumeRequest rebuilds a paused run's request from its record: a resumed
@@ -3807,18 +3820,40 @@ func (s *Service) RunAccept(ctx context.Context, id string, msg string) (*Accept
 	return s.runAccept(ctx, id, msg, "human")
 }
 
-func (s *Service) runAccept(ctx context.Context, id string, msg string, actor string) (*AcceptResult, error) {
+func (s *Service) runAccept(ctx context.Context, id string, msg string, actor string) (result *AcceptResult, err error) {
 	s.runsMu.RLock()
 	rs, ok := s.runs[id]
 	s.runsMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("run %q not found", id)
 	}
-	entry, err := s.entryFor(rs)
-	if err != nil {
+	if _, err = s.ensureWriter(rs); err != nil {
 		return nil, err
 	}
-	if _, err := s.ensureWriter(rs); err != nil {
+	// Refusals are decisions about custody and verification, not ephemeral HTTP
+	// errors. Keep their cause and all roots in events.jsonl so a later audit can
+	// establish why no commit landed even after the client has disconnected.
+	defer func() {
+		if err == nil {
+			return
+		}
+		w, writerErr := s.ensureWriter(rs)
+		if writerErr != nil {
+			return
+		}
+		_ = w.AppendEvent("accept_refused", map[string]interface{}{
+			"actor":          actor,
+			"reason":         err.Error(),
+			"status":         rs.run.Status,
+			"pending_kind":   rs.run.PendingKind,
+			"execution_root": rs.run.ExecutionRoot,
+			"gate_root":      rs.run.GateRoot,
+			"worktree_path":  rs.run.WorktreePath,
+		})
+		_ = w.WriteState()
+	}()
+	entry, err := s.entryFor(rs)
+	if err != nil {
 		return nil, err
 	}
 	// Accept answers a gate; it must never masquerade as "continue" for a
@@ -3829,7 +3864,7 @@ func (s *Service) runAccept(ctx context.Context, id string, msg string, actor st
 	if rs.run.Status == "paused" && rs.run.PendingKind != "gate" {
 		return nil, fmt.Errorf("run %q is paused for %s, not awaiting acceptance — resolve the condition and resume, or abort", id, rs.run.PendingKind)
 	}
-	if err := s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
+	if err = s.acceptRun(ctx, rs, entry, msg, actor); err != nil {
 		return nil, err
 	}
 	// The decision freed the working tree this run's diff was holding. Runs
