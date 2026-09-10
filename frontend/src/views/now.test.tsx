@@ -319,10 +319,9 @@ describe("Now — the inbox", () => {
     } as Partial<EngineClient>);
     render(<Now client={client} projectId="p" />);
     const card = await screen.findByTestId("now-plan-card");
-    expect(card.textContent).toContain("criteria covered: 1");
-    expect(card.textContent).toContain("tasks proposed: 2");
-    expect(card.textContent).toContain("can run in parallel: 2");
-    expect(card.textContent).toContain("files with two owners: 1");
+    expect(card.textContent).toContain("tasks covered: 1/2");
+    expect(card.textContent).toContain("ownership lanes declared: 2/2");
+    expect(card.textContent).toContain("ownership collisions in proposed plan: 1");
     fireEvent.click(screen.getByTestId("plan-examine"));
     expect(screen.getByTestId("plan-drawer-meaning").textContent).toBe(
       "you approve these tasks being born and their lanes — you are not approving code yet",
@@ -338,6 +337,82 @@ describe("Now — the inbox", () => {
     await screen.findByTestId("now-view");
     await waitFor(() => expect(client.artifact).toHaveBeenCalledWith("p", "plan"));
     expect(screen.queryByTestId("now-plan-card")).toBeNull();
+  });
+
+  it("counts an amendment against approved tasks without treating milestones as tasks", async () => {
+    const tasks = Array.from({ length: 38 }, (_, index) => ({
+      id: `T-${String(index + 1).padStart(3, "0")}`,
+      title: `task ${index + 1}`,
+      body: "",
+      fields: { owns: `src/${index + 1}.rs` },
+    }));
+    const milestones = Array.from({ length: 6 }, (_, index) => ({
+      id: `M-${String(index + 1).padStart(2, "0")}`,
+      title: `milestone ${index + 1}`,
+      body: "",
+      fields: {},
+    }));
+    const artifact: Artifact = {
+      kind: "plan", version: 1, approved: true, markdown: "", sections: [...milestones, ...tasks],
+      proposal: {
+        diff: "+ one task",
+        sections: [...milestones, ...tasks, { id: "T-039", title: "new task", body: "", fields: { owns: "src/new.rs" } }],
+      },
+    };
+    const client = clientWith({
+      artifact: vi.fn(() => Promise.resolve(artifact)),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: ["plan"] })),
+    } as Partial<EngineClient>);
+
+    render(<Now client={client} projectId="p" />);
+    const card = await screen.findByTestId("now-plan-card");
+    expect(card).toHaveTextContent("adds 1, changes 0, and removes 0 task from the approved 38-task plan");
+    expect(card).not.toHaveTextContent("44-task");
+    expect(card).toHaveTextContent("changed tasks covered: 1/1");
+  });
+
+  it("shows one decision for one paused plan and keeps two aborted runs in history", async () => {
+    const planRun: Run = {
+      ...base,
+      id: "r-plan",
+      stage: "plan",
+      task_id: "",
+      verdict: "PASSED",
+      next: ["accept", "request_changes", "reject"],
+    };
+    seed([
+      planRun,
+      { ...base, id: "r-aborted-1", task_id: "T-001", status: "failed", verdict: "ABORTED", pending_kind: undefined, next: [], ended_at: "2026-07-31T08:00:00Z" },
+      { ...base, id: "r-aborted-2", task_id: "T-002", status: "failed", verdict: "ABORTED", pending_kind: undefined, next: [], ended_at: "2026-07-31T08:30:00Z" },
+    ]);
+    const client = clientWith({
+      artifact: vi.fn(() => Promise.resolve({
+        kind: "plan", version: 1, approved: true, markdown: "", sections: [],
+        proposal: { run_id: "r-plan", diff: "+ proposal", sections: [{ id: "T-001", title: "one", body: "", fields: { owns: "src/one.rs" } }] },
+      })),
+      traceCheck: vi.fn(() => Promise.resolve({ errors: [], proposed: ["plan"] })),
+      projectNext: vi.fn(() => Promise.resolve([
+        { kind: "run", id: "decide", ref: "r-plan", action: "Decide plan", reason: "waiting" },
+        { kind: "task", id: "build", ref: "T-003", action: "Start T-003", reason: "ready" },
+      ])),
+      stageStart: vi.fn(() => Promise.resolve({ id: "r-revision" })),
+    } as unknown as Partial<EngineClient>);
+
+    render(<Now client={client} projectId="p" />);
+    expect(await screen.findByTestId("now-waiting-count")).toHaveTextContent("1");
+    expect(screen.getAllByTestId("now-waiting-card")).toHaveLength(1);
+    expect(screen.queryByTestId("now-plan-card")).toBeNull();
+    expect(screen.queryByTestId("now-next-steps")).toBeNull();
+    expect(screen.queryByTestId("now-failures")).toBeNull();
+    expect(screen.getByTestId("now-waiting-card")).not.toHaveTextContent("requirements");
+    expect(screen.getByTestId("now-waiting-card")).toHaveTextContent("plan proposal is ready");
+    expect(screen.getByTestId("now-accept")).toBeInTheDocument();
+    expect(screen.getByTestId("now-request-changes")).toBeInTheDocument();
+    expect(screen.getByTestId("now-reject")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("now-request-changes"));
+    fireEvent.change(screen.getByLabelText("requested changes"), { target: { value: "split the last acceptance slice" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start revision" }));
+    await waitFor(() => expect(client.stageStart).toHaveBeenCalledWith("p", "plan", { revise: "split the last acceptance slice" }));
   });
 
   it("does not resurrect a consumed plan from an older artifact response", async () => {

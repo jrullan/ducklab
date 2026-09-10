@@ -25,11 +25,15 @@ export function EscalationSuggestionCard({
   onRelaunch,
   onOpenTask,
   onContinue,
+  secondary = false,
 }: {
   event: DucklabEvent;
   onRelaunch: (candidate: string) => void;
   onOpenTask: () => void;
   onContinue: () => void;
+  /** A stopped run already has an authoritative decision. Fold this advisory
+   * recovery so it cannot compete with that decision for attention. */
+  secondary?: boolean;
 }) {
   const data = (event.data ?? {}) as EscalationData;
   const thresholds = words(data.thresholds_fired);
@@ -38,9 +42,7 @@ export function EscalationSuggestionCard({
   const candidateID = typeof candidate?.id === "string" ? candidate.id : "";
   const floor = typeof candidate?.wilson_floor === "number" ? candidate.wilson_floor : undefined;
 
-  return (
-    <section className="m-2 rounded-card border border-warn p-3" data-testid="escalation-suggestion">
-      <h2 className="text-sm font-medium text-ink">escalation suggestion</h2>
+  const content = <>
       <p className="mt-1 text-sm text-ink-secondary">The run paused with evidence that continuing may not be the best recovery.</p>
       {thresholds.length > 0 && <p className="mt-2 text-sm"><span className="text-ink-muted">thresholds fired · </span>{thresholds.map(label).join(" · ")}</p>}
       {typeof data.current_stage === "string" && <p className="mt-2 text-sm" data-testid="escalation-current-stage"><span className="text-ink-muted">current stage · </span>{data.current_stage}</p>}
@@ -75,6 +77,23 @@ export function EscalationSuggestionCard({
           <p className="mt-1 text-xs text-ink-muted">Continue keeps this scope and this run's dice in play.</p>
         </div>
       </div>
+    </>;
+
+  if (secondary) {
+    return (
+      <details className="m-2 rounded-card border border-hairline p-3" data-testid="escalation-suggestion" data-secondary="true">
+        <summary className="cursor-pointer text-sm text-ink-secondary">
+          Secondary recovery suggestion{candidateID ? ` · consider ${candidateID}` : ""}
+        </summary>
+        {content}
+      </details>
+    );
+  }
+
+  return (
+    <section className="m-2 rounded-card border border-warn p-3" data-testid="escalation-suggestion">
+      <h2 className="text-sm font-medium text-ink">escalation suggestion</h2>
+      {content}
     </section>
   );
 }

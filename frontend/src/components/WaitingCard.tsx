@@ -8,6 +8,10 @@ import { EvidenceDrawerHost } from "./EvidenceDrawer";
 import { useRuns } from "../store/runs";
 
 function waitingExplanation(run: Run): string {
+  if (["intake", "spec", "plan"].includes(run.stage)) {
+    const subject = run.stage === "intake" ? "requirements" : run.stage;
+    return `The ${subject} proposal is ready — it is waiting for your decision.`;
+  }
   if (run.pending_kind === "question") {
     return "This task paused to ask you a question — it is waiting for your answer.";
   }
@@ -31,6 +35,7 @@ export function WaitingCard({
   onAccept,
   onReject,
   onAbort,
+  onRequestChanges,
   acceptError,
   client,
 }: {
@@ -40,9 +45,13 @@ export function WaitingCard({
   onAccept: () => void;
   onReject: () => void;
   onAbort: () => void;
+  onRequestChanges?: (note: string) => Promise<void>;
   acceptError?: string;
 }) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changes, setChanges] = useState("");
+  const [changesBusy, setChangesBusy] = useState(false);
   // From the engine's list, never this card's opinion of the state
   // (docs/ux-evaluation.md §5.4).
   const next = run.next ?? [];
@@ -143,6 +152,16 @@ export function WaitingCard({
             Reject
           </button>
         )}
+        {next.includes("request_changes") && onRequestChanges && (
+          <button
+            type="button"
+            data-testid="now-request-changes"
+            onClick={() => setChangesOpen((open) => !open)}
+            className="rounded border border-hairline px-2 py-1 text-xs"
+          >
+            Request changes
+          </button>
+        )}
         {next.includes("answer") && (
           <a
             href={routeHref({ name: "run", id: run.id })}
@@ -163,6 +182,29 @@ export function WaitingCard({
           </button>
         )}
       </div>
+      {changesOpen && (
+        <form
+          className="mt-2 flex gap-2"
+          data-testid="now-request-changes-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!changes.trim() || !onRequestChanges) return;
+            setChangesBusy(true);
+            void onRequestChanges(changes.trim()).finally(() => setChangesBusy(false));
+          }}
+        >
+          <input
+            aria-label="requested changes"
+            value={changes}
+            onChange={(event) => setChanges(event.target.value)}
+            placeholder="What must change?"
+            className="min-w-0 flex-1 rounded border border-hairline bg-surface2 px-2 py-1 text-xs"
+          />
+          <button type="submit" disabled={changesBusy || !changes.trim()} className="rounded border border-hairline px-2 py-1 text-xs disabled:opacity-40">
+            {changesBusy ? "Starting revision…" : "Start revision"}
+          </button>
+        </form>
+      )}
       {acceptError && (
         <p className="mt-1 text-xs text-critical" data-testid="now-accept-error">
           accept failed: {acceptError}

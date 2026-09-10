@@ -27,7 +27,7 @@ import { routeHref } from "../app/routes";
 import { seatsFromRoster, rolesForMode } from "../lib/seats";
 import { JourneyRail, useJourney } from "../components/JourneyRail";
 import { roleSeats } from "../components/RunLauncher";
-import { verdictStatus, verdictLabel, assignDucklingColors, type Verdict } from "../lib/colors";
+import { verdictStatus, verdictLabel, assignDucklingColors, runStatusRole, type StatusRole, type Verdict } from "../lib/colors";
 import { runLabel } from "../lib/runview";
 
 type Tab = "diff" | "verify" | "candidates" | "calls";
@@ -72,6 +72,34 @@ function evidencedVerdictLabel(run: Run): string {
   if (run.review_evidence.status === "approved" && run.review_evidence.independence === "self") return "gates passed · self-reviewed";
   if (run.review_evidence.status === "approved" && run.review_evidence.independence === "independent") return "passed · independent review";
   return base;
+}
+
+function runStatePresentation(run: Run): { label: string; role: StatusRole } {
+  if (run.status === "paused") {
+    const reason = run.pending_kind === "gate"
+      ? "decision"
+      : run.pending_kind === "question"
+        ? "answer needed"
+        : run.pending_kind || "paused";
+    return { label: `waiting for you · ${reason}`, role: "serious" };
+  }
+  if (run.status === "running") return { label: "running", role: "good" };
+  if (run.status === "queued") return { label: "queued", role: "muted" };
+  if (run.status === "failed") return { label: "failed", role: "critical" };
+  return { label: "done", role: runStatusRole(run.status) };
+}
+
+function plainFailure(failure: string, run: Run): string {
+  if (/contract parse failed/i.test(failure) && /reviewer|verdict contract/i.test(failure)) {
+    return "The reviewer did not return a usable verdict, and the automatic format repair also failed.";
+  }
+  if (/calls?(?: per reply)?|call budget/i.test(failure)) {
+    return `The ${run.pending_data?.role ?? "model"} ran out of calls before it could finish.`;
+  }
+  if (/provider unavailable|timed? ?out|connection/i.test(failure)) {
+    return "The model provider stopped responding after Ducklab retried.";
+  }
+  return "Ducklab stopped this run before it could finish.";
 }
 
 // The task endpoint returns the canonical section, including immutable fields.
@@ -761,9 +789,12 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
   // happen had to go and find another screen to say "almost".
   const stageToRevise = ["intake", "spec", "plan"].includes(run.stage) ? run.stage : "";
   const next = run.next ?? [];
-  const decisionOpen = next.some((v) => ["accept", "reject", "resume", "request_changes"].includes(v));
-	const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
-	const materializedRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_in_progress === true;
+  const decisionOpen = run.pending_kind !== "question" && run.pending_kind !== "chat" && (
+    next.some((v) => ["accept", "reject", "resume", "request_changes"].includes(v)) ||
+    (run.status === "paused" && next.includes("abort"))
+  );
+  const documentProposal = !!stageToRevise && (next.includes("accept") || next.includes("request_changes"));
+  const materializedRebaseConflict = run.pending_kind === "gate" && run.pending_data?.rebase_in_progress === true;
   // What accepting DOES, per kind. Three incidents were the person discovering
   // it after the click.
   const consequence = next.includes("resume")
@@ -772,7 +803,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       : run.pending_kind === "provider"
         ? "The model provider dropped the connection and retries ran out; the work is intact. Resume when the provider is reachable, or abort."
         : run.pending_kind === "error"
-          ? "The run stopped on an error — see why above. Resume retries from its last real checkpoint; abort closes the failed attempt."
+          ? "The run stopped on an error. Its work is intact; Resume retries from its last real checkpoint, while Abort closes the attempt. Technical details follow below."
           : "The engine restarted while this run was working; resuming re-enters it from its checkpoint."
     : materializedRebaseConflict
       ? "retries the same acceptance only after the rebase has been completed in the shown worktree; unresolved conflicts remain paused"
@@ -807,6 +838,15 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     if (run.status === "failed" || run.verdict === "FAILED") return "not accepted";
     return "finished";
   })();
+  const runState = run.stage === "triage" && run.accepted
+    ? { label: `triaged ${triage.length || "the"} report${triage.length === 1 ? "" : "s"} · applied`, role: "good" as const }
+    : run.stage === "triage" && isWorking
+      ? { label: "triaging", role: "muted" as const }
+      : run.stage === "chat" && isWorking
+        ? { label: "conversing", role: "muted" as const }
+        : run.stage === "chat"
+          ? { label: "conversation ended", role: "muted" as const }
+          : runStatePresentation(run);
 
   // Offered when a task run has ended without being accepted. Not for a run
   // still going — there is nothing to learn from yet — and not for a stage,
@@ -914,6 +954,127 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
     }
   };
 
+  // The engine's legal actions are the primary fact whenever a run is
+  // waiting. Build this once and place it directly below the sticky identity
+  // header; transcript evidence and recovery suggestions follow it.
+  const decisionSurface = decisionOpen ? (
+    <section className="m-2 rounded-card border border-serious p-3" data-testid="run-decision">
+      <DecisionCard
+        next={next}
+        title={
+          run.pending_kind === "error"
+            ? "Run stopped on an error"
+            : documentProposal ? "Proposal awaiting your decision" : "Waiting for your decision"
+        }
+        subtitle={`${run.stage} · ${run.task_id || run.id}`}
+        consequence={consequence}
+        cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
+        accepting={acceptState.kind === "pending"}
+        onAccept={onAccept}
+        onReject={() => {
+          setActionError(null);
+          void client.reject(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+        }}
+        onAbort={() => {
+          setActionError(null);
+          void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+        }}
+        onRequestChanges={stageToRevise || run.stage === "release" ? requestChanges : undefined}
+        onResume={() => {
+          setActionError(null);
+          void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+        }}
+        revisionRun={revisionRun}
+        redoNote={run.redo_note}
+        onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
+        documentGate={!!(documentProposal || run.stage === "release")}
+        landedAs={landedAs}
+        dissent={codeRun ? dissent : null}
+        acceptAndFix={codeRun && dissent && dissent.findings > 0 && next.includes("accept") ? {
+          busy: fixBusy,
+          error: fixError,
+          mode: run.mode,
+          spent: budget && budget.usd > 0 ? money(budget.usd) : undefined,
+          onClick: () => {
+            setFixBusy(true);
+            setFixError(null);
+            const note =
+              "The previous run passed its gate but its reviewer requested changes. " +
+              "Address these outstanding findings:\n" +
+              dissent.notes.map((n) => `- ${n}`).join("\n");
+            void client
+              .accept(run.id)
+              .then(() => relaunch({ mode: run.mode, ducklings: [], note }))
+              .then((id) => {
+                if (id) location.hash = `#/runs/${id}`;
+              })
+              .catch((e) => setFixError(e instanceof Error ? e.message : String(e)))
+              .finally(() => setFixBusy(false));
+          },
+        } : undefined}
+        fileFindings={fileable ? {
+          items: lastVerdict!.findings,
+          filed,
+          busy: fileBusy,
+          error: fileError,
+          boardHref: routeHref({ name: "board", tab: "bugs" }),
+          onFile: () => {
+            setFileBusy(true);
+            setFileError(null);
+            void client
+              .runFileFindings(run.id)
+              .then((r) => setFiledBugs(r.items.map((b) => b.id)))
+              .catch((e) => setFileError(e instanceof Error ? e.message : String(e)))
+              .finally(() => setFileBusy(false));
+          },
+        } : undefined}
+      />
+      <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
+      {(() => {
+        const unread = (run.pending_data?.unread_refs as string[] | undefined) ?? [];
+        if (unread.length === 0) return null;
+        return (
+          <p data-testid="run-unread-refs" className="mt-2 text-xs text-warn">
+            ⚠ {unread.length} reference document{unread.length === 1 ? " was" : "s were"} digested
+            but never opened during this run: {unread.map((r) => r.split("/").pop()).join(", ")} — the draft may miss their detail.
+          </p>
+        );
+      })()}
+      {(() => {
+        if (run.pending_kind !== "provider" && run.pending_kind !== "error") return null;
+        if (!next.includes("resume")) return null;
+        for (let i = events.length - 1; i >= 0; i--) {
+          const event = events[i]!;
+          if (event.type !== "provider_retry") continue;
+          const from = (event.data as { duckling?: string }).duckling ?? "";
+          const to = fleet.find((duckling) => duckling.id === from)?.fallback;
+          if (!from || !to) return null;
+          return (
+            <div className="mt-2 flex items-center gap-2" data-testid="reseat-offer">
+              <button
+                type="button"
+                data-testid="reseat-button"
+                onClick={() => {
+                  setActionError(null);
+                  void client.runReseat(runId, from, to).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
+                }}
+                className="rounded border border-hairline px-2 py-1 text-sm"
+              >
+                {to === "auto" ? "Reseat automatically & resume" : `Reseat to ${to} & resume`}
+              </button>
+              <span className="text-xs text-ink-muted">
+                {from} is unreachable; {to === "auto"
+                  ? "Ducklab will select an eligible duckling using the current Flock criteria"
+                  : `${to} is its declared fallback and inherits the work`}
+              </span>
+            </div>
+          );
+        }
+        return null;
+      })()}
+    </section>
+  ) : null;
+
   // Not a fixed-height layout. The run view stacks four regions of unbounded
   // content — gate, conversation, tool timeline, diff — and forcing them into
   // one viewport made flex shrink the ones below their content while their
@@ -967,6 +1128,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             chat is not IN the pipeline, and "unverified" is its loudest chip
             for what is simply a run with no gate by design. Their headers
             say what the run did instead. */}
+        <span data-testid="run-state"><StatusChip role={runState.role} label={runState.label} /></span>
         {run.stage !== "triage" && run.stage !== "chat" && <CycleMap stage={run.stage} />}
         {/* WHO is working, said where it cannot scroll away: a triager's
             forty searches took the turn header off screen and nothing else
@@ -982,17 +1144,11 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             </span>
           ) : null;
         })()}
-        {run.stage === "triage" ? (
-          <StatusChip role={run.accepted ? "good" : isWorking ? "muted" : "serious"} label={run.accepted ? `triaged ${triage.length || "the"} report${triage.length === 1 ? "" : "s"} · applied` : isWorking ? "triaging" : "triage awaiting your decision"} />
-        ) : run.stage === "chat" ? (
-          <StatusChip role="muted" label={isWorking ? "conversing" : "conversation ended"} />
-        ) : run.no_changes ? (
-          <StatusChip role="muted" label="no changes — already in the tree" />
-        ) : run.resolution === "landed" ? (
-          <StatusChip role="good" label="landed" />
-        ) : (
-          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={run.acceptance_gate?.green ? `${evidencedVerdictLabel(run)} · reproduced green at accept` : evidencedVerdictLabel(run)} />
+        {run.stage !== "triage" && run.stage !== "chat" && run.verdict && (
+          <StatusChip role={verdictStatus(run.verdict as Verdict)} label={`gate · ${run.acceptance_gate?.green ? `${evidencedVerdictLabel(run)} · reproduced green at accept` : evidencedVerdictLabel(run)}`} />
         )}
+        {run.no_changes && <span className="text-sm text-ink-secondary">no changes — already in the tree</span>}
+        {run.resolution === "landed" && <span className="text-sm text-ink-secondary">landed</span>}
         <div className="ml-auto flex items-center gap-2">
           {/* A decision that has been made is not still open. These used to be
               shown on every run whatever its state, so an accepted run went on
@@ -1002,7 +1158,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           {/* From the engine's list, not this view's opinion of the state:
               the decision itself lives in the card below, the header keeps
               only the one control that stops work in flight. */}
-          {next.includes("abort") && (
+          {next.includes("abort") && !decisionOpen && (
             <button
               type="button"
               onClick={() => {
@@ -1173,6 +1329,8 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         )}
       </header>
 
+      {decisionSurface}
+
       {/* Breathing room so the first card clears the pinned header's shadow
           instead of peeking out cut in half. */}
       <div className="pt-1" />
@@ -1210,6 +1368,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
             dismissEscalation(latestEscalation);
             void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
           }}
+          secondary={!runIsLive || decisionOpen || !!run.failure}
         />
       )}
       {run.stage !== "chat" && configFailure && (() => {
@@ -1506,24 +1665,25 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
       {run.failure && (
         <section
           data-testid="run-failure"
-          className="m-2 rounded-card border border-critical p-3"
+          className={`m-2 rounded-card border p-3 ${run.status === "failed" ? "border-critical" : "border-hairline"}`}
         >
-          {/* A budget pause records its reason here while it waits; calling
-              that "failed" on a paused (or resumed) run announced a death
-              that had not happened. */}
-          <h2 className="text-sm font-medium text-critical mb-1">
+          <h2 className={`mb-1 text-sm font-medium ${run.status === "failed" ? "text-critical" : "text-ink"}`}>
             {run.status === "failed" ? "Why it failed" : "Why it stopped"}
           </h2>
-          <p className="whitespace-pre-wrap break-words text-sm text-ink">{run.failure}</p>
-          {structureFailure && (
-            <p className="mt-2 text-sm text-ink-secondary" data-testid="structure-failure-detail">
-              {String(structureFailureData.reason ?? "structure guard stopped") === "stalled"
-                ? String(structureFailureData.stall_cause ?? "") === "repeated_findings"
-                  ? `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} because the exact finding set repeated; the best checkpoint has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`
-                  : `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)}: ${Number(structureFailureData.stagnant_attempts ?? 0)}/${Number(structureFailureData.stagnation_limit ?? 0)} consecutive patches did not improve the best checkpoint (${Number(structureFailureData.best_problem_count ?? 0)} findings).`
-                : `Exhausted ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} structure repair attempts; the best checkpoint still has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`}
-            </p>
-          )}
+          <p className="text-sm text-ink" data-testid="run-failure-summary">{plainFailure(run.failure, run)}</p>
+          <details className="mt-2 text-sm" data-testid="run-failure-details">
+            <summary className="cursor-pointer text-xs text-ink-muted">Technical details</summary>
+            <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-surface2 p-2 text-xs text-ink-secondary">{run.failure}</pre>
+            {structureFailure && (
+              <p className="mt-2 text-sm text-ink-secondary" data-testid="structure-failure-detail">
+                {String(structureFailureData.reason ?? "structure guard stopped") === "stalled"
+                  ? String(structureFailureData.stall_cause ?? "") === "repeated_findings"
+                    ? `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} because the exact finding set repeated; the best checkpoint has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`
+                    : `Stopped early at repair ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)}: ${Number(structureFailureData.stagnant_attempts ?? 0)}/${Number(structureFailureData.stagnation_limit ?? 0)} consecutive patches did not improve the best checkpoint (${Number(structureFailureData.best_problem_count ?? 0)} findings).`
+                  : `Exhausted ${Number(structureFailureData.attempt ?? 0)}/${Number(structureFailureData.max_attempts ?? 0)} structure repair attempts; the best checkpoint still has ${Number(structureFailureData.best_problem_count ?? 0)} findings.`}
+              </p>
+            )}
+          </details>
           {run.stage === "test" && /retire-test|working tree is dirty|commit or clean/i.test(run.failure) && (
             <a className="mt-2 inline-block text-sm underline" href={routeHref({ name: "projects" })}>Clean or commit the workspace</a>
           )}
@@ -1671,137 +1831,6 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
         </section>
       )}
 
-      {/* One card for every kind of gate — stage, triage, build — and for a
-          run the engine's own restart paused. The verdict buttons come from
-          run.next; what varies by kind is the consequence and the evidence,
-          never the frame. */}
-      {decisionOpen && (
-        <section className="m-2 rounded-card border border-serious p-3">
-          <DecisionCard
-            next={next}
-            title={
-				run.pending_kind === "error"
-					? "Run stopped on an error"
-					: documentProposal ? "Proposal awaiting your decision" : "Waiting for your decision"
-            }
-            subtitle={`${run.stage} · ${run.task_id || run.id}`}
-            consequence={consequence}
-            cost={budget && budget.usd > 0 ? `${money(budget.usd)} · ${tokens(budget.tokens)} tokens` : undefined}
-            accepting={acceptState.kind === "pending"}
-            onAccept={onAccept}
-            onReject={() => {
-              setActionError(null);
-              void client.reject(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
-            }}
-            onAbort={() => {
-              setActionError(null);
-              void client.abort(runId).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
-            }}
-            onRequestChanges={stageToRevise || run.stage === "release" ? requestChanges : undefined}
-            onResume={() => {
-              setActionError(null);
-              void client.runResume(runId).then((r) => useRuns.getState().setRun(r)).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
-            }}
-            revisionRun={revisionRun}
-            redoNote={run.redo_note}
-            onRetry={(note) => void relaunch({ mode: run.mode, ducklings: relaunchDucklings, note })}
-			documentGate={!!(documentProposal || run.stage === "release")}
-            landedAs={landedAs}
-            dissent={codeRun ? dissent : null}
-            acceptAndFix={codeRun && dissent && dissent.findings > 0 && next.includes("accept") ? {
-              busy: fixBusy,
-              error: fixError,
-              mode: run.mode,
-              spent: budget && budget.usd > 0 ? money(budget.usd) : undefined,
-              onClick: () => {
-                setFixBusy(true);
-                setFixError(null);
-                const note =
-                  "The previous run passed its gate but its reviewer requested changes. " +
-                  "Address these outstanding findings:\n" +
-                  dissent.notes.map((n) => `- ${n}`).join("\n");
-                // Through the one relaunch path (B-258), naming NO ducklings:
-                // the engine fills the mode's saved line-up from the project's
-                // current flock, exactly like any launch that names none.
-                // Copying this run's roster (even as ducklings, not seats) is
-                // the override the engine honours, and the regression Jose saw.
-                void client
-                  .accept(run.id)
-                  .then(() => relaunch({ mode: run.mode, ducklings: [], note }))
-                  .then((id) => {
-                    if (id) location.hash = `#/runs/${id}`;
-                  })
-                  .catch((e) => setFixError(e instanceof Error ? e.message : String(e)))
-                  .finally(() => setFixBusy(false));
-              },
-            } : undefined}
-            fileFindings={fileable ? {
-              items: lastVerdict!.findings,
-              filed,
-              busy: fileBusy,
-              error: fileError,
-              boardHref: routeHref({ name: "board", tab: "bugs" }),
-              onFile: () => {
-                setFileBusy(true);
-                setFileError(null);
-                void client
-                  .runFileFindings(run.id)
-                  .then((r) => setFiledBugs(r.items.map((b) => b.id)))
-                  .catch((e) => setFileError(e instanceof Error ? e.message : String(e)))
-                  .finally(() => setFileBusy(false));
-              },
-            } : undefined}
-          />
-          <SurveyCoverageLine run={run} testId="proposal-unaccounted" />
-          {(() => {
-            const unread = (run.pending_data?.unread_refs as string[] | undefined) ?? [];
-            if (unread.length === 0) return null;
-            return (
-              <p data-testid="run-unread-refs" className="mt-2 text-xs text-warn">
-                ⚠ {unread.length} reference document{unread.length === 1 ? " was" : "s were"} digested
-                but never opened during this run:{" "}
-                {unread.map((r) => r.split("/").pop()).join(", ")} — the draft may miss their detail.
-              </p>
-            );
-          })()}
-          {/* The fallback door: provider weather, one click to swap the seats
-              and go. A fixed target is declared in Settings; auto delegates
-              to the person's Flock criteria. Both are recorded. */}
-          {(() => {
-            if (run.pending_kind !== "provider" && run.pending_kind !== "error") return null;
-            if (!next.includes("resume")) return null;
-            for (let i = events.length - 1; i >= 0; i--) {
-              const e = events[i]!;
-              if (e.type === "provider_retry") {
-                const from = (e.data as { duckling?: string }).duckling ?? "";
-                const to = fleet.find((d) => d.id === from)?.fallback;
-                if (!from || !to) return null;
-                return (
-                  <div className="mt-2 flex items-center gap-2" data-testid="reseat-offer">
-                    <button
-                      type="button"
-                      data-testid="reseat-button"
-                      onClick={() => {
-                        setActionError(null);
-                        void client.runReseat(runId, from, to).catch((e) => setActionError(e instanceof Error ? e.message : String(e)));
-                      }}
-                      className="rounded border border-hairline px-2 py-1 text-sm"
-                    >
-                      {to === "auto" ? "Reseat automatically & resume" : `Reseat to ${to} & resume`}
-                    </button>
-                    <span className="text-xs text-ink-muted">
-                      {from} is unreachable; {to === "auto"
-                        ? "Ducklab will select an eligible duckling using the current Flock criteria"
-                        : `${to} is its declared fallback and inherits the work`}
-                    </span>
-                  </div>
-                );
-              }
-            }
-            return null;
-          })()}
-        </section>
-      )}
 
       {(actionError || relaunchError) && (
         <p className="m-2 text-critical" role="alert" data-testid={actionError ? "abort-error" : "action-error"}>
@@ -1848,7 +1877,7 @@ export function RunView({ runId, client }: { runId: string; client: EngineClient
           answer, on every turn. */}
       {/* B-261: a plain gate's "waiting for you" strip duplicated the decision
           card. The strip stays for pauses that carry a question or a reason. */}
-      {pending && pending.kind !== "chat" && !(decisionOpen && pending.kind === "gate" && !pending.question && !pending.detail) && (
+      {pending && pending.kind !== "chat" && !decisionOpen && (
         <section className="m-2 rounded-card border border-hairline p-3" data-testid="pending-human">
           <StatusChip role="serious" label={`waiting for you — ${pending.kind}`} />
           {pending.detail && !pending.question && (
