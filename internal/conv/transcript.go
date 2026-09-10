@@ -188,10 +188,10 @@ func RenderFindings(findings []Finding) string {
 // Finding mirrors agent.Finding. conv must not import agent (agent is the
 // caller), so the shape is repeated here and converted at the boundary.
 type Finding struct {
-	Severity  string
-	File      string
-	Line      int
-	Issue     string
-	Fix       string
-	Invariant string
+	Severity  string `json:"severity"`
+	File      string `json:"file"`
+	Line      int    `json:"line,omitempty"`
+	Issue     string `json:"issue"`
+	Fix       string `json:"fix,omitempty"`
+	Invariant string `json:"invariant,omitempty"`
 }

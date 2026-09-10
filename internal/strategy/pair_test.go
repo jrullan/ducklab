@@ -123,6 +123,42 @@ func TestPairUsesTwoDucklingsAndFeedsBackFindings(t *testing.T) {
 	}
 }
 
+func TestPairMakesEngineInvariantFindingsBlockingAndFeedsThemBack(t *testing.T) {
+	rec := &recorder{}
+	params := pairParams(rec, "green",
+		editsOutcome("changed a sibling-owned file"), verdictOutcome("approve"),
+		editsOutcome("reverted it"), verdictOutcome("approve"),
+	)
+	checks := 0
+	params.InvariantFindings = func() ([]conv.Finding, error) {
+		checks++
+		if checks <= 2 { // first reviewer prompt and first round gate
+			return []conv.Finding{{Severity: "critical", File: "shared.rs", Issue: "outside T-001's lane", Fix: "revert it"}}, nil
+		}
+		return nil, nil
+	}
+	var violations int
+	params.OnEvent = func(kind string, _ map[string]interface{}) {
+		if kind == "invariant_violation" {
+			violations++
+		}
+	}
+
+	res, err := ExecutePair(context.Background(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Rounds != 2 || violations != 1 {
+		t.Fatalf("rounds=%d invariant events=%d, want repair round and one event", res.Rounds, violations)
+	}
+	if !strings.Contains(rec.prompts[1], "Engine-owned blocking invariants") || !strings.Contains(rec.prompts[1], "shared.rs") {
+		t.Fatalf("reviewer did not receive the lane invariant:\n%s", rec.prompts[1])
+	}
+	if !strings.Contains(rec.prompts[2], "outside T-001's lane") {
+		t.Fatalf("repairing implementer did not receive the invariant finding:\n%s", rec.prompts[2])
+	}
+}
+
 // A process-level pause reconstructs ExecuteScript with a fresh transcript.
 // The checkpoint must therefore carry the open review ledger explicitly;
 // skipping round 1 cannot magically rebuild it.

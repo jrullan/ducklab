@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jrullan/ducklab/internal/artifact"
 	"github.com/jrullan/ducklab/internal/runlog"
 	"github.com/jrullan/ducklab/internal/tools"
 	"github.com/jrullan/ducklab/internal/vcs"
@@ -129,6 +130,44 @@ func TestAcceptWorktreeRefusesTurnRootMismatchWithoutStrandingCandidate(t *testi
 	}
 	if _, err := os.Stat(filepath.Join(dir, candidate)); !os.IsNotExist(err) {
 		t.Fatalf("candidate was stranded in the registered checkout: %v", err)
+	}
+}
+
+func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	plan := `## M-001 — Parallel work
+
+### T-001 — Leaf implementation
+
+**Produces:** file:owned.txt
+
+### T-002 — Shared integration
+
+**Produces:** file:shared.txt
+`
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: plan})
+	git := gitProject(t, dir)
+	base := mustHead(t, git)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-out-of-lane")
+	for path, body := range map[string]string{"owned.txt": "mine\n", "shared.txt": "not mine\n"} {
+		if err := os.WriteFile(filepath.Join(run.WorktreePath, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "outside T-001's declared Produces/Owns lane") {
+		t.Fatalf("accept error = %v, want lane refusal", err)
+	}
+	if got := mustHead(t, git); got != base {
+		t.Fatalf("default advanced to %s despite lane violation; want %s", got, base)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(detail.Run.PendingData["lane_findings"])
+	if !strings.Contains(string(encoded), "shared.txt") || !strings.Contains(string(encoded), "T-002") {
+		t.Fatalf("lane finding does not name path and owner: %s", encoded)
 	}
 }
 

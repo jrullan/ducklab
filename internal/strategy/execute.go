@@ -93,6 +93,9 @@ type ExecuteParams struct {
 	Gate GateRunner
 	// Diff returns the current working-tree diff, shown to the reviewer.
 	Diff func() (string, error)
+	// InvariantFindings deterministically checks the current candidate against
+	// engine-owned contracts such as the task's declared write lane.
+	InvariantFindings func() ([]conv.Finding, error)
 	// Roster maps a role to the duckling that plays it.
 	Roster map[config.Role]config.DucklingID
 	// InventoryUnaccounted is the lexical coverage gap from an adoption survey.
@@ -1387,6 +1390,23 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 				return result, err
 			}
 			state.Gate = gate
+			if params.InvariantFindings != nil {
+				invariants, invariantErr := params.InvariantFindings()
+				if invariantErr != nil {
+					result.Error = invariantErr
+					return result, invariantErr
+				}
+				if len(invariants) > 0 {
+					state.Gate = "red"
+					findings = append(findings, invariants...)
+					state.NoFindings = false
+					emit(params, "invariant_violation", map[string]interface{}{
+						"round": round, "findings": invariants,
+						"detail": "candidate edits paths outside the task's declared write lane",
+					})
+					log = strings.TrimSpace(log) + "\nengine invariant: candidate edits paths outside the task's declared write lane"
+				}
+			}
 			// round_gate, not gate: the two carry different things under the same
 			// name otherwise. The service's "gate" reports a verification —
 			// which command ran and what it exited with. This reports a round's
@@ -1394,9 +1414,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 			// got whichever happened to come last, and the desktop's gate card
 			// showed the right thing only because of event ordering.
 			emit(params, "round_gate", map[string]interface{}{
-				"result": gate, "round": round, "log": firstNStr(log, 4000),
+				"result": state.Gate, "round": round, "log": firstNStr(log, 4000),
 			})
-			if gate == "red" {
+			if state.Gate == "red" {
 				redGateStreak++
 			} else {
 				redGateStreak = 0
@@ -1738,6 +1758,15 @@ func buildPrompt(turn *Turn, params *ExecuteParams, tr *conv.Transcript, finding
 			b.WriteString(rendered)
 		}
 	case config.RoleReviewer:
+		if params.InvariantFindings != nil {
+			invariants, err := params.InvariantFindings()
+			if err != nil {
+				return "", fmt.Errorf("check candidate invariants: %w", err)
+			}
+			if rendered := conv.RenderFindings(invariants); rendered != "" {
+				b.WriteString("\n\n## Engine-owned blocking invariants\n\nThese findings are deterministic and block the gate; do not downgrade them.\n\n" + rendered)
+			}
+		}
 		if len(params.InventoryUnaccounted) > 0 {
 			b.WriteString("\n\n## Adoption survey gaps\nThe proposal does not account for these inventoried surfaces; critique the named gaps:\n")
 			for _, item := range params.InventoryUnaccounted {

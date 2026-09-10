@@ -385,6 +385,29 @@ func (g *Git) DiffExcluding(excluded ...string) (string, error) {
 	return g.run(append([]string{"diff", "HEAD", "--"}, paths...)...)
 }
 
+// WorkingChangedPaths lists tracked and newly-created paths in the same
+// candidate that DiffExcluding presents to review.
+func (g *Git) WorkingChangedPaths(excluded ...string) ([]string, error) {
+	if _, err := g.run("add", "-AN"); err != nil {
+		return nil, err
+	}
+	paths := []string{".", ":^.ducklab", ":^.ducklab-render-captures"}
+	for _, path := range uniquePaths(excluded) {
+		paths = append(paths, ":^"+path)
+	}
+	out, err := g.run(append([]string{"diff", "--name-only", "HEAD", "--"}, paths...)...)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, path := range strings.Split(strings.TrimSpace(out), "\n") {
+		if path = strings.TrimSpace(path); path != "" {
+			changed = append(changed, path)
+		}
+	}
+	return changed, nil
+}
+
 // DiffStat returns the diff stat, including untracked files.
 func (g *Git) DiffStat() (string, error) {
 	if _, err := g.run("add", "-AN"); err != nil {
