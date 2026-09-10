@@ -28,7 +28,8 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 	if kind == artifact.KindPlan {
 		mechanical = planCompositionFindings(p.ProjectRoot, base, proposed)
 	}
-	contractFindings := referenceContractFindings(kind, proposed, p.ReferenceContracts)
+	contractFindings := artifactContractFindings(kind, proposed)
+	contractFindings = append(contractFindings, referenceContractFindings(kind, proposed, p.ReferenceContracts)...)
 	mechanical = append(mechanical, contractFindings...)
 	baseBody := artifact.RenderBody(base)
 	delta := strings.TrimSpace(ask)
@@ -75,6 +76,27 @@ func reviewComposition(ctx context.Context, p Params, kind artifact.Kind, ask st
 		p.OnEvent("composition_review_completed", completed)
 	}
 	return mechanical, semantic, nil
+}
+
+// artifactContractFindings applies the same public preflight contract to the
+// exact composed candidate. A graph check cannot see malformed commands or
+// artifact values, and semantic review cannot override deterministic grammar.
+func artifactContractFindings(kind artifact.Kind, proposed *artifact.Document) []string {
+	if proposed == nil {
+		return nil
+	}
+	diagnostics, err := artifact.ContractLint(artifact.Render(proposed), kind)
+	if err != nil {
+		return []string{"artifact contract could not parse the composed candidate: " + err.Error()}
+	}
+	var findings []string
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "legacy_grammar" {
+			continue
+		}
+		findings = append(findings, diagnostic.Error())
+	}
+	return findings
 }
 
 func referenceContractFindings(kind artifact.Kind, proposed *artifact.Document, contracts []capability.ReferenceContract) []string {

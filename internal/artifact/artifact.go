@@ -129,6 +129,23 @@ const (
 	ShapeCommand          FieldShape = "one backtick command"
 )
 
+// ValidPlanArtifact reports whether one machine-readable plan artifact names
+// both its kind and value. Every consumer of the plan contract must use this
+// authority; otherwise a value can pass one representation and disappear from
+// lanes, prompts, or gates in the next one.
+func ValidPlanArtifact(item string) bool {
+	kind, value, ok := strings.Cut(strings.TrimSpace(item), ":")
+	if !ok || strings.TrimSpace(value) == "" {
+		return false
+	}
+	switch kind {
+	case "file", "dir", "build-target", "capability":
+		return true
+	default:
+		return false
+	}
+}
+
 // fieldVocabulary is the single authority for parser and syntax-lint field validation.
 var fieldVocabulary = []FieldDefinition{
 	{Canonical: "Run", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Submitted at", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Outcome", Kind: KindIntent, Scope: SectionScope}, {Canonical: "Requirements", Kind: KindIntent, Scope: SectionScope},
@@ -533,8 +550,26 @@ func planTaskContractDiagnostics(task Section) []FieldError {
 				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, remedy))
 			}
 		case ShapeArtifacts:
-			if rule.MinItems > 0 && len(commaItems(value)) < rule.MinItems {
+			items := commaItems(value)
+			if rule.MinItems > 0 && len(items) < rule.MinItems {
 				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "name at least one artifact; `none` is not valid here"))
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(value), "none") {
+				if strings.EqualFold(rule.Canonical, "Consumes") {
+					continue
+				}
+				diagnostics = append(diagnostics, invalidFieldShape(task.ID, rule, "`none` is valid only for Consumes"))
+				continue
+			}
+			for _, item := range strings.Split(value, ",") {
+				item = strings.TrimSpace(strings.Trim(item, "`"))
+				if !ValidPlanArtifact(item) {
+					diagnostics = append(diagnostics, FieldError{
+						ID: task.ID, Key: rule.Canonical, Token: item, Code: "invalid_artifact_reference",
+						Detail: fmt.Sprintf("%s **%s:** contains untyped artifact %q; use file:, dir:, build-target:, or capability:", task.ID, rule.Canonical, item),
+					})
+				}
 			}
 		case ShapeCommand:
 			commands := backtickCommands(strings.Join(block, "\n"))

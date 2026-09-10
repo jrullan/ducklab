@@ -643,7 +643,11 @@ Grammar 2 treats these task fields as a machine-readable contract:
 - `Acceptance probes` is a required flat list with exactly one numbered,
   backtick-delimited command for each acceptance slice, in the same order.
 - `Produces` and `Exercises` are required comma-separated artifact lists with
-  at least one item. `Consumes` is required and may be `none`.
+  at least one item. Every item uses `file:`, `dir:`, `build-target:`, or
+  `capability:` followed by a non-empty value. `Consumes` uses the same typed
+  items, or exactly `none` when the task has no input artifacts. Bare paths and
+  mixed lists containing `none` are invalid because downstream lane and
+  toolchain consumers do not infer an artifact kind.
 - `Verification` is required and contains exactly one backtick-delimited
   command. Put dependent shell steps inside that one span, for example
   `` `generate && test` ``; multiple independent command spans are invalid.
