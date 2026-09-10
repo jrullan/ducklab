@@ -57,6 +57,21 @@ func TestTheFragmentPromptIsAnOutline(t *testing.T) {
 	}
 }
 
+// B-374: plan updates removed the manifest architect but retained its critic.
+// The orphan reviewer then became turn zero and judged an absent manifest
+// before the architect had produced the requested amendment.
+func TestArtifactUpdateScriptDropsTheWholePlanManifestPair(t *testing.T) {
+	script := artifactUpdateScript(artifact.KindPlan.Prefix(), "council", nil)
+	if len(script.Turns) == 0 || script.Turns[0].Role != config.RoleArchitect {
+		t.Fatalf("first plan-update turn = %+v, want architect", script.Turns)
+	}
+	for _, turn := range script.Turns {
+		if turn.Persona == strategy.PersonaPlanManifest || turn.Persona == strategy.PersonaPlanManifestCritic {
+			t.Fatalf("plan update retained first-draft manifest turn: %+v", turn)
+		}
+	}
+}
+
 func TestMergeFragmentConsumesExplicitSectionDeletion(t *testing.T) {
 	base := &artifact.Document{Sections: []artifact.Section{
 		{ID: "REQ-001", Title: "Capture", Body: "keep"},
