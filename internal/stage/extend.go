@@ -77,43 +77,62 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		return nil, err
 	}
 
-	tasks, real := parsePlanItems(raw)
-	if real == 0 {
+	taskFragment, namedReplacements, err := extractNamedPlanReplacements(raw, current)
+	if err != nil {
+		return nil, err
+	}
+	tasks, real := parsePlanItems(taskFragment)
+	if real == 0 && len(namedReplacements) == 0 {
 		// A council revise that stood pat replies in prose; the draft it
 		// stood on is still the amendment. Fall back before refusing.
 		for _, draft := range drafts(p) {
-			if t2, r2 := parsePlanItems(draft); r2 > 0 {
-				tasks, real = t2, r2
+			fragment, replacements, extractErr := extractNamedPlanReplacements(draft, current)
+			if extractErr != nil {
+				return nil, extractErr
+			}
+			if t2, r2 := parsePlanItems(fragment); r2 > 0 || len(replacements) > 0 {
+				tasks, real, namedReplacements = t2, r2, replacements
 				break
 			}
 		}
 	}
-	if real == 0 {
+	if real == 0 && len(namedReplacements) == 0 {
 		// By contract this is the architect judging the change core — or
 		// producing nothing usable. Either way the person gets the words.
 		return nil, fmt.Errorf("the architect added no tasks: %s", clip(raw))
 	}
-	if p.SplitTask == "" {
-		if id := extensionRewritesExistingTask(current, tasks); id != "" {
-			return nil, fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks but must not silently duplicate an existing task", id)
-		}
-	}
 
 	var proposed *artifact.Document
+	var dependencyAmendments []planDependencyAmendment
 	if p.SplitTask != "" {
+		if len(namedReplacements) > 0 {
+			return nil, fmt.Errorf("a task split cannot also replace named plan sections")
+		}
 		proposed, err = mergeSplit(current, p.SplitTask, tasks)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		proposed = mergeExtension(current, tasks)
+		var additions []artifact.Section
+		additions, dependencyAmendments, err = partitionExtensionTasks(current, tasks)
+		if err != nil {
+			return nil, err
+		}
+		proposed = mergeExtension(current, additions)
+		if err = applyDependencyAmendments(current, proposed, additions, dependencyAmendments); err != nil {
+			return nil, err
+		}
+		if proposed, err = applyNamedPlanReplacements(proposed, namedReplacements); err != nil {
+			return nil, err
+		}
 	}
 	proposed.Front.Kind = kind
 	proposed.Front.Project = current.Front.Project
 	if dropped := dedupeSections(proposed); len(dropped) > 0 && p.OnEvent != nil {
 		p.OnEvent("dedupe", map[string]interface{}{"kind": string(kind), "dropped": dropped})
 	}
-	mechanical, semantic, err := reviewComposition(ctx, p, kind, effectiveChange, current, proposed)
+	reviewAsk := extensionReviewAsk(effectiveChange, dependencyAmendments, namedReplacements)
+	mechanical, semantic, err := reviewComposition(ctx, p, kind, reviewAsk, current, proposed)
 	if err != nil {
 		return nil, err
 	}
@@ -124,20 +143,159 @@ func runExtend(ctx context.Context, p Params, current *artifact.Document) (*Resu
 		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
-func extensionRewritesExistingTask(current *artifact.Document, tasks []artifact.Section) string {
-	existing := map[string]bool{}
-	for _, milestone := range current.Sections {
-		for _, task := range milestone.Children {
-			existing[strings.ToUpper(strings.TrimSpace(task.ID))] = true
+type planDependencyAmendment struct {
+	TaskID    string
+	DependsOn []string
+}
+
+// partitionExtensionTasks admits one deliberately narrow mutation of an
+// existing task: a dependency-only stub. Everything else keeps the historical
+// refusal, so an extension cannot smuggle a Work unit or task-body rewrite in
+// beside new work.
+func partitionExtensionTasks(current *artifact.Document, tasks []artifact.Section) ([]artifact.Section, []planDependencyAmendment, error) {
+	existing := map[string]*artifact.Section{}
+	for mi := range current.Sections {
+		for ti := range current.Sections[mi].Children {
+			task := &current.Sections[mi].Children[ti]
+			existing[strings.ToUpper(task.ID)] = task
 		}
 	}
+	var additions []artifact.Section
+	var amendments []planDependencyAmendment
 	for _, task := range tasks {
-		id := strings.ToUpper(strings.TrimSpace(task.ID))
-		if existing[id] {
-			return task.ID
+		old := existing[strings.ToUpper(strings.TrimSpace(task.ID))]
+		if old == nil || looksLikeMilestoneDecl(task) {
+			additions = append(additions, task)
+			continue
+		}
+		if strings.TrimSpace(task.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(old.Title)) {
+			return nil, nil, existingTaskRewriteError(task.ID)
+		}
+		depends := task.Field("depends on")
+		if strings.TrimSpace(depends) == "" || !dependencyOnlyStub(task.Body) {
+			return nil, nil, existingTaskRewriteError(task.ID)
+		}
+		amendments = append(amendments, planDependencyAmendment{TaskID: old.ID, DependsOn: splitPlanItems(depends)})
+	}
+	return additions, amendments, nil
+}
+
+func existingTaskRewriteError(id string) error {
+	return fmt.Errorf("plan extension tried to rewrite existing task %s; extension may add tasks and dependency-only stubs but must not silently rewrite existing work", id)
+}
+
+func dependencyOnlyStub(body string) bool {
+	seen := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), "**depends on:**") && !seen {
+			seen = true
+			continue
+		}
+		return false
+	}
+	return seen
+}
+
+func splitPlanItems(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(strings.Trim(item, "`")); item != "" {
+			out = append(out, strings.ToUpper(item))
 		}
 	}
-	return ""
+	return out
+}
+
+func applyDependencyAmendments(current, proposed *artifact.Document, additions []artifact.Section, amendments []planDependencyAmendment) error {
+	if len(amendments) == 0 {
+		return nil
+	}
+	currentTasks := map[string]*artifact.Section{}
+	for mi := range current.Sections {
+		for ti := range current.Sections[mi].Children {
+			task := &current.Sections[mi].Children[ti]
+			currentTasks[strings.ToUpper(task.ID)] = task
+		}
+	}
+	proposedTasks := map[string]*artifact.Section{}
+	for mi := range proposed.Sections {
+		for ti := range proposed.Sections[mi].Children {
+			task := &proposed.Sections[mi].Children[ti]
+			proposedTasks[strings.ToUpper(task.ID)] = task
+		}
+	}
+	placeholder := map[string]string{}
+	var existing []artifact.Section
+	for _, milestone := range current.Sections {
+		existing = append(existing, milestone.Children...)
+	}
+	for _, task := range additions {
+		if looksLikeMilestoneDecl(task) {
+			continue
+		}
+		realID := fmt.Sprintf("T-%03d", NextFree(existing, "T"))
+		existing = append(existing, artifact.Section{ID: realID})
+		key := strings.ToUpper(task.ID)
+		if placeholder[key] == "" {
+			placeholder[key] = realID
+		}
+	}
+	for _, amendment := range amendments {
+		old, target := currentTasks[strings.ToUpper(amendment.TaskID)], proposedTasks[strings.ToUpper(amendment.TaskID)]
+		if old == nil || target == nil {
+			return fmt.Errorf("dependency amendment target %s does not exist", amendment.TaskID)
+		}
+		deps := splitPlanItems(old.Field("depends on"))
+		seen := map[string]bool{}
+		for _, dep := range deps {
+			seen[dep] = true
+		}
+		added := 0
+		for _, dep := range amendment.DependsOn {
+			if real := placeholder[dep]; real != "" {
+				dep = real
+			}
+			dep = strings.ToUpper(dep)
+			if dep == strings.ToUpper(target.ID) || proposedTasks[dep] == nil {
+				return fmt.Errorf("dependency amendment for %s names unknown or self dependency %s", target.ID, dep)
+			}
+			if !seen[dep] {
+				seen[dep] = true
+				deps = append(deps, dep)
+				added++
+			}
+		}
+		if added == 0 {
+			return fmt.Errorf("dependency amendment for %s adds no dependency", target.ID)
+		}
+		setTaskScalarField(target, "Depends on", strings.Join(deps, ", "))
+	}
+	return nil
+}
+
+func setTaskScalarField(task *artifact.Section, field, value string) {
+	fieldPrefix := "**" + field + ":**"
+	lines := strings.Split(task.Body, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), strings.ToLower(fieldPrefix)) {
+			lines[i] = fieldPrefix + " " + value
+			task.Body = strings.TrimSpace(strings.Join(lines, "\n"))
+			if task.Fields == nil {
+				task.Fields = map[string]string{}
+			}
+			task.Fields[strings.ToLower(field)] = value
+			return
+		}
+	}
+	task.Body = strings.TrimSpace(task.Body + "\n\n" + fieldPrefix + " " + value)
+	if task.Fields == nil {
+		task.Fields = map[string]string{}
+	}
+	task.Fields[strings.ToLower(field)] = value
 }
 
 func extendChange(p Params) string {
@@ -158,6 +316,152 @@ func effectiveExtendChange(p Params) string {
 	}
 	return "Original requested change:\n" + change +
 		"\n\nOperator revisions, in order (each authoritative where it changes or narrows what precedes it):\n" + revision
+}
+
+type namedPlanReplacement struct {
+	Heading  string
+	Markdown string
+}
+
+func extensionReviewAsk(change string, dependencies []planDependencyAmendment, replacements []namedPlanReplacement) string {
+	var scope []string
+	for _, amendment := range dependencies {
+		scope = append(scope, amendment.TaskID+" Depends on only")
+	}
+	for _, replacement := range replacements {
+		scope = append(scope, "## "+replacement.Heading)
+	}
+	if len(scope) == 0 {
+		return change
+	}
+	return strings.TrimSpace(change) + "\n\nEngine-authorized changes to existing plan content: " + strings.Join(scope, "; ") + ". No other existing task or named section may change."
+}
+
+var planIDHeading = regexp.MustCompile(`^[A-Z][A-Z0-9_-]*-\d+(?:\s|$)`)
+
+type planHeadingBlock struct {
+	Heading    string
+	Start, End int
+}
+
+// namedPlanHeadingBlocks finds human-facing H2 sections embedded in a plan's
+// preserved Markdown. A following task H3 also ends the named section: plans
+// commonly place derived tables between two tasks even though only M/T ids are
+// indexed by the artifact parser.
+func namedPlanHeadingBlocks(text string) []planHeadingBlock {
+	lines := strings.Split(text, "\n")
+	var starts []planHeadingBlock
+	inFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || !strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
+			continue
+		}
+		heading := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+		if !planIDHeading.MatchString(strings.ToUpper(heading)) {
+			starts = append(starts, planHeadingBlock{Heading: heading, Start: i})
+		}
+	}
+	for i := range starts {
+		end := len(lines)
+		inFence = false
+		for j := starts[i].Start + 1; j < len(lines); j++ {
+			trimmed := strings.TrimSpace(lines[j])
+			if strings.HasPrefix(trimmed, "```") {
+				inFence = !inFence
+				continue
+			}
+			if inFence {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "## ") && !strings.HasPrefix(trimmed, "### ") {
+				end = j
+				break
+			}
+			if strings.HasPrefix(trimmed, "### ") && planIDHeading.MatchString(strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(trimmed, "### ")))) {
+				end = j
+				break
+			}
+		}
+		starts[i].End = end
+	}
+	return starts
+}
+
+func extractNamedPlanReplacements(raw string, current *artifact.Document) (string, []namedPlanReplacement, error) {
+	known := map[string]int{}
+	for _, block := range namedPlanHeadingBlocks(artifact.RenderBody(current)) {
+		known[strings.ToLower(block.Heading)]++
+	}
+	blocks := namedPlanHeadingBlocks(raw)
+	if len(blocks) == 0 {
+		return raw, nil, nil
+	}
+	lines := strings.Split(raw, "\n")
+	remove := make([]bool, len(lines))
+	var replacements []namedPlanReplacement
+	seen := map[string]bool{}
+	for _, block := range blocks {
+		key := strings.ToLower(block.Heading)
+		if known[key] != 1 {
+			return "", nil, fmt.Errorf("plan extension cannot replace named section %q: expected exactly one existing H2 with that title", block.Heading)
+		}
+		if seen[key] {
+			return "", nil, fmt.Errorf("plan extension repeats named section replacement %q", block.Heading)
+		}
+		seen[key] = true
+		for i := block.Start; i < block.End; i++ {
+			remove[i] = true
+		}
+		replacements = append(replacements, namedPlanReplacement{
+			Heading: block.Heading, Markdown: strings.TrimSpace(strings.Join(lines[block.Start:block.End], "\n")),
+		})
+	}
+	var kept []string
+	for i, line := range lines {
+		if !remove[i] {
+			kept = append(kept, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n")), replacements, nil
+}
+
+func applyNamedPlanReplacements(doc *artifact.Document, replacements []namedPlanReplacement) (*artifact.Document, error) {
+	if len(replacements) == 0 {
+		return doc, nil
+	}
+	body := artifact.RenderBody(doc)
+	for _, replacement := range replacements {
+		blocks := namedPlanHeadingBlocks(body)
+		match := -1
+		for i, block := range blocks {
+			if strings.EqualFold(block.Heading, replacement.Heading) {
+				if match >= 0 {
+					return nil, fmt.Errorf("plan contains more than one named section %q", replacement.Heading)
+				}
+				match = i
+			}
+		}
+		if match < 0 {
+			return nil, fmt.Errorf("plan has no named section %q to replace", replacement.Heading)
+		}
+		lines := strings.Split(body, "\n")
+		block := blocks[match]
+		updated := append([]string{}, lines[:block.Start]...)
+		updated = append(updated, strings.Split(replacement.Markdown, "\n")...)
+		updated = append(updated, lines[block.End:]...)
+		body = strings.Join(updated, "\n")
+	}
+	parsed, err := artifact.Parse(body, artifact.KindPlan)
+	if err != nil {
+		return nil, err
+	}
+	parsed.Front = doc.Front
+	return parsed, nil
 }
 
 // normalizeFragment makes the architect's fragment parseable as a plan: the
@@ -208,6 +512,13 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		}
 	}
 	b.WriteString("\n")
+	if blocks := namedPlanHeadingBlocks(artifact.RenderBody(plan)); len(blocks) > 0 {
+		b.WriteString("## Named plan sections you may replace\n\n")
+		for _, block := range blocks {
+			b.WriteString("- ## " + block.Heading + "\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if spec, sErr := artifact.Load(projectRoot, artifact.KindSpec); sErr == nil && spec != nil && len(spec.Sections) > 0 {
 		b.WriteString("## Spec sections you may wire to\n\n")
@@ -229,6 +540,8 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		"real ids are assigned by the engine. When one of these tasks consumes what another delivers, say so " +
 		"with **Depends on:** naming the placeholder (e.g. `**Depends on:** T-900`); the engine rewrites it to " +
 		"the real id. Never depend on a task that comes later in your own list.\n" +
+		"- To make an EXISTING task wait for new work, append a stub: `## T-NNN — <exact current title>` plus only `**Depends on:**` with old dependencies and the new placeholder. Other changes are refused.\n" +
+		"- To replace a listed named section, emit its exact `## <heading>` and complete body. H3 is reserved for task ids.\n" +
 		"- Never invent SPEC ids; wire only to the list above.\n" +
 		"- This amendment cannot remove tasks. Retire superseded tasks separately with task_remove.\n" +
 		"- If the change alters what the product IS — its requirements — return NO sections: " +
@@ -323,7 +636,9 @@ func mergeSplit(current *artifact.Document, target string, tasks []artifact.Sect
 func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artifact.Document {
 	out := *current
 	out.Sections = make([]artifact.Section, len(current.Sections))
-	copy(out.Sections, current.Sections)
+	for i := range current.Sections {
+		out.Sections[i] = clonePlanSection(current.Sections[i])
+	}
 
 	var existing []artifact.Section
 	for _, m := range out.Sections {
@@ -413,6 +728,23 @@ func mergeExtension(current *artifact.Document, tasks []artifact.Section) *artif
 	}
 	rewriteDependsOn(&out, placedIDs, placeholder)
 	return &out
+}
+
+func clonePlanSection(section artifact.Section) artifact.Section {
+	out := section
+	out.Implements = append([]string(nil), section.Implements...)
+	out.Owns = append([]string(nil), section.Owns...)
+	if section.Fields != nil {
+		out.Fields = make(map[string]string, len(section.Fields))
+		for key, value := range section.Fields {
+			out.Fields[key] = value
+		}
+	}
+	out.Children = make([]artifact.Section, len(section.Children))
+	for i := range section.Children {
+		out.Children[i] = clonePlanSection(section.Children[i])
+	}
+	return out
 }
 
 var placeholderRef = regexp.MustCompile(`\bT-9\d\d\b`)
