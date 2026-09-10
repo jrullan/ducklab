@@ -185,19 +185,28 @@ func existingTaskRewriteError(id string) error {
 }
 
 func dependencyOnlyStub(body string) bool {
-	seen := false
+	seenDepends := false
+	seenMilestone := false
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(trimmed), "**depends on:**") && !seen {
-			seen = true
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "**depends on:**") && !seenDepends {
+			seenDepends = true
+			continue
+		}
+		// The fragment contract asks every emitted task for Milestone. It is
+		// harmless on an existing-task stub because the engine applies only the
+		// dependency delta and preserves the task's actual placement.
+		if strings.HasPrefix(lower, "**milestone:**") && !seenMilestone {
+			seenMilestone = true
 			continue
 		}
 		return false
 	}
-	return seen
+	return seenDepends
 }
 
 func splitPlanItems(value string) []string {
@@ -392,9 +401,47 @@ func namedPlanHeadingBlocks(text string) []planHeadingBlock {
 	return starts
 }
 
+// replaceableNamedPlanHeadingBlocks excludes headings owned by structured
+// task bodies. The permissive artifact parser retains unindexed H2 Markdown in
+// the preceding task, so mere Body membership cannot distinguish a later
+// global table from task prose. Bug-promoted tasks provide the missing
+// boundary themselves: their Reported/Triage subsections make every H2 in
+// that task body task-owned. Ordinary standalone H2 sections remain eligible.
+func replaceableNamedPlanHeadingBlocks(doc *artifact.Document) []planHeadingBlock {
+	if doc == nil {
+		return nil
+	}
+	taskBodyHeadings := map[string]bool{}
+	for _, milestone := range doc.Sections {
+		for _, task := range milestone.Children {
+			blocks := namedPlanHeadingBlocks(task.Body)
+			structuredTaskBody := false
+			for _, block := range blocks {
+				if strings.EqualFold(block.Heading, "Reported") || strings.EqualFold(block.Heading, "Triage") {
+					structuredTaskBody = true
+					break
+				}
+			}
+			if !structuredTaskBody {
+				continue
+			}
+			for _, block := range blocks {
+				taskBodyHeadings[strings.ToLower(block.Heading)] = true
+			}
+		}
+	}
+	var replaceable []planHeadingBlock
+	for _, block := range namedPlanHeadingBlocks(artifact.RenderBody(doc)) {
+		if !taskBodyHeadings[strings.ToLower(block.Heading)] {
+			replaceable = append(replaceable, block)
+		}
+	}
+	return replaceable
+}
+
 func extractNamedPlanReplacements(raw string, current *artifact.Document) (string, []namedPlanReplacement, error) {
 	known := map[string]int{}
-	for _, block := range namedPlanHeadingBlocks(artifact.RenderBody(current)) {
+	for _, block := range replaceableNamedPlanHeadingBlocks(current) {
 		known[strings.ToLower(block.Heading)]++
 	}
 	blocks := namedPlanHeadingBlocks(raw)
@@ -407,6 +454,9 @@ func extractNamedPlanReplacements(raw string, current *artifact.Document) (strin
 	seen := map[string]bool{}
 	for _, block := range blocks {
 		key := strings.ToLower(block.Heading)
+		if known[key] == 0 {
+			continue
+		}
 		if known[key] != 1 {
 			return "", nil, fmt.Errorf("plan extension cannot replace named section %q: expected exactly one existing H2 with that title", block.Heading)
 		}
@@ -436,7 +486,7 @@ func applyNamedPlanReplacements(doc *artifact.Document, replacements []namedPlan
 	}
 	body := artifact.RenderBody(doc)
 	for _, replacement := range replacements {
-		blocks := namedPlanHeadingBlocks(body)
+		blocks := replaceableNamedPlanHeadingBlocks(doc)
 		match := -1
 		for i, block := range blocks {
 			if strings.EqualFold(block.Heading, replacement.Heading) {
@@ -512,7 +562,7 @@ func buildExtendPrompt(projectRoot string, plan *artifact.Document, change, prio
 		}
 	}
 	b.WriteString("\n")
-	if blocks := namedPlanHeadingBlocks(artifact.RenderBody(plan)); len(blocks) > 0 {
+	if blocks := replaceableNamedPlanHeadingBlocks(plan); len(blocks) > 0 {
 		b.WriteString("## Named plan sections you may replace\n\n")
 		for _, block := range blocks {
 			b.WriteString("- ## " + block.Heading + "\n")

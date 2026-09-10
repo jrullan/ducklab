@@ -180,7 +180,7 @@ func TestExtendAddsANewTaskAndAppendsItsRealIDToAnExistingDependency(t *testing.
 				return `{"verdict":"approve","findings":[]}`, nil
 			}
 			return "## T-900 — New prerequisite\n\n**Milestone:** M-001\n**Implements:** SPEC-001\n\nBuild it.\n\n" +
-				"## T-002 — Existing consumer\n\n**Depends on:** T-001, T-900\n", nil
+				"## T-002 — Existing consumer\n\n**Milestone:** M-001\n**Depends on:** T-001, T-900\n", nil
 		},
 	}, current)
 	if err != nil {
@@ -242,6 +242,45 @@ func TestExtendReplacesAnExistingNamedPlanSectionWithoutSwallowingTasks(t *testi
 	}
 	if !strings.Contains(reviewPrompt, "## Traceability closed") || !strings.Contains(reviewPrompt, "Engine-authorized changes") {
 		t.Fatalf("reviewer was not told the named-section scope:\n%s", reviewPrompt)
+	}
+}
+
+// B-375: bug-promoted tasks use human H2 subsections in their bodies. They
+// are not global plan sections, even when hundreds of tasks repeat the same
+// Reported/Triage headings, and must never enter the replacement vocabulary.
+func TestExtendKeepsTaskBodyHeadingsOutOfNamedSectionReplacements(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Bugs\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Bugs\n\n"+
+			"### T-001 — First bug\n\nFirst body.\n\n## Reported\n\nFirst report.\n\n## Triage\n\nFirst triage.\n\n"+
+			"### T-002 — Second bug\n\nSecond body.\n\n## Reported\n\nSecond report.\n\n## Triage\n\nSecond triage.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var architectPrompt string
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-promoted-bug", Mode: "solo",
+		Extend: "add another promoted bug task",
+		Execute: func(_ context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			architectPrompt = prompt
+			return "## T-900 — Third bug\n\n**Milestone:** M-001\n**Implements:** SPEC-001\n\n" +
+				"## Reported\n\nThird report.\n\n## Triage\n\nThird triage.\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatalf("task-body headings were mistaken for named replacements: %v", err)
+	}
+	if strings.Contains(architectPrompt, "Named plan sections you may replace") || strings.Contains(architectPrompt, "- ## Reported") {
+		t.Fatalf("task-body headings leaked into the replacement prompt:\n%s", architectPrompt)
+	}
+	third := res.Proposed.Section("T-003")
+	if third == nil || !strings.Contains(third.Body, "Reported") || !strings.Contains(third.Body, "Third report") {
+		t.Fatalf("promoted-bug body did not merge unchanged: %+v", third)
 	}
 }
 
