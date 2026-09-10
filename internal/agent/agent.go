@@ -1176,10 +1176,14 @@ Each value names what you inspected in the final code. Bare words such as "ok", 
 
 The accepted task has %d executable acceptance slices. Your JSON object MUST
 also contain "acceptance_evidence", with exactly one entry for every slice in
-order: [{"slice":1,"status":"pass|fail","evidence":"concrete observed probe output or behavior"}].
+order: [{"slice":1,"status":"pass|fail","inputs":"exact fixture, registry, selection and other inputs exercised","evidence":"concrete observed probe output or behavior"}].
 Run or inspect the authoritative probes and account for every slice. An
 approval requires every entry to pass; bare words such as "ok", "verified",
-or "green" are not concrete evidence.`, len(ectx.TaskAcceptanceProbes))
+or "green" are not concrete evidence. Compare each probe to the accepted task:
+if the test substitutes, filters, disables, clears, retains, or edits a named
+fixture, corpus case, registry, selection, or input, report a finding unless
+that exact narrowing is required by the acceptance slice. A passing test over
+different or reduced inputs does not satisfy the slice.`, len(ectx.TaskAcceptanceProbes))
 	}
 	if (turn.Persona == "critic" || turn.Persona == "plan_manifest_critic") && turn.Role == config.RoleReviewer {
 		rolePrompt = criticPrompt
@@ -1354,6 +1358,13 @@ Method:
    not pause. Consulting once beats twenty more failed calls.
 6. When you finish, reply with a 3-line summary: what changed, why, and what you
    did not do.
+
+The task's named fixtures, corpus cases, registries, selections, and files are
+part of its contract. Do not narrow, filter, clear, disable, retain a subset of,
+or substitute those inputs merely to make a probe pass. That is a blocker to report
+with ask_human or ask_advisor, not a fix. A focused test may select only
+the exact cases the acceptance slice names, but it must exercise those cases
+with the registry and inputs the task requires.
 
 If the task underdetermines a decision a user would notice — a boundary (where
 does a "week" start?), a format, an external contract — do not guess and do not

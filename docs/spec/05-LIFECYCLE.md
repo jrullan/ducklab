@@ -439,9 +439,12 @@ project gate, stop at the first non-zero exit, and are persisted in the run's
 harness profile. They turn observable behavior such as CLI output and exit
 status into gate evidence without teaching the core about a project type.
 When probes exist, the reviewer verdict must contain one concrete
-`acceptance_evidence` entry per slice/probe. Missing or duplicate slice numbers,
-generic evidence, and an approval whose evidence contains a failed slice are
-contract errors repaired before the verdict can steer the run.
+`acceptance_evidence` entry per slice/probe. Each entry names the exact fixture,
+registry, selection, and other inputs exercised as well as the observed output.
+Missing or duplicate slice numbers, generic evidence or inputs, and an approval
+whose evidence contains a failed slice are contract errors repaired before the
+verdict can steer the run. A probe that substitutes or narrows a resource named
+by the accepted task does not satisfy the slice merely because it exits zero.
 
 Before submitting a hand-written requirements, specification, or plan,
 `ducklab artifact lint --kind <requirements|spec|plan> <file>` preflights its

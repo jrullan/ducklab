@@ -669,7 +669,7 @@ func (s *Service) dispatchMode(ctx context.Context, mc *modeContext) error {
 			if err != nil {
 				return nil, err
 			}
-			return taskLaneFindings(mc.entry.Path, mc.req.TaskID, paths), nil
+			return taskCandidateInvariantFindings(root, mc.req.TaskID, paths), nil
 		},
 		OnEvent: func(kind string, data map[string]interface{}) {
 			mc.rs.writer.AppendEvent(kind, data)
