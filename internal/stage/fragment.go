@@ -151,11 +151,11 @@ func runFragment(ctx context.Context, p Params, base *artifact.Document, ask str
 		CompositionMechanical: mechanical, CompositionReview: semantic}, nil
 }
 
-// artifactUpdateScript removes plan's topology-manifest turn from updates.
+// artifactUpdateScript removes plan's topology-manifest pair from updates.
 // The manifest constrains a first plan before Markdown exists. A fragment or
-// section-wise revision already has a checkpointed topology; seating that
-// persona again gives one turn two incompatible jobs (JSON manifest and
-// Markdown fragment) and fails before the actual edit can run.
+// section-wise revision already has a checkpointed topology; retaining either
+// half of the pair makes the critic judge a manifest nobody drafted or gives
+// the architect two incompatible jobs before the actual edit can run.
 func artifactUpdateScript(prefix, mode string, critics []config.DucklingID) *strategy.Script {
 	script := strategy.ArtifactScript(prefix, mode, critics)
 	if prefix != artifact.KindPlan.Prefix() {
@@ -163,7 +163,7 @@ func artifactUpdateScript(prefix, mode string, critics []config.DucklingID) *str
 	}
 	turns := script.Turns[:0]
 	for _, turn := range script.Turns {
-		if turn.Persona != strategy.PersonaPlanManifest {
+		if turn.Persona != strategy.PersonaPlanManifest && turn.Persona != strategy.PersonaPlanManifestCritic {
 			turns = append(turns, turn)
 		}
 	}
