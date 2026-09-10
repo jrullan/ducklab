@@ -476,6 +476,13 @@ where the commit carries a `package.json`, `.venv` where it carries a Python
 marker (`pyproject.toml`, `requirements.txt`, `setup.py`, `setup.cfg`,
 `pytest.ini`, `tox.ini`, `Pipfile`) — the same custody rule the gate's
 environment scrub follows: isolate engine state, never the tools of the trade.
+The gate runs with `HOME` (and the XDG/Windows equivalents) pointed at a
+fresh temporary directory; toolchain state rooted in the person's home is
+kept reachable through `GOPATH`, `GOMODCACHE`, `GOCACHE`, `npm_config_cache`,
+`RUSTUP_HOME` and `CARGO_HOME`, each defaulted from the real home when unset
+and inherited verbatim when set. A gate whose output shows a missing toolchain
+carries a `gate environment:` line naming this, so a seat does not try to
+configure the host from inside the run.
 Build products are never borrowed. This table is the zero-config default; a
 declared `[verify] link_deps` / `setup` (B-061) is the general form.
 
