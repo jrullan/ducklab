@@ -81,6 +81,21 @@ func TestAdvisorStripsDeliberationAndKeepsTerseAdvice(t *testing.T) {
 	}
 }
 
+func TestEveryAdvisorPromptTreatsTheTaskLaneAsAHardBoundary(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"paused question": advisorSystemPrompt,
+		"inline consult":  rubberDuckSystemPrompt,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, want := range []string{"accepted task lane is a hard boundary", "Never recommend writing outside it", "request a plan amendment"} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("advisor prompt missing %q:\n%s", want, prompt)
+				}
+			}
+		})
+	}
+}
+
 // A question pauses before its advisor call completes, but that call still
 // belongs to the paused run rather than disappearing from its per-duckling spend.
 func TestAdvisorSentenceCountUsesProseBoundaries(t *testing.T) {
