@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jrullan/ducklab/internal/config"
@@ -45,15 +46,16 @@ type ProviderView struct {
 
 // DucklingView is a duckling as a client sees it, for editing.
 type DucklingView struct {
-	ID       string                `json:"id"`
-	Provider string                `json:"provider"`
-	Model    string                `json:"model"`
-	Tier     string                `json:"tier,omitempty"`
-	Roles    []string              `json:"roles,omitempty"`
-	Notes    string                `json:"notes,omitempty"`
-	Params   config.SamplingParams `json:"params"`
-	Caps     config.Caps           `json:"caps"`
-	Cost     config.Cost           `json:"cost"`
+	ID                 string                `json:"id"`
+	Provider           string                `json:"provider"`
+	Model              string                `json:"model"`
+	OpenRouterProvider string                `json:"openrouter_provider,omitempty"`
+	Tier               string                `json:"tier,omitempty"`
+	Roles              []string              `json:"roles,omitempty"`
+	Notes              string                `json:"notes,omitempty"`
+	Params             config.SamplingParams `json:"params"`
+	Caps               config.Caps           `json:"caps"`
+	Cost               config.Cost           `json:"cost"`
 	// Color is one of the eight series slots, or 0 for "decide from the fleet".
 	Color int `json:"color,omitempty"`
 	// Fallback is the declared stand-in for provider weather.
@@ -65,16 +67,17 @@ type DucklingView struct {
 // --color 0 must be able to restore automatic colour selection, and neither
 // may erase unrelated capabilities that the caller did not repeat.
 type DucklingUpdate struct {
-	Provider *string               `json:"provider,omitempty"`
-	Model    *string               `json:"model,omitempty"`
-	Tier     *string               `json:"tier,omitempty"`
-	Roles    *[]string             `json:"roles,omitempty"`
-	Notes    *string               `json:"notes,omitempty"`
-	Params   *SamplingParamsUpdate `json:"params,omitempty"`
-	Caps     *CapsUpdate           `json:"caps,omitempty"`
-	Cost     *CostUpdate           `json:"cost,omitempty"`
-	Color    *int                  `json:"color,omitempty"`
-	Fallback *string               `json:"fallback,omitempty"`
+	Provider           *string               `json:"provider,omitempty"`
+	Model              *string               `json:"model,omitempty"`
+	OpenRouterProvider *string               `json:"openrouter_provider,omitempty"`
+	Tier               *string               `json:"tier,omitempty"`
+	Roles              *[]string             `json:"roles,omitempty"`
+	Notes              *string               `json:"notes,omitempty"`
+	Params             *SamplingParamsUpdate `json:"params,omitempty"`
+	Caps               *CapsUpdate           `json:"caps,omitempty"`
+	Cost               *CostUpdate           `json:"cost,omitempty"`
+	Color              *int                  `json:"color,omitempty"`
+	Fallback           *string               `json:"fallback,omitempty"`
 }
 
 type SamplingParamsUpdate struct {
@@ -312,10 +315,15 @@ func (s *Service) DucklingSet(id string, view DucklingView) error {
 	if view.Fallback == id {
 		return fmt.Errorf("duckling %q cannot be its own fallback", id)
 	}
+	providerConfig := s.cfg.Providers[config.ProviderID(view.Provider)]
+	if view.OpenRouterProvider != "" && !isOpenRouter(providerConfig) {
+		return fmt.Errorf("duckling %q can select an OpenRouter endpoint only when its provider is OpenRouter", id)
+	}
 	d := config.Duckling{
 		Provider: config.ProviderID(view.Provider), Model: view.Model,
-		Tier:  config.ModelTier(view.Tier),
-		Roles: roles, Notes: view.Notes,
+		OpenRouterProvider: strings.TrimSpace(view.OpenRouterProvider),
+		Tier:               config.ModelTier(view.Tier),
+		Roles:              roles, Notes: view.Notes,
 		Params: view.Params, Caps: view.Caps, Cost: view.Cost,
 		Color: view.Color, Fallback: view.Fallback,
 	}
@@ -391,8 +399,9 @@ func (s *Service) DucklingGet(ctx context.Context, id string) (*DucklingView, er
 	}
 	return &DucklingView{
 		ID: id, Provider: string(d.Provider), Model: d.Model,
-		Tier:  string(d.Tier),
-		Roles: roles, Notes: d.Notes,
+		OpenRouterProvider: d.OpenRouterProvider,
+		Tier:               string(d.Tier),
+		Roles:              roles, Notes: d.Notes,
 		Params: d.Params, Caps: d.Caps, Cost: d.Cost,
 		Color: d.Color, Fallback: d.Fallback,
 	}, nil
@@ -456,6 +465,34 @@ type modelInformer interface {
 	ModelInfo(ctx context.Context, model string) (*provider.ModelInfo, error)
 }
 
+type modelEndpointInformer interface {
+	ModelEndpoints(ctx context.Context, model string) ([]provider.ModelEndpoint, error)
+}
+
+// ProviderModelEndpoints returns the concrete serving choices for one
+// OpenRouter model. Other OpenAI-compatible providers do not have this
+// routing concept, so the route refuses them rather than returning a
+// misleading empty dropdown.
+func (s *Service) ProviderModelEndpoints(ctx context.Context, providerID, model string) ([]provider.ModelEndpoint, error) {
+	s.cfgMu.RLock()
+	configured, exists := s.cfg.Providers[config.ProviderID(providerID)]
+	prov := s.providers[config.ProviderID(providerID)]
+	s.cfgMu.RUnlock()
+	if !exists {
+		return nil, fmt.Errorf("provider %q does not exist", providerID)
+	}
+	if !isOpenRouter(configured) {
+		return nil, fmt.Errorf("provider %q is not OpenRouter", providerID)
+	}
+	informer, ok := prov.(modelEndpointInformer)
+	if !ok {
+		return nil, fmt.Errorf("provider %q cannot list model endpoints", providerID)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return informer.ModelEndpoints(ctx, model)
+}
+
 func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	needsContext := view.Caps.ContextTokens == nil || *view.Caps.ContextTokens <= 0
 	needsCost := view.Cost.InputPerMTok == 0 && view.Cost.OutputPerMTok == 0
@@ -473,6 +510,36 @@ func (s *Service) enrichFromProvider(view DucklingView) DucklingView {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if view.OpenRouterProvider != "" {
+		if endpoints, ok := prov.(modelEndpointInformer); ok {
+			if choices, err := endpoints.ModelEndpoints(ctx, view.Model); err == nil {
+				for _, choice := range choices {
+					if choice.Tag != view.OpenRouterProvider {
+						continue
+					}
+					if needsContext && choice.ContextTokens > 0 {
+						n := choice.ContextTokens
+						view.Caps.ContextTokens = &n
+						needsContext = false
+					}
+					if needsCost && (choice.InputPerMTok > 0 || choice.OutputPerMTok > 0) {
+						view.Cost.InputPerMTok = choice.InputPerMTok
+						view.Cost.OutputPerMTok = choice.OutputPerMTok
+						needsCost = false
+					}
+					if needsOutput && choice.MaxOutputTokens > 0 {
+						n := choice.MaxOutputTokens
+						view.Params.MaxTokens = &n
+						needsOutput = false
+					}
+					break
+				}
+			}
+		}
+	}
+	if !needsContext && !needsCost && !needsOutput {
+		return view
+	}
 	info, err := informer.ModelInfo(ctx, view.Model)
 	if err != nil || info == nil {
 		return view

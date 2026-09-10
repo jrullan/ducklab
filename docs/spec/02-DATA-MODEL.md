@@ -173,6 +173,10 @@ output_per_mtok = 0.0
 [duckling.pato-nube]
 provider = "openrouter"
 model    = "qwen/qwen3.6-35b-a3b"
+# Optional concrete endpoint tag from OpenRouter's model endpoint catalog.
+# Empty means OpenRouter chooses. When set, Ducklab sends provider.only with
+# fallbacks disabled so price, quantization, and policy cannot change silently.
+openrouter_provider = "deepinfra/fp8"
 roles    = ["implementer", "reviewer", "judge"]
 
 [duckling.pato-nube.params]
@@ -191,6 +195,14 @@ args    = ["--stdio"]
 env     = { }
 enabled = true
 ```
+
+The Ducklings editor obtains the valid `openrouter_provider` values from
+OpenRouter's per-model endpoint API. It displays the endpoint's declared price
+and quantization, adopts that price when selected, and shows only data-policy
+facts exposed programmatically. A ZDR catalog match is shown as zero retention;
+training, retention, or moderation absent from the API remain explicitly
+unknown. If discovery is unavailable, the editor accepts the endpoint tag as
+text rather than making configuration impossible.
 
 Calls/reply resolve as global → phase → role → small-seat pair reserve → run.
 The reserve applies only when the effective implementer actually seated in a

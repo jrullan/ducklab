@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import type { Duckling, EngineClient, ProviderView } from "../api/client";
+import type { Duckling, EngineClient, ModelEndpoint, ProviderView } from "../api/client";
 import { StatusChip } from "../components/StatusChip";
 import { DuckAvatar } from "../components/DuckAvatar";
 import { money } from "../lib/format";
@@ -37,6 +37,20 @@ const backendHint = (provider: Pick<ProviderView, "id" | "base_url">): string | 
   if (/vllm/i.test(name)) return "vLLM handles several";
   return undefined;
 };
+const isOpenRouterProvider = (provider?: ProviderView): boolean => {
+  if (!provider) return false;
+  try {
+    return /(^|\.)openrouter\.ai$/i.test(new URL(provider.base_url).hostname);
+  } catch {
+    return false;
+  }
+};
+const policyLabel = (
+  value: boolean | undefined,
+  unknown: string,
+  yes = "yes",
+  no = "no",
+): string => value === undefined ? unknown : value ? yes : no;
 
 /**
  * `projectId` remains in the public props for callers that render the fleet
@@ -250,6 +264,9 @@ function DucklingCard({
       <dl className="mt-2 text-sm text-ink-secondary">
         <div className="flex justify-between gap-2"><dt className="shrink-0">provider</dt><dd className="min-w-0 break-all text-right">{d.provider}</dd></div>
         <div className="flex justify-between gap-2"><dt className="shrink-0">model</dt><dd className="min-w-0 break-all text-right font-mono">{d.model}</dd></div>
+        {d.openrouter_provider && (
+          <div className="flex justify-between gap-2"><dt className="shrink-0">OpenRouter endpoint</dt><dd className="min-w-0 break-all text-right font-mono">{d.openrouter_provider}</dd></div>
+        )}
         <div className="flex justify-between">
           <dt>tools</dt>
           <dd>{d.caps?.native_tools ? "native" : "text protocol"}</dd>
@@ -571,6 +588,11 @@ function DucklingForm({
   const [id, setId] = useState(existing?.id ?? "");
   const [provider, setProvider] = useState(existing?.provider ?? providers[0]?.id ?? "");
   const [model, setModel] = useState(existing?.model ?? "");
+  const [openRouterProvider, setOpenRouterProvider] = useState(existing?.openrouter_provider ?? "");
+  const [modelEndpoints, setModelEndpoints] = useState<ModelEndpoint[]>([]);
+  const [endpointFailure, setEndpointFailure] = useState("");
+  const [endpointsLoading, setEndpointsLoading] = useState(false);
+  const [endpointsLoaded, setEndpointsLoaded] = useState(false);
   const [tier, setTier] = useState(existing?.tier ?? "");
   const [roles, setRoles] = useState<string[]>(existing?.roles ?? []);
   const [contextTokens, setContextTokens] = useState(String(existing?.caps?.context_tokens ?? ""));
@@ -602,12 +624,65 @@ function DucklingForm({
   // provider is unreachable, the paused run offers a one-click reseat to
   // this one. Named by the person, never chosen by a router.
   const [fallback, setFallback] = useState(existing?.fallback ?? "");
+  const providerDefinition = providers.find((item) => item.id === provider);
+  const openRouter = isOpenRouterProvider(providerDefinition);
+  const selectedEndpoint = modelEndpoints.find((item) => item.tag === openRouterProvider);
+
+  // Endpoint discovery is keyed by the complete model slug and debounced so
+  // typing "author/model" does not turn each keystroke into an API request.
+  useEffect(() => {
+    setModelEndpoints([]);
+    setEndpointFailure("");
+    setEndpointsLoaded(false);
+    setEndpointsLoading(false);
+    if (!openRouter || !model.includes("/")) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setEndpointsLoading(true);
+      client.providerModelEndpoints(provider, model.trim())
+        .then((items) => {
+          if (!cancelled) {
+            setModelEndpoints(items);
+            setEndpointsLoaded(true);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setEndpointFailure(error instanceof Error ? error.message : String(error));
+            setEndpointsLoaded(true);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setEndpointsLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [client, model, openRouter, provider]);
+
+  const chooseEndpoint = (tag: string) => {
+    setOpenRouterProvider(tag);
+    const endpoint = modelEndpoints.find((item) => item.tag === tag);
+    if (endpoint) {
+      setCostIn(String(endpoint.input_per_mtok));
+      setCostOut(String(endpoint.output_per_mtok));
+      if (!contextTokens && endpoint.context_tokens) setContextTokens(String(endpoint.context_tokens));
+      if (!maxTokens && endpoint.max_output_tokens) setMaxTokens(String(endpoint.max_output_tokens));
+    }
+  };
 
   const save = () => {
     void client
       .ducklingSet(id.trim(), {
         provider,
         model: model.trim(),
+        // Null deliberately clears a prior pin; omission would preserve it
+        // under the engine's merge-patch contract.
+        ...(openRouter || existing?.openrouter_provider
+          ? { openrouter_provider: openRouter ? openRouterProvider || null : null }
+          : {}),
         tier: tier || undefined,
         roles,
         // Empty means "do not send it": a temperature of 0 is a real choice and
@@ -654,7 +729,12 @@ function DucklingForm({
           aria-label="provider"
           data-testid="duckling-provider"
           value={provider}
-          onChange={(e) => setProvider(e.target.value)}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            if (!isOpenRouterProvider(providers.find((item) => item.id === e.target.value))) {
+              setOpenRouterProvider("");
+            }
+          }}
           className="rounded border border-hairline bg-surface2 px-2 py-1 text-sm"
         >
           {providers.map((p) => (
@@ -684,6 +764,58 @@ function DucklingForm({
           <option value="large">tier: large</option>
         </select>
       </div>
+
+      {openRouter && (
+        <div className="rounded border border-hairline bg-surface2 p-2 text-sm" data-testid="openrouter-endpoint-config">
+          <label className="flex flex-col gap-1">
+            <span>OpenRouter serving provider</span>
+            {endpointFailure || (endpointsLoaded && modelEndpoints.length === 0) ? (
+              <input
+                aria-label="OpenRouter provider code"
+                data-testid="duckling-openrouter-provider-input"
+                value={openRouterProvider}
+                onChange={(event) => setOpenRouterProvider(event.target.value)}
+                placeholder="deepinfra/fp4"
+                className="rounded border border-hairline bg-page px-2 py-1 font-mono"
+              />
+            ) : (
+              <select
+                aria-label="OpenRouter serving provider"
+                data-testid="duckling-openrouter-provider"
+                value={openRouterProvider}
+                onChange={(event) => chooseEndpoint(event.target.value)}
+                className="rounded border border-hairline bg-page px-2 py-1"
+              >
+                <option value="">OpenRouter automatic routing</option>
+                {openRouterProvider && !modelEndpoints.some((item) => item.tag === openRouterProvider) && (
+                  <option value={openRouterProvider}>{openRouterProvider}</option>
+                )}
+                {modelEndpoints.map((endpoint) => (
+                  <option key={endpoint.tag} value={endpoint.tag}>
+                    {endpoint.provider_name} — {endpoint.tag}{endpoint.quantization ? ` — ${endpoint.quantization}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+          {endpointsLoading && <p className="mt-1 text-xs text-ink-muted">Loading endpoints…</p>}
+          {endpointFailure && (
+            <p className="mt-1 text-xs text-warning">OpenRouter did not return a catalog; enter its endpoint tag directly. {endpointFailure}</p>
+          )}
+          {!endpointFailure && endpointsLoaded && modelEndpoints.length === 0 && (
+            <p className="mt-1 text-xs text-ink-muted">No endpoint choices were returned for this model; enter an OpenRouter endpoint tag directly.</p>
+          )}
+          {selectedEndpoint && (
+            <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs" data-testid="openrouter-endpoint-details">
+              <dt>quantization</dt><dd>{selectedEndpoint.quantization || "not disclosed"}</dd>
+              <dt>price</dt><dd>${selectedEndpoint.input_per_mtok}/Mtok in · ${selectedEndpoint.output_per_mtok}/Mtok out</dd>
+              <dt>prompt training</dt><dd>{policyLabel(selectedEndpoint.prompt_training, "not disclosed by API")}</dd>
+              <dt>data retention</dt><dd>{selectedEndpoint.data_retention === "zero" ? "zero retention" : selectedEndpoint.data_retention || (selectedEndpoint.zero_data_retention === true ? "zero retention" : selectedEndpoint.zero_data_retention === false ? "retention allowed" : "not disclosed by API")}</dd>
+              <dt>moderation</dt><dd>{policyLabel(selectedEndpoint.moderated, "not disclosed by API", "required", "not required")}</dd>
+            </dl>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3 text-sm text-ink-secondary">
         <label className="flex items-center gap-1">

@@ -34,6 +34,33 @@ type ChatRequest struct {
 	// UsageDetail asks OpenRouter to include the billed cost in usage. Only
 	// sent to OpenRouter: OpenAI proper rejects unknown top-level params.
 	UsageDetail *UsageDetail `json:"usage,omitempty"`
+	// Provider pins one of OpenRouter's concrete upstream endpoints. It stays
+	// absent for every other OpenAI-compatible server.
+	Provider *ProviderPreferences `json:"provider,omitempty"`
+}
+
+// ProviderPreferences is the OpenRouter provider-routing object. Only is used
+// rather than Order so selecting an endpoint cannot silently spill to another
+// upstream with different price, quantization, or data policy.
+type ProviderPreferences struct {
+	Only           []string `json:"only,omitempty"`
+	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"`
+}
+
+// ModelEndpoint is one concrete OpenRouter serving endpoint for a model.
+// Unknown policy values stay nil/empty: absence in the API is not consent.
+type ModelEndpoint struct {
+	ProviderName      string  `json:"provider_name"`
+	Tag               string  `json:"tag"`
+	Quantization      string  `json:"quantization,omitempty"`
+	InputPerMTok      float64 `json:"input_per_mtok"`
+	OutputPerMTok     float64 `json:"output_per_mtok"`
+	ContextTokens     int     `json:"context_tokens,omitempty"`
+	MaxOutputTokens   int     `json:"max_output_tokens,omitempty"`
+	ZeroDataRetention *bool   `json:"zero_data_retention,omitempty"`
+	DataRetention     string  `json:"data_retention,omitempty"`
+	PromptTraining    *bool   `json:"prompt_training,omitempty"`
+	Moderated         *bool   `json:"moderated,omitempty"`
 }
 
 // UsageDetail is OpenRouter's usage accounting request.

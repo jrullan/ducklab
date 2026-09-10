@@ -314,9 +314,11 @@ export interface ModeDefaultsView {
 }
 
 export interface Duckling {
-  id: string;
-  provider: string;
-  model: string;
+	id: string;
+	provider: string;
+	model: string;
+  /** Concrete OpenRouter endpoint tag; absent keeps OpenRouter routing. */
+  openrouter_provider?: string;
   /** Declared model capacity; never inferred from provider locality. */
   tier?: "small" | "large";
   roles?: string[];
@@ -331,6 +333,20 @@ export interface Duckling {
   /** The declared stand-in for provider weather — named by the person,
    * never chosen by a router. */
   fallback?: string;
+}
+
+export interface ModelEndpoint {
+  provider_name: string;
+  tag: string;
+  quantization?: string;
+  input_per_mtok: number;
+  output_per_mtok: number;
+  context_tokens?: number;
+  max_output_tokens?: number;
+  zero_data_retention?: boolean;
+  data_retention?: string;
+  prompt_training?: boolean;
+  moderated?: boolean;
 }
 
 /** One numbered item in an artifact: a REQ, a SPEC, a milestone. */
@@ -1130,6 +1146,12 @@ export class EngineClient {
   }
   providerRemove(id: string) {
     return this.request<unknown>("DELETE", `/v1/providers/${id}`);
+  }
+  providerModelEndpoints(id: string, model: string) {
+    return this.request<{ items: ModelEndpoint[] | null }>(
+      "GET",
+      `/v1/providers/${encodeURIComponent(id)}/model-endpoints?model=${encodeURIComponent(model)}`,
+    ).then((r) => r.items ?? []);
   }
   ducklingSet(id: string, body: Record<string, unknown>) {
     return this.request<unknown>("PUT", `/v1/ducklings/${id}`, body);

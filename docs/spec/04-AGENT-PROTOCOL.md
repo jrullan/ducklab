@@ -568,6 +568,15 @@ data, Ducklab estimates tokens as `len(text)/4` and marks the record
 `estimated: true`; estimated tokens are shown in reports with a `~` prefix and
 never silently mixed with measured ones.
 
+An OpenRouter duckling may pin a concrete serving endpoint. Every chat and
+streaming request for that duckling then carries
+`provider.only = [openrouter_provider]` and `provider.allow_fallbacks = false`.
+Using `order` alone is insufficient: OpenRouter could otherwise spill to a
+different endpoint whose list price, quantization, retention, or moderation
+policy does not match what the person selected. Endpoint list prices seed the
+duckling's configured cost; provider-reported billed cost still wins at run
+time because caching and discounts can change the actual charge.
+
 Budget enforcement is checked **before** each model call, using the spend so far
 plus a worst-case estimate of the next call (`prompt_tokens_estimate * input +
 max_tokens * output`). This prevents overshoot on the last call.

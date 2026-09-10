@@ -428,6 +428,20 @@ func (s *Server) handleProviderSet(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, map[string]interface{}{"items": s.svc.ProviderList()})
 }
 
+func (s *Server) handleProviderModelEndpoints(w http.ResponseWriter, r *http.Request) {
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	if model == "" {
+		s.error(w, http.StatusBadRequest, "invalid_request", "model is required")
+		return
+	}
+	items, err := s.svc.ProviderModelEndpoints(r.Context(), r.PathValue("id"), model)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
 func (s *Server) handleProviderRemove(w http.ResponseWriter, r *http.Request) {
 	if err := s.svc.ProviderRemove(r.PathValue("id")); err != nil {
 		s.error(w, http.StatusBadRequest, "invalid_request", err.Error())

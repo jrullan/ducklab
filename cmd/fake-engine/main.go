@@ -135,6 +135,7 @@ func (f *fakeEngine) routes() {
 	f.mux.HandleFunc("GET /v1/projects/{id}/autonomy", f.auth(f.projectAutonomy))
 	f.mux.HandleFunc("GET /v1/ducklings", f.auth(f.ducklings))
 	f.mux.HandleFunc("GET /v1/providers", f.auth(f.providers))
+	f.mux.HandleFunc("GET /v1/providers/{id}/model-endpoints", f.auth(f.providerModelEndpoints))
 	f.mux.HandleFunc("GET /v1/defaults/budget", f.auth(f.budgetDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/engine", f.auth(f.engineDefaults))
 	f.mux.HandleFunc("GET /v1/defaults/autopilot", f.auth(f.autopilotDefaults))
@@ -385,6 +386,12 @@ func (f *fakeEngine) providers(w http.ResponseWriter, r *http.Request) {
 		{"id": "beelink", "kind": "openai", "base_url": "http://127.0.0.1:8080", "api_key_env": "BEELINK_API_KEY", "key_present": true},
 		{"id": "openrouter", "kind": "openai", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "key_present": true},
 	}, "total": 2})
+}
+
+func (f *fakeEngine) providerModelEndpoints(w http.ResponseWriter, r *http.Request) {
+	f.write(w, http.StatusOK, map[string]interface{}{"items": []map[string]interface{}{
+		{"provider_name": "DeepInfra", "tag": "deepinfra/fp4", "quantization": "fp4", "input_per_mtok": 0.49, "output_per_mtok": 1.56, "zero_data_retention": true, "data_retention": "zero"},
+	}})
 }
 
 func (f *fakeEngine) budgetDefaults(w http.ResponseWriter, r *http.Request) {

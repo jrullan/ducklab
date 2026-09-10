@@ -205,6 +205,17 @@ type Provider struct {
 	MaxConcurrent int               `toml:"max_concurrent" json:"max_concurrent,omitempty"`
 }
 
+// IsOpenRouter identifies the gateway by host rather than by the person's
+// configurable provider id.
+func IsOpenRouter(p Provider) bool {
+	u, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai")
+}
+
 // SamplingParams holds sampling parameters.
 type SamplingParams struct {
 	Temperature     *float64 `toml:"temperature" json:"temperature"`
@@ -295,6 +306,9 @@ type ExternalIndex struct {
 type Duckling struct {
 	Provider ProviderID `toml:"provider" json:"provider"`
 	Model    string     `toml:"model" json:"model"`
+	// OpenRouterProvider pins this model to one concrete OpenRouter endpoint
+	// tag (for example "deepinfra/fp4"). Empty keeps OpenRouter routing.
+	OpenRouterProvider string `toml:"openrouter_provider,omitempty" json:"openrouter_provider,omitempty"`
 	// Tier selects capacity-sensitive harness behavior. It describes the
 	// model, not where its provider happens to run.
 	Tier   ModelTier      `toml:"tier,omitempty" json:"tier,omitempty"`
@@ -711,6 +725,9 @@ func (g *Global) Validate(path string) error {
 		}
 		if _, ok := g.Providers[d.Provider]; !ok {
 			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.provider", id), Msg: fmt.Sprintf("provider %q not defined", d.Provider)}
+		}
+		if d.OpenRouterProvider != "" && !IsOpenRouter(g.Providers[d.Provider]) {
+			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.openrouter_provider", id), Msg: "requires an OpenRouter provider"}
 		}
 		if err := ValidateModelTier(d.Tier); err != nil {
 			return &Error{File: path, Key: fmt.Sprintf("duckling.%s.tier", id), Msg: err.Error()}
