@@ -155,6 +155,107 @@ func TestExtendRefusesToTurnAnExistingTaskEditIntoADuplicate(t *testing.T) {
 	}
 }
 
+// B-371: the composition reviewer could require an existing consumer to wait
+// for the newly added prerequisite, but the only legal response was rejected
+// as an existing-task rewrite. Dependency-only stubs make that edge explicit
+// without granting plan_extend authority over the task body.
+func TestExtendAddsANewTaskAndAppendsItsRealIDToAnExistingDependency(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n"+
+			"### T-001 — Foundation\n\nFoundation body.\n\n"+
+			"### T-002 — Existing consumer\n\nConsumer body.\n\n**Depends on:** T-001\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewPrompt string
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-dependency", Mode: "solo",
+		Extend: "add a prerequisite and make the existing consumer wait for it",
+		Execute: func(_ context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				reviewPrompt = prompt
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			return "## T-900 — New prerequisite\n\n**Milestone:** M-001\n**Implements:** SPEC-001\n\nBuild it.\n\n" +
+				"## T-002 — Existing consumer\n\n**Depends on:** T-001, T-900\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := res.Proposed.Section("T-002")
+	if consumer == nil || consumer.Field("depends on") != "T-001, T-003" || !strings.Contains(consumer.Body, "Consumer body.") {
+		t.Fatalf("dependency-only amendment corrupted consumer: %+v", consumer)
+	}
+	if current.Section("T-002").Field("depends on") != "T-001" {
+		t.Fatal("dependency amendment mutated the approved plan")
+	}
+	for _, want := range []string{"T-002 Depends on only", "No other existing task"} {
+		if !strings.Contains(reviewPrompt, want) {
+			t.Errorf("composition scope lost %q:\n%s", want, reviewPrompt)
+		}
+	}
+}
+
+// B-375: a named H2 is preserved Markdown rather than an indexed task. The
+// old fragment merge had no legal representation for replacing it and folded
+// an H3 copy into the new task instead.
+func TestExtendReplacesAnExistingNamedPlanSectionWithoutSwallowingTasks(t *testing.T) {
+	root := t.TempDir()
+	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Build\n\nContract.\n")
+	writeDoc(t, root, artifact.KindPlan,
+		"## M-001 — Core\n\n"+
+			"### T-001 — Foundation\n\nFoundation body.\n\n"+
+			"## Traceability closed\n\n| SPEC | Tasks |\n|---|---|\n| 001 | T-001 |\n\n"+
+			"### T-002 — Later task\n\nThis task must survive.\n")
+	current, err := artifact.Load(root, artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewPrompt string
+	res, err := runExtend(context.Background(), Params{
+		ProjectRoot: root, Stage: Plan, RunID: "r-named", Mode: "solo",
+		Extend: "add the new task and update Traceability closed",
+		Execute: func(_ context.Context, script *strategy.Script, prompt string) (string, error) {
+			if script.Name == "composition-review" {
+				reviewPrompt = prompt
+				return `{"verdict":"approve","findings":[]}`, nil
+			}
+			return "## T-900 — New task\n\n**Milestone:** M-001\n**Implements:** SPEC-001\n\nBuild it.\n\n" +
+				"## Traceability closed\n\n| SPEC | Tasks |\n|---|---|\n| 001 | T-001,T-003 |\n", nil
+		},
+	}, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := artifact.RenderBody(res.Proposed)
+	for _, want := range []string{"| 001 | T-001,T-003 |", "### T-002 — Later task", "### T-003 — New task"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("composed plan lost %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "| 001 | T-001 |") || strings.Count(body, "## Traceability closed") != 1 {
+		t.Fatalf("named section was duplicated instead of replaced:\n%s", body)
+	}
+	if !strings.Contains(reviewPrompt, "## Traceability closed") || !strings.Contains(reviewPrompt, "Engine-authorized changes") {
+		t.Fatalf("reviewer was not told the named-section scope:\n%s", reviewPrompt)
+	}
+}
+
+func TestPlanCompositionRejectsANamedSectionWrittenAsH3(t *testing.T) {
+	plan, err := artifact.Parse("## M-01 — Core\n\n### T-001 — Task\n\nBody.\n\n### Traceability closed\n\nDuplicate table.\n", artifact.KindPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(invalidPlanSubheadingFindings(plan), "\n")
+	if !strings.Contains(got, `non-task H3 heading "Traceability closed"`) {
+		t.Fatalf("misleveled named section escaped the mechanical check: %s", got)
+	}
+}
+
 // The whole flow against disk: fragment in, merged proposal out, with every
 // existing section carried by code.
 func TestRunExtendWritesAMergedProposal(t *testing.T) {

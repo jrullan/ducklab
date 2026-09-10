@@ -275,12 +275,36 @@ func planCompositionFindings(projectRoot string, base, proposed *artifact.Docume
 		baseline[finding.String()] = true
 	}
 	var out []string
+	out = append(out, invalidPlanSubheadingFindings(proposed)...)
 	for _, finding := range artifact.CheckPlan(spec, proposed) {
 		if !baseline[finding.String()] {
 			out = append(out, finding.String())
 		}
 	}
 	return out
+}
+
+func invalidPlanSubheadingFindings(plan *artifact.Document) []string {
+	if plan == nil {
+		return nil
+	}
+	var findings []string
+	inFence := false
+	for _, line := range strings.Split(artifact.RenderBody(plan), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || !strings.HasPrefix(trimmed, "### ") {
+			continue
+		}
+		heading := strings.TrimSpace(strings.TrimPrefix(trimmed, "### "))
+		if !planIDHeading.MatchString(strings.ToUpper(heading)) {
+			findings = append(findings, fmt.Sprintf("plan contains non-task H3 heading %q; use ## for a named section or ### T-NNN for a task", heading))
+		}
+	}
+	return findings
 }
 
 func requestsSectionSplit(ask string) bool {

@@ -365,6 +365,15 @@ as-built spec is refused outright ("nothing to plan"), because the plan of an
 adopted project grows from feature briefs and bug promotions, which create it
 on their own.
 
+A light plan extension normally emits only new task fragments; Ducklab assigns
+their real sequential IDs and preserves every existing task by code. Two
+bounded amendment deltas are also legal. A dependency-only stub may add new
+IDs to an existing task's `Depends on` set, but may contain no other field or
+prose. An exact `##` heading listed as a named plan section may replace that
+section's complete body. Unknown or ambiguous headings are refused, and `###`
+is reserved for task IDs. The final composition review receives the exact set
+of existing tasks and named sections the engine allowed to change.
+
 ### 4.5 `split` — decompose to raise the ceiling
 
 For tasks beyond one model's context or capacity.
