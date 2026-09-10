@@ -15,7 +15,7 @@ import (
 func TestExtendPromptDirectsRetiringSupersededTasksToTaskRemove(t *testing.T) {
 	plan := &artifact.Document{Front: artifact.Frontmatter{Kind: artifact.KindPlan}}
 	plan.Sections = []artifact.Section{{ID: "M-001", Title: "Core", Children: []artifact.Section{{ID: "T-061", Title: "Old approach"}}}}
-	prompt, err := buildExtendPrompt(t.TempDir(), plan, "replace the old approach", "", "")
+	prompt, err := buildExtendPrompt(t.TempDir(), plan, "replace the old approach", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestTheExtendPromptIsAnOutlineNotTheDocument(t *testing.T) {
 	}}
 	writeDoc(t, root, artifact.KindSpec, "## SPEC-001 — Snapshot\n\nShows weight.\n")
 
-	prompt, err := buildExtendPrompt(root, plan, "make the header cosmetic change", "", "")
+	prompt, err := buildExtendPrompt(root, plan, "make the header cosmetic change", "")
 	if err != nil {
 		t.Fatal(err)
 	}
