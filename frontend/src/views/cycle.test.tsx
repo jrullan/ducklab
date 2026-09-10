@@ -316,6 +316,35 @@ describe("Cycle", () => {
     expect(screen.queryByTestId("cycle-section")).toBeNull();
   });
 
+  it("preflights a pasted draft through the engine and separates errors from notices", async () => {
+    let lintRequest: Record<string, unknown> | null = null;
+    const client = clientWith((path, init) => {
+      if (path.endsWith("/artifacts/requirements/lint")) {
+        lintRequest = JSON.parse(String(init?.body));
+        return json({
+          kind: "requirements",
+          valid: false,
+          errors: [{ code: "unknown_field", message: "unknown field Implementa; use Implements", offending_token: "Implementa" }],
+          notices: [{ code: "legacy_grammar", message: "frontmatter has no grammar: add grammar: 2" }],
+        });
+      }
+      if (path.includes("/artifacts/requirements")) return json(REQUIREMENTS);
+      if (path.includes("/trace/check")) return json({ errors: [] });
+      return json({}, 404);
+    });
+    render(<Cycle client={client} projectId="p" stage="intake" />);
+
+    fireEvent.click(await screen.findByTestId("grammar-check-open"));
+    expect(screen.getByTestId("grammar-file")).toHaveAttribute("accept", expect.stringContaining(".md"));
+    fireEvent.change(screen.getByTestId("grammar-candidate"), { target: { value: "---\nkind: requirements\n---\n\n# REQ-001 — Example\n\n**Implementa:** SPEC-001" } });
+    fireEvent.click(screen.getByTestId("grammar-check-run"));
+
+    expect(await screen.findByTestId("grammar-errors")).toHaveTextContent("unknown field Implementa; use Implements");
+    expect(screen.getByTestId("grammar-errors")).toHaveTextContent("token: Implementa");
+    expect(screen.getByTestId("grammar-notices")).toHaveTextContent("Notices — non-blocking");
+    expect(lintRequest).toEqual({ content: expect.stringContaining("**Implementa:**") });
+  });
+
   it("pins the frame, narrows the index, and anchors every selected section at the same top", async () => {
     const client = clientWith((p) => {
       if (p.includes("/artifacts/requirements")) return json(REQUIREMENTS);

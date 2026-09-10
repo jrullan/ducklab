@@ -363,6 +363,24 @@ export interface Section {
   children?: Section[];
 }
 
+export interface ArtifactLintDiagnostic {
+  section?: string;
+  field?: string;
+  offending_token?: string;
+  canonical?: string;
+  code?: string;
+  detail?: string;
+  message: string;
+  related_ids?: string[];
+}
+
+export interface ArtifactLintResult {
+  kind: string;
+  valid: boolean;
+  errors: ArtifactLintDiagnostic[];
+  notices: ArtifactLintDiagnostic[];
+}
+
 export interface Artifact {
   kind: string;
   version: number;
@@ -1332,6 +1350,15 @@ export class EngineClient {
 
   artifact(projectId: string, kind: string) {
     return this.request<Artifact>("GET", `/v1/projects/${projectId}/artifacts/${kind}`);
+  }
+  /** Check a complete hand-written candidate against the engine's artifact
+   * grammar without writing it or creating a proposal. */
+  artifactLint(projectId: string, kind: string, content: string) {
+    return this.request<ArtifactLintResult>(
+      "POST",
+      `/v1/projects/${projectId}/artifacts/${kind}/lint`,
+      { content },
+    );
   }
   /** Promote a proposal to the artifact. This is the human gate (05 §1.1) —
    * the only caller is a person clicking Accept, never a model. */

@@ -303,6 +303,12 @@ When a stage run produces a **proposal**, the view switches to a **side-by-side
 document diff** (current ← → proposed) with `Accept` / `Reject` / `Edit then
 accept`. Nothing is written to the artifact until Accept (`05 §1.1` step 8).
 
+For requirements, spec, and plan, Documents also exposes **Check grammar**.
+The person may paste a complete draft or load a Markdown/text file; the action
+calls the engine's read-only artifact lint and displays blocking errors apart
+from non-blocking notices. It never writes the candidate or substitutes trace
+and semantic review.
+
 The `council` conversation appears live in a collapsible drawer at the right —
 the user watches the architect draft and the reviewer object while it happens,
 and a `human` turn surfaces as an inline input in that drawer.
