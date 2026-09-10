@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,52 @@ func TestLaunchEscalationWarnsAfterTwoTaskStageFailures(t *testing.T) {
 		}
 	}
 	t.Fatal("two prior failed/aborted runs did not emit a launch escalation")
+}
+
+// B-361: the data said prior_failed_or_aborted_runs 4 while the sentence said
+// "twice". The sentence names the real count and says it is a reminder from
+// history, since it fires before this run makes a single call.
+func TestLaunchEscalationSentenceCarriesTheRealCount(t *testing.T) {
+	s := newTestService(t)
+	dir := t.TempDir()
+	current := &runlog.Run{ID: "r-current", ProjectID: "p", TaskID: "T-001", Stage: "build", Roster: map[string]string{"implementer": "terra"}}
+	w, err := runlog.NewWriter(dir, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	rs := &runState{run: current, writer: w}
+	s.runs = map[string]*runState{current.ID: rs}
+	for i, verdict := range []string{"FAILED", "FAILED", "ABORTED", "FAILED"} {
+		id := "r-prior-" + string(rune('a'+i))
+		s.runs[id] = &runState{run: &runlog.Run{ID: id, ProjectID: "p", TaskID: "T-001", Stage: "build", Verdict: verdict}}
+	}
+
+	s.emitLaunchEscalation(rs)
+	events, err := runlog.ReadEvents(w.RunDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type != "escalation_suggestion" || event.Data["point"] != "launch" {
+			continue
+		}
+		if got, _ := event.Data["prior_failed_or_aborted_runs"].(float64); int(got) != 4 {
+			t.Fatalf("prior_failed_or_aborted_runs = %v, want 4", event.Data["prior_failed_or_aborted_runs"])
+		}
+		diagnoses, _ := event.Data["diagnoses"].(map[string]interface{})
+		sentence, _ := diagnoses["task_brief_quality"].(string)
+		for _, want := range []string{"4 times", "build stage", "reminder from history"} {
+			if !strings.Contains(sentence, want) {
+				t.Fatalf("diagnosis %q omits %q", sentence, want)
+			}
+		}
+		if strings.Contains(sentence, "twice") {
+			t.Fatalf("diagnosis still says twice: %q", sentence)
+		}
+		return
+	}
+	t.Fatal("four prior failures did not emit a launch escalation")
 }
 
 func TestWallclockEscalationTriggersWithHistory(t *testing.T) {
