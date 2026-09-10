@@ -85,18 +85,22 @@ func TestReviewerMustAccountForEveryAcceptanceProbe(t *testing.T) {
 	ectx := &tools.ExecContext{TaskAcceptanceProbes: []string{"./app --help", "! ./app --save"}}
 	attachReviewContractValidator(ectx)
 	verdict := &agent.Verdict{Verdict: "approve", Findings: []agent.Finding{}, AcceptanceEvidence: []agent.AcceptanceEvidence{
-		{Slice: 1, Status: "pass", Evidence: "stdout contains Usage and process exits 0"},
+		{Slice: 1, Status: "pass", Inputs: "fixtures/help.txt with the default command registry and unfiltered argv", Evidence: "stdout contains Usage and process exits 0"},
 	}}
 	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err == nil || !strings.Contains(err.Error(), "exactly 2 entries") {
 		t.Fatalf("partial acceptance evidence was accepted: %v", err)
 	}
-	verdict.AcceptanceEvidence = append(verdict.AcceptanceEvidence, agent.AcceptanceEvidence{Slice: 2, Status: "fail", Evidence: "process exits 0 without a save path"})
+	verdict.AcceptanceEvidence = append(verdict.AcceptanceEvidence, agent.AcceptanceEvidence{Slice: 2, Status: "fail", Inputs: "fixtures/save.json with the default registry and --save selection", Evidence: "process exits 0 without a save path"})
 	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err == nil || !strings.Contains(err.Error(), "approval requires") {
 		t.Fatalf("approval with a failed slice was accepted: %v", err)
 	}
 	verdict.Verdict = "request-changes"
 	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err != nil {
 		t.Fatalf("dissent with complete probe evidence was rejected: %v", err)
+	}
+	verdict.AcceptanceEvidence[0].Inputs = "same"
+	if _, err := ectx.NormalizeContract(config.RoleReviewer, "verdict", verdict); err == nil || !strings.Contains(err.Error(), "concrete fixture") {
+		t.Fatalf("generic probe inputs were accepted: %v", err)
 	}
 }
 

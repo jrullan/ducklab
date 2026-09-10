@@ -92,6 +92,10 @@ type AcceptanceEvidence struct {
 	Slice    int    `json:"slice"`
 	Status   string `json:"status"` // pass | fail
 	Evidence string `json:"evidence"`
+	// Inputs names the concrete fixture, registry, selection and other inputs
+	// the reviewer observed. A green command is not evidence that the test ran
+	// against the resources the accepted task named (B-385).
+	Inputs string `json:"inputs"`
 }
 
 // NativeReviewChecks makes the native sweep accountable. A prose checklist

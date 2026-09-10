@@ -1402,9 +1402,9 @@ func ExecuteScript(ctx context.Context, script *Script, params *ExecuteParams) (
 					state.NoFindings = false
 					emit(params, "invariant_violation", map[string]interface{}{
 						"round": round, "findings": invariants,
-						"detail": "candidate edits paths outside the task's declared write lane",
+						"detail": "candidate violates engine-owned task invariants",
 					})
-					log = strings.TrimSpace(log) + "\nengine invariant: candidate edits paths outside the task's declared write lane"
+					log = strings.TrimSpace(log) + "\nengine invariant: candidate violates engine-owned task invariants"
 				}
 			}
 			// round_gate, not gate: the two carry different things under the same

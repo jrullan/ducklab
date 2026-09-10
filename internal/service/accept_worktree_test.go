@@ -171,6 +171,55 @@ func TestAcceptWorktreeRefusesEditsOutsideTheTaskLane(t *testing.T) {
 	}
 }
 
+func TestAcceptWorktreeRefusesATestThatNarrowsItsNamedCorpus(t *testing.T) {
+	s := serviceWithDucklings(t, "pato-uno")
+	plan := `## M-001 — Corpus
+
+### T-001 — Exercise the default registry
+
+**Produces:** file:tests/corpus.rs
+
+**Consumes:** file:conformance/v1/corpus.json, file:src/default_registry.rs
+`
+	id, dir := projectWithDocs(t, s, map[artifact.Kind]string{artifact.KindPlan: plan})
+	if err := os.MkdirAll(filepath.Join(dir, "conformance", "v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "conformance", "v1", "corpus.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := gitProject(t, dir)
+	base := mustHead(t, git)
+	run, _ := pausedWorktreeRun(t, s, id, dir, "r-narrowed-corpus")
+	testPath := filepath.Join(run.WorktreePath, "tests", "corpus.rs")
+	if err := os.MkdirAll(filepath.Dir(testPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(testPath, []byte(`
+let source = include_str!("../conformance/v1/corpus.json");
+let mut payload = constructor().into_payload();
+payload.inspections.clear();
+run_document("corpus.json", source, resolver);
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.RunAccept(context.Background(), run.ID, ""); err == nil || !strings.Contains(err.Error(), "narrow a fixture named by T-001") {
+		t.Fatalf("accept error = %v, want named-fixture refusal", err)
+	}
+	if got := mustHead(t, git); got != base {
+		t.Fatalf("default advanced to %s despite narrowed fixture; want %s", got, base)
+	}
+	detail, err := s.RunGet(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(detail.Run.PendingData["fixture_findings"])
+	if !strings.Contains(string(encoded), "tests/corpus.rs") || !strings.Contains(string(encoded), "test narrows the named fixture") {
+		t.Fatalf("fixture finding is not actionable: %s", encoded)
+	}
+}
+
 // A green clean checkout has two materially different causes for a test-first
 // run: its committed test may be vacuous, or this run may have committed no
 // test change whatsoever. The latter must say so; blaming a test that never

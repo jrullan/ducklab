@@ -3002,6 +3002,18 @@ func (s *Service) acceptWorktreeRun(ctx context.Context, rs *runState, entry *re
 		_ = rs.writer.WriteState()
 		return fmt.Errorf("%s", detail)
 	}
+	if fixtureFindings := taskFixtureNarrowingFindings(rs.run.WorktreePath, rs.run.TaskID, changedPaths); len(fixtureFindings) > 0 {
+		detail := fmt.Sprintf("accept refused: %d test edit(s) narrow a fixture named by %s; exercise the accepted corpus, registry, and selection without substitution", len(fixtureFindings), rs.run.TaskID)
+		if rs.run.PendingData == nil {
+			rs.run.PendingData = map[string]interface{}{}
+		}
+		rs.run.PendingData["fixture_findings"] = fixtureFindings
+		rs.writer.AppendEvent("invariant_violation", map[string]interface{}{
+			"phase": "accept", "findings": fixtureFindings, "detail": detail,
+		})
+		_ = rs.writer.WriteState()
+		return fmt.Errorf("%s", detail)
+	}
 
 	// The chained red test remains solely on its run branch. Its build may
 	// later land the combined history through the normal acceptance path.

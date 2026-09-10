@@ -52,6 +52,10 @@ func attachReviewContractValidator(ectx *tools.ExecContext) {
 				if detail == "" || detail == "ok" || detail == "verified" || detail == "green" || detail == "pass" || detail == "fail" {
 					return false, fmt.Errorf("verdict contract: acceptance_evidence slice %d must name concrete observed output or behavior", evidence.Slice)
 				}
+				inputs := strings.ToLower(strings.Trim(strings.TrimSpace(evidence.Inputs), "."))
+				if inputs == "" || inputs == "same" || inputs == "expected" || inputs == "task inputs" || inputs == "unchanged" {
+					return false, fmt.Errorf("verdict contract: acceptance_evidence slice %d must name the concrete fixture, registry, selection, and other inputs exercised", evidence.Slice)
+				}
 				if verdict.Approved() && status != "pass" {
 					return false, fmt.Errorf("verdict contract: approval requires acceptance_evidence slice %d to pass", evidence.Slice)
 				}

@@ -647,6 +647,22 @@ func TestATurnWithNoToolsIsToldSo(t *testing.T) {
 	}
 }
 
+func TestAcceptanceReviewerMustNameAndPreserveProbeInputs(t *testing.T) {
+	msgs := BuildMessages(&Turn{Role: config.RoleReviewer, Contract: "verdict", Prompt: "review"},
+		&tools.ExecContext{ProjectRoot: t.TempDir(), Registry: tools.NewRegistry(), TaskAcceptanceProbes: []string{"cargo test corpus"}}, true)
+	var system string
+	for _, message := range msgs {
+		if message.Role == "system" {
+			system += message.Content
+		}
+	}
+	for _, want := range []string{`"inputs":"exact fixture, registry, selection and other inputs exercised"`, "substitutes, filters, disables, clears, retains", "different or reduced inputs does not satisfy"} {
+		if !strings.Contains(system, want) {
+			t.Errorf("reviewer acceptance contract lacks %q:\n%s", want, system)
+		}
+	}
+}
+
 // Native tool calling carries the schemas in the request, so the catalogue
 // would be a second, drifting copy.
 func TestNativeDialectGetsNoTextCatalogue(t *testing.T) {

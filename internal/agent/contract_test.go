@@ -621,6 +621,14 @@ func TestTheImplementerIsToldWhenToAsk(t *testing.T) {
 	}
 }
 
+func TestTheImplementerCannotNarrowNamedFixturesToMakeAProbePass(t *testing.T) {
+	for _, want := range []string{"named fixtures", "Do not narrow", "registry and inputs", "blocker to report"} {
+		if !strings.Contains(implementerPrompt, want) {
+			t.Errorf("the implementer prompt does not say %q", want)
+		}
+	}
+}
+
 // The strategy normalizes from what models actually type, and NEVER invents:
 // an absent or unrecognizable answer stays empty — no recommendation.
 func TestTriageTestStrategyNormalizes(t *testing.T) {

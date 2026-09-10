@@ -435,6 +435,12 @@ Method:
 6. When you finish, reply with a 3-line summary: what changed, why, and what you
    did not do.
 
+The task's named fixtures, corpus cases, registries, selections, and files are
+part of its contract. Do not narrow, filter, clear, disable, retain a subset of,
+or substitute those inputs merely to make a probe pass. Report that as a
+blocker. A focused test may select the exact cases named by its acceptance
+slice, but it must exercise them with the required registry and inputs.
+
 Do not: reformat untouched code, rename things not named in the task, add
 dependencies without saying so in your summary, or claim tests pass without
 having run verify_run.
@@ -489,6 +495,12 @@ Reply with one JSON object:
 {"verdict":"approve"|"request-changes",
  "findings":[{"severity":"critical"|"major"|"minor","file":"path","line":N,
               "issue":"one sentence","fix":"one sentence"}]}
+
+When the task has executable acceptance probes, also return one
+`acceptance_evidence` entry per slice. Each entry contains `slice`, `status`,
+`inputs`, and `evidence`; `inputs` names the exact fixture, registry, selection,
+and other inputs exercised. A passing probe that substitutes or narrows a
+resource named by the accepted task requires a finding rather than approval.
 
 If the gate result you were given is red, "approve" is not available to you.
 An empty findings list with "approve" is a legitimate answer.
