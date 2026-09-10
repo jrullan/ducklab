@@ -2788,8 +2788,10 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// Persist the work branch with the acceptance record. This is the provenance
 	// that lets status distinguish accepted work from work shipped on main.
 	rs.run.Branch, _ = git.CurrentBranch()
-	// Stage candidate work, never runtime dependency links or build products.
-	present, err := stageRun(git, rs.run, entry.Path)
+	// A shared human checkout can contain work from the person, board
+	// operations, and other completed runs. Stage only this run's recorded
+	// writes and its promoted document; isolated worktrees use stageRun below.
+	present, landingPaths, err := stageSharedCheckoutRun(git, rs, entry.Path)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("git add: %w", err))
 		return err
@@ -2806,7 +2808,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 	// "Already committed" is decided by the index, not by the working tree:
 	// untracked build products never land and must not turn a no-op accept
 	// into a doomed `git commit` (B-364, B-366).
-	if staged, cerr := git.HasStagedChanges(); cerr == nil && !staged {
+	if staged, cerr := git.HasStagedChangesFor(landingPaths); cerr == nil && !staged {
 		head, _ := git.HeadSHA()
 		// Announced: this is the slow tail of every accept — a full suite
 		// from a fresh checkout — and after the round gate's green it read
@@ -2852,7 +2854,7 @@ func (s *Service) acceptRun(ctx context.Context, rs *runState, entry *registry.P
 		"Ducklab-Run": rs.run.ID,
 		"Duckling":    "implementer",
 	}
-	sha, err := git.CommitWithTrailer(message, trailers)
+	sha, err := git.CommitPathsWithTrailer(message, trailers, landingPaths)
 	if err != nil {
 		s.failRun(rs, fmt.Errorf("commit: %w", err))
 		return err
@@ -4289,6 +4291,106 @@ func stageRun(git *vcs.Git, run *runlog.Run, projectRoot string) ([]string, erro
 		return nil, err
 	}
 	return present, nil
+}
+
+// stageSharedCheckoutRun narrows a non-worktree acceptance to evidence owned
+// by that run. Model file tools provide the code paths; artifact promotion
+// contributes its two deterministic document paths. Older recovered build
+// records without either a snapshot or tool evidence retain the legacy path so
+// they remain decidable after upgrade, but current runs never use that escape.
+func stageSharedCheckoutRun(git *vcs.Git, rs *runState, projectRoot string) ([]string, []string, error) {
+	excluded := append([]string(nil), rs.run.LinkedDeps...)
+	excluded = append(excluded, landingExclusions(git.Root, projectRoot)...)
+	present := presentExclusions(git.Root, excluded)
+	candidates := runWrittenPaths(rs.runDir)
+	if kind := artifactKindForStage(rs.run.Stage); kind != "" {
+		candidates = append(candidates,
+			artifact.Path(projectRoot, artifact.Kind(kind)),
+			artifact.ProposedPath(projectRoot, artifact.Kind(kind)),
+		)
+	}
+	// A durable start snapshot is the fallback for legacy/synthetic tool logs
+	// and for explicitly unsafe shell writes. It compares two tree objects, so
+	// dirt that already existed when the run started is not inherited.
+	if len(candidates) == 0 && rs.run.TreeSnapshot != "" {
+		current, snapshotErr := git.SnapshotTree()
+		if snapshotErr != nil {
+			return nil, nil, snapshotErr
+		}
+		delta, deltaErr := git.ChangedPaths(rs.run.TreeSnapshot, current)
+		if deltaErr != nil {
+			return nil, nil, deltaErr
+		}
+		candidates = append(candidates, delta...)
+	}
+	paths, err := scopedLandingPaths(git.Root, candidates, append(excluded, ".ducklab-render-captures"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(paths) == 0 && rs.run.TreeSnapshot == "" && rs.run.Stage != "release" {
+		if err := git.AddAllExcluding(excluded...); err != nil {
+			return nil, nil, err
+		}
+		staged, err := git.StagedPaths()
+		return present, staged, err
+	}
+	stageable := paths[:0]
+	for _, path := range paths {
+		if git.ExistsOrTracked(path) {
+			stageable = append(stageable, path)
+		}
+	}
+	paths = stageable
+	if len(paths) > 0 {
+		if err := git.AddPaths(paths...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return present, paths, nil
+}
+
+func scopedLandingPaths(root string, candidates, excluded []string) ([]string, error) {
+	normalize := func(path string) (string, error) {
+		if filepath.IsAbs(path) {
+			var err error
+			path, err = filepath.Rel(root, path)
+			if err != nil {
+				return "", err
+			}
+		}
+		path = filepath.ToSlash(filepath.Clean(path))
+		if path == "." || path == "" || path == ".." || strings.HasPrefix(path, "../") {
+			return "", fmt.Errorf("run recorded landing path outside project: %q", path)
+		}
+		return path, nil
+	}
+	var excludedPaths []string
+	for _, path := range excluded {
+		normalized, err := normalize(path)
+		if err == nil {
+			excludedPaths = append(excludedPaths, normalized)
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, path := range candidates {
+		normalized, err := normalize(path)
+		if err != nil {
+			return nil, err
+		}
+		skip := false
+		for _, excluded := range excludedPaths {
+			if normalized == excluded || strings.HasPrefix(normalized, excluded+"/") {
+				skip = true
+				break
+			}
+		}
+		if !skip && !seen[normalized] {
+			seen[normalized] = true
+			out = append(out, normalized)
+		}
+	}
+	return out, nil
 }
 
 // recordLandingExclusions says what stageRun left out of the commit. A

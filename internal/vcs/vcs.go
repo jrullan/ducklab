@@ -222,6 +222,27 @@ func (g *Git) Add(paths ...string) error {
 	return err
 }
 
+// AddPaths stages additions, edits, and deletions inside an explicit path set.
+func (g *Git) AddPaths(paths ...string) error {
+	args := []string{"add", "-A", "--"}
+	for _, path := range paths {
+		args = append(args, shellEscape(path))
+	}
+	_, err := g.run(args...)
+	return err
+}
+
+// ExistsOrTracked reports whether a path can lawfully be passed to git add:
+// present files and tracked deletions qualify; a never-tracked absent proposal
+// does not.
+func (g *Git) ExistsOrTracked(path string) bool {
+	if _, err := os.Lstat(filepath.Join(g.Root, filepath.FromSlash(path))); err == nil {
+		return true
+	}
+	_, err := g.run("ls-files", "--error-unmatch", "--", shellEscape(path))
+	return err == nil
+}
+
 // AddAll stages all changes.
 func (g *Git) AddAll() error {
 	return g.AddAllExcluding()
@@ -312,6 +333,28 @@ func (g *Git) CommitWithTrailer(message string, trailers map[string]string) (str
 	}
 	_, err := g.run(args...)
 	if err != nil {
+		return "", err
+	}
+	return g.HeadSHA()
+}
+
+// CommitPathsWithTrailer commits only paths owned by the caller while leaving
+// unrelated staged changes in the index. `git commit --only` is the custody
+// boundary a shared human checkout needs: a run may not inherit whatever the
+// person or another engine operation happened to stage first.
+func (g *Git) CommitPathsWithTrailer(message string, trailers map[string]string, paths []string) (string, error) {
+	if len(paths) == 0 {
+		return "", fmt.Errorf("commit paths: no paths supplied")
+	}
+	args := []string{"commit", "--only", "-m", shellEscape(message)}
+	for k, v := range trailers {
+		args = append(args, "-m", shellEscape(fmt.Sprintf("%s: %s", k, v)))
+	}
+	args = append(args, "--")
+	for _, path := range paths {
+		args = append(args, shellEscape(path))
+	}
+	if _, err := g.run(args...); err != nil {
 		return "", err
 	}
 	return g.HeadSHA()
@@ -1411,6 +1454,23 @@ func (g *Git) HasStagedChanges() (bool, error) {
 		return false, err
 	}
 	return len(paths) > 0, nil
+}
+
+// HasStagedChangesFor asks whether the index differs from HEAD only inside the
+// named custody boundary.
+func (g *Git) HasStagedChangesFor(paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return false, nil
+	}
+	args := []string{"diff", "--cached", "--name-only", "--"}
+	for _, path := range paths {
+		args = append(args, shellEscape(path))
+	}
+	out, err := g.run(args...)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 func (g *Git) StagedPaths() ([]string, error) {

@@ -513,6 +513,12 @@ dependency links and the build output its tree's markers name (`Cargo.toml`
 event, and the reviewer's diff omits the same paths. A `.gitignore` covering
 them is still the project's business (B-364).
 
+A legacy/shared-checkout run commits only its recorded file writes and any
+artifact promoted by that decision. Dirty or staged harness changes that
+predate the run remain in the checkout for the separately worded release
+sweep; `commit --only` keeps them out of the run's landing commit without
+discarding the person's index.
+
 An auto-accept whose reproduction fails **pauses at the human gate wearing the
 error** — never a run stranded as running.
 
