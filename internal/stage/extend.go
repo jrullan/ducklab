@@ -157,7 +157,7 @@ func effectiveExtendChange(p Params) string {
 		return change
 	}
 	return "Original requested change:\n" + change +
-		"\n\nOperator revision (authoritative where it changes or narrows the original):\n" + revision
+		"\n\nOperator revisions, in order (each authoritative where it changes or narrows what precedes it):\n" + revision
 }
 
 // normalizeFragment makes the architect's fragment parseable as a plan: the
